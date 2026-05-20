@@ -1,3 +1,10 @@
+export function parseReplyPage(html: string): { guid: string; messageId: string } | null {
+  const guidMatch = html.match(/id="Guid"[^>]+value="([^"]+)"/);
+  const msgIdMatch = html.match(/id="MessageId"[^>]+value="([^"]+)"/);
+  if (!guidMatch || !msgIdMatch) return null;
+  return { guid: guidMatch[1], messageId: msgIdMatch[1] };
+}
+
 const BROWSER_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
@@ -20,21 +27,14 @@ export async function sendGarminReply(
     (pageResp.headers as unknown as { getSetCookie?(): string[] }).getSetCookie?.() ?? [];
   const cookieHeader = setCookies.map((c) => c.split(";")[0]).join("; ");
 
-  const guidMatch = pageText.match(/id="Guid"[^>]+value="([^"]+)"/);
-  const msgIdMatch = pageText.match(/id="MessageId"[^>]+value="([^"]+)"/);
-
-  if (!guidMatch) {
+  const parsed = parseReplyPage(pageText);
+  if (!parsed) {
     console.error(`garmin: Guid not found in page (len=${pageText.length})`);
     console.debug("garmin: page body:", pageText.slice(0, 2000));
     return false;
   }
-  if (!msgIdMatch) {
-    console.error("garmin: MessageId not found in page");
-    return false;
-  }
 
-  const guid = guidMatch[1];
-  const messageId = msgIdMatch[1];
+  const { guid, messageId } = parsed;
   console.log("garmin: guid=%s message_id=%s", guid, messageId);
 
   const baseUrl = pageResp.url.split("/textmessage")[0];

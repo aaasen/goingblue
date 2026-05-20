@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "node --watch dist/index.js",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "@hono/node-server": "^1.12.0",
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.1"
   }
 }
