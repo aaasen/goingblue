@@ -447,32 +447,6 @@
                 color: #c03030;
             }
 
-            .model-info-wrap {
-                margin-top: 2px;
-            }
-            .model-info-toggle {
-                font-size: 0.72rem;
-                font-weight: 700;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-                color: #aaa;
-                cursor: pointer;
-                user-select: none;
-                list-style: none;
-                display: inline-flex;
-                align-items: center;
-                gap: 4px;
-                margin-bottom: 6px;
-            }
-            .model-info-toggle::-webkit-details-marker { display: none; }
-            .model-info-toggle::before {
-                content: "▶";
-                font-size: 0.55rem;
-                transition: transform 0.15s;
-            }
-            details[open] .model-info-toggle::before {
-                transform: rotate(90deg);
-            }
             .model-info {
                 width: 100%;
                 border-collapse: collapse;
@@ -780,8 +754,8 @@
             <div id="output"></div>
         </section>
 
-        <details class="model-info-wrap" style="margin-top:8px">
-            <summary class="model-info-toggle">Model details</summary>
+        <section class="step">
+            <div class="step-head">Model details</div>
             <table class="model-info">
                 <thead>
                     <tr>
@@ -868,7 +842,103 @@
                     </tr>
                 </tbody>
             </table>
-        </details>
+
+            <div style="margin-top:14px; margin-bottom:5px; font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#aaa;">Variables</div>
+            <table class="model-info">
+                <thead>
+                    <tr>
+                        <th>Variable</th>
+                        <th>Description</th>
+                        <th>Unit</th>
+                        <th>Multi-period aggregation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Precip %</td>
+                        <td style="white-space:normal">Probability that any given hour in the period receives ≥ 0.1 mm of precipitation, derived from ensemble model spread.</td>
+                        <td>%</td>
+                        <td>Max</td>
+                    </tr>
+                    <tr>
+                        <td>Temp</td>
+                        <td style="white-space:normal">Air temperature at 2 m above ground.</td>
+                        <td>°F</td>
+                        <td>Max</td>
+                    </tr>
+                    <tr>
+                        <td>Snow</td>
+                        <td style="white-space:normal">New snowfall accumulation during the period.</td>
+                        <td>in</td>
+                        <td>Sum</td>
+                    </tr>
+                    <tr>
+                        <td>Freeze level</td>
+                        <td style="white-space:normal">Altitude above sea level where the 0 °C isotherm occurs.</td>
+                        <td>ft</td>
+                        <td>Max</td>
+                    </tr>
+                    <tr>
+                        <td>Sfc wind</td>
+                        <td style="white-space:normal">Wind speed and direction at 10 m above ground.</td>
+                        <td>mph</td>
+                        <td>Peak gust speed; dominant direction weighted by speed</td>
+                    </tr>
+                    <tr>
+                        <td>500 hPa wind</td>
+                        <td style="white-space:normal">Wind at ~18,000 ft (upper troposphere / jet-stream level).</td>
+                        <td>mph</td>
+                        <td>Peak gust speed; dominant direction weighted by speed</td>
+                    </tr>
+                    <tr>
+                        <td>600 hPa wind</td>
+                        <td style="white-space:normal">Wind at ~14,000 ft.</td>
+                        <td>mph</td>
+                        <td>Peak gust speed; dominant direction weighted by speed</td>
+                    </tr>
+                    <tr>
+                        <td>700 hPa wind</td>
+                        <td style="white-space:normal">Wind at ~10,000 ft.</td>
+                        <td>mph</td>
+                        <td>Peak gust speed; dominant direction weighted by speed</td>
+                    </tr>
+                    <tr>
+                        <td>Cloud (total)</td>
+                        <td style="white-space:normal">Fraction of sky covered by all cloud layers combined.</td>
+                        <td>%</td>
+                        <td>Max</td>
+                    </tr>
+                    <tr>
+                        <td>Cloud (high)</td>
+                        <td style="white-space:normal">Cloud cover from cirrus and other high-level clouds above 8 km.</td>
+                        <td>%</td>
+                        <td>Max</td>
+                    </tr>
+                    <tr>
+                        <td>Cloud (mid)</td>
+                        <td style="white-space:normal">Cloud cover from mid-level clouds between 3–8 km.</td>
+                        <td>%</td>
+                        <td>Max</td>
+                    </tr>
+                    <tr>
+                        <td>Cloud (low)</td>
+                        <td style="white-space:normal">Cloud cover from low-level clouds and fog below 3 km.</td>
+                        <td>%</td>
+                        <td>Max</td>
+                    </tr>
+                    <tr>
+                        <td>Visibility</td>
+                        <td style="white-space:normal">Horizontal viewing distance at ground level, affected by fog, precipitation, and aerosols.</td>
+                        <td>km</td>
+                        <td>Min</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p style="font-size:0.72rem; color:#aaa; margin-top:12px;">
+                Weather data provided by <a href="https://open-meteo.com/" style="color:#aaa;">Open-Meteo</a>.
+            </p>
+        </section>
 
         <script type="module" src="/src/main.ts"></script>
     </body>
