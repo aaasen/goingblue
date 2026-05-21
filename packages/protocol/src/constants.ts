@@ -40,7 +40,7 @@ export const VARS_BIT: Record<string, number> = {
 
 // Bits consumed per variable (parallel to VARS_BIT order)
 // WMO always uses 5 bits; these are for optional vars bits 0-11
-export const VAR_BITS = [7, 8, 4, 4, 7, 7, 7, 7, 7, 7, 7, 7];
+export const VAR_BITS = [3, 8, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3];
 //                       ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl
 
 export const WMO_BITS = 5;

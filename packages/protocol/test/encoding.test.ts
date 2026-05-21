@@ -108,7 +108,7 @@ describe("round-trip encoding", () => {
     const decoded = roundTrip(msg());
     const p = decoded.periods[0][0];
     expect(p.weathercode).toBe(PERIOD.weathercode);
-    expect(p.precip).toBe(PERIOD.precip);
+    expect(p.precip).toBe(Math.round(Math.round((PERIOD.precip ?? 0) * 7 / 100) * 100 / 7));
     expect(p.temp_f).toBe(PERIOD.temp_f);
     expect(p.snow_in).toBe(PERIOD.snow_in);
     expect(p.freeze_ft).toBe(PERIOD.freeze_ft);
@@ -120,10 +120,11 @@ describe("round-trip encoding", () => {
     expect(p.wind_600_dir).toBe(PERIOD.wind_600_dir);
     expect(p.wind_700_mph).toBe(PERIOD.wind_700_mph);
     expect(p.wind_700_dir).toBe(PERIOD.wind_700_dir);
-    expect(p.cloud_total).toBe(PERIOD.cloud_total);
-    expect(p.cloud_high).toBe(PERIOD.cloud_high);
-    expect(p.cloud_mid).toBe(PERIOD.cloud_mid);
-    expect(p.cloud_low).toBe(PERIOD.cloud_low);
+    // cloud cover is quantized to 3 bits (0–7 steps), decoded back to nearest %
+    expect(p.cloud_total).toBe(Math.round(Math.round((PERIOD.cloud_total ?? 0) * 7 / 100) * 100 / 7));
+    expect(p.cloud_high).toBe(Math.round(Math.round((PERIOD.cloud_high   ?? 0) * 7 / 100) * 100 / 7));
+    expect(p.cloud_mid).toBe(Math.round(Math.round((PERIOD.cloud_mid     ?? 0) * 7 / 100) * 100 / 7));
+    expect(p.cloud_low).toBe(Math.round(Math.round((PERIOD.cloud_low     ?? 0) * 7 / 100) * 100 / 7));
   });
 
   it("omits all optional fields when vars_mask=0", () => {
@@ -143,7 +144,7 @@ describe("round-trip encoding", () => {
     const varsMask = (1 << VARS_BIT.precip) | (1 << VARS_BIT.freeze);
     const decoded = roundTrip(msg({ vars_mask: varsMask }));
     const p = decoded.periods[0][0];
-    expect(p.precip).toBe(75);
+    expect(p.precip).toBe(Math.round(Math.round(75 * 7 / 100) * 100 / 7));
     expect(p.freeze_ft).toBe(6000);
     expect(p.temp_f).toBeUndefined();
     expect(p.snow_in).toBeUndefined();
@@ -213,9 +214,9 @@ describe("round-trip encoding", () => {
     expect(decoded.periods[0][0].freeze_ft).toBe(15000);
   });
 
-  it("rounds precip to whole percent", () => {
+  it("rounds precip to nearest 3-bit step", () => {
     const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, precip: 73 }]] }));
-    expect(decoded.periods[0][0].precip).toBe(73);
+    expect(decoded.periods[0][0].precip).toBe(Math.round(Math.round(73 * 7 / 100) * 100 / 7));
   });
 
   it("preserves negative temp", () => {
