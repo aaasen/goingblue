@@ -18,15 +18,6 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   e.respondWith(
-    caches.match(e.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(e.request).then((response) => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, clone));
-        }
-        return response;
-      });
-    }),
+    caches.match(e.request).then((cached) => cached ?? fetch(e.request)),
   );
 });
