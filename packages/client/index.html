@@ -512,6 +512,84 @@
                 margin-right: 5px;
                 vertical-align: middle;
             }
+
+            .tutorial {
+                margin-bottom: 20px;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                background: #fff;
+                overflow: hidden;
+            }
+            .tutorial-summary {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 14px;
+                cursor: pointer;
+                user-select: none;
+                font-size: 0.72rem;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: #aaa;
+                list-style: none;
+            }
+            .tutorial-summary::-webkit-details-marker,
+            .tutorial-summary::marker {
+                display: none;
+            }
+            .tutorial-summary::after {
+                content: "▶";
+                font-size: 1em;
+                opacity: 0.6;
+                margin-left: 6px;
+                line-height: 0;
+            }
+            details[open] > .tutorial-summary::after {
+                content: "▼";
+            }
+            .tutorial-body {
+                padding: 0 14px 14px;
+                border-top: 1px solid #e8e8e8;
+            }
+            .tutorial-section {
+                margin-top: 14px;
+            }
+            .tutorial-section-title {
+                font-size: 0.68rem;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: #bbb;
+                margin-bottom: 8px;
+            }
+            .tutorial-text {
+                font-size: 0.82rem;
+                color: #555;
+                margin-bottom: 12px;
+                line-height: 1.5;
+            }
+            .tutorial-images {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+            .tutorial-img-wrap {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+            .tutorial-img-wrap img {
+                width: 100%;
+                border-radius: 6px;
+                border: 1px solid #e0e0e0;
+                display: block;
+            }
+            .tutorial-caption {
+                font-size: 0.68rem;
+                color: #999;
+                text-align: center;
+            }
         </style>
     </head>
     <body>
@@ -519,6 +597,56 @@
             <h1>Denali WX</h1>
             <span class="subtitle">inReach decoder · 63.07°N 151.01°W</span>
         </header>
+
+        <details class="tutorial">
+            <summary class="tutorial-summary">Getting started</summary>
+            <div class="tutorial-body">
+                <div class="tutorial-section">
+                    <div class="tutorial-section-title">Installation</div>
+                    <p class="tutorial-text">This site can be installed on your phone for offline access. To install it, open the page on your phone and press "Share" then "Add to Home Screen". The app will be cached so you can use it offline.</p>
+                    <div class="tutorial-images">
+                        <div class="tutorial-img-wrap">
+                            <img src="/images/1 overview.png" alt="Overview" />
+                            <span class="tutorial-caption">Click '...'</span>
+                        </div>
+                        <div class="tutorial-img-wrap">
+                            <img src="/images/2 share.png" alt="Share" />
+                            <span class="tutorial-caption">Click 'Share'</span>
+                        </div>
+                        <div class="tutorial-img-wrap">
+                            <img src="/images/3 add to home screen.png" alt="Add to Home Screen" />
+                            <span class="tutorial-caption">Click 'Add to Home Screen'</span>
+                        </div>
+                        <div class="tutorial-img-wrap">
+                            <img src="/images/4 add app.png" alt="Add app" />
+                            <span class="tutorial-caption">Add the app to your home screen</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="tutorial-section">
+                    <div class="tutorial-section-title">Usage</div>
+                    <p class="tutorial-text">The app uses a custom weather forecast encoding to maximize the amount of weather data in each message. To request a forecast, first select the location, weather model, and weather variables that you want to include. Note that since each message is limited to 160 characters, you may need to reduce the number of variables or resolution to fit within the limit. Copy the forecast request and send it to <strong>wx@email.laneaasen.com</strong> in the Garmin app. When you receive a response, copy it into the decoder app to visualize the forecast.</p>
+                    <div class="tutorial-images">
+                        <div class="tutorial-img-wrap">
+                            <img src="/images/5 build forecast.png" alt="Build forecast request" />
+                            <span class="tutorial-caption">Build a forecast request</span>
+                        </div>
+                        <div class="tutorial-img-wrap">
+                            <img src="/images/6 send message.png" alt="Send message" />
+                            <span class="tutorial-caption">Send the request to 'wx@email.laneaasen.com'</span>
+                        </div>
+                        <div class="tutorial-img-wrap">
+                            <img src="/images/7 copy message.png" alt="Copy message" />
+                            <span class="tutorial-caption">Copy the response</span>
+                        </div>
+                        <div class="tutorial-img-wrap">
+                            <img src="/images/8 decode message.png" alt="Decode message" />
+                            <span class="tutorial-caption">Paste the response into the decoder app to see the forecast</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </details>
 
         <section class="step">
             <div class="step-head">
