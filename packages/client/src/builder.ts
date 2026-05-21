@@ -5,28 +5,34 @@ const MAX_CHARS = 160;
 
 let _coords: string | null = null;
 let _coordsErr: string | null = null;
-let _fetching = false;
+let _coordsPromise: Promise<string> | null = null;
 
-function requestCoords(): void {
-  if (_fetching || _coords !== null) return;
-  _fetching = true;
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      _coords = `${pos.coords.latitude.toFixed(5)},${pos.coords.longitude.toFixed(5)}`;
-      _coordsErr = null;
-      _fetching = false;
-      updateBuilder();
-    },
-    (err) => {
-      _coordsErr =
-        err.code === 1
-          ? "Location access denied — enable permissions or choose a different location."
-          : "Location unavailable — try again or choose a different location.";
-      _fetching = false;
-      updateBuilder();
-    },
-    { timeout: 10000 },
-  );
+export function requestCoords(): Promise<string> {
+  if (_coords !== null) return Promise.resolve(_coords);
+  if (_coordsPromise !== null) return _coordsPromise;
+  _coordsErr = null;
+  _coordsPromise = new Promise<string>((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        _coords = `${pos.coords.latitude.toFixed(5)},${pos.coords.longitude.toFixed(5)}`;
+        _coordsErr = null;
+        _coordsPromise = null;
+        resolve(_coords);
+        updateBuilder();
+      },
+      (err) => {
+        _coordsErr =
+          err.code === 1
+            ? "Location access denied — enable permissions or choose a different location."
+            : "Location unavailable — try again or choose a different location.";
+        _coordsPromise = null;
+        reject(new Error(_coordsErr));
+        updateBuilder();
+      },
+      { timeout: 10000 },
+    );
+  });
+  return _coordsPromise;
 }
 
 export function builderChars(days: number, resHours: number, nModels: number, varsMask: number): number {
@@ -48,7 +54,7 @@ export function updateBuilder(): void {
   if (locationVal !== "current") {
     _coords = null;
     _coordsErr = null;
-    _fetching = false;
+    _coordsPromise = null;
   }
 
   const days = parseInt((document.getElementById("days-slider") as HTMLInputElement).value);
@@ -79,29 +85,7 @@ export function updateBuilder(): void {
   const copyBtn = document.getElementById("builder-copy") as HTMLButtonElement;
   const fetchBtn = document.getElementById("fetch-btn") as HTMLButtonElement;
 
-  if (locationVal === "current") {
-    if (_fetching || _coords === null) {
-      requestCoords();
-      txt.textContent = "Getting location…";
-      txt.className = "len-text";
-      bar.style.width = "0%";
-      msgEl.textContent = "";
-      copyBtn.disabled = true;
-      fetchBtn.disabled = true;
-      return;
-    }
-    if (_coordsErr) {
-      txt.textContent = _coordsErr;
-      txt.className = "len-text len-over";
-      bar.style.width = "0%";
-      msgEl.textContent = "";
-      copyBtn.disabled = true;
-      fetchBtn.disabled = true;
-      return;
-    }
-  }
-
-  const location = locationVal === "current" ? _coords! : locationVal;
+  const location = locationVal === "current" ? (_coords ?? "") : locationVal;
 
   const nChars = builderChars(days, resHours, 1, varsMask);
   const pct = Math.min((nChars / MAX_CHARS) * 100, 100);
@@ -115,6 +99,6 @@ export function updateBuilder(): void {
     : `${nChars} / ${MAX_CHARS} chars`;
 
   msgEl.textContent = builderMsg(location, days, resHours, [model], vars);
-  copyBtn.disabled = over;
+  copyBtn.disabled = over || (locationVal === "current" && _coords === null);
   fetchBtn.disabled = over;
 }

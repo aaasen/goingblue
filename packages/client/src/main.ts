@@ -6,7 +6,7 @@ import {
   modelsFromMask,
 } from "@weather/protocol";
 import { render, type ForecastView, type DecodedPeriod } from "./render.js";
-import { updateBuilder } from "./builder.js";
+import { updateBuilder, requestCoords } from "./builder.js";
 import { LOCATION_DISPLAY_NAMES } from "./ui-constants.js";
 
 const VERSION = 3;
@@ -91,6 +91,24 @@ const fetchBtn = document.getElementById("fetch-btn") as HTMLButtonElement;
 const fetchStatus = document.getElementById("fetch-status") as HTMLElement;
 
 fetchBtn.addEventListener("click", async () => {
+  const locationVal =
+    (document.querySelector('input[name="location"]:checked') as HTMLInputElement | null)?.value ??
+    "current";
+
+  if (locationVal === "current") {
+    fetchBtn.disabled = true;
+    fetchStatus.textContent = "Getting location…";
+    fetchStatus.className = "fetch-status";
+    try {
+      await requestCoords();
+    } catch (e) {
+      fetchStatus.textContent = (e as Error).message;
+      fetchStatus.className = "fetch-status fetch-error";
+      fetchBtn.disabled = false;
+      return;
+    }
+  }
+
   const msg = (document.getElementById("builder-msg") as HTMLElement).textContent ?? "";
   if (!msg) return;
 
