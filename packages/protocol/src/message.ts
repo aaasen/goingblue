@@ -1,6 +1,6 @@
-import { VERSION, HEADER_BITS, PERIOD_BITS, RESOLUTION_HOURS } from "./constants.js";
+import { VERSION, HEADER_BITS, HEADER_CHARS, RESOLUTION_HOURS, periodBitsForMask, nCharsForBits } from "./constants.js";
 import { putInt, takeInt } from "./bits.js";
-import { encode, decode, bitsFromChars } from "./codec.js";
+import { encode, decode } from "./codec.js";
 import { type Period, periodToBits, periodFromBits } from "./period.js";
 
 export interface ForecastMessage {
@@ -9,53 +9,56 @@ export interface ForecastMessage {
   days: number;
   resolution: number;
   models_mask: number;
+  vars_mask: number;
   month: number;
   day: number;
   hour: number;
   periods: Period[][];
 }
 
+// Message format: encode(headerBits)[7 chars] + encode(bodyBits)[variable]
+// This lets the decoder read vars_mask from the header before knowing period size.
 export function messageToString(msg: ForecastMessage): string {
-  const bits: number[] = [];
-  putInt(bits, msg.version, 7);
-  putInt(bits, msg.location, 1);
-  putInt(bits, msg.days - 1, 4);
-  putInt(bits, msg.resolution, 3);
-  putInt(bits, msg.models_mask, 3);
-  putInt(bits, msg.month, 4);
-  putInt(bits, msg.day, 5);
-  putInt(bits, msg.hour, 5);
+  const headerBits: number[] = [];
+  putInt(headerBits, msg.version, 7);
+  putInt(headerBits, msg.location, 2);
+  putInt(headerBits, msg.days - 1, 4);
+  putInt(headerBits, msg.resolution, 3);
+  putInt(headerBits, msg.models_mask, 3);
+  putInt(headerBits, msg.vars_mask, 8);
+  putInt(headerBits, msg.month, 4);
+  putInt(headerBits, msg.day, 5);
+  putInt(headerBits, msg.hour, 5);
+
+  const bodyBits: number[] = [];
   const nPeriods = msg.periods[0].length;
   for (let i = 0; i < nPeriods; i++) {
     for (const modelPeriods of msg.periods) {
-      bits.push(...periodToBits(modelPeriods[i]));
+      bodyBits.push(...periodToBits(modelPeriods[i], msg.vars_mask));
     }
   }
-  return encode(bits);
+
+  return encode(headerBits) + encode(bodyBits);
 }
 
 export function messageFromString(s: string): ForecastMessage {
-  const nBits = bitsFromChars(s.length);
-  if (nBits === null) throw new Error(`Unexpected message length: ${s.length} chars`);
-  const bits = decode(s, nBits);
+  if (s.length < HEADER_CHARS)
+    throw new Error(`Unexpected message length: ${s.length} chars`);
+
+  const headerBits = decode(s.slice(0, HEADER_CHARS), HEADER_BITS);
   let pos = 0;
 
-  let version: number,
-    location: number,
-    daysRaw: number,
-    resolution: number,
-    models_mask: number,
-    month: number,
-    day: number,
-    hour: number;
-  [version, pos] = takeInt(bits, pos, 7);
-  [location, pos] = takeInt(bits, pos, 1);
-  [daysRaw, pos] = takeInt(bits, pos, 4);
-  [resolution, pos] = takeInt(bits, pos, 3);
-  [models_mask, pos] = takeInt(bits, pos, 3);
-  [month, pos] = takeInt(bits, pos, 4);
-  [day, pos] = takeInt(bits, pos, 5);
-  [hour, pos] = takeInt(bits, pos, 5);
+  let version: number, location: number, daysRaw: number, resolution: number,
+      models_mask: number, vars_mask: number, month: number, day: number, hour: number;
+  [version,     pos] = takeInt(headerBits, pos, 7);
+  [location,    pos] = takeInt(headerBits, pos, 2);
+  [daysRaw,     pos] = takeInt(headerBits, pos, 4);
+  [resolution,  pos] = takeInt(headerBits, pos, 3);
+  [models_mask, pos] = takeInt(headerBits, pos, 3);
+  [vars_mask,   pos] = takeInt(headerBits, pos, 8);
+  [month,       pos] = takeInt(headerBits, pos, 4);
+  [day,         pos] = takeInt(headerBits, pos, 5);
+  [hour,        pos] = takeInt(headerBits, pos, 5);
 
   if (version !== VERSION)
     throw new Error(`Version mismatch: encoded v${version}, expected v${VERSION}`);
@@ -64,17 +67,27 @@ export function messageFromString(s: string): ForecastMessage {
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
   const nPeriods = (daysRaw + 1) * periodsPerDay;
   const nModels = popcount(models_mask);
+  const periodBits = periodBitsForMask(vars_mask);
+  const totalBodyBits = nPeriods * nModels * periodBits;
+
+  const expectedBodyChars = nCharsForBits(totalBodyBits);
+  const actualBodyChars = s.length - HEADER_CHARS;
+  if (actualBodyChars !== expectedBodyChars)
+    throw new Error(`Unexpected message length: ${s.length} chars`);
+
+  const bodyBits = decode(s.slice(HEADER_CHARS), totalBodyBits);
+  pos = 0;
 
   const allPeriods: Period[][] = Array.from({ length: nModels }, () => []);
   for (let i = 0; i < nPeriods; i++) {
     for (let m = 0; m < nModels; m++) {
-      const [p, nextPos] = periodFromBits(bits, pos);
+      const [p, nextPos] = periodFromBits(bodyBits, pos, vars_mask);
       pos = nextPos;
       allPeriods[m].push(p);
     }
   }
 
-  return { version, location, days: daysRaw + 1, resolution, models_mask, month, day, hour, periods: allPeriods };
+  return { version, location, days: daysRaw + 1, resolution, models_mask, vars_mask, month, day, hour, periods: allPeriods };
 }
 
 export function startDatetime(msg: ForecastMessage): Date {

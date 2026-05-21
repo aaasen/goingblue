@@ -8,21 +8,21 @@ export interface WindCell {
 export interface DecodedPeriod {
   date: Date;
   wc: number;
-  precip: number;
-  fz_ft: number;
-  snow: number;
-  cloud: number;
-  p500: WindCell;
-  p600: WindCell;
-  p700: WindCell;
+  precip?: number;
+  temp_f?: number;
+  fz_ft?: number;
+  snow?: number;
+  snowUnit: number;
+  p_sfc?: WindCell;
+  p500?: WindCell;
+  p600?: WindCell;
+  p700?: WindCell;
 }
 
 export interface ForecastView {
   label: string;
   models: string[];
-  hasSnow: boolean;
   timeStep: number;
-  snowUnit: number;
   periods: DecodedPeriod[][];
 }
 
@@ -47,13 +47,16 @@ function precipColor(pct: number): string {
 
 type CellValue = string | { style: string; html: string };
 
-function windCellHtml(ws: number | null, dir: string | null, colored: boolean): CellValue {
-  if (ws == null) return '<span class="nil">—</span>';
-  const arrow = dir ? (ARROWS[dir] ?? "") : "";
-  const inner = `<div class="wind-cell"><span class="bft-mph">${ws} mph</span>${dir ? ` <span style="font-size:.75rem"> ${dir} ${arrow}</span>` : ""}</div>`;
+function windCellHtml(ws: number, dir: string, colored: boolean): CellValue {
+  const arrow = ARROWS[dir] ?? "";
+  const inner = `<div class="wind-cell"><span class="bft-mph">${ws} mph</span> <span style="font-size:.75rem">${dir} ${arrow}</span></div>`;
   if (!colored || !ws) return inner;
   const b = beaufort(ws);
   return { style: `background:${b.bg};color:${b.fg}`, html: inner };
+}
+
+function nilCell(): string {
+  return '<span class="nil">—</span>';
 }
 
 function periodLabel(date: Date, timeStep: number): string {
@@ -83,9 +86,7 @@ function sectionRow(lbl: string, n: number): string {
 }
 
 function sepRow(n: number): string {
-  return `<tr class="model-sep">${Array(n + 1)
-    .fill("<td></td>")
-    .join("")}</tr>`;
+  return `<tr class="model-sep">${Array(n + 1).fill("<td></td>").join("")}</tr>`;
 }
 
 function modelRow(name: string, n: number): string {
@@ -95,13 +96,13 @@ function modelRow(name: string, n: number): string {
 
 function iconCells(ps: DecodedPeriod[]): string[] {
   return ps.map(
-    (p) =>
-      `<span class="wx-icon">${wmoIcon(p.wc)}</span><div class="wx-short">${wmoShort(p.wc)}</div>`,
+    (p) => `<span class="wx-icon">${wmoIcon(p.wc)}</span><div class="wx-short">${wmoShort(p.wc)}</div>`,
   );
 }
 
 function precipCells(ps: DecodedPeriod[]): string[] {
   return ps.map((p) => {
+    if (p.precip == null) return nilCell();
     const c = precipColor(p.precip);
     return (
       `<div class="precip-pct" style="color:${c}">${p.precip}%</div>` +
@@ -110,21 +111,21 @@ function precipCells(ps: DecodedPeriod[]): string[] {
   });
 }
 
-function cloudCells(ps: DecodedPeriod[]): string[] {
+function tempCells(ps: DecodedPeriod[]): string[] {
   return ps.map((p) =>
-    p.cloud != null
-      ? `<div class="precip-pct" style="color:#777">${p.cloud}%</div>` +
-        `<div class="precip-bar"><div class="precip-fill" style="width:${p.cloud}%;background:#aaa"></div></div>`
-      : '<span class="nil">—</span>',
+    p.temp_f != null
+      ? `<span class="fz-val">${p.temp_f}°F</span>`
+      : nilCell(),
   );
 }
 
-function snowCells(ps: DecodedPeriod[], snowUnit: number): string[] {
+function snowCells(ps: DecodedPeriod[]): string[] {
   return ps.map((p) => {
-    const val = p.snow * snowUnit;
+    if (p.snow == null) return nilCell();
+    const val = p.snow * p.snowUnit;
     return val
-      ? `<span class="snow-val">${val.toFixed(snowUnit < 1 ? 1 : 0)}</span> <span class="snow-unit">in</span>`
-      : '<span class="nil">—</span>';
+      ? `<span class="snow-val">${val.toFixed(p.snowUnit < 1 ? 1 : 0)}</span> <span class="snow-unit">in</span>`
+      : nilCell();
   });
 }
 
@@ -132,29 +133,49 @@ function freezeCells(ps: DecodedPeriod[]): string[] {
   return ps.map((p) =>
     p.fz_ft != null
       ? `<span class="fz-val">${p.fz_ft.toLocaleString()}</span> <span class="snow-unit">ft</span>`
-      : '<span class="nil">—</span>',
+      : nilCell(),
   );
 }
 
-function altRows(ps: DecodedPeriod[], n: number): string {
-  const w700 = ps.map((p) =>
-    p.p700 ? windCellHtml(p.p700.ws, p.p700.dir, true) : '<span class="nil">—</span>',
-  );
-  const w600 = ps.map((p) =>
-    p.p600 ? windCellHtml(p.p600.ws, p.p600.dir, true) : '<span class="nil">—</span>',
-  );
-  const w500 = ps.map((p) =>
-    p.p500 ? windCellHtml(p.p500.ws, p.p500.dir, true) : '<span class="nil">—</span>',
-  );
-  return `
-    ${sectionRow("Alt", n)}
-    ${row('500<br><span style="font-weight:400;letter-spacing:0;opacity:.65">~18k ft</span>', w500)}
-    ${row('600<br><span style="font-weight:400;letter-spacing:0;opacity:.65">~14k ft</span>', w600)}
-    ${row('700<br><span style="font-weight:400;letter-spacing:0;opacity:.65">~10k ft</span>', w700)}`;
+function windCells(ps: DecodedPeriod[], key: keyof DecodedPeriod, colored: boolean): CellValue[] {
+  return ps.map((p) => {
+    const w = p[key] as WindCell | undefined;
+    return w != null ? windCellHtml(w.ws, w.dir, colored) : nilCell();
+  });
+}
+
+function modelBlock(ps: DecodedPeriod[], n: number): string {
+  const hasPrecip  = ps.some((p) => p.precip  != null);
+  const hasTemp    = ps.some((p) => p.temp_f   != null);
+  const hasSnow    = ps.some((p) => p.snow     != null);
+  const hasFreeze  = ps.some((p) => p.fz_ft    != null);
+  const hasSfc     = ps.some((p) => p.p_sfc    != null);
+  const has500     = ps.some((p) => p.p500     != null);
+  const has600     = ps.some((p) => p.p600     != null);
+  const has700     = ps.some((p) => p.p700     != null);
+  const hasAlt     = has500 || has600 || has700;
+  const hasSurface = hasPrecip || hasTemp || hasSnow || hasFreeze || hasSfc;
+
+  let body = row("", iconCells(ps));
+  if (hasSurface) {
+    body += sectionRow("Surface", n);
+    if (hasPrecip) body += row("Precip",   precipCells(ps));
+    if (hasTemp)   body += row("Temp",     tempCells(ps));
+    if (hasSnow)   body += row("Snow",     snowCells(ps));
+    if (hasFreeze) body += row("Freeze",   freezeCells(ps));
+    if (hasSfc)    body += row("Sfc wind", windCells(ps, "p_sfc", true));
+  }
+  if (hasAlt) {
+    body += sectionRow("Alt", n);
+    if (has500) body += row('500<br><span style="font-weight:400;letter-spacing:0;opacity:.65">~18k ft</span>', windCells(ps, "p500", true));
+    if (has600) body += row('600<br><span style="font-weight:400;letter-spacing:0;opacity:.65">~14k ft</span>', windCells(ps, "p600", true));
+    if (has700) body += row('700<br><span style="font-weight:400;letter-spacing:0;opacity:.65">~10k ft</span>', windCells(ps, "p700", true));
+  }
+  return body;
 }
 
 export function render(fc: ForecastView): string {
-  const { label, models, hasSnow, timeStep, snowUnit, periods } = fc;
+  const { label, models, timeStep, periods } = fc;
   const primary = periods[0];
   const extras = periods.slice(1);
   const n = primary.length;
@@ -162,26 +183,13 @@ export function render(fc: ForecastView): string {
   const th = `<th class="lbl"></th>${primary.map((p) => `<th class="day-h">${periodLabel(p.date, timeStep)}</th>`).join("")}`;
 
   let body = "";
-
   if (models.length > 1) body += modelRow(models[0], n);
-  body += row("", iconCells(primary));
-  body += sectionRow("Surface", n);
-  body += row("Cloud mid", cloudCells(primary));
-  body += row("Precip", precipCells(primary));
-  if (hasSnow) body += row("Snow", snowCells(primary, snowUnit));
-  body += row("Freeze", freezeCells(primary));
-  body += altRows(primary, n);
+  body += modelBlock(primary, n);
   if (models.length > 1) body += sepRow(n);
 
   extras.forEach((ps, mi) => {
     body += modelRow(models[mi + 1], n);
-    body += row("", iconCells(ps));
-    body += sectionRow("Surface", n);
-    body += row("Cloud mid", cloudCells(ps));
-    body += row("Precip", precipCells(ps));
-    if (hasSnow) body += row("Snow", snowCells(ps, snowUnit));
-    body += row("Freeze", freezeCells(ps));
-    body += altRows(ps, n);
+    body += modelBlock(ps, n);
     body += sepRow(n);
   });
 

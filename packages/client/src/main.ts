@@ -9,7 +9,7 @@ import { render, type ForecastView, type DecodedPeriod } from "./render.js";
 import { updateBuilder } from "./builder.js";
 import { LOCATION_DISPLAY_NAMES } from "./ui-constants.js";
 
-const VERSION = 1;
+const VERSION = 2;
 
 function toView(msg: ForecastMessage): ForecastView {
   const models = modelsFromMask(msg.models_mask);
@@ -22,26 +22,34 @@ function toView(msg: ForecastMessage): ForecastView {
   if (now.getTime() - start.getTime() > 180 * 86400000) start.setFullYear(start.getFullYear() + 1);
   const stepMs = resHours * 3600000;
 
-  const periods: DecodedPeriod[][] = msg.periods.map((modelPeriods, _mi) =>
+  const periods: DecodedPeriod[][] = msg.periods.map((modelPeriods) =>
     modelPeriods.map((p, i) => ({
       date: new Date(start.getTime() + i * stepMs),
       wc: p.weathercode,
       precip: p.precip,
+      temp_f: p.temp_f,
       fz_ft: p.freeze_ft,
       snow: p.snow_in,
-      cloud: p.cloud_mid,
-      p500: { ws: p.wind_500_mph, dir: CARDINALS[p.wind_500_dir] },
-      p600: { ws: p.wind_600_mph, dir: CARDINALS[p.wind_600_dir] },
-      p700: { ws: p.wind_700_mph, dir: CARDINALS[p.wind_700_dir] },
+      snowUnit: daily ? 1 : 0.1,
+      p_sfc: p.wind_sfc_mph != null
+        ? { ws: p.wind_sfc_mph, dir: CARDINALS[p.wind_sfc_dir!] }
+        : undefined,
+      p500: p.wind_500_mph != null
+        ? { ws: p.wind_500_mph, dir: CARDINALS[p.wind_500_dir!] }
+        : undefined,
+      p600: p.wind_600_mph != null
+        ? { ws: p.wind_600_mph, dir: CARDINALS[p.wind_600_dir!] }
+        : undefined,
+      p700: p.wind_700_mph != null
+        ? { ws: p.wind_700_mph, dir: CARDINALS[p.wind_700_dir!] }
+        : undefined,
     })),
   );
 
   return {
     label: `${LOCATION_DISPLAY_NAMES[msg.location] ?? "Unknown"} · ${msg.days}d ${resLabel} · ${models.join(" + ")}`,
     models,
-    hasSnow: true,
     timeStep: resHours,
-    snowUnit: daily ? 1 : 0.1,
     periods,
   };
 }

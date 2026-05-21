@@ -1,14 +1,13 @@
-import { ALPHABET, HEADER_BITS, PERIOD_BITS } from "./constants.js";
+import { ALPHABET, nCharsForBits } from "./constants.js";
+
+export { nCharsForBits };
 
 const A2I: Record<string, number> = Object.fromEntries(
   [...ALPHABET].map((c, i) => [c, i]),
 );
 
-export function nCharsForBits(nBits: number): number {
-  return Math.ceil((nBits * Math.log(2)) / Math.log(94));
-}
-
 export function encode(bits: number[]): string {
+  if (bits.length === 0) return "";
   const nChars = nCharsForBits(bits.length);
   let value = 0n;
   for (const b of bits) value = (value << 1n) | BigInt(b);
@@ -21,6 +20,7 @@ export function encode(bits: number[]): string {
 }
 
 export function decode(s: string, nBits: number): number[] {
+  if (nBits === 0) return [];
   let value = 0n;
   for (const c of s) {
     const idx = A2I[c];
@@ -32,14 +32,4 @@ export function decode(s: string, nBits: number): number[] {
     value >>= 1n;
   }
   return bits;
-}
-
-export function bitsFromChars(nChars: number): number | null {
-  for (let k = 0; k < 1000; k++) {
-    const nBits = HEADER_BITS + k * PERIOD_BITS;
-    const nc = nCharsForBits(nBits);
-    if (nc === nChars) return nBits;
-    if (nc > nChars) break;
-  }
-  return null;
 }

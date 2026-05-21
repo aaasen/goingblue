@@ -1,6 +1,8 @@
 import {
   VERSION,
   MODEL_BIT,
+  DEFAULT_VARS_MASK,
+  VARS_BIT,
   type Period,
   type ForecastMessage,
   messageToString,
@@ -42,12 +44,11 @@ const MODEL_NAME_TO_BIT: Record<string, number> = {
 };
 
 const SURFACE_VARS = [
+  "temperature_2m",
   "wind_speed_10m",
   "wind_direction_10m",
-  "wind_gusts_10m",
   "precipitation_probability",
   "weather_code",
-  "cloud_cover_mid",
   "freezing_level_height",
   "snowfall",
 ];
@@ -65,9 +66,11 @@ function round5(v: number | null | undefined): number {
 
 interface HourlyData {
   time: string[];
+  temperature_2m: (number | null)[];
+  wind_speed_10m: (number | null)[];
+  wind_direction_10m: (number | null)[];
   precipitation_probability: (number | null)[];
   weather_code: (number | null)[];
-  cloud_cover_mid: (number | null)[];
   freezing_level_height: (number | null)[];
   snowfall: (number | null)[];
   [key: string]: unknown[];
@@ -75,9 +78,11 @@ interface HourlyData {
 
 interface Row {
   time: string;
+  temp_c: number | null;
+  wind_speed_10m: number | null;
+  wind_direction_10m: number | null;
   precip: number | null;
   weathercode: number | null;
-  cloudcover_mid: number | null;
   freezing_level_m: number | null;
   snow_cm: number;
   wind_speed_500hPa: number | null;
@@ -116,9 +121,11 @@ async function fetchHourly(
 function buildRow(h: HourlyData, times: string[], idx: number, snowCm: number): Row {
   return {
     time: times[idx],
+    temp_c: h.temperature_2m[idx],
+    wind_speed_10m: h["wind_speed_10m"][idx] as number | null,
+    wind_direction_10m: h["wind_direction_10m"][idx] as number | null,
     precip: h.precipitation_probability[idx],
     weathercode: h.weather_code[idx],
-    cloudcover_mid: h.cloud_cover_mid[idx],
     freezing_level_m: h.freezing_level_height[idx],
     snow_cm: snowCm,
     wind_speed_500hPa: h["wind_speed_500hPa"][idx] as number | null,
@@ -175,24 +182,35 @@ async function hourRows(
   return rows;
 }
 
-function toFullPeriod(r: Row, daily: boolean): Period {
-  const fzM = r.freezing_level_m ?? 0;
-  const snowIn = daily
-    ? Math.round((r.snow_cm ?? 0) / 2.54)
-    : Math.round((r.snow_cm ?? 0) / 0.254);
-  return {
-    weathercode: r.weathercode ?? 0,
-    precip: r.precip ?? 0,
-    freeze_ft: Math.round((fzM * 3.28084) / 1000) * 1000,
-    snow_in: Math.min(snowIn, 15),
-    cloud_mid: r.cloudcover_mid ?? 0,
-    wind_500_mph: round5(r.wind_speed_500hPa),
-    wind_500_dir: degToDirIdx(r.wind_direction_500hPa),
-    wind_600_mph: round5(r.wind_speed_600hPa),
-    wind_600_dir: degToDirIdx(r.wind_direction_600hPa),
-    wind_700_mph: round5(r.wind_speed_700hPa),
-    wind_700_dir: degToDirIdx(r.wind_direction_700hPa),
-  };
+function toFullPeriod(r: Row, daily: boolean, varsMask: number): Period {
+  const p: Period = { weathercode: r.weathercode ?? 0 };
+  if (varsMask & (1 << VARS_BIT.precip)) p.precip = r.precip ?? 0;
+  if (varsMask & (1 << VARS_BIT.temp)) p.temp_f = Math.round(((r.temp_c ?? 0) * 9) / 5 + 32);
+  if (varsMask & (1 << VARS_BIT.snow)) {
+    const snowIn = daily
+      ? Math.round((r.snow_cm ?? 0) / 2.54)
+      : Math.round((r.snow_cm ?? 0) / 0.254);
+    p.snow_in = Math.min(snowIn, 15);
+  }
+  if (varsMask & (1 << VARS_BIT.freeze))
+    p.freeze_ft = Math.round(((r.freezing_level_m ?? 0) * 3.28084) / 1000) * 1000;
+  if (varsMask & (1 << VARS_BIT.wind)) {
+    p.wind_sfc_mph = round5(r.wind_speed_10m);
+    p.wind_sfc_dir = degToDirIdx(r.wind_direction_10m);
+  }
+  if (varsMask & (1 << VARS_BIT.w500)) {
+    p.wind_500_mph = round5(r.wind_speed_500hPa);
+    p.wind_500_dir = degToDirIdx(r.wind_direction_500hPa);
+  }
+  if (varsMask & (1 << VARS_BIT.w600)) {
+    p.wind_600_mph = round5(r.wind_speed_600hPa);
+    p.wind_600_dir = degToDirIdx(r.wind_direction_600hPa);
+  }
+  if (varsMask & (1 << VARS_BIT.w700)) {
+    p.wind_700_mph = round5(r.wind_speed_700hPa);
+    p.wind_700_dir = degToDirIdx(r.wind_direction_700hPa);
+  }
+  return p;
 }
 
 export interface ForecastParams {
@@ -202,6 +220,7 @@ export interface ForecastParams {
   days: number;
   resolutionIdx: number;
   modelsMask: number;
+  varsMask: number;
 }
 
 export function parseRequest(body: string): ForecastParams {
@@ -212,6 +231,7 @@ export function parseRequest(body: string): ForecastParams {
   let days = 10;
   let resolutionIdx = 0;
   let modelsMask = 1; // ECMWF default
+  let varsMask = 0;
 
   const gpsMatch = body.match(/Lat\s+([-\d.]+)\s+Lon\s+([-\d.]+)/i);
   if (gpsMatch) {
@@ -230,6 +250,8 @@ export function parseRequest(body: string): ForecastParams {
       days = Math.max(1, Math.min(10, parseInt(word)));
     } else if (word in RESOLUTION_LABEL_TO_IDX) {
       resolutionIdx = RESOLUTION_LABEL_TO_IDX[word];
+    } else if (word in VARS_BIT) {
+      varsMask |= 1 << VARS_BIT[word];
     } else {
       const parts = word.split(",");
       if (parts.some((m) => m in MODEL_NAME_TO_BIT)) {
@@ -242,7 +264,9 @@ export function parseRequest(body: string): ForecastParams {
     }
   }
 
-  return { locationIdx, lat, lon, days, resolutionIdx, modelsMask };
+  if (varsMask === 0) varsMask = DEFAULT_VARS_MASK;
+
+  return { locationIdx, lat, lon, days, resolutionIdx, modelsMask, varsMask };
 }
 
 export async function fetchForecast(params: ForecastParams): Promise<string> {
@@ -250,7 +274,8 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
   const locationName = locationNames[params.locationIdx];
   let lat: number, lon: number, tz: string;
   if (params.locationIdx === 2) {
-    if (params.lat == null || params.lon == null) throw new Error("current location requested but no GPS coordinates in message");
+    if (params.lat == null || params.lon == null)
+      throw new Error("current location requested but no GPS coordinates in message");
     [lat, lon, tz] = [params.lat, params.lon, "America/Anchorage"];
   } else {
     [lat, lon, tz] = LOCATION_COORDS[locationName];
@@ -283,10 +308,13 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
     days: params.days,
     resolution: params.resolutionIdx,
     models_mask: params.modelsMask,
+    vars_mask: params.varsMask,
     month,
     day,
     hour,
-    periods: rowsPerModel.map((rows) => rows.map((r) => toFullPeriod(r, daily))),
+    periods: rowsPerModel.map((rows) =>
+      rows.map((r) => toFullPeriod(r, daily, params.varsMask)),
+    ),
   };
 
   return messageToString(msg);
