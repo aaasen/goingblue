@@ -486,6 +486,24 @@
             }
             .vok { color: #2a8f5a; }
             .vno { color: #b05020; text-decoration: line-through; opacity: 0.75; }
+            details > summary.step-head {
+                cursor: pointer;
+                user-select: none;
+            }
+            details > summary.step-head::after {
+                content: "▶";
+                font-size: 1em;
+                opacity: 0.6;
+                margin-left: 6px;
+                line-height: 0;
+            }
+            details[open] > summary.step-head::after {
+                content: "▼";
+            }
+            details > summary.step-head::-webkit-details-marker,
+            details > summary.step-head::marker {
+                display: none;
+            }
             .model-dot {
                 display: inline-block;
                 width: 8px;
@@ -515,7 +533,6 @@
                                 type="radio"
                                 name="location"
                                 value="current"
-                                checked
                             />
                             Current location</label
                         >
@@ -532,6 +549,7 @@
                                 type="radio"
                                 name="location"
                                 value="14k"
+                                checked
                             />
                             14k</label
                         >
@@ -570,9 +588,9 @@
                             id="days-slider"
                             min="1"
                             max="15"
-                            value="10"
+                            value="7"
                         />
-                        <span id="days-display">10 days</span>
+                        <span id="days-display">7 days</span>
                     </div>
                 </div>
 
@@ -615,12 +633,11 @@
                                 type="radio"
                                 name="model"
                                 value="hres"
-                                checked
                             />
                             ECMWF HRES</label
                         >
                         <label class="opt-btn"
-                            ><input type="radio" name="model" value="ifs" />
+                            ><input type="radio" name="model" value="ifs" checked />
                             ECMWF</label
                         >
                         <label class="opt-btn"
@@ -647,8 +664,12 @@
                             Precip %</label
                         >
                         <label class="opt-btn"
-                            ><input type="checkbox" name="var" value="temp" />
-                            Temp</label
+                            ><input type="checkbox" name="var" value="temp" checked />
+                            Max Temp</label
+                        >
+                        <label class="opt-btn"
+                            ><input type="checkbox" name="var" value="tmin" checked />
+                            Min Temp</label
                         >
                         <label class="opt-btn"
                             ><input
@@ -669,8 +690,8 @@
                             Freezing level</label
                         >
                         <label class="opt-btn"
-                            ><input type="checkbox" name="var" value="wind" />
-                            Sfc wind</label
+                            ><input type="checkbox" name="var" value="wind" checked />
+                            Wind</label
                         >
                     </div>
                 </div>
@@ -683,19 +704,19 @@
                             Total</label
                         >
                         <label class="opt-btn"
-                            ><input type="checkbox" name="var" value="cch" />
+                            ><input type="checkbox" name="var" value="cch" checked />
                             High</label
                         >
                         <label class="opt-btn"
-                            ><input type="checkbox" name="var" value="ccm" />
+                            ><input type="checkbox" name="var" value="ccm" checked />
                             Mid</label
                         >
                         <label class="opt-btn"
-                            ><input type="checkbox" name="var" value="ccl" />
+                            ><input type="checkbox" name="var" value="ccl" checked />
                             Low</label
                         >
                         <label class="opt-btn"
-                            ><input type="checkbox" name="var" value="vis" />
+                            ><input type="checkbox" name="var" value="vis" checked />
                             Visibility</label
                         >
                     </div>
@@ -779,7 +800,8 @@
         </section>
 
         <section class="step">
-            <div class="step-head">Model details</div>
+            <details>
+            <summary class="step-head">Model details</summary>
             <div class="table-wrap">
             <table class="model-info">
                 <thead>
@@ -887,16 +909,28 @@
                 </thead>
                 <tbody>
                     <tr>
+                        <td>WMO code</td>
+                        <td style="white-space:normal">Weather condition code per WMO table 4677 (clear, cloudy, rain, snow, fog, thunderstorm, etc.).</td>
+                        <td>code</td>
+                        <td>First in period</td>
+                    </tr>
+                    <tr>
                         <td>Precip %</td>
                         <td style="white-space:normal">Probability that any given hour in the period receives ≥ 0.1 mm of precipitation, derived from ensemble model spread.</td>
                         <td>%</td>
                         <td>Max</td>
                     </tr>
                     <tr>
-                        <td>Temp</td>
-                        <td style="white-space:normal">Air temperature at 2 m above ground.</td>
+                        <td>Max Temp</td>
+                        <td style="white-space:normal">Maximum air temperature at 2 m above ground during the period.</td>
                         <td>°F</td>
                         <td>Max</td>
+                    </tr>
+                    <tr>
+                        <td>Min Temp</td>
+                        <td style="white-space:normal">Minimum air temperature at 2 m above ground during the period.</td>
+                        <td>°F</td>
+                        <td>Min</td>
                     </tr>
                     <tr>
                         <td>Snow</td>
@@ -911,7 +945,7 @@
                         <td>Max</td>
                     </tr>
                     <tr>
-                        <td>Sfc wind</td>
+                        <td>Wind</td>
                         <td style="white-space:normal">Wind speed and direction at 10 m above ground.</td>
                         <td>mph</td>
                         <td>Peak gust speed; dominant direction weighted by speed</td>
@@ -971,6 +1005,7 @@
             <p style="font-size:0.72rem; color:#aaa; margin-top:12px;">
                 Weather data provided by <a href="https://open-meteo.com/" style="color:#aaa;">Open-Meteo</a>.
             </p>
+            </details>
         </section>
 
         <script type="module" src="/src/main.ts"></script>

@@ -72,7 +72,8 @@ afterAll(() => {
 function row(snow_cm: number): Row {
   return {
     time: "2026-05-21T00:00",
-    temp_c: -10,
+    temp_max_c: -10,
+    temp_min_c: -15,
     wind_speed_10m: 5,
     wind_direction_10m: 90,
     precip: 50,

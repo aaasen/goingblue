@@ -1,6 +1,6 @@
-export const VERSION = 8;
-// Header layout (93 bits): version:7 location:3 days:4 resolution:3 models_mask:4 vars_mask:13 month:4 day:5 hour:5 lat:15 lon:16 elev:14
-export const HEADER_BITS = 93;
+export const VERSION = 10;
+// Header layout (94 bits): version:7 location:3 days:4 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5 lat:15 lon:16 elev:14
+export const HEADER_BITS = 94; // +1: vars_mask expanded from 13 to 14 bits
 export const HEADER_CHARS = Math.ceil((HEADER_BITS * Math.log(2)) / Math.log(94)); // = 15
 export const LAT_BITS = 15;  // -90..+90 in ~611m steps
 export const LON_BITS = 16;  // -180..+180 in ~611m steps at equator
@@ -26,7 +26,7 @@ export const MODEL_NAMES: string[] = ["ECMWF IFS HRES", "GFS", "ICON", "ECMWF IF
 // vars_mask bit indices
 export const VARS_BIT: Record<string, number> = {
   precip: 0,
-  temp: 1,
+  temp: 1,   // max temperature
   snow: 2,
   freeze: 3,
   wind: 4,   // surface (10m) wind
@@ -38,12 +38,13 @@ export const VARS_BIT: Record<string, number> = {
   ccm: 10,   // mid cloud cover
   ccl: 11,   // low cloud cover
   vis: 12,   // visibility
+  tmin: 13,  // min temperature
 };
 
 // Bits consumed per variable (parallel to VARS_BIT order)
 // WMO always uses 5 bits; these are for optional vars bits 0-11
-export const VAR_BITS = [3, 8, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4];
-//                       ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^vis
+export const VAR_BITS = [3, 8, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4, 8];
+//                       ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^vis ^tmin
 
 export const WMO_BITS = 5;
 

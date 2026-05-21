@@ -10,6 +10,7 @@ export interface DecodedPeriod {
   wc: number;
   precip?: number;
   temp_f?: number;
+  temp_min_f?: number;
   fz_ft?: number;
   snow?: number;
   snowUnit: number;
@@ -116,10 +117,10 @@ function precipCells(ps: DecodedPeriod[]): string[] {
   });
 }
 
-function tempCells(ps: DecodedPeriod[]): string[] {
+function tempCells(ps: DecodedPeriod[], key: "temp_f" | "temp_min_f"): string[] {
   return ps.map((p) =>
-    p.temp_f != null
-      ? `<span class="fz-val">${p.temp_f}°F</span>`
+    p[key] != null
+      ? `<span class="fz-val">${p[key]}°F</span>`
       : nilCell(),
   );
 }
@@ -163,7 +164,8 @@ function windCells(ps: DecodedPeriod[], key: keyof DecodedPeriod, colored: boole
 
 function modelBlock(ps: DecodedPeriod[], n: number): string {
   const hasPrecip  = ps.some((p) => p.precip      != null);
-  const hasTemp    = ps.some((p) => p.temp_f       != null);
+  const hasTempMax = ps.some((p) => p.temp_f     != null);
+  const hasTempMin = ps.some((p) => p.temp_min_f != null);
   const hasSnow    = ps.some((p) => p.snow         != null);
   const hasFreeze  = ps.some((p) => p.fz_ft        != null);
   const hasSfc     = ps.some((p) => p.p_sfc        != null);
@@ -175,7 +177,7 @@ function modelBlock(ps: DecodedPeriod[], n: number): string {
   const hasCloudM  = ps.some((p) => p.cloud_mid    != null);
   const hasCloudL  = ps.some((p) => p.cloud_low    != null);
   const hasVis     = ps.some((p) => p.vis_km       != null);
-  const hasSurface = hasPrecip || hasTemp || hasSnow || hasFreeze || hasSfc;
+  const hasSurface = hasPrecip || hasTempMax || hasTempMin || hasSnow || hasFreeze || hasSfc;
   const hasUpper   = has500 || has600 || has700;
   const hasCloud   = hasCloudT || hasCloudH || hasCloudM || hasCloudL || hasVis;
 
@@ -183,10 +185,11 @@ function modelBlock(ps: DecodedPeriod[], n: number): string {
   if (hasSurface) {
     body += sectionRow("Surface", n);
     if (hasPrecip) body += row("Precip",   precipCells(ps));
-    if (hasTemp)   body += row("Temp",     tempCells(ps));
+    if (hasTempMax) body += row("Max temp", tempCells(ps, "temp_f"));
+    if (hasTempMin) body += row("Min temp", tempCells(ps, "temp_min_f"));
     if (hasSnow)   body += row("Snow",     snowCells(ps));
     if (hasFreeze) body += row("Freeze",   freezeCells(ps));
-    if (hasSfc)    body += row("Sfc wind", windCells(ps, "p_sfc", true));
+    if (hasSfc)    body += row("Wind", windCells(ps, "p_sfc", true));
   }
   if (hasCloud) {
     body += sectionRow("Cloud", n);

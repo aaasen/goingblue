@@ -140,7 +140,8 @@ interface HourlyData {
 
 export interface Row {
   time: string;
-  temp_c: number | null;
+  temp_max_c: number | null;
+  temp_min_c: number | null;
   wind_speed_10m: number | null;
   wind_direction_10m: number | null;
   precip: number | null;
@@ -249,7 +250,8 @@ export async function aggregateRows(
 
     return {
       time: times[idx[0]],
-      temp_c: maxOf(pick(h.temperature_2m)),
+      temp_max_c: maxOf(pick(h.temperature_2m)),
+      temp_min_c: minOf(pick(h.temperature_2m)),
       wind_speed_10m: maxOf(sfcSpd),
       wind_direction_10m: dominantDirDeg(sfcSpd, sfcDir),
       precip: maxOf(pick(h.precipitation_probability)),
@@ -279,7 +281,8 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string, hoursPe
   if (MODEL_NO_PRESSURE.has(modelKey)) varsMask &= ~PRESSURE_VAR_BITS;
   const p: Period = { weathercode: r.weathercode ?? 0 };
   if (varsMask & (1 << VARS_BIT.precip)) p.precip = r.precip ?? 0;
-  if (varsMask & (1 << VARS_BIT.temp)) p.temp_f = Math.round(((r.temp_c ?? 0) * 9) / 5 + 32);
+  if (varsMask & (1 << VARS_BIT.temp)) p.temp_f     = Math.round(((r.temp_max_c ?? 0) * 9) / 5 + 32);
+  if (varsMask & (1 << VARS_BIT.tmin)) p.temp_min_f = Math.round(((r.temp_min_c ?? 0) * 9) / 5 + 32);
   if (varsMask & (1 << VARS_BIT.snow)) {
     const inches = (r.snow_cm ?? 0) / 2.54;
     // daily: store whole inches (0–15); sub-daily: store tenths of an inch (0–15 = 0.0–1.5 in)

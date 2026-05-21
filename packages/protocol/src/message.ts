@@ -28,7 +28,7 @@ export function messageToString(msg: ForecastMessage): string {
   putInt(headerBits, msg.days - 1, 4);
   putInt(headerBits, msg.resolution, 3);
   putInt(headerBits, msg.models_mask, 4);
-  putInt(headerBits, msg.vars_mask, 13);
+  putInt(headerBits, msg.vars_mask, 14);
   putInt(headerBits, msg.month, 4);
   putInt(headerBits, msg.day, 5);
   putInt(headerBits, msg.hour, 5);
@@ -61,7 +61,7 @@ export function messageFromString(s: string): ForecastMessage {
   [daysRaw,     pos] = takeInt(headerBits, pos, 4);
   [resolution,  pos] = takeInt(headerBits, pos, 3);
   [models_mask, pos] = takeInt(headerBits, pos, 4);
-  [vars_mask,   pos] = takeInt(headerBits, pos, 13);
+  [vars_mask,   pos] = takeInt(headerBits, pos, 14);
   [month,       pos] = takeInt(headerBits, pos, 4);
   [day,         pos] = takeInt(headerBits, pos, 5);
   [hour,        pos] = takeInt(headerBits, pos, 5);

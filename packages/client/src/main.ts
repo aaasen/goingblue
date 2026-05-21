@@ -9,7 +9,7 @@ import { render, type ForecastView, type DecodedPeriod } from "./render.js";
 import { updateBuilder, requestCoords } from "./builder.js";
 import { LOCATION_DISPLAY_NAMES } from "./ui-constants.js";
 
-const VERSION = 3;
+const VERSION = 4;
 
 function toView(msg: ForecastMessage): ForecastView {
   const models = modelsFromMask(msg.models_mask);
@@ -28,6 +28,7 @@ function toView(msg: ForecastMessage): ForecastView {
       wc: p.weathercode,
       precip: p.precip,
       temp_f: p.temp_f,
+      temp_min_f: p.temp_min_f,
       fz_ft: p.freeze_ft,
       snow: p.snow_in,
       snowUnit: daily ? 1 : 0.1,

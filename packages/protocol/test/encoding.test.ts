@@ -7,11 +7,12 @@ import {
   CARDINALS,
   DEFAULT_VARS_MASK,
   VARS_BIT,
+  VERSION,
 } from "../src/index.js";
 
 const ALL_VARS =
   (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) |
-  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 12);
+  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 12) | (1 << 13);
 
 const RESOLUTIONS_PER_DAY = [1, 2, 4, 8, 24];
 
@@ -19,6 +20,7 @@ const PERIOD: Period = {
   weathercode: 73,
   precip: 75,
   temp_f: 32,
+  temp_min_f: -5,
   snow_in: 4,
   freeze_ft: 6000,
   wind_sfc_mph: 10,
@@ -54,7 +56,7 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const periods = overrides.periods ?? defaultPeriods;
   const days = periods[0].length / periodsPerDay;
   return {
-    version: 8,
+    version: VERSION,
     location: 0,
     resolution,
     models_mask,
@@ -80,7 +82,7 @@ describe("round-trip encoding", () => {
     // resolution=2 (6h) → 4 periods/day; 3 days → 12 periods per model; 2 models
     const original = msg({ location: 1, resolution: 2, models_mask: 0b011, month: 1, day: 31, hour: 0 });
     const decoded = roundTrip(original);
-    expect(decoded.version).toBe(8);
+    expect(decoded.version).toBe(VERSION);
     expect(decoded.location).toBe(1);
     expect(decoded.days).toBe(3);
     expect(decoded.resolution).toBe(2);
@@ -121,6 +123,7 @@ describe("round-trip encoding", () => {
     expect(p.weathercode).toBe(PERIOD.weathercode);
     expect(p.precip).toBe(Math.round(Math.round((PERIOD.precip ?? 0) * 7 / 100) * 100 / 7));
     expect(p.temp_f).toBe(PERIOD.temp_f);
+    expect(p.temp_min_f).toBe(PERIOD.temp_min_f);
     expect(p.snow_in).toBe(PERIOD.snow_in);
     expect(p.freeze_ft).toBe(PERIOD.freeze_ft);
     expect(p.wind_sfc_mph).toBe(PERIOD.wind_sfc_mph);
@@ -144,6 +147,7 @@ describe("round-trip encoding", () => {
     const p = decoded.periods[0][0];
     expect(p.precip).toBeUndefined();
     expect(p.temp_f).toBeUndefined();
+    expect(p.temp_min_f).toBeUndefined();
     expect(p.snow_in).toBeUndefined();
     expect(p.freeze_ft).toBeUndefined();
     expect(p.wind_sfc_mph).toBeUndefined();
@@ -160,8 +164,19 @@ describe("round-trip encoding", () => {
     expect(p.precip).toBe(Math.round(Math.round(75 * 7 / 100) * 100 / 7));
     expect(p.freeze_ft).toBe(6000);
     expect(p.temp_f).toBeUndefined();
+    expect(p.temp_min_f).toBeUndefined();
     expect(p.snow_in).toBeUndefined();
     expect(p.wind_500_mph).toBeUndefined();
+  });
+
+  it("temp and tmin are independent bits", () => {
+    const maxOnly = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp }));
+    expect(maxOnly.periods[0][0].temp_f).toBe(PERIOD.temp_f);
+    expect(maxOnly.periods[0][0].temp_min_f).toBeUndefined();
+
+    const minOnly = roundTrip(msg({ vars_mask: 1 << VARS_BIT.tmin }));
+    expect(minOnly.periods[0][0].temp_min_f).toBe(PERIOD.temp_min_f);
+    expect(minOnly.periods[0][0].temp_f).toBeUndefined();
   });
 
   it("default vars mask includes expected vars", () => {
@@ -243,8 +258,9 @@ describe("round-trip encoding", () => {
   });
 
   it("preserves negative temp", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, temp_f: -20 }]] }));
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, temp_f: -20, temp_min_f: -35 }]] }));
     expect(decoded.periods[0][0].temp_f).toBe(-20);
+    expect(decoded.periods[0][0].temp_min_f).toBe(-35);
   });
 
   it("throws on version mismatch", () => {
