@@ -185,7 +185,9 @@ async function fetchHourly(
     models: OPENMETEO_MODELS[modelKey],
   });
   if (elev_m !== undefined) params.set("elevation", String(elev_m));
-  const resp = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
+  const url = `https://api.open-meteo.com/v1/forecast?${params}`;
+  console.log("Open-Meteo request:", url);
+  const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Open-Meteo ${resp.status}: ${await resp.text()}`);
   const data = (await resp.json()) as { hourly: HourlyData; elevation: number };
   return [data.hourly, data.hourly.time, data.elevation ?? 0];
@@ -246,7 +248,7 @@ async function aggregateRows(
       precip: maxOf(pick(h.precipitation_probability)),
       weathercode: maxOf(pick(h.weather_code)),
       freezing_level_m: maxOf(pickUnk("freezing_level_height")),
-      snow_cm: Math.round(sumOf(pick(h.snowfall)) * 10) / 10,
+      snow_cm: sumOf(pick(h.snowfall)),
       wind_speed_500hPa: maxOf(spd500),
       wind_direction_500hPa: dominantDirDeg(spd500, dir500),
       wind_speed_600hPa: maxOf(spd600),
@@ -266,13 +268,18 @@ async function aggregateRows(
 const PRESSURE_VAR_BITS =
   (1 << VARS_BIT.freeze) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
 
-function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period {
+function toFullPeriod(r: Row, varsMask: number, modelKey: string, hoursPerPeriod: number): Period {
   if (MODEL_NO_PRESSURE.has(modelKey)) varsMask &= ~PRESSURE_VAR_BITS;
   const p: Period = { weathercode: r.weathercode ?? 0 };
   if (varsMask & (1 << VARS_BIT.precip)) p.precip = r.precip ?? 0;
   if (varsMask & (1 << VARS_BIT.temp)) p.temp_f = Math.round(((r.temp_c ?? 0) * 9) / 5 + 32);
-  if (varsMask & (1 << VARS_BIT.snow))
-    p.snow_in = Math.min(Math.round((r.snow_cm ?? 0) / 2.54), 15);
+  if (varsMask & (1 << VARS_BIT.snow)) {
+    const inches = (r.snow_cm ?? 0) / 2.54;
+    // daily: store whole inches (0–15); sub-daily: store tenths of an inch (0–15 = 0.0–1.5 in)
+    p.snow_in = hoursPerPeriod >= 24
+      ? Math.min(Math.round(inches), 15)
+      : Math.min(Math.round(inches * 10), 15);
+  }
   if (varsMask & (1 << VARS_BIT.freeze))
     p.freeze_ft = Math.round(((r.freezing_level_m ?? 0) * 3.28084) / 1000) * 1000;
   if (varsMask & (1 << VARS_BIT.wind)) {
@@ -400,7 +407,7 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
     lon,
     elevation,
     periods: rowsPerModel.map((rows, mi) =>
-      rows.map((r) => toFullPeriod(r, params.varsMask, keys[mi])),
+      rows.map((r) => toFullPeriod(r, params.varsMask, keys[mi], HOURS_PER_PERIOD[params.resolutionIdx])),
     ),
   };
 
