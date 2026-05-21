@@ -65,3 +65,11 @@ export const MODEL_COLORS: Record<string, string> = {
   ICON: "#c06010",
   "ECMWF IFS 0.25": "#7040b0",
 };
+
+// model checkbox value → vars not supported by that model
+export const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
+  hres: ["freeze", "w500", "w600", "w700"],
+  gfs: [],
+  icon: [],
+  ifs: [],
+};

@@ -330,6 +330,13 @@
                 background: #eaf1fb;
                 color: #1a4a88;
             }
+            .opt-btn:has(input:disabled) {
+                opacity: 0.3;
+                cursor: not-allowed;
+                border-color: #d0d0d0 !important;
+                background: #f5f5f5 !important;
+                color: #999 !important;
+            }
             .opt-btn input {
                 display: none;
             }
@@ -495,6 +502,16 @@
             .model-limit {
                 color: #b05020 !important;
             }
+            .model-vars {
+                white-space: normal !important;
+            }
+            .model-vars span {
+                display: inline-block;
+                margin: 1px 3px 1px 0;
+                font-size: 0.63rem;
+            }
+            .vok { color: #2a8f5a; }
+            .vno { color: #b05020; text-decoration: line-through; opacity: 0.75; }
             .model-dot {
                 display: inline-block;
                 width: 8px;
@@ -741,7 +758,7 @@
                         <th>Temporal</th>
                         <th>Length</th>
                         <th>Updates</th>
-                        <th>Limits</th>
+                        <th>Variables</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -751,7 +768,16 @@
                         <td>1h → 3h → 6h</td>
                         <td>15 d</td>
                         <td>4×/day</td>
-                        <td class="model-limit">No freeze, no pressure winds</td>
+                        <td class="model-vars">
+                            <span class="vok">precip</span>
+                            <span class="vok">temp</span>
+                            <span class="vok">snow</span>
+                            <span class="vno">freeze</span>
+                            <span class="vok">sfc wind</span>
+                            <span class="vno">500w</span>
+                            <span class="vno">600w</span>
+                            <span class="vno">700w</span>
+                        </td>
                     </tr>
                     <tr>
                         <td><span class="model-dot" style="background:#2a8f5a"></span>GFS</td>
@@ -759,7 +785,16 @@
                         <td>1h</td>
                         <td>16 d</td>
                         <td>4×/day</td>
-                        <td>—</td>
+                        <td class="model-vars">
+                            <span class="vok">precip</span>
+                            <span class="vok">temp</span>
+                            <span class="vok">snow</span>
+                            <span class="vok">freeze</span>
+                            <span class="vok">sfc wind</span>
+                            <span class="vok">500w</span>
+                            <span class="vok">600w</span>
+                            <span class="vok">700w</span>
+                        </td>
                     </tr>
                     <tr>
                         <td><span class="model-dot" style="background:#c06010"></span>ICON</td>
@@ -767,7 +802,16 @@
                         <td>1h</td>
                         <td>7.5 d</td>
                         <td>3×/day</td>
-                        <td>—</td>
+                        <td class="model-vars">
+                            <span class="vok">precip</span>
+                            <span class="vok">temp</span>
+                            <span class="vok">snow</span>
+                            <span class="vok">freeze</span>
+                            <span class="vok">sfc wind</span>
+                            <span class="vok">500w</span>
+                            <span class="vok">600w</span>
+                            <span class="vok">700w</span>
+                        </td>
                     </tr>
                     <tr>
                         <td><span class="model-dot" style="background:#7040b0"></span>ECMWF IFS 0.25</td>
@@ -775,7 +819,16 @@
                         <td>3h → 6h</td>
                         <td>15 d</td>
                         <td>4×/day</td>
-                        <td>—</td>
+                        <td class="model-vars">
+                            <span class="vok">precip</span>
+                            <span class="vok">temp</span>
+                            <span class="vok">snow</span>
+                            <span class="vok">freeze</span>
+                            <span class="vok">sfc wind</span>
+                            <span class="vok">500w</span>
+                            <span class="vok">600w</span>
+                            <span class="vok">700w</span>
+                        </td>
                     </tr>
                 </tbody>
             </table>

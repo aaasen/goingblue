@@ -1,4 +1,5 @@
 import { HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT } from "@weather/protocol";
+import { MODEL_UNAVAIL_VARS } from "./ui-constants.js";
 
 const MAX_CHARS = 160;
 
@@ -27,10 +28,16 @@ export function updateBuilder(): void {
   const models = [
     ...(document.querySelectorAll('input[name="model"]:checked') as NodeListOf<HTMLInputElement>),
   ].map((el) => el.value);
-  const vars = [
-    ...(document.querySelectorAll('input[name="var"]:checked') as NodeListOf<HTMLInputElement>),
-  ].map((el) => el.value);
 
+  // Disable var checkboxes not supported by any selected model
+  const varCheckboxes = [...document.querySelectorAll('input[name="var"]')] as HTMLInputElement[];
+  for (const cb of varCheckboxes) {
+    const unavail = models.length > 0 && models.every((m) => MODEL_UNAVAIL_VARS[m]?.includes(cb.value));
+    cb.disabled = unavail;
+    if (unavail) cb.checked = false;
+  }
+
+  const vars = varCheckboxes.filter((cb) => cb.checked).map((cb) => cb.value);
   const varsMask = vars.reduce((mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)), 0);
 
   (document.getElementById("days-display") as HTMLElement).textContent =
