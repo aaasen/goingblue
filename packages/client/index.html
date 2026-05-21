@@ -439,6 +439,70 @@
             .fetch-error {
                 color: #c03030;
             }
+
+            .model-info-wrap {
+                margin-top: 2px;
+            }
+            .model-info-toggle {
+                font-size: 0.72rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                color: #aaa;
+                cursor: pointer;
+                user-select: none;
+                list-style: none;
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                margin-bottom: 6px;
+            }
+            .model-info-toggle::-webkit-details-marker { display: none; }
+            .model-info-toggle::before {
+                content: "▶";
+                font-size: 0.55rem;
+                transition: transform 0.15s;
+            }
+            details[open] .model-info-toggle::before {
+                transform: rotate(90deg);
+            }
+            .model-info {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 0.72rem;
+            }
+            .model-info th,
+            .model-info td {
+                padding: 4px 8px;
+                text-align: left;
+                border-bottom: 1px solid #ececec;
+                white-space: nowrap;
+            }
+            .model-info th {
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                color: #aaa;
+                font-size: 0.65rem;
+            }
+            .model-info td:first-child {
+                font-weight: 600;
+                color: #333;
+            }
+            .model-info td {
+                color: #555;
+            }
+            .model-limit {
+                color: #b05020 !important;
+            }
+            .model-dot {
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                margin-right: 5px;
+                vertical-align: middle;
+            }
         </style>
     </head>
     <body>
@@ -603,10 +667,10 @@
                             ><input
                                 type="checkbox"
                                 name="model"
-                                value="ecmwf"
+                                value="hres"
                                 checked
                             />
-                            ECMWF</label
+                            ECMWF IFS HRES</label
                         >
                         <label class="opt-btn"
                             ><input type="checkbox" name="model" value="gfs" />
@@ -615,6 +679,10 @@
                         <label class="opt-btn"
                             ><input type="checkbox" name="model" value="icon" />
                             ICON</label
+                        >
+                        <label class="opt-btn"
+                            ><input type="checkbox" name="model" value="ifs" />
+                            ECMWF IFS 0.25</label
                         >
                     </div>
                 </div>
@@ -662,6 +730,56 @@
             ></textarea>
             <div id="output"></div>
         </section>
+
+        <details class="model-info-wrap" style="margin-top:8px">
+            <summary class="model-info-toggle">Model details</summary>
+            <table class="model-info">
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th>Res</th>
+                        <th>Temporal</th>
+                        <th>Length</th>
+                        <th>Updates</th>
+                        <th>Limits</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="model-dot" style="background:#2a6bb5"></span>ECMWF IFS HRES</td>
+                        <td>9 km</td>
+                        <td>1h → 3h → 6h</td>
+                        <td>15 d</td>
+                        <td>4×/day</td>
+                        <td class="model-limit">No freeze, no pressure winds</td>
+                    </tr>
+                    <tr>
+                        <td><span class="model-dot" style="background:#2a8f5a"></span>GFS</td>
+                        <td>25 km</td>
+                        <td>1h</td>
+                        <td>16 d</td>
+                        <td>4×/day</td>
+                        <td>—</td>
+                    </tr>
+                    <tr>
+                        <td><span class="model-dot" style="background:#c06010"></span>ICON</td>
+                        <td>11 km</td>
+                        <td>1h</td>
+                        <td>7.5 d</td>
+                        <td>3×/day</td>
+                        <td>—</td>
+                    </tr>
+                    <tr>
+                        <td><span class="model-dot" style="background:#7040b0"></span>ECMWF IFS 0.25</td>
+                        <td>25 km</td>
+                        <td>3h → 6h</td>
+                        <td>15 d</td>
+                        <td>4×/day</td>
+                        <td>—</td>
+                    </tr>
+                </tbody>
+            </table>
+        </details>
 
         <script type="module" src="/src/main.ts"></script>
     </body>

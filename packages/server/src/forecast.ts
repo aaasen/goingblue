@@ -9,10 +9,14 @@ import {
 } from "@weather/protocol";
 
 const OPENMETEO_MODELS: Record<string, string> = {
-  ECMWF: "ecmwf_ifs",
+  HRES: "ecmwf_ifs",
   GFS: "gfs_seamless",
   ICON: "icon_seamless",
+  IFS: "ecmwf_ifs025",
 };
+
+// ecmwf_ifs (HRES) does not provide freezing_level_height or pressure-level wind/temp
+const MODEL_NO_PRESSURE = new Set(["HRES"]);
 
 const LOCATION_COORDS: Record<string, [number, number, string]> = {
   upper: [63.135, -150.989, "America/Anchorage"],
@@ -37,10 +41,12 @@ const RESOLUTION_LABEL_TO_IDX: Record<string, number> = {
 };
 
 const MODEL_NAME_TO_BIT: Record<string, number> = {
-  ecmwf: MODEL_BIT["ECMWF"],
-  euro: MODEL_BIT["ECMWF"],
+  hres: MODEL_BIT["HRES"],
+  ecmwf: MODEL_BIT["HRES"],
   gfs: MODEL_BIT["GFS"],
   icon: MODEL_BIT["ICON"],
+  ifs: MODEL_BIT["IFS"],
+  euro: MODEL_BIT["IFS"],
 };
 
 const SURFACE_VARS = [
@@ -100,13 +106,17 @@ async function fetchHourly(
   lon: number,
   tz: string,
 ): Promise<[HourlyData, string[]]> {
-  const pressureVars = PRESSURE_VAR_NAMES.flatMap((v) =>
-    PRESSURE_LEVELS.map((l) => `${v}_${l}hPa`),
-  );
+  const hasPressure = !MODEL_NO_PRESSURE.has(modelKey);
+  const pressureVars = hasPressure
+    ? PRESSURE_VAR_NAMES.flatMap((v) => PRESSURE_LEVELS.map((l) => `${v}_${l}hPa`))
+    : [];
+  const surfaceVars = hasPressure
+    ? SURFACE_VARS
+    : SURFACE_VARS.filter((v) => v !== "freezing_level_height");
   const params = new URLSearchParams({
     latitude: String(lat),
     longitude: String(lon),
-    hourly: [...SURFACE_VARS, ...pressureVars].join(","),
+    hourly: [...surfaceVars, ...pressureVars].join(","),
     wind_speed_unit: "mph",
     timezone: tz,
     forecast_days: String(nDays),
@@ -119,6 +129,8 @@ async function fetchHourly(
 }
 
 function buildRow(h: HourlyData, times: string[], idx: number, snowCm: number): Row {
+  const opt = (key: string): number | null =>
+    ((h[key] as (number | null)[] | undefined)?.[idx] ?? null);
   return {
     time: times[idx],
     temp_c: h.temperature_2m[idx],
@@ -126,14 +138,14 @@ function buildRow(h: HourlyData, times: string[], idx: number, snowCm: number): 
     wind_direction_10m: h["wind_direction_10m"][idx] as number | null,
     precip: h.precipitation_probability[idx],
     weathercode: h.weather_code[idx],
-    freezing_level_m: h.freezing_level_height[idx],
+    freezing_level_m: opt("freezing_level_height"),
     snow_cm: snowCm,
-    wind_speed_500hPa: h["wind_speed_500hPa"][idx] as number | null,
-    wind_direction_500hPa: h["wind_direction_500hPa"][idx] as number | null,
-    wind_speed_600hPa: h["wind_speed_600hPa"][idx] as number | null,
-    wind_direction_600hPa: h["wind_direction_600hPa"][idx] as number | null,
-    wind_speed_700hPa: h["wind_speed_700hPa"][idx] as number | null,
-    wind_direction_700hPa: h["wind_direction_700hPa"][idx] as number | null,
+    wind_speed_500hPa: opt("wind_speed_500hPa"),
+    wind_direction_500hPa: opt("wind_direction_500hPa"),
+    wind_speed_600hPa: opt("wind_speed_600hPa"),
+    wind_direction_600hPa: opt("wind_direction_600hPa"),
+    wind_speed_700hPa: opt("wind_speed_700hPa"),
+    wind_direction_700hPa: opt("wind_direction_700hPa"),
   };
 }
 
@@ -182,7 +194,11 @@ async function hourRows(
   return rows;
 }
 
-function toFullPeriod(r: Row, daily: boolean, varsMask: number): Period {
+const PRESSURE_VAR_BITS =
+  (1 << VARS_BIT.freeze) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
+
+function toFullPeriod(r: Row, daily: boolean, varsMask: number, modelKey: string): Period {
+  if (MODEL_NO_PRESSURE.has(modelKey)) varsMask &= ~PRESSURE_VAR_BITS;
   const p: Period = { weathercode: r.weathercode ?? 0 };
   if (varsMask & (1 << VARS_BIT.precip)) p.precip = r.precip ?? 0;
   if (varsMask & (1 << VARS_BIT.temp)) p.temp_f = Math.round(((r.temp_c ?? 0) * 9) / 5 + 32);
@@ -281,10 +297,10 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
     [lat, lon, tz] = LOCATION_COORDS[locationName];
   }
 
-  const modelKeys = (["ECMWF", "GFS", "ICON"] as const).filter(
+  const modelKeys = (["HRES", "GFS", "ICON", "IFS"] as const).filter(
     (_, bit) => params.modelsMask & (1 << bit),
   );
-  const keys = modelKeys.length ? modelKeys : (["ECMWF"] as const);
+  const keys = modelKeys.length ? modelKeys : (["HRES"] as const);
 
   const targetHours = RESOLUTION_TARGET_HOURS[params.resolutionIdx];
   const daily = params.resolutionIdx === 0;
@@ -312,8 +328,8 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
     month,
     day,
     hour,
-    periods: rowsPerModel.map((rows) =>
-      rows.map((r) => toFullPeriod(r, daily, params.varsMask)),
+    periods: rowsPerModel.map((rows, mi) =>
+      rows.map((r) => toFullPeriod(r, daily, params.varsMask, keys[mi])),
     ),
   };
 

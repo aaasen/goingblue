@@ -48,7 +48,7 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const periods = overrides.periods ?? defaultPeriods;
   const days = periods[0].length / periodsPerDay;
   return {
-    version: 2,
+    version: 3,
     location: 0,
     resolution,
     models_mask,
@@ -71,7 +71,7 @@ describe("round-trip encoding", () => {
     // resolution=2 (6h) → 4 periods/day; 3 days → 12 periods per model; 2 models
     const original = msg({ location: 1, resolution: 2, models_mask: 0b011, month: 1, day: 31, hour: 0 });
     const decoded = roundTrip(original);
-    expect(decoded.version).toBe(2);
+    expect(decoded.version).toBe(3);
     expect(decoded.location).toBe(1);
     expect(decoded.days).toBe(3);
     expect(decoded.resolution).toBe(2);
@@ -167,12 +167,12 @@ describe("round-trip encoding", () => {
     expect(decoded.periods[1]).toHaveLength(3);
   });
 
-  it("handles all three models", () => {
-    const row = Array(10).fill(PERIOD);
-    const decoded = roundTrip(msg({ models_mask: 0b111, periods: [row, row, row] }));
-    expect(decoded.models_mask).toBe(0b111);
-    expect(decoded.periods).toHaveLength(3);
-    expect(decoded.days).toBe(10);
+  it("handles all four models", () => {
+    const row = Array(5).fill(PERIOD);
+    const decoded = roundTrip(msg({ models_mask: 0b1111, periods: [row, row, row, row] }));
+    expect(decoded.models_mask).toBe(0b1111);
+    expect(decoded.periods).toHaveLength(4);
+    expect(decoded.days).toBe(5);
   });
 
   it("clamps wind speed to 5 mph steps", () => {
@@ -202,7 +202,7 @@ describe("round-trip encoding", () => {
 
   it("throws on version mismatch", () => {
     const encoded = messageToString(msg({ version: 99 }));
-    expect(() => messageFromString(encoded)).toThrow("Version mismatch");
+    expect(() => messageFromString(encoded)).toThrow(/Version mismatch.*v99/);
   });
 
   it("throws on short message", () => {

@@ -60,7 +60,8 @@ export const BEAUFORT: [number, string, string, string][] = [
 ];
 
 export const MODEL_COLORS: Record<string, string> = {
-  ECMWF: "#2a6bb5",
+  "ECMWF IFS HRES": "#2a6bb5",
   GFS: "#2a8f5a",
   ICON: "#c06010",
+  "ECMWF IFS 0.25": "#7040b0",
 };

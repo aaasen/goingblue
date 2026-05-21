@@ -1,6 +1,6 @@
-export const VERSION = 2;
-// Header layout (41 bits): version:7 location:2 days:4 resolution:3 models_mask:3 vars_mask:8 month:4 day:5 hour:5
-export const HEADER_BITS = 41;
+export const VERSION = 3;
+// Header layout (42 bits): version:7 location:2 days:4 resolution:3 models_mask:4 vars_mask:8 month:4 day:5 hour:5
+export const HEADER_BITS = 42;
 export const HEADER_CHARS = Math.ceil((HEADER_BITS * Math.log(2)) / Math.log(94)); // = 7
 
 export const ALPHABET =
@@ -17,8 +17,8 @@ export const RESOLUTION_LABEL: Record<number, string> = {
   4: "1h",
 };
 
-export const MODEL_BIT: Record<string, number> = { ECMWF: 0, GFS: 1, ICON: 2 };
-export const MODEL_NAMES: string[] = ["ECMWF", "GFS", "ICON"];
+export const MODEL_BIT: Record<string, number> = { HRES: 0, GFS: 1, ICON: 2, IFS: 3 };
+export const MODEL_NAMES: string[] = ["ECMWF IFS HRES", "GFS", "ICON", "ECMWF IFS 0.25"];
 
 // vars_mask bit indices
 export const VARS_BIT: Record<string, number> = {
