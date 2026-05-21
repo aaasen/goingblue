@@ -58,8 +58,13 @@ function toView(msg: ForecastMessage): ForecastView {
     ? ` · ${Math.round(msg.elevation * 3.28084).toLocaleString()}ft`
     : "";
 
+  const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const startStr = daily
+    ? `${DAY_NAMES[start.getDay()]} ${start.getMonth() + 1}/${start.getDate()}`
+    : `${DAY_NAMES[start.getDay()]} ${start.getMonth() + 1}/${start.getDate()} ${start.getHours()}h`;
+
   return {
-    label: `${LOCATION_DISPLAY_NAMES[msg.location] ?? "Unknown"} · ${latStr} ${lonStr}${elevStr} · ${msg.days}d ${resLabel} · ${models.join(" + ")}`,
+    label: `${LOCATION_DISPLAY_NAMES[msg.location] ?? "Unknown"} · ${latStr} ${lonStr}${elevStr} · ${msg.days}d ${resLabel} from ${startStr} · ${models.join(" + ")}`,
     models,
     timeStep: resHours,
     periods,

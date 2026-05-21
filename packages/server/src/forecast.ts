@@ -207,6 +207,12 @@ export async function aggregateRows(
   const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
   const nTotal = nDays * (24 / hoursPerPeriod);
 
+  const nowLocal = new Date().toLocaleString("sv-SE", { timeZone: tz });
+  const nowDate = nowLocal.slice(0, 10);
+  const nowHour = parseInt(nowLocal.slice(11, 13));
+  const nowPeriodHour = Math.floor(nowHour / hoursPerPeriod) * hoursPerPeriod;
+  const currentKey = `${nowDate}T${String(nowPeriodHour).padStart(2, "0")}`;
+
   type Window = { indices: number[] };
   const windows: Window[] = [];
   const windowMap = new Map<string, Window>();
@@ -216,6 +222,7 @@ export async function aggregateRows(
     const hour = parseInt(times[i].slice(11, 13));
     const startHour = Math.floor(hour / hoursPerPeriod) * hoursPerPeriod;
     const key = `${date}T${String(startHour).padStart(2, "0")}`;
+    if (key < currentKey) continue;
     if (!windowMap.has(key)) {
       if (windows.length >= nTotal) break;
       const w: Window = { indices: [] };

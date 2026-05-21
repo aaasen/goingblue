@@ -77,7 +77,7 @@ export function messageFromString(s: string): ForecastMessage {
 
   const resHours = RESOLUTION_HOURS[resolution] ?? 24;
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
-  const nPeriods = (daysRaw + 1) * periodsPerDay;
+  const nPeriods = (daysRaw + 1) * periodsPerDay - Math.floor(hour / resHours);
   const nModels = popcount(models_mask);
   const periodBits = periodBitsForMask(vars_mask);
   const totalBodyBits = nPeriods * nModels * periodBits;

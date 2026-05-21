@@ -42,17 +42,23 @@ function popcount(n: number): number {
   return c;
 }
 
-// Always derives `days` from periods[0].length / periodsPerDay to keep encoding consistent.
+const RES_HOURS = [24, 12, 6, 3, 1];
+
+// Derives `days` from periods[0].length and hour so the decoder recovers the right nPeriods.
+// Invariant: nPeriods = days * periodsPerDay - floor(hour / resHours)
 function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const resolution = overrides.resolution ?? 0;
   const models_mask = overrides.models_mask ?? 0b001;
   const nModels = popcount(models_mask);
   const periodsPerDay = RESOLUTIONS_PER_DAY[resolution];
+  const resHours = RES_HOURS[resolution];
+  const hour = overrides.hour ?? 0;
   const defaultPeriods = Array.from({ length: nModels }, () =>
     Array(3 * periodsPerDay).fill(PERIOD),
   );
   const periods = overrides.periods ?? defaultPeriods;
-  const days = periods[0].length / periodsPerDay;
+  const skipped = Math.floor(hour / resHours);
+  const days = (periods[0].length + skipped) / periodsPerDay;
   return {
     version: 8,
     location: 0,
@@ -61,7 +67,7 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
     vars_mask: ALL_VARS,
     month: 5,
     day: 20,
-    hour: 12,
+    hour,
     lat: 63.135,
     lon: -150.989,
     elevation: 500,
@@ -193,6 +199,16 @@ describe("round-trip encoding", () => {
       expect(decoded.days).toBe(2);
       expect(decoded.periods[0]).toHaveLength(nPeriods);
     }
+  });
+
+  it("round-trips with non-zero start hour", () => {
+    // 6h resolution (4 periods/day), starting at hour 6: skips 1 period from day 1.
+    // days=2, nPeriods = 2*4 - floor(6/6) = 7
+    const nPeriods = 7;
+    const decoded = roundTrip(msg({ resolution: 2, hour: 6, periods: [Array(nPeriods).fill(PERIOD)] }));
+    expect(decoded.hour).toBe(6);
+    expect(decoded.days).toBe(2);
+    expect(decoded.periods[0]).toHaveLength(nPeriods);
   });
 
   it("handles multiple models", () => {

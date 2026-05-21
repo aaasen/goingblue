@@ -141,11 +141,18 @@ describe("toFullPeriod — daily resolution (whole inches)", () => {
 
 // ─── aggregateRows integration tests ─────────────────────────────────────────
 
+// Fixture times are in America/Anchorage (AKDT = UTC-8 in May).
+// Midnight AKDT = 08:00 UTC. Pinning time here means no hours are filtered.
+const FIXTURE_START_UTC = "2026-05-21T08:00:00Z";
+
 describe("aggregateRows — 1h resolution", () => {
   let rows: Awaited<ReturnType<typeof aggregateRows>>[0];
 
   beforeAll(async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXTURE_START_UTC));
     [rows] = await aggregateRows("HRES", N_DAYS, 4, LAT, LON, TZ, ELEV_M);
+    vi.useRealTimers();
   });
 
   it("produces one row per hour", () => {
@@ -180,11 +187,42 @@ describe("aggregateRows — 1h resolution", () => {
   });
 });
 
+describe("aggregateRows — current time filtering", () => {
+  // 10:00 AKDT = 18:00 UTC. Hours 00–09 (10 total) should be excluded.
+  const CURRENT_HOUR_AKDT = 10;
+  const TIME_UTC = "2026-05-21T18:00:00Z";
+
+  it("excludes periods before the current hour", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(TIME_UTC));
+    const [rows] = await aggregateRows("HRES", N_DAYS, 4, LAT, LON, TZ, ELEV_M);
+    vi.useRealTimers();
+
+    const remainingDay1 = 24 - CURRENT_HOUR_AKDT;
+    expect(rows).toHaveLength(remainingDay1 + 24);
+    expect(rows[0].time).toBe(`2026-05-21T${String(CURRENT_HOUR_AKDT).padStart(2, "0")}:00`);
+  });
+
+  it("includes the current period (daily) even mid-day", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(TIME_UTC)); // still 10:00 AKDT
+    const [rows] = await aggregateRows("HRES", N_DAYS, 0, LAT, LON, TZ, ELEV_M);
+    vi.useRealTimers();
+
+    // Daily period starts at 00:00, which contains hour 10 — both days kept
+    expect(rows).toHaveLength(N_DAYS);
+    expect(rows[0].time).toBe("2026-05-21T00:00");
+  });
+});
+
 describe("aggregateRows — daily resolution", () => {
   let rows: Awaited<ReturnType<typeof aggregateRows>>[0];
 
   beforeAll(async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXTURE_START_UTC));
     [rows] = await aggregateRows("HRES", N_DAYS, 0, LAT, LON, TZ, ELEV_M);
+    vi.useRealTimers();
   });
 
   it("produces one row per day", () => {
