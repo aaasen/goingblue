@@ -18,9 +18,20 @@ const OPENMETEO_MODELS: Record<string, string> = {
 // ecmwf_ifs (HRES) does not provide freezing_level_height or pressure-level wind/temp
 const MODEL_NO_PRESSURE = new Set(["HRES"]);
 
-const LOCATION_COORDS: Record<string, [number, number, string]> = {
-  upper: [63.135, -150.989, "America/Anchorage"],
-  airstrip: [62.967, -151.057, "America/Anchorage"],
+interface NamedLocation { lat: number; lon: number; tz: string; elev_m: number }
+
+// Indexed by locationIdx (0 = current/GPS, 1-5 = named)
+const NAMED_LOCATIONS: (NamedLocation | null)[] = [
+  null,                                                                  // 0: current (GPS)
+  { lat: 63.067, lon: -151.172, tz: "America/Anchorage", elev_m: 3353 }, // 1: 11k  (11,000ft)
+  { lat: 63.063, lon: -151.081, tz: "America/Anchorage", elev_m: 4267 }, // 2: 14k  (14,000ft)
+  { lat: 63.069, lon: -151.047, tz: "America/Anchorage", elev_m: 5182 }, // 3: 17k  (17,000ft)
+  { lat: 63.069, lon: -151.003, tz: "America/Anchorage", elev_m: 6096 }, // 4: summit (20,000ft)
+  { lat: 62.965, lon: -151.177, tz: "America/Anchorage", elev_m: 2134 }, // 5: airstrip (7,000ft)
+];
+
+const LOCATION_NAME_TO_IDX: Record<string, number> = {
+  "11k": 1, "14k": 2, "17k": 3, "summit": 4, "airstrip": 5,
 };
 
 const HOURS_PER_PERIOD: Record<number, number> = {
@@ -155,6 +166,7 @@ async function fetchHourly(
   lat: number,
   lon: number,
   tz: string,
+  elev_m?: number,
 ): Promise<[HourlyData, string[], number]> {
   const hasPressure = !MODEL_NO_PRESSURE.has(modelKey);
   const pressureVars = hasPressure
@@ -172,6 +184,7 @@ async function fetchHourly(
     forecast_days: String(nDays),
     models: OPENMETEO_MODELS[modelKey],
   });
+  if (elev_m !== undefined) params.set("elevation", String(elev_m));
   const resp = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
   if (!resp.ok) throw new Error(`Open-Meteo ${resp.status}: ${await resp.text()}`);
   const data = (await resp.json()) as { hourly: HourlyData; elevation: number };
@@ -186,8 +199,9 @@ async function aggregateRows(
   lat: number,
   lon: number,
   tz: string,
+  elev_m?: number,
 ): Promise<[Row[], number]> {
-  const [h, times, elevation] = await fetchHourly(modelKey, nDays, lat, lon, tz);
+  const [h, times, elevation] = await fetchHourly(modelKey, nDays, lat, lon, tz, elev_m);
   const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
   const nTotal = nDays * (24 / hoursPerPeriod);
 
@@ -316,12 +330,10 @@ export function parseRequest(body: string): ForecastParams {
   }
 
   for (const word of words) {
-    if (word === "upper") {
-      locationIdx = 0;
-    } else if (word === "airstrip") {
-      locationIdx = 1;
+    if (word in LOCATION_NAME_TO_IDX) {
+      locationIdx = LOCATION_NAME_TO_IDX[word];
     } else if (word === "current" || word === "here") {
-      locationIdx = 2;
+      locationIdx = 0;
     } else if (/^\d+d$/.test(word)) {
       days = Math.max(1, Math.min(10, parseInt(word)));
     } else if (word in RESOLUTION_LABEL_TO_IDX) {
@@ -346,15 +358,16 @@ export function parseRequest(body: string): ForecastParams {
 }
 
 export async function fetchForecast(params: ForecastParams): Promise<string> {
-  const locationNames = Object.keys(LOCATION_COORDS);
-  const locationName = locationNames[params.locationIdx];
-  let lat: number, lon: number, tz: string;
-  if (params.locationIdx === 2) {
+  let lat: number, lon: number, tz: string, elev_m: number | undefined;
+  if (params.locationIdx === 0) {
     if (params.lat == null || params.lon == null)
       throw new Error("current location requested but no GPS coordinates in message");
     [lat, lon, tz] = [params.lat, params.lon, "America/Anchorage"];
+    elev_m = undefined;
   } else {
-    [lat, lon, tz] = LOCATION_COORDS[locationName];
+    const loc = NAMED_LOCATIONS[params.locationIdx];
+    if (!loc) throw new Error(`Unknown location index: ${params.locationIdx}`);
+    ({ lat, lon, tz, elev_m } = loc);
   }
 
   const modelKeys = (["HRES", "GFS", "ICON", "IFS"] as const).filter(
@@ -363,7 +376,7 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
   const keys = modelKeys.length ? modelKeys : (["HRES"] as const);
 
   const results = await Promise.all(
-    keys.map((key) => aggregateRows(key, params.days, params.resolutionIdx, lat, lon, tz)),
+    keys.map((key) => aggregateRows(key, params.days, params.resolutionIdx, lat, lon, tz, elev_m)),
   );
   const rowsPerModel = results.map(([rows]) => rows);
   const elevation = results[0][1];

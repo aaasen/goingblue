@@ -24,7 +24,7 @@ export interface ForecastMessage {
 export function messageToString(msg: ForecastMessage): string {
   const headerBits: number[] = [];
   putInt(headerBits, msg.version, 7);
-  putInt(headerBits, msg.location, 2);
+  putInt(headerBits, msg.location, 3);
   putInt(headerBits, msg.days - 1, 4);
   putInt(headerBits, msg.resolution, 3);
   putInt(headerBits, msg.models_mask, 4);
@@ -57,7 +57,7 @@ export function messageFromString(s: string): ForecastMessage {
   let version: number, location: number, daysRaw: number, resolution: number,
       models_mask: number, vars_mask: number, month: number, day: number, hour: number;
   [version,     pos] = takeInt(headerBits, pos, 7);
-  [location,    pos] = takeInt(headerBits, pos, 2);
+  [location,    pos] = takeInt(headerBits, pos, 3);
   [daysRaw,     pos] = takeInt(headerBits, pos, 4);
   [resolution,  pos] = takeInt(headerBits, pos, 3);
   [models_mask, pos] = takeInt(headerBits, pos, 4);

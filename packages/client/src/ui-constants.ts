@@ -1,4 +1,4 @@
-export const LOCATION_DISPLAY_NAMES = ["Denali summit", "Kahiltna airstrip", "Current location"];
+export const LOCATION_DISPLAY_NAMES = ["Current location", "11k", "14k", "17k", "Summit", "Airstrip"];
 
 export const WMO: Record<number, [string, string, string]> = {
   0: ["Clear sky", "Clear", "☀️"],

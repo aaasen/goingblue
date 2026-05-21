@@ -1,6 +1,6 @@
-export const VERSION = 7;
-// Header layout (92 bits): version:7 location:2 days:4 resolution:3 models_mask:4 vars_mask:13 month:4 day:5 hour:5 lat:15 lon:16 elev:14
-export const HEADER_BITS = 92;
+export const VERSION = 8;
+// Header layout (93 bits): version:7 location:3 days:4 resolution:3 models_mask:4 vars_mask:13 month:4 day:5 hour:5 lat:15 lon:16 elev:14
+export const HEADER_BITS = 93;
 export const HEADER_CHARS = Math.ceil((HEADER_BITS * Math.log(2)) / Math.log(94)); // = 15
 export const LAT_BITS = 15;  // -90..+90 in ~611m steps
 export const LON_BITS = 16;  // -180..+180 in ~611m steps at equator
@@ -9,7 +9,7 @@ export const ELEV_BITS = 14; // 0..16383m
 export const ALPHABET =
   "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
 
-export const LOCATIONS: string[] = ["upper", "airstrip", "current"];
+export const LOCATIONS: string[] = ["current", "11k", "14k", "17k", "summit", "airstrip"];
 
 export const RESOLUTION_HOURS: Record<number, number> = { 0: 24, 1: 12, 2: 6, 3: 3, 4: 1 };
 export const RESOLUTION_LABEL: Record<number, string> = {

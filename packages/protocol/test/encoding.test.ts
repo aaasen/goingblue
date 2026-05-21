@@ -54,7 +54,7 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const periods = overrides.periods ?? defaultPeriods;
   const days = periods[0].length / periodsPerDay;
   return {
-    version: 7,
+    version: 8,
     location: 0,
     resolution,
     models_mask,
@@ -80,7 +80,7 @@ describe("round-trip encoding", () => {
     // resolution=2 (6h) → 4 periods/day; 3 days → 12 periods per model; 2 models
     const original = msg({ location: 1, resolution: 2, models_mask: 0b011, month: 1, day: 31, hour: 0 });
     const decoded = roundTrip(original);
-    expect(decoded.version).toBe(7);
+    expect(decoded.version).toBe(8);
     expect(decoded.location).toBe(1);
     expect(decoded.days).toBe(3);
     expect(decoded.resolution).toBe(2);
@@ -109,9 +109,10 @@ describe("round-trip encoding", () => {
     expect(clamped.elevation).toBe(0);
   });
 
-  it("preserves location=2 (current)", () => {
-    const decoded = roundTrip(msg({ location: 2 }));
-    expect(decoded.location).toBe(2);
+  it("preserves all location indices", () => {
+    for (let loc = 0; loc <= 5; loc++) {
+      expect(roundTrip(msg({ location: loc })).location).toBe(loc);
+    }
   });
 
   it("preserves all period fields", () => {
