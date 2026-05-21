@@ -25,14 +25,13 @@ export function updateBuilder(): void {
     (document.querySelector('input[name="resolution"]:checked') as HTMLInputElement | null)
       ?.value ?? "24",
   );
-  const models = [
-    ...(document.querySelectorAll('input[name="model"]:checked') as NodeListOf<HTMLInputElement>),
-  ].map((el) => el.value);
+  const model =
+    (document.querySelector('input[name="model"]:checked') as HTMLInputElement | null)?.value ?? "hres";
 
-  // Disable var checkboxes not supported by any selected model
+  // Disable var checkboxes not supported by the selected model
   const varCheckboxes = [...document.querySelectorAll('input[name="var"]')] as HTMLInputElement[];
   for (const cb of varCheckboxes) {
-    const unavail = models.length > 0 && models.every((m) => MODEL_UNAVAIL_VARS[m]?.includes(cb.value));
+    const unavail = MODEL_UNAVAIL_VARS[model]?.includes(cb.value) ?? false;
     cb.disabled = unavail;
     if (unavail) cb.checked = false;
   }
@@ -43,7 +42,7 @@ export function updateBuilder(): void {
   (document.getElementById("days-display") as HTMLElement).textContent =
     `${days} day${days > 1 ? "s" : ""}`;
 
-  const nChars = models.length > 0 ? builderChars(days, resHours, models.length, varsMask) : 0;
+  const nChars = builderChars(days, resHours, 1, varsMask);
   const bar = document.getElementById("len-bar") as HTMLElement;
   const txt = document.getElementById("len-text") as HTMLElement;
   const pct = Math.min((nChars / MAX_CHARS) * 100, 100);
@@ -52,16 +51,13 @@ export function updateBuilder(): void {
   bar.style.width = pct + "%";
   bar.style.background = over ? "#cc2222" : "#2a8f5a";
   txt.className = "len-text " + (over ? "len-over" : "len-ok");
-  txt.textContent =
-    models.length === 0
-      ? "Select at least one model"
-      : over
-        ? `${nChars} chars — exceeds ${MAX_CHARS}, reduce days or resolution`
-        : `${nChars} / ${MAX_CHARS} chars`;
+  txt.textContent = over
+    ? `${nChars} chars — exceeds ${MAX_CHARS}, reduce days or resolution`
+    : `${nChars} / ${MAX_CHARS} chars`;
 
-  const msg = models.length > 0 ? builderMsg(location, days, resHours, models, vars) : "";
+  const msg = builderMsg(location, days, resHours, [model], vars);
   (document.getElementById("builder-msg") as HTMLElement).textContent = msg;
-  const disabled = over || models.length === 0;
+  const disabled = over;
   (document.getElementById("builder-copy") as HTMLButtonElement).disabled = disabled;
   (document.getElementById("fetch-btn") as HTMLButtonElement).disabled = disabled;
 }
