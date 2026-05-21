@@ -594,6 +594,80 @@
                 color: #999;
                 text-align: center;
             }
+
+            .past-forecasts-summary {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 0 8px;
+                cursor: pointer;
+                user-select: none;
+                font-size: 0.72rem;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: #aaa;
+                list-style: none;
+            }
+            .past-forecasts-summary::-webkit-details-marker,
+            .past-forecasts-summary::marker { display: none; }
+            .past-forecasts-summary::after {
+                content: "▶";
+                font-size: 1em;
+                opacity: 0.6;
+                margin-left: 6px;
+                line-height: 0;
+            }
+            details[open] > .past-forecasts-summary::after {
+                content: "▼";
+            }
+
+            .past-forecast-item {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 7px 0;
+                border-bottom: 1px solid #f0f0f0;
+                gap: 12px;
+            }
+            .past-forecast-item:last-child { border-bottom: none; }
+            .past-forecast-meta {
+                font-size: 0.78rem;
+                color: #555;
+                flex: 1;
+                min-width: 0;
+            }
+            .past-forecast-btns {
+                display: flex;
+                gap: 6px;
+                flex-shrink: 0;
+            }
+            .past-load-btn, .past-delete-btn {
+                padding: 3px 9px;
+                font-size: 0.72rem;
+                font-weight: 600;
+                border-radius: 4px;
+                cursor: pointer;
+                white-space: nowrap;
+            }
+            .past-load-btn {
+                border: 1px solid #2a6bb5;
+                background: #2a6bb5;
+                color: #fff;
+            }
+            .past-load-btn:hover {
+                background: #1a5aa5;
+                border-color: #1a5aa5;
+            }
+            .past-delete-btn {
+                border: 1px solid #d0d0d0;
+                background: #f5f5f5;
+                color: #888;
+            }
+            .past-delete-btn:hover {
+                background: #e8e8e8;
+                border-color: #c0c0c0;
+            }
         </style>
     </head>
     <body>
@@ -929,6 +1003,10 @@
                 spellcheck="false"
             ></textarea>
             <div id="output"></div>
+            <details id="past-forecasts-section" style="margin-top:4px">
+                <summary class="past-forecasts-summary">Past forecasts</summary>
+                <div id="past-forecasts-list"></div>
+            </details>
         </section>
 
         <section class="step">

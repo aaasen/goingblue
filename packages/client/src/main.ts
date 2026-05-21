@@ -2,8 +2,10 @@ import {
   messageFromString,
   type ForecastMessage,
   RESOLUTION_HOURS,
+  RESOLUTION_LABEL,
   CARDINALS,
   modelsFromMask,
+  startDatetime,
 } from "@weather/protocol";
 import { render, type ForecastView, type DecodedPeriod } from "./render.js";
 import { updateBuilder, requestCoords } from "./builder.js";
@@ -75,6 +77,8 @@ function toView(msg: ForecastMessage): ForecastView {
 const input = document.getElementById("input") as HTMLTextAreaElement;
 const output = document.getElementById("output") as HTMLElement;
 
+let suppressNextCache = false;
+
 input.addEventListener("input", () => {
   const text = input.value.replace(/\s/g, "");
   if (!text) {
@@ -85,7 +89,10 @@ input.addEventListener("input", () => {
   try {
     const msg = messageFromString(text);
     output.innerHTML = render(toView(msg));
+    if (!suppressNextCache) addToCache(text);
+    suppressNextCache = false;
   } catch (e) {
+    suppressNextCache = false;
     const msg = String(e);
     if (msg.includes("Version mismatch")) {
       const match = msg.match(/encoded v(\d+)/);
@@ -171,6 +178,127 @@ document.getElementById("builder-copy")?.addEventListener("click", () => {
 });
 
 updateBuilder();
+
+// --- Past forecast cache ---
+
+const CACHE_KEY = "past_forecasts";
+
+interface CacheEntry {
+  encoded: string;
+  savedAt: number;
+}
+
+function loadCache(): CacheEntry[] {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return [];
+    const arr: unknown = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    const valid: CacheEntry[] = [];
+    let dirty = false;
+    for (const item of arr) {
+      if (
+        typeof item !== "object" || item === null ||
+        typeof (item as CacheEntry).encoded !== "string" ||
+        typeof (item as CacheEntry).savedAt !== "number"
+      ) { dirty = true; continue; }
+      try {
+        messageFromString((item as CacheEntry).encoded);
+        valid.push(item as CacheEntry);
+      } catch {
+        dirty = true;
+      }
+    }
+    if (dirty) persistCache(valid);
+    return valid;
+  } catch {
+    return [];
+  }
+}
+
+function persistCache(entries: CacheEntry[]): void {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(entries));
+  } catch {}
+}
+
+function addToCache(encoded: string): void {
+  try { messageFromString(encoded); } catch { return; }
+  const entries = loadCache().filter((e) => e.encoded !== encoded);
+  entries.unshift({ encoded, savedAt: Date.now() });
+  persistCache(entries);
+  renderPastForecasts();
+}
+
+function deleteFromCache(encoded: string): void {
+  persistCache(loadCache().filter((e) => e.encoded !== encoded));
+  renderPastForecasts();
+}
+
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function renderPastForecasts(): void {
+  const list = document.getElementById("past-forecasts-list") as HTMLElement;
+  const entries = loadCache();
+
+  list.innerHTML = "";
+
+  if (entries.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.style.padding = "12px 0";
+    empty.textContent = "No past forecasts.";
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const entry of entries) {
+    let meta = "Unknown";
+    try {
+      const msg = messageFromString(entry.encoded);
+      const models = modelsFromMask(msg.models_mask).join(" + ");
+      const resLabel = RESOLUTION_LABEL[msg.resolution] ?? "?";
+      const resHours = RESOLUTION_HOURS[msg.resolution] ?? 24;
+      const start = startDatetime(msg);
+      const startStr = resHours >= 24
+        ? `${DAY_NAMES[start.getDay()]} ${start.getMonth() + 1}/${start.getDate()}`
+        : `${DAY_NAMES[start.getDay()]} ${start.getMonth() + 1}/${start.getDate()} ${start.getHours()}h`;
+      const location = LOCATION_DISPLAY_NAMES[msg.location] ?? "Unknown";
+      meta = `${location} · ${startStr} · ${msg.days}d ${resLabel} · ${models}`;
+    } catch { /* filtered by loadCache */ }
+
+    const item = document.createElement("div");
+    item.className = "past-forecast-item";
+
+    const metaSpan = document.createElement("span");
+    metaSpan.className = "past-forecast-meta";
+    metaSpan.textContent = meta;
+
+    const btns = document.createElement("div");
+    btns.className = "past-forecast-btns";
+
+    const loadBtn = document.createElement("button");
+    loadBtn.className = "past-load-btn";
+    loadBtn.textContent = "Load";
+    loadBtn.addEventListener("click", () => {
+      suppressNextCache = true;
+      input.value = entry.encoded;
+      input.dispatchEvent(new Event("input"));
+      input.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "past-delete-btn";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.addEventListener("click", () => deleteFromCache(entry.encoded));
+
+    btns.append(loadBtn, deleteBtn);
+    item.append(metaSpan, btns);
+    list.appendChild(item);
+  }
+}
+
+renderPastForecasts();
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
