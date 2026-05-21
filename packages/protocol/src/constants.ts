@@ -1,4 +1,4 @@
-export const VERSION = 10;
+export const VERSION = 1;
 // Header layout (94 bits): version:7 location:3 days:4 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5 lat:15 lon:16 elev:14
 export const HEADER_BITS = 94; // +1: vars_mask expanded from 13 to 14 bits
 export const HEADER_CHARS = Math.ceil((HEADER_BITS * Math.log(2)) / Math.log(94)); // = 15
