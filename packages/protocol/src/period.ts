@@ -19,6 +19,10 @@ export interface Period {
   wind_600_dir?: number;
   wind_700_mph?: number;
   wind_700_dir?: number;
+  cloud_total?: number;   // 0–100 %
+  cloud_high?: number;    // 0–100 %
+  cloud_mid?: number;     // 0–100 %
+  cloud_low?: number;     // 0–100 %
 }
 
 function putWind(bits: number[], mph: number, dir: number): void {
@@ -43,6 +47,10 @@ export function periodToBits(p: Period, varsMask: number): number[] {
   if (varsMask & (1 << 5)) putWind(bits, p.wind_500_mph ?? 0, p.wind_500_dir ?? 0);
   if (varsMask & (1 << 6)) putWind(bits, p.wind_600_mph ?? 0, p.wind_600_dir ?? 0);
   if (varsMask & (1 << 7)) putWind(bits, p.wind_700_mph ?? 0, p.wind_700_dir ?? 0);
+  if (varsMask & (1 << 8))  putInt(bits, Math.min(Math.round(p.cloud_total ?? 0), 100), 7);
+  if (varsMask & (1 << 9))  putInt(bits, Math.min(Math.round(p.cloud_high  ?? 0), 100), 7);
+  if (varsMask & (1 << 10)) putInt(bits, Math.min(Math.round(p.cloud_mid   ?? 0), 100), 7);
+  if (varsMask & (1 << 11)) putInt(bits, Math.min(Math.round(p.cloud_low   ?? 0), 100), 7);
   return bits;
 }
 
@@ -59,6 +67,10 @@ export function periodFromBits(bits: number[], pos: number, varsMask: number): [
   if (varsMask & (1 << 5)) { let mph: number, dir: number; [mph, dir, pos] = takeWind(bits, pos); p.wind_500_mph = mph; p.wind_500_dir = dir; }
   if (varsMask & (1 << 6)) { let mph: number, dir: number; [mph, dir, pos] = takeWind(bits, pos); p.wind_600_mph = mph; p.wind_600_dir = dir; }
   if (varsMask & (1 << 7)) { let mph: number, dir: number; [mph, dir, pos] = takeWind(bits, pos); p.wind_700_mph = mph; p.wind_700_dir = dir; }
+  if (varsMask & (1 << 8))  { let v: number; [v, pos] = takeInt(bits, pos, 7); p.cloud_total = v; }
+  if (varsMask & (1 << 9))  { let v: number; [v, pos] = takeInt(bits, pos, 7); p.cloud_high  = v; }
+  if (varsMask & (1 << 10)) { let v: number; [v, pos] = takeInt(bits, pos, 7); p.cloud_mid   = v; }
+  if (varsMask & (1 << 11)) { let v: number; [v, pos] = takeInt(bits, pos, 7); p.cloud_low   = v; }
 
   return [p, pos];
 }

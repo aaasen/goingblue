@@ -43,6 +43,10 @@ function toView(msg: ForecastMessage): ForecastView {
       p700: p.wind_700_mph != null
         ? { ws: p.wind_700_mph, dir: CARDINALS[p.wind_700_dir!] }
         : undefined,
+      cloud_total: p.cloud_total,
+      cloud_high:  p.cloud_high,
+      cloud_mid:   p.cloud_mid,
+      cloud_low:   p.cloud_low,
     })),
   );
 

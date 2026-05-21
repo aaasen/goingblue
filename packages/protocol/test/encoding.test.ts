@@ -10,7 +10,8 @@ import {
 } from "../src/index.js";
 
 const ALL_VARS =
-  (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7);
+  (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) |
+  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11);
 
 const RESOLUTIONS_PER_DAY = [1, 2, 4, 8, 24];
 
@@ -28,6 +29,10 @@ const PERIOD: Period = {
   wind_600_dir: 3,
   wind_700_mph: 15,
   wind_700_dir: 2,
+  cloud_total: 80,
+  cloud_high: 60,
+  cloud_mid: 40,
+  cloud_low: 20,
 };
 
 function popcount(n: number): number {
@@ -48,7 +53,7 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const periods = overrides.periods ?? defaultPeriods;
   const days = periods[0].length / periodsPerDay;
   return {
-    version: 4,
+    version: 5,
     location: 0,
     resolution,
     models_mask,
@@ -73,7 +78,7 @@ describe("round-trip encoding", () => {
     // resolution=2 (6h) → 4 periods/day; 3 days → 12 periods per model; 2 models
     const original = msg({ location: 1, resolution: 2, models_mask: 0b011, month: 1, day: 31, hour: 0 });
     const decoded = roundTrip(original);
-    expect(decoded.version).toBe(4);
+    expect(decoded.version).toBe(5);
     expect(decoded.location).toBe(1);
     expect(decoded.days).toBe(3);
     expect(decoded.resolution).toBe(2);
@@ -115,6 +120,10 @@ describe("round-trip encoding", () => {
     expect(p.wind_600_dir).toBe(PERIOD.wind_600_dir);
     expect(p.wind_700_mph).toBe(PERIOD.wind_700_mph);
     expect(p.wind_700_dir).toBe(PERIOD.wind_700_dir);
+    expect(p.cloud_total).toBe(PERIOD.cloud_total);
+    expect(p.cloud_high).toBe(PERIOD.cloud_high);
+    expect(p.cloud_mid).toBe(PERIOD.cloud_mid);
+    expect(p.cloud_low).toBe(PERIOD.cloud_low);
   });
 
   it("omits all optional fields when vars_mask=0", () => {
@@ -126,6 +135,8 @@ describe("round-trip encoding", () => {
     expect(p.freeze_ft).toBeUndefined();
     expect(p.wind_sfc_mph).toBeUndefined();
     expect(p.wind_500_mph).toBeUndefined();
+    expect(p.cloud_total).toBeUndefined();
+    expect(p.cloud_high).toBeUndefined();
   });
 
   it("only includes selected vars", () => {

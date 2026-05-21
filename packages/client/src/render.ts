@@ -17,6 +17,10 @@ export interface DecodedPeriod {
   p500?: WindCell;
   p600?: WindCell;
   p700?: WindCell;
+  cloud_total?: number;
+  cloud_high?: number;
+  cloud_mid?: number;
+  cloud_low?: number;
 }
 
 export interface ForecastView {
@@ -137,6 +141,14 @@ function freezeCells(ps: DecodedPeriod[]): string[] {
   );
 }
 
+function cloudCells(ps: DecodedPeriod[], key: keyof DecodedPeriod): string[] {
+  return ps.map((p) => {
+    const v = p[key] as number | undefined;
+    if (v == null) return nilCell();
+    return `<span style="font-family:monospace;font-size:.85rem;font-weight:600;color:#6688aa">${v}%</span>`;
+  });
+}
+
 function windCells(ps: DecodedPeriod[], key: keyof DecodedPeriod, colored: boolean): CellValue[] {
   return ps.map((p) => {
     const w = p[key] as WindCell | undefined;
@@ -145,16 +157,21 @@ function windCells(ps: DecodedPeriod[], key: keyof DecodedPeriod, colored: boole
 }
 
 function modelBlock(ps: DecodedPeriod[], n: number): string {
-  const hasPrecip  = ps.some((p) => p.precip  != null);
-  const hasTemp    = ps.some((p) => p.temp_f   != null);
-  const hasSnow    = ps.some((p) => p.snow     != null);
-  const hasFreeze  = ps.some((p) => p.fz_ft    != null);
-  const hasSfc     = ps.some((p) => p.p_sfc    != null);
-  const has500     = ps.some((p) => p.p500     != null);
-  const has600     = ps.some((p) => p.p600     != null);
-  const has700     = ps.some((p) => p.p700     != null);
+  const hasPrecip  = ps.some((p) => p.precip      != null);
+  const hasTemp    = ps.some((p) => p.temp_f       != null);
+  const hasSnow    = ps.some((p) => p.snow         != null);
+  const hasFreeze  = ps.some((p) => p.fz_ft        != null);
+  const hasSfc     = ps.some((p) => p.p_sfc        != null);
+  const has500     = ps.some((p) => p.p500         != null);
+  const has600     = ps.some((p) => p.p600         != null);
+  const has700     = ps.some((p) => p.p700         != null);
+  const hasCloudT  = ps.some((p) => p.cloud_total  != null);
+  const hasCloudH  = ps.some((p) => p.cloud_high   != null);
+  const hasCloudM  = ps.some((p) => p.cloud_mid    != null);
+  const hasCloudL  = ps.some((p) => p.cloud_low    != null);
   const hasSurface = hasPrecip || hasTemp || hasSnow || hasFreeze || hasSfc;
   const hasUpper   = has500 || has600 || has700;
+  const hasCloud   = hasCloudT || hasCloudH || hasCloudM || hasCloudL;
 
   let body = row("", iconCells(ps));
   if (hasSurface) {
@@ -164,6 +181,13 @@ function modelBlock(ps: DecodedPeriod[], n: number): string {
     if (hasSnow)   body += row("Snow",     snowCells(ps));
     if (hasFreeze) body += row("Freeze",   freezeCells(ps));
     if (hasSfc)    body += row("Sfc wind", windCells(ps, "p_sfc", true));
+  }
+  if (hasCloud) {
+    body += sectionRow("Cloud", n);
+    if (hasCloudT) body += row("Total",  cloudCells(ps, "cloud_total"));
+    if (hasCloudH) body += row("High",   cloudCells(ps, "cloud_high"));
+    if (hasCloudM) body += row("Mid",    cloudCells(ps, "cloud_mid"));
+    if (hasCloudL) body += row("Low",    cloudCells(ps, "cloud_low"));
   }
   if (hasUpper) {
     body += sectionRow("Pressure", n);

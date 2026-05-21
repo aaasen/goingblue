@@ -57,6 +57,10 @@ const SURFACE_VARS = [
   "weather_code",
   "freezing_level_height",
   "snowfall",
+  "cloud_cover",
+  "cloud_cover_high",
+  "cloud_cover_mid",
+  "cloud_cover_low",
 ];
 const PRESSURE_LEVELS = [500, 600, 700];
 const PRESSURE_VAR_NAMES = ["temperature", "wind_speed", "wind_direction"];
@@ -79,6 +83,10 @@ interface HourlyData {
   weather_code: (number | null)[];
   freezing_level_height: (number | null)[];
   snowfall: (number | null)[];
+  cloud_cover: (number | null)[];
+  cloud_cover_high: (number | null)[];
+  cloud_cover_mid: (number | null)[];
+  cloud_cover_low: (number | null)[];
   [key: string]: unknown[];
 }
 
@@ -97,6 +105,10 @@ interface Row {
   wind_direction_600hPa: number | null;
   wind_speed_700hPa: number | null;
   wind_direction_700hPa: number | null;
+  cloud_cover: number | null;
+  cloud_cover_high: number | null;
+  cloud_cover_mid: number | null;
+  cloud_cover_low: number | null;
 }
 
 async function fetchHourly(
@@ -146,6 +158,10 @@ function buildRow(h: HourlyData, times: string[], idx: number, snowCm: number): 
     wind_direction_600hPa: opt("wind_direction_600hPa"),
     wind_speed_700hPa: opt("wind_speed_700hPa"),
     wind_direction_700hPa: opt("wind_direction_700hPa"),
+    cloud_cover: opt("cloud_cover"),
+    cloud_cover_high: opt("cloud_cover_high"),
+    cloud_cover_mid: opt("cloud_cover_mid"),
+    cloud_cover_low: opt("cloud_cover_low"),
   };
 }
 
@@ -226,6 +242,10 @@ function toFullPeriod(r: Row, daily: boolean, varsMask: number, modelKey: string
     p.wind_700_mph = round5(r.wind_speed_700hPa);
     p.wind_700_dir = degToDirIdx(r.wind_direction_700hPa);
   }
+  if (varsMask & (1 << VARS_BIT.cc))  p.cloud_total = Math.round(r.cloud_cover      ?? 0);
+  if (varsMask & (1 << VARS_BIT.cch)) p.cloud_high  = Math.round(r.cloud_cover_high ?? 0);
+  if (varsMask & (1 << VARS_BIT.ccm)) p.cloud_mid   = Math.round(r.cloud_cover_mid  ?? 0);
+  if (varsMask & (1 << VARS_BIT.ccl)) p.cloud_low   = Math.round(r.cloud_cover_low  ?? 0);
   return p;
 }
 

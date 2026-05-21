@@ -1,6 +1,6 @@
-export const VERSION = 4;
-// Header layout (73 bits): version:7 location:2 days:4 resolution:3 models_mask:4 vars_mask:8 month:4 day:5 hour:5 lat:15 lon:16
-export const HEADER_BITS = 73;
+export const VERSION = 5;
+// Header layout (77 bits): version:7 location:2 days:4 resolution:3 models_mask:4 vars_mask:12 month:4 day:5 hour:5 lat:15 lon:16
+export const HEADER_BITS = 77;
 export const HEADER_CHARS = Math.ceil((HEADER_BITS * Math.log(2)) / Math.log(94)); // = 12
 export const LAT_BITS = 15;  // -90..+90 in ~611m steps
 export const LON_BITS = 16;  // -180..+180 in ~611m steps at equator
@@ -32,12 +32,16 @@ export const VARS_BIT: Record<string, number> = {
   w500: 5,
   w600: 6,
   w700: 7,
+  cc: 8,     // total cloud cover
+  cch: 9,    // high cloud cover
+  ccm: 10,   // mid cloud cover
+  ccl: 11,   // low cloud cover
 };
 
 // Bits consumed per variable (parallel to VARS_BIT order)
-// WMO always uses 5 bits; these are for optional vars bits 0-7
-export const VAR_BITS = [7, 8, 4, 4, 7, 7, 7, 7];
-//                       ^p ^t ^s ^f ^w ^5 ^6 ^7
+// WMO always uses 5 bits; these are for optional vars bits 0-11
+export const VAR_BITS = [7, 8, 4, 4, 7, 7, 7, 7, 7, 7, 7, 7];
+//                       ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl
 
 export const WMO_BITS = 5;
 
@@ -47,7 +51,7 @@ export const DEFAULT_VARS_MASK =
 
 export function periodBitsForMask(varsMask: number): number {
   let bits = WMO_BITS;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < VAR_BITS.length; i++) {
     if (varsMask & (1 << i)) bits += VAR_BITS[i];
   }
   return bits;
