@@ -1,8 +1,11 @@
+import { parse } from "node-html-parser";
+
 export function parseReplyPage(html: string): { guid: string; messageId: string } | null {
-  const guidMatch = html.match(/id="Guid"[^>]+value="([^"]+)"/);
-  const msgIdMatch = html.match(/id="MessageId"[^>]+value="([^"]+)"/);
-  if (!guidMatch || !msgIdMatch) return null;
-  return { guid: guidMatch[1], messageId: msgIdMatch[1] };
+  const doc = parse(html);
+  const guid = doc.querySelector("#Guid")?.getAttribute("value");
+  const messageId = doc.querySelector("#MessageId")?.getAttribute("value");
+  if (!guid || !messageId) return null;
+  return { guid, messageId };
 }
 
 const BROWSER_HEADERS = {

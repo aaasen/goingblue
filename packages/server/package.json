@@ -12,7 +12,8 @@
   "dependencies": {
     "@hono/node-server": "^1.12.0",
     "@weather/protocol": "workspace:*",
-    "hono": "^4.6.0"
+    "hono": "^4.6.0",
+    "node-html-parser": "^7.1.0"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
