@@ -203,7 +203,7 @@ export async function aggregateRows(
   tz: string,
   elev_m?: number,
 ): Promise<[Row[], number]> {
-  const [h, times, elevation] = await fetchHourly(modelKey, nDays, lat, lon, tz, elev_m);
+  const [h, times, elevation] = await fetchHourly(modelKey, nDays + 1, lat, lon, tz, elev_m);
   const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
   const nTotal = nDays * (24 / hoursPerPeriod);
 

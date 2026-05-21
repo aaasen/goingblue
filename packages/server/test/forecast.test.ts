@@ -188,28 +188,27 @@ describe("aggregateRows — 1h resolution", () => {
 });
 
 describe("aggregateRows — current time filtering", () => {
-  // 10:00 AKDT = 18:00 UTC. Hours 00–09 (10 total) should be excluded.
+  // 10:00 AKDT = 18:00 UTC. Hours 00–09 should be excluded.
   const CURRENT_HOUR_AKDT = 10;
   const TIME_UTC = "2026-05-21T18:00:00Z";
 
-  it("excludes periods before the current hour", async () => {
+  it("excludes past periods but always returns the full period count", async () => {
+    // nDays=1 so fetching nDays+1=2 days fits within the 48-hour fixture.
     vi.useFakeTimers();
     vi.setSystemTime(new Date(TIME_UTC));
-    const [rows] = await aggregateRows("HRES", N_DAYS, 4, LAT, LON, TZ, ELEV_M);
+    const [rows] = await aggregateRows("HRES", 1, 4, LAT, LON, TZ, ELEV_M);
     vi.useRealTimers();
 
-    const remainingDay1 = 24 - CURRENT_HOUR_AKDT;
-    expect(rows).toHaveLength(remainingDay1 + 24);
+    expect(rows).toHaveLength(24); // always nDays * 24, not nDays * 24 - currentHour
     expect(rows[0].time).toBe(`2026-05-21T${String(CURRENT_HOUR_AKDT).padStart(2, "0")}:00`);
   });
 
   it("includes the current period (daily) even mid-day", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date(TIME_UTC)); // still 10:00 AKDT
+    vi.setSystemTime(new Date(TIME_UTC));
     const [rows] = await aggregateRows("HRES", N_DAYS, 0, LAT, LON, TZ, ELEV_M);
     vi.useRealTimers();
 
-    // Daily period starts at 00:00, which contains hour 10 — both days kept
     expect(rows).toHaveLength(N_DAYS);
     expect(rows[0].time).toBe("2026-05-21T00:00");
   });
