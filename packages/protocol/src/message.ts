@@ -1,4 +1,4 @@
-import { VERSION, HEADER_BITS, HEADER_CHARS, RESOLUTION_HOURS, periodBitsForMask, nCharsForBits } from "./constants.js";
+import { VERSION, HEADER_BITS, HEADER_CHARS, RESOLUTION_HOURS, periodBitsForMask, nCharsForBits, LAT_BITS, LON_BITS } from "./constants.js";
 import { putInt, takeInt } from "./bits.js";
 import { encode, decode } from "./codec.js";
 import { type Period, periodToBits, periodFromBits } from "./period.js";
@@ -13,6 +13,8 @@ export interface ForecastMessage {
   month: number;
   day: number;
   hour: number;
+  lat: number;
+  lon: number;
   periods: Period[][];
 }
 
@@ -29,6 +31,8 @@ export function messageToString(msg: ForecastMessage): string {
   putInt(headerBits, msg.month, 4);
   putInt(headerBits, msg.day, 5);
   putInt(headerBits, msg.hour, 5);
+  putInt(headerBits, Math.round((msg.lat + 90) * ((1 << LAT_BITS) - 1) / 180), LAT_BITS);
+  putInt(headerBits, Math.round((msg.lon + 180) * ((1 << LON_BITS) - 1) / 360), LON_BITS);
 
   const bodyBits: number[] = [];
   const nPeriods = msg.periods[0].length;
@@ -59,6 +63,11 @@ export function messageFromString(s: string): ForecastMessage {
   [month,       pos] = takeInt(headerBits, pos, 4);
   [day,         pos] = takeInt(headerBits, pos, 5);
   [hour,        pos] = takeInt(headerBits, pos, 5);
+  let lat_raw: number, lon_raw: number;
+  [lat_raw,     pos] = takeInt(headerBits, pos, LAT_BITS);
+  [lon_raw,     pos] = takeInt(headerBits, pos, LON_BITS);
+  const lat = lat_raw * 180 / ((1 << LAT_BITS) - 1) - 90;
+  const lon = lon_raw * 360 / ((1 << LON_BITS) - 1) - 180;
 
   if (version !== VERSION)
     throw new Error(`Version mismatch: encoded v${version}, expected v${VERSION}`);
@@ -87,7 +96,7 @@ export function messageFromString(s: string): ForecastMessage {
     }
   }
 
-  return { version, location, days: daysRaw + 1, resolution, models_mask, vars_mask, month, day, hour, periods: allPeriods };
+  return { version, location, days: daysRaw + 1, resolution, models_mask, vars_mask, month, day, hour, lat, lon, periods: allPeriods };
 }
 
 export function startDatetime(msg: ForecastMessage): Date {

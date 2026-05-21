@@ -332,6 +332,8 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
     month,
     day,
     hour,
+    lat,
+    lon,
     periods: rowsPerModel.map((rows, mi) =>
       rows.map((r) => toFullPeriod(r, daily, params.varsMask, keys[mi])),
     ),

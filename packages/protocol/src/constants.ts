@@ -1,7 +1,9 @@
-export const VERSION = 3;
-// Header layout (42 bits): version:7 location:2 days:4 resolution:3 models_mask:4 vars_mask:8 month:4 day:5 hour:5
-export const HEADER_BITS = 42;
-export const HEADER_CHARS = Math.ceil((HEADER_BITS * Math.log(2)) / Math.log(94)); // = 7
+export const VERSION = 4;
+// Header layout (73 bits): version:7 location:2 days:4 resolution:3 models_mask:4 vars_mask:8 month:4 day:5 hour:5 lat:15 lon:16
+export const HEADER_BITS = 73;
+export const HEADER_CHARS = Math.ceil((HEADER_BITS * Math.log(2)) / Math.log(94)); // = 12
+export const LAT_BITS = 15;  // -90..+90 in ~611m steps
+export const LON_BITS = 16;  // -180..+180 in ~611m steps at equator
 
 export const ALPHABET =
   "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";

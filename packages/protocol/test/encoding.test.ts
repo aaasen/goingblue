@@ -48,7 +48,7 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const periods = overrides.periods ?? defaultPeriods;
   const days = periods[0].length / periodsPerDay;
   return {
-    version: 3,
+    version: 4,
     location: 0,
     resolution,
     models_mask,
@@ -56,6 +56,8 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
     month: 5,
     day: 20,
     hour: 12,
+    lat: 63.135,
+    lon: -150.989,
     ...overrides,
     days,
     periods,
@@ -71,7 +73,7 @@ describe("round-trip encoding", () => {
     // resolution=2 (6h) → 4 periods/day; 3 days → 12 periods per model; 2 models
     const original = msg({ location: 1, resolution: 2, models_mask: 0b011, month: 1, day: 31, hour: 0 });
     const decoded = roundTrip(original);
-    expect(decoded.version).toBe(3);
+    expect(decoded.version).toBe(4);
     expect(decoded.location).toBe(1);
     expect(decoded.days).toBe(3);
     expect(decoded.resolution).toBe(2);
@@ -80,6 +82,16 @@ describe("round-trip encoding", () => {
     expect(decoded.month).toBe(1);
     expect(decoded.day).toBe(31);
     expect(decoded.hour).toBe(0);
+  });
+
+  it("preserves lat/lon within 1km", () => {
+    const decoded = roundTrip(msg({ lat: 63.135, lon: -150.989 }));
+    expect(decoded.lat).toBeCloseTo(63.135, 2);
+    expect(decoded.lon).toBeCloseTo(-150.989, 2);
+    // negative lat/lon
+    const s = roundTrip(msg({ lat: -33.868, lon: 151.209 }));
+    expect(s.lat).toBeCloseTo(-33.868, 2);
+    expect(s.lon).toBeCloseTo(151.209, 2);
   });
 
   it("preserves location=2 (current)", () => {
