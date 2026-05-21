@@ -34,7 +34,7 @@ const LOCATION_NAME_TO_IDX: Record<string, number> = {
   "11k": 1, "14k": 2, "17k": 3, "summit": 4, "airstrip": 5,
 };
 
-const HOURS_PER_PERIOD: Record<number, number> = {
+export const HOURS_PER_PERIOD: Record<number, number> = {
   0: 24,
   1: 12,
   2: 6,
@@ -138,7 +138,7 @@ interface HourlyData {
   [key: string]: unknown[];
 }
 
-interface Row {
+export interface Row {
   time: string;
   temp_c: number | null;
   wind_speed_10m: number | null;
@@ -194,7 +194,7 @@ async function fetchHourly(
 }
 
 
-async function aggregateRows(
+export async function aggregateRows(
   modelKey: string,
   nDays: number,
   resolutionIdx: number,
@@ -268,7 +268,7 @@ async function aggregateRows(
 const PRESSURE_VAR_BITS =
   (1 << VARS_BIT.freeze) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
 
-function toFullPeriod(r: Row, varsMask: number, modelKey: string, hoursPerPeriod: number): Period {
+export function toFullPeriod(r: Row, varsMask: number, modelKey: string, hoursPerPeriod: number): Period {
   if (MODEL_NO_PRESSURE.has(modelKey)) varsMask &= ~PRESSURE_VAR_BITS;
   const p: Period = { weathercode: r.weathercode ?? 0 };
   if (varsMask & (1 << VARS_BIT.precip)) p.precip = r.precip ?? 0;
