@@ -5,7 +5,7 @@ export const PERIOD_BITS = 40;
 export const ALPHABET =
   "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
 
-export const LOCATIONS: string[] = ["upper", "airstrip"];
+export const LOCATIONS: string[] = ["upper", "airstrip", "current"];
 
 export const RESOLUTION_HOURS: Record<number, number> = { 0: 24, 1: 12, 2: 6, 3: 3, 4: 1 };
 export const RESOLUTION_LABEL: Record<number, string> = {

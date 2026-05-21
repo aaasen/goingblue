@@ -7,14 +7,14 @@ import {
 } from "@weather/protocol";
 
 const OPENMETEO_MODELS: Record<string, string> = {
-  ECMWF: "ecmwf_ifs025",
+  ECMWF: "ecmwf_ifs",
   GFS: "gfs_seamless",
   ICON: "icon_seamless",
 };
 
 const LOCATION_COORDS: Record<string, [number, number, string]> = {
-  upper: [63.0692, -151.007, "America/Anchorage"],
-  airstrip: [62.9, -151.093, "America/Anchorage"],
+  upper: [63.135, -150.989, "America/Anchorage"],
+  airstrip: [62.967, -151.057, "America/Anchorage"],
 };
 
 const RESOLUTION_TARGET_HOURS: Record<number, number[] | null> = {
@@ -197,6 +197,8 @@ function toFullPeriod(r: Row, daily: boolean): Period {
 
 export interface ForecastParams {
   locationIdx: number;
+  lat?: number;
+  lon?: number;
   days: number;
   resolutionIdx: number;
   modelsMask: number;
@@ -205,15 +207,25 @@ export interface ForecastParams {
 export function parseRequest(body: string): ForecastParams {
   const words = body.toLowerCase().trim().split(/\s+/);
   let locationIdx = 0;
+  let lat: number | undefined;
+  let lon: number | undefined;
   let days = 10;
   let resolutionIdx = 0;
   let modelsMask = 1; // ECMWF default
+
+  const gpsMatch = body.match(/Lat\s+([-\d.]+)\s+Lon\s+([-\d.]+)/i);
+  if (gpsMatch) {
+    lat = parseFloat(gpsMatch[1]);
+    lon = parseFloat(gpsMatch[2]);
+  }
 
   for (const word of words) {
     if (word === "upper") {
       locationIdx = 0;
     } else if (word === "airstrip") {
       locationIdx = 1;
+    } else if (word === "current" || word === "here") {
+      locationIdx = 2;
     } else if (/^\d+d$/.test(word)) {
       days = Math.max(1, Math.min(10, parseInt(word)));
     } else if (word in RESOLUTION_LABEL_TO_IDX) {
@@ -230,13 +242,19 @@ export function parseRequest(body: string): ForecastParams {
     }
   }
 
-  return { locationIdx, days, resolutionIdx, modelsMask };
+  return { locationIdx, lat, lon, days, resolutionIdx, modelsMask };
 }
 
 export async function fetchForecast(params: ForecastParams): Promise<string> {
   const locationNames = Object.keys(LOCATION_COORDS);
   const locationName = locationNames[params.locationIdx];
-  const [lat, lon, tz] = LOCATION_COORDS[locationName];
+  let lat: number, lon: number, tz: string;
+  if (params.locationIdx === 2) {
+    if (params.lat == null || params.lon == null) throw new Error("current location requested but no GPS coordinates in message");
+    [lat, lon, tz] = [params.lat, params.lon, "America/Anchorage"];
+  } else {
+    [lat, lon, tz] = LOCATION_COORDS[locationName];
+  }
 
   const modelKeys = (["ECMWF", "GFS", "ICON"] as const).filter(
     (_, bit) => params.modelsMask & (1 << bit),

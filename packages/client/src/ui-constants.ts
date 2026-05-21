@@ -1,4 +1,4 @@
-export const LOCATION_DISPLAY_NAMES = ["Upper mountain", "Airstrip"];
+export const LOCATION_DISPLAY_NAMES = ["Upper mountain", "Airstrip", "Current location"];
 
 export const WMO: Record<number, [string, string, string]> = {
   0: ["Clear sky", "Clear", "☀️"],
