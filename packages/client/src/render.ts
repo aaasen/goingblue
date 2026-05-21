@@ -153,8 +153,8 @@ function modelBlock(ps: DecodedPeriod[], n: number): string {
   const has500     = ps.some((p) => p.p500     != null);
   const has600     = ps.some((p) => p.p600     != null);
   const has700     = ps.some((p) => p.p700     != null);
-  const hasAlt     = has500 || has600 || has700;
   const hasSurface = hasPrecip || hasTemp || hasSnow || hasFreeze || hasSfc;
+  const hasUpper   = has500 || has600 || has700;
 
   let body = row("", iconCells(ps));
   if (hasSurface) {
@@ -165,8 +165,8 @@ function modelBlock(ps: DecodedPeriod[], n: number): string {
     if (hasFreeze) body += row("Freeze",   freezeCells(ps));
     if (hasSfc)    body += row("Sfc wind", windCells(ps, "p_sfc", true));
   }
-  if (hasAlt) {
-    body += sectionRow("Alt", n);
+  if (hasUpper) {
+    body += sectionRow("Pressure", n);
     if (has500) body += row('500<br><span style="font-weight:400;letter-spacing:0;opacity:.65">~18k ft</span>', windCells(ps, "p500", true));
     if (has600) body += row('600<br><span style="font-weight:400;letter-spacing:0;opacity:.65">~14k ft</span>', windCells(ps, "p600", true));
     if (has700) body += row('700<br><span style="font-weight:400;letter-spacing:0;opacity:.65">~10k ft</span>', windCells(ps, "p700", true));

@@ -3,6 +3,32 @@ import { MODEL_UNAVAIL_VARS } from "./ui-constants.js";
 
 const MAX_CHARS = 160;
 
+let _coords: string | null = null;
+let _coordsErr: string | null = null;
+let _fetching = false;
+
+function requestCoords(): void {
+  if (_fetching || _coords !== null) return;
+  _fetching = true;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      _coords = `${pos.coords.latitude.toFixed(5)},${pos.coords.longitude.toFixed(5)}`;
+      _coordsErr = null;
+      _fetching = false;
+      updateBuilder();
+    },
+    (err) => {
+      _coordsErr =
+        err.code === 1
+          ? "Location access denied — enable permissions or choose a different location."
+          : "Location unavailable — try again or choose a different location.";
+      _fetching = false;
+      updateBuilder();
+    },
+    { timeout: 10000 },
+  );
+}
+
 export function builderChars(days: number, resHours: number, nModels: number, varsMask: number): number {
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
   const bodyBits = days * periodsPerDay * nModels * periodBitsForMask(varsMask);
@@ -15,20 +41,25 @@ export function builderMsg(location: string, days: number, resHours: number, mod
 }
 
 export function updateBuilder(): void {
-  const location =
+  const locationVal =
     (document.querySelector('input[name="location"]:checked') as HTMLInputElement | null)?.value ??
-    "upper";
-  const days = parseInt(
-    (document.getElementById("days-slider") as HTMLInputElement).value,
-  );
+    "current";
+
+  if (locationVal !== "current") {
+    _coords = null;
+    _coordsErr = null;
+    _fetching = false;
+  }
+
+  const days = parseInt((document.getElementById("days-slider") as HTMLInputElement).value);
   const resHours = parseInt(
     (document.querySelector('input[name="resolution"]:checked') as HTMLInputElement | null)
       ?.value ?? "24",
   );
   const model =
-    (document.querySelector('input[name="model"]:checked') as HTMLInputElement | null)?.value ?? "hres";
+    (document.querySelector('input[name="model"]:checked') as HTMLInputElement | null)?.value ??
+    "hres";
 
-  // Disable var checkboxes not supported by the selected model
   const varCheckboxes = [...document.querySelectorAll('input[name="var"]')] as HTMLInputElement[];
   for (const cb of varCheckboxes) {
     const unavail = MODEL_UNAVAIL_VARS[model]?.includes(cb.value) ?? false;
@@ -42,9 +73,37 @@ export function updateBuilder(): void {
   (document.getElementById("days-display") as HTMLElement).textContent =
     `${days} day${days > 1 ? "s" : ""}`;
 
-  const nChars = builderChars(days, resHours, 1, varsMask);
   const bar = document.getElementById("len-bar") as HTMLElement;
   const txt = document.getElementById("len-text") as HTMLElement;
+  const msgEl = document.getElementById("builder-msg") as HTMLElement;
+  const copyBtn = document.getElementById("builder-copy") as HTMLButtonElement;
+  const fetchBtn = document.getElementById("fetch-btn") as HTMLButtonElement;
+
+  if (locationVal === "current") {
+    if (_fetching || _coords === null) {
+      requestCoords();
+      txt.textContent = "Getting location…";
+      txt.className = "len-text";
+      bar.style.width = "0%";
+      msgEl.textContent = "";
+      copyBtn.disabled = true;
+      fetchBtn.disabled = true;
+      return;
+    }
+    if (_coordsErr) {
+      txt.textContent = _coordsErr;
+      txt.className = "len-text len-over";
+      bar.style.width = "0%";
+      msgEl.textContent = "";
+      copyBtn.disabled = true;
+      fetchBtn.disabled = true;
+      return;
+    }
+  }
+
+  const location = locationVal === "current" ? _coords! : locationVal;
+
+  const nChars = builderChars(days, resHours, 1, varsMask);
   const pct = Math.min((nChars / MAX_CHARS) * 100, 100);
   const over = nChars > MAX_CHARS;
 
@@ -55,9 +114,7 @@ export function updateBuilder(): void {
     ? `${nChars} chars — exceeds ${MAX_CHARS}, reduce days or resolution`
     : `${nChars} / ${MAX_CHARS} chars`;
 
-  const msg = builderMsg(location, days, resHours, [model], vars);
-  (document.getElementById("builder-msg") as HTMLElement).textContent = msg;
-  const disabled = over;
-  (document.getElementById("builder-copy") as HTMLButtonElement).disabled = disabled;
-  (document.getElementById("fetch-btn") as HTMLButtonElement).disabled = disabled;
+  msgEl.textContent = builderMsg(location, days, resHours, [model], vars);
+  copyBtn.disabled = over;
+  fetchBtn.disabled = over;
 }

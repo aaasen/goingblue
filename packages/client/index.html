@@ -302,7 +302,7 @@
                 text-transform: uppercase;
                 letter-spacing: 0.06em;
                 color: #aaa;
-                min-width: 72px;
+                min-width: 120px;
             }
 
             .builder-opts {
@@ -540,10 +540,18 @@
                             ><input
                                 type="radio"
                                 name="location"
-                                value="upper"
+                                value="current"
                                 checked
                             />
-                            Upper mountain</label
+                            Current location</label
+                        >
+                        <label class="opt-btn"
+                            ><input
+                                type="radio"
+                                name="location"
+                                value="upper"
+                            />
+                            Denali summit</label
                         >
                         <label class="opt-btn"
                             ><input
@@ -551,15 +559,7 @@
                                 name="location"
                                 value="airstrip"
                             />
-                            Airstrip</label
-                        >
-                        <label class="opt-btn"
-                            ><input
-                                type="radio"
-                                name="location"
-                                value="current"
-                            />
-                            Current location</label
+                            Kahiltna airstrip</label
                         >
                     </div>
                 </div>
@@ -582,97 +582,29 @@
                     <span class="builder-label">Resolution</span>
                     <div class="builder-opts">
                         <label class="opt-btn"
-                            ><input
-                                type="radio"
-                                name="resolution"
-                                value="24"
-                                checked
-                            />
-                            Daily</label
-                        >
-                        <label class="opt-btn"
-                            ><input type="radio" name="resolution" value="12" />
-                            12h</label
-                        >
-                        <label class="opt-btn"
-                            ><input type="radio" name="resolution" value="6" />
-                            6h</label
+                            ><input type="radio" name="resolution" value="1" />
+                            1h</label
                         >
                         <label class="opt-btn"
                             ><input type="radio" name="resolution" value="3" />
                             3h</label
                         >
                         <label class="opt-btn"
-                            ><input type="radio" name="resolution" value="1" />
-                            1h</label
-                        >
-                    </div>
-                </div>
-
-                <div class="builder-row">
-                    <span class="builder-label">Vars</span>
-                    <div class="builder-opts">
-                        <label class="opt-btn"
-                            ><input
-                                type="checkbox"
-                                name="var"
-                                value="precip"
-                                checked
-                            />
-                            Precip</label
+                            ><input type="radio" name="resolution" value="6" />
+                            6h</label
                         >
                         <label class="opt-btn"
-                            ><input type="checkbox" name="var" value="temp" />
-                            Temp</label
+                            ><input type="radio" name="resolution" value="12" />
+                            12h</label
                         >
                         <label class="opt-btn"
                             ><input
-                                type="checkbox"
-                                name="var"
-                                value="snow"
+                                type="radio"
+                                name="resolution"
+                                value="24"
                                 checked
                             />
-                            Snow</label
-                        >
-                        <label class="opt-btn"
-                            ><input
-                                type="checkbox"
-                                name="var"
-                                value="freeze"
-                                checked
-                            />
-                            Freeze</label
-                        >
-                        <label class="opt-btn"
-                            ><input type="checkbox" name="var" value="wind" />
-                            Sfc wind</label
-                        >
-                        <label class="opt-btn"
-                            ><input
-                                type="checkbox"
-                                name="var"
-                                value="w500"
-                                checked
-                            />
-                            500 wind</label
-                        >
-                        <label class="opt-btn"
-                            ><input
-                                type="checkbox"
-                                name="var"
-                                value="w600"
-                                checked
-                            />
-                            600 wind</label
-                        >
-                        <label class="opt-btn"
-                            ><input
-                                type="checkbox"
-                                name="var"
-                                value="w700"
-                                checked
-                            />
-                            700 wind</label
+                            24h</label
                         >
                     </div>
                 </div>
@@ -700,6 +632,80 @@
                         <label class="opt-btn"
                             ><input type="radio" name="model" value="ifs" />
                             ECMWF IFS 0.25</label
+                        >
+                    </div>
+                </div>
+
+                <div class="builder-row">
+                    <span class="builder-label">Surface Variables</span>
+                    <div class="builder-opts">
+                        <label class="opt-btn"
+                            ><input
+                                type="checkbox"
+                                name="var"
+                                value="precip"
+                                checked
+                            />
+                            Precip %</label
+                        >
+                        <label class="opt-btn"
+                            ><input type="checkbox" name="var" value="temp" />
+                            Temp</label
+                        >
+                        <label class="opt-btn"
+                            ><input
+                                type="checkbox"
+                                name="var"
+                                value="snow"
+                                checked
+                            />
+                            Snow</label
+                        >
+                        <label class="opt-btn"
+                            ><input
+                                type="checkbox"
+                                name="var"
+                                value="freeze"
+                                checked
+                            />
+                            Freezing level</label
+                        >
+                        <label class="opt-btn"
+                            ><input type="checkbox" name="var" value="wind" />
+                            Sfc wind</label
+                        >
+                    </div>
+                </div>
+
+                <div class="builder-row">
+                    <span class="builder-label">Pressure Variables</span>
+                    <div class="builder-opts">
+                        <label class="opt-btn"
+                            ><input
+                                type="checkbox"
+                                name="var"
+                                value="w500"
+                                checked
+                            />
+                            500 hPa Wind</label
+                        >
+                        <label class="opt-btn"
+                            ><input
+                                type="checkbox"
+                                name="var"
+                                value="w600"
+                                checked
+                            />
+                            600 hPa Wind</label
+                        >
+                        <label class="opt-btn"
+                            ><input
+                                type="checkbox"
+                                name="var"
+                                value="w700"
+                                checked
+                            />
+                            700 hPa Wind</label
                         >
                     </div>
                 </div>

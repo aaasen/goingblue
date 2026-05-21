@@ -9,7 +9,7 @@ import { render, type ForecastView, type DecodedPeriod } from "./render.js";
 import { updateBuilder } from "./builder.js";
 import { LOCATION_DISPLAY_NAMES } from "./ui-constants.js";
 
-const VERSION = 2;
+const VERSION = 3;
 
 function toView(msg: ForecastMessage): ForecastView {
   const models = modelsFromMask(msg.models_mask);

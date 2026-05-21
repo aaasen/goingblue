@@ -249,10 +249,14 @@ export function parseRequest(body: string): ForecastParams {
   let modelsMask = 1; // ECMWF default
   let varsMask = 0;
 
-  const gpsMatch = body.match(/Lat\s+([-\d.]+)\s+Lon\s+([-\d.]+)/i);
+  // Compact "X,Y" (message body) takes priority over "Lat X Lon Y" (Garmin email footer)
+  const gpsMatch =
+    body.match(/(-?\d+\.\d{4,}),(-?\d+\.\d{4,})/) ??
+    body.match(/Lat\s+([-\d.]+)\s+Lon\s+([-\d.]+)/i);
   if (gpsMatch) {
     lat = parseFloat(gpsMatch[1]);
     lon = parseFloat(gpsMatch[2]);
+    locationIdx = 2;
   }
 
   for (const word of words) {
