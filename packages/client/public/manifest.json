@@ -1,9 +1,14 @@
 {
-  "name": "Denali WX",
-  "short_name": "WX",
+  "name": "Denali Weather",
+  "short_name": "Denali WX",
+  "description": "Mountain weather decoder for Garmin inReach",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#f5f5f5",
   "theme_color": "#f5f5f5",
-  "icons": []
+  "icons": [
+    { "src": "/denaliwx-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/denaliwx-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
 }
