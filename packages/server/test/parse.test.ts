@@ -26,10 +26,11 @@ describe("parseRequest", () => {
     expect(parseRequest("l:here").locationIdx).toBe(0);
   });
 
-  it("GPS coordinates set lat/lon", () => {
+  it("GPS coordinates set lat/lon and locationIdx 0", () => {
     const p = parseRequest("63.06300,-151.08100");
     expect(p.lat).toBeCloseTo(63.063);
     expect(p.lon).toBeCloseTo(-151.081);
+    expect(p.locationIdx).toBe(0);
   });
 
   it("Garmin email footer GPS format", () => {

@@ -343,7 +343,7 @@ export function parseRequest(body: string): ForecastParams {
   if (gpsMatch) {
     lat = parseFloat(gpsMatch[1]);
     lon = parseFloat(gpsMatch[2]);
-    locationIdx = 2;
+    locationIdx = 0;
   }
 
   for (const word of words) {
