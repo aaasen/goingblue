@@ -42,8 +42,13 @@ export function builderChars(days: number, resHours: number, nModels: number, va
 }
 
 export function builderMsg(location: string, days: number, resHours: number, models: string[], vars: string[]): string {
-  const res = resHours >= 24 ? "daily" : `${resHours}h`;
-  return [location, `${days}d`, res, models.join(","), ...vars].filter(Boolean).join(" ");
+  const parts: string[] = [];
+  if (location) parts.push(`l:${location}`);
+  parts.push(`d:${days}`);
+  if (resHours < 24) parts.push(`r:${resHours}h`);
+  parts.push(`m:${models.join(",")}`);
+  if (vars.length) parts.push(`v:${vars.join(",")}`);
+  return parts.join(" ");
 }
 
 export function updateBuilder(): void {

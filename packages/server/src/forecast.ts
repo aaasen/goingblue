@@ -347,24 +347,31 @@ export function parseRequest(body: string): ForecastParams {
   }
 
   for (const word of words) {
-    if (word in LOCATION_NAME_TO_IDX) {
-      locationIdx = LOCATION_NAME_TO_IDX[word];
-    } else if (word === "current" || word === "here") {
-      locationIdx = 0;
-    } else if (/^\d+d$/.test(word)) {
-      days = Math.max(1, Math.min(10, parseInt(word)));
-    } else if (word in RESOLUTION_LABEL_TO_IDX) {
-      resolutionIdx = RESOLUTION_LABEL_TO_IDX[word];
-    } else if (word in VARS_BIT) {
-      varsMask |= 1 << VARS_BIT[word];
-    } else {
-      const parts = word.split(",");
-      if (parts.some((m) => m in MODEL_NAME_TO_BIT)) {
+    const colonIdx = word.indexOf(":");
+    if (colonIdx !== -1) {
+      const key = word.slice(0, colonIdx);
+      const val = word.slice(colonIdx + 1);
+      if (key === "l") {
+        if (val === "current" || val === "here") {
+          locationIdx = 0;
+        } else if (val in LOCATION_NAME_TO_IDX) {
+          locationIdx = LOCATION_NAME_TO_IDX[val];
+        }
+      } else if (key === "d") {
+        const n = parseInt(val);
+        if (!isNaN(n)) days = Math.max(1, Math.min(10, n));
+      } else if (key === "r") {
+        if (val in RESOLUTION_LABEL_TO_IDX) resolutionIdx = RESOLUTION_LABEL_TO_IDX[val];
+      } else if (key === "m") {
         let mask = 0;
-        for (const m of parts) {
+        for (const m of val.split(",")) {
           if (m in MODEL_NAME_TO_BIT) mask |= 1 << MODEL_NAME_TO_BIT[m];
         }
         if (mask) modelsMask = mask;
+      } else if (key === "v") {
+        for (const v of val.split(",")) {
+          if (v in VARS_BIT) varsMask |= 1 << VARS_BIT[v];
+        }
       }
     }
   }
