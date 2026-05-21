@@ -142,11 +142,15 @@ function freezeCells(ps: DecodedPeriod[]): string[] {
   );
 }
 
-function cloudCells(ps: DecodedPeriod[], key: keyof DecodedPeriod): string[] {
+function cloudCells(ps: DecodedPeriod[], key: keyof DecodedPeriod): CellValue[] {
   return ps.map((p) => {
     const v = p[key] as number | undefined;
     if (v == null) return nilCell();
-    return `<span style="font-family:monospace;font-size:.85rem;font-weight:600;color:#6688aa">${v}%</span>`;
+    const alpha = (v / 100).toFixed(2);
+    return {
+      style: `background:rgba(150,150,150,${alpha})`,
+      html: `<span style="font-family:monospace;font-size:.85rem;font-weight:600;color:#444">${v}%</span>`,
+    };
   });
 }
 
