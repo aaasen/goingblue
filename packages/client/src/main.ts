@@ -47,6 +47,7 @@ function toView(msg: ForecastMessage): ForecastView {
       cloud_high:  p.cloud_high,
       cloud_mid:   p.cloud_mid,
       cloud_low:   p.cloud_low,
+      vis_km:      p.vis_km,
     })),
   );
 

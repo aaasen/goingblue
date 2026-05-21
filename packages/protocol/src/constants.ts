@@ -1,6 +1,6 @@
-export const VERSION = 5;
-// Header layout (77 bits): version:7 location:2 days:4 resolution:3 models_mask:4 vars_mask:12 month:4 day:5 hour:5 lat:15 lon:16
-export const HEADER_BITS = 77;
+export const VERSION = 6;
+// Header layout (78 bits): version:7 location:2 days:4 resolution:3 models_mask:4 vars_mask:13 month:4 day:5 hour:5 lat:15 lon:16
+export const HEADER_BITS = 78;
 export const HEADER_CHARS = Math.ceil((HEADER_BITS * Math.log(2)) / Math.log(94)); // = 12
 export const LAT_BITS = 15;  // -90..+90 in ~611m steps
 export const LON_BITS = 16;  // -180..+180 in ~611m steps at equator
@@ -36,12 +36,13 @@ export const VARS_BIT: Record<string, number> = {
   cch: 9,    // high cloud cover
   ccm: 10,   // mid cloud cover
   ccl: 11,   // low cloud cover
+  vis: 12,   // visibility
 };
 
 // Bits consumed per variable (parallel to VARS_BIT order)
 // WMO always uses 5 bits; these are for optional vars bits 0-11
-export const VAR_BITS = [3, 8, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3];
-//                       ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl
+export const VAR_BITS = [3, 8, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4];
+//                       ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^vis
 
 export const WMO_BITS = 5;
 

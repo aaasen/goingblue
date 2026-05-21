@@ -23,6 +23,7 @@ export interface Period {
   cloud_high?: number;    // 0–100 %
   cloud_mid?: number;     // 0–100 %
   cloud_low?: number;     // 0–100 %
+  vis_km?: number;        // 0–15 km
 }
 
 function putWind(bits: number[], mph: number, dir: number): void {
@@ -51,6 +52,7 @@ export function periodToBits(p: Period, varsMask: number): number[] {
   if (varsMask & (1 << 9))  putInt(bits, Math.min(Math.round((p.cloud_high  ?? 0) * 7 / 100), 7), 3);
   if (varsMask & (1 << 10)) putInt(bits, Math.min(Math.round((p.cloud_mid   ?? 0) * 7 / 100), 7), 3);
   if (varsMask & (1 << 11)) putInt(bits, Math.min(Math.round((p.cloud_low   ?? 0) * 7 / 100), 7), 3);
+  if (varsMask & (1 << 12)) putInt(bits, Math.min(p.vis_km ?? 0, 15), 4);
   return bits;
 }
 
@@ -70,7 +72,8 @@ export function periodFromBits(bits: number[], pos: number, varsMask: number): [
   if (varsMask & (1 << 8))  { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_total = Math.round(v * 100 / 7); }
   if (varsMask & (1 << 9))  { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_high  = Math.round(v * 100 / 7); }
   if (varsMask & (1 << 10)) { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_mid   = Math.round(v * 100 / 7); }
-  if (varsMask & (1 << 11)) { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_low   = Math.round(v * 100 / 7); }
+  if (varsMask & (1 << 11)) { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_low = Math.round(v * 100 / 7); }
+  if (varsMask & (1 << 12)) { let v: number; [v, pos] = takeInt(bits, pos, 4); p.vis_km = v; }
 
   return [p, pos];
 }

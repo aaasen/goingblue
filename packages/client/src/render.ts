@@ -21,6 +21,7 @@ export interface DecodedPeriod {
   cloud_high?: number;
   cloud_mid?: number;
   cloud_low?: number;
+  vis_km?: number;
 }
 
 export interface ForecastView {
@@ -169,9 +170,10 @@ function modelBlock(ps: DecodedPeriod[], n: number): string {
   const hasCloudH  = ps.some((p) => p.cloud_high   != null);
   const hasCloudM  = ps.some((p) => p.cloud_mid    != null);
   const hasCloudL  = ps.some((p) => p.cloud_low    != null);
+  const hasVis     = ps.some((p) => p.vis_km       != null);
   const hasSurface = hasPrecip || hasTemp || hasSnow || hasFreeze || hasSfc;
   const hasUpper   = has500 || has600 || has700;
-  const hasCloud   = hasCloudT || hasCloudH || hasCloudM || hasCloudL;
+  const hasCloud   = hasCloudT || hasCloudH || hasCloudM || hasCloudL || hasVis;
 
   let body = row("", iconCells(ps));
   if (hasSurface) {
@@ -188,6 +190,11 @@ function modelBlock(ps: DecodedPeriod[], n: number): string {
     if (hasCloudH) body += row("High",   cloudCells(ps, "cloud_high"));
     if (hasCloudM) body += row("Mid",    cloudCells(ps, "cloud_mid"));
     if (hasCloudL) body += row("Low",    cloudCells(ps, "cloud_low"));
+    if (hasVis)    body += row("Vis",    ps.map((p) => {
+      if (p.vis_km == null) return nilCell();
+      const label = p.vis_km >= 15 ? "≥15 km" : `${p.vis_km} km`;
+      return `<span style="font-family:monospace;font-size:.85rem;font-weight:600;color:#6688aa">${label}</span>`;
+    }));
   }
   if (hasUpper) {
     body += sectionRow("Pressure", n);
