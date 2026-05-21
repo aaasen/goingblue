@@ -99,6 +99,6 @@ export function updateBuilder(): void {
     : `${nChars} / ${MAX_CHARS} chars`;
 
   msgEl.textContent = builderMsg(location, days, resHours, [model], vars);
-  copyBtn.disabled = over || (locationVal === "current" && _coords === null);
+  copyBtn.disabled = over;
   fetchBtn.disabled = over;
 }

@@ -569,7 +569,7 @@
                             type="range"
                             id="days-slider"
                             min="1"
-                            max="10"
+                            max="15"
                             value="10"
                         />
                         <span id="days-display">10 days</span>
@@ -617,7 +617,11 @@
                                 value="hres"
                                 checked
                             />
-                            ECMWF IFS HRES</label
+                            ECMWF HRES</label
+                        >
+                        <label class="opt-btn"
+                            ><input type="radio" name="model" value="ifs" />
+                            ECMWF</label
                         >
                         <label class="opt-btn"
                             ><input type="radio" name="model" value="gfs" />
@@ -626,10 +630,6 @@
                         <label class="opt-btn"
                             ><input type="radio" name="model" value="icon" />
                             ICON</label
-                        >
-                        <label class="opt-btn"
-                            ><input type="radio" name="model" value="ifs" />
-                            ECMWF IFS 0.25</label
                         >
                     </div>
                 </div>
@@ -780,10 +780,12 @@
 
         <section class="step">
             <div class="step-head">Model details</div>
+            <div class="table-wrap">
             <table class="model-info">
                 <thead>
                     <tr>
                         <th>Model</th>
+                        <th>Full name</th>
                         <th>Res</th>
                         <th>Temporal</th>
                         <th>Length</th>
@@ -793,7 +795,8 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td><span class="model-dot" style="background:#2a6bb5"></span>ECMWF IFS HRES</td>
+                        <td><span class="model-dot" style="background:#2a6bb5"></span>ECMWF HRES</td>
+                        <td>ECMWF IFS HRES</td>
                         <td>9 km</td>
                         <td>1h → 3h → 6h</td>
                         <td>15 d</td>
@@ -811,7 +814,27 @@
                         </td>
                     </tr>
                     <tr>
+                        <td><span class="model-dot" style="background:#7040b0"></span>ECMWF</td>
+                        <td>ECMWF IFS 0.25°</td>
+                        <td>25 km</td>
+                        <td>3h → 6h</td>
+                        <td>15 d</td>
+                        <td>4×/day</td>
+                        <td class="model-vars">
+                            <span class="vok">precip</span>
+                            <span class="vok">temp</span>
+                            <span class="vok">snow</span>
+                            <span class="vok">freeze</span>
+                            <span class="vok">sfc wind</span>
+                            <span class="vok">500w</span>
+                            <span class="vok">600w</span>
+                            <span class="vok">700w</span>
+                            <span class="vok">cloud</span>
+                        </td>
+                    </tr>
+                    <tr>
                         <td><span class="model-dot" style="background:#2a8f5a"></span>GFS</td>
+                        <td>GFS (NOAA)</td>
                         <td>25 km</td>
                         <td>1h</td>
                         <td>16 d</td>
@@ -830,6 +853,7 @@
                     </tr>
                     <tr>
                         <td><span class="model-dot" style="background:#c06010"></span>ICON</td>
+                        <td>ICON (DWD)</td>
                         <td>11 km</td>
                         <td>1h</td>
                         <td>7.5 d</td>
@@ -846,28 +870,12 @@
                             <span class="vok">cloud</span>
                         </td>
                     </tr>
-                    <tr>
-                        <td><span class="model-dot" style="background:#7040b0"></span>ECMWF IFS 0.25</td>
-                        <td>25 km</td>
-                        <td>3h → 6h</td>
-                        <td>15 d</td>
-                        <td>4×/day</td>
-                        <td class="model-vars">
-                            <span class="vok">precip</span>
-                            <span class="vok">temp</span>
-                            <span class="vok">snow</span>
-                            <span class="vok">freeze</span>
-                            <span class="vok">sfc wind</span>
-                            <span class="vok">500w</span>
-                            <span class="vok">600w</span>
-                            <span class="vok">700w</span>
-                            <span class="vok">cloud</span>
-                        </td>
-                    </tr>
                 </tbody>
             </table>
+            </div>
 
             <div style="margin-top:14px; margin-bottom:5px; font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#aaa;">Variables</div>
+            <div class="table-wrap">
             <table class="model-info">
                 <thead>
                     <tr>
@@ -958,6 +966,7 @@
                     </tr>
                 </tbody>
             </table>
+            </div>
 
             <p style="font-size:0.72rem; color:#aaa; margin-top:12px;">
                 Weather data provided by <a href="https://open-meteo.com/" style="color:#aaa;">Open-Meteo</a>.

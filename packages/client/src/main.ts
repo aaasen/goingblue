@@ -144,11 +144,21 @@ fetchBtn.addEventListener("click", async () => {
   }
 });
 
-document.querySelector(".builder")?.addEventListener("change", updateBuilder);
-(document.getElementById("days-slider") as HTMLInputElement).addEventListener(
-  "input",
-  updateBuilder,
-);
+function clearFetchError() {
+  if (fetchStatus.className.includes("fetch-error")) {
+    fetchStatus.textContent = "";
+    fetchStatus.className = "fetch-status";
+  }
+}
+
+document.querySelector(".builder")?.addEventListener("change", () => {
+  updateBuilder();
+  clearFetchError();
+});
+(document.getElementById("days-slider") as HTMLInputElement).addEventListener("input", () => {
+  updateBuilder();
+  clearFetchError();
+});
 
 document.getElementById("builder-copy")?.addEventListener("click", () => {
   const msg = (document.getElementById("builder-msg") as HTMLElement).textContent ?? "";
