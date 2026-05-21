@@ -54,8 +54,10 @@ function toView(msg: ForecastMessage): ForecastView {
   const latStr = `${Math.abs(msg.lat).toFixed(3)}°${msg.lat >= 0 ? "N" : "S"}`;
   const lonStr = `${Math.abs(msg.lon).toFixed(3)}°${msg.lon >= 0 ? "E" : "W"}`;
 
+  const elevStr = msg.elevation != null ? ` · ${Math.round(msg.elevation * 3.28084).toLocaleString()}ft` : "";
+
   return {
-    label: `${LOCATION_DISPLAY_NAMES[msg.location] ?? "Unknown"} · ${latStr} ${lonStr} · ${msg.days}d ${resLabel} · ${models.join(" + ")}`,
+    label: `${LOCATION_DISPLAY_NAMES[msg.location] ?? "Unknown"} · ${latStr} ${lonStr}${elevStr} · ${msg.days}d ${resLabel} · ${models.join(" + ")}`,
     models,
     timeStep: resHours,
     periods,

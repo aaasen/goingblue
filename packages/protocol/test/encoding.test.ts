@@ -54,7 +54,7 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const periods = overrides.periods ?? defaultPeriods;
   const days = periods[0].length / periodsPerDay;
   return {
-    version: 6,
+    version: 7,
     location: 0,
     resolution,
     models_mask,
@@ -64,6 +64,7 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
     hour: 12,
     lat: 63.135,
     lon: -150.989,
+    elevation: 500,
     ...overrides,
     days,
     periods,
@@ -79,7 +80,7 @@ describe("round-trip encoding", () => {
     // resolution=2 (6h) → 4 periods/day; 3 days → 12 periods per model; 2 models
     const original = msg({ location: 1, resolution: 2, models_mask: 0b011, month: 1, day: 31, hour: 0 });
     const decoded = roundTrip(original);
-    expect(decoded.version).toBe(6);
+    expect(decoded.version).toBe(7);
     expect(decoded.location).toBe(1);
     expect(decoded.days).toBe(3);
     expect(decoded.resolution).toBe(2);
@@ -98,6 +99,14 @@ describe("round-trip encoding", () => {
     const s = roundTrip(msg({ lat: -33.868, lon: 151.209 }));
     expect(s.lat).toBeCloseTo(-33.868, 2);
     expect(s.lon).toBeCloseTo(151.209, 2);
+  });
+
+  it("preserves elevation", () => {
+    const decoded = roundTrip(msg({ elevation: 2200 }));
+    expect(decoded.elevation).toBe(2200);
+    // clamps negative to 0
+    const clamped = roundTrip(msg({ elevation: -50 }));
+    expect(clamped.elevation).toBe(0);
   });
 
   it("preserves location=2 (current)", () => {

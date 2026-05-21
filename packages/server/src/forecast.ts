@@ -155,7 +155,7 @@ async function fetchHourly(
   lat: number,
   lon: number,
   tz: string,
-): Promise<[HourlyData, string[]]> {
+): Promise<[HourlyData, string[], number]> {
   const hasPressure = !MODEL_NO_PRESSURE.has(modelKey);
   const pressureVars = hasPressure
     ? PRESSURE_VAR_NAMES.flatMap((v) => PRESSURE_LEVELS.map((l) => `${v}_${l}hPa`))
@@ -174,8 +174,8 @@ async function fetchHourly(
   });
   const resp = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
   if (!resp.ok) throw new Error(`Open-Meteo ${resp.status}: ${await resp.text()}`);
-  const data = (await resp.json()) as { hourly: HourlyData };
-  return [data.hourly, data.hourly.time];
+  const data = (await resp.json()) as { hourly: HourlyData; elevation: number };
+  return [data.hourly, data.hourly.time, data.elevation ?? 0];
 }
 
 
@@ -186,8 +186,8 @@ async function aggregateRows(
   lat: number,
   lon: number,
   tz: string,
-): Promise<Row[]> {
-  const [h, times] = await fetchHourly(modelKey, nDays, lat, lon, tz);
+): Promise<[Row[], number]> {
+  const [h, times, elevation] = await fetchHourly(modelKey, nDays, lat, lon, tz);
   const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
   const nTotal = nDays * (24 / hoursPerPeriod);
 
@@ -209,7 +209,7 @@ async function aggregateRows(
     windowMap.get(key)!.indices.push(i);
   }
 
-  return windows.map((w) => {
+  const rows = windows.map((w) => {
     const idx = w.indices;
     const pick = (arr: (number | null)[]): (number | null)[] => idx.map((i) => arr[i]);
     const pickUnk = (key: string): (number | null)[] =>
@@ -246,6 +246,7 @@ async function aggregateRows(
       visibility_m: minOf(pick(h.visibility)),
     };
   });
+  return [rows, elevation];
 }
 
 const PRESSURE_VAR_BITS =
@@ -361,9 +362,11 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
   );
   const keys = modelKeys.length ? modelKeys : (["HRES"] as const);
 
-  const rowsPerModel: Row[][] = await Promise.all(
+  const results = await Promise.all(
     keys.map((key) => aggregateRows(key, params.days, params.resolutionIdx, lat, lon, tz)),
   );
+  const rowsPerModel = results.map(([rows]) => rows);
+  const elevation = results[0][1];
 
   const firstTime = rowsPerModel[0][0].time;
   const month = parseInt(firstTime.slice(5, 7));
@@ -382,6 +385,7 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
     hour,
     lat,
     lon,
+    elevation,
     periods: rowsPerModel.map((rows, mi) =>
       rows.map((r) => toFullPeriod(r, params.varsMask, keys[mi])),
     ),
