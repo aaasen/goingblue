@@ -23,12 +23,12 @@ const LOCATION_COORDS: Record<string, [number, number, string]> = {
   airstrip: [62.967, -151.057, "America/Anchorage"],
 };
 
-const RESOLUTION_TARGET_HOURS: Record<number, number[] | null> = {
-  0: null,
-  1: [0, 12],
-  2: [0, 6, 12, 18],
-  3: [0, 3, 6, 9, 12, 15, 18, 21],
-  4: Array.from({ length: 24 }, (_, i) => i),
+const HOURS_PER_PERIOD: Record<number, number> = {
+  0: 24,
+  1: 12,
+  2: 6,
+  3: 3,
+  4: 1,
 };
 
 const RESOLUTION_LABEL_TO_IDX: Record<string, number> = {
@@ -73,6 +73,41 @@ function degToDirIdx(deg: number | null | undefined): number {
 
 function round5(v: number | null | undefined): number {
   return Math.round((v ?? 0) / 5) * 5;
+}
+
+export function maxOf(vals: (number | null)[]): number | null {
+  let m: number | null = null;
+  for (const v of vals) if (v != null && (m === null || v > m)) m = v;
+  return m;
+}
+
+export function minOf(vals: (number | null)[]): number | null {
+  let m: number | null = null;
+  for (const v of vals) if (v != null && (m === null || v < m)) m = v;
+  return m;
+}
+
+export function sumOf(vals: (number | null)[]): number {
+  let s = 0;
+  for (const v of vals) s += v ?? 0;
+  return s;
+}
+
+export function dominantDirDeg(
+  speeds: (number | null)[],
+  directions: (number | null)[],
+): number | null {
+  let x = 0, y = 0;
+  for (let i = 0; i < speeds.length; i++) {
+    const spd = speeds[i] ?? 0;
+    const rad = ((directions[i] ?? 0) * Math.PI) / 180;
+    x += Math.cos(rad) * spd;
+    y += Math.sin(rad) * spd;
+  }
+  if (x === 0 && y === 0) return null;
+  let deg = (Math.atan2(y, x) * 180) / Math.PI;
+  if (deg < 0) deg += 360;
+  return deg;
 }
 
 interface HourlyData {
@@ -143,91 +178,86 @@ async function fetchHourly(
   return [data.hourly, data.hourly.time];
 }
 
-function buildRow(h: HourlyData, times: string[], idx: number, snowCm: number): Row {
-  const opt = (key: string): number | null =>
-    ((h[key] as (number | null)[] | undefined)?.[idx] ?? null);
-  return {
-    time: times[idx],
-    temp_c: h.temperature_2m[idx],
-    wind_speed_10m: h["wind_speed_10m"][idx] as number | null,
-    wind_direction_10m: h["wind_direction_10m"][idx] as number | null,
-    precip: h.precipitation_probability[idx],
-    weathercode: h.weather_code[idx],
-    freezing_level_m: opt("freezing_level_height"),
-    snow_cm: snowCm,
-    wind_speed_500hPa: opt("wind_speed_500hPa"),
-    wind_direction_500hPa: opt("wind_direction_500hPa"),
-    wind_speed_600hPa: opt("wind_speed_600hPa"),
-    wind_direction_600hPa: opt("wind_direction_600hPa"),
-    wind_speed_700hPa: opt("wind_speed_700hPa"),
-    wind_direction_700hPa: opt("wind_direction_700hPa"),
-    cloud_cover: opt("cloud_cover"),
-    cloud_cover_high: opt("cloud_cover_high"),
-    cloud_cover_mid: opt("cloud_cover_mid"),
-    cloud_cover_low: opt("cloud_cover_low"),
-    visibility_m: opt("visibility"),
-  };
-}
 
-async function noonRows(
+async function aggregateRows(
   modelKey: string,
   nDays: number,
+  resolutionIdx: number,
   lat: number,
   lon: number,
   tz: string,
 ): Promise<Row[]> {
   const [h, times] = await fetchHourly(modelKey, nDays, lat, lon, tz);
-  const snowArr = h.snowfall;
-  const dailySnow: Record<string, number> = {};
+  const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
+  const nTotal = nDays * (24 / hoursPerPeriod);
+
+  type Window = { indices: number[] };
+  const windows: Window[] = [];
+  const windowMap = new Map<string, Window>();
+
   for (let i = 0; i < times.length; i++) {
     const date = times[i].slice(0, 10);
-    dailySnow[date] = (dailySnow[date] ?? 0) + ((snowArr[i] as number) || 0);
-  }
-  const rows: Row[] = [];
-  for (let i = 0; i < times.length && rows.length < nDays; i++) {
-    if (times[i].endsWith("T12:00")) {
-      const date = times[i].slice(0, 10);
-      rows.push(buildRow(h, times, i, Math.round((dailySnow[date] ?? 0) * 10) / 10));
-    }
-  }
-  return rows;
-}
-
-async function hourRows(
-  modelKey: string,
-  nDays: number,
-  targetHours: number[],
-  lat: number,
-  lon: number,
-  tz: string,
-): Promise<Row[]> {
-  const [h, times] = await fetchHourly(modelKey, nDays, lat, lon, tz);
-  const snowArr = h.snowfall;
-  const nTotal = nDays * targetHours.length;
-  const rows: Row[] = [];
-  for (let i = 0; i < times.length && rows.length < nTotal; i++) {
     const hour = parseInt(times[i].slice(11, 13));
-    if (targetHours.includes(hour)) {
-      rows.push(buildRow(h, times, i, (snowArr[i] as number) || 0));
+    const startHour = Math.floor(hour / hoursPerPeriod) * hoursPerPeriod;
+    const key = `${date}T${String(startHour).padStart(2, "0")}`;
+    if (!windowMap.has(key)) {
+      if (windows.length >= nTotal) break;
+      const w: Window = { indices: [] };
+      windowMap.set(key, w);
+      windows.push(w);
     }
+    windowMap.get(key)!.indices.push(i);
   }
-  return rows;
+
+  return windows.map((w) => {
+    const idx = w.indices;
+    const pick = (arr: (number | null)[]): (number | null)[] => idx.map((i) => arr[i]);
+    const pickUnk = (key: string): (number | null)[] =>
+      idx.map((i) => ((h[key] as (number | null)[] | undefined)?.[i] ?? null));
+
+    const sfcSpd = pick(h.wind_speed_10m);
+    const sfcDir = pick(h.wind_direction_10m);
+    const spd500 = pickUnk("wind_speed_500hPa");
+    const dir500 = pickUnk("wind_direction_500hPa");
+    const spd600 = pickUnk("wind_speed_600hPa");
+    const dir600 = pickUnk("wind_direction_600hPa");
+    const spd700 = pickUnk("wind_speed_700hPa");
+    const dir700 = pickUnk("wind_direction_700hPa");
+
+    return {
+      time: times[idx[0]],
+      temp_c: maxOf(pick(h.temperature_2m)),
+      wind_speed_10m: maxOf(sfcSpd),
+      wind_direction_10m: dominantDirDeg(sfcSpd, sfcDir),
+      precip: maxOf(pick(h.precipitation_probability)),
+      weathercode: maxOf(pick(h.weather_code)),
+      freezing_level_m: maxOf(pickUnk("freezing_level_height")),
+      snow_cm: Math.round(sumOf(pick(h.snowfall)) * 10) / 10,
+      wind_speed_500hPa: maxOf(spd500),
+      wind_direction_500hPa: dominantDirDeg(spd500, dir500),
+      wind_speed_600hPa: maxOf(spd600),
+      wind_direction_600hPa: dominantDirDeg(spd600, dir600),
+      wind_speed_700hPa: maxOf(spd700),
+      wind_direction_700hPa: dominantDirDeg(spd700, dir700),
+      cloud_cover: maxOf(pick(h.cloud_cover)),
+      cloud_cover_high: maxOf(pick(h.cloud_cover_high)),
+      cloud_cover_mid: maxOf(pick(h.cloud_cover_mid)),
+      cloud_cover_low: maxOf(pick(h.cloud_cover_low)),
+      visibility_m: minOf(pick(h.visibility)),
+    };
+  });
 }
 
 const PRESSURE_VAR_BITS =
   (1 << VARS_BIT.freeze) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
 
-function toFullPeriod(r: Row, daily: boolean, varsMask: number, modelKey: string): Period {
+function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period {
   if (MODEL_NO_PRESSURE.has(modelKey)) varsMask &= ~PRESSURE_VAR_BITS;
   const p: Period = { weathercode: r.weathercode ?? 0 };
   if (varsMask & (1 << VARS_BIT.precip)) p.precip = r.precip ?? 0;
   if (varsMask & (1 << VARS_BIT.temp)) p.temp_f = Math.round(((r.temp_c ?? 0) * 9) / 5 + 32);
-  if (varsMask & (1 << VARS_BIT.snow)) {
-    const snowIn = daily
-      ? Math.round((r.snow_cm ?? 0) / 2.54)
-      : Math.round((r.snow_cm ?? 0) / 0.254);
-    p.snow_in = Math.min(snowIn, 15);
-  }
+  if (varsMask & (1 << VARS_BIT.snow))
+    p.snow_in = Math.min(Math.round((r.snow_cm ?? 0) / 2.54), 15);
   if (varsMask & (1 << VARS_BIT.freeze))
     p.freeze_ft = Math.round(((r.freezing_level_m ?? 0) * 3.28084) / 1000) * 1000;
   if (varsMask & (1 << VARS_BIT.wind)) {
@@ -331,15 +361,8 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
   );
   const keys = modelKeys.length ? modelKeys : (["HRES"] as const);
 
-  const targetHours = RESOLUTION_TARGET_HOURS[params.resolutionIdx];
-  const daily = params.resolutionIdx === 0;
-
   const rowsPerModel: Row[][] = await Promise.all(
-    keys.map((key) =>
-      daily
-        ? noonRows(key, params.days, lat, lon, tz)
-        : hourRows(key, params.days, targetHours!, lat, lon, tz),
-    ),
+    keys.map((key) => aggregateRows(key, params.days, params.resolutionIdx, lat, lon, tz)),
   );
 
   const firstTime = rowsPerModel[0][0].time;
@@ -360,7 +383,7 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
     lat,
     lon,
     periods: rowsPerModel.map((rows, mi) =>
-      rows.map((r) => toFullPeriod(r, daily, params.varsMask, keys[mi])),
+      rows.map((r) => toFullPeriod(r, params.varsMask, keys[mi])),
     ),
   };
 
