@@ -27,6 +27,8 @@ const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
 };
 
 type LocationMode = 'current' | 'custom';
+const LOCATION_MODES: LocationMode[] = ['current', 'custom'];
+const LOCATION_LABELS = ['Current Location', 'Custom'];
 
 const RESOLUTIONS = [
   { value: 1, label: '1h' },
@@ -230,10 +232,11 @@ export default function BuilderTab({ onForecastReceived }: Props) {
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
       <Section label="Location">
-        <View style={styles.pills}>
-          <Pill label="Current Location" selected={locationMode === 'current'} onPress={() => setLocationMode('current')} />
-          <Pill label="Custom" selected={locationMode === 'custom'} onPress={() => setLocationMode('custom')} />
-        </View>
+        <SegmentedControl
+          values={LOCATION_LABELS}
+          selectedIndex={LOCATION_MODES.indexOf(locationMode)}
+          onChange={(e) => setLocationMode(LOCATION_MODES[e.nativeEvent.selectedSegmentIndex])}
+        />
         {locationMode === 'current' && (locating || gpsCoords) && (
           <View style={styles.locationStatus}>
             {locating ? (
@@ -274,11 +277,11 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       </Section>
 
       <Section label="Resolution">
-        <View style={styles.pills}>
-          {RESOLUTIONS.map((r) => (
-            <Pill key={r.value} label={r.label} selected={resHours === r.value} onPress={() => setResHours(r.value)} />
-          ))}
-        </View>
+        <SegmentedControl
+          values={RESOLUTIONS.map((r) => r.label)}
+          selectedIndex={RESOLUTIONS.findIndex((r) => r.value === resHours)}
+          onChange={(e) => setResHours(RESOLUTIONS[e.nativeEvent.selectedSegmentIndex].value)}
+        />
       </Section>
 
       <Section label="Number of Messages">
@@ -295,11 +298,11 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       </Section>
 
       <Section label="Model">
-        <View style={styles.pills}>
-          {MODELS.map((m) => (
-            <Pill key={m.value} label={m.label} selected={model === m.value} onPress={() => setModel(m.value)} />
-          ))}
-        </View>
+        <SegmentedControl
+          values={MODELS.map((m) => m.label)}
+          selectedIndex={MODELS.findIndex((m) => m.value === model)}
+          onChange={(e) => setModel(MODELS[e.nativeEvent.selectedSegmentIndex].value)}
+        />
       </Section>
 
       {VAR_GROUPS.map((group) => (
@@ -372,26 +375,12 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function Pill({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={[styles.pill, selected && styles.pillSelected]} onPress={onPress} activeOpacity={0.7}>
-      <Text style={[styles.pillText, selected && styles.pillTextSelected]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: '#f2f2f7' },
   content: { padding: 16, paddingBottom: 48 },
 
   section: { marginBottom: 20 },
   sectionLabel: { fontSize: 12, fontWeight: '600', color: '#6e6e73', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
-
-  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d1d6' },
-  pillSelected: { backgroundColor: '#2a6bb5', borderColor: '#2a6bb5' },
-  pillText: { fontSize: 14, fontWeight: '500', color: '#1c1c1e' },
-  pillTextSelected: { color: '#fff' },
 
   varList: { backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
   varRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10 },
