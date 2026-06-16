@@ -43,8 +43,9 @@ export interface Period {
 }
 
 // Decoded forecast message. Each protocol version defines its own header format;
-// `ForecastMessage` is the common shape shared by every version, and individual
-// versions extend it with their own extra header fields (see `V1ForecastMessage`).
+// `ForecastMessage` is the common shape shared by every version. A version that needs
+// extra header fields extends this interface and parameterizes its codec with the
+// extended type (see `VersionedCodec`).
 export interface ForecastMessage {
   version: number;
   days: number;
@@ -58,12 +59,6 @@ export interface ForecastMessage {
   lon: number;
   elevation: number;
   periods: Period[][];
-}
-
-// v1 header additionally carries a legacy location index (0 = current/GPS, 1-5 = named).
-// Dropped in v2, where locations are addressed by lat/lon only.
-export interface V1ForecastMessage extends ForecastMessage {
-  location: number;
 }
 
 // A codec for a single protocol version. The header format is version-specific, so the

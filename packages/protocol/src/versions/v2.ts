@@ -3,6 +3,7 @@ import {
 } from "../constants.js";
 import { putInt, takeInt } from "../bits.js";
 import { encode, decode, periodBitsForMask, nCharsForBits } from "../codec.js";
+import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js";
 import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec } from "../model.js";
 
@@ -12,13 +13,17 @@ const VERSION = V2_VERSION;
 // v2 drops v1's 3-bit location field — locations are addressed by lat/lon only.
 // The count is a period count (not days), so sub-daily resolutions can carry a partial
 // final day. periods:8 stores (nPeriods - 1), i.e. 1..256 periods.
-// Header layout (95 bits): version:7 periods:8 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5 lat:15 lon:16 elev:14
-export const V2_HEADER_BITS = 95;
+//
+// The 7-bit version field lives in the shared, self-describing prefix (see version.ts),
+// not in this packed header. Packed header layout (88 bits):
+//   periods:8 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5 lat:15 lon:16 elev:14
+export const V2_HEADER_BITS = 88;
 export const V2_PERIODS_BITS = 8;
 export const V2_MAX_PERIODS = 1 << V2_PERIODS_BITS; // 256
-export const V2_HEADER_CHARS = nCharsForBits(V2_HEADER_BITS); // = 14
+// Total chars before the body: the shared version prefix plus this version's packed header.
+export const V2_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V2_HEADER_BITS); // 1 + 14 = 15
 const HEADER_BITS = V2_HEADER_BITS;
-const HEADER_CHARS = V2_HEADER_CHARS;
+const HEADER_CHARS = nCharsForBits(V2_HEADER_BITS); // packed-header chars (excludes version prefix)
 
 // v2 temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
 export const VAR_BITS_V2 = [3, 7, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 0, 7];
@@ -82,7 +87,6 @@ function periodFromBits(bits: number[], pos: number, varsMask: number): [Period,
 export function v2MessageToString(msg: ForecastMessage): string {
   const headerBits: number[] = [];
   const nPeriods = msg.periods[0].length;
-  putInt(headerBits, msg.version, 7);
   putInt(headerBits, nPeriods - 1, V2_PERIODS_BITS);
   putInt(headerBits, msg.resolution, 3);
   putInt(headerBits, msg.models_mask, 4);
@@ -101,19 +105,22 @@ export function v2MessageToString(msg: ForecastMessage): string {
     }
   }
 
-  return encode(headerBits) + encode(bodyBits);
+  return encodeVersion(VERSION) + encode(headerBits) + encode(bodyBits);
 }
 
 export function v2MessageFromString(s: string): ForecastMessage {
-  if (s.length < HEADER_CHARS)
+  const [version, rest] = takeVersion(s);
+  if (version !== VERSION)
+    throw new Error(`Version mismatch: encoded v${version}, expected v${VERSION}`);
+
+  if (rest.length < HEADER_CHARS)
     throw new Error(`Unexpected message length: ${s.length} chars`);
 
-  const headerBits = decode(s.slice(0, HEADER_CHARS), HEADER_BITS);
+  const headerBits = decode(rest.slice(0, HEADER_CHARS), HEADER_BITS);
   let pos = 0;
 
-  let version: number, periodsRaw: number, resolution: number,
+  let periodsRaw: number, resolution: number,
       models_mask: number, vars_mask: number, month: number, day: number, hour: number;
-  [version,     pos] = takeInt(headerBits, pos, 7);
   [periodsRaw,  pos] = takeInt(headerBits, pos, V2_PERIODS_BITS);
   [resolution,  pos] = takeInt(headerBits, pos, 3);
   [models_mask, pos] = takeInt(headerBits, pos, 4);
@@ -128,9 +135,6 @@ export function v2MessageFromString(s: string): ForecastMessage {
   const lat = lat_raw * 180 / ((1 << LAT_BITS) - 1) - 90;
   const lon = lon_raw * 360 / ((1 << LON_BITS) - 1) - 180;
 
-  if (version !== VERSION)
-    throw new Error(`Version mismatch: encoded v${version}, expected v${VERSION}`);
-
   const resHours = RESOLUTION_HOURS[resolution] ?? 24;
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
   const nPeriods = periodsRaw + 1;
@@ -139,11 +143,11 @@ export function v2MessageFromString(s: string): ForecastMessage {
   const totalBodyBits = nPeriods * nModels * periodBits;
 
   const expectedBodyChars = nCharsForBits(totalBodyBits);
-  const actualBodyChars = s.length - HEADER_CHARS;
+  const actualBodyChars = rest.length - HEADER_CHARS;
   if (actualBodyChars !== expectedBodyChars)
     throw new Error(`Unexpected message length: ${s.length} chars`);
 
-  const bodyBits = decode(s.slice(HEADER_CHARS), totalBodyBits);
+  const bodyBits = decode(rest.slice(HEADER_CHARS), totalBodyBits);
   pos = 0;
 
   const allPeriods: Period[][] = Array.from({ length: nModels }, () => []);

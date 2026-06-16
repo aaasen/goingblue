@@ -2,8 +2,9 @@ import {
   MODEL_BIT,
   DEFAULT_VARS_MASK,
   VARS_BIT,
+  CURRENT_VERSION,
   type Period,
-  type V1ForecastMessage,
+  type ForecastMessage,
   type VersionedCodec,
 } from "@weather/protocol";
 
@@ -326,7 +327,7 @@ export function parseRequest(body: string): ForecastParams {
   let resolutionIdx = 0;
   let modelsMask = 1; // ECMWF default
   let varsMask = 0;
-  let decoderVersion = 1; // default for backward compat
+  let decoderVersion = CURRENT_VERSION; // override with a `vN` token in the request
 
   // Compact "X,Y" (message body) takes priority over "Lat X Lon Y" (Garmin email footer)
   const gpsMatch =
@@ -420,10 +421,8 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   const day = parseInt(firstTime.slice(8, 10));
   const hour = parseInt(firstTime.slice(11, 13));
 
-  // Carries `location` for v1; v2's codec ignores it. Assignable to any version's encoder.
-  const msg: V1ForecastMessage = {
+  const msg: ForecastMessage = {
     version: params.decoderVersion,
-    location: params.locationIdx,
     days,
     resolution: params.resolutionIdx,
     models_mask: params.modelsMask,

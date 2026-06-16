@@ -1,15 +1,18 @@
 import { describe, it, expect } from "vitest";
 import {
-  messageToString,
-  messageFromString,
-  type V1ForecastMessage,
+  v2MessageToString,
+  v2MessageFromString,
+  V2_VERSION,
+  encodeVersion,
+  decodeMessage,
+  type ForecastMessage,
   type Period,
   CARDINALS,
   DEFAULT_VARS_MASK,
   VARS_BIT,
-  VERSION,
 } from "../src/index.js";
 
+// Every v2 variable except `vis` (bit 12), which v2 encodes in 0 bits (dropped).
 const ALL_VARS =
   (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) |
   (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 13);
@@ -43,8 +46,9 @@ function popcount(n: number): number {
   return c;
 }
 
-// Always derives `days` from periods[0].length / periodsPerDay to keep encoding consistent.
-function msg(overrides: Partial<V1ForecastMessage> = {}): V1ForecastMessage {
+// v2's header carries a period count, so `days` is derived on decode as ceil(nPeriods /
+// periodsPerDay). This helper keeps the input self-consistent for whole-day period counts.
+function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const resolution = overrides.resolution ?? 0;
   const models_mask = overrides.models_mask ?? 0b001;
   const nModels = popcount(models_mask);
@@ -53,10 +57,9 @@ function msg(overrides: Partial<V1ForecastMessage> = {}): V1ForecastMessage {
     Array(3 * periodsPerDay).fill(PERIOD),
   );
   const periods = overrides.periods ?? defaultPeriods;
-  const days = periods[0].length / periodsPerDay;
+  const days = Math.ceil(periods[0].length / periodsPerDay);
   return {
-    version: VERSION,
-    location: 0,
+    version: V2_VERSION,
     resolution,
     models_mask,
     vars_mask: ALL_VARS,
@@ -72,17 +75,16 @@ function msg(overrides: Partial<V1ForecastMessage> = {}): V1ForecastMessage {
   };
 }
 
-function roundTrip(m: V1ForecastMessage): V1ForecastMessage {
-  return messageFromString(messageToString(m));
+function roundTrip(m: ForecastMessage): ForecastMessage {
+  return v2MessageFromString(v2MessageToString(m));
 }
 
-describe("round-trip encoding", () => {
+describe("v2 round-trip encoding", () => {
   it("preserves header fields", () => {
     // resolution=2 (6h) → 4 periods/day; 3 days → 12 periods per model; 2 models
-    const original = msg({ location: 1, resolution: 2, models_mask: 0b011, month: 1, day: 31, hour: 0 });
+    const original = msg({ resolution: 2, models_mask: 0b011, month: 1, day: 31, hour: 0 });
     const decoded = roundTrip(original);
-    expect(decoded.version).toBe(VERSION);
-    expect(decoded.location).toBe(1);
+    expect(decoded.version).toBe(V2_VERSION);
     expect(decoded.days).toBe(3);
     expect(decoded.resolution).toBe(2);
     expect(decoded.models_mask).toBe(0b011);
@@ -108,12 +110,6 @@ describe("round-trip encoding", () => {
     // clamps negative to 0
     const clamped = roundTrip(msg({ elevation: -50 }));
     expect(clamped.elevation).toBe(0);
-  });
-
-  it("preserves all location indices", () => {
-    for (let loc = 0; loc <= 5; loc++) {
-      expect(roundTrip(msg({ location: loc })).location).toBe(loc);
-    }
   });
 
   it("preserves all period fields", () => {
@@ -207,9 +203,14 @@ describe("round-trip encoding", () => {
     }
   });
 
+  it("round-trips a partial final day (period count, not whole days)", () => {
+    // 6h resolution (4 periods/day) with 10 periods → 2.5 days, rounded up to 3 on decode.
+    const decoded = roundTrip(msg({ resolution: 2, periods: [Array(10).fill(PERIOD)] }));
+    expect(decoded.periods[0]).toHaveLength(10);
+    expect(decoded.days).toBe(3);
+  });
+
   it("round-trips with non-zero start hour", () => {
-    // 6h resolution (4 periods/day), starting at hour 6: hour is display-only,
-    // period count is always the full days * periodsPerDay.
     const nPeriods = 2 * 4; // 2 days * 4 periods/day
     const decoded = roundTrip(msg({ resolution: 2, hour: 6, periods: [Array(nPeriods).fill(PERIOD)] }));
     expect(decoded.hour).toBe(6);
@@ -260,12 +261,21 @@ describe("round-trip encoding", () => {
     expect(decoded.periods[0][0].temp_min_c).toBe(-35);
   });
 
-  it("throws on version mismatch", () => {
-    const encoded = messageToString(msg({ version: 99 }));
-    expect(() => messageFromString(encoded)).toThrow(/Version mismatch.*v99/);
+  it("throws when decoding a different version's tag", () => {
+    // Swap the self-describing version prefix to v3; the v2 codec must reject it.
+    const encoded = v2MessageToString(msg());
+    const reTagged = encodeVersion(3) + encoded.slice(1);
+    expect(() => v2MessageFromString(reTagged)).toThrow(/Version mismatch.*v3/);
+  });
+
+  it("dispatches an unknown version to a clear error", () => {
+    const encoded = v2MessageToString(msg());
+    const reTagged = encodeVersion(7) + encoded.slice(1);
+    expect(() => decodeMessage(reTagged)).toThrow(/Unsupported protocol version: v7/);
   });
 
   it("throws on short message", () => {
-    expect(() => messageFromString("abc")).toThrow("Unexpected message length");
+    // Valid v2 tag but no room for the header.
+    expect(() => v2MessageFromString(encodeVersion(2) + "abc")).toThrow("Unexpected message length");
   });
 });

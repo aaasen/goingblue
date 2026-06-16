@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { CODECS, type ForecastMessage } from '@weather/protocol';
+import { decodeMessage, type ForecastMessage } from '@weather/protocol';
 
 const CACHE_KEY = 'past_forecasts';
 
@@ -8,20 +8,13 @@ export interface CacheEntry {
   savedAt: number;
 }
 
-/** Decode an encoded forecast, trying each known protocol version. */
+/**
+ * Decode an encoded forecast. The protocol's version tag is read up front and dispatched
+ * to the matching codec; an unknown (e.g. newer) version throws a clear error.
+ */
 export function decodeAny(encoded: string): ForecastMessage {
   const text = encoded.replace(/\s/g, '').replace(/^fw:/i, '');
-  let versionMismatch: string | null = null;
-  for (const version of [1, 2] as const) {
-    try {
-      return CODECS[version].decode(text);
-    } catch (e) {
-      const msg = String(e);
-      if (msg.includes('Version mismatch')) versionMismatch = msg;
-    }
-  }
-  if (versionMismatch) throw new Error(versionMismatch);
-  throw new Error('Could not decode forecast');
+  return decodeMessage(text);
 }
 
 function isDecodable(encoded: string): boolean {
