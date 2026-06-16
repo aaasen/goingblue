@@ -81,10 +81,6 @@ function degToDirIdx(deg: number | null | undefined): number {
   return Math.round(deg / 45) % 8;
 }
 
-function round5(v: number | null | undefined): number {
-  return Math.round((v ?? 0) / 5) * 5;
-}
-
 export function maxOf(vals: (number | null)[]): number | null {
   let m: number | null = null;
   for (const v of vals) if (v != null && (m === null || v > m)) m = v;
@@ -179,7 +175,7 @@ async function fetchHourly(
     latitude: String(lat),
     longitude: String(lon),
     hourly: [...surfaceVars, ...pressureVars].join(","),
-    wind_speed_unit: "mph",
+
     timezone: tz,
     forecast_days: String(nDays),
     models: OPENMETEO_MODELS[modelKey],
@@ -276,35 +272,28 @@ export async function aggregateRows(
 const PRESSURE_VAR_BITS =
   (1 << VARS_BIT.freeze) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
 
-export function toFullPeriod(r: Row, varsMask: number, modelKey: string, hoursPerPeriod: number): Period {
+export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period {
   if (MODEL_NO_PRESSURE.has(modelKey)) varsMask &= ~PRESSURE_VAR_BITS;
   const p: Period = { weathercode: r.weathercode ?? 0 };
-  if (varsMask & (1 << VARS_BIT.precip)) p.precip = r.precip ?? 0;
-  if (varsMask & (1 << VARS_BIT.temp)) p.temp_f     = Math.round(((r.temp_max_c ?? 0) * 9) / 5 + 32);
-  if (varsMask & (1 << VARS_BIT.tmin)) p.temp_min_f = Math.round(((r.temp_min_c ?? 0) * 9) / 5 + 32);
-  if (varsMask & (1 << VARS_BIT.snow)) {
-    const inches = (r.snow_cm ?? 0) / 2.54;
-    // daily: store whole inches (0–15); sub-daily: store tenths of an inch (0–15 = 0.0–1.5 in)
-    p.snow_in = hoursPerPeriod >= 24
-      ? Math.min(Math.round(inches), 15)
-      : Math.min(Math.round(inches * 10), 15);
-  }
-  if (varsMask & (1 << VARS_BIT.freeze))
-    p.freeze_ft = Math.round(((r.freezing_level_m ?? 0) * 3.28084) / 1000) * 1000;
+  if (varsMask & (1 << VARS_BIT.precip)) p.precip     = r.precip ?? 0;
+  if (varsMask & (1 << VARS_BIT.temp))   p.temp_c     = r.temp_max_c ?? 0;
+  if (varsMask & (1 << VARS_BIT.tmin))   p.temp_min_c = r.temp_min_c ?? 0;
+  if (varsMask & (1 << VARS_BIT.snow))   p.snow_cm    = r.snow_cm ?? 0;
+  if (varsMask & (1 << VARS_BIT.freeze)) p.freeze_m   = r.freezing_level_m ?? 0;
   if (varsMask & (1 << VARS_BIT.wind)) {
-    p.wind_sfc_mph = round5(r.wind_speed_10m);
+    p.wind_sfc_kph = r.wind_speed_10m ?? 0;
     p.wind_sfc_dir = degToDirIdx(r.wind_direction_10m);
   }
   if (varsMask & (1 << VARS_BIT.w500)) {
-    p.wind_500_mph = round5(r.wind_speed_500hPa);
+    p.wind_500_kph = r.wind_speed_500hPa ?? 0;
     p.wind_500_dir = degToDirIdx(r.wind_direction_500hPa);
   }
   if (varsMask & (1 << VARS_BIT.w600)) {
-    p.wind_600_mph = round5(r.wind_speed_600hPa);
+    p.wind_600_kph = r.wind_speed_600hPa ?? 0;
     p.wind_600_dir = degToDirIdx(r.wind_direction_600hPa);
   }
   if (varsMask & (1 << VARS_BIT.w700)) {
-    p.wind_700_mph = round5(r.wind_speed_700hPa);
+    p.wind_700_kph = r.wind_speed_700hPa ?? 0;
     p.wind_700_dir = degToDirIdx(r.wind_direction_700hPa);
   }
   if (varsMask & (1 << VARS_BIT.cc))  p.cloud_total = Math.round(r.cloud_cover      ?? 0);
@@ -427,7 +416,7 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
     lon,
     elevation,
     periods: rowsPerModel.map((rows, mi) =>
-      rows.map((r) => toFullPeriod(r, params.varsMask, keys[mi], HOURS_PER_PERIOD[params.resolutionIdx])),
+      rows.map((r) => toFullPeriod(r, params.varsMask, keys[mi])),
     ),
   };
 

@@ -6,7 +6,6 @@ import { DEFAULT_VARS_MASK } from "@weather/protocol";
 import {
   aggregateRows,
   toFullPeriod,
-  HOURS_PER_PERIOD,
   type Row,
 } from "../src/forecast.js";
 
@@ -44,7 +43,6 @@ beforeAll(async () => {
       latitude: String(LAT),
       longitude: String(LON),
       hourly: vars.join(","),
-      wind_speed_unit: "mph",
       timezone: TZ,
       forecast_days: String(N_DAYS),
       models: "ecmwf_ifs",
@@ -96,47 +94,11 @@ function row(snow_cm: number): Row {
 
 // ─── toFullPeriod unit tests ──────────────────────────────────────────────────
 
-describe("toFullPeriod — 1h resolution (tenths of an inch)", () => {
-  const hpp = HOURS_PER_PERIOD[4]; // 1
-
-  it("0.00 cm → snow_in = 0", () => {
-    expect(toFullPeriod(row(0.00), DEFAULT_VARS_MASK, "HRES", hpp).snow_in).toBe(0);
-  });
-
-  it("0.07 cm → snow_in = 0  (0.028 in, rounds down)", () => {
-    expect(toFullPeriod(row(0.07), DEFAULT_VARS_MASK, "HRES", hpp).snow_in).toBe(0);
-  });
-
-  it("0.28 cm → snow_in = 1  (0.110 in → 0.1 in displayed)", () => {
-    expect(toFullPeriod(row(0.28), DEFAULT_VARS_MASK, "HRES", hpp).snow_in).toBe(1);
-  });
-
-  it("0.56 cm → snow_in = 2  (0.220 in → 0.2 in displayed)", () => {
-    expect(toFullPeriod(row(0.56), DEFAULT_VARS_MASK, "HRES", hpp).snow_in).toBe(2);
-  });
-
-  it("caps at 15 (= 1.5 in displayed)", () => {
-    expect(toFullPeriod(row(100), DEFAULT_VARS_MASK, "HRES", hpp).snow_in).toBe(15);
-  });
-});
-
-describe("toFullPeriod — daily resolution (whole inches)", () => {
-  const hpp = HOURS_PER_PERIOD[0]; // 24
-
-  it("0.00 cm → snow_in = 0", () => {
-    expect(toFullPeriod(row(0.00), DEFAULT_VARS_MASK, "HRES", hpp).snow_in).toBe(0);
-  });
-
-  it("5.08 cm → snow_in = 2  (exactly 2.0 in)", () => {
-    expect(toFullPeriod(row(5.08), DEFAULT_VARS_MASK, "HRES", hpp).snow_in).toBe(2);
-  });
-
-  it("1.27 cm → snow_in = 1  (0.5 in boundary rounds up)", () => {
-    expect(toFullPeriod(row(1.27), DEFAULT_VARS_MASK, "HRES", hpp).snow_in).toBe(1);
-  });
-
-  it("caps at 15 in", () => {
-    expect(toFullPeriod(row(1000), DEFAULT_VARS_MASK, "HRES", hpp).snow_in).toBe(15);
+describe("toFullPeriod — snow", () => {
+  it("passes snow_cm through unchanged", () => {
+    expect(toFullPeriod(row(0.28), DEFAULT_VARS_MASK, "HRES").snow_cm).toBe(0.28);
+    expect(toFullPeriod(row(5.08), DEFAULT_VARS_MASK, "HRES").snow_cm).toBe(5.08);
+    expect(toFullPeriod(row(100), DEFAULT_VARS_MASK, "HRES").snow_cm).toBe(100);
   });
 });
 
@@ -166,25 +128,11 @@ describe("aggregateRows — 1h resolution", () => {
     });
   });
 
-  it("0.28 cm hour produces snow_in = 1, not 0", () => {
+  it("toFullPeriod passes snow_cm through from row", () => {
     const idx = fixture.hourly.snowfall.findIndex((v) => v === 0.28);
     expect(idx).toBeGreaterThanOrEqual(0);
-    const p = toFullPeriod(rows[idx], DEFAULT_VARS_MASK, "HRES", HOURS_PER_PERIOD[4]);
-    expect(p.snow_in).toBe(1);
-  });
-
-  it("0.56 cm hour produces snow_in = 2", () => {
-    const idx = fixture.hourly.snowfall.findIndex((v) => v === 0.56);
-    expect(idx).toBeGreaterThanOrEqual(0);
-    const p = toFullPeriod(rows[idx], DEFAULT_VARS_MASK, "HRES", HOURS_PER_PERIOD[4]);
-    expect(p.snow_in).toBe(2);
-  });
-
-  it("hours with < 0.127 cm snowfall produce snow_in = 0", () => {
-    const idx = fixture.hourly.snowfall.findIndex((v) => v > 0 && v < 0.127);
-    expect(idx).toBeGreaterThanOrEqual(0);
-    const p = toFullPeriod(rows[idx], DEFAULT_VARS_MASK, "HRES", HOURS_PER_PERIOD[4]);
-    expect(p.snow_in).toBe(0);
+    const p = toFullPeriod(rows[idx], DEFAULT_VARS_MASK, "HRES");
+    expect(p.snow_cm).toBe(0.28);
   });
 });
 
@@ -237,11 +185,8 @@ describe("aggregateRows — daily resolution", () => {
     expect(rows[1].snow_cm).toBeCloseTo(day1, 5);
   });
 
-  it("daily snow_in is the summed total rounded to whole inches", () => {
-    const sf = fixture.hourly.snowfall;
-    const day0cm = sf.slice(0, 24).reduce((a, b) => a + b, 0);
-    const expected = Math.min(Math.round(day0cm / 2.54), 15);
-    const p = toFullPeriod(rows[0], DEFAULT_VARS_MASK, "HRES", HOURS_PER_PERIOD[0]);
-    expect(p.snow_in).toBe(expected);
+  it("toFullPeriod passes daily snow_cm through from row", () => {
+    const p = toFullPeriod(rows[0], DEFAULT_VARS_MASK, "HRES");
+    expect(p.snow_cm).toBe(rows[0].snow_cm);
   });
 });
