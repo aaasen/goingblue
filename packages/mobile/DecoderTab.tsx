@@ -381,21 +381,22 @@ function ForecastTable({ msg, units }: { msg: ForecastMessage; units: Units }) {
 
 // ── DecoderTab ─────────────────────────────────────────────────────────────
 
-const LOCATION_NAMES = ['Current', '11k', '14k', '17k', 'Summit', 'Airstrip'];
+function latLonLabel(msg: ForecastMessage): string {
+  const latStr = `${Math.abs(msg.lat).toFixed(2)}°${msg.lat >= 0 ? 'N' : 'S'}`;
+  const lonStr = `${Math.abs(msg.lon).toFixed(2)}°${msg.lon >= 0 ? 'E' : 'W'}`;
+  return `${latStr} ${lonStr}`;
+}
 
 function metaLabel(msg: ForecastMessage, units: Units): string {
   const models = modelsFromMask(msg.models_mask);
   const resHours = RESOLUTION_HOURS[msg.resolution] ?? 24;
   const resLabel = resHours >= 24 ? 'daily' : `${resHours}h`;
-  const location = LOCATION_NAMES[msg.location] ?? 'Unknown';
-  const latStr = `${Math.abs(msg.lat).toFixed(2)}°${msg.lat >= 0 ? 'N' : 'S'}`;
-  const lonStr = `${Math.abs(msg.lon).toFixed(2)}°${msg.lon >= 0 ? 'E' : 'W'}`;
   const elevStr = msg.elevation > 0
     ? units === 'imperial'
       ? ` · ${Math.round(msg.elevation * 3.28084).toLocaleString()}ft`
       : ` · ${Math.round(msg.elevation).toLocaleString()}m`
     : '';
-  return `${location} · ${latStr} ${lonStr}${elevStr} · ${msg.days}d ${resLabel} · ${models.join(' + ')}`;
+  return `${latLonLabel(msg)}${elevStr} · ${msg.days}d ${resLabel} · ${models.join(' + ')}`;
 }
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -411,8 +412,7 @@ function cacheMetaLabel(encoded: string): string {
     const startStr = resHours >= 24
       ? `${DAY_NAMES[start.getDay()]} ${start.getMonth() + 1}/${start.getDate()}`
       : `${DAY_NAMES[start.getDay()]} ${start.getMonth() + 1}/${start.getDate()} ${start.getHours()}h`;
-    const location = LOCATION_NAMES[msg.location] ?? 'Unknown';
-    return `${location} · ${startStr} · ${msg.days}d ${resLabel} · ${models}`;
+    return `${latLonLabel(msg)} · ${startStr} · ${msg.days}d ${resLabel} · ${models}`;
   } catch {
     return 'Unknown';
   }
