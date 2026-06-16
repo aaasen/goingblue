@@ -281,13 +281,14 @@ export default function BuilderTab({ onForecastReceived }: Props) {
                   activeOpacity={disabled ? 1 : 0.6}
                 >
                   <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{v.label}</Text>
-                  <Switch
-                    value={checked}
-                    onValueChange={() => { if (!disabled) toggleVar(v.value); }}
-                    disabled={disabled}
-                    trackColor={{ false: '#d1d1d6', true: '#2a6bb5' }}
-                    thumbColor="#fff"
-                  />
+                  <View pointerEvents="none">
+                    <Switch
+                      value={checked}
+                      disabled={disabled}
+                      trackColor={{ false: '#d1d1d6', true: '#2a6bb5' }}
+                      thumbColor="#fff"
+                    />
+                  </View>
                 </TouchableOpacity>
               );
             })}
