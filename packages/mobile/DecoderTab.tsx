@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity,
-  ScrollView, Share,
+  ScrollView,
 } from 'react-native';
 import {
   CARDINALS, RESOLUTION_HOURS, RESOLUTION_LABEL, modelsFromMask, startDatetime,
@@ -561,14 +561,6 @@ export default function DecoderTab({ forecastData, onForecastDataChange }: Props
               </View>
             </View>
 
-            {/* Share encoded string */}
-            <TouchableOpacity
-              style={styles.shareRow}
-              onPress={() => Share.share({ message: forecastData.trim() })}
-            >
-              <Text style={styles.shareRowText}>Share encoded forecast</Text>
-            </TouchableOpacity>
-
             {/* Forecast table */}
             <ForecastTable msg={decoded} units={units} />
           </>
@@ -636,12 +628,6 @@ const styles = StyleSheet.create({
   unitBtnActive: { backgroundColor: '#fff' },
   unitBtnText: { fontSize: 13, color: '#6e6e73', fontWeight: '500' },
   unitBtnTextActive: { color: '#1c1c1e' },
-
-  shareRow: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-  },
-  shareRowText: { fontSize: 13, color: '#2a6bb5' },
 
   emptyState: { alignItems: 'center', justifyContent: 'center', padding: 40 },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: '#3a3a3c', marginBottom: 10, textAlign: 'center' },
