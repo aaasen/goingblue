@@ -10,8 +10,12 @@ export const V2_VERSION = 2;
 const VERSION = V2_VERSION;
 
 // v2 drops v1's 3-bit location field — locations are addressed by lat/lon only.
-// Header layout (91 bits): version:7 days:4 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5 lat:15 lon:16 elev:14
-export const V2_HEADER_BITS = 91;
+// The count is a period count (not days), so sub-daily resolutions can carry a partial
+// final day. periods:8 stores (nPeriods - 1), i.e. 1..256 periods.
+// Header layout (95 bits): version:7 periods:8 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5 lat:15 lon:16 elev:14
+export const V2_HEADER_BITS = 95;
+export const V2_PERIODS_BITS = 8;
+export const V2_MAX_PERIODS = 1 << V2_PERIODS_BITS; // 256
 export const V2_HEADER_CHARS = nCharsForBits(V2_HEADER_BITS); // = 14
 const HEADER_BITS = V2_HEADER_BITS;
 const HEADER_CHARS = V2_HEADER_CHARS;
@@ -77,8 +81,9 @@ function periodFromBits(bits: number[], pos: number, varsMask: number): [Period,
 
 export function v2MessageToString(msg: ForecastMessage): string {
   const headerBits: number[] = [];
+  const nPeriods = msg.periods[0].length;
   putInt(headerBits, msg.version, 7);
-  putInt(headerBits, msg.days - 1, 4);
+  putInt(headerBits, nPeriods - 1, V2_PERIODS_BITS);
   putInt(headerBits, msg.resolution, 3);
   putInt(headerBits, msg.models_mask, 4);
   putInt(headerBits, msg.vars_mask, 14);
@@ -90,7 +95,6 @@ export function v2MessageToString(msg: ForecastMessage): string {
   putInt(headerBits, Math.min(Math.max(Math.round(msg.elevation), 0), (1 << ELEV_BITS) - 1), ELEV_BITS);
 
   const bodyBits: number[] = [];
-  const nPeriods = msg.periods[0].length;
   for (let i = 0; i < nPeriods; i++) {
     for (const modelPeriods of msg.periods) {
       bodyBits.push(...periodToBits(modelPeriods[i], msg.vars_mask));
@@ -107,10 +111,10 @@ export function v2MessageFromString(s: string): ForecastMessage {
   const headerBits = decode(s.slice(0, HEADER_CHARS), HEADER_BITS);
   let pos = 0;
 
-  let version: number, daysRaw: number, resolution: number,
+  let version: number, periodsRaw: number, resolution: number,
       models_mask: number, vars_mask: number, month: number, day: number, hour: number;
   [version,     pos] = takeInt(headerBits, pos, 7);
-  [daysRaw,     pos] = takeInt(headerBits, pos, 4);
+  [periodsRaw,  pos] = takeInt(headerBits, pos, V2_PERIODS_BITS);
   [resolution,  pos] = takeInt(headerBits, pos, 3);
   [models_mask, pos] = takeInt(headerBits, pos, 4);
   [vars_mask,   pos] = takeInt(headerBits, pos, 14);
@@ -129,7 +133,7 @@ export function v2MessageFromString(s: string): ForecastMessage {
 
   const resHours = RESOLUTION_HOURS[resolution] ?? 24;
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
-  const nPeriods = (daysRaw + 1) * periodsPerDay;
+  const nPeriods = periodsRaw + 1;
   const nModels = popcount(models_mask);
   const periodBits = periodBitsForMask(vars_mask, VAR_BITS_V2);
   const totalBodyBits = nPeriods * nModels * periodBits;
@@ -151,7 +155,10 @@ export function v2MessageFromString(s: string): ForecastMessage {
     }
   }
 
-  return { version, days: daysRaw + 1, resolution, models_mask, vars_mask, month, day, hour, lat, lon, elevation, periods: allPeriods };
+  // `days` is retained on the common message shape for display; it's the calendar-day span
+  // implied by the period count (a partial final day rounds up).
+  const days = Math.ceil(nPeriods / periodsPerDay);
+  return { version, days, resolution, models_mask, vars_mask, month, day, hour, lat, lon, elevation, periods: allPeriods };
 }
 
 function popcount(n: number): number {

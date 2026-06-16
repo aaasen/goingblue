@@ -7,9 +7,9 @@ const GFS  = 1 << MODEL_BIT["GFS"];
 const IFS  = 1 << MODEL_BIT["IFS"];
 
 describe("parseRequest", () => {
-  it("defaults: 10 days, daily, HRES, default vars, location 0", () => {
+  it("defaults: 10 daily periods, daily, HRES, default vars, location 0", () => {
     const p = parseRequest("");
-    expect(p).toMatchObject({ days: 10, resolutionIdx: 0, modelsMask: HRES, locationIdx: 0 });
+    expect(p).toMatchObject({ nPeriods: 10, resolutionIdx: 0, modelsMask: HRES, locationIdx: 0 });
     expect(p.varsMask).toBe(DEFAULT_VARS_MASK);
   });
 
@@ -39,10 +39,25 @@ describe("parseRequest", () => {
     expect(p.lon).toBeCloseTo(-151.081);
   });
 
-  it("d: sets days, clamped 1–10", () => {
-    expect(parseRequest("d:7").days).toBe(7);
-    expect(parseRequest("d:0").days).toBe(1);
-    expect(parseRequest("d:99").days).toBe(10);
+  it("d: sets period count from whole days (daily), days clamped 1–10", () => {
+    expect(parseRequest("d:7").nPeriods).toBe(7);
+    expect(parseRequest("d:0").nPeriods).toBe(1);
+    expect(parseRequest("d:99").nPeriods).toBe(10);
+  });
+
+  it("d: scales by resolution (periods per day)", () => {
+    expect(parseRequest("d:2 r:1h").nPeriods).toBe(48);
+    expect(parseRequest("d:3 r:6h").nPeriods).toBe(12);
+  });
+
+  it("p: sets the period count directly, clamped 1–256", () => {
+    expect(parseRequest("p:46 r:1h").nPeriods).toBe(46);
+    expect(parseRequest("p:0").nPeriods).toBe(1);
+    expect(parseRequest("p:999").nPeriods).toBe(256);
+  });
+
+  it("p: takes priority over d:", () => {
+    expect(parseRequest("d:5 p:46 r:1h").nPeriods).toBe(46);
   });
 
   it("r: sets resolution index", () => {
@@ -89,7 +104,7 @@ describe("parseRequest", () => {
     const p = parseRequest("l:14k d:7 r:3h m:ifs v:precip,temp");
     expect(p).toMatchObject({
       locationIdx: 2,
-      days: 7,
+      nPeriods: 56, // 7 days × 8 periods/day at 3h
       resolutionIdx: 3,
       modelsMask: IFS,
     });

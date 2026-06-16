@@ -10,7 +10,8 @@ import {
 } from '@weather/protocol';
 
 const MAX_CHARS = 160;
-const MAX_DAYS = 15;
+const MAX_PERIODS = 256;   // v2 header carries an 8-bit period count
+const HORIZON_DAYS = 15;   // upstream forecast horizon
 const FORECAST_URL = __DEV__
   ? 'http://localhost:8080/forecast'
   : 'https://weather.laneaasen.com/forecast';
@@ -76,16 +77,35 @@ const DEFAULT_VARS = new Set([
   'w500', 'w600', 'w700',
 ]);
 
-function calcChars(days: number, resHours: number, varsMask: number): number {
-  const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
-  const bodyBits = days * periodsPerDay * periodBitsForMask(varsMask, VAR_BITS_V2);
+// Chars needed to encode `nPeriods` time periods with the given variables. The period count
+// is carried directly, so resolution no longer affects the body size — only the count does.
+function calcChars(nPeriods: number, varsMask: number): number {
+  const bodyBits = nPeriods * periodBitsForMask(varsMask, VAR_BITS_V2);
   return V2_HEADER_CHARS + nCharsForBits(bodyBits);
 }
 
-function buildMsg(coords: { lat: number; lon: number } | null, days: number, resHours: number, model: string, vars: string[]): string {
+// As many time periods as fit MAX_CHARS for the selected variables, bounded by the 8-bit
+// header field and the forecast horizon. Returns 0 only if a single period won't fit.
+function maxPeriodsFor(resHours: number, varsMask: number): number {
+  const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
+  const cap = Math.min(MAX_PERIODS, Math.floor(HORIZON_DAYS * periodsPerDay));
+  for (let n = cap; n >= 1; n--) {
+    if (calcChars(n, varsMask) <= MAX_CHARS) return n;
+  }
+  return 0;
+}
+
+// Day span as a short label, e.g. 2, 1.5, or "<1 day".
+function formatSpan(days: number): string {
+  if (days < 1) return '<1 day';
+  const rounded = Math.round(days * 10) / 10;
+  return `${rounded} day${rounded === 1 ? '' : 's'}`;
+}
+
+function buildMsg(coords: { lat: number; lon: number } | null, nPeriods: number, resHours: number, model: string, vars: string[]): string {
   const parts: string[] = [];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
-  parts.push(`d:${days}`);
+  parts.push(`p:${nPeriods}`);
   if (resHours < 24) parts.push(`r:${resHours}h`);
   parts.push(`m:${model}`);
   if (vars.length) parts.push(`v:${vars.join(',')}`);
@@ -102,7 +122,6 @@ export default function BuilderTab({ onForecastReceived }: Props) {
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [customLat, setCustomLat] = useState('');
   const [customLon, setCustomLon] = useState('');
-  const [days, setDays] = useState(7);
   const [resHours, setResHours] = useState(24);
   const [model, setModel] = useState('ifs');
   const [vars, setVars] = useState<Set<string>>(new Set(DEFAULT_VARS));
@@ -112,8 +131,13 @@ export default function BuilderTab({ onForecastReceived }: Props) {
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
   const activeVars = [...vars].filter((v) => !unavail.includes(v));
   const varsMask = activeVars.reduce((mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)), 0);
-  const nChars = calcChars(days, resHours, varsMask);
-  const over = nChars > MAX_CHARS;
+  // The period count isn't user-selected: include as many time periods as the char budget allows.
+  const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
+  const nPeriods = maxPeriodsFor(resHours, varsMask);
+  const fits = nPeriods > 0;
+  const spanDays = nPeriods / periodsPerDay;
+  const nChars = fits ? calcChars(nPeriods, varsMask) : 0;
+  const resLabel = RESOLUTIONS.find((r) => r.value === resHours)?.label ?? `${resHours}h`;
 
   const resolvedCoords = locationMode === 'current'
     ? gpsCoords
@@ -122,12 +146,12 @@ export default function BuilderTab({ onForecastReceived }: Props) {
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
   // In current-location mode we always show a preview (coords are omitted until GPS resolves);
   // in custom mode we only show a message once valid coords are entered.
-  const showMessage = coordsValid || locationMode === 'current';
+  const showMessage = fits && (coordsValid || locationMode === 'current');
   const message = showMessage
-    ? buildMsg(coordsValid ? resolvedCoords : null, days, resHours, model, activeVars)
+    ? buildMsg(coordsValid ? resolvedCoords : null, nPeriods, resHours, model, activeVars)
     : '';
   // In current-location mode the buttons stay tappable so they can request GPS on demand.
-  const copyDisabled = locating || over || (locationMode === 'custom' && !coordsValid);
+  const copyDisabled = locating || !fits || (locationMode === 'custom' && !coordsValid);
   const fetchDisabled = copyDisabled || fetching;
 
   async function requestCurrentLocation(): Promise<{ lat: number; lon: number } | null> {
@@ -156,7 +180,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       coords = await requestCurrentLocation();
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return;
-    const msg = buildMsg(coords, days, resHours, model, activeVars);
+    const msg = buildMsg(coords, nPeriods, resHours, model, activeVars);
     await Clipboard.setStringAsync(msg);
   }
 
@@ -183,7 +207,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: buildMsg(coords, days, resHours, model, activeVars),
+        body: buildMsg(coords, nPeriods, resHours, model, activeVars),
       });
       if (!resp.ok) throw new Error(await resp.text());
       onForecastReceived(await resp.text());
@@ -240,17 +264,6 @@ export default function BuilderTab({ onForecastReceived }: Props) {
         )}
       </Section>
 
-      <Section label={`Days: ${days}`}>
-        <View style={styles.stepper}>
-          <StepBtn label="−" onPress={() => setDays((d) => Math.max(1, d - 1))} />
-          <View style={styles.stepTrack}>
-            <View style={[styles.stepFill, { flex: days }]} />
-            <View style={{ flex: MAX_DAYS - days }} />
-          </View>
-          <StepBtn label="+" onPress={() => setDays((d) => Math.min(MAX_DAYS, d + 1))} />
-        </View>
-      </Section>
-
       <Section label="Resolution">
         <View style={styles.pills}>
           {RESOLUTIONS.map((r) => (
@@ -298,13 +311,15 @@ export default function BuilderTab({ onForecastReceived }: Props) {
 
       <Section label="Forecast Length">
         <View style={styles.lenTrack}>
-          <View style={[styles.lenFill, { flex: Math.min(nChars, MAX_CHARS), backgroundColor: over ? '#cc2222' : '#2a8f5a' }]} />
-          <View style={{ flex: Math.max(MAX_CHARS - nChars, 0) }} />
+          <View style={[styles.lenFill, { flex: fits ? nChars : MAX_CHARS, backgroundColor: fits ? '#2a8f5a' : '#cc2222' }]} />
+          <View style={{ flex: fits ? Math.max(MAX_CHARS - nChars, 0) : 0 }} />
         </View>
-        <Text style={[styles.lenText, over ? styles.lenOver : styles.lenOk]}>
-          {over
-            ? `${nChars} chars — exceeds ${MAX_CHARS}, reduce days or variables`
-            : `${nChars} / ${MAX_CHARS} chars`}
+        <Text style={[styles.lenText, fits ? styles.lenOk : styles.lenOver]}>
+          {fits
+            ? resHours >= 24
+              ? `${nPeriods} day${nPeriods === 1 ? '' : 's'} · ${nChars}/${MAX_CHARS} chars`
+              : `${nPeriods} periods · ${formatSpan(spanDays)} · ${nChars}/${MAX_CHARS} chars`
+            : `Too many variables for ${resLabel} resolution — reduce variables or coarsen resolution`}
         </Text>
       </Section>
 
@@ -313,7 +328,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
           {message ? (
             <Text style={styles.msgText} selectable>{message}</Text>
           ) : (
-            <Text style={styles.msgPlaceholder}>Enter lat/lon above</Text>
+            <Text style={styles.msgPlaceholder}>{fits ? 'Enter lat/lon above' : 'Reduce variables or coarsen resolution'}</Text>
           )}
         </View>
       </Section>
@@ -357,14 +372,6 @@ function Pill({ label, selected, onPress }: { label: string; selected: boolean; 
   );
 }
 
-function StepBtn({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={styles.stepBtn} onPress={onPress} activeOpacity={0.7}>
-      <Text style={styles.stepBtnText}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: '#f2f2f7' },
   content: { padding: 16, paddingBottom: 48 },
@@ -377,12 +384,6 @@ const styles = StyleSheet.create({
   pillSelected: { backgroundColor: '#2a6bb5', borderColor: '#2a6bb5' },
   pillText: { fontSize: 14, fontWeight: '500', color: '#1c1c1e' },
   pillTextSelected: { color: '#fff' },
-
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  stepBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d1d6', alignItems: 'center', justifyContent: 'center' },
-  stepBtnText: { fontSize: 20, color: '#1c1c1e', lineHeight: 24 },
-  stepTrack: { flex: 1, height: 6, flexDirection: 'row', borderRadius: 3, backgroundColor: '#e5e5ea', overflow: 'hidden' },
-  stepFill: { height: 6, backgroundColor: '#2a6bb5', borderRadius: 3 },
 
   varList: { backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
   varRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10 },

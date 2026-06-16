@@ -113,7 +113,7 @@ describe("aggregateRows — 1h resolution", () => {
   beforeAll(async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXTURE_START_UTC));
-    [rows] = await aggregateRows("HRES", N_DAYS, 4, LAT, LON, TZ, ELEV_M);
+    [rows] = await aggregateRows("HRES", N_DAYS * 24, 4, LAT, LON, TZ, ELEV_M);
     vi.useRealTimers();
   });
 
@@ -141,13 +141,13 @@ describe("aggregateRows — current time filtering", () => {
   const TIME_UTC = "2026-05-21T18:00:00Z";
 
   it("excludes past periods but always returns the full period count", async () => {
-    // nDays=1 so fetching nDays+1=2 days fits within the 48-hour fixture.
+    // 24 hourly periods → fetches ceil(24/24)+1=2 days, within the 48-hour fixture.
     vi.useFakeTimers();
     vi.setSystemTime(new Date(TIME_UTC));
-    const [rows] = await aggregateRows("HRES", 1, 4, LAT, LON, TZ, ELEV_M);
+    const [rows] = await aggregateRows("HRES", 24, 4, LAT, LON, TZ, ELEV_M);
     vi.useRealTimers();
 
-    expect(rows).toHaveLength(24); // always nDays * 24, not nDays * 24 - currentHour
+    expect(rows).toHaveLength(24); // the full requested period count, not 24 - currentHour
     expect(rows[0].time).toBe(`2026-05-21T${String(CURRENT_HOUR_AKDT).padStart(2, "0")}:00`);
   });
 

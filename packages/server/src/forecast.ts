@@ -189,16 +189,19 @@ async function fetchHourly(
 
 export async function aggregateRows(
   modelKey: string,
-  nDays: number,
+  nPeriods: number,
   resolutionIdx: number,
   lat: number,
   lon: number,
   tz: string,
   elev_m?: number,
 ): Promise<[Row[], number]> {
-  const [h, times, elevation] = await fetchHourly(modelKey, nDays + 1, lat, lon, tz, elev_m);
   const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
-  const nTotal = nDays * (24 / hoursPerPeriod);
+  const periodsPerDay = 24 / hoursPerPeriod;
+  // Fetch one extra day so the final (possibly partial) period window is fully covered.
+  const nDaysToFetch = Math.ceil(nPeriods / periodsPerDay) + 1;
+  const [h, times, elevation] = await fetchHourly(modelKey, nDaysToFetch, lat, lon, tz, elev_m);
+  const nTotal = nPeriods;
 
   const nowLocal = new Date().toLocaleString("sv-SE", { timeZone: tz });
   const nowDate = nowLocal.slice(0, 10);
@@ -303,19 +306,23 @@ export interface ForecastParams {
   locationIdx: number;
   lat?: number;
   lon?: number;
-  days: number;
+  nPeriods: number;
   resolutionIdx: number;
   modelsMask: number;
   varsMask: number;
   decoderVersion: number;
 }
 
+// 8-bit period count in the v2 header → 1..256 periods.
+const MAX_PERIODS = 256;
+
 export function parseRequest(body: string): ForecastParams {
   const words = body.toLowerCase().trim().split(/\s+/);
   let locationIdx = 0;
   let lat: number | undefined;
   let lon: number | undefined;
-  let days = 10;
+  let days: number | undefined;
+  let periods: number | undefined;
   let resolutionIdx = 0;
   let modelsMask = 1; // ECMWF default
   let varsMask = 0;
@@ -345,6 +352,9 @@ export function parseRequest(body: string): ForecastParams {
       } else if (key === "d") {
         const n = parseInt(val);
         if (!isNaN(n)) days = Math.max(1, Math.min(10, n));
+      } else if (key === "p") {
+        const n = parseInt(val);
+        if (!isNaN(n)) periods = Math.max(1, Math.min(MAX_PERIODS, n));
       } else if (key === "r") {
         if (val in RESOLUTION_LABEL_TO_IDX) resolutionIdx = RESOLUTION_LABEL_TO_IDX[val];
       } else if (key === "m") {
@@ -365,7 +375,15 @@ export function parseRequest(body: string): ForecastParams {
 
   if (varsMask === 0) varsMask = DEFAULT_VARS_MASK;
 
-  return { locationIdx, lat, lon, days, resolutionIdx, modelsMask, varsMask, decoderVersion };
+  // Resolve the period count. `p:` (period count) wins; otherwise derive from `d:` (whole
+  // days) × periods-per-day; otherwise default to 10 days at the chosen resolution.
+  const periodsPerDay = 24 / HOURS_PER_PERIOD[resolutionIdx];
+  const nPeriods = Math.min(
+    MAX_PERIODS,
+    periods ?? (days ?? 10) * periodsPerDay,
+  );
+
+  return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, decoderVersion };
 }
 
 export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<string> {
@@ -387,10 +405,15 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   const keys = modelKeys.length ? modelKeys : (["HRES"] as const);
 
   const results = await Promise.all(
-    keys.map((key) => aggregateRows(key, params.days, params.resolutionIdx, lat, lon, tz, elev_m)),
+    keys.map((key) => aggregateRows(key, params.nPeriods, params.resolutionIdx, lat, lon, tz, elev_m)),
   );
   const rowsPerModel = results.map(([rows]) => rows);
   const elevation = results[0][1];
+
+  // v2 encodes the period count directly; `days` is the calendar-day span (used by v1 and
+  // for display) implied by however many period rows the upstream API actually returned.
+  const periodsPerDay = 24 / HOURS_PER_PERIOD[params.resolutionIdx];
+  const days = Math.max(1, Math.ceil(rowsPerModel[0].length / periodsPerDay));
 
   const firstTime = rowsPerModel[0][0].time;
   const month = parseInt(firstTime.slice(5, 7));
@@ -401,7 +424,7 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   const msg: V1ForecastMessage = {
     version: params.decoderVersion,
     location: params.locationIdx,
-    days: params.days,
+    days,
     resolution: params.resolutionIdx,
     models_mask: params.modelsMask,
     vars_mask: params.varsMask,
