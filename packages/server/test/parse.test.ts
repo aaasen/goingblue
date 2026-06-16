@@ -7,9 +7,11 @@ const GFS  = 1 << MODEL_BIT["GFS"];
 const IFS  = 1 << MODEL_BIT["IFS"];
 
 describe("parseRequest", () => {
-  it("defaults: 10 daily periods, daily, HRES, default vars, location 0", () => {
+  it("defaults: fills the budget (15 daily periods at horizon), daily, HRES, default vars, location 0", () => {
+    // No d: → the server fits as many periods as the response budget allows; at daily
+    // resolution that's the 15-day forecast horizon.
     const p = parseRequest("");
-    expect(p).toMatchObject({ nPeriods: 10, resolutionIdx: 0, modelsMask: HRES, locationIdx: 0 });
+    expect(p).toMatchObject({ nPeriods: 15, resolutionIdx: 0, modelsMask: HRES, locationIdx: 0 });
     expect(p.varsMask).toBe(DEFAULT_VARS_MASK);
   });
 
@@ -39,25 +41,14 @@ describe("parseRequest", () => {
     expect(p.lon).toBeCloseTo(-151.081);
   });
 
-  it("d: sets period count from whole days (daily), days clamped 1–10", () => {
-    expect(parseRequest("d:7").nPeriods).toBe(7);
-    expect(parseRequest("d:0").nPeriods).toBe(1);
-    expect(parseRequest("d:99").nPeriods).toBe(10);
-  });
-
-  it("d: scales by resolution (periods per day)", () => {
-    expect(parseRequest("d:2 r:1h").nPeriods).toBe(48);
-    expect(parseRequest("d:3 r:6h").nPeriods).toBe(12);
-  });
-
-  it("p: sets the period count directly, clamped 1–256", () => {
-    expect(parseRequest("p:46 r:1h").nPeriods).toBe(46);
-    expect(parseRequest("p:0").nPeriods).toBe(1);
-    expect(parseRequest("p:999").nPeriods).toBe(256);
-  });
-
-  it("p: takes priority over d:", () => {
-    expect(parseRequest("d:5 p:46 r:1h").nPeriods).toBe(46);
+  it("the period count always fits the budget; a fuller var set yields fewer hourly periods", () => {
+    // At 1h resolution the default var set fills more periods than an all-vars request,
+    // and both stay within the response budget.
+    const defaultRes = parseRequest("r:1h").nPeriods;
+    const richRes = parseRequest("r:1h v:precip,temp,tmin,snow,freeze,wind,w500,w600,w700,cc,cch,ccm,ccl").nPeriods;
+    expect(defaultRes).toBeGreaterThan(0);
+    expect(richRes).toBeGreaterThan(0);
+    expect(richRes).toBeLessThan(defaultRes);
   });
 
   it("r: sets resolution index", () => {
@@ -97,17 +88,17 @@ describe("parseRequest", () => {
   });
 
   it("v: falls back to DEFAULT_VARS_MASK when no vars specified", () => {
-    expect(parseRequest("l:14k d:7 m:ifs").varsMask).toBe(DEFAULT_VARS_MASK);
+    expect(parseRequest("l:14k m:ifs").varsMask).toBe(DEFAULT_VARS_MASK);
   });
 
   it("full message parses all fields", () => {
-    const p = parseRequest("l:14k d:7 r:3h m:ifs v:precip,temp");
+    const p = parseRequest("l:14k r:3h m:ifs v:precip,temp");
     expect(p).toMatchObject({
       locationIdx: 2,
-      nPeriods: 56, // 7 days × 8 periods/day at 3h
       resolutionIdx: 3,
       modelsMask: IFS,
     });
+    expect(p.nPeriods).toBeGreaterThan(0);
     expect(p.varsMask).toBe((1 << VARS_BIT["precip"]) | (1 << VARS_BIT["temp"]));
   });
 });

@@ -3,6 +3,10 @@ import {
   DEFAULT_VARS_MASK,
   VARS_BIT,
   CURRENT_VERSION,
+  V1_HEADER_CHARS,
+  VAR_BITS_V1,
+  periodBitsForMask,
+  nCharsForBits,
   type Period,
   type ForecastMessage,
   type VersionedCodec,
@@ -316,14 +320,36 @@ export interface ForecastParams {
 
 // 8-bit period count in the protocol header → 1..256 periods.
 const MAX_PERIODS = 256;
+const RESPONSE_MAX_CHARS = 160; // Garmin inReach reply length limit
+const HORIZON_DAYS = 15;        // upstream forecast horizon
+
+function popcount(n: number): number {
+  let c = 0;
+  while (n) { c += n & 1; n >>>= 1; }
+  return c;
+}
+
+// Largest period count whose encoded forecast still fits the response budget, bounded by the
+// protocol's 8-bit period field and the forecast horizon. The request no longer carries a
+// period count, so the server fits as many periods as possible for the chosen resolution,
+// variables, and models (mirrors the builder app's preview math).
+function maxPeriodsForBudget(resolutionIdx: number, varsMask: number, modelsMask: number): number {
+  const periodsPerDay = 24 / HOURS_PER_PERIOD[resolutionIdx];
+  const cap = Math.min(MAX_PERIODS, Math.floor(HORIZON_DAYS * periodsPerDay));
+  const nModels = Math.max(1, popcount(modelsMask));
+  const periodBits = periodBitsForMask(varsMask, VAR_BITS_V1);
+  for (let n = cap; n >= 1; n--) {
+    const bodyBits = n * nModels * periodBits;
+    if (V1_HEADER_CHARS + nCharsForBits(bodyBits) <= RESPONSE_MAX_CHARS) return n;
+  }
+  return 1;
+}
 
 export function parseRequest(body: string): ForecastParams {
   const words = body.toLowerCase().trim().split(/\s+/);
   let locationIdx = 0;
   let lat: number | undefined;
   let lon: number | undefined;
-  let days: number | undefined;
-  let periods: number | undefined;
   let resolutionIdx = 0;
   let modelsMask = 1; // ECMWF default
   let varsMask = 0;
@@ -350,12 +376,6 @@ export function parseRequest(body: string): ForecastParams {
         } else if (val in LOCATION_NAME_TO_IDX) {
           locationIdx = LOCATION_NAME_TO_IDX[val];
         }
-      } else if (key === "d") {
-        const n = parseInt(val);
-        if (!isNaN(n)) days = Math.max(1, Math.min(10, n));
-      } else if (key === "p") {
-        const n = parseInt(val);
-        if (!isNaN(n)) periods = Math.max(1, Math.min(MAX_PERIODS, n));
       } else if (key === "r") {
         if (val in RESOLUTION_LABEL_TO_IDX) resolutionIdx = RESOLUTION_LABEL_TO_IDX[val];
       } else if (key === "m") {
@@ -376,13 +396,9 @@ export function parseRequest(body: string): ForecastParams {
 
   if (varsMask === 0) varsMask = DEFAULT_VARS_MASK;
 
-  // Resolve the period count. `p:` (period count) wins; otherwise derive from `d:` (whole
-  // days) × periods-per-day; otherwise default to 10 days at the chosen resolution.
-  const periodsPerDay = 24 / HOURS_PER_PERIOD[resolutionIdx];
-  const nPeriods = Math.min(
-    MAX_PERIODS,
-    periods ?? (days ?? 10) * periodsPerDay,
-  );
+  // The request carries no period count: fit as many periods as the response budget allows
+  // for the chosen resolution, variables, and models.
+  const nPeriods = maxPeriodsForBudget(resolutionIdx, varsMask, modelsMask);
 
   return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, decoderVersion };
 }

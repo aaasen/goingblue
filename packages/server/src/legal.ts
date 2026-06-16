@@ -43,7 +43,7 @@ handles information when you request weather forecasts by text message.</p>
   <li><strong>Location coordinates</strong> — the latitude and longitude you include in a
   request, used to retrieve the forecast for that location.</li>
   <li><strong>Request parameters and message content</strong> — the forecast options you
-  specify (e.g. number of days, weather variables, protocol version).</li>
+  specify (e.g. resolution, weather variables, protocol version).</li>
 </ul>
 
 <h2>How we use it</h2>

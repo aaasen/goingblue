@@ -102,14 +102,14 @@ function formatSpan(days: number): string {
   return `${rounded} day${rounded === 1 ? '' : 's'}`;
 }
 
-function buildMsg(coords: { lat: number; lon: number } | null, nPeriods: number, resHours: number, model: string, vars: string[]): string {
-  const parts: string[] = [];
+// The request leads with the protocol version and omits any period count — the server fits
+// as many periods as the response budget allows for the chosen resolution and variables.
+function buildMsg(coords: { lat: number; lon: number } | null, resHours: number, model: string, vars: string[]): string {
+  const parts: string[] = [`v${V1_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
-  parts.push(`p:${nPeriods}`);
   if (resHours < 24) parts.push(`r:${resHours}h`);
   parts.push(`m:${model}`);
   if (vars.length) parts.push(`v:${vars.join(',')}`);
-  parts.push(`v${V1_VERSION}`);
   return parts.join(' ');
 }
 
@@ -148,7 +148,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
   // in custom mode we only show a message once valid coords are entered.
   const showMessage = fits && (coordsValid || locationMode === 'current');
   const message = showMessage
-    ? buildMsg(coordsValid ? resolvedCoords : null, nPeriods, resHours, model, activeVars)
+    ? buildMsg(coordsValid ? resolvedCoords : null, resHours, model, activeVars)
     : '';
   // In current-location mode the buttons stay tappable so they can request GPS on demand.
   const copyDisabled = locating || !fits || (locationMode === 'custom' && !coordsValid);
@@ -180,7 +180,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       coords = await requestCurrentLocation();
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return;
-    const msg = buildMsg(coords, nPeriods, resHours, model, activeVars);
+    const msg = buildMsg(coords, resHours, model, activeVars);
     await Clipboard.setStringAsync(msg);
   }
 
@@ -207,7 +207,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: buildMsg(coords, nPeriods, resHours, model, activeVars),
+        body: buildMsg(coords, resHours, model, activeVars),
       });
       if (!resp.ok) throw new Error(await resp.text());
       onForecastReceived(await resp.text());
