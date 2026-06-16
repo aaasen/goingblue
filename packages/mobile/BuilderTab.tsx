@@ -82,9 +82,9 @@ function calcChars(days: number, resHours: number, varsMask: number): number {
   return HEADER_CHARS + nCharsForBits(bodyBits);
 }
 
-function buildMsg(lat: number, lon: number, days: number, resHours: number, model: string, vars: string[]): string {
+function buildMsg(coords: { lat: number; lon: number } | null, days: number, resHours: number, model: string, vars: string[]): string {
   const parts: string[] = [];
-  parts.push(`${lat.toFixed(4)},${lon.toFixed(4)}`);
+  if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   parts.push(`d:${days}`);
   if (resHours < 24) parts.push(`r:${resHours}h`);
   parts.push(`m:${model}`);
@@ -120,32 +120,43 @@ export default function BuilderTab({ onForecastReceived }: Props) {
     : { lat: parseFloat(customLat), lon: parseFloat(customLon) };
   const coordsValid = resolvedCoords != null
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
-  const message = coordsValid
-    ? buildMsg(resolvedCoords!.lat, resolvedCoords!.lon, days, resHours, model, activeVars)
+  // In current-location mode we always show a preview (coords are omitted until GPS resolves);
+  // in custom mode we only show a message once valid coords are entered.
+  const showMessage = coordsValid || locationMode === 'current';
+  const message = showMessage
+    ? buildMsg(coordsValid ? resolvedCoords : null, days, resHours, model, activeVars)
     : '';
+  // In current-location mode the button is always tappable so it can request GPS on demand.
+  const copyDisabled = locating || over || (locationMode === 'custom' && !coordsValid);
 
-  async function requestCurrentLocation() {
+  async function requestCurrentLocation(): Promise<{ lat: number; lon: number } | null> {
     setLocating(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission denied', 'Location access is required to use current location.');
-        return;
+        return null;
       }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setGpsCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+      const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      setGpsCoords(coords);
+      return coords;
     } catch (e) {
       Alert.alert('Error', 'Could not get location: ' + String(e));
+      return null;
     } finally {
       setLocating(false);
     }
   }
 
-  function handleLocationModeChange(mode: LocationMode) {
-    setLocationMode(mode);
-    if (mode === 'current' && gpsCoords == null) {
-      requestCurrentLocation();
+  async function handleCopy() {
+    let coords = resolvedCoords;
+    if (locationMode === 'current' && !coordsValid) {
+      coords = await requestCurrentLocation();
     }
+    if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return;
+    const msg = buildMsg(coords, days, resHours, model, activeVars);
+    await Clipboard.setStringAsync(msg);
   }
 
   function toggleVar(v: string) {
@@ -182,21 +193,17 @@ export default function BuilderTab({ onForecastReceived }: Props) {
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
       <Section label="Location">
         <View style={styles.pills}>
-          <Pill label="Current Location" selected={locationMode === 'current'} onPress={() => handleLocationModeChange('current')} />
-          <Pill label="Custom" selected={locationMode === 'custom'} onPress={() => handleLocationModeChange('custom')} />
+          <Pill label="Current Location" selected={locationMode === 'current'} onPress={() => setLocationMode('current')} />
+          <Pill label="Custom" selected={locationMode === 'custom'} onPress={() => setLocationMode('custom')} />
         </View>
-        {locationMode === 'current' && (
+        {locationMode === 'current' && (locating || gpsCoords) && (
           <View style={styles.locationStatus}>
             {locating ? (
               <ActivityIndicator size="small" color="#2a6bb5" />
-            ) : gpsCoords ? (
-              <Text style={styles.coordsText}>
-                {gpsCoords.lat.toFixed(4)}, {gpsCoords.lon.toFixed(4)}
-              </Text>
             ) : (
-              <TouchableOpacity onPress={requestCurrentLocation}>
-                <Text style={styles.locationRetry}>Tap to get location</Text>
-              </TouchableOpacity>
+              <Text style={styles.coordsText}>
+                {gpsCoords!.lat.toFixed(4)}, {gpsCoords!.lon.toFixed(4)}
+              </Text>
             )}
           </View>
         )}
@@ -300,20 +307,18 @@ export default function BuilderTab({ onForecastReceived }: Props) {
           {message ? (
             <Text style={styles.msgText} selectable>{message}</Text>
           ) : (
-            <Text style={styles.msgPlaceholder}>
-              {locationMode === 'current' ? 'Waiting for GPS…' : 'Enter lat/lon above'}
-            </Text>
+            <Text style={styles.msgPlaceholder}>Enter lat/lon above</Text>
           )}
         </View>
       </Section>
 
       <View style={styles.buttons}>
         <TouchableOpacity
-          style={[styles.btn, styles.btnOutline, !message && styles.btnDisabled]}
-          onPress={() => message && Clipboard.setStringAsync(message)}
-          disabled={!message}
+          style={[styles.btn, styles.btnOutline, copyDisabled && styles.btnDisabled]}
+          onPress={handleCopy}
+          disabled={copyDisabled}
         >
-          <Text style={styles.btnOutlineText}>Copy Message</Text>
+          {locating ? <ActivityIndicator color="#2a6bb5" /> : <Text style={styles.btnOutlineText}>Copy Message</Text>}
         </TouchableOpacity>
         {__DEV__ && (
           <TouchableOpacity
@@ -387,7 +392,6 @@ const styles = StyleSheet.create({
 
   locationStatus: { marginTop: 10, alignItems: 'flex-start' },
   coordsText: { fontFamily: 'Courier', fontSize: 13, color: '#2a6bb5' },
-  locationRetry: { fontSize: 13, color: '#2a6bb5', textDecorationLine: 'underline' },
   customCoords: { marginTop: 10, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
   coordRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
   coordRowLast: { borderBottomWidth: 0 },
