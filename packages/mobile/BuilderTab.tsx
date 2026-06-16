@@ -126,8 +126,9 @@ export default function BuilderTab({ onForecastReceived }: Props) {
   const message = showMessage
     ? buildMsg(coordsValid ? resolvedCoords : null, days, resHours, model, activeVars)
     : '';
-  // In current-location mode the button is always tappable so it can request GPS on demand.
+  // In current-location mode the buttons stay tappable so they can request GPS on demand.
   const copyDisabled = locating || over || (locationMode === 'custom' && !coordsValid);
+  const fetchDisabled = copyDisabled || fetching;
 
   async function requestCurrentLocation(): Promise<{ lat: number; lon: number } | null> {
     setLocating(true);
@@ -169,7 +170,11 @@ export default function BuilderTab({ onForecastReceived }: Props) {
   }
 
   async function handleFetch() {
-    if (!coordsValid) {
+    let coords = resolvedCoords;
+    if (locationMode === 'current' && !coordsValid) {
+      coords = await requestCurrentLocation();
+    }
+    if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) {
       Alert.alert('No location', 'Please set a valid location before fetching.');
       return;
     }
@@ -178,7 +183,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: message,
+        body: buildMsg(coords, days, resHours, model, activeVars),
       });
       if (!resp.ok) throw new Error(await resp.text());
       onForecastReceived(await resp.text());
@@ -322,9 +327,9 @@ export default function BuilderTab({ onForecastReceived }: Props) {
         </TouchableOpacity>
         {__DEV__ && (
           <TouchableOpacity
-            style={[styles.btn, styles.btnPrimary, (over || !coordsValid) && styles.btnDisabled]}
+            style={[styles.btn, styles.btnPrimary, fetchDisabled && styles.btnDisabled]}
             onPress={handleFetch}
-            disabled={over || fetching || !coordsValid}
+            disabled={fetchDisabled}
           >
             {fetching ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Fetch Forecast</Text>}
           </TouchableOpacity>
