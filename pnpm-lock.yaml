@@ -7,19 +7,6 @@ importers:
 
   .: {}
 
-  packages/client:
-    dependencies:
-      '@weather/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-    devDependencies:
-      typescript:
-        specifier: ^5.4.0
-        version: 5.4.2
-      vite:
-        specifier: ^5.0.0
-        version: 5.0.0(@types/node@25.9.1)
-
   packages/mobile:
     dependencies:
       '@react-native-async-storage/async-storage':

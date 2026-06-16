@@ -4,10 +4,8 @@ RUN corepack enable
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/server/package.json packages/server/
-COPY packages/client/package.json packages/client/
 RUN pnpm install --frozen-lockfile
 COPY . .
-RUN pnpm --filter @weather/client build \
- && pnpm --filter @weather/protocol build \
+RUN pnpm --filter @weather/protocol build \
  && pnpm --filter @weather/server build
 CMD ["node", "packages/server/dist/index.js"]

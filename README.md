@@ -6,16 +6,15 @@ The goal of this project is to provide better weather forecasts than the default
 
 ## Offline Usage
 
-The decoder app is a Progressive Web App (PWA) that can be installed on your phone for offline use. Open [weather.laneaasen.com](https://weather.laneaasen.com/) in your browser and tap the share button, then select "Add to Home Screen".
+The mobile app builds forecast requests, decodes the satellite replies, and caches decoded forecasts on-device so they remain available offline.
 
 ## Architecture
 
-This is a pnpm monorepo with four packages:
+This is a pnpm monorepo with three packages:
 
-- `packages/protocol` — shared TypeScript binary encoding/decoding used by both server and client
-- `packages/server` — Hono/Node.js server; receives inbound email webhooks, fetches Open-Meteo forecasts, sends Garmin replies, and serves the decoder page
-- `packages/client` — Vite PWA decoder; imports the protocol package to decode and render forecasts entirely in-browser
-- `packages/mobile` — Expo React Native iOS companion app
+- `packages/protocol` — shared TypeScript binary encoding/decoding used by both the server and the mobile app
+- `packages/server` — Hono/Node.js server; receives inbound email webhooks, fetches Open-Meteo forecasts, and sends Garmin replies
+- `packages/mobile` — Expo React Native app for building requests and decoding forecasts
 
 ## Development
 
@@ -29,7 +28,7 @@ pnpm install
 
 ### Build
 
-Build all packages (protocol → client → server):
+Build all packages (protocol → server):
 
 ```bash
 pnpm build
@@ -39,7 +38,6 @@ To build a single package:
 
 ```bash
 pnpm --filter @weather/protocol build
-pnpm --filter @weather/client build
 pnpm --filter @weather/server build
 ```
 
@@ -51,7 +49,7 @@ Build and start the server:
 pnpm start
 ```
 
-The server starts at `http://localhost:8080`. Open it in a browser to use the decoder.
+The server starts at `http://localhost:8080`. It exposes the `/forecast` endpoint used by the mobile app during local development.
 
 To use a different port:
 
