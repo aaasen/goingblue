@@ -95,7 +95,7 @@ document.querySelectorAll<HTMLInputElement>('input[name="units"]').forEach((el) 
 });
 
 input.addEventListener("input", () => {
-  const text = input.value.replace(/\s/g, "");
+  const text = input.value.replace(/\s/g, "").replace(/^fw:/i, "");
   if (!text) {
     output.innerHTML = "";
     lastMsg = null;
