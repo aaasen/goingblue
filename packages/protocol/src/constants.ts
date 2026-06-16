@@ -41,31 +41,11 @@ export const VARS_BIT: Record<string, number> = {
   tmin: 13,  // min temperature
 };
 
-// Bits consumed per variable (parallel to VARS_BIT order)
-// WMO always uses 5 bits; these are for optional vars bits 0-13
-export const VAR_BITS    = [3, 8, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4, 8];
-export const VAR_BITS_V2 = [3, 7, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4, 7];
-//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^vis ^tmin
-// v2 temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
-
 export const WMO_BITS = 5;
 
 export const DEFAULT_VARS_MASK =
   (1 << 0) | (1 << 2) | (1 << 3) | (1 << 5) | (1 << 6) | (1 << 7);
 // precip + snow + freeze + w500 + w600 + w700
-
-export function periodBitsForMask(varsMask: number, varBits: number[] = VAR_BITS): number {
-  let bits = WMO_BITS;
-  for (let i = 0; i < varBits.length; i++) {
-    if (varsMask & (1 << i)) bits += varBits[i];
-  }
-  return bits;
-}
-
-export function nCharsForBits(nBits: number): number {
-  if (nBits === 0) return 0;
-  return Math.ceil((nBits * Math.log(2)) / Math.log(94));
-}
 
 export const WMO_CODES: number[] = [
   0, 1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77,

@@ -1,14 +1,73 @@
 import {
-  HEADER_BITS, HEADER_CHARS, RESOLUTION_HOURS,
-  periodBitsForMask, VAR_BITS_V2, nCharsForBits, LAT_BITS, LON_BITS, ELEV_BITS,
+  HEADER_BITS, HEADER_CHARS, RESOLUTION_HOURS, WMO_CODES, LAT_BITS, LON_BITS, ELEV_BITS,
 } from "../constants.js";
 import { putInt, takeInt } from "../bits.js";
-import { encode, decode } from "../codec.js";
-import { type Period } from "../model.js";
-import { periodToBitsV2, periodFromBitsV2 } from "../period_v2.js";
+import { encode, decode, periodBitsForMask, nCharsForBits } from "../codec.js";
+import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec } from "../message.js";
 
 const VERSION = 2;
+
+// v2 temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
+export const VAR_BITS_V2 = [3, 7, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4, 7];
+//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^vis ^tmin
+
+const TEMP_OFFSET = 40;
+const KPH_PER_STEP = 5 * 1.609344;
+
+function putWind(bits: number[], kph: number, dir: number): void {
+  putInt(bits, Math.min(Math.floor(kph / KPH_PER_STEP), 15), 4);
+  putInt(bits, dir % 8, 3);
+}
+
+function takeWind(bits: number[], pos: number): [number, number, number] {
+  const [spd, p1] = takeInt(bits, pos, 4);
+  const [dir, p2] = takeInt(bits, p1, 3);
+  return [spd * KPH_PER_STEP, dir, p2];
+}
+
+function periodToBits(p: Period, varsMask: number): number[] {
+  const bits: number[] = [];
+  putInt(bits, WMO2IDX[p.weathercode] ?? 0, 5);
+  if (varsMask & (1 << 0))  putInt(bits, Math.min(Math.round((p.precip ?? 0) * 7 / 100), 7), 3);
+  if (varsMask & (1 << 1))  putInt(bits, Math.min(Math.max(Math.round((p.temp_c     ?? 0) + TEMP_OFFSET), 0), 127), 7);
+  if (varsMask & (1 << 13)) putInt(bits, Math.min(Math.max(Math.round((p.temp_min_c ?? 0) + TEMP_OFFSET), 0), 127), 7);
+  if (varsMask & (1 << 2))  putInt(bits, Math.min(Math.round((p.snow_cm ?? 0) / 2.54), 15), 4);
+  if (varsMask & (1 << 3))  putInt(bits, Math.min(Math.floor((p.freeze_m ?? 0) / 304.8), 15), 4);
+  if (varsMask & (1 << 4))  putWind(bits, p.wind_sfc_kph ?? 0, p.wind_sfc_dir ?? 0);
+  if (varsMask & (1 << 5))  putWind(bits, p.wind_500_kph ?? 0, p.wind_500_dir ?? 0);
+  if (varsMask & (1 << 6))  putWind(bits, p.wind_600_kph ?? 0, p.wind_600_dir ?? 0);
+  if (varsMask & (1 << 7))  putWind(bits, p.wind_700_kph ?? 0, p.wind_700_dir ?? 0);
+  if (varsMask & (1 << 8))  putInt(bits, Math.min(Math.round((p.cloud_total ?? 0) * 7 / 100), 7), 3);
+  if (varsMask & (1 << 9))  putInt(bits, Math.min(Math.round((p.cloud_high  ?? 0) * 7 / 100), 7), 3);
+  if (varsMask & (1 << 10)) putInt(bits, Math.min(Math.round((p.cloud_mid   ?? 0) * 7 / 100), 7), 3);
+  if (varsMask & (1 << 11)) putInt(bits, Math.min(Math.round((p.cloud_low   ?? 0) * 7 / 100), 7), 3);
+  if (varsMask & (1 << 12)) putInt(bits, Math.min(p.vis_km ?? 0, 15), 4);
+  return bits;
+}
+
+function periodFromBits(bits: number[], pos: number, varsMask: number): [Period, number] {
+  let wc: number;
+  [wc, pos] = takeInt(bits, pos, 5);
+  const p: Period = { weathercode: WMO_CODES[wc] ?? 0 };
+
+  if (varsMask & (1 << 0))  { let v: number; [v, pos] = takeInt(bits, pos, 3); p.precip      = Math.round(v * 100 / 7); }
+  if (varsMask & (1 << 1))  { let v: number; [v, pos] = takeInt(bits, pos, 7); p.temp_c      = v - TEMP_OFFSET; }
+  if (varsMask & (1 << 13)) { let v: number; [v, pos] = takeInt(bits, pos, 7); p.temp_min_c  = v - TEMP_OFFSET; }
+  if (varsMask & (1 << 2))  { let v: number; [v, pos] = takeInt(bits, pos, 4); p.snow_cm     = v * 2.54; }
+  if (varsMask & (1 << 3))  { let v: number; [v, pos] = takeInt(bits, pos, 4); p.freeze_m    = v * 304.8; }
+  if (varsMask & (1 << 4))  { let kph: number, dir: number; [kph, dir, pos] = takeWind(bits, pos); p.wind_sfc_kph = kph; p.wind_sfc_dir = dir; }
+  if (varsMask & (1 << 5))  { let kph: number, dir: number; [kph, dir, pos] = takeWind(bits, pos); p.wind_500_kph = kph; p.wind_500_dir = dir; }
+  if (varsMask & (1 << 6))  { let kph: number, dir: number; [kph, dir, pos] = takeWind(bits, pos); p.wind_600_kph = kph; p.wind_600_dir = dir; }
+  if (varsMask & (1 << 7))  { let kph: number, dir: number; [kph, dir, pos] = takeWind(bits, pos); p.wind_700_kph = kph; p.wind_700_dir = dir; }
+  if (varsMask & (1 << 8))  { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_total = Math.round(v * 100 / 7); }
+  if (varsMask & (1 << 9))  { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_high  = Math.round(v * 100 / 7); }
+  if (varsMask & (1 << 10)) { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_mid   = Math.round(v * 100 / 7); }
+  if (varsMask & (1 << 11)) { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_low   = Math.round(v * 100 / 7); }
+  if (varsMask & (1 << 12)) { let v: number; [v, pos] = takeInt(bits, pos, 4); p.vis_km      = v; }
+
+  return [p, pos];
+}
 
 export function v2MessageToString(msg: ForecastMessage): string {
   const headerBits: number[] = [];
@@ -29,7 +88,7 @@ export function v2MessageToString(msg: ForecastMessage): string {
   const nPeriods = msg.periods[0].length;
   for (let i = 0; i < nPeriods; i++) {
     for (const modelPeriods of msg.periods) {
-      bodyBits.push(...periodToBitsV2(modelPeriods[i], msg.vars_mask));
+      bodyBits.push(...periodToBits(modelPeriods[i], msg.vars_mask));
     }
   }
 
@@ -82,7 +141,7 @@ export function v2MessageFromString(s: string): ForecastMessage {
   const allPeriods: Period[][] = Array.from({ length: nModels }, () => []);
   for (let i = 0; i < nPeriods; i++) {
     for (let m = 0; m < nModels; m++) {
-      const [p, nextPos] = periodFromBitsV2(bodyBits, pos, vars_mask);
+      const [p, nextPos] = periodFromBits(bodyBits, pos, vars_mask);
       pos = nextPos;
       allPeriods[m].push(p);
     }

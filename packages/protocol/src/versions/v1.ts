@@ -1,10 +1,12 @@
 import {
   VERSION, HEADER_BITS, HEADER_CHARS, RESOLUTION_HOURS,
-  periodBitsForMask, nCharsForBits, LAT_BITS, LON_BITS, ELEV_BITS,
+  WMO_CODES, LAT_BITS, LON_BITS, ELEV_BITS,
 } from "../constants.js";
 import { putInt, takeInt } from "../bits.js";
-import { encode, decode } from "../codec.js";
-import { WMO_CODES } from "../constants.js";
+import { encode, decode, periodBitsForMask, nCharsForBits } from "../codec.js";
+
+export const VAR_BITS = [3, 8, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4, 8];
+//                       ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^vis ^tmin
 import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec } from "../message.js";
 
@@ -123,7 +125,7 @@ export function messageFromString(s: string): ForecastMessage {
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
   const nPeriods = (daysRaw + 1) * periodsPerDay;
   const nModels = popcount(models_mask);
-  const periodBits = periodBitsForMask(vars_mask);
+  const periodBits = periodBitsForMask(vars_mask, VAR_BITS);
   const totalBodyBits = nPeriods * nModels * periodBits;
 
   const expectedBodyChars = nCharsForBits(totalBodyBits);

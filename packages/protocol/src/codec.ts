@@ -1,6 +1,17 @@
-import { ALPHABET, nCharsForBits } from "./constants.js";
+import { ALPHABET, WMO_BITS } from "./constants.js";
 
-export { nCharsForBits };
+export function nCharsForBits(nBits: number): number {
+  if (nBits === 0) return 0;
+  return Math.ceil((nBits * Math.log(2)) / Math.log(94));
+}
+
+export function periodBitsForMask(varsMask: number, varBits: number[]): number {
+  let bits = WMO_BITS;
+  for (let i = 0; i < varBits.length; i++) {
+    if (varsMask & (1 << i)) bits += varBits[i];
+  }
+  return bits;
+}
 
 const A2I: Record<string, number> = Object.fromEntries(
   [...ALPHABET].map((c, i) => [c, i]),
