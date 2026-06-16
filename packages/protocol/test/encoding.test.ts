@@ -21,15 +21,15 @@ const PERIOD: Period = {
   precip: 75,
   temp_c: 0,
   temp_min_c: -20,
-  snow_in: 4,
-  freeze_ft: 6000,
-  wind_sfc_mph: 10,
+  snow_cm: 4 * 2.54,       // 4 whole inches in cm — round-trips exactly
+  freeze_m: 6 * 304.8,     // 6000 ft in m — round-trips exactly
+  wind_sfc_kph: 10 * 1.609344,
   wind_sfc_dir: 2,
-  wind_500_mph: 30,
+  wind_500_kph: 30 * 1.609344,
   wind_500_dir: 4,
-  wind_600_mph: 25,
+  wind_600_kph: 25 * 1.609344,
   wind_600_dir: 3,
-  wind_700_mph: 15,
+  wind_700_kph: 15 * 1.609344,
   wind_700_dir: 2,
   cloud_total: 80,
   cloud_high: 60,
@@ -124,15 +124,15 @@ describe("round-trip encoding", () => {
     expect(p.precip).toBe(Math.round(Math.round((PERIOD.precip ?? 0) * 7 / 100) * 100 / 7));
     expect(p.temp_c).toBe(PERIOD.temp_c);
     expect(p.temp_min_c).toBe(PERIOD.temp_min_c);
-    expect(p.snow_in).toBe(PERIOD.snow_in);
-    expect(p.freeze_ft).toBe(PERIOD.freeze_ft);
-    expect(p.wind_sfc_mph).toBe(PERIOD.wind_sfc_mph);
+    expect(p.snow_cm).toBeCloseTo(PERIOD.snow_cm!, 5);
+    expect(p.freeze_m).toBeCloseTo(PERIOD.freeze_m!, 5);
+    expect(p.wind_sfc_kph).toBeCloseTo(PERIOD.wind_sfc_kph!, 3);
     expect(p.wind_sfc_dir).toBe(PERIOD.wind_sfc_dir);
-    expect(p.wind_500_mph).toBe(PERIOD.wind_500_mph);
+    expect(p.wind_500_kph).toBeCloseTo(PERIOD.wind_500_kph!, 3);
     expect(p.wind_500_dir).toBe(PERIOD.wind_500_dir);
-    expect(p.wind_600_mph).toBe(PERIOD.wind_600_mph);
+    expect(p.wind_600_kph).toBeCloseTo(PERIOD.wind_600_kph!, 3);
     expect(p.wind_600_dir).toBe(PERIOD.wind_600_dir);
-    expect(p.wind_700_mph).toBe(PERIOD.wind_700_mph);
+    expect(p.wind_700_kph).toBeCloseTo(PERIOD.wind_700_kph!, 3);
     expect(p.wind_700_dir).toBe(PERIOD.wind_700_dir);
     // cloud cover is quantized to 3 bits (0–7 steps), decoded back to nearest %
     expect(p.cloud_total).toBe(Math.round(Math.round((PERIOD.cloud_total ?? 0) * 7 / 100) * 100 / 7));
@@ -146,12 +146,12 @@ describe("round-trip encoding", () => {
     const decoded = roundTrip(msg({ vars_mask: 0 }));
     const p = decoded.periods[0][0];
     expect(p.precip).toBeUndefined();
-    expect(p.temp_f).toBeUndefined();
-    expect(p.temp_min_f).toBeUndefined();
-    expect(p.snow_in).toBeUndefined();
-    expect(p.freeze_ft).toBeUndefined();
-    expect(p.wind_sfc_mph).toBeUndefined();
-    expect(p.wind_500_mph).toBeUndefined();
+    expect(p.temp_c).toBeUndefined();
+    expect(p.temp_min_c).toBeUndefined();
+    expect(p.snow_cm).toBeUndefined();
+    expect(p.freeze_m).toBeUndefined();
+    expect(p.wind_sfc_kph).toBeUndefined();
+    expect(p.wind_500_kph).toBeUndefined();
     expect(p.cloud_total).toBeUndefined();
     expect(p.cloud_high).toBeUndefined();
     expect(p.vis_km).toBeUndefined();
@@ -162,21 +162,21 @@ describe("round-trip encoding", () => {
     const decoded = roundTrip(msg({ vars_mask: varsMask }));
     const p = decoded.periods[0][0];
     expect(p.precip).toBe(Math.round(Math.round(75 * 7 / 100) * 100 / 7));
-    expect(p.freeze_ft).toBe(6000);
-    expect(p.temp_f).toBeUndefined();
-    expect(p.temp_min_f).toBeUndefined();
-    expect(p.snow_in).toBeUndefined();
-    expect(p.wind_500_mph).toBeUndefined();
+    expect(p.freeze_m).toBeCloseTo(6 * 304.8, 5);
+    expect(p.temp_c).toBeUndefined();
+    expect(p.temp_min_c).toBeUndefined();
+    expect(p.snow_cm).toBeUndefined();
+    expect(p.wind_500_kph).toBeUndefined();
   });
 
   it("temp and tmin are independent bits", () => {
     const maxOnly = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp }));
-    expect(maxOnly.periods[0][0].temp_f).toBe(PERIOD.temp_f);
-    expect(maxOnly.periods[0][0].temp_min_f).toBeUndefined();
+    expect(maxOnly.periods[0][0].temp_c).toBe(PERIOD.temp_c);
+    expect(maxOnly.periods[0][0].temp_min_c).toBeUndefined();
 
     const minOnly = roundTrip(msg({ vars_mask: 1 << VARS_BIT.tmin }));
-    expect(minOnly.periods[0][0].temp_min_f).toBe(PERIOD.temp_min_f);
-    expect(minOnly.periods[0][0].temp_f).toBeUndefined();
+    expect(minOnly.periods[0][0].temp_min_c).toBe(PERIOD.temp_min_c);
+    expect(minOnly.periods[0][0].temp_c).toBeUndefined();
   });
 
   it("default vars mask includes expected vars", () => {
@@ -238,18 +238,18 @@ describe("round-trip encoding", () => {
   });
 
   it("clamps wind speed to 5 mph steps", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, wind_700_mph: 27 }]] }));
-    expect(decoded.periods[0][0].wind_700_mph).toBe(25);
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, wind_700_kph: 27 * 1.609344 }]] }));
+    expect(decoded.periods[0][0].wind_700_kph).toBeCloseTo(25 * 1.609344, 3);
   });
 
-  it("clamps snow to 15 max", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, snow_in: 20 }]] }));
-    expect(decoded.periods[0][0].snow_in).toBe(15);
+  it("clamps snow to 15 in max (38.1 cm)", () => {
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, snow_cm: 20 * 2.54 }]] }));
+    expect(decoded.periods[0][0].snow_cm).toBeCloseTo(15 * 2.54, 5);
   });
 
-  it("clamps freeze level to 15,000 ft max", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, freeze_ft: 20000 }]] }));
-    expect(decoded.periods[0][0].freeze_ft).toBe(15000);
+  it("clamps freeze level to 15,000 ft max (4572 m)", () => {
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, freeze_m: 20000 * 0.3048 }]] }));
+    expect(decoded.periods[0][0].freeze_m).toBeCloseTo(15 * 304.8, 5);
   });
 
   it("rounds precip to nearest 3-bit step", () => {
