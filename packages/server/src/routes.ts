@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { fetchForecast, parseRequest } from "./forecast.js";
 import { sendGarminReply } from "./garmin.js";
+import { CODECS } from "@weather/protocol";
 
 const REPLY_ADDRESS = "wx@email.laneaasen.com";
 
@@ -8,8 +9,13 @@ export async function forecast(c: Context) {
   const body = await c.req.text();
   const params = parseRequest(body.trim());
   console.log("forecast request:", params);
+  const codec = CODECS[params.decoderVersion];
+  if (!codec) {
+    const supported = Object.keys(CODECS).map((v) => `v${v}`).join(", ");
+    return c.text(`Unsupported protocol version: v${params.decoderVersion}. Supported: ${supported}`, 400);
+  }
   try {
-    const encoded = await fetchForecast(params);
+    const encoded = await fetchForecast(params, codec);
     return c.text(encoded, 200);
   } catch (e) {
     console.error("fetchForecast failed:", e);
@@ -35,9 +41,15 @@ export async function inbound(c: Context) {
     const params = parseRequest(body);
     console.log("forecast request params:", params);
 
+    const codec = CODECS[params.decoderVersion];
+    if (!codec) {
+      console.error(`Unsupported protocol version: v${params.decoderVersion}`);
+      return c.text("OK", 200);
+    }
+
     let encoded: string;
     try {
-      encoded = await fetchForecast(params);
+      encoded = await fetchForecast(params, codec);
       console.log(`forecast fetched (len=${encoded.length}): ${encoded}`);
     } catch (e) {
       console.error("fetchForecast failed:", e);

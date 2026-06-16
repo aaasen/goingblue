@@ -1,0 +1,58 @@
+{
+  "description": "3-day daily ECMWF HRES, precip+snow+freeze+w500+w600+w700, Denali 14k camp",
+  "encoded": "!%DRoQ:)||4a5Nf(^D|AV}7*Tgzo(#DL",
+  "decoded": {
+    "version": 1,
+    "location": 2,
+    "days": 3,
+    "resolution": 0,
+    "models_mask": 1,
+    "vars_mask": 237,
+    "month": 6,
+    "day": 15,
+    "hour": 0,
+    "lat": 63.06070131534776,
+    "lon": -151.0835431448844,
+    "elevation": 4267,
+    "periods": [
+      [
+        {
+          "weathercode": 3,
+          "precip": 57,
+          "snow_in": 0,
+          "freeze_ft": 10000,
+          "wind_500_mph": 30,
+          "wind_500_dir": 4,
+          "wind_600_mph": 25,
+          "wind_600_dir": 3,
+          "wind_700_mph": 15,
+          "wind_700_dir": 2
+        },
+        {
+          "weathercode": 61,
+          "precip": 86,
+          "snow_in": 2,
+          "freeze_ft": 8000,
+          "wind_500_mph": 35,
+          "wind_500_dir": 3,
+          "wind_600_mph": 30,
+          "wind_600_dir": 3,
+          "wind_700_mph": 20,
+          "wind_700_dir": 3
+        },
+        {
+          "weathercode": 2,
+          "precip": 14,
+          "snow_in": 0,
+          "freeze_ft": 11000,
+          "wind_500_mph": 20,
+          "wind_500_dir": 5,
+          "wind_600_mph": 15,
+          "wind_600_dir": 4,
+          "wind_700_mph": 10,
+          "wind_700_dir": 5
+        }
+      ]
+    ]
+  }
+}

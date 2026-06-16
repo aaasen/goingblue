@@ -1,4 +1,4 @@
-import { HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT } from "@weather/protocol";
+import { HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, VERSION } from "@weather/protocol";
 import { MODEL_UNAVAIL_VARS } from "./ui-constants.js";
 
 const MAX_CHARS = 160;
@@ -48,6 +48,7 @@ export function builderMsg(location: string, days: number, resHours: number, mod
   if (resHours < 24) parts.push(`r:${resHours}h`);
   parts.push(`m:${models.join(",")}`);
   if (vars.length) parts.push(`v:${vars.join(",")}`);
+  parts.push(`v${VERSION}`);
   return parts.join(" ");
 }
 

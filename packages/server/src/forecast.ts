@@ -1,11 +1,10 @@
 import {
-  VERSION,
   MODEL_BIT,
   DEFAULT_VARS_MASK,
   VARS_BIT,
   type Period,
   type ForecastMessage,
-  messageToString,
+  type VersionedCodec,
 } from "@weather/protocol";
 
 const OPENMETEO_MODELS: Record<string, string> = {
@@ -324,6 +323,7 @@ export interface ForecastParams {
   resolutionIdx: number;
   modelsMask: number;
   varsMask: number;
+  decoderVersion: number;
 }
 
 export function parseRequest(body: string): ForecastParams {
@@ -335,6 +335,7 @@ export function parseRequest(body: string): ForecastParams {
   let resolutionIdx = 0;
   let modelsMask = 1; // ECMWF default
   let varsMask = 0;
+  let decoderVersion = 1; // default for backward compat
 
   // Compact "X,Y" (message body) takes priority over "Lat X Lon Y" (Garmin email footer)
   const gpsMatch =
@@ -373,15 +374,17 @@ export function parseRequest(body: string): ForecastParams {
           if (v in VARS_BIT) varsMask |= 1 << VARS_BIT[v];
         }
       }
+    } else if (/^v\d+$/.test(word)) {
+      decoderVersion = parseInt(word.slice(1));
     }
   }
 
   if (varsMask === 0) varsMask = DEFAULT_VARS_MASK;
 
-  return { locationIdx, lat, lon, days, resolutionIdx, modelsMask, varsMask };
+  return { locationIdx, lat, lon, days, resolutionIdx, modelsMask, varsMask, decoderVersion };
 }
 
-export async function fetchForecast(params: ForecastParams): Promise<string> {
+export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<string> {
   let lat: number, lon: number, tz: string, elev_m: number | undefined;
   if (params.locationIdx === 0) {
     if (params.lat == null || params.lon == null)
@@ -411,7 +414,7 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
   const hour = parseInt(firstTime.slice(11, 13));
 
   const msg: ForecastMessage = {
-    version: VERSION,
+    version: params.decoderVersion,
     location: params.locationIdx,
     days: params.days,
     resolution: params.resolutionIdx,
@@ -428,5 +431,5 @@ export async function fetchForecast(params: ForecastParams): Promise<string> {
     ),
   };
 
-  return messageToString(msg);
+  return codec.encode(msg);
 }
