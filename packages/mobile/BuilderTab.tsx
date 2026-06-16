@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity,
-  Share, ActivityIndicator, Alert, Switch, TextInput,
+  ActivityIndicator, Alert, Switch, TextInput,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import {
   HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, VERSION, VAR_BITS,
@@ -309,18 +310,20 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       <View style={styles.buttons}>
         <TouchableOpacity
           style={[styles.btn, styles.btnOutline, !message && styles.btnDisabled]}
-          onPress={() => message && Share.share({ message })}
+          onPress={() => message && Clipboard.setStringAsync(message)}
           disabled={!message}
         >
-          <Text style={styles.btnOutlineText}>Share</Text>
+          <Text style={styles.btnOutlineText}>Copy Message</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.btn, styles.btnPrimary, (over || !coordsValid) && styles.btnDisabled]}
-          onPress={handleFetch}
-          disabled={over || fetching || !coordsValid}
-        >
-          {fetching ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Fetch Forecast</Text>}
-        </TouchableOpacity>
+        {__DEV__ && (
+          <TouchableOpacity
+            style={[styles.btn, styles.btnPrimary, (over || !coordsValid) && styles.btnDisabled]}
+            onPress={handleFetch}
+            disabled={over || fetching || !coordsValid}
+          >
+            {fetching ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Fetch Forecast</Text>}
+          </TouchableOpacity>
+        )}
       </View>
     </ScrollView>
   );
