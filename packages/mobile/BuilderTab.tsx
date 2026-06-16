@@ -9,7 +9,10 @@ import {
 } from '@weather/protocol';
 
 const MAX_CHARS = 160;
-const FORECAST_URL = 'http://localhost:8080/forecast';
+const MAX_DAYS = 15;
+const FORECAST_URL = __DEV__
+  ? 'http://localhost:8080/forecast'
+  : 'https://weather.laneaasen.com/forecast';
 
 const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
   hres: ['freeze', 'w500', 'w600', 'w700'],
@@ -229,9 +232,9 @@ export default function BuilderTab({ onForecastReceived }: Props) {
           <StepBtn label="−" onPress={() => setDays((d) => Math.max(1, d - 1))} />
           <View style={styles.stepTrack}>
             <View style={[styles.stepFill, { flex: days }]} />
-            <View style={{ flex: 10 - days }} />
+            <View style={{ flex: MAX_DAYS - days }} />
           </View>
-          <StepBtn label="+" onPress={() => setDays((d) => Math.min(10, d + 1))} />
+          <StepBtn label="+" onPress={() => setDays((d) => Math.min(MAX_DAYS, d + 1))} />
         </View>
       </Section>
 
@@ -267,7 +270,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
                   <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{v.label}</Text>
                   <Switch
                     value={checked}
-                    onValueChange={() => !disabled && toggleVar(v.value)}
+                    onValueChange={() => { if (!disabled) toggleVar(v.value); }}
                     disabled={disabled}
                     trackColor={{ false: '#d1d1d6', true: '#2a6bb5' }}
                     thumbColor="#fff"

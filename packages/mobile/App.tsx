@@ -3,8 +3,9 @@ import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-na
 import { StatusBar } from 'expo-status-bar';
 import BuilderTab from './BuilderTab';
 import DecoderTab from './DecoderTab';
+import InfoTab from './InfoTab';
 
-type Tab = 'builder' | 'decoder';
+type Tab = 'builder' | 'decoder' | 'info';
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('builder');
@@ -21,12 +22,13 @@ export default function App() {
       <View style={styles.tabBar}>
         <TabBtn label="Builder" active={tab === 'builder'} onPress={() => setTab('builder')} />
         <TabBtn label="Decoder" active={tab === 'decoder'} onPress={() => setTab('decoder')} />
+        <TabBtn label="Info" active={tab === 'info'} onPress={() => setTab('info')} />
       </View>
-      {tab === 'builder' ? (
-        <BuilderTab onForecastReceived={onForecastReceived} />
-      ) : (
+      {tab === 'builder' && <BuilderTab onForecastReceived={onForecastReceived} />}
+      {tab === 'decoder' && (
         <DecoderTab forecastData={forecastData} onForecastDataChange={setForecastData} />
       )}
+      {tab === 'info' && <InfoTab />}
     </SafeAreaView>
   );
 }

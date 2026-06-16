@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity,
   ScrollView, Share,
 } from 'react-native';
 import {
-  CODECS, CARDINALS, RESOLUTION_HOURS, modelsFromMask, startDatetime,
+  CARDINALS, RESOLUTION_HOURS, RESOLUTION_LABEL, modelsFromMask, startDatetime,
   type ForecastMessage, type Period,
 } from '@weather/protocol';
+import { decodeAny, loadCache, addToCache, deleteFromCache, type CacheEntry } from './cache';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -137,16 +138,6 @@ function periodLabel(date: Date, timeStep: number): string {
   return `${DAYS[date.getDay()]}\n${date.getHours()}h`;
 }
 
-// ── Decode ─────────────────────────────────────────────────────────────────
-
-function tryDecode(raw: string): ForecastMessage {
-  const text = raw.replace(/\s/g, '').replace(/^fw:/i, '');
-  for (const version of [1, 2] as const) {
-    try { return CODECS[version].decode(text); } catch { /* try next */ }
-  }
-  throw new Error('Could not decode forecast');
-}
-
 // ── Row model ──────────────────────────────────────────────────────────────
 
 interface ModelBlock {
@@ -220,9 +211,9 @@ function buildBlocks(msg: ForecastMessage, models: string[]): ModelBlock[] {
 function IconCell({ period, height }: { period: Period; height: number }) {
   const [label, emoji] = WMO[period.weathercode] ?? ['Unknown', '❓'];
   return (
-    <View style={[styles.cell, { height, width: CELL_W, alignItems: 'center', justifyContent: 'center' }]}>
-      <Text style={styles.wmoEmoji}>{emoji}</Text>
-      <Text style={styles.wmoLabel} numberOfLines={2}>{label}</Text>
+    <View style={[ftStyles.cell, { height, width: CELL_W, alignItems: 'center', justifyContent: 'center' }]}>
+      <Text style={ftStyles.wmoEmoji}>{emoji}</Text>
+      <Text style={ftStyles.wmoLabel} numberOfLines={2}>{label}</Text>
     </View>
   );
 }
@@ -232,10 +223,10 @@ function PrecipCell({ period, height }: { period: Period; height: number }) {
   if (pct == null) return <NilCell height={height} />;
   const color = precipColor(pct);
   return (
-    <View style={[styles.cell, { height, width: CELL_W, alignItems: 'center', justifyContent: 'center' }]}>
-      <Text style={[styles.precipPct, { color }]}>{pct}%</Text>
-      <View style={styles.precipTrack}>
-        <View style={[styles.precipFill, { width: `${pct}%` as any, backgroundColor: color }]} />
+    <View style={[ftStyles.cell, { height, width: CELL_W, alignItems: 'center', justifyContent: 'center' }]}>
+      <Text style={[ftStyles.precipPct, { color }]}>{pct}%</Text>
+      <View style={ftStyles.precipTrack}>
+        <View style={[ftStyles.precipFill, { width: `${pct}%` as any, backgroundColor: color }]} />
       </View>
     </View>
   );
@@ -243,8 +234,8 @@ function PrecipCell({ period, height }: { period: Period; height: number }) {
 
 function TextCell({ value, height }: { value: string; height: number }) {
   return (
-    <View style={[styles.cell, { height, width: CELL_W, alignItems: 'center', justifyContent: 'center' }]}>
-      <Text style={styles.dataText}>{value}</Text>
+    <View style={[ftStyles.cell, { height, width: CELL_W, alignItems: 'center', justifyContent: 'center' }]}>
+      <Text style={ftStyles.dataText}>{value}</Text>
     </View>
   );
 }
@@ -255,9 +246,9 @@ function WindCell({ kph, dirIdx, height, units }: { kph: number | undefined; dir
   const dir = dirIdx != null ? (CARDINALS[dirIdx] ?? 'N') : 'N';
   const arrow = ARROWS[dir] ?? '';
   return (
-    <View style={[styles.cell, { height, width: CELL_W, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }]}>
-      <Text style={[styles.windSpeed, { color: fg }]}>{fmtWind(kph, units)}</Text>
-      <Text style={[styles.windDir, { color: fg }]}>{dir} {arrow}</Text>
+    <View style={[ftStyles.cell, { height, width: CELL_W, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }]}>
+      <Text style={[ftStyles.windSpeed, { color: fg }]}>{fmtWind(kph, units)}</Text>
+      <Text style={[ftStyles.windDir, { color: fg }]}>{dir} {arrow}</Text>
     </View>
   );
 }
@@ -266,22 +257,22 @@ function CloudCell({ pct, height }: { pct: number | undefined; height: number })
   if (pct == null) return <NilCell height={height} />;
   const alpha = (pct / 100).toFixed(2);
   return (
-    <View style={[styles.cell, { height, width: CELL_W, backgroundColor: `rgba(130,130,130,${alpha})`, alignItems: 'center', justifyContent: 'center' }]}>
-      <Text style={styles.cloudPct}>{pct}%</Text>
+    <View style={[ftStyles.cell, { height, width: CELL_W, backgroundColor: `rgba(130,130,130,${alpha})`, alignItems: 'center', justifyContent: 'center' }]}>
+      <Text style={ftStyles.cloudPct}>{pct}%</Text>
     </View>
   );
 }
 
 function NilCell({ height }: { height: number }) {
   return (
-    <View style={[styles.cell, { height, width: CELL_W, alignItems: 'center', justifyContent: 'center' }]}>
-      <Text style={styles.nil}>—</Text>
+    <View style={[ftStyles.cell, { height, width: CELL_W, alignItems: 'center', justifyContent: 'center' }]}>
+      <Text style={ftStyles.nil}>—</Text>
     </View>
   );
 }
 
 function SectionBandCell({ height }: { height: number }) {
-  return <View style={[styles.cell, { height, width: CELL_W, backgroundColor: '#e8eaf0' }]} />;
+  return <View style={[ftStyles.cell, { height, width: CELL_W, backgroundColor: '#e8eaf0' }]} />;
 }
 
 function renderCell(row: DataRow, period: Period, units: Units) {
@@ -407,6 +398,26 @@ function metaLabel(msg: ForecastMessage, units: Units): string {
   return `${location} · ${latStr} ${lonStr}${elevStr} · ${msg.days}d ${resLabel} · ${models.join(' + ')}`;
 }
 
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** Compact label for a cached forecast (location · start · NNd res · models). */
+function cacheMetaLabel(encoded: string): string {
+  try {
+    const msg = decodeAny(encoded);
+    const models = modelsFromMask(msg.models_mask).join(' + ');
+    const resLabel = RESOLUTION_LABEL[msg.resolution] ?? '?';
+    const resHours = RESOLUTION_HOURS[msg.resolution] ?? 24;
+    const start = startDatetime(msg);
+    const startStr = resHours >= 24
+      ? `${DAY_NAMES[start.getDay()]} ${start.getMonth() + 1}/${start.getDate()}`
+      : `${DAY_NAMES[start.getDay()]} ${start.getMonth() + 1}/${start.getDate()} ${start.getHours()}h`;
+    const location = LOCATION_NAMES[msg.location] ?? 'Unknown';
+    return `${location} · ${startStr} · ${msg.days}d ${resLabel} · ${models}`;
+  } catch {
+    return 'Unknown';
+  }
+}
+
 interface Props {
   forecastData: string;
   onForecastDataChange: (v: string) => void;
@@ -416,21 +427,86 @@ export default function DecoderTab({ forecastData, onForecastDataChange }: Props
   const [units, setUnits] = useState<Units>('imperial');
   const [decoded, setDecoded] = useState<ForecastMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cache, setCache] = useState<CacheEntry[]>([]);
+  const [showPast, setShowPast] = useState(false);
+  // When true, the next decode came from loading a cached entry — don't re-cache it.
+  const suppressNextCache = useRef(false);
+
+  useEffect(() => {
+    loadCache().then(setCache);
+  }, []);
 
   useEffect(() => {
     if (!forecastData.trim()) {
       setDecoded(null);
       setError(null);
+      suppressNextCache.current = false;
       return;
     }
     try {
-      setDecoded(tryDecode(forecastData));
+      const msg = decodeAny(forecastData);
+      setDecoded(msg);
       setError(null);
-    } catch {
+      if (suppressNextCache.current) {
+        suppressNextCache.current = false;
+      } else {
+        addToCache(forecastData).then(setCache);
+      }
+    } catch (e) {
+      suppressNextCache.current = false;
       setDecoded(null);
-      setError('Could not decode forecast — paste the encoded reply from your inReach.');
+      const msg = String(e);
+      if (msg.includes('Version mismatch')) {
+        const match = msg.match(/encoded v(\d+)/);
+        const encoded = match ? match[1] : '?';
+        setError(`Version mismatch: this message uses protocol v${encoded}, which this app can't decode. Update the app or request a new forecast.`);
+      } else {
+        setError('Could not decode forecast — paste the encoded reply from your inReach.');
+      }
     }
   }, [forecastData]);
+
+  const loadPast = useCallback((encoded: string) => {
+    suppressNextCache.current = true;
+    onForecastDataChange(encoded);
+    setShowPast(false);
+  }, [onForecastDataChange]);
+
+  const deletePast = useCallback((encoded: string) => {
+    deleteFromCache(encoded).then(setCache);
+  }, []);
+
+  const pastSection = (
+    <View style={styles.pastSection}>
+      <TouchableOpacity
+        style={styles.pastHeader}
+        onPress={() => setShowPast((s) => !s)}
+        activeOpacity={0.6}
+      >
+        <Text style={styles.pastHeaderText}>Past forecasts</Text>
+        <Text style={styles.pastChevron}>{showPast ? '▼' : '▶'}</Text>
+      </TouchableOpacity>
+      {showPast && (
+        cache.length === 0 ? (
+          <Text style={styles.pastEmpty}>No past forecasts.</Text>
+        ) : (
+          cache.map((entry) => (
+            <View key={entry.encoded} style={styles.pastItem}>
+              <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(entry.encoded)}</Text>
+              <View style={styles.pastBtns}>
+                <TouchableOpacity style={styles.pastLoadBtn} onPress={() => loadPast(entry.encoded)}>
+                  <Text style={styles.pastLoadText}>Load</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.pastDeleteBtn} onPress={() => deletePast(entry.encoded)}>
+                  <Text style={styles.pastDeleteText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        )
+      )}
+    </View>
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: '#f2f2f7' }}>
@@ -457,54 +533,58 @@ export default function DecoderTab({ forecastData, onForecastDataChange }: Props
         )}
       </View>
 
-      {error && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-
-      {decoded && (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 48 }}>
-          {/* Meta + controls */}
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText} numberOfLines={3}>{metaLabel(decoded, units)}</Text>
-            <View style={styles.unitsToggle}>
-              <TouchableOpacity
-                style={[styles.unitBtn, units === 'imperial' && styles.unitBtnActive]}
-                onPress={() => setUnits('imperial')}
-              >
-                <Text style={[styles.unitBtnText, units === 'imperial' && styles.unitBtnTextActive]}>Imperial</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.unitBtn, units === 'metric' && styles.unitBtnActive]}
-                onPress={() => setUnits('metric')}
-              >
-                <Text style={[styles.unitBtnText, units === 'metric' && styles.unitBtnTextActive]}>Metric</Text>
-              </TouchableOpacity>
-            </View>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 48 }}>
+        {error && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
           </View>
+        )}
 
-          {/* Share encoded string */}
-          <TouchableOpacity
-            style={styles.shareRow}
-            onPress={() => Share.share({ message: forecastData.trim() })}
-          >
-            <Text style={styles.shareRowText}>Share encoded forecast</Text>
-          </TouchableOpacity>
+        {decoded && (
+          <>
+            {/* Meta + controls */}
+            <View style={styles.metaRow}>
+              <Text style={styles.metaText} numberOfLines={3}>{metaLabel(decoded, units)}</Text>
+              <View style={styles.unitsToggle}>
+                <TouchableOpacity
+                  style={[styles.unitBtn, units === 'imperial' && styles.unitBtnActive]}
+                  onPress={() => setUnits('imperial')}
+                >
+                  <Text style={[styles.unitBtnText, units === 'imperial' && styles.unitBtnTextActive]}>Imperial</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.unitBtn, units === 'metric' && styles.unitBtnActive]}
+                  onPress={() => setUnits('metric')}
+                >
+                  <Text style={[styles.unitBtnText, units === 'metric' && styles.unitBtnTextActive]}>Metric</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
 
-          {/* Forecast table */}
-          <ForecastTable msg={decoded} units={units} />
-        </ScrollView>
-      )}
+            {/* Share encoded string */}
+            <TouchableOpacity
+              style={styles.shareRow}
+              onPress={() => Share.share({ message: forecastData.trim() })}
+            >
+              <Text style={styles.shareRowText}>Share encoded forecast</Text>
+            </TouchableOpacity>
 
-      {!decoded && !error && (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>No forecast loaded</Text>
-          <Text style={styles.emptyBody}>
-            Fetch a forecast from the Builder tab, or paste an encoded reply received via Garmin inReach.
-          </Text>
-        </View>
-      )}
+            {/* Forecast table */}
+            <ForecastTable msg={decoded} units={units} />
+          </>
+        )}
+
+        {!decoded && !error && (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No forecast loaded</Text>
+            <Text style={styles.emptyBody}>
+              Fetch a forecast from the Builder tab, or paste an encoded reply received via Garmin inReach.
+            </Text>
+          </View>
+        )}
+
+        {pastSection}
+      </ScrollView>
     </View>
   );
 }
@@ -563,9 +643,26 @@ const styles = StyleSheet.create({
   },
   shareRowText: { fontSize: 13, color: '#2a6bb5' },
 
-  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
+  emptyState: { alignItems: 'center', justifyContent: 'center', padding: 40 },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: '#3a3a3c', marginBottom: 10, textAlign: 'center' },
   emptyBody: { fontSize: 14, color: '#8e8e93', lineHeight: 21, textAlign: 'center' },
+
+  pastSection: { marginTop: 8, marginHorizontal: 16 },
+  pastHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 },
+  pastHeaderText: { fontSize: 12, fontWeight: '700', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: 0.5 },
+  pastChevron: { fontSize: 11, color: '#8e8e93' },
+  pastEmpty: { fontSize: 13, color: '#aeaeb2', fontFamily: 'Courier', paddingVertical: 12 },
+  pastItem: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 10, gap: 12,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e5ea',
+  },
+  pastMeta: { flex: 1, fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
+  pastBtns: { flexDirection: 'row', gap: 8 },
+  pastLoadBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: '#2a6bb5' },
+  pastLoadText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  pastDeleteBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d1d6' },
+  pastDeleteText: { color: '#8e8e93', fontSize: 13, fontWeight: '600' },
 });
 
 const ftStyles = StyleSheet.create({
