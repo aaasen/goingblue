@@ -42,9 +42,11 @@ export const VARS_BIT: Record<string, number> = {
 };
 
 // Bits consumed per variable (parallel to VARS_BIT order)
-// WMO always uses 5 bits; these are for optional vars bits 0-11
-export const VAR_BITS = [3, 8, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4, 8];
-//                       ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^vis ^tmin
+// WMO always uses 5 bits; these are for optional vars bits 0-13
+export const VAR_BITS    = [3, 8, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4, 8];
+export const VAR_BITS_V2 = [3, 7, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4, 7];
+//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^vis ^tmin
+// v2 temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
 
 export const WMO_BITS = 5;
 
@@ -52,10 +54,10 @@ export const DEFAULT_VARS_MASK =
   (1 << 0) | (1 << 2) | (1 << 3) | (1 << 5) | (1 << 6) | (1 << 7);
 // precip + snow + freeze + w500 + w600 + w700
 
-export function periodBitsForMask(varsMask: number): number {
+export function periodBitsForMask(varsMask: number, varBits: number[] = VAR_BITS): number {
   let bits = WMO_BITS;
-  for (let i = 0; i < VAR_BITS.length; i++) {
-    if (varsMask & (1 << i)) bits += VAR_BITS[i];
+  for (let i = 0; i < varBits.length; i++) {
+    if (varsMask & (1 << i)) bits += varBits[i];
   }
   return bits;
 }

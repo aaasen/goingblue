@@ -19,8 +19,8 @@ const RESOLUTIONS_PER_DAY = [1, 2, 4, 8, 24];
 const PERIOD: Period = {
   weathercode: 73,
   precip: 75,
-  temp_f: 32,
-  temp_min_f: -5,
+  temp_c: 0,
+  temp_min_c: -20,
   snow_in: 4,
   freeze_ft: 6000,
   wind_sfc_mph: 10,
@@ -122,8 +122,8 @@ describe("round-trip encoding", () => {
     const p = decoded.periods[0][0];
     expect(p.weathercode).toBe(PERIOD.weathercode);
     expect(p.precip).toBe(Math.round(Math.round((PERIOD.precip ?? 0) * 7 / 100) * 100 / 7));
-    expect(p.temp_f).toBe(PERIOD.temp_f);
-    expect(p.temp_min_f).toBe(PERIOD.temp_min_f);
+    expect(p.temp_c).toBe(PERIOD.temp_c);
+    expect(p.temp_min_c).toBe(PERIOD.temp_min_c);
     expect(p.snow_in).toBe(PERIOD.snow_in);
     expect(p.freeze_ft).toBe(PERIOD.freeze_ft);
     expect(p.wind_sfc_mph).toBe(PERIOD.wind_sfc_mph);
@@ -258,9 +258,9 @@ describe("round-trip encoding", () => {
   });
 
   it("preserves negative temp", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, temp_f: -20, temp_min_f: -35 }]] }));
-    expect(decoded.periods[0][0].temp_f).toBe(-20);
-    expect(decoded.periods[0][0].temp_min_f).toBe(-35);
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, temp_c: -20, temp_min_c: -35 }]] }));
+    expect(decoded.periods[0][0].temp_c).toBe(-20);
+    expect(decoded.periods[0][0].temp_min_c).toBe(-35);
   });
 
   it("throws on version mismatch", () => {

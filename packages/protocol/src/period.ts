@@ -1,15 +1,15 @@
 import { WMO_CODES } from "./constants.js";
 import { putInt, takeInt } from "./bits.js";
 
-const WMO2IDX: Record<number, number> = Object.fromEntries(
+export const WMO2IDX: Record<number, number> = Object.fromEntries(
   WMO_CODES.map((c, i) => [c, i]),
 );
 
 export interface Period {
   weathercode: number;
   precip?: number;        // 0–100 %
-  temp_f?: number;        // °F integer (max)
-  temp_min_f?: number;    // °F integer (min)
+  temp_c?: number;        // °C (max)
+  temp_min_c?: number;    // °C (min)
   snow_in?: number;       // 0–15 in
   freeze_ft?: number;     // 0–15 000 ft (1 000 ft steps)
   wind_sfc_mph?: number;
@@ -42,8 +42,8 @@ export function periodToBits(p: Period, varsMask: number): number[] {
   const bits: number[] = [];
   putInt(bits, WMO2IDX[p.weathercode] ?? 0, 5);
   if (varsMask & (1 << 0)) putInt(bits, Math.min(Math.round((p.precip ?? 0) * 7 / 100), 7), 3);
-  if (varsMask & (1 <<  1)) putInt(bits, Math.min(Math.max(Math.round((p.temp_f     ?? 0) + 100), 0), 255), 8);
-  if (varsMask & (1 << 13)) putInt(bits, Math.min(Math.max(Math.round((p.temp_min_f ?? 0) + 100), 0), 255), 8);
+  if (varsMask & (1 <<  1)) putInt(bits, Math.min(Math.max(Math.round((p.temp_c     ?? 0) * 9/5 + 132), 0), 255), 8);
+  if (varsMask & (1 << 13)) putInt(bits, Math.min(Math.max(Math.round((p.temp_min_c ?? 0) * 9/5 + 132), 0), 255), 8);
   if (varsMask & (1 << 2)) putInt(bits, Math.min(p.snow_in ?? 0, 15), 4);
   if (varsMask & (1 << 3)) putInt(bits, Math.min(Math.floor((p.freeze_ft ?? 0) / 1000), 15), 4);
   if (varsMask & (1 << 4)) putWind(bits, p.wind_sfc_mph ?? 0, p.wind_sfc_dir ?? 0);
@@ -64,8 +64,8 @@ export function periodFromBits(bits: number[], pos: number, varsMask: number): [
   const p: Period = { weathercode: WMO_CODES[wc] ?? 0 };
 
   if (varsMask & (1 << 0)) { let v: number; [v, pos] = takeInt(bits, pos, 3); p.precip = Math.round(v * 100 / 7); }
-  if (varsMask & (1 <<  1)) { let v: number; [v, pos] = takeInt(bits, pos, 8); p.temp_f     = v - 100; }
-  if (varsMask & (1 << 13)) { let v: number; [v, pos] = takeInt(bits, pos, 8); p.temp_min_f = v - 100; }
+  if (varsMask & (1 <<  1)) { let v: number; [v, pos] = takeInt(bits, pos, 8); p.temp_c     = (v - 132) * 5/9; }
+  if (varsMask & (1 << 13)) { let v: number; [v, pos] = takeInt(bits, pos, 8); p.temp_min_c = (v - 132) * 5/9; }
   if (varsMask & (1 << 2)) { let v: number; [v, pos] = takeInt(bits, pos, 4); p.snow_in = v; }
   if (varsMask & (1 << 3)) { let v: number; [v, pos] = takeInt(bits, pos, 4); p.freeze_ft = v * 1000; }
   if (varsMask & (1 << 4)) { let mph: number, dir: number; [mph, dir, pos] = takeWind(bits, pos); p.wind_sfc_mph = mph; p.wind_sfc_dir = dir; }
