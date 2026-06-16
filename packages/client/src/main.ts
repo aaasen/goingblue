@@ -7,13 +7,15 @@ import {
   modelsFromMask,
   startDatetime,
 } from "@weather/protocol";
-import { render, type ForecastView, type DecodedPeriod } from "./render.js";
+import { render, type ForecastView, type UnitSystem } from "./render.js";
 import { updateBuilder, requestCoords } from "./builder.js";
 import { LOCATION_DISPLAY_NAMES } from "./ui-constants.js";
 
 const VERSION = 4;
 
-function toView(msg: ForecastMessage): ForecastView {
+let units: UnitSystem = (localStorage.getItem("units") as UnitSystem | null) ?? "imperial";
+
+function toView(msg: ForecastMessage, u: UnitSystem): ForecastView {
   const models = modelsFromMask(msg.models_mask);
   const resHours = RESOLUTION_HOURS[msg.resolution] ?? 24;
   const daily = resHours >= 24;
@@ -24,27 +26,26 @@ function toView(msg: ForecastMessage): ForecastView {
   if (now.getTime() - start.getTime() > 180 * 86400000) start.setFullYear(start.getFullYear() + 1);
   const stepMs = resHours * 3600000;
 
-  const periods: DecodedPeriod[][] = msg.periods.map((modelPeriods) =>
+  const periods = msg.periods.map((modelPeriods) =>
     modelPeriods.map((p, i) => ({
       date: new Date(start.getTime() + i * stepMs),
       wc: p.weathercode,
       precip: p.precip,
-      temp_f: p.temp_f,
-      temp_min_f: p.temp_min_f,
-      fz_ft: p.freeze_ft,
-      snow: p.snow_in,
-      snowUnit: daily ? 1 : 0.1,
-      p_sfc: p.wind_sfc_mph != null
-        ? { ws: p.wind_sfc_mph, dir: CARDINALS[p.wind_sfc_dir!] }
+      temp_c: p.temp_c,
+      temp_min_c: p.temp_min_c,
+      fz_m: p.freeze_m,
+      snow_cm: p.snow_cm,
+      p_sfc: p.wind_sfc_kph != null
+        ? { ws: p.wind_sfc_kph, dir: CARDINALS[p.wind_sfc_dir!] }
         : undefined,
-      p500: p.wind_500_mph != null
-        ? { ws: p.wind_500_mph, dir: CARDINALS[p.wind_500_dir!] }
+      p500: p.wind_500_kph != null
+        ? { ws: p.wind_500_kph, dir: CARDINALS[p.wind_500_dir!] }
         : undefined,
-      p600: p.wind_600_mph != null
-        ? { ws: p.wind_600_mph, dir: CARDINALS[p.wind_600_dir!] }
+      p600: p.wind_600_kph != null
+        ? { ws: p.wind_600_kph, dir: CARDINALS[p.wind_600_dir!] }
         : undefined,
-      p700: p.wind_700_mph != null
-        ? { ws: p.wind_700_mph, dir: CARDINALS[p.wind_700_dir!] }
+      p700: p.wind_700_kph != null
+        ? { ws: p.wind_700_kph, dir: CARDINALS[p.wind_700_dir!] }
         : undefined,
       cloud_total: p.cloud_total,
       cloud_high:  p.cloud_high,
@@ -58,7 +59,9 @@ function toView(msg: ForecastMessage): ForecastView {
   const lonStr = `${Math.abs(msg.lon).toFixed(3)}°${msg.lon >= 0 ? "E" : "W"}`;
 
   const elevStr = msg.location === 0 && msg.elevation != null
-    ? ` · ${Math.round(msg.elevation * 3.28084).toLocaleString()}ft`
+    ? u === "imperial"
+      ? ` · ${Math.round(msg.elevation * 3.28084).toLocaleString()}ft`
+      : ` · ${Math.round(msg.elevation).toLocaleString()}m`
     : "";
 
   const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -70,6 +73,7 @@ function toView(msg: ForecastMessage): ForecastView {
     label: `${LOCATION_DISPLAY_NAMES[msg.location] ?? "Unknown"} · ${latStr} ${lonStr}${elevStr} · ${msg.days}d ${resLabel} from ${startStr} · ${models.join(" + ")}`,
     models,
     timeStep: resHours,
+    units: u,
     periods,
   };
 }
@@ -78,17 +82,30 @@ const input = document.getElementById("input") as HTMLTextAreaElement;
 const output = document.getElementById("output") as HTMLElement;
 
 let suppressNextCache = false;
+let lastMsg: ForecastMessage | null = null;
+
+// Sync unit toggle to persisted state
+document.querySelectorAll<HTMLInputElement>('input[name="units"]').forEach((el) => {
+  if (el.value === units) el.checked = true;
+  el.addEventListener("change", () => {
+    units = el.value as UnitSystem;
+    localStorage.setItem("units", units);
+    if (lastMsg) output.innerHTML = render(toView(lastMsg, units));
+  });
+});
 
 input.addEventListener("input", () => {
   const text = input.value.replace(/\s/g, "");
   if (!text) {
     output.innerHTML = "";
+    lastMsg = null;
     return;
   }
 
   try {
     const msg = messageFromString(text);
-    output.innerHTML = render(toView(msg));
+    lastMsg = msg;
+    output.innerHTML = render(toView(msg, units));
     if (!suppressNextCache) addToCache(text);
     suppressNextCache = false;
   } catch (e) {
