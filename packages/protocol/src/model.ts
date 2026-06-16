@@ -5,12 +5,24 @@ export const WMO2IDX: Record<number, number> = Object.fromEntries(
 );
 
 export interface Period {
+  // WMO Weather code.
   weathercode: number;
-  precip?: number;        // 0–100 %
-  temp_c?: number;        // °C (max)
-  temp_min_c?: number;    // °C (min)
-  snow_cm?: number;       // cm
-  freeze_m?: number;      // m
+
+  // Probability of precipitation.
+  precip?: number;
+
+  // Maximum and minimum air temperature in Celsius.
+  temp_c?: number;
+  temp_min_c?: number;
+
+  // Snow accumulation in centimeters.
+  snow_cm?: number;
+
+  // Freezing altitude in meters.
+  freeze_m?: number;
+
+  // Wind speeds in kilometers per hour and direction.
+  // Surface level as well as 500, 600, 700 hPa pressure levels.
   wind_sfc_kph?: number;
   wind_sfc_dir?: number;
   wind_500_kph?: number;
@@ -19,9 +31,13 @@ export interface Period {
   wind_600_dir?: number;
   wind_700_kph?: number;
   wind_700_dir?: number;
-  cloud_total?: number;   // 0–100 %
-  cloud_high?: number;    // 0–100 %
-  cloud_mid?: number;     // 0–100 %
-  cloud_low?: number;     // 0–100 %
+
+  // Cloud cover percentages.
+  cloud_total?: number;
+  cloud_high?: number;    // 8km+
+  cloud_mid?: number;     // 3-8km
+  cloud_low?: number;     // <3km
+
+  // Visibility in kilometers.
   vis_km?: number;        // 0–15 km
 }
