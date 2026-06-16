@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity,
-  ActivityIndicator, Alert, Switch, TextInput,
+  ActivityIndicator, Alert, TextInput,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
@@ -319,14 +319,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
                   activeOpacity={disabled ? 1 : 0.6}
                 >
                   <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{v.label}</Text>
-                  <View pointerEvents="none">
-                    <Switch
-                      value={checked}
-                      disabled={disabled}
-                      trackColor={{ false: '#d1d1d6', true: '#2a6bb5' }}
-                      thumbColor="#fff"
-                    />
-                  </View>
+                  <Text style={[styles.varCheck, !checked && styles.varCheckHidden]}>✓</Text>
                 </TouchableOpacity>
               );
             })}
@@ -387,6 +380,8 @@ const styles = StyleSheet.create({
   varRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
   varLabel: { fontSize: 15, color: '#1c1c1e' },
   varLabelDim: { color: '#aeaeb2' },
+  varCheck: { fontSize: 17, fontWeight: '600', color: '#2a6bb5' },
+  varCheckHidden: { opacity: 0 },
 
   lenSummary: { fontSize: 13, color: '#6e6e73', marginTop: 8 },
   lenOver: { color: '#cc2222', fontWeight: '500' },
