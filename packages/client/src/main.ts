@@ -80,6 +80,7 @@ function toView(msg: ForecastMessage, u: UnitSystem): ForecastView {
 
 const input = document.getElementById("input") as HTMLTextAreaElement;
 const output = document.getElementById("output") as HTMLElement;
+const clearBtn = document.getElementById("clear-input") as HTMLButtonElement;
 
 let suppressNextCache = false;
 let lastMsg: ForecastMessage | null = null;
@@ -94,7 +95,19 @@ document.querySelectorAll<HTMLInputElement>('input[name="units"]').forEach((el) 
   });
 });
 
+function updateClearBtn() {
+  clearBtn.style.display = input.value ? "block" : "none";
+}
+
+clearBtn.addEventListener("click", () => {
+  input.value = "";
+  output.innerHTML = "";
+  updateClearBtn();
+  input.focus();
+});
+
 input.addEventListener("input", () => {
+  updateClearBtn();
   const text = input.value.replace(/\s/g, "").replace(/^fw:/i, "");
   if (!text) {
     output.innerHTML = "";

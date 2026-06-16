@@ -55,6 +55,10 @@
                 letter-spacing: 0.03em;
             }
 
+            .textarea-wrap {
+                position: relative;
+                margin-bottom: 12px;
+            }
             textarea {
                 width: 100%;
                 background: #fff;
@@ -68,14 +72,36 @@
                 resize: vertical;
                 min-height: 60px;
                 outline: none;
-                margin-bottom: 12px;
+                margin-bottom: 0;
                 -webkit-appearance: none;
+                box-sizing: border-box;
             }
             textarea::placeholder {
                 color: #bbb;
             }
             textarea:focus {
                 border-color: #999;
+            }
+            #clear-input {
+                display: none;
+                position: absolute;
+                top: 6px;
+                right: 6px;
+                width: 22px;
+                height: 22px;
+                border: none;
+                border-radius: 50%;
+                background: #ccc;
+                color: #555;
+                font-size: 14px;
+                line-height: 22px;
+                text-align: center;
+                cursor: pointer;
+                padding: 0;
+                user-select: none;
+            }
+            #clear-input:hover {
+                background: #bbb;
             }
 
             .type-badge {
@@ -1002,13 +1028,16 @@
                     <label class="opt-btn"><input type="radio" name="units" value="metric" /> Metric</label>
                 </div>
             </div>
-            <textarea
-                id="input"
-                placeholder="Paste the encoded forecast from your inReach…"
-                autocorrect="off"
-                autocapitalize="off"
-                spellcheck="false"
-            ></textarea>
+            <div class="textarea-wrap">
+                <textarea
+                    id="input"
+                    placeholder="Paste the encoded forecast from your inReach…"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                ></textarea>
+                <button id="clear-input" title="Clear">×</button>
+            </div>
             <div id="output"></div>
             <details id="past-forecasts-section" style="margin-top:4px">
                 <summary class="past-forecasts-summary">Past forecasts</summary>
