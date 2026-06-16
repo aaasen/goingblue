@@ -9,8 +9,8 @@ import type { ForecastMessage, VersionedCodec } from "../message.js";
 const VERSION = 2;
 
 // v2 temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
-export const VAR_BITS_V2 = [3, 7, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4, 7];
-//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^vis ^tmin
+export const VAR_BITS_V2 = [3, 7, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 0, 7];
+//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl  -  ^tmin
 
 const TEMP_OFFSET = 40;
 const KPH_PER_STEP = 5 * 1.609344;
@@ -42,7 +42,6 @@ function periodToBits(p: Period, varsMask: number): number[] {
   if (varsMask & (1 << 9))  putInt(bits, Math.min(Math.round((p.cloud_high  ?? 0) * 7 / 100), 7), 3);
   if (varsMask & (1 << 10)) putInt(bits, Math.min(Math.round((p.cloud_mid   ?? 0) * 7 / 100), 7), 3);
   if (varsMask & (1 << 11)) putInt(bits, Math.min(Math.round((p.cloud_low   ?? 0) * 7 / 100), 7), 3);
-  if (varsMask & (1 << 12)) putInt(bits, Math.min(p.vis_km ?? 0, 15), 4);
   return bits;
 }
 
@@ -64,7 +63,6 @@ function periodFromBits(bits: number[], pos: number, varsMask: number): [Period,
   if (varsMask & (1 << 9))  { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_high  = Math.round(v * 100 / 7); }
   if (varsMask & (1 << 10)) { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_mid   = Math.round(v * 100 / 7); }
   if (varsMask & (1 << 11)) { let v: number; [v, pos] = takeInt(bits, pos, 3); p.cloud_low   = Math.round(v * 100 / 7); }
-  if (varsMask & (1 << 12)) { let v: number; [v, pos] = takeInt(bits, pos, 4); p.vis_km      = v; }
 
   return [p, pos];
 }

@@ -23,7 +23,6 @@ export interface DecodedPeriod {
   cloud_high?: number;
   cloud_mid?: number;
   cloud_low?: number;
-  vis_km?: number;
 }
 
 export interface ForecastView {
@@ -179,20 +178,6 @@ function windCells(ps: DecodedPeriod[], key: keyof DecodedPeriod, colored: boole
   });
 }
 
-function visCells(ps: DecodedPeriod[], units: UnitSystem): string[] {
-  return ps.map((p) => {
-    if (p.vis_km == null) return nilCell();
-    let label: string;
-    if (units === "imperial") {
-      const mi = p.vis_km * 0.621371;
-      label = p.vis_km >= 15 ? "≥9 mi" : `${mi < 1 ? mi.toFixed(1) : Math.round(mi)} mi`;
-    } else {
-      label = p.vis_km >= 15 ? "≥15 km" : `${p.vis_km} km`;
-    }
-    return `<span style="font-family:monospace;font-size:.85rem;font-weight:600;color:#6688aa">${label}</span>`;
-  });
-}
-
 function modelBlock(ps: DecodedPeriod[], n: number, units: UnitSystem): string {
   const hasPrecip  = ps.some((p) => p.precip      != null);
   const hasTempMax = ps.some((p) => p.temp_c      != null);
@@ -207,10 +192,9 @@ function modelBlock(ps: DecodedPeriod[], n: number, units: UnitSystem): string {
   const hasCloudH  = ps.some((p) => p.cloud_high   != null);
   const hasCloudM  = ps.some((p) => p.cloud_mid    != null);
   const hasCloudL  = ps.some((p) => p.cloud_low    != null);
-  const hasVis     = ps.some((p) => p.vis_km       != null);
   const hasSurface = hasPrecip || hasTempMax || hasTempMin || hasSnow || hasFreeze || hasSfc;
   const hasUpper   = has500 || has600 || has700;
-  const hasCloud   = hasCloudT || hasCloudH || hasCloudM || hasCloudL || hasVis;
+  const hasCloud   = hasCloudT || hasCloudH || hasCloudM || hasCloudL;
 
   const imp = units === "imperial";
 
@@ -230,7 +214,6 @@ function modelBlock(ps: DecodedPeriod[], n: number, units: UnitSystem): string {
     if (hasCloudH) body += row("High",   cloudCells(ps, "cloud_high"));
     if (hasCloudM) body += row("Mid",    cloudCells(ps, "cloud_mid"));
     if (hasCloudL) body += row("Low",    cloudCells(ps, "cloud_low"));
-    if (hasVis)    body += row("Vis",    visCells(ps, units));
   }
   if (hasUpper) {
     body += sectionRow("Pressure", n);

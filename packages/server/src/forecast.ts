@@ -71,7 +71,6 @@ const SURFACE_VARS = [
   "cloud_cover_high",
   "cloud_cover_mid",
   "cloud_cover_low",
-  "visibility",
 ];
 const PRESSURE_LEVELS = [500, 600, 700];
 const PRESSURE_VAR_NAMES = ["temperature", "wind_speed", "wind_direction"];
@@ -129,7 +128,6 @@ interface HourlyData {
   cloud_cover_high: (number | null)[];
   cloud_cover_mid: (number | null)[];
   cloud_cover_low: (number | null)[];
-  visibility: (number | null)[];
   [key: string]: unknown[];
 }
 
@@ -153,7 +151,6 @@ export interface Row {
   cloud_cover_high: number | null;
   cloud_cover_mid: number | null;
   cloud_cover_low: number | null;
-  visibility_m: number | null;
 }
 
 async function fetchHourly(
@@ -263,7 +260,6 @@ export async function aggregateRows(
       cloud_cover_high: maxOf(pick(h.cloud_cover_high)),
       cloud_cover_mid: maxOf(pick(h.cloud_cover_mid)),
       cloud_cover_low: maxOf(pick(h.cloud_cover_low)),
-      visibility_m: minOf(pick(h.visibility)),
     };
   });
   return [rows, elevation];
@@ -300,7 +296,6 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period
   if (varsMask & (1 << VARS_BIT.cch)) p.cloud_high  = Math.round(r.cloud_cover_high ?? 0);
   if (varsMask & (1 << VARS_BIT.ccm)) p.cloud_mid   = Math.round(r.cloud_cover_mid  ?? 0);
   if (varsMask & (1 << VARS_BIT.ccl)) p.cloud_low   = Math.round(r.cloud_cover_low  ?? 0);
-  if (varsMask & (1 << VARS_BIT.vis)) p.vis_km = Math.min(Math.round((r.visibility_m ?? 0) / 1000), 15);
   return p;
 }
 

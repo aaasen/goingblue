@@ -12,7 +12,7 @@ import {
 
 const ALL_VARS =
   (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) |
-  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 12) | (1 << 13);
+  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 13);
 
 const RESOLUTIONS_PER_DAY = [1, 2, 4, 8, 24];
 
@@ -35,7 +35,6 @@ const PERIOD: Period = {
   cloud_high: 60,
   cloud_mid: 40,
   cloud_low: 20,
-  vis_km: 8,
 };
 
 function popcount(n: number): number {
@@ -139,7 +138,6 @@ describe("round-trip encoding", () => {
     expect(p.cloud_high).toBe(Math.round(Math.round((PERIOD.cloud_high   ?? 0) * 7 / 100) * 100 / 7));
     expect(p.cloud_mid).toBe(Math.round(Math.round((PERIOD.cloud_mid     ?? 0) * 7 / 100) * 100 / 7));
     expect(p.cloud_low).toBe(Math.round(Math.round((PERIOD.cloud_low     ?? 0) * 7 / 100) * 100 / 7));
-    expect(p.vis_km).toBe(PERIOD.vis_km);
   });
 
   it("omits all optional fields when vars_mask=0", () => {
@@ -154,7 +152,6 @@ describe("round-trip encoding", () => {
     expect(p.wind_500_kph).toBeUndefined();
     expect(p.cloud_total).toBeUndefined();
     expect(p.cloud_high).toBeUndefined();
-    expect(p.vis_km).toBeUndefined();
   });
 
   it("only includes selected vars", () => {

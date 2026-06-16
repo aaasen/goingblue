@@ -37,7 +37,7 @@ beforeAll(async () => {
     const vars = [
       "temperature_2m", "wind_speed_10m", "wind_direction_10m",
       "precipitation_probability", "weather_code", "snowfall",
-      "cloud_cover", "cloud_cover_high", "cloud_cover_mid", "cloud_cover_low", "visibility",
+      "cloud_cover", "cloud_cover_high", "cloud_cover_mid", "cloud_cover_low",
     ];
     const params = new URLSearchParams({
       latitude: String(LAT),
@@ -88,7 +88,6 @@ function row(snow_cm: number): Row {
     cloud_cover_high: 0,
     cloud_cover_mid: 90,
     cloud_cover_low: 100,
-    visibility_m: 200,
   };
 }
 
