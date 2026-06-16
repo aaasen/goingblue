@@ -6,12 +6,15 @@ import { encode, decode, periodBitsForMask, nCharsForBits } from "../codec.js";
 import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec } from "../model.js";
 
-const VERSION = 2;
+export const V2_VERSION = 2;
+const VERSION = V2_VERSION;
 
 // v2 drops v1's 3-bit location field — locations are addressed by lat/lon only.
 // Header layout (91 bits): version:7 days:4 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5 lat:15 lon:16 elev:14
-const HEADER_BITS = 91;
-const HEADER_CHARS = nCharsForBits(HEADER_BITS); // = 14
+export const V2_HEADER_BITS = 91;
+export const V2_HEADER_CHARS = nCharsForBits(V2_HEADER_BITS); // = 14
+const HEADER_BITS = V2_HEADER_BITS;
+const HEADER_CHARS = V2_HEADER_CHARS;
 
 // v2 temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
 export const VAR_BITS_V2 = [3, 7, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 0, 7];

@@ -6,7 +6,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import {
-  HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, VERSION, VAR_BITS,
+  V2_HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, V2_VERSION, VAR_BITS_V2,
 } from '@weather/protocol';
 
 const MAX_CHARS = 160;
@@ -78,8 +78,8 @@ const DEFAULT_VARS = new Set([
 
 function calcChars(days: number, resHours: number, varsMask: number): number {
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
-  const bodyBits = days * periodsPerDay * periodBitsForMask(varsMask, VAR_BITS);
-  return HEADER_CHARS + nCharsForBits(bodyBits);
+  const bodyBits = days * periodsPerDay * periodBitsForMask(varsMask, VAR_BITS_V2);
+  return V2_HEADER_CHARS + nCharsForBits(bodyBits);
 }
 
 function buildMsg(coords: { lat: number; lon: number } | null, days: number, resHours: number, model: string, vars: string[]): string {
@@ -89,7 +89,7 @@ function buildMsg(coords: { lat: number; lon: number } | null, days: number, res
   if (resHours < 24) parts.push(`r:${resHours}h`);
   parts.push(`m:${model}`);
   if (vars.length) parts.push(`v:${vars.join(',')}`);
-  parts.push(`v${VERSION}`);
+  parts.push(`v${V2_VERSION}`);
   return parts.join(' ');
 }
 
