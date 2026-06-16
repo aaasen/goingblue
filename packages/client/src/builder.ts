@@ -1,4 +1,4 @@
-import { HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, VERSION } from "@weather/protocol";
+import { HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, VERSION, VAR_BITS } from "@weather/protocol";
 import { MODEL_UNAVAIL_VARS } from "./ui-constants.js";
 
 const MAX_CHARS = 160;
@@ -37,7 +37,7 @@ export function requestCoords(): Promise<string> {
 
 export function builderChars(days: number, resHours: number, nModels: number, varsMask: number): number {
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
-  const bodyBits = days * periodsPerDay * nModels * periodBitsForMask(varsMask);
+  const bodyBits = days * periodsPerDay * nModels * periodBitsForMask(varsMask, VAR_BITS);
   return HEADER_CHARS + nCharsForBits(bodyBits);
 }
 
