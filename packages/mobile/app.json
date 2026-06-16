@@ -10,7 +10,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.laneaasen.weather",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "Used to fetch a weather forecast for your current position."
       }
     },
     "android": {

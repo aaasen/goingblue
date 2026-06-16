@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity,
-  Share, ActivityIndicator, Alert, Switch,
+  Share, ActivityIndicator, Alert, Switch, TextInput,
 } from 'react-native';
+import * as Location from 'expo-location';
 import {
   HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, VERSION, VAR_BITS,
 } from '@weather/protocol';
@@ -17,14 +18,7 @@ const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
   ifs: [],
 };
 
-const LOCATIONS = [
-  { value: 'current', label: 'Current' },
-  { value: '11k', label: '11k' },
-  { value: '14k', label: '14k' },
-  { value: '17k', label: '17k' },
-  { value: 'summit', label: 'Summit' },
-  { value: 'airstrip', label: 'Airstrip' },
-];
+type LocationMode = 'current' | 'custom';
 
 const RESOLUTIONS = [
   { value: 1, label: '1h' },
@@ -84,9 +78,9 @@ function calcChars(days: number, resHours: number, varsMask: number): number {
   return HEADER_CHARS + nCharsForBits(bodyBits);
 }
 
-function buildMsg(location: string, days: number, resHours: number, model: string, vars: string[]): string {
+function buildMsg(lat: number, lon: number, days: number, resHours: number, model: string, vars: string[]): string {
   const parts: string[] = [];
-  if (location && location !== 'current') parts.push(`l:${location}`);
+  parts.push(`${lat.toFixed(4)},${lon.toFixed(4)}`);
   parts.push(`d:${days}`);
   if (resHours < 24) parts.push(`r:${resHours}h`);
   parts.push(`m:${model}`);
@@ -100,19 +94,55 @@ interface Props {
 }
 
 export default function BuilderTab({ onForecastReceived }: Props) {
-  const [location, setLocation] = useState('14k');
+  const [locationMode, setLocationMode] = useState<LocationMode>('current');
+  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [customLat, setCustomLat] = useState('');
+  const [customLon, setCustomLon] = useState('');
   const [days, setDays] = useState(7);
   const [resHours, setResHours] = useState(24);
   const [model, setModel] = useState('ifs');
   const [vars, setVars] = useState<Set<string>>(new Set(DEFAULT_VARS));
   const [fetching, setFetching] = useState(false);
+  const [locating, setLocating] = useState(false);
 
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
   const activeVars = [...vars].filter((v) => !unavail.includes(v));
   const varsMask = activeVars.reduce((mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)), 0);
   const nChars = calcChars(days, resHours, varsMask);
   const over = nChars > MAX_CHARS;
-  const message = buildMsg(location, days, resHours, model, activeVars);
+
+  const resolvedCoords = locationMode === 'current'
+    ? gpsCoords
+    : { lat: parseFloat(customLat), lon: parseFloat(customLon) };
+  const coordsValid = resolvedCoords != null
+    && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
+  const message = coordsValid
+    ? buildMsg(resolvedCoords!.lat, resolvedCoords!.lon, days, resHours, model, activeVars)
+    : '';
+
+  async function requestCurrentLocation() {
+    setLocating(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission denied', 'Location access is required to use current location.');
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setGpsCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+    } catch (e) {
+      Alert.alert('Error', 'Could not get location: ' + String(e));
+    } finally {
+      setLocating(false);
+    }
+  }
+
+  function handleLocationModeChange(mode: LocationMode) {
+    setLocationMode(mode);
+    if (mode === 'current' && gpsCoords == null) {
+      requestCurrentLocation();
+    }
+  }
 
   function toggleVar(v: string) {
     setVars((prev) => {
@@ -124,6 +154,10 @@ export default function BuilderTab({ onForecastReceived }: Props) {
   }
 
   async function handleFetch() {
+    if (!coordsValid) {
+      Alert.alert('No location', 'Please set a valid location before fetching.');
+      return;
+    }
     setFetching(true);
     try {
       const resp = await fetch(FORECAST_URL, {
@@ -143,13 +177,51 @@ export default function BuilderTab({ onForecastReceived }: Props) {
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
       <Section label="Location">
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={styles.pills}>
-            {LOCATIONS.map((l) => (
-              <Pill key={l.value} label={l.label} selected={location === l.value} onPress={() => setLocation(l.value)} />
-            ))}
+        <View style={styles.pills}>
+          <Pill label="Current Location" selected={locationMode === 'current'} onPress={() => handleLocationModeChange('current')} />
+          <Pill label="Custom" selected={locationMode === 'custom'} onPress={() => handleLocationModeChange('custom')} />
+        </View>
+        {locationMode === 'current' && (
+          <View style={styles.locationStatus}>
+            {locating ? (
+              <ActivityIndicator size="small" color="#2a6bb5" />
+            ) : gpsCoords ? (
+              <Text style={styles.coordsText}>
+                {gpsCoords.lat.toFixed(4)}, {gpsCoords.lon.toFixed(4)}
+              </Text>
+            ) : (
+              <TouchableOpacity onPress={requestCurrentLocation}>
+                <Text style={styles.locationRetry}>Tap to get location</Text>
+              </TouchableOpacity>
+            )}
           </View>
-        </ScrollView>
+        )}
+        {locationMode === 'custom' && (
+          <View style={styles.customCoords}>
+            <View style={styles.coordRow}>
+              <Text style={styles.coordLabel}>Lat</Text>
+              <TextInput
+                style={styles.coordInput}
+                value={customLat}
+                onChangeText={setCustomLat}
+                placeholder="63.0000"
+                keyboardType="numbers-and-punctuation"
+                returnKeyType="next"
+              />
+            </View>
+            <View style={[styles.coordRow, styles.coordRowLast]}>
+              <Text style={styles.coordLabel}>Lon</Text>
+              <TextInput
+                style={styles.coordInput}
+                value={customLon}
+                onChangeText={setCustomLon}
+                placeholder="-151.0000"
+                keyboardType="numbers-and-punctuation"
+                returnKeyType="done"
+              />
+            </View>
+          </View>
+        )}
       </Section>
 
       <Section label={`Days: ${days}`}>
@@ -221,18 +293,28 @@ export default function BuilderTab({ onForecastReceived }: Props) {
 
       <Section label="Message">
         <View style={styles.msgBox}>
-          <Text style={styles.msgText} selectable>{message}</Text>
+          {message ? (
+            <Text style={styles.msgText} selectable>{message}</Text>
+          ) : (
+            <Text style={styles.msgPlaceholder}>
+              {locationMode === 'current' ? 'Waiting for GPS…' : 'Enter lat/lon above'}
+            </Text>
+          )}
         </View>
       </Section>
 
       <View style={styles.buttons}>
-        <TouchableOpacity style={[styles.btn, styles.btnOutline]} onPress={() => Share.share({ message })}>
+        <TouchableOpacity
+          style={[styles.btn, styles.btnOutline, !message && styles.btnDisabled]}
+          onPress={() => message && Share.share({ message })}
+          disabled={!message}
+        >
           <Text style={styles.btnOutlineText}>Share</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.btn, styles.btnPrimary, over && styles.btnDisabled]}
+          style={[styles.btn, styles.btnPrimary, (over || !coordsValid) && styles.btnDisabled]}
           onPress={handleFetch}
-          disabled={over || fetching}
+          disabled={over || fetching || !coordsValid}
         >
           {fetching ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Fetch Forecast</Text>}
         </TouchableOpacity>
@@ -297,8 +379,18 @@ const styles = StyleSheet.create({
   lenOk: { color: '#2a8f5a' },
   lenOver: { color: '#cc2222', fontWeight: '500' },
 
+  locationStatus: { marginTop: 10, alignItems: 'flex-start' },
+  coordsText: { fontFamily: 'Courier', fontSize: 13, color: '#2a6bb5' },
+  locationRetry: { fontSize: 13, color: '#2a6bb5', textDecorationLine: 'underline' },
+  customCoords: { marginTop: 10, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
+  coordRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
+  coordRowLast: { borderBottomWidth: 0 },
+  coordLabel: { width: 30, fontSize: 14, fontWeight: '600', color: '#6e6e73' },
+  coordInput: { flex: 1, fontSize: 14, color: '#1c1c1e', fontFamily: 'Courier' },
+
   msgBox: { backgroundColor: '#fff', borderRadius: 12, padding: 14 },
   msgText: { fontFamily: 'Courier', fontSize: 14, color: '#1c1c1e', lineHeight: 22 },
+  msgPlaceholder: { fontFamily: 'Courier', fontSize: 14, color: '#aeaeb2', lineHeight: 22 },
 
   buttons: { flexDirection: 'row', gap: 12, marginTop: 4 },
   btn: { flex: 1, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
