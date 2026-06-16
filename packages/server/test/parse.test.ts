@@ -41,6 +41,24 @@ describe("parseRequest", () => {
     expect(p.lon).toBeCloseTo(-151.081);
   });
 
+  it("max response length defaults to 160", () => {
+    expect(parseRequest("").maxChars).toBe(160);
+  });
+
+  it("c: sets the max response length and yields more periods when raised", () => {
+    expect(parseRequest("c:320").maxChars).toBe(320);
+    const dflt = parseRequest("r:1h").nPeriods;
+    const larger = parseRequest("c:320 r:1h").nPeriods;
+    const smaller = parseRequest("c:80 r:1h").nPeriods;
+    expect(larger).toBeGreaterThan(dflt);
+    expect(smaller).toBeLessThan(dflt);
+  });
+
+  it("c: clamps to a minimum of 1 and still returns at least one period", () => {
+    expect(parseRequest("c:0").maxChars).toBe(1);
+    expect(parseRequest("c:0").nPeriods).toBe(1);
+  });
+
   it("the period count always fits the budget; a fuller var set yields fewer hourly periods", () => {
     // At 1h resolution the default var set fills more periods than an all-vars request,
     // and both stay within the response budget.

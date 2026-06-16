@@ -315,13 +315,14 @@ export interface ForecastParams {
   resolutionIdx: number;
   modelsMask: number;
   varsMask: number;
+  maxChars: number;
   decoderVersion: number;
 }
 
 // 8-bit period count in the protocol header → 1..256 periods.
 const MAX_PERIODS = 256;
-const RESPONSE_MAX_CHARS = 160; // Garmin inReach reply length limit
-const HORIZON_DAYS = 15;        // upstream forecast horizon
+const DEFAULT_MAX_CHARS = 160; // default response length cap (Garmin inReach reply limit)
+const HORIZON_DAYS = 15;       // upstream forecast horizon
 
 function popcount(n: number): number {
   let c = 0;
@@ -329,18 +330,24 @@ function popcount(n: number): number {
   return c;
 }
 
-// Largest period count whose encoded forecast still fits the response budget, bounded by the
-// protocol's 8-bit period field and the forecast horizon. The request no longer carries a
-// period count, so the server fits as many periods as possible for the chosen resolution,
-// variables, and models (mirrors the builder app's preview math).
-function maxPeriodsForBudget(resolutionIdx: number, varsMask: number, modelsMask: number): number {
+// Largest period count whose encoded forecast still fits within `maxChars`, bounded by the
+// protocol's 8-bit period field and the forecast horizon. The request carries no period
+// count, so the server fits as many periods as possible for the chosen resolution, variables,
+// models, and client-requested max length (mirrors the builder app's preview math). Returns
+// at least 1 period even when a single period exceeds `maxChars`.
+function maxPeriodsForBudget(
+  resolutionIdx: number,
+  varsMask: number,
+  modelsMask: number,
+  maxChars: number,
+): number {
   const periodsPerDay = 24 / HOURS_PER_PERIOD[resolutionIdx];
   const cap = Math.min(MAX_PERIODS, Math.floor(HORIZON_DAYS * periodsPerDay));
   const nModels = Math.max(1, popcount(modelsMask));
   const periodBits = periodBitsForMask(varsMask, VAR_BITS_V1);
   for (let n = cap; n >= 1; n--) {
     const bodyBits = n * nModels * periodBits;
-    if (V1_HEADER_CHARS + nCharsForBits(bodyBits) <= RESPONSE_MAX_CHARS) return n;
+    if (V1_HEADER_CHARS + nCharsForBits(bodyBits) <= maxChars) return n;
   }
   return 1;
 }
@@ -353,6 +360,7 @@ export function parseRequest(body: string): ForecastParams {
   let resolutionIdx = 0;
   let modelsMask = 1; // ECMWF default
   let varsMask = 0;
+  let maxChars = DEFAULT_MAX_CHARS; // override with a `c:` token in the request
   let decoderVersion = CURRENT_VERSION; // override with a `vN` token in the request
 
   // Compact "X,Y" (message body) takes priority over "Lat X Lon Y" (Garmin email footer)
@@ -378,6 +386,9 @@ export function parseRequest(body: string): ForecastParams {
         }
       } else if (key === "r") {
         if (val in RESOLUTION_LABEL_TO_IDX) resolutionIdx = RESOLUTION_LABEL_TO_IDX[val];
+      } else if (key === "c") {
+        const n = parseInt(val);
+        if (!isNaN(n)) maxChars = Math.max(1, n);
       } else if (key === "m") {
         let mask = 0;
         for (const m of val.split(",")) {
@@ -396,11 +407,11 @@ export function parseRequest(body: string): ForecastParams {
 
   if (varsMask === 0) varsMask = DEFAULT_VARS_MASK;
 
-  // The request carries no period count: fit as many periods as the response budget allows
-  // for the chosen resolution, variables, and models.
-  const nPeriods = maxPeriodsForBudget(resolutionIdx, varsMask, modelsMask);
+  // The request carries no period count: fit as many periods as the requested max length
+  // allows for the chosen resolution, variables, and models.
+  const nPeriods = maxPeriodsForBudget(resolutionIdx, varsMask, modelsMask, maxChars);
 
-  return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, decoderVersion };
+  return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, maxChars, decoderVersion };
 }
 
 export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<string> {

@@ -9,7 +9,9 @@ import {
   V1_HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, V1_VERSION, VAR_BITS_V1,
 } from '@weather/protocol';
 
-const MAX_CHARS = 160;
+const CHARS_PER_MESSAGE = 160; // each Garmin inReach message holds 160 characters
+const DEFAULT_MESSAGES = 1;
+const MESSAGE_OPTIONS = [1, 2, 3, 4, 5];
 const MAX_PERIODS = 256;   // v1 header carries an 8-bit period count
 const HORIZON_DAYS = 15;   // upstream forecast horizon
 const FORECAST_URL = __DEV__
@@ -84,13 +86,13 @@ function calcChars(nPeriods: number, varsMask: number): number {
   return V1_HEADER_CHARS + nCharsForBits(bodyBits);
 }
 
-// As many time periods as fit MAX_CHARS for the selected variables, bounded by the 8-bit
+// As many time periods as fit `maxChars` for the selected variables, bounded by the 8-bit
 // header field and the forecast horizon. Returns 0 only if a single period won't fit.
-function maxPeriodsFor(resHours: number, varsMask: number): number {
+function maxPeriodsFor(resHours: number, varsMask: number, maxChars: number): number {
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
   const cap = Math.min(MAX_PERIODS, Math.floor(HORIZON_DAYS * periodsPerDay));
   for (let n = cap; n >= 1; n--) {
-    if (calcChars(n, varsMask) <= MAX_CHARS) return n;
+    if (calcChars(n, varsMask) <= maxChars) return n;
   }
   return 0;
 }
@@ -103,13 +105,15 @@ function formatSpan(days: number): string {
 }
 
 // The request leads with the protocol version and omits any period count — the server fits
-// as many periods as the response budget allows for the chosen resolution and variables.
-function buildMsg(coords: { lat: number; lon: number } | null, resHours: number, model: string, vars: string[]): string {
+// as many periods as the max response length (`c:`, in chars) allows for the chosen
+// resolution and variables. `c:` is always included, even at the default length.
+function buildMsg(coords: { lat: number; lon: number } | null, resHours: number, model: string, vars: string[], maxChars: number): string {
   const parts: string[] = [`v${V1_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   if (resHours < 24) parts.push(`r:${resHours}h`);
   parts.push(`m:${model}`);
   if (vars.length) parts.push(`v:${vars.join(',')}`);
+  parts.push(`c:${maxChars}`);
   return parts.join(' ');
 }
 
@@ -125,18 +129,22 @@ export default function BuilderTab({ onForecastReceived }: Props) {
   const [resHours, setResHours] = useState(24);
   const [model, setModel] = useState('ifs');
   const [vars, setVars] = useState<Set<string>>(new Set(DEFAULT_VARS));
+  const [numMessages, setNumMessages] = useState(DEFAULT_MESSAGES);
   const [fetching, setFetching] = useState(false);
   const [locating, setLocating] = useState(false);
+
+  // The user picks how many 160-char messages the reply may span; that sets the response
+  // length budget.
+  const maxChars = numMessages * CHARS_PER_MESSAGE;
 
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
   const activeVars = [...vars].filter((v) => !unavail.includes(v));
   const varsMask = activeVars.reduce((mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)), 0);
   // The period count isn't user-selected: include as many time periods as the char budget allows.
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
-  const nPeriods = maxPeriodsFor(resHours, varsMask);
+  const nPeriods = maxPeriodsFor(resHours, varsMask, maxChars);
   const fits = nPeriods > 0;
   const spanDays = nPeriods / periodsPerDay;
-  const nChars = fits ? calcChars(nPeriods, varsMask) : 0;
   const resLabel = RESOLUTIONS.find((r) => r.value === resHours)?.label ?? `${resHours}h`;
 
   const resolvedCoords = locationMode === 'current'
@@ -148,7 +156,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
   // in custom mode we only show a message once valid coords are entered.
   const showMessage = fits && (coordsValid || locationMode === 'current');
   const message = showMessage
-    ? buildMsg(coordsValid ? resolvedCoords : null, resHours, model, activeVars)
+    ? buildMsg(coordsValid ? resolvedCoords : null, resHours, model, activeVars, maxChars)
     : '';
   // In current-location mode the buttons stay tappable so they can request GPS on demand.
   const copyDisabled = locating || !fits || (locationMode === 'custom' && !coordsValid);
@@ -180,7 +188,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       coords = await requestCurrentLocation();
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return;
-    const msg = buildMsg(coords, resHours, model, activeVars);
+    const msg = buildMsg(coords, resHours, model, activeVars, maxChars);
     await Clipboard.setStringAsync(msg);
   }
 
@@ -207,7 +215,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: buildMsg(coords, resHours, model, activeVars),
+        body: buildMsg(coords, resHours, model, activeVars, maxChars),
       });
       if (!resp.ok) throw new Error(await resp.text());
       onForecastReceived(await resp.text());
@@ -272,6 +280,19 @@ export default function BuilderTab({ onForecastReceived }: Props) {
         </View>
       </Section>
 
+      <Section label="Number of Messages">
+        <View style={styles.pills}>
+          {MESSAGE_OPTIONS.map((n) => (
+            <Pill key={n} label={String(n)} selected={numMessages === n} onPress={() => setNumMessages(n)} />
+          ))}
+        </View>
+        <Text style={[styles.lenSummary, !fits && styles.lenOver]}>
+          {fits
+            ? `${formatSpan(spanDays)} · ${nPeriods} period${nPeriods === 1 ? '' : 's'}`
+            : `Won't fit ${numMessages} message${numMessages === 1 ? '' : 's'} at ${resLabel} resolution — reduce variables or coarsen resolution`}
+        </Text>
+      </Section>
+
       <Section label="Model">
         <View style={styles.pills}>
           {MODELS.map((m) => (
@@ -308,20 +329,6 @@ export default function BuilderTab({ onForecastReceived }: Props) {
           </View>
         </Section>
       ))}
-
-      <Section label="Forecast Length">
-        <View style={styles.lenTrack}>
-          <View style={[styles.lenFill, { flex: fits ? nChars : MAX_CHARS, backgroundColor: fits ? '#2a8f5a' : '#cc2222' }]} />
-          <View style={{ flex: fits ? Math.max(MAX_CHARS - nChars, 0) : 0 }} />
-        </View>
-        <Text style={[styles.lenText, fits ? styles.lenOk : styles.lenOver]}>
-          {fits
-            ? resHours >= 24
-              ? `${nPeriods} day${nPeriods === 1 ? '' : 's'} · ${nChars}/${MAX_CHARS} chars`
-              : `${nPeriods} periods · ${formatSpan(spanDays)} · ${nChars}/${MAX_CHARS} chars`
-            : `Too many variables for ${resLabel} resolution — reduce variables or coarsen resolution`}
-        </Text>
-      </Section>
 
       <Section label="Message">
         <View style={styles.msgBox}>
@@ -391,10 +398,7 @@ const styles = StyleSheet.create({
   varLabel: { fontSize: 15, color: '#1c1c1e' },
   varLabelDim: { color: '#aeaeb2' },
 
-  lenTrack: { height: 8, flexDirection: 'row', borderRadius: 4, backgroundColor: '#e5e5ea', overflow: 'hidden', marginBottom: 6 },
-  lenFill: { height: 8 },
-  lenText: { fontSize: 13 },
-  lenOk: { color: '#2a8f5a' },
+  lenSummary: { fontSize: 13, color: '#6e6e73', marginTop: 8 },
   lenOver: { color: '#cc2222', fontWeight: '500' },
 
   locationStatus: { marginTop: 10, alignItems: 'flex-start' },
