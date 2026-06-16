@@ -12,6 +12,9 @@ importers:
       '@react-native-async-storage/async-storage':
         specifier: 2.2.0
         version: 2.2.0(react-native@0.85.3)
+      '@react-native-segmented-control/segmented-control':
+        specifier: 2.5.7
+        version: 2.5.7(react-native@0.85.3)(react@19.2.3)
       '@weather/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -1695,6 +1698,16 @@ packages:
       react-native: ^0.0.0-0 || >=0.65 <1.0
     dependencies:
       merge-options: 3.0.4
+      react-native: 0.85.3(@babel/core@8.0.0)(@types/react@19.2.17)(react@19.2.3)
+    dev: false
+
+  /@react-native-segmented-control/segmented-control@2.5.7(react-native@0.85.3)(react@19.2.3):
+    resolution: {integrity: sha512-l84YeVX8xAU3lvOJSvV4nK/NbGhIm2gBfveYolwaoCbRp+/SLXtc6mYrQmM9ScXNwU14mnzjQTpTHWl5YPnkzQ==}
+    peerDependencies:
+      react: '>=16.0'
+      react-native: '>=0.62'
+    dependencies:
+      react: 19.2.3
       react-native: 0.85.3(@babel/core@8.0.0)(@types/react@19.2.17)(react@19.2.3)
     dev: false
 

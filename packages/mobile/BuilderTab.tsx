@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
   V1_HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, V1_VERSION, VAR_BITS_V1,
 } from '@weather/protocol';
@@ -281,11 +282,11 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       </Section>
 
       <Section label="Number of Messages">
-        <View style={styles.pills}>
-          {MESSAGE_OPTIONS.map((n) => (
-            <Pill key={n} label={String(n)} selected={numMessages === n} onPress={() => setNumMessages(n)} />
-          ))}
-        </View>
+        <SegmentedControl
+          values={MESSAGE_OPTIONS.map(String)}
+          selectedIndex={MESSAGE_OPTIONS.indexOf(numMessages)}
+          onChange={(e) => setNumMessages(MESSAGE_OPTIONS[e.nativeEvent.selectedSegmentIndex])}
+        />
         <Text style={[styles.lenSummary, !fits && styles.lenOver]}>
           {fits
             ? `${formatSpan(spanDays)} · ${nPeriods} period${nPeriods === 1 ? '' : 's'}`
