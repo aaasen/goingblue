@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   messageToString,
   messageFromString,
-  type ForecastMessage,
+  type V1ForecastMessage,
   type Period,
   CARDINALS,
   DEFAULT_VARS_MASK,
@@ -44,7 +44,7 @@ function popcount(n: number): number {
 }
 
 // Always derives `days` from periods[0].length / periodsPerDay to keep encoding consistent.
-function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
+function msg(overrides: Partial<V1ForecastMessage> = {}): V1ForecastMessage {
   const resolution = overrides.resolution ?? 0;
   const models_mask = overrides.models_mask ?? 0b001;
   const nModels = popcount(models_mask);
@@ -72,7 +72,7 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   };
 }
 
-function roundTrip(m: ForecastMessage): ForecastMessage {
+function roundTrip(m: V1ForecastMessage): V1ForecastMessage {
   return messageFromString(messageToString(m));
 }
 

@@ -41,3 +41,41 @@ export interface Period {
   // Visibility in kilometers.
   vis_km?: number;        // 0–15 km
 }
+
+// Decoded forecast message. Each protocol version defines its own header format;
+// `ForecastMessage` is the common shape shared by every version, and individual
+// versions extend it with their own extra header fields (see `V1ForecastMessage`).
+export interface ForecastMessage {
+  version: number;
+  days: number;
+  resolution: number;
+  models_mask: number;
+  vars_mask: number;
+  month: number;
+  day: number;
+  hour: number;
+  lat: number;
+  lon: number;
+  elevation: number;
+  periods: Period[][];
+}
+
+// v1 header additionally carries a legacy location index (0 = current/GPS, 1-5 = named).
+// Dropped in v2, where locations are addressed by lat/lon only.
+export interface V1ForecastMessage extends ForecastMessage {
+  location: number;
+}
+
+// A codec for a single protocol version. The header format is version-specific, so the
+// codec is parameterized by its message type (defaulting to the common `ForecastMessage`).
+export interface VersionedCodec<M extends ForecastMessage = ForecastMessage> {
+  encode(msg: M): string;
+  decode(str: string): M;
+}
+
+export function startDatetime(msg: ForecastMessage): Date {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), msg.month - 1, msg.day, msg.hour);
+  if (now.getTime() - d.getTime() > 180 * 86400000) d.setFullYear(d.getFullYear() + 1);
+  return d;
+}

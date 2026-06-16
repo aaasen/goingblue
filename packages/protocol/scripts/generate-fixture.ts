@@ -3,11 +3,11 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { v1Codec } from "../src/versions/v1.js";
 import { DEFAULT_VARS_MASK } from "../src/constants.js";
-import type { ForecastMessage } from "../src/message.js";
+import type { V1ForecastMessage } from "../src/model.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const input: ForecastMessage = {
+const input: V1ForecastMessage = {
   version: 1,
   location: 2,         // 14k camp
   days: 3,

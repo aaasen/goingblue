@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { v1Codec } from "../src/versions/v1.js";
 import { v2Codec } from "../src/versions/v2.js";
-import type { ForecastMessage } from "../src/message.js";
+import type { ForecastMessage, V1ForecastMessage } from "../src/model.js";
 import v1Fixture from "./fixtures/v1.fixture.json";
 import v2Fixture from "./fixtures/v2.fixture.json";
 
 describe("v1 fixture stability", () => {
   it("encodes to the same string", () => {
-    expect(v1Codec.encode(v1Fixture.decoded as ForecastMessage)).toBe(v1Fixture.encoded);
+    expect(v1Codec.encode(v1Fixture.decoded as V1ForecastMessage)).toBe(v1Fixture.encoded);
   });
 
   it("decodes to the same object", () => {

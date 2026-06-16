@@ -8,7 +8,7 @@ import { encode, decode, periodBitsForMask, nCharsForBits } from "../codec.js";
 export const VAR_BITS = [3, 8, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 4, 8];
 //                       ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^vis ^tmin
 import { WMO2IDX, type Period } from "../model.js";
-import type { ForecastMessage, VersionedCodec } from "../message.js";
+import type { V1ForecastMessage, VersionedCodec } from "../model.js";
 
 // v1 wire: wind stored as 5 mph steps (0–75 mph); convert from/to km/h
 const KPH_PER_STEP = 5 * 1.609344;
@@ -67,7 +67,7 @@ function periodFromBits(bits: number[], pos: number, varsMask: number): [Period,
   return [p, pos];
 }
 
-export function messageToString(msg: ForecastMessage): string {
+export function messageToString(msg: V1ForecastMessage): string {
   const headerBits: number[] = [];
   putInt(headerBits, msg.version, 7);
   putInt(headerBits, msg.location, 3);
@@ -93,7 +93,7 @@ export function messageToString(msg: ForecastMessage): string {
   return encode(headerBits) + encode(bodyBits);
 }
 
-export function messageFromString(s: string): ForecastMessage {
+export function messageFromString(s: string): V1ForecastMessage {
   if (s.length < HEADER_CHARS)
     throw new Error(`Unexpected message length: ${s.length} chars`);
 
@@ -154,7 +154,7 @@ function popcount(n: number): number {
   return c;
 }
 
-export const v1Codec: VersionedCodec = {
+export const v1Codec: VersionedCodec<V1ForecastMessage> = {
   encode: messageToString,
   decode: messageFromString,
 };

@@ -3,7 +3,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { v2Codec } from "../src/versions/v2.js";
 import { DEFAULT_VARS_MASK } from "../src/constants.js";
-import type { ForecastMessage } from "../src/message.js";
+import type { ForecastMessage } from "../src/model.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -12,7 +12,6 @@ const vars_mask = DEFAULT_VARS_MASK | (1 << 1) | (1 << 13);
 
 const input: ForecastMessage = {
   version: 2,
-  location: 2,         // 14k camp
   days: 3,
   resolution: 0,       // daily
   models_mask: 0b0001, // HRES only

@@ -3,7 +3,7 @@ import {
   DEFAULT_VARS_MASK,
   VARS_BIT,
   type Period,
-  type ForecastMessage,
+  type V1ForecastMessage,
   type VersionedCodec,
 } from "@weather/protocol";
 
@@ -397,7 +397,8 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   const day = parseInt(firstTime.slice(8, 10));
   const hour = parseInt(firstTime.slice(11, 13));
 
-  const msg: ForecastMessage = {
+  // Carries `location` for v1; v2's codec ignores it. Assignable to any version's encoder.
+  const msg: V1ForecastMessage = {
     version: params.decoderVersion,
     location: params.locationIdx,
     days: params.days,

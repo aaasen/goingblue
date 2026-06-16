@@ -1,12 +1,17 @@
 import {
-  HEADER_BITS, HEADER_CHARS, RESOLUTION_HOURS, WMO_CODES, LAT_BITS, LON_BITS, ELEV_BITS,
+  RESOLUTION_HOURS, WMO_CODES, LAT_BITS, LON_BITS, ELEV_BITS,
 } from "../constants.js";
 import { putInt, takeInt } from "../bits.js";
 import { encode, decode, periodBitsForMask, nCharsForBits } from "../codec.js";
 import { WMO2IDX, type Period } from "../model.js";
-import type { ForecastMessage, VersionedCodec } from "../message.js";
+import type { ForecastMessage, VersionedCodec } from "../model.js";
 
 const VERSION = 2;
+
+// v2 drops v1's 3-bit location field — locations are addressed by lat/lon only.
+// Header layout (91 bits): version:7 days:4 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5 lat:15 lon:16 elev:14
+const HEADER_BITS = 91;
+const HEADER_CHARS = nCharsForBits(HEADER_BITS); // = 14
 
 // v2 temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
 export const VAR_BITS_V2 = [3, 7, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 0, 7];
@@ -70,7 +75,6 @@ function periodFromBits(bits: number[], pos: number, varsMask: number): [Period,
 export function v2MessageToString(msg: ForecastMessage): string {
   const headerBits: number[] = [];
   putInt(headerBits, msg.version, 7);
-  putInt(headerBits, msg.location, 3);
   putInt(headerBits, msg.days - 1, 4);
   putInt(headerBits, msg.resolution, 3);
   putInt(headerBits, msg.models_mask, 4);
@@ -100,10 +104,9 @@ export function v2MessageFromString(s: string): ForecastMessage {
   const headerBits = decode(s.slice(0, HEADER_CHARS), HEADER_BITS);
   let pos = 0;
 
-  let version: number, location: number, daysRaw: number, resolution: number,
+  let version: number, daysRaw: number, resolution: number,
       models_mask: number, vars_mask: number, month: number, day: number, hour: number;
   [version,     pos] = takeInt(headerBits, pos, 7);
-  [location,    pos] = takeInt(headerBits, pos, 3);
   [daysRaw,     pos] = takeInt(headerBits, pos, 4);
   [resolution,  pos] = takeInt(headerBits, pos, 3);
   [models_mask, pos] = takeInt(headerBits, pos, 4);
@@ -145,7 +148,7 @@ export function v2MessageFromString(s: string): ForecastMessage {
     }
   }
 
-  return { version, location, days: daysRaw + 1, resolution, models_mask, vars_mask, month, day, hour, lat, lon, elevation, periods: allPeriods };
+  return { version, days: daysRaw + 1, resolution, models_mask, vars_mask, month, day, hour, lat, lon, elevation, periods: allPeriods };
 }
 
 function popcount(n: number): number {
