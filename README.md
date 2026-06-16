@@ -10,11 +10,12 @@ The decoder app is a Progressive Web App (PWA) that can be installed on your pho
 
 ## Architecture
 
-This is a pnpm monorepo with three packages:
+This is a pnpm monorepo with four packages:
 
 - `packages/protocol` — shared TypeScript binary encoding/decoding used by both server and client
 - `packages/server` — Hono/Node.js server; receives inbound email webhooks, fetches Open-Meteo forecasts, sends Garmin replies, and serves the decoder page
 - `packages/client` — Vite PWA decoder; imports the protocol package to decode and render forecasts entirely in-browser
+- `packages/mobile` — Expo React Native iOS companion app
 
 ## Development
 
@@ -56,6 +57,33 @@ To use a different port:
 
 ```bash
 PORT=3000 node packages/server/dist/index.js
+```
+
+### Mobile (Expo / React Native)
+
+**Additional prerequisites:** [Expo Go](https://expo.dev/go) on your iOS or Android device, or Xcode (iOS simulator) / Android Studio (Android emulator).
+
+```
+pnpm --filter @weather/mobile exec expo install expo-dev-client
+```
+
+Start the Expo development server from the mobile package:
+
+```bash
+pnpm --filter @weather/mobile start
+```
+
+This opens the Expo CLI. Then:
+
+- **Physical device:** scan the QR code with the Expo Go app
+- **iOS simulator:** press `i` (requires Xcode)
+- **Android emulator:** press `a` (requires Android Studio)
+
+You can also target a platform directly:
+
+```bash
+pnpm --filter @weather/mobile ios      # iOS simulator
+pnpm --filter @weather/mobile android  # Android emulator
 ```
 
 ### Tests
