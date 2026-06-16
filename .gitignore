@@ -9,3 +9,5 @@ packages/*/dist/
 .DS_Store
 
 TODO.md
+
+.claude
