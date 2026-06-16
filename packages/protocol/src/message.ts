@@ -1,4 +1,4 @@
-import type { Period } from "./period.js";
+import type { Period } from "./model.js";
 
 export interface VersionedCodec {
   encode(msg: ForecastMessage): string;

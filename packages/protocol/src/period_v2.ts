@@ -1,6 +1,6 @@
 import { WMO_CODES } from "./constants.js";
 import { putInt, takeInt } from "./bits.js";
-import { WMO2IDX, type Period } from "./period.js";
+import { WMO2IDX, type Period } from "./model.js";
 
 // Temp: 7 bits, 1°C steps, offset +40 → stored value = round(temp_c) + 40
 // Range: -40°C (value 0) to +87°C (value 127)

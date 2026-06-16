@@ -4,7 +4,7 @@ import {
 } from "../constants.js";
 import { putInt, takeInt } from "../bits.js";
 import { encode, decode } from "../codec.js";
-import { type Period } from "../period.js";
+import { type Period } from "../model.js";
 import { periodToBitsV2, periodFromBitsV2 } from "../period_v2.js";
 import type { ForecastMessage, VersionedCodec } from "../message.js";
 
