@@ -15,7 +15,7 @@ type Units = 'imperial' | 'metric';
 
 // ── Layout constants ───────────────────────────────────────────────────────
 
-const LABEL_W = 78;
+const LABEL_W = 92;
 const CELL_W = 72;
 
 const ROW_H = {
@@ -65,22 +65,58 @@ const ARROWS: Record<string, string> = {
   S: '↑', SW: '↗', W: '→', NW: '↘',
 };
 
-// [mph upper bound, bg, fg]
+// Wind speed ramp, calm → storm. [mph upper bound, bg, fg]
+// Smooth green → yellow → orange → red → violet gradient (meteoblue/Windy style).
 const BEAUFORT: [number, string, string][] = [
-  [1,        '#7e97a0', '#fff'],
-  [4,        '#7e97a0', '#fff'],
-  [8,        '#82c8ec', '#1a1a1a'],
-  [13,       '#3a9ecc', '#fff'],
-  [19,       '#3a9e88', '#fff'],
-  [25,       '#4a9e30', '#fff'],
-  [32,       '#d47810', '#fff'],
-  [39,       '#9e2818', '#fff'],
-  [47,       '#dd0028', '#fff'],
-  [55,       '#8800aa', '#fff'],
-  [64,       '#5030b0', '#fff'],
-  [73,       '#006888', '#fff'],
-  [Infinity, '#00cc44', '#fff'],
+  [1,        '#a7cf95', '#2b3a25'],
+  [4,        '#8cc274', '#2b3a25'],
+  [8,        '#aacb52', '#2b3a16'],
+  [13,       '#cfd049', '#3a3614'],
+  [19,       '#edc63f', '#3a2e08'],
+  [25,       '#eba23c', '#fff'],
+  [32,       '#e37b34', '#fff'],
+  [39,       '#d9502d', '#fff'],
+  [47,       '#c02b2b', '#fff'],
+  [55,       '#9c2566', '#fff'],
+  [64,       '#76288e', '#fff'],
+  [73,       '#522a9e', '#fff'],
+  [Infinity, '#372a8e', '#fff'],
 ];
+
+// Temperature → text color stops (°C). Interpolated for a smooth blue→red scale.
+const TEMP_STOPS: [number, [number, number, number]][] = [
+  [-15, [91, 58, 158]],
+  [-5,  [58, 95, 191]],
+  [3,   [42, 134, 200]],
+  [11,  [38, 158, 122]],
+  [18,  [122, 158, 42]],
+  [24,  [212, 144, 32]],
+  [30,  [212, 96, 42]],
+  [38,  [192, 48, 42]],
+];
+
+function lerp(a: number, b: number, t: number): number {
+  return Math.round(a + (b - a) * t);
+}
+
+function tempColor(c: number): string {
+  const stops = TEMP_STOPS;
+  if (c <= stops[0][0]) return rgb(stops[0][1]);
+  if (c >= stops[stops.length - 1][0]) return rgb(stops[stops.length - 1][1]);
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [t0, c0] = stops[i];
+    const [t1, c1] = stops[i + 1];
+    if (c >= t0 && c <= t1) {
+      const t = (c - t0) / (t1 - t0);
+      return rgb([lerp(c0[0], c1[0], t), lerp(c0[1], c1[1], t), lerp(c0[2], c1[2], t)]);
+    }
+  }
+  return '#1c1c1e';
+}
+
+function rgb([r, g, b]: [number, number, number]): string {
+  return `rgb(${r}, ${g}, ${b})`;
+}
 
 const MODEL_COLORS: Record<string, string> = {
   'ECMWF IFS HRES':  '#2a6bb5',
@@ -129,6 +165,11 @@ function precipColor(pct: number): string {
   if (pct >= 60) return '#c04040';
   if (pct >= 30) return '#c08020';
   return '#4080c8';
+}
+
+/** Faint alternating tint so each day/column reads as its own block. */
+function colBg(i: number): string {
+  return i % 2 === 1 ? '#f4f7fb' : '#ffffff';
 }
 
 function periodLabel(date: Date, timeStep: number): string {
@@ -232,10 +273,10 @@ function PrecipCell({ period, height }: { period: Period; height: number }) {
   );
 }
 
-function TextCell({ value, height }: { value: string; height: number }) {
+function TextCell({ value, height, color }: { value: string; height: number; color?: string }) {
   return (
     <View style={[ftStyles.cell, { height, width: CELL_W, alignItems: 'center', justifyContent: 'center' }]}>
-      <Text style={ftStyles.dataText}>{value}</Text>
+      <Text style={[ftStyles.dataText, color != null && { color, fontWeight: '700' as const }]}>{value}</Text>
     </View>
   );
 }
@@ -272,7 +313,7 @@ function NilCell({ height }: { height: number }) {
 }
 
 function SectionBandCell({ height }: { height: number }) {
-  return <View style={[ftStyles.cell, { height, width: CELL_W, backgroundColor: '#e8eaf0' }]} />;
+  return <View style={[ftStyles.cell, { height, width: CELL_W, backgroundColor: '#eef1f6' }]} />;
 }
 
 function renderCell(row: DataRow, period: Period, units: Units) {
@@ -280,8 +321,8 @@ function renderCell(row: DataRow, period: Period, units: Units) {
   switch (kind) {
     case 'icon':   return <IconCell   period={period} height={height} />;
     case 'precip': return <PrecipCell period={period} height={height} />;
-    case 'temp-max': return <TextCell value={fmtTemp(period.temp_c,     units)} height={height} />;
-    case 'temp-min': return <TextCell value={fmtTemp(period.temp_min_c, units)} height={height} />;
+    case 'temp-max': return <TextCell value={fmtTemp(period.temp_c,     units)} height={height} color={period.temp_c     != null ? tempColor(period.temp_c)     : undefined} />;
+    case 'temp-min': return <TextCell value={fmtTemp(period.temp_min_c, units)} height={height} color={period.temp_min_c != null ? tempColor(period.temp_min_c) : undefined} />;
     case 'snow':     return <TextCell value={fmtSnow(period.snow_cm,    units)} height={height} />;
     case 'freeze':   return <TextCell value={fmtFreeze(period.freeze_m, units)} height={height} />;
     case 'wind-sfc': return <WindCell kph={period.wind_sfc_kph} dirIdx={period.wind_sfc_dir} height={height} units={units} />;
@@ -329,8 +370,8 @@ function ForecastTable({ msg, units }: { msg: ForecastMessage; units: Units }) {
               {block.rows.map((row, ri) => {
                 if (row.kind === 'section') {
                   return (
-                    <View key={ri} style={[ftStyles.labelCell, { height: row.height, backgroundColor: '#e8eaf0' }]}>
-                      <Text style={ftStyles.sectionLabelText}>{row.label}</Text>
+                    <View key={ri} style={[ftStyles.labelCell, { height: row.height, backgroundColor: '#eef1f6', paddingLeft: 14 }]}>
+                      <Text style={ftStyles.sectionLabelText} numberOfLines={1}>{row.label}</Text>
                     </View>
                   );
                 }
@@ -349,9 +390,9 @@ function ForecastTable({ msg, units }: { msg: ForecastMessage; units: Units }) {
             <ScrollView horizontal bounces={false} showsHorizontalScrollIndicator={bi === blocks.length - 1}>
               <View>
                 {/* Date header */}
-                <View style={{ flexDirection: 'row', height: ROW_H.DATE, backgroundColor: '#fff', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' }}>
+                <View style={{ flexDirection: 'row', height: ROW_H.DATE, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' }}>
                   {dates.map((d, i) => (
-                    <View key={i} style={{ width: CELL_W, alignItems: 'center', justifyContent: 'center' }}>
+                    <View key={i} style={{ width: CELL_W, alignItems: 'center', justifyContent: 'center', backgroundColor: colBg(i) }}>
                       <Text style={ftStyles.dateText}>{periodLabel(d, resHours)}</Text>
                     </View>
                   ))}
@@ -359,9 +400,9 @@ function ForecastTable({ msg, units }: { msg: ForecastMessage; units: Units }) {
 
                 {/* Data rows */}
                 {block.rows.map((row, ri) => (
-                  <View key={ri} style={{ flexDirection: 'row', height: row.height, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e5ea' }}>
+                  <View key={ri} style={{ flexDirection: 'row', height: row.height, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eef0f3' }}>
                     {block.periods.map((period, pi) => (
-                      <View key={pi}>
+                      <View key={pi} style={{ backgroundColor: colBg(pi) }}>
                         {renderCell(row, period, units)}
                       </View>
                     ))}
@@ -665,32 +706,32 @@ const ftStyles = StyleSheet.create({
   labelCell: {
     width: LABEL_W,
     justifyContent: 'center',
-    paddingLeft: 12,
+    paddingLeft: 14,
     paddingRight: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e5ea',
+    borderBottomColor: '#eef0f3',
   },
-  labelText: { fontSize: 12, fontWeight: '600', color: '#3a3a3c' },
-  sublabelText: { fontSize: 10, color: '#8e8e93', marginTop: 1 },
-  sectionLabelText: { fontSize: 11, fontWeight: '700', color: '#6e6e73', textTransform: 'uppercase', letterSpacing: 0.3 },
+  labelText: { fontSize: 12, fontWeight: '500', color: '#48484a' },
+  sublabelText: { fontSize: 9.5, color: '#aeaeb2', marginTop: 1 },
+  sectionLabelText: { fontSize: 10.5, fontWeight: '700', color: '#8a8f99', textTransform: 'uppercase', letterSpacing: 0.6 },
 
-  dateText: { fontSize: 12, fontWeight: '600', color: '#3a3a3c', textAlign: 'center', lineHeight: 17 },
+  dateText: { fontSize: 12.5, fontWeight: '600', color: '#48484a', textAlign: 'center', lineHeight: 17 },
 
-  // cell base
-  cell: { borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: '#e5e5ea' },
-  wmoEmoji: { fontSize: 22, lineHeight: 28 },
-  wmoLabel: { fontSize: 10, color: '#3a3a3c', textAlign: 'center', marginTop: 2, lineHeight: 12 },
+  // cell base — no grid borders; day tints + colored bars do the visual separation
+  cell: {},
+  wmoEmoji: { fontSize: 23, lineHeight: 28 },
+  wmoLabel: { fontSize: 9.5, color: '#8a8f99', textAlign: 'center', marginTop: 1, lineHeight: 12 },
 
   precipPct: { fontSize: 13, fontWeight: '600' },
-  precipTrack: { marginTop: 3, width: 44, height: 3, backgroundColor: '#e5e5ea', borderRadius: 1.5, overflow: 'hidden' },
-  precipFill: { height: 3, borderRadius: 1.5 },
+  precipTrack: { marginTop: 4, width: 42, height: 3, backgroundColor: '#e5e8ee', borderRadius: 2, overflow: 'hidden' },
+  precipFill: { height: 3, borderRadius: 2 },
 
   dataText: { fontSize: 13, color: '#1c1c1e', fontWeight: '500', textAlign: 'center' },
 
-  windSpeed: { fontSize: 12, fontWeight: '700', textAlign: 'center' },
-  windDir: { fontSize: 11, textAlign: 'center', marginTop: 2 },
+  windSpeed: { fontSize: 12.5, fontWeight: '700', textAlign: 'center' },
+  windDir: { fontSize: 11, textAlign: 'center', marginTop: 1, opacity: 0.92 },
 
-  cloudPct: { fontSize: 13, fontWeight: '600', color: '#1c1c1e' },
+  cloudPct: { fontSize: 13, fontWeight: '600', color: '#48484a' },
 
-  nil: { fontSize: 16, color: '#c7c7cc' },
+  nil: { fontSize: 15, color: '#d1d1d6' },
 });
