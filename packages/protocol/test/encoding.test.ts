@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
-  v2MessageToString,
-  v2MessageFromString,
-  V2_VERSION,
+  v1MessageToString,
+  v1MessageFromString,
+  V1_VERSION,
   encodeVersion,
   decodeMessage,
   type ForecastMessage,
@@ -12,7 +12,7 @@ import {
   VARS_BIT,
 } from "../src/index.js";
 
-// Every v2 variable except `vis` (bit 12), which v2 encodes in 0 bits (dropped).
+// Every v1 variable except `vis` (bit 12), which v1 encodes in 0 bits (dropped).
 const ALL_VARS =
   (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) |
   (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 13);
@@ -46,7 +46,7 @@ function popcount(n: number): number {
   return c;
 }
 
-// v2's header carries a period count, so `days` is derived on decode as ceil(nPeriods /
+// v1's header carries a period count, so `days` is derived on decode as ceil(nPeriods /
 // periodsPerDay). This helper keeps the input self-consistent for whole-day period counts.
 function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const resolution = overrides.resolution ?? 0;
@@ -59,7 +59,7 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const periods = overrides.periods ?? defaultPeriods;
   const days = Math.ceil(periods[0].length / periodsPerDay);
   return {
-    version: V2_VERSION,
+    version: V1_VERSION,
     resolution,
     models_mask,
     vars_mask: ALL_VARS,
@@ -76,15 +76,15 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
 }
 
 function roundTrip(m: ForecastMessage): ForecastMessage {
-  return v2MessageFromString(v2MessageToString(m));
+  return v1MessageFromString(v1MessageToString(m));
 }
 
-describe("v2 round-trip encoding", () => {
+describe("v1 round-trip encoding", () => {
   it("preserves header fields", () => {
     // resolution=2 (6h) → 4 periods/day; 3 days → 12 periods per model; 2 models
     const original = msg({ resolution: 2, models_mask: 0b011, month: 1, day: 31, hour: 0 });
     const decoded = roundTrip(original);
-    expect(decoded.version).toBe(V2_VERSION);
+    expect(decoded.version).toBe(V1_VERSION);
     expect(decoded.days).toBe(3);
     expect(decoded.resolution).toBe(2);
     expect(decoded.models_mask).toBe(0b011);
@@ -262,20 +262,20 @@ describe("v2 round-trip encoding", () => {
   });
 
   it("throws when decoding a different version's tag", () => {
-    // Swap the self-describing version prefix to v3; the v2 codec must reject it.
-    const encoded = v2MessageToString(msg());
+    // Swap the self-describing version prefix to v3; the v1 codec must reject it.
+    const encoded = v1MessageToString(msg());
     const reTagged = encodeVersion(3) + encoded.slice(1);
-    expect(() => v2MessageFromString(reTagged)).toThrow(/Version mismatch.*v3/);
+    expect(() => v1MessageFromString(reTagged)).toThrow(/Version mismatch.*v3/);
   });
 
   it("dispatches an unknown version to a clear error", () => {
-    const encoded = v2MessageToString(msg());
+    const encoded = v1MessageToString(msg());
     const reTagged = encodeVersion(7) + encoded.slice(1);
     expect(() => decodeMessage(reTagged)).toThrow(/Unsupported protocol version: v7/);
   });
 
   it("throws on short message", () => {
-    // Valid v2 tag but no room for the header.
-    expect(() => v2MessageFromString(encodeVersion(2) + "abc")).toThrow("Unexpected message length");
+    // Valid v1 tag but no room for the header.
+    expect(() => v1MessageFromString(encodeVersion(V1_VERSION) + "abc")).toThrow("Unexpected message length");
   });
 });

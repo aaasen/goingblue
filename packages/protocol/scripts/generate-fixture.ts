@@ -1,17 +1,17 @@
 import { writeFileSync, mkdirSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { v2Codec } from "../src/versions/v2.js";
+import { v1Codec } from "../src/versions/v1.js";
 import { DEFAULT_VARS_MASK } from "../src/constants.js";
 import type { ForecastMessage } from "../src/model.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Include temp (bit 1) and tmin (bit 13) to exercise v2's 7-bit Celsius encoding.
+// Include temp (bit 1) and tmin (bit 13) to exercise v1's 7-bit Celsius encoding.
 const vars_mask = DEFAULT_VARS_MASK | (1 << 1) | (1 << 13);
 
 const input: ForecastMessage = {
-  version: 2,
+  version: 1,
   days: 3,
   resolution: 0,       // daily
   models_mask: 0b0001, // HRES only
@@ -29,9 +29,9 @@ const input: ForecastMessage = {
   ]],
 };
 
-const encoded = v2Codec.encode(input);
+const encoded = v1Codec.encode(input);
 // Round-trip to capture quantization so fixture.decoded is exactly what decode produces.
-const decoded = v2Codec.decode(encoded);
+const decoded = v1Codec.decode(encoded);
 
 const fixture = {
   description: "3-day daily ECMWF HRES, precip+temp+tmin+snow+freeze+w500+w600+w700, Denali 14k camp",
@@ -41,7 +41,7 @@ const fixture = {
 
 const outDir = join(__dirname, "../test/fixtures");
 mkdirSync(outDir, { recursive: true });
-const outPath = join(outDir, "v2.fixture.json");
+const outPath = join(outDir, "v1.fixture.json");
 writeFileSync(outPath, JSON.stringify(fixture, null, 2) + "\n");
 console.log(`Written: ${outPath}`);
 console.log(`Encoded: ${encoded}`);

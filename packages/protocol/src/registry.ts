@@ -1,4 +1,4 @@
-import { v2Codec } from "./versions/v2.js";
+import { v1Codec } from "./versions/v1.js";
 import { peekVersion } from "./version.js";
 import type { ForecastMessage, VersionedCodec } from "./model.js";
 
@@ -9,7 +9,7 @@ import type { ForecastMessage, VersionedCodec } from "./model.js";
 // registered for it, and any version not present here is rejected with a clear error rather
 // than mis-decoded. Keep older codecs registered so new clients can still read old messages.
 export const CODECS: Record<number, VersionedCodec> = {
-  2: v2Codec,
+  1: v1Codec,
 };
 
 export function supportedVersions(): number[] {

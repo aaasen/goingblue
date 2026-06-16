@@ -314,7 +314,7 @@ export interface ForecastParams {
   decoderVersion: number;
 }
 
-// 8-bit period count in the v2 header → 1..256 periods.
+// 8-bit period count in the protocol header → 1..256 periods.
 const MAX_PERIODS = 256;
 
 export function parseRequest(body: string): ForecastParams {
@@ -411,8 +411,8 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   const rowsPerModel = results.map(([rows]) => rows);
   const elevation = results[0][1];
 
-  // v2 encodes the period count directly; `days` is the calendar-day span (used by v1 and
-  // for display) implied by however many period rows the upstream API actually returned.
+  // The protocol encodes the period count directly; `days` is the calendar-day span (for
+  // display) implied by however many period rows the upstream API actually returned.
   const periodsPerDay = 24 / HOURS_PER_PERIOD[params.resolutionIdx];
   const days = Math.max(1, Math.ceil(rowsPerModel[0].length / periodsPerDay));
 

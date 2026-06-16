@@ -6,11 +6,11 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import {
-  V2_HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, V2_VERSION, VAR_BITS_V2,
+  V1_HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, V1_VERSION, VAR_BITS_V1,
 } from '@weather/protocol';
 
 const MAX_CHARS = 160;
-const MAX_PERIODS = 256;   // v2 header carries an 8-bit period count
+const MAX_PERIODS = 256;   // v1 header carries an 8-bit period count
 const HORIZON_DAYS = 15;   // upstream forecast horizon
 const FORECAST_URL = __DEV__
   ? 'http://localhost:8080/forecast'
@@ -80,8 +80,8 @@ const DEFAULT_VARS = new Set([
 // Chars needed to encode `nPeriods` time periods with the given variables. The period count
 // is carried directly, so resolution no longer affects the body size — only the count does.
 function calcChars(nPeriods: number, varsMask: number): number {
-  const bodyBits = nPeriods * periodBitsForMask(varsMask, VAR_BITS_V2);
-  return V2_HEADER_CHARS + nCharsForBits(bodyBits);
+  const bodyBits = nPeriods * periodBitsForMask(varsMask, VAR_BITS_V1);
+  return V1_HEADER_CHARS + nCharsForBits(bodyBits);
 }
 
 // As many time periods as fit MAX_CHARS for the selected variables, bounded by the 8-bit
@@ -109,7 +109,7 @@ function buildMsg(coords: { lat: number; lon: number } | null, nPeriods: number,
   if (resHours < 24) parts.push(`r:${resHours}h`);
   parts.push(`m:${model}`);
   if (vars.length) parts.push(`v:${vars.join(',')}`);
-  parts.push(`v${V2_VERSION}`);
+  parts.push(`v${V1_VERSION}`);
   return parts.join(' ');
 }
 

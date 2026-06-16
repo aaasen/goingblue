@@ -1,6 +1,6 @@
 // The protocol version emitted by encoders today. Decoders accept any version with a
 // registered codec (see registry.ts); this is only the default for new messages.
-export const CURRENT_VERSION = 2;
+export const CURRENT_VERSION = 1;
 
 // Geographic field widths — shared by every version's header.
 export const LAT_BITS = 15;  // -90..+90 in ~611m steps

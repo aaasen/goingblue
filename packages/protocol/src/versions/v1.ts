@@ -7,26 +7,26 @@ import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js"
 import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec } from "../model.js";
 
-export const V2_VERSION = 2;
-const VERSION = V2_VERSION;
+export const V1_VERSION = 1;
+const VERSION = V1_VERSION;
 
-// v2 drops v1's 3-bit location field — locations are addressed by lat/lon only.
+// Locations are addressed by lat/lon only — there is no location field.
 // The count is a period count (not days), so sub-daily resolutions can carry a partial
 // final day. periods:8 stores (nPeriods - 1), i.e. 1..256 periods.
 //
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts),
 // not in this packed header. Packed header layout (88 bits):
 //   periods:8 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5 lat:15 lon:16 elev:14
-export const V2_HEADER_BITS = 88;
-export const V2_PERIODS_BITS = 8;
-export const V2_MAX_PERIODS = 1 << V2_PERIODS_BITS; // 256
+export const V1_HEADER_BITS = 88;
+export const V1_PERIODS_BITS = 8;
+export const V1_MAX_PERIODS = 1 << V1_PERIODS_BITS; // 256
 // Total chars before the body: the shared version prefix plus this version's packed header.
-export const V2_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V2_HEADER_BITS); // 1 + 14 = 15
-const HEADER_BITS = V2_HEADER_BITS;
-const HEADER_CHARS = nCharsForBits(V2_HEADER_BITS); // packed-header chars (excludes version prefix)
+export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 14 = 15
+const HEADER_BITS = V1_HEADER_BITS;
+const HEADER_CHARS = nCharsForBits(V1_HEADER_BITS); // packed-header chars (excludes version prefix)
 
-// v2 temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
-export const VAR_BITS_V2 = [3, 7, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 0, 7];
+// temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
+export const VAR_BITS_V1 = [3, 7, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 0, 7];
 //                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl  -  ^tmin
 
 const TEMP_OFFSET = 40;
@@ -84,10 +84,10 @@ function periodFromBits(bits: number[], pos: number, varsMask: number): [Period,
   return [p, pos];
 }
 
-export function v2MessageToString(msg: ForecastMessage): string {
+export function v1MessageToString(msg: ForecastMessage): string {
   const headerBits: number[] = [];
   const nPeriods = msg.periods[0].length;
-  putInt(headerBits, nPeriods - 1, V2_PERIODS_BITS);
+  putInt(headerBits, nPeriods - 1, V1_PERIODS_BITS);
   putInt(headerBits, msg.resolution, 3);
   putInt(headerBits, msg.models_mask, 4);
   putInt(headerBits, msg.vars_mask, 14);
@@ -108,7 +108,7 @@ export function v2MessageToString(msg: ForecastMessage): string {
   return encodeVersion(VERSION) + encode(headerBits) + encode(bodyBits);
 }
 
-export function v2MessageFromString(s: string): ForecastMessage {
+export function v1MessageFromString(s: string): ForecastMessage {
   const [version, rest] = takeVersion(s);
   if (version !== VERSION)
     throw new Error(`Version mismatch: encoded v${version}, expected v${VERSION}`);
@@ -121,7 +121,7 @@ export function v2MessageFromString(s: string): ForecastMessage {
 
   let periodsRaw: number, resolution: number,
       models_mask: number, vars_mask: number, month: number, day: number, hour: number;
-  [periodsRaw,  pos] = takeInt(headerBits, pos, V2_PERIODS_BITS);
+  [periodsRaw,  pos] = takeInt(headerBits, pos, V1_PERIODS_BITS);
   [resolution,  pos] = takeInt(headerBits, pos, 3);
   [models_mask, pos] = takeInt(headerBits, pos, 4);
   [vars_mask,   pos] = takeInt(headerBits, pos, 14);
@@ -139,7 +139,7 @@ export function v2MessageFromString(s: string): ForecastMessage {
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
   const nPeriods = periodsRaw + 1;
   const nModels = popcount(models_mask);
-  const periodBits = periodBitsForMask(vars_mask, VAR_BITS_V2);
+  const periodBits = periodBitsForMask(vars_mask, VAR_BITS_V1);
   const totalBodyBits = nPeriods * nModels * periodBits;
 
   const expectedBodyChars = nCharsForBits(totalBodyBits);
@@ -171,7 +171,7 @@ function popcount(n: number): number {
   return c;
 }
 
-export const v2Codec: VersionedCodec = {
-  encode: v2MessageToString,
-  decode: v2MessageFromString,
+export const v1Codec: VersionedCodec = {
+  encode: v1MessageToString,
+  decode: v1MessageFromString,
 };
