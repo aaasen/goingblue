@@ -18,6 +18,7 @@ const PAGE = (title: string, body: string, showUpdated = true) => `<!doctype htm
   .tagline { color: #444; font-size: 1.1em; }
   .cta { background: #f0f6fc; border: 1px solid #cfe2f5; border-radius: 8px; padding: 16px 20px; margin: 1.8em 0; }
   a { color: #0b62c4; }
+  .appbtn { display: inline-block; background: #0b62c4; color: #fff; padding: 11px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 0.6em 0 1.2em; }
   footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
 </style>
 </head>
@@ -28,7 +29,7 @@ ${body}
 <footer>
   ${BRAND} is operated as a sole proprietorship by Lane Aasen.
   Questions? Contact <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.<br>
-  <a href="/">Home</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a>
+  <a href="/">Home</a> · <a href="/app">App</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a>
 </footer>
 </body>
 </html>`;
@@ -42,13 +43,15 @@ You send a short text containing a location and the forecast options you want; $
 replies with a compact, encoded forecast that the companion app decodes into a full
 multi-day forecast — small enough to fit within satellite messaging size limits.</p>
 
+<p><a class=appbtn href="/app">Open the ${BRAND} app →</a></p>
+
 <h2>How it works</h2>
 <ol>
   <li>Send a text message to ${BRAND} with a location (latitude and longitude) and your
   forecast options, from your satellite messenger or mobile phone.</li>
   <li>${BRAND} fetches the forecast for that location and replies to you with a single
   message.</li>
-  <li>Open the companion app to decode and view the full forecast.</li>
+  <li>Open the <a href="/app">companion app</a> to decode and view the full forecast.</li>
 </ol>
 
 <div class=cta>

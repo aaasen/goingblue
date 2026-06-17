@@ -347,15 +347,13 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
         >
           {locating ? <ActivityIndicator color="#2a6bb5" /> : <Text style={styles.btnOutlineText}>Copy Message</Text>}
         </TouchableOpacity>
-        {__DEV__ && (
-          <TouchableOpacity
-            style={[styles.btn, styles.btnPrimary, fetchDisabled && styles.btnDisabled]}
-            onPress={handleFetch}
-            disabled={fetchDisabled}
-          >
-            {fetching ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Fetch Forecast</Text>}
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          style={[styles.btn, styles.btnPrimary, fetchDisabled && styles.btnDisabled]}
+          onPress={handleFetch}
+          disabled={fetchDisabled}
+        >
+          {fetching ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Fetch Forecast</Text>}
+        </TouchableOpacity>
       </View>
     </ScrollView>
   );
