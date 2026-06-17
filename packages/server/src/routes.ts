@@ -88,11 +88,16 @@ export async function health(c: Context) {
   return c.text(`OK db:${dbUp ? "up" : "down"}`, 200);
 }
 
-// POST /account — mint a new account token. Called once over normal internet during app
-// setup (not over satellite). Returns { token }.
+// POST /account { smsConsent } — mint a new account token. Called once over normal internet
+// during app setup (not over satellite). The user must opt in to receiving text messages, so
+// the request is rejected unless smsConsent is true. Returns { token }.
 export async function createAccountRoute(c: Context) {
+  const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+  if (body?.smsConsent !== true) {
+    return c.text("SMS consent is required to create an account", 400);
+  }
   try {
-    const token = await createAccount();
+    const token = await createAccount(true);
     return c.json({ token });
   } catch (e) {
     console.error("createAccount failed:", e);

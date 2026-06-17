@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity, Alert, Platform } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { formatToken } from '@weather/protocol';
 
@@ -80,7 +80,24 @@ const VARIABLES: VarInfo[] = [
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function InfoTab({ token }: { token: string }) {
+export default function InfoTab({ token, onReset }: { token: string; onReset: () => void }) {
+  const RESET_MESSAGE =
+    'This forgets the token on this device and returns to setup. The account still exists on the server — make sure you’ve saved the token if you want to get back to it.';
+
+  function confirmReset() {
+    // react-native-web's Alert doesn't fire button callbacks, so use window.confirm on web.
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm(`Reset account?\n\n${RESET_MESSAGE}`)) {
+        onReset();
+      }
+      return;
+    }
+    Alert.alert('Reset account?', RESET_MESSAGE, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reset', style: 'destructive', onPress: onReset },
+    ]);
+  }
+
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
       {/* Account */}
@@ -91,13 +108,18 @@ export default function InfoTab({ token }: { token: string }) {
           This token identifies your account. Save it to move your account to another device — enter
           it under “I already have a token” during setup.
         </Text>
-        <TouchableOpacity
-          style={styles.copyBtn}
-          onPress={() => Clipboard.setStringAsync(token)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.copyBtnText}>Copy token</Text>
-        </TouchableOpacity>
+        <View style={styles.accountBtns}>
+          <TouchableOpacity
+            style={styles.copyBtn}
+            onPress={() => Clipboard.setStringAsync(token)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.copyBtnText}>Copy token</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.resetBtn} onPress={confirmReset} activeOpacity={0.7}>
+            <Text style={styles.resetBtnText}>Reset account</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Getting started */}
@@ -219,8 +241,11 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12 },
   tokenValue: { fontSize: 20, fontWeight: '600', fontFamily: 'Courier', color: '#1c1c1e', letterSpacing: 1, marginBottom: 10 },
   tokenNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginBottom: 12 },
-  copyBtn: { alignSelf: 'flex-start', backgroundColor: '#eef3fa', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  accountBtns: { flexDirection: 'row', gap: 10 },
+  copyBtn: { backgroundColor: '#eef3fa', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
   copyBtnText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },
+  resetBtn: { backgroundColor: '#faecec', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  resetBtnText: { color: '#cc2222', fontSize: 14, fontWeight: '600' },
   cardHeader: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 },
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#1c1c1e', marginRight: 8 },

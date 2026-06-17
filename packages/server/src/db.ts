@@ -49,9 +49,14 @@ export function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
 export async function migrate(): Promise<void> {
   await query(`
     create table if not exists accounts (
-      token       text primary key,
-      created_at  timestamptz not null default now()
+      token        text primary key,
+      sms_consent  boolean not null default false,
+      created_at   timestamptz not null default now()
     )
+  `);
+  // Backfill the column for databases created before sms_consent existed.
+  await query(`
+    alter table accounts add column if not exists sms_consent boolean not null default false
   `);
   await query(`
     create table if not exists requests (

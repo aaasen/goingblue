@@ -5,7 +5,7 @@ import BuilderTab from './BuilderTab';
 import DecoderTab from './DecoderTab';
 import InfoTab from './InfoTab';
 import SetupScreen from './SetupScreen';
-import { loadToken } from './account';
+import { loadToken, clearToken } from './account';
 
 type Tab = 'builder' | 'decoder' | 'info';
 
@@ -22,6 +22,12 @@ export default function App() {
   function onForecastReceived(encoded: string) {
     setForecastData(encoded);
     setTab('decoder');
+  }
+
+  async function handleReset() {
+    await clearToken();
+    setTab('builder');
+    setToken(null);
   }
 
   if (token === undefined) {
@@ -54,7 +60,7 @@ export default function App() {
       {tab === 'decoder' && (
         <DecoderTab forecastData={forecastData} onForecastDataChange={setForecastData} />
       )}
-      {tab === 'info' && <InfoTab token={token} />}
+      {tab === 'info' && <InfoTab token={token} onReset={handleReset} />}
     </SafeAreaView>
   );
 }

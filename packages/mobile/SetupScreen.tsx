@@ -17,15 +17,17 @@ export default function SetupScreen({ onReady }: Props) {
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const [entry, setEntry] = useState('');
+  const [smsConsent, setSmsConsent] = useState(false);
 
-  // A local check-symbol test gates the Import button so an obvious typo never reaches the
-  // server (and can't resolve to someone else's account).
+  // A local shape check (length + alphabet) gates the Import button so an obviously malformed
+  // token never reaches the server.
   const entryValid = isValidToken(entry);
 
   async function handleCreate() {
+    if (!smsConsent) return;
     setBusy(true);
     try {
-      const token = await createAccount();
+      const token = await createAccount(smsConsent);
       onReady(token);
     } catch (e) {
       Alert.alert('Could not create account', String(e));
@@ -63,10 +65,14 @@ export default function SetupScreen({ onReady }: Props) {
 
       {!importing ? (
         <>
+          <Checkbox checked={smsConsent} onToggle={() => setSmsConsent((v) => !v)} disabled={busy}>
+            I agree to receive text messages from Going Blue, including forecast replies and
+            account notifications. Message and data rates may apply; reply STOP to opt out.
+          </Checkbox>
           <TouchableOpacity
-            style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
+            style={[styles.btn, styles.btnPrimary, (busy || !smsConsent) && styles.btnDisabled]}
             onPress={handleCreate}
-            disabled={busy}
+            disabled={busy || !smsConsent}
           >
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Create account</Text>}
           </TouchableOpacity>
@@ -102,6 +108,22 @@ export default function SetupScreen({ onReady }: Props) {
   );
 }
 
+function Checkbox({ checked, onToggle, disabled, children }: {
+  checked: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <TouchableOpacity style={styles.consentRow} onPress={onToggle} disabled={disabled} activeOpacity={0.7}>
+      <View style={[styles.box, checked && styles.boxChecked]}>
+        {checked && <Text style={styles.boxCheck}>✓</Text>}
+      </View>
+      <Text style={styles.consentText}>{children}</Text>
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: '#f2f2f7' },
   content: { padding: 24, paddingTop: 48 },
@@ -113,6 +135,16 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier', color: '#1c1c1e', marginBottom: 16,
     borderWidth: StyleSheet.hairlineWidth, borderColor: '#d1d1d6',
   },
+  consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 20 },
+  box: {
+    width: 24, height: 24, borderRadius: 6, marginTop: 1,
+    borderWidth: 1.5, borderColor: '#aeaeb2', backgroundColor: '#fff',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  boxChecked: { backgroundColor: '#2a6bb5', borderColor: '#2a6bb5' },
+  boxCheck: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  consentText: { flex: 1, fontSize: 13, color: '#3a3a3c', lineHeight: 19 },
+
   btn: { height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   btnPrimary: { backgroundColor: '#2a6bb5' },
   btnDisabled: { backgroundColor: '#aeaeb2' },

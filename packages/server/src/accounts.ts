@@ -6,14 +6,15 @@ import { query } from "./db.js";
 // takes its randomness as a parameter).
 const rng = (n: number) => Uint8Array.from(randomBytes(n));
 
-// Mint and persist a new account, returning its token. The token is the primary key, so a
-// collision surfaces as a unique-violation; we retry (it is astronomically unlikely at 64
-// bits, but the loop keeps minting correct).
-export async function createAccount(): Promise<string> {
+// Mint and persist a new account, returning its token. `smsConsent` records the user's
+// opt-in to receiving text messages. The token is the primary key, so a collision surfaces
+// as a unique-violation; we retry (astronomically unlikely at 80 bits, but the loop keeps
+// minting correct).
+export async function createAccount(smsConsent: boolean): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const token = generateToken(rng);
     try {
-      await query("insert into accounts (token) values ($1)", [token]);
+      await query("insert into accounts (token, sms_consent) values ($1, $2)", [token, smsConsent]);
       return token;
     } catch (e) {
       if ((e as { code?: string }).code === "23505") continue; // unique_violation

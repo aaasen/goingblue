@@ -22,9 +22,20 @@ export async function saveToken(token: string): Promise<void> {
   await AsyncStorage.setItem(TOKEN_KEY, normalizeToken(token));
 }
 
-// Mint a new account on the server and persist the returned token.
-export async function createAccount(): Promise<string> {
-  const resp = await fetch(`${API_BASE}/account`, { method: 'POST' });
+// Forget the stored token, sending the app back to the setup flow. The account still exists
+// server-side; this only clears the local reference.
+export async function clearToken(): Promise<void> {
+  await AsyncStorage.removeItem(TOKEN_KEY);
+}
+
+// Mint a new account on the server and persist the returned token. `smsConsent` records the
+// user's opt-in to receiving text messages; the server requires it to be true.
+export async function createAccount(smsConsent: boolean): Promise<string> {
+  const resp = await fetch(`${API_BASE}/account`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ smsConsent }),
+  });
   if (!resp.ok) throw new Error(`Account creation failed (${resp.status})`);
   const { token } = await resp.json();
   if (typeof token !== 'string' || !isValidToken(token)) {
