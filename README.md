@@ -1,24 +1,38 @@
-# Satellite Weather
+# Going Blue: Weather Forecasts via Satellite
 
-Weather forecasts via Garmin inReach satellite messenger. Deployed at [going.blue](https://going.blue/).
+Going Blue is a tool for retrieving weather forecasts over satellite. It is deployed at [going.blue](https://going.blue/).
 
-The goal of this project is to provide better weather forecasts than the default inReach system. Forecasts are sourced from [Open-Meteo](https://open-meteo.com/). They are encoded with a custom binary encoding to maximize information density. Using this encoding, it is possible to get 10-day daily forecasts in a single message.
+I built Going Blue before a Denali ski expedition because I wasn't satisfied with the existing weather forecast tools. For Denali, it was important to have high-altitude wind data, hourly forecasts, and compare multiple models.
 
-## Offline Usage
+Going Blue works like this:
+1. Build a forecast request from the mobile app. Choose time resolution, weather model, and the variables that you need.
+2. Send the forecast request to (425) 434-5858 via Garmin inReach, ZOLEO, SMS, or any other satellite messenger.
+3. Copy the forecast response into the mobile app. Responses are encoded in a custom format to maximize space.
+4. View the forecast on the mobile app.
 
-The mobile app builds forecast requests, decodes the satellite replies, and caches decoded forecasts on-device so they remain available offline.
+Forecasts are provided by [Open-Meteo](https://open-meteo.com/).
 
 ## Architecture
 
 This is a pnpm monorepo with three packages:
 
 - `packages/protocol` — shared TypeScript binary encoding/decoding used by both the server and the mobile app
-- `packages/server` — Hono/Node.js server; receives inbound email webhooks, fetches Open-Meteo forecasts, and sends Garmin replies
+- `packages/server` — Hono/Node.js server; receives inbound messages, fetches forecasts, and sends replies
 - `packages/mobile` — Expo React Native app for building requests and decoding forecasts
 
 ## Development
 
-**Prerequisites:** Node.js 18+, pnpm (`npm install -g pnpm`)
+### Database
+
+The server uses a PostgreSQL database to store user tokens and forecast requests.
+
+```bash
+docker run --rm -d --name goingblue -p 5432:5432 \
+  -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=goingblue postgres:18
+DB_USER=postgres DB_PASS=dev DB_NAME=goingblue pnpm start
+```
+
+### Server
 
 Install dependencies:
 
@@ -26,85 +40,28 @@ Install dependencies:
 pnpm install
 ```
 
-### Build
-
-Build all packages (protocol → server):
-
-```bash
-pnpm build
-```
-
-To build a single package:
-
-```bash
-pnpm --filter @weather/protocol build
-pnpm --filter @weather/server build
-```
-
-### Run
-
-Build and start the server:
+Start the server:
 
 ```bash
 pnpm start
 ```
 
-The server starts at `http://localhost:8080`. It exposes the `/forecast` endpoint used by the mobile app during local development.
+The server starts at `http://localhost:8080`. 
 
-To use a different port:
-
-```bash
-PORT=3000 node packages/server/dist/index.js
-```
-
-### Database
-
-The server uses Postgres (Cloud SQL in production) to store user accounts and forecast requests. Connection details come from the environment; the schema is applied automatically on startup. The forecast path keeps working if the DB is unavailable — only account features require it.
-
-| Env var | Purpose |
-| --- | --- |
-| `INSTANCE_CONNECTION_NAME` | Cloud SQL instance (`project:region:instance`). When set (and `DB_HOST` is not), the driver connects over the Cloud SQL Auth Proxy socket at `/cloudsql/<name>`. |
-| `DB_HOST` / `DB_PORT` | TCP host/port for local dev (default `127.0.0.1:5432`). |
-| `DB_USER` / `DB_PASS` / `DB_NAME` | Credentials and database name. |
-| `DB_POOL_MAX` | Max pool connections per instance (default `5`). |
-
-**Local dev** — run Postgres in Docker and point the server at it:
+The server can also be run in a Docker container: 
 
 ```bash
-docker run --rm -d --name weather-pg -p 5432:5432 \
-  -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=goingblue postgres:18
-DB_USER=postgres DB_PASS=dev DB_NAME=goingblue pnpm start
+docker build -t goingblue .
+docker run --rm -p 8080:8080 goingblue
 ```
 
-(Alternatively, run `cloud-sql-proxy <INSTANCE_CONNECTION_NAME>` to connect to the real Cloud SQL instance over `127.0.0.1`.)
+### Client
 
-Production deployment (Cloud Run, Cloud SQL, and the `DB_PASS` secret) is documented separately in `DEPLOYMENT.md`.
-
-### Mobile (Expo / React Native)
-
-**Additional prerequisites:** [Expo Go](https://expo.dev/go) on your iOS or Android device, or Xcode (iOS simulator) / Android Studio (Android emulator).
-
-```
-pnpm --filter @weather/mobile exec expo install expo-dev-client
-```
-
-Start the Expo development server from the mobile package:
+The client is an Expo React Native app. The app works on iOS, Android, and the web. To run the web client:
 
 ```bash
-pnpm --filter @weather/mobile start
-```
-
-This opens the Expo CLI. Then:
-
-- **Physical device:** scan the QR code with the Expo Go app
-- **iOS simulator:** press `i` (requires Xcode)
-- **Android emulator:** press `a` (requires Android Studio)
-
-You can also target a platform directly:
-
-```bash
-pnpm --filter @weather/mobile ios      # iOS simulator
-pnpm --filter @weather/mobile android  # Android emulator
+cd packages/mobile
+pnpm run web
 ```
 
 ### Tests
@@ -112,33 +69,6 @@ pnpm --filter @weather/mobile android  # Android emulator
 ```bash
 pnpm test
 ```
-
-### Docker
-
-Build and run the container locally:
-
-```bash
-docker build -t denali-wx .
-docker run --rm -p 8080:8080 denali-wx
-```
-
-The server starts at `http://localhost:8080`.
-
-## Deploy
-
-Requires [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) with a project configured.
-
-```bash
-./deploy.sh
-```
-
-Or directly:
-
-```bash
-gcloud run deploy denali-wx --source . --region us-west1 --allow-unauthenticated --platform managed
-```
-
-The Dockerfile builds all packages from source and runs the server on `$PORT` (Cloud Run sets this automatically).
 
 ## License
 

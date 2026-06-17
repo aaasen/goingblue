@@ -19,8 +19,9 @@ app.post("/test", testPage);
 
 const port = parseInt(process.env["PORT"] ?? "8080");
 
-// Apply schema on startup, but don't let a DB hiccup keep the server (and the forecast
-// path) from coming up — log and carry on.
+// Apply schema on startup. The database is a required dependency (it gates the forecast
+// path for quotas/rate limiting and records every request), so a migration failure is
+// logged loudly; requests that need the DB will surface the error on their own path.
 migrate()
   .then(() => console.log("db schema ready"))
   .catch((e) => console.error("db migrate failed:", e));

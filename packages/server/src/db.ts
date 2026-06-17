@@ -1,8 +1,8 @@
 import pg from "pg";
 
 // Postgres access for the accounts/requests store. The pool is created lazily on first
-// use so that importing this module (e.g. from tests) never opens a connection, and the
-// forecast path keeps working in environments where the DB isn't configured.
+// use so that importing this module (e.g. from tests) never opens a connection; tests that
+// don't exercise the DB therefore need no Postgres running.
 //
 // Connection config comes entirely from the environment:
 //   - Cloud Run: set INSTANCE_CONNECTION_NAME (project:region:instance) and attach the
