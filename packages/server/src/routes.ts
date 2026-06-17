@@ -4,6 +4,7 @@ import { sendGarminReply } from "./garmin.js";
 import { ping } from "./db.js";
 import { createAccount, accountExists, recordRequest } from "./accounts.js";
 import { CODECS, isValidToken, normalizeToken } from "@weather/protocol";
+import { twiml, validateTwilioSignature } from "./twilio.js";
 
 const REPLY_ADDRESS = "wx@email.laneaasen.com";
 
@@ -36,6 +37,32 @@ export async function forecast(c: Context) {
   }
 }
 
+// Parse a request body, fetch its forecast, and record the request. Returns the encoded
+// forecast, or null when the protocol version is unsupported or the upstream fetch fails — the
+// caller decides how to surface that on its own transport (email/Garmin vs. SMS/Twilio).
+async function buildForecast(body: string): Promise<string | null> {
+  const params = parseRequest(body);
+  console.log("forecast request params:", params);
+
+  const codec = CODECS[params.decoderVersion];
+  if (!codec) {
+    console.error(`Unsupported protocol version: v${params.decoderVersion}`);
+    return null;
+  }
+
+  let encoded: string;
+  try {
+    encoded = await fetchForecast(params, codec);
+    console.log(`forecast fetched (len=${encoded.length}): ${encoded}`);
+  } catch (e) {
+    console.error("fetchForecast failed:", e);
+    return null;
+  }
+
+  await logRequest(params.userToken, encoded.length);
+  return encoded;
+}
+
 export async function inbound(c: Context) {
   const form = await c.req.parseBody();
   const text = String(form["text"] ?? "");
@@ -50,36 +77,55 @@ export async function inbound(c: Context) {
   console.log("reply_url:", replyUrl);
 
   if (replyUrl) {
-    const body = text.replace(replyUrl, "").trim();
-    const params = parseRequest(body);
-    console.log("forecast request params:", params);
-
-    const codec = CODECS[params.decoderVersion];
-    if (!codec) {
-      console.error(`Unsupported protocol version: v${params.decoderVersion}`);
-      return c.text("OK", 200);
-    }
-
-    let encoded: string;
-    try {
-      encoded = await fetchForecast(params, codec);
-      console.log(`forecast fetched (len=${encoded.length}): ${encoded}`);
-    } catch (e) {
-      console.error("fetchForecast failed:", e);
-      return c.text("OK", 200);
-    }
-
-    await logRequest(params.userToken, encoded.length);
-
-    try {
-      const success = await sendGarminReply(replyUrl, REPLY_ADDRESS, encoded);
-      console.log("garmin reply sent:", success);
-    } catch (e) {
-      console.error("sendGarminReply failed:", e);
+    const encoded = await buildForecast(text.replace(replyUrl, "").trim());
+    if (encoded !== null) {
+      try {
+        const success = await sendGarminReply(replyUrl, REPLY_ADDRESS, encoded);
+        console.log("garmin reply sent:", success);
+      } catch (e) {
+        console.error("sendGarminReply failed:", e);
+      }
     }
   }
 
   return c.text("OK", 200);
+}
+
+// POST /sms — Twilio inbound-SMS webhook. Twilio delivers each text a user sends to the Going
+// Blue number here as form-encoded params (Body, From, To, …) and sends whatever <Message> we
+// return in TwiML back to that sender, so the reply path needs no Twilio REST credentials. When
+// TWILIO_AUTH_TOKEN is set, the request signature is verified so the public endpoint can't be
+// spoofed; an unsigned/invalid request is rejected with 403.
+export async function sms(c: Context) {
+  const form = await c.req.parseBody();
+  // Flatten to string params for both signature validation and our own use.
+  const params: Record<string, string> = {};
+  for (const [k, v] of Object.entries(form)) params[k] = String(v);
+
+  const authToken = process.env["TWILIO_AUTH_TOKEN"];
+  if (authToken) {
+    const signature = c.req.header("X-Twilio-Signature") ?? "";
+    // The URL Twilio signed is the public webhook URL. Behind Cloud Run the in-process URL can
+    // differ (internal scheme/host), so allow pinning it via TWILIO_WEBHOOK_URL.
+    const url = process.env["TWILIO_WEBHOOK_URL"] ?? c.req.url;
+    if (!validateTwilioSignature(authToken, signature, url, params)) {
+      console.error("sms: invalid Twilio signature");
+      return c.text("Invalid signature", 403);
+    }
+  }
+
+  const body = params["Body"] ?? "";
+  const sender = params["From"] ?? "";
+  console.log("=== Inbound SMS ===");
+  console.log("from:", sender);
+  console.log("text:", body);
+
+  const encoded = await buildForecast(body.trim());
+  // No forecast (unsupported version or upstream failure): reply with a short human-readable note
+  // rather than silence, since unlike Garmin the sender expects a direct SMS back.
+  const reply = encoded ?? "Forecast unavailable, please try again.";
+
+  return c.text(twiml(reply), 200, { "Content-Type": "text/xml" });
 }
 
 export async function health(c: Context) {
