@@ -1,15 +1,18 @@
-import { Platform, NativeModules } from 'react-native';
+import { Platform } from 'react-native';
+// @ts-expect-error - internal RN module, ships no types
+import getDevServer from 'react-native/Libraries/Core/Devtools/getDevServer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isValidToken, normalizeToken } from '@weather/protocol';
 
 // In a dev build on a physical device, `localhost` resolves to the phone itself, not the dev
-// machine, so the API is unreachable. Metro serves the JS bundle from the dev machine's LAN
-// address (scriptURL looks like http://192.168.x.x:8081/index.bundle?...), so reuse that host
-// and target the API's port. Falls back to localhost (simulator / unparsable URL).
+// machine, so the API is unreachable. getDevServer() returns Metro's dev-server URL (e.g.
+// http://192.168.x.x:8081/) under both the old and New (bridgeless) architectures — unlike
+// NativeModules.SourceCode.scriptURL, which is empty under the New Architecture. Reuse that
+// host and target the API's port. Falls back to localhost (simulator / unparsable URL).
 function devNativeApiBase(): string {
-  const scriptURL: string | undefined = NativeModules.SourceCode?.scriptURL;
-  const host = scriptURL?.match(/^https?:\/\/([^/:]+)/)?.[1];
-  console.log('[api] scriptURL=', scriptURL, 'derived host=', host);
+  const url: string | undefined = getDevServer()?.url;
+  const host = url?.match(/^https?:\/\/([^/:]+)/)?.[1];
+  console.log('[api] devServer url=', url, 'derived host=', host);
   return `http://${host ?? 'localhost'}:8080`;
 }
 
