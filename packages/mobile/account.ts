@@ -9,6 +9,7 @@ import { isValidToken, normalizeToken } from '@weather/protocol';
 function devNativeApiBase(): string {
   const scriptURL: string | undefined = NativeModules.SourceCode?.scriptURL;
   const host = scriptURL?.match(/^https?:\/\/([^/:]+)/)?.[1];
+  console.log('[api] scriptURL=', scriptURL, 'derived host=', host);
   return `http://${host ?? 'localhost'}:8080`;
 }
 
