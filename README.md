@@ -55,6 +55,13 @@ cd packages/mobile
 pnpm run web
 ```
 
+Or, build an iOS app:
+
+```
+cd packages/mobile
+eas build --platform ios --local
+```
+
 ### Tests
 
 ```bash
