@@ -8,6 +8,7 @@
     "@weather/protocol": "workspace:*",
     "expo": "~56.0.12",
     "expo-clipboard": "~56.0.4",
+    "expo-constants": "~56.0.18",
     "expo-dev-client": "~56.0.20",
     "expo-location": "~56.0.18",
     "expo-status-bar": "~56.0.4",
