@@ -1,16 +1,28 @@
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isValidToken, normalizeToken } from '@weather/protocol';
 
+// In a dev build on a physical device, `localhost` resolves to the phone itself, not the dev
+// machine, so the API is unreachable. Metro serves the JS bundle from the dev machine's LAN
+// address (scriptURL looks like http://192.168.x.x:8081/index.bundle?...), so reuse that host
+// and target the API's port. Falls back to localhost (simulator / unparsable URL).
+function devNativeApiBase(): string {
+  const scriptURL: string | undefined = NativeModules.SourceCode?.scriptURL;
+  const host = scriptURL?.match(/^https?:\/\/([^/:]+)/)?.[1];
+  return `http://${host ?? 'localhost'}:8080`;
+}
+
 // Base URL for the API. Account provisioning runs over normal internet during app setup (never
 // over satellite), so it can talk to the server directly.
-//   - dev (Expo Go / Metro web): the API runs on localhost:8080, a different origin than Metro,
-//     so use an absolute URL (cross-origin, allowed by the server's CORS).
+//   - dev web (Metro web): browser and API share localhost, so use an absolute cross-origin URL.
+//   - dev native: derive the dev machine's host from Metro (see devNativeApiBase).
 //   - production web: the server hosts this app at /app, so call it same-origin (relative). This
 //     avoids CORS entirely and works regardless of host (localhost or going.blue).
 //   - production native: no shared origin, so target the deployed server directly.
 export const API_BASE = __DEV__
-  ? 'http://localhost:8080'
+  ? Platform.OS === 'web'
+    ? 'http://localhost:8080'
+    : devNativeApiBase()
   : Platform.OS === 'web'
     ? ''
     : 'https://going.blue';
