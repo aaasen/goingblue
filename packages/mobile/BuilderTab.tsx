@@ -17,7 +17,7 @@ const MAX_PERIODS = 256;   // v1 header carries an 8-bit period count
 const HORIZON_DAYS = 15;   // upstream forecast horizon
 const FORECAST_URL = __DEV__
   ? 'http://localhost:8080/forecast'
-  : 'https://weather.laneaasen.com/forecast';
+  : 'https://going.blue/forecast';
 
 const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
   hres: ['freeze', 'w500', 'w600', 'w700'],
