@@ -109,22 +109,25 @@ function formatSpan(days: number): string {
 
 // The request leads with the protocol version and omits any period count — the server fits
 // as many periods as the max response length (`c:`, in chars) allows for the chosen
-// resolution and variables. `c:` is always included, even at the default length.
-function buildMsg(coords: { lat: number; lon: number } | null, resHours: number, model: string, vars: string[], maxChars: number): string {
+// resolution and variables. `c:` is always included, even at the default length. `u:` carries
+// the account token so the server can attribute the request to the user.
+function buildMsg(token: string, coords: { lat: number; lon: number } | null, resHours: number, model: string, vars: string[], maxChars: number): string {
   const parts: string[] = [`v${V1_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   if (resHours < 24) parts.push(`r:${resHours}h`);
   parts.push(`m:${model}`);
   if (vars.length) parts.push(`v:${vars.join(',')}`);
   parts.push(`c:${maxChars}`);
+  parts.push(`u:${token}`);
   return parts.join(' ');
 }
 
 interface Props {
+  token: string;
   onForecastReceived: (encoded: string) => void;
 }
 
-export default function BuilderTab({ onForecastReceived }: Props) {
+export default function BuilderTab({ token, onForecastReceived }: Props) {
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [customLat, setCustomLat] = useState('');
@@ -159,7 +162,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
   // in custom mode we only show a message once valid coords are entered.
   const showMessage = fits && (coordsValid || locationMode === 'current');
   const message = showMessage
-    ? buildMsg(coordsValid ? resolvedCoords : null, resHours, model, activeVars, maxChars)
+    ? buildMsg(token, coordsValid ? resolvedCoords : null, resHours, model, activeVars, maxChars)
     : '';
   // In current-location mode the buttons stay tappable so they can request GPS on demand.
   const copyDisabled = locating || !fits || (locationMode === 'custom' && !coordsValid);
@@ -191,7 +194,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       coords = await requestCurrentLocation();
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return;
-    const msg = buildMsg(coords, resHours, model, activeVars, maxChars);
+    const msg = buildMsg(token, coords, resHours, model, activeVars, maxChars);
     await Clipboard.setStringAsync(msg);
   }
 
@@ -218,7 +221,7 @@ export default function BuilderTab({ onForecastReceived }: Props) {
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: buildMsg(coords, resHours, model, activeVars, maxChars),
+        body: buildMsg(token, coords, resHours, model, activeVars, maxChars),
       });
       if (!resp.ok) throw new Error(await resp.text());
       onForecastReceived(await resp.text());

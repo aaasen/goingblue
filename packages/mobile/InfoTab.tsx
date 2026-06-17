@@ -1,4 +1,6 @@
 import { StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { formatToken } from '@weather/protocol';
 
 const FORECAST_EMAIL = 'wx@email.laneaasen.com';
 
@@ -78,11 +80,28 @@ const VARIABLES: VarInfo[] = [
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function InfoTab() {
+export default function InfoTab({ token }: { token: string }) {
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+      {/* Account */}
+      <Text style={styles.heading}>Your account</Text>
+      <View style={styles.card}>
+        <Text style={styles.tokenValue} selectable>{formatToken(token)}</Text>
+        <Text style={styles.tokenNote}>
+          This token identifies your account. Save it to move your account to another device — enter
+          it under “I already have a token” during setup.
+        </Text>
+        <TouchableOpacity
+          style={styles.copyBtn}
+          onPress={() => Clipboard.setStringAsync(token)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.copyBtnText}>Copy token</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Getting started */}
-      <Text style={styles.heading}>Getting started</Text>
+      <Text style={[styles.heading, { marginTop: 28 }]}>Getting started</Text>
       <Text style={styles.para}>
         This app uses a custom weather forecast encoding to pack as much weather data as possible
         into each satellite message.
@@ -198,6 +217,10 @@ const styles = StyleSheet.create({
   stepTitle: { fontSize: 15, fontWeight: '600', color: '#1c1c1e', marginBottom: 4 },
 
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12 },
+  tokenValue: { fontSize: 20, fontWeight: '600', fontFamily: 'Courier', color: '#1c1c1e', letterSpacing: 1, marginBottom: 10 },
+  tokenNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginBottom: 12 },
+  copyBtn: { alignSelf: 'flex-start', backgroundColor: '#eef3fa', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  copyBtnText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },
   cardHeader: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 },
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#1c1c1e', marginRight: 8 },

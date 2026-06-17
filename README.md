@@ -27,9 +27,7 @@ This is a pnpm monorepo with three packages:
 The server uses a PostgreSQL database to store user tokens and forecast requests.
 
 ```bash
-docker run --rm -d --name goingblue -p 5432:5432 \
-  -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=goingblue postgres:18
-DB_USER=postgres DB_PASS=dev DB_NAME=goingblue pnpm start
+docker run --rm -d --name goingblue -p 5432:5432 -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=goingblue postgres:18
 ```
 
 ### Server
@@ -43,7 +41,7 @@ pnpm install
 Start the server:
 
 ```bash
-pnpm start
+DB_USER=postgres DB_PASS=dev DB_NAME=goingblue pnpm start
 ```
 
 The server starts at `http://localhost:8080`. 
