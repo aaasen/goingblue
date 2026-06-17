@@ -73,7 +73,14 @@ Or, build an iOS app:
 
 ```
 cd packages/mobile
-eas build --platform ios --local
+eas build -p ios --profile development
+```
+
+Then run the Expo development server:
+
+```
+cd packages/mobile
+npx expo start
 ```
 
 ### Tests
