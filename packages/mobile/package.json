@@ -5,6 +5,7 @@
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-segmented-control/segmented-control": "2.5.7",
+    "@shopify/react-native-skia": "2.6.2",
     "@weather/protocol": "workspace:*",
     "expo": "~56.0.12",
     "expo-clipboard": "~56.0.4",
@@ -16,9 +17,11 @@
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
     "react-native-maps": "1.27.2",
+    "react-native-reanimated": "4.3.1",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
+    "@babel/core": "7.29.7",
     "@types/react": "~19.2.2",
     "typescript": "~6.0.3"
   },

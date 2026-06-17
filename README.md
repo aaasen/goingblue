@@ -80,7 +80,14 @@ Then run the Expo development server:
 
 ```
 cd packages/mobile
-npx expo start
+npx expo start -c
+```
+
+Or run in the simulator:
+
+```
+cd packages/mobile
+npx expo run:ios
 ```
 
 ### Tests
