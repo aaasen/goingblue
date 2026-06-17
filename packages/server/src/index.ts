@@ -2,10 +2,11 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { forecast, health, inbound, testPage } from "./routes.js";
-import { privacy, terms } from "./legal.js";
+import { landing, privacy, terms } from "./legal.js";
 
 const app = new Hono();
 
+app.get("/", landing);
 app.get("/health", health);
 app.get("/privacy", privacy);
 app.get("/terms", terms);

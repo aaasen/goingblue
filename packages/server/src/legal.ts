@@ -1,38 +1,80 @@
 import type { Context } from "hono";
 
+const BRAND = "Going Blue";
 const LAST_UPDATED = "June 16, 2026";
 const CONTACT_EMAIL = "laneaasen@gmail.com";
 
-const PAGE = (title: string, body: string) => `<!doctype html>
+const PAGE = (title: string, body: string, showUpdated = true) => `<!doctype html>
 <html lang=en>
 <head>
 <meta charset=utf-8>
 <meta name=viewport content="width=device-width, initial-scale=1">
-<title>${title} — Lane Aasen Weather</title>
+<title>${title === BRAND ? BRAND : `${title} — ${BRAND}`}</title>
 <style>
   body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; line-height: 1.55; }
   h1 { font-size: 1.6em; }
   h2 { font-size: 1.15em; margin-top: 1.8em; }
   .updated { color: #666; font-size: 0.9em; }
+  .tagline { color: #444; font-size: 1.1em; }
+  .cta { background: #f0f6fc; border: 1px solid #cfe2f5; border-radius: 8px; padding: 16px 20px; margin: 1.8em 0; }
   a { color: #0b62c4; }
   footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
 </style>
 </head>
 <body>
 <h1>${title}</h1>
-<p class=updated>Last updated: ${LAST_UPDATED}</p>
+${showUpdated ? `<p class=updated>Last updated: ${LAST_UPDATED}</p>` : ""}
 ${body}
 <footer>
-  Lane Aasen Weather is operated as a sole proprietorship by Lane Aasen.
+  ${BRAND} is operated as a sole proprietorship by Lane Aasen.
   Questions? Contact <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.<br>
-  <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a>
+  <a href="/">Home</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a>
 </footer>
 </body>
 </html>`;
 
+const LANDING_BODY = `
+<p class=tagline>On-request weather forecasts delivered by text message — built for
+satellite messengers like the Garmin inReach, and for mobile phones.</p>
+
+<p>${BRAND} gives you better forecasts than the default satellite-messenger weather service.
+You send a short text containing a location and the forecast options you want; ${BRAND}
+replies with a compact, encoded forecast that the companion app decodes into a full
+multi-day forecast — small enough to fit within satellite messaging size limits.</p>
+
+<h2>How it works</h2>
+<ol>
+  <li>Send a text message to ${BRAND} with a location (latitude and longitude) and your
+  forecast options, from your satellite messenger or mobile phone.</li>
+  <li>${BRAND} fetches the forecast for that location and replies to you with a single
+  message.</li>
+  <li>Open the companion app to decode and view the full forecast.</li>
+</ol>
+
+<div class=cta>
+  <h2 style="margin-top:0">Opt-in &amp; consent</h2>
+  <p>${BRAND} only ever replies to a message you send first. <strong>When you text ${BRAND}
+  to request a forecast, you are opting in to receive a reply message with that forecast.</strong>
+  We send no marketing, promotional, or recurring messages — every message we send is a
+  one-to-one reply to a request you just made. Message frequency depends entirely on how often
+  you choose to request a forecast.</p>
+  <p>Message and data rates may apply. Reply <strong>STOP</strong> at any time to opt out, or
+  <strong>HELP</strong> for assistance. We never sell or share your phone number or opt-in
+  consent with third parties for their own marketing.</p>
+</div>
+
+<h2>Important: forecasts are informational</h2>
+<p>Forecasts are provided for informational purposes only and may be inaccurate, delayed, or
+unavailable. Do not rely on ${BRAND} as your sole source of weather information for decisions
+affecting safety, including in remote or backcountry settings.</p>
+
+<p>See our <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms &amp; Conditions</a>
+for full details. Questions? Contact <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>
+`;
+
 const PRIVACY_BODY = `
 <p>This Privacy Policy describes how Lane Aasen ("we," "us"), operating the
-Lane Aasen Weather SMS forecast service (the "Service") as a sole proprietorship,
+${BRAND} SMS forecast service (the "Service") as a sole proprietorship,
 handles information when you request weather forecasts by text message.</p>
 
 <h2>Information we collect</h2>
@@ -86,7 +128,7 @@ most recent revision.</p>
 `;
 
 const TERMS_BODY = `
-<p>These Terms &amp; Conditions govern your use of the Lane Aasen Weather SMS forecast
+<p>These Terms &amp; Conditions govern your use of the ${BRAND} SMS forecast
 service (the "Service"), operated as a sole proprietorship by Lane Aasen. By texting the
 Service to request a forecast, you agree to these terms.</p>
 
@@ -131,6 +173,10 @@ most recent revision. Continued use of the Service constitutes acceptance of the
 <p>For questions about these terms, contact
 <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>
 `;
+
+export function landing(c: Context) {
+  return c.html(PAGE(BRAND, LANDING_BODY, false));
+}
 
 export function privacy(c: Context) {
   return c.html(PAGE("Privacy Policy", PRIVACY_BODY));
