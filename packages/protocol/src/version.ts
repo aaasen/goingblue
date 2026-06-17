@@ -1,7 +1,7 @@
 import { ALPHABET } from "./constants.js";
 
-// Every message begins with a self-describing version tag: a single base-94 character
-// whose alphabet index is the protocol version (0–93). It is fixed-width and identical
+// Every message begins with a self-describing version tag: a single base-85 character
+// whose alphabet index is the protocol version (0–84). It is fixed-width and identical
 // across all versions, so a decoder can read the version *before* it knows anything else
 // about the message's layout, then dispatch to exactly one codec (see registry.ts).
 //
@@ -9,7 +9,7 @@ import { ALPHABET } from "./constants.js";
 // client that receives a newer version reads the tag, finds no codec for it, and fails
 // with a clear "unsupported version" error instead of silently mis-decoding the payload.
 export const VERSION_PREFIX_CHARS = 1;
-export const MAX_VERSION = ALPHABET.length - 1; // 93
+export const MAX_VERSION = ALPHABET.length - 1; // 84
 
 const CHAR_TO_VALUE: Record<string, number> = Object.fromEntries(
   [...ALPHABET].map((c, i) => [c, i]),

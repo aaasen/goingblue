@@ -7,8 +7,12 @@ export const LAT_BITS = 15;  // -90..+90 in ~611m steps
 export const LON_BITS = 16;  // -180..+180 in ~611m steps at equator
 export const ELEV_BITS = 14; // 0..16383m
 
+// Restricted to characters in the GSM-7 basic alphabet, so a message can be carried over SMS
+// where each character is a single septet. Excludes the printable-ASCII characters that GSM-7
+// either omits (`) or relegates to the extension table, which would cost two septets each
+// ([ \ ] ^ { | } ~). This is base-85; see codec.ts.
 export const ALPHABET =
-  "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+  "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
 
 export const RESOLUTION_HOURS: Record<number, number> = { 0: 24, 1: 12, 2: 6, 3: 3, 4: 1 };
 export const RESOLUTION_LABEL: Record<number, string> = {
