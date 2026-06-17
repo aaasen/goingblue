@@ -57,6 +57,29 @@ To use a different port:
 PORT=3000 node packages/server/dist/index.js
 ```
 
+### Database
+
+The server uses Postgres (Cloud SQL in production) to store user accounts and forecast requests. Connection details come from the environment; the schema is applied automatically on startup. The forecast path keeps working if the DB is unavailable — only account features require it.
+
+| Env var | Purpose |
+| --- | --- |
+| `INSTANCE_CONNECTION_NAME` | Cloud SQL instance (`project:region:instance`). When set (and `DB_HOST` is not), the driver connects over the Cloud SQL Auth Proxy socket at `/cloudsql/<name>`. |
+| `DB_HOST` / `DB_PORT` | TCP host/port for local dev (default `127.0.0.1:5432`). |
+| `DB_USER` / `DB_PASS` / `DB_NAME` | Credentials and database name. |
+| `DB_POOL_MAX` | Max pool connections per instance (default `5`). |
+
+**Local dev** — run Postgres in Docker and point the server at it:
+
+```bash
+docker run --rm -d --name weather-pg -p 5432:5432 \
+  -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=goingblue postgres:18
+DB_USER=postgres DB_PASS=dev DB_NAME=goingblue pnpm start
+```
+
+(Alternatively, run `cloud-sql-proxy <INSTANCE_CONNECTION_NAME>` to connect to the real Cloud SQL instance over `127.0.0.1`.)
+
+Production deployment (Cloud Run, Cloud SQL, and the `DB_PASS` secret) is documented separately in `DEPLOYMENT.md`.
+
 ### Mobile (Expo / React Native)
 
 **Additional prerequisites:** [Expo Go](https://expo.dev/go) on your iOS or Android device, or Xcode (iOS simulator) / Android Studio (Android emulator).

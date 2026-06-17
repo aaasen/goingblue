@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { forecast, health, inbound, testPage } from "./routes.js";
 import { landing, privacy, terms } from "./legal.js";
+import { migrate } from "./db.js";
 
 const app = new Hono();
 
@@ -17,6 +18,13 @@ app.get("/test", testPage);
 app.post("/test", testPage);
 
 const port = parseInt(process.env["PORT"] ?? "8080");
+
+// Apply schema on startup, but don't let a DB hiccup keep the server (and the forecast
+// path) from coming up — log and carry on.
+migrate()
+  .then(() => console.log("db schema ready"))
+  .catch((e) => console.error("db migrate failed:", e));
+
 serve({ fetch: app.fetch, port }, () => {
   console.log(`Server listening on :${port}`);
 });

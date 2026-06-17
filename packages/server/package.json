@@ -13,10 +13,12 @@
     "@hono/node-server": "^1.12.0",
     "@weather/protocol": "workspace:*",
     "hono": "^4.6.0",
-    "node-html-parser": "^7.1.0"
+    "node-html-parser": "^7.1.0",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
+    "@types/pg": "^8.11.0",
     "typescript": "^5.4.0",
     "vitest": "^1.6.1"
   }

@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { fetchForecast, parseRequest } from "./forecast.js";
 import { sendGarminReply } from "./garmin.js";
+import { ping } from "./db.js";
 import { CODECS } from "@weather/protocol";
 
 const REPLY_ADDRESS = "wx@email.laneaasen.com";
@@ -67,8 +68,10 @@ export async function inbound(c: Context) {
   return c.text("OK", 200);
 }
 
-export function health(c: Context) {
-  return c.text("OK", 200);
+export async function health(c: Context) {
+  const dbUp = await ping();
+  // Always 200 so this stays a valid liveness probe; the body reports DB reachability.
+  return c.text(`OK db:${dbUp ? "up" : "down"}`, 200);
 }
 
 const TEST_HTML = (opts: {
