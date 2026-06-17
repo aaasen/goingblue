@@ -19,7 +19,12 @@
         "backgroundColor": "#9ccdf0",
         "foregroundImage": "./assets/icon.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "config": {
+        "googleMaps": {
+          "apiKey": "REPLACE_WITH_ANDROID_MAPS_SDK_API_KEY"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png",

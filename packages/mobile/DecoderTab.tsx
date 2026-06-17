@@ -9,6 +9,7 @@ import {
 } from '@weather/protocol';
 import { decodeAny, loadCache, addToCache, deleteFromCache, type CacheEntry } from './cache';
 import type { Units } from './settings';
+import LocationMap from './LocationMap';
 
 // ── Layout constants ───────────────────────────────────────────────────────
 
@@ -566,8 +567,12 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
   );
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#f2f2f7' }}>
-      {/* Input area */}
+    <ScrollView
+      style={{ flex: 1, backgroundColor: '#f2f2f7' }}
+      contentContainerStyle={{ paddingBottom: 48 }}
+      keyboardShouldPersistTaps="handled"
+    >
+      {/* Input area (scrolls away with the rest of the page rather than staying pinned) */}
       <Text style={styles.inputPrompt}>Paste the forecast response from your inReach here</Text>
       <View style={styles.inputArea}>
         <TextInput
@@ -591,8 +596,7 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
         )}
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 48 }}>
-        {error && (
+      {error && (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{error}</Text>
           </View>
@@ -603,6 +607,15 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
             {/* Meta */}
             <View style={styles.metaRow}>
               <Text style={styles.metaText} numberOfLines={3}>{metaLabel(decoded, units)}</Text>
+            </View>
+
+            {/* Forecast location. Keyed on the coordinate so loading a new forecast recenters the map. */}
+            <View style={styles.mapRow}>
+              <LocationMap
+                key={`${decoded.lat},${decoded.lon}`}
+                coord={{ lat: decoded.lat, lon: decoded.lon }}
+                height={160}
+              />
             </View>
 
             {/* Forecast table */}
@@ -620,8 +633,7 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
         )}
 
         {pastSection}
-      </ScrollView>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -676,6 +688,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   metaText: { fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
+
+  mapRow: { marginHorizontal: 16, marginBottom: 8 },
 
   emptyState: { alignItems: 'center', justifyContent: 'center', padding: 40 },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: '#3a3a3c', marginBottom: 10, textAlign: 'center' },

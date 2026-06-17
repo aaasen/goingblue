@@ -10,6 +10,7 @@ import {
   V1_HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, V1_VERSION, VAR_BITS_V1,
 } from '@weather/protocol';
 import { API_BASE } from './account';
+import LocationMap from './LocationMap';
 
 const CHARS_PER_MESSAGE = 160; // each Garmin inReach message holds 160 characters
 const FORECAST_SMS = '+1 (425) 434-5858';
@@ -123,6 +124,14 @@ function buildMsg(token: string, coords: { lat: number; lon: number } | null, re
   return parts.join(' ');
 }
 
+// Parse a single "lat, lon" string into coordinates. Accepts comma- or whitespace-separated pairs
+// (e.g. "47.45915, -121.45958" pasted from CalTopo). Returns null unless it's exactly two numbers.
+function parseLatLon(s: string): { lat: number; lon: number } | null {
+  const m = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
+}
+
 interface Props {
   token: string;
   onForecastReceived: (encoded: string) => void;
@@ -131,8 +140,7 @@ interface Props {
 export default function BuilderTab({ token, onForecastReceived }: Props) {
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
-  const [customLat, setCustomLat] = useState('');
-  const [customLon, setCustomLon] = useState('');
+  const [customCoords, setCustomCoords] = useState('');
   const [resHours, setResHours] = useState(24);
   const [model, setModel] = useState('ifs');
   const [vars, setVars] = useState<Set<string>>(new Set(DEFAULT_VARS));
@@ -157,7 +165,7 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
 
   const resolvedCoords = locationMode === 'current'
     ? gpsCoords
-    : { lat: parseFloat(customLat), lon: parseFloat(customLon) };
+    : parseLatLon(customCoords);
   const coordsValid = resolvedCoords != null
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
   // In current-location mode we always show a preview (coords are omitted until GPS resolves);
@@ -259,31 +267,32 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
             )}
           </View>
         )}
+        {locationMode === 'current' && gpsCoords && (
+          <LocationMap coord={gpsCoords} height={160} />
+        )}
         {locationMode === 'custom' && (
-          <View style={styles.customCoords}>
-            <View style={styles.coordRow}>
-              <Text style={styles.coordLabel}>Lat</Text>
-              <TextInput
-                style={styles.coordInput}
-                value={customLat}
-                onChangeText={setCustomLat}
-                placeholder="63.0000"
-                keyboardType="numbers-and-punctuation"
-                returnKeyType="next"
-              />
+          <>
+            <View style={styles.customCoords}>
+              <View style={[styles.coordRow, styles.coordRowLast]}>
+                <Text style={[styles.coordLabel, styles.coordLabelWide]}>Lat, Lon</Text>
+                <TextInput
+                  style={styles.coordInput}
+                  value={customCoords}
+                  onChangeText={setCustomCoords}
+                  placeholder="47.45915, -121.45958"
+                  keyboardType="numbers-and-punctuation"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                />
+              </View>
             </View>
-            <View style={[styles.coordRow, styles.coordRowLast]}>
-              <Text style={styles.coordLabel}>Lon</Text>
-              <TextInput
-                style={styles.coordInput}
-                value={customLon}
-                onChangeText={setCustomLon}
-                placeholder="-151.0000"
-                keyboardType="numbers-and-punctuation"
-                returnKeyType="done"
-              />
-            </View>
-          </View>
+            <Text style={styles.mapHint}>Paste “lat, lon”, or tap the map / drag the pin to set a location.</Text>
+            <LocationMap
+              coord={coordsValid ? resolvedCoords : null}
+              onPick={(c) => setCustomCoords(`${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`)}
+            />
+          </>
         )}
       </Section>
 
@@ -412,7 +421,9 @@ const styles = StyleSheet.create({
   coordRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
   coordRowLast: { borderBottomWidth: 0 },
   coordLabel: { width: 30, fontSize: 14, fontWeight: '600', color: '#6e6e73' },
+  coordLabelWide: { width: 64 },
   coordInput: { flex: 1, fontSize: 14, color: '#1c1c1e', fontFamily: 'Courier' },
+  mapHint: { fontSize: 12, color: '#8e8e93', marginTop: 10 },
 
   msgBox: { backgroundColor: '#fff', borderRadius: 12, padding: 14 },
   msgText: { fontFamily: 'Courier', fontSize: 14, color: '#1c1c1e', lineHeight: 22 },
