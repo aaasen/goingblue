@@ -21,6 +21,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "eas-build-post-install": "pnpm --filter @weather/protocol build",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
