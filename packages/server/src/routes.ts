@@ -2,9 +2,20 @@ import type { Context } from "hono";
 import { fetchForecast, parseRequest } from "./forecast.js";
 import { sendGarminReply } from "./garmin.js";
 import { ping } from "./db.js";
-import { CODECS } from "@weather/protocol";
+import { createAccount, accountExists, recordRequest } from "./accounts.js";
+import { CODECS, isValidToken, normalizeToken } from "@weather/protocol";
 
 const REPLY_ADDRESS = "wx@email.laneaasen.com";
+
+// Record a served request without ever failing the response: the forecast is already built
+// by the time we get here, so a DB hiccup must not turn a successful reply into an error.
+async function logRequest(token: string | null, chars: number): Promise<void> {
+  try {
+    await recordRequest(token, chars);
+  } catch (e) {
+    console.error("recordRequest failed:", e);
+  }
+}
 
 export async function forecast(c: Context) {
   const body = await c.req.text();
@@ -17,6 +28,7 @@ export async function forecast(c: Context) {
   }
   try {
     const encoded = await fetchForecast(params, codec);
+    await logRequest(params.userToken, encoded.length);
     return c.text(encoded, 200);
   } catch (e) {
     console.error("fetchForecast failed:", e);
@@ -57,6 +69,8 @@ export async function inbound(c: Context) {
       return c.text("OK", 200);
     }
 
+    await logRequest(params.userToken, encoded.length);
+
     try {
       const success = await sendGarminReply(replyUrl, REPLY_ADDRESS, encoded);
       console.log("garmin reply sent:", success);
@@ -72,6 +86,35 @@ export async function health(c: Context) {
   const dbUp = await ping();
   // Always 200 so this stays a valid liveness probe; the body reports DB reachability.
   return c.text(`OK db:${dbUp ? "up" : "down"}`, 200);
+}
+
+// POST /account — mint a new account token. Called once over normal internet during app
+// setup (not over satellite). Returns { token }.
+export async function createAccountRoute(c: Context) {
+  try {
+    const token = await createAccount();
+    return c.json({ token });
+  } catch (e) {
+    console.error("createAccount failed:", e);
+    return c.text("Could not create account", 503);
+  }
+}
+
+// POST /account/verify { token } — used by the import flow to confirm an existing token is
+// real. A malformed token (bad check symbol) is reported as { valid: false } without a DB
+// lookup; a DB error is surfaced as 503 so the client retries rather than concluding the
+// token is invalid.
+export async function verifyAccountRoute(c: Context) {
+  const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+  const raw = typeof body?.token === "string" ? body.token : "";
+  if (!isValidToken(raw)) return c.json({ valid: false });
+  try {
+    const exists = await accountExists(normalizeToken(raw));
+    return c.json({ valid: exists });
+  } catch (e) {
+    console.error("verifyAccount failed:", e);
+    return c.text("Verification unavailable", 503);
+  }
 }
 
 const TEST_HTML = (opts: {

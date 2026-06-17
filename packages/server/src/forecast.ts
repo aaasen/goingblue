@@ -7,6 +7,8 @@ import {
   VAR_BITS_V1,
   periodBitsForMask,
   nCharsForBits,
+  isValidToken,
+  normalizeToken,
   type Period,
   type ForecastMessage,
   type VersionedCodec,
@@ -317,6 +319,9 @@ export interface ForecastParams {
   varsMask: number;
   maxChars: number;
   decoderVersion: number;
+  // Normalized account token from a `u:` request word, or null when absent/malformed.
+  // Phase 1 only records it; it does not yet gate the response.
+  userToken: string | null;
 }
 
 // 8-bit period count in the protocol header → 1..256 periods.
@@ -362,6 +367,7 @@ export function parseRequest(body: string): ForecastParams {
   let varsMask = 0;
   let maxChars = DEFAULT_MAX_CHARS; // override with a `c:` token in the request
   let decoderVersion = CURRENT_VERSION; // override with a `vN` token in the request
+  let userToken: string | null = null; // set from a `u:` token in the request
 
   // Compact "X,Y" (message body) takes priority over "Lat X Lon Y" (Garmin email footer)
   const gpsMatch =
@@ -399,6 +405,10 @@ export function parseRequest(body: string): ForecastParams {
         for (const v of val.split(",")) {
           if (v in VARS_BIT) varsMask |= 1 << VARS_BIT[v];
         }
+      } else if (key === "u") {
+        // The body was lowercased above; normalizeToken restores canonical casing. Keep a
+        // valid token (check symbol matches), drop a malformed one as if absent.
+        if (isValidToken(val)) userToken = normalizeToken(val);
       }
     } else if (/^v\d+$/.test(word)) {
       decoderVersion = parseInt(word.slice(1));
@@ -411,7 +421,7 @@ export function parseRequest(body: string): ForecastParams {
   // allows for the chosen resolution, variables, and models.
   const nPeriods = maxPeriodsForBudget(resolutionIdx, varsMask, modelsMask, maxChars);
 
-  return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, maxChars, decoderVersion };
+  return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, maxChars, decoderVersion, userToken };
 }
 
 export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<string> {

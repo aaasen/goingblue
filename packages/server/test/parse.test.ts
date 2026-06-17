@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { MODEL_BIT, VARS_BIT, DEFAULT_VARS_MASK } from "@weather/protocol";
+import { randomBytes } from "node:crypto";
+import { MODEL_BIT, VARS_BIT, DEFAULT_VARS_MASK, generateToken } from "@weather/protocol";
 import { parseRequest } from "../src/forecast.js";
+
+const newToken = () => generateToken((n) => Uint8Array.from(randomBytes(n)));
 
 const HRES = 1 << MODEL_BIT["HRES"];
 const GFS  = 1 << MODEL_BIT["GFS"];
@@ -118,5 +121,23 @@ describe("parseRequest", () => {
     });
     expect(p.nPeriods).toBeGreaterThan(0);
     expect(p.varsMask).toBe((1 << VARS_BIT["precip"]) | (1 << VARS_BIT["temp"]));
+  });
+
+  it("u: extracts a valid account token", () => {
+    const token = newToken();
+    expect(parseRequest(`l:14k u:${token}`).userToken).toBe(token);
+  });
+
+  it("u: tolerates lowercase and hyphen grouping (the body is lowercased before parsing)", () => {
+    const token = newToken();
+    const grouped = token.replace(/(.{4})(?=.)/g, "$1-").toLowerCase();
+    expect(parseRequest(`u:${grouped}`).userToken).toBe(token);
+  });
+
+  it("userToken is null when absent or malformed", () => {
+    expect(parseRequest("l:14k").userToken).toBeNull();
+    expect(parseRequest("u:not-a-real-token").userToken).toBeNull();
+    // Right length, wrong check symbol → rejected.
+    expect(parseRequest("u:00000000000001").userToken).toBeNull();
   });
 });
