@@ -9,15 +9,14 @@ import SegmentedControl from '@react-native-segmented-control/segmented-control'
 import {
   V1_HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, V1_VERSION, VAR_BITS_V1,
 } from '@weather/protocol';
+import { API_BASE } from './account';
 
 const CHARS_PER_MESSAGE = 160; // each Garmin inReach message holds 160 characters
 const DEFAULT_MESSAGES = 1;
 const MESSAGE_OPTIONS = [1, 2, 3, 4, 5];
 const MAX_PERIODS = 256;   // v1 header carries an 8-bit period count
 const HORIZON_DAYS = 15;   // upstream forecast horizon
-const FORECAST_URL = __DEV__
-  ? 'http://localhost:8080/forecast'
-  : 'https://going.blue/forecast';
+const FORECAST_URL = `${API_BASE}/forecast`;
 
 const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
   hres: ['freeze', 'w500', 'w600', 'w700'],

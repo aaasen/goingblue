@@ -1,0 +1,16 @@
+# Patterns use **/ so they match at any depth (Docker, unlike gitignore, does not match
+# bare names against nested paths). Stale **/*.tsbuildinfo in particular must be excluded, or
+# `tsc --composite` treats the build as up to date and emits nothing.
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+
+.git
+.gitignore
+.gcloudignore
+.dockerignore
+
+**/.expo/
+.claude/
+*.har
+DEPLOYMENT.md

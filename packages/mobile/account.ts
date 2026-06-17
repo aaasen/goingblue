@@ -1,9 +1,19 @@
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isValidToken, normalizeToken } from '@weather/protocol';
 
-// Account provisioning runs over normal internet during app setup (never over satellite), so
-// it can talk to the server directly. Mirrors the forecast endpoint's dev/prod split.
-export const API_BASE = __DEV__ ? 'http://localhost:8080' : 'https://going.blue';
+// Base URL for the API. Account provisioning runs over normal internet during app setup (never
+// over satellite), so it can talk to the server directly.
+//   - dev (Expo Go / Metro web): the API runs on localhost:8080, a different origin than Metro,
+//     so use an absolute URL (cross-origin, allowed by the server's CORS).
+//   - production web: the server hosts this app at /app, so call it same-origin (relative). This
+//     avoids CORS entirely and works regardless of host (localhost or going.blue).
+//   - production native: no shared origin, so target the deployed server directly.
+export const API_BASE = __DEV__
+  ? 'http://localhost:8080'
+  : Platform.OS === 'web'
+    ? ''
+    : 'https://going.blue';
 
 const TOKEN_KEY = 'user_token';
 
