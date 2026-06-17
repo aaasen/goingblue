@@ -46,13 +46,6 @@ DB_USER=postgres DB_PASS=dev DB_NAME=goingblue pnpm start
 
 The server starts at `http://localhost:8080`. 
 
-The server can also be run in a Docker container: 
-
-```bash
-docker build -t goingblue .
-docker run --rm -p 8080:8080 goingblue
-```
-
 ### Client
 
 The client is an Expo React Native app. The app works on iOS, Android, and the web. To run the web client:

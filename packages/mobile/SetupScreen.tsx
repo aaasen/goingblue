@@ -81,7 +81,7 @@ export default function SetupScreen({ onReady }: Props) {
             style={styles.input}
             value={entry}
             onChangeText={setEntry}
-            placeholder="XXXX-XXXX-XXXX-XX"
+            placeholder="XXXX-XXXX-XXXX-XXXX"
             autoCapitalize="characters"
             autoCorrect={false}
             editable={!busy}

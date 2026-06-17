@@ -137,7 +137,9 @@ describe("parseRequest", () => {
   it("userToken is null when absent or malformed", () => {
     expect(parseRequest("l:14k").userToken).toBeNull();
     expect(parseRequest("u:not-a-real-token").userToken).toBeNull();
-    // Right length, wrong check symbol → rejected.
-    expect(parseRequest("u:00000000000001").userToken).toBeNull();
+    // Wrong length (15 chars, need 16) → rejected.
+    expect(parseRequest("u:000000000000000").userToken).toBeNull();
+    // Contains 'u', which is outside the Crockford alphabet → rejected.
+    expect(parseRequest("u:uuuuuuuuuuuuuuuu").userToken).toBeNull();
   });
 });
