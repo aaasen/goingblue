@@ -4,16 +4,22 @@ import {
 } from 'react-native';
 import { isValidToken, normalizeToken } from '@weather/protocol';
 import { createAccount, saveToken, verifyAccount } from './account';
+import UnitsToggle from './UnitsToggle';
+import type { Units } from './settings';
+
+const FORECAST_SMS = '+1 (425) 434-5858';
 
 interface Props {
   // Called with the provisioned token once setup completes; the token is already persisted.
   onReady: (token: string) => void;
+  units: Units;
+  onUnitsChange: (u: Units) => void;
 }
 
 // First-run gate. The account token identifies the user for usage limits and is created once,
 // here, over normal internet — not over satellite. Users either mint a new account or import
 // an existing token when moving to a new device.
-export default function SetupScreen({ onReady }: Props) {
+export default function SetupScreen({ onReady, units, onUnitsChange }: Props) {
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const [entry, setEntry] = useState('');
@@ -56,6 +62,31 @@ export default function SetupScreen({ onReady }: Props) {
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+      <Text style={styles.brand}>Going Blue</Text>
+
+      {/* Getting started */}
+      <Text style={styles.gsHeading}>Getting started</Text>
+      <Text style={styles.gsPara}>
+        This app uses a custom weather forecast encoding to pack as much weather data as possible
+        into each satellite message.
+      </Text>
+
+      <Step n={1} title="Build a forecast request">
+        On the <Bold>Builder</Bold> tab, choose your location, weather model, and variables. Each
+        message is limited to 160 characters, so you may need to reduce the number of variables or
+        the resolution to fit within the limit.
+      </Step>
+      <Step n={2} title="Send it">
+        Copy the request and text it to{' '}
+        <Text style={styles.bold} selectable>{FORECAST_SMS}</Text>{' '}
+        from the Garmin Messenger app on your inReach device.
+      </Step>
+      <Step n={3} title="View forecast">
+        When you receive a response, copy it and paste it into the <Bold>Decoder</Bold> tab to
+        visualize the forecast. Decoded forecasts are cached on your device so you can revisit them
+        offline under “Past forecasts.”
+      </Step>
+
       <Text style={styles.title}>Set up your account</Text>
       <Text style={styles.para}>
         Going Blue uses an account token to identify you for usage limits. It’s created once and
@@ -65,6 +96,10 @@ export default function SetupScreen({ onReady }: Props) {
 
       {!importing ? (
         <>
+          <Text style={styles.label}>Units</Text>
+          <View style={styles.unitsRow}>
+            <UnitsToggle units={units} onChange={onUnitsChange} />
+          </View>
           <Checkbox checked={smsConsent} onToggle={() => setSmsConsent((v) => !v)} disabled={busy}>
             I agree to receive text messages from Going Blue, including forecast replies and
             account notifications. Message and data rates may apply; reply STOP to opt out.
@@ -108,6 +143,24 @@ export default function SetupScreen({ onReady }: Props) {
   );
 }
 
+function Bold({ children }: { children: React.ReactNode }) {
+  return <Text style={styles.bold}>{children}</Text>;
+}
+
+function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.step}>
+      <View style={styles.stepNum}>
+        <Text style={styles.stepNumText}>{n}</Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.stepTitle}>{title}</Text>
+        <Text style={styles.gsPara}>{children}</Text>
+      </View>
+    </View>
+  );
+}
+
 function Checkbox({ checked, onToggle, disabled, children }: {
   checked: boolean;
   onToggle: () => void;
@@ -127,7 +180,8 @@ function Checkbox({ checked, onToggle, disabled, children }: {
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: '#f2f2f7' },
   content: { padding: 24, paddingTop: 48 },
-  title: { fontSize: 24, fontWeight: '700', color: '#1c1c1e', marginBottom: 12 },
+  brand: { fontSize: 30, fontWeight: '700', color: '#2a6bb5', marginBottom: 20 },
+  title: { fontSize: 22, fontWeight: '700', color: '#1c1c1e', marginTop: 32, marginBottom: 12 },
   para: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginBottom: 28 },
   label: { fontSize: 12, fontWeight: '600', color: '#6e6e73', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   input: {
@@ -151,4 +205,14 @@ const styles = StyleSheet.create({
   btnPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   linkBtn: { alignItems: 'center', paddingVertical: 16 },
   linkText: { color: '#2a6bb5', fontSize: 15, fontWeight: '500' },
+
+  unitsRow: { marginBottom: 20 },
+
+  gsHeading: { fontSize: 13, fontWeight: '700', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
+  gsPara: { fontSize: 14, color: '#3a3a3c', lineHeight: 21, marginBottom: 12 },
+  bold: { fontWeight: '700', color: '#1c1c1e' },
+  step: { flexDirection: 'row', gap: 12, marginBottom: 4 },
+  stepNum: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#2a6bb5', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  stepNumText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  stepTitle: { fontSize: 15, fontWeight: '600', color: '#1c1c1e', marginBottom: 4 },
 });

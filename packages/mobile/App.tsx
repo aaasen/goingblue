@@ -3,21 +3,30 @@ import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ActivityIndicat
 import { StatusBar } from 'expo-status-bar';
 import BuilderTab from './BuilderTab';
 import DecoderTab from './DecoderTab';
-import InfoTab from './InfoTab';
+import SettingsTab from './SettingsTab';
 import SetupScreen from './SetupScreen';
 import { loadToken, clearToken } from './account';
+import { loadUnits, saveUnits, type Units } from './settings';
 
-type Tab = 'builder' | 'decoder' | 'info';
+type Tab = 'builder' | 'decoder' | 'settings';
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('builder');
   const [forecastData, setForecastData] = useState('');
   // undefined = still loading from storage; null = no account yet (show setup); string = ready.
   const [token, setToken] = useState<string | null | undefined>(undefined);
+  const [units, setUnitsState] = useState<Units>('imperial');
 
   useEffect(() => {
     loadToken().then(setToken);
+    loadUnits().then(setUnitsState);
   }, []);
+
+  // Persist unit changes so the choice survives across sessions.
+  function setUnits(u: Units) {
+    setUnitsState(u);
+    saveUnits(u);
+  }
 
   function onForecastReceived(encoded: string) {
     setForecastData(encoded);
@@ -43,7 +52,7 @@ export default function App() {
     return (
       <SafeAreaView style={styles.safe}>
         <StatusBar style="dark" />
-        <SetupScreen onReady={setToken} />
+        <SetupScreen onReady={setToken} units={units} onUnitsChange={setUnits} />
       </SafeAreaView>
     );
   }
@@ -54,13 +63,15 @@ export default function App() {
       <View style={styles.tabBar}>
         <TabBtn label="Builder" active={tab === 'builder'} onPress={() => setTab('builder')} />
         <TabBtn label="Decoder" active={tab === 'decoder'} onPress={() => setTab('decoder')} />
-        <TabBtn label="Info" active={tab === 'info'} onPress={() => setTab('info')} />
+        <TabBtn label="Settings" active={tab === 'settings'} onPress={() => setTab('settings')} />
       </View>
       {tab === 'builder' && <BuilderTab token={token} onForecastReceived={onForecastReceived} />}
       {tab === 'decoder' && (
-        <DecoderTab forecastData={forecastData} onForecastDataChange={setForecastData} />
+        <DecoderTab forecastData={forecastData} onForecastDataChange={setForecastData} units={units} />
       )}
-      {tab === 'info' && <InfoTab token={token} onReset={handleReset} />}
+      {tab === 'settings' && (
+        <SettingsTab token={token} onReset={handleReset} units={units} onUnitsChange={setUnits} />
+      )}
     </SafeAreaView>
   );
 }

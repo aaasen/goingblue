@@ -12,6 +12,8 @@ import {
 import { API_BASE } from './account';
 
 const CHARS_PER_MESSAGE = 160; // each Garmin inReach message holds 160 characters
+const FORECAST_SMS = '+1 (425) 434-5858';
+const FORECAST_SMS_TEL = '+14254345858';
 const DEFAULT_MESSAGES = 1;
 const MESSAGE_OPTIONS = [1, 2, 3, 4, 5];
 const MAX_PERIODS = 256;   // v1 header carries an 8-bit period count
@@ -135,6 +137,7 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
   const [model, setModel] = useState('ifs');
   const [vars, setVars] = useState<Set<string>>(new Set(DEFAULT_VARS));
   const [numMessages, setNumMessages] = useState(DEFAULT_MESSAGES);
+  const [numCopied, setNumCopied] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [locating, setLocating] = useState(false);
 
@@ -185,6 +188,12 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
     } finally {
       setLocating(false);
     }
+  }
+
+  async function copyNumber() {
+    await Clipboard.setStringAsync(FORECAST_SMS_TEL);
+    setNumCopied(true);
+    setTimeout(() => setNumCopied(false), 2000);
   }
 
   async function handleCopy() {
@@ -355,6 +364,17 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
           {fetching ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Fetch Forecast</Text>}
         </TouchableOpacity>
       </View>
+
+      <Text style={styles.smsHint}>
+        Copy the message and text it to the number below from your inReach. When you get a reply,
+        paste it into the Decoder tab to view the forecast.
+      </Text>
+      <View style={styles.smsRow}>
+        <Text style={styles.smsNumber} selectable>{FORECAST_SMS}</Text>
+        <TouchableOpacity style={styles.smsCopyBtn} onPress={copyNumber} activeOpacity={0.7}>
+          <Text style={styles.smsCopyText}>{numCopied ? 'Copied' : 'Copy'}</Text>
+        </TouchableOpacity>
+      </View>
     </ScrollView>
   );
 }
@@ -405,4 +425,13 @@ const styles = StyleSheet.create({
   btnDisabled: { backgroundColor: '#aeaeb2' },
   btnPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   btnOutlineText: { color: '#2a6bb5', fontSize: 16, fontWeight: '600' },
+
+  smsHint: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: 14 },
+  smsRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginTop: 10,
+  },
+  smsNumber: { fontSize: 16, fontWeight: '600', color: '#1c1c1e', fontFamily: 'Courier' },
+  smsCopyBtn: { backgroundColor: '#eef3fa', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 7 },
+  smsCopyText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },
 });
