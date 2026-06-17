@@ -13,7 +13,7 @@ const MAX_CHARS = 160;
 const MAX_DAYS = 15;
 const FORECAST_URL = __DEV__
   ? 'http://localhost:8080/forecast'
-  : 'https://weather.laneaasen.com/forecast';
+  : 'https://going.blue/forecast';
 
 const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
   hres: ['freeze', 'w500', 'w600', 'w700'],

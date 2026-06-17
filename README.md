@@ -1,6 +1,6 @@
 # Satellite Weather
 
-Weather forecasts via Garmin inReach satellite messenger. Deployed at [weather.laneaasen.com](https://weather.laneaasen.com/).
+Weather forecasts via Garmin inReach satellite messenger. Deployed at [going.blue](https://going.blue/).
 
 The goal of this project is to provide better weather forecasts than the default inReach system. Forecasts are sourced from [Open-Meteo](https://open-meteo.com/). They are encoded with a custom binary encoding to maximize information density. Using this encoding, it is possible to get 10-day daily forecasts in a single message.
 
@@ -116,3 +116,7 @@ gcloud run deploy denali-wx --source . --region us-west1 --allow-unauthenticated
 ```
 
 The Dockerfile builds all packages from source and runs the server on `$PORT` (Cloud Run sets this automatically).
+
+## License
+
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). You may read, modify, and use the code for any noncommercial purpose. Commercial use is reserved to the copyright holder.
