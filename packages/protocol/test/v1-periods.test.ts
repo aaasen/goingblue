@@ -27,7 +27,10 @@ function msg(nPeriods: number, resolution: number): ForecastMessage {
 // Round-trip with a resolver that returns the message's own request context.
 function dec(m: ForecastMessage): ForecastMessage {
   return v1Codec.decode(v1Codec.encode(m), () => ({
-    resolution: m.resolution, models_mask: m.models_mask, vars_mask: m.vars_mask, lat: m.lat, lon: m.lon,
+    resolution: m.resolution,
+    model: 31 - Math.clz32(m.models_mask & -m.models_mask),
+    vars_mask: m.vars_mask, lat: m.lat, lon: m.lon,
+    start: Date.UTC(new Date().getUTCFullYear(), m.month - 1, m.day, m.hour),
   }));
 }
 
@@ -51,8 +54,8 @@ describe("v1 period count", () => {
     expect(decoded.periods[0]).toHaveLength(128);
   });
 
-  it("uses a 7-char header", () => {
-    expect(V1_HEADER_CHARS).toBe(7);
+  it("uses a 5-char header", () => {
+    expect(V1_HEADER_CHARS).toBe(5);
     expect(v1Codec.encode(msg(1, 4)).length).toBeGreaterThanOrEqual(V1_HEADER_CHARS);
   });
 });

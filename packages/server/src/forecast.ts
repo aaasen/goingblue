@@ -201,21 +201,19 @@ export async function aggregateRows(
   resolutionIdx: number,
   lat: number,
   lon: number,
-  tz: string,
+  startEpochHour: number,
   elev_m?: number,
 ): Promise<[Row[], number]> {
   const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
   const periodsPerDay = 24 / hoursPerPeriod;
   // Fetch one extra day so the final (possibly partial) period window is fully covered.
   const nDaysToFetch = Math.ceil(nPeriods / periodsPerDay) + 1;
-  const [h, times, elevation] = await fetchHourly(modelKey, nDaysToFetch, lat, lon, tz, elev_m);
+  // All times are UTC; the forecast is anchored to the client-requested start (aligned to the
+  // period boundary), not to "now", so delivery delay can't shift which periods come back.
+  const [h, times, elevation] = await fetchHourly(modelKey, nDaysToFetch, lat, lon, "UTC", elev_m);
   const nTotal = nPeriods;
 
-  const nowLocal = new Date().toLocaleString("sv-SE", { timeZone: tz });
-  const nowDate = nowLocal.slice(0, 10);
-  const nowHour = parseInt(nowLocal.slice(11, 13));
-  const nowPeriodHour = Math.floor(nowHour / hoursPerPeriod) * hoursPerPeriod;
-  const currentKey = `${nowDate}T${String(nowPeriodHour).padStart(2, "0")}`;
+  const anchorKey = new Date(startEpochHour * 3600000).toISOString().slice(0, 13); // "YYYY-MM-DDTHH"
 
   type Window = { indices: number[] };
   const windows: Window[] = [];
@@ -226,7 +224,7 @@ export async function aggregateRows(
     const hour = parseInt(times[i].slice(11, 13));
     const startHour = Math.floor(hour / hoursPerPeriod) * hoursPerPeriod;
     const key = `${date}T${String(startHour).padStart(2, "0")}`;
-    if (key < currentKey) continue;
+    if (key < anchorKey) continue;
     if (!windowMap.has(key)) {
       if (windows.length >= nTotal) break;
       const w: Window = { indices: [] };
@@ -326,6 +324,8 @@ export interface ForecastParams {
   decoderVersion: number;
   // 7-bit message code from a `k:` request word, echoed in the response (default 0).
   code: number;
+  // Requested UTC forecast start as hours since the epoch (`t:`), aligned to the resolution.
+  startEpochHour: number;
   // Normalized account token from a `u:` request word, or null when absent/malformed.
   // Phase 1 only records it; it does not yet gate the response.
   userToken: string | null;
@@ -365,6 +365,7 @@ export function parseRequest(body: string): ForecastParams {
   let userToken: string | null = null; // set from a `u:` token in the request
   let code = 0; // client message code (`k:` token); echoed in the response so the client can
                 // match it to the stored request and recover lat/lon/models/vars/resolution
+  let startEpochHour = NaN; // requested UTC forecast start (`t:`, hours since epoch); see below
 
   // Compact "X,Y" (message body) takes priority over "Lat X Lon Y" (Garmin email footer)
   const gpsMatch =
@@ -409,6 +410,9 @@ export function parseRequest(body: string): ForecastParams {
       } else if (key === "k") {
         const n = parseInt(val);
         if (!isNaN(n) && n >= 0 && n <= 127) code = n; // 7-bit message code, 0..127
+      } else if (key === "t") {
+        const n = parseInt(val);
+        if (!isNaN(n) && n >= 0) startEpochHour = n; // UTC forecast start, hours since epoch
       }
     } else if (/^v\d+$/.test(word)) {
       decoderVersion = parseInt(word.slice(1));
@@ -417,34 +421,43 @@ export function parseRequest(body: string): ForecastParams {
 
   if (varsMask === 0) varsMask = DEFAULT_VARS_MASK;
 
+  // Default the forecast start to "now", aligned down to the resolution boundary in UTC. The client
+  // normally supplies `t:` so the start is fixed against delivery delay, but a missing one is safe.
+  const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
+  if (isNaN(startEpochHour)) {
+    startEpochHour = Math.floor(Math.floor(Date.now() / 3600000) / hoursPerPeriod) * hoursPerPeriod;
+  }
+
   // The request carries no period count: fetch the full horizon and trim the encoded reply to
   // the requested max length afterwards (the encoding is variable-length, so the fit can't be
   // computed up front).
   const nPeriods = horizonPeriods(resolutionIdx);
 
-  return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, maxChars, decoderVersion, userToken, code };
+  return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, maxChars, decoderVersion, userToken, code, startEpochHour };
 }
 
 export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<string> {
-  let lat: number, lon: number, tz: string, elev_m: number | undefined;
+  let lat: number, lon: number, elev_m: number | undefined;
   if (params.locationIdx === 0) {
     if (params.lat == null || params.lon == null)
       throw new Error("current location requested but no GPS coordinates in message");
-    [lat, lon, tz] = [params.lat, params.lon, "America/Anchorage"];
+    [lat, lon] = [params.lat, params.lon];
     elev_m = undefined;
   } else {
     const loc = NAMED_LOCATIONS[params.locationIdx];
     if (!loc) throw new Error(`Unknown location index: ${params.locationIdx}`);
-    ({ lat, lon, tz, elev_m } = loc);
+    ({ lat, lon, elev_m } = loc);
   }
 
+  // A response carries exactly one model (the decoder assumes nModels=1), so take the first
+  // requested model bit only.
   const modelKeys = (["HRES", "GFS", "ICON", "IFS"] as const).filter(
     (_, bit) => params.modelsMask & (1 << bit),
   );
-  const keys = modelKeys.length ? modelKeys : (["HRES"] as const);
+  const keys = [modelKeys[0] ?? "HRES"] as const;
 
   const results = await Promise.all(
-    keys.map((key) => aggregateRows(key, params.nPeriods, params.resolutionIdx, lat, lon, tz, elev_m)),
+    keys.map((key) => aggregateRows(key, params.nPeriods, params.resolutionIdx, lat, lon, params.startEpochHour, elev_m)),
   );
   const rowsPerModel = results.map(([rows]) => rows);
   const elevation = results[0][1];
@@ -454,10 +467,12 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   const periodsPerDay = 24 / HOURS_PER_PERIOD[params.resolutionIdx];
   const days = Math.max(1, Math.ceil(rowsPerModel[0].length / periodsPerDay));
 
-  const firstTime = rowsPerModel[0][0].time;
-  const month = parseInt(firstTime.slice(5, 7));
-  const day = parseInt(firstTime.slice(8, 10));
-  const hour = parseInt(firstTime.slice(11, 13));
+  // month/day/hour are carried on the message for display but not on the wire (the client recovers
+  // the start from its stored request). Derive them from the requested UTC start.
+  const startDate = new Date(params.startEpochHour * 3600000);
+  const month = startDate.getUTCMonth() + 1;
+  const day = startDate.getUTCDate();
+  const hour = startDate.getUTCHours();
 
   const msg: ForecastMessage = {
     version: params.decoderVersion,

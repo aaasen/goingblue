@@ -8,7 +8,7 @@ import * as Location from 'expo-location';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
   V1_HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, V1_VERSION, VAR_BITS_V1,
-  RESOLUTION_HOURS, DEFAULT_VARS_MASK, maskFromModels, type RequestContext,
+  RESOLUTION_HOURS, DEFAULT_VARS_MASK, MODEL_BIT, type RequestContext,
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import { allocCode } from './cache';
@@ -18,6 +18,13 @@ import LocationMap from './LocationMap';
 const RES_HOURS_TO_IDX: Record<number, number> = Object.fromEntries(
   Object.entries(RESOLUTION_HOURS).map(([idx, hours]) => [hours, Number(idx)]),
 );
+
+// The forecast start, in UTC hours since the epoch, aligned down to the resolution boundary.
+// Sent in the request (`t:`) so the start is fixed against delivery delay, and stored in the
+// request context so the client can reconstruct the start datetime the slim response omits.
+function alignedStartEpochHour(resHours: number): number {
+  return Math.floor(Math.floor(Date.now() / 3600000) / resHours) * resHours;
+}
 
 const CHARS_PER_MESSAGE = 160; // each Garmin inReach message holds 160 characters
 const FORECAST_SMS = '+1 (425) 434-5858';
@@ -125,7 +132,7 @@ function formatSpan(days: number): string {
 // resolution and variables. `c:` is always included, even at the default length. `u:` carries
 // the account token so the server can attribute the request to the user. `k:` is the message code
 // the slim response echoes so the client can recover the request context (see cache.ts).
-function buildMsg(token: string, coords: { lat: number; lon: number } | null, resHours: number, model: string, vars: string[], maxChars: number, code: number): string {
+function buildMsg(token: string, coords: { lat: number; lon: number } | null, resHours: number, model: string, vars: string[], maxChars: number, code: number, startEpochHour: number): string {
   const parts: string[] = [`v${V1_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   if (resHours < 24) parts.push(`r:${resHours}h`);
@@ -134,18 +141,20 @@ function buildMsg(token: string, coords: { lat: number; lon: number } | null, re
   parts.push(`c:${maxChars}`);
   parts.push(`u:${token}`);
   parts.push(`k:${code}`);
+  parts.push(`t:${startEpochHour}`);
   return parts.join(' ');
 }
 
 // The request context the client stores under the message code, mirroring how the server will
 // parse this request (so the recovered fields exactly match what the response was encoded with).
-function buildContext(coords: { lat: number; lon: number }, resHours: number, model: string, varsMask: number): RequestContext {
+function buildContext(coords: { lat: number; lon: number }, resHours: number, model: string, varsMask: number, startEpochHour: number): RequestContext {
   return {
     resolution: RES_HOURS_TO_IDX[resHours] ?? 0,
-    models_mask: maskFromModels([model]) || 1,
+    model: MODEL_BIT[model.toUpperCase()] ?? 0, // single model index
     vars_mask: varsMask === 0 ? DEFAULT_VARS_MASK : varsMask, // mirror the server's empty-vars default
     lat: coords.lat,
     lon: coords.lon,
+    start: startEpochHour * 3600000, // UTC epoch ms
   };
 }
 
@@ -198,7 +207,7 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
   const showMessage = fits && (coordsValid || locationMode === 'current');
   // Preview only — the real message code is allocated on copy/fetch (buildContext + allocCode).
   const message = showMessage
-    ? buildMsg(token, coordsValid ? resolvedCoords : null, resHours, model, activeVars, maxChars, 0)
+    ? buildMsg(token, coordsValid ? resolvedCoords : null, resHours, model, activeVars, maxChars, 0, alignedStartEpochHour(resHours))
     : '';
   // In current-location mode the buttons stay tappable so they can request GPS on demand.
   const copyDisabled = locating || !fits || (locationMode === 'custom' && !coordsValid);
@@ -236,8 +245,9 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
       coords = await requestCurrentLocation();
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return;
-    const code = await allocCode(buildContext(coords, resHours, model, varsMask), `${resLabel} · ${model.toUpperCase()}`);
-    const msg = buildMsg(token, coords, resHours, model, activeVars, maxChars, code);
+    const startHour = alignedStartEpochHour(resHours);
+    const code = await allocCode(buildContext(coords, resHours, model, varsMask, startHour), `${resLabel} · ${model.toUpperCase()}`);
+    const msg = buildMsg(token, coords, resHours, model, activeVars, maxChars, code, startHour);
     await Clipboard.setStringAsync(msg);
   }
 
@@ -261,11 +271,12 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
     }
     setFetching(true);
     try {
-      const code = await allocCode(buildContext(coords, resHours, model, varsMask), `${resLabel} · ${model.toUpperCase()}`);
+      const startHour = alignedStartEpochHour(resHours);
+      const code = await allocCode(buildContext(coords, resHours, model, varsMask, startHour), `${resLabel} · ${model.toUpperCase()}`);
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: buildMsg(token, coords, resHours, model, activeVars, maxChars, code),
+        body: buildMsg(token, coords, resHours, model, activeVars, maxChars, code, startHour),
       });
       if (!resp.ok) throw new Error(await resp.text());
       onForecastReceived(await resp.text());

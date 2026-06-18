@@ -73,10 +73,15 @@ export interface ForecastMessage {
 // they remain on ForecastMessage; the wire just doesn't carry them.
 export interface RequestContext {
   resolution: number;
-  models_mask: number;
+  // A response carries exactly one model, identified by index (0..3 → MODEL_NAMES). The decoded
+  // message exposes it as a single-bit models_mask for display.
+  model: number;
   vars_mask: number;
   lat: number;
   lon: number;
+  // Forecast start as UTC epoch milliseconds, aligned to the resolution. The client chooses it
+  // (so delivery delay can't shift it) and stores it; the slim header omits month/day/hour.
+  start: number;
 }
 
 // Resolves a message code to the originating request's context. Returns undefined when the code
@@ -91,9 +96,12 @@ export interface VersionedCodec<M extends ForecastMessage = ForecastMessage> {
   decode(str: string, resolve: ContextResolver): M;
 }
 
+// The forecast start as an absolute instant. month/day/hour are stored in UTC (the year is omitted
+// from the wire and inferred: a date more than ~180 days in the past is taken to be next year).
 export function startDatetime(msg: ForecastMessage): Date {
   const now = new Date();
-  const d = new Date(now.getFullYear(), msg.month - 1, msg.day, msg.hour);
-  if (now.getTime() - d.getTime() > 180 * 86400000) d.setFullYear(d.getFullYear() + 1);
+  let d = new Date(Date.UTC(now.getUTCFullYear(), msg.month - 1, msg.day, msg.hour));
+  if (now.getTime() - d.getTime() > 180 * 86400000)
+    d = new Date(Date.UTC(now.getUTCFullYear() + 1, msg.month - 1, msg.day, msg.hour));
   return d;
 }

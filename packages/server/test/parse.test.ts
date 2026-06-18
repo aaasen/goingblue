@@ -81,6 +81,15 @@ describe("parseRequest", () => {
     expect(parseRequest("k:200").code).toBe(0);
   });
 
+  it("t: sets the requested UTC start hour, defaulting to a recent aligned hour", () => {
+    expect(parseRequest("t:480000").startEpochHour).toBe(480000);
+    const dflt = parseRequest("").startEpochHour;
+    expect(Number.isInteger(dflt)).toBe(true);
+    expect(dflt).toBeGreaterThan(0);
+    // daily default aligns down to a UTC day boundary (multiple of 24 epoch-hours)
+    expect(dflt % 24).toBe(0);
+  });
+
   it("r: sets resolution index", () => {
     expect(parseRequest("r:1h").resolutionIdx).toBe(4);
     expect(parseRequest("r:3h").resolutionIdx).toBe(3);

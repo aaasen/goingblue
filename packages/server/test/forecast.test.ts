@@ -103,18 +103,17 @@ describe("toFullPeriod — snow", () => {
 
 // ─── aggregateRows integration tests ─────────────────────────────────────────
 
-// Fixture times are in America/Anchorage (AKDT = UTC-8 in May).
-// Midnight AKDT = 08:00 UTC. Pinning time here means no hours are filtered.
-const FIXTURE_START_UTC = "2026-05-21T08:00:00Z";
+// aggregateRows now anchors to a client-supplied UTC start (hours since epoch), not "now". The
+// mocked fixture's time labels are compared as plain strings, so we anchor at the fixture's first
+// label ("2026-05-21T00:00") by passing the matching UTC epoch hour.
+const hourFor = (iso: string) => Date.parse(iso) / 3600000;
+const START_HOUR = hourFor("2026-05-21T00:00:00Z");
 
 describe("aggregateRows — 1h resolution", () => {
   let rows: Awaited<ReturnType<typeof aggregateRows>>[0];
 
   beforeAll(async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXTURE_START_UTC));
-    [rows] = await aggregateRows("HRES", N_DAYS * 24, 4, LAT, LON, TZ, ELEV_M);
-    vi.useRealTimers();
+    [rows] = await aggregateRows("HRES", N_DAYS * 24, 4, LAT, LON, START_HOUR, ELEV_M);
   });
 
   it("produces one row per hour", () => {
@@ -135,28 +134,17 @@ describe("aggregateRows — 1h resolution", () => {
   });
 });
 
-describe("aggregateRows — current time filtering", () => {
-  // 10:00 AKDT = 18:00 UTC. Hours 00–09 should be excluded.
-  const CURRENT_HOUR_AKDT = 10;
-  const TIME_UTC = "2026-05-21T18:00:00Z";
-
-  it("excludes past periods but always returns the full period count", async () => {
-    // 24 hourly periods → fetches ceil(24/24)+1=2 days, within the 48-hour fixture.
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(TIME_UTC));
-    const [rows] = await aggregateRows("HRES", 24, 4, LAT, LON, TZ, ELEV_M);
-    vi.useRealTimers();
-
-    expect(rows).toHaveLength(24); // the full requested period count, not 24 - currentHour
-    expect(rows[0].time).toBe(`2026-05-21T${String(CURRENT_HOUR_AKDT).padStart(2, "0")}:00`);
+describe("aggregateRows — start anchoring", () => {
+  it("starts at the requested hour and returns the full period count", async () => {
+    // Anchor at hour 10; hours 00–09 are skipped. 24 hourly periods → fetches 2 days (fixture).
+    const [rows] = await aggregateRows("HRES", 24, 4, LAT, LON, hourFor("2026-05-21T10:00:00Z"), ELEV_M);
+    expect(rows).toHaveLength(24); // the full requested period count
+    expect(rows[0].time).toBe("2026-05-21T10:00");
   });
 
-  it("includes the current period (daily) even mid-day", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(TIME_UTC));
-    const [rows] = await aggregateRows("HRES", N_DAYS, 0, LAT, LON, TZ, ELEV_M);
-    vi.useRealTimers();
-
+  it("anchors a daily forecast to the day containing the (aligned) start", async () => {
+    // The client aligns a daily start down to UTC midnight, so day 0 is included.
+    const [rows] = await aggregateRows("HRES", N_DAYS, 0, LAT, LON, START_HOUR, ELEV_M);
     expect(rows).toHaveLength(N_DAYS);
     expect(rows[0].time).toBe("2026-05-21T00:00");
   });
@@ -166,10 +154,7 @@ describe("aggregateRows — daily resolution", () => {
   let rows: Awaited<ReturnType<typeof aggregateRows>>[0];
 
   beforeAll(async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXTURE_START_UTC));
-    [rows] = await aggregateRows("HRES", N_DAYS, 0, LAT, LON, TZ, ELEV_M);
-    vi.useRealTimers();
+    [rows] = await aggregateRows("HRES", N_DAYS, 0, LAT, LON, START_HOUR, ELEV_M);
   });
 
   it("produces one row per day", () => {

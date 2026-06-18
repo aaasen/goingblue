@@ -11,14 +11,14 @@ import { encodeWeathercode, decodeWeathercode, chooseWcTable } from "../huffman.
 export const V1_VERSION = 1;
 const VERSION = V1_VERSION;
 
-// The response is slim: lat/lon/models/vars/resolution are NOT on the wire. The client stores the
-// request under `code` and recovers them via a ContextResolver at decode time (see RequestContext).
-// The count is a period count (not days), so sub-daily resolutions can carry a partial final day.
-// periods:7 stores (nPeriods - 1), i.e. 1..128 periods.
+// The response is slim: lat/lon/models/vars/resolution AND the start datetime are NOT on the wire.
+// The client stores the request under `code` and recovers them via a ContextResolver at decode time
+// (see RequestContext). The count is a period count (not days), so sub-daily resolutions can carry
+// a partial final day. periods:7 stores (nPeriods - 1), i.e. 1..128 periods.
 //
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
-// packed header. Packed header layout (38 bits):
-//   code:7 periods:7 month:4 day:5 hour:5 elev:7 wc_table:3
+// packed header. Packed header layout (24 bits):
+//   code:7 periods:7 elev:7 wc_table:3
 // The body carries no length field — it is packed little-endian and self-delimiting (the decoder
 // knows the structure and reads exactly the bits it needs; see encodeBodyLE/decodeBodyLE).
 export const V1_PERIODS_BITS = 7;
@@ -34,9 +34,9 @@ const ELEV_BITS = 7;
 const ELEV_STEP_M = 100;
 
 export const V1_HEADER_BITS =
-  CODE_BITS + V1_PERIODS_BITS + 4 + 5 + 5 + ELEV_BITS + WC_TABLE_BITS; // 38
+  CODE_BITS + V1_PERIODS_BITS + ELEV_BITS + WC_TABLE_BITS; // 24
 // Total chars before the body: the shared version prefix plus this version's packed header.
-export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 6 = 7
+export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 4 = 5
 const HEADER_BITS = V1_HEADER_BITS;
 const HEADER_CHARS = nCharsForBits(V1_HEADER_BITS); // packed-header chars (excludes version prefix)
 
@@ -282,14 +282,11 @@ export function v1MessageToString(msg: ForecastMessage): string {
     });
   }
 
-  // lat/lon/models_mask/vars_mask/resolution are recovered client-side via `code` (RequestContext),
-  // so they are intentionally absent from the header.
+  // lat/lon/models/vars/resolution and the start datetime are recovered client-side via `code`
+  // (RequestContext), so they are intentionally absent from the header.
   const headerBits: number[] = [];
   putInt(headerBits, msg.code, CODE_BITS);
   putInt(headerBits, nPeriods - 1, V1_PERIODS_BITS);
-  putInt(headerBits, msg.month, 4);
-  putInt(headerBits, msg.day, 5);
-  putInt(headerBits, msg.hour, 5);
   putInt(headerBits, Math.min(Math.max(Math.round(msg.elevation / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1), ELEV_BITS);
   putInt(headerBits, wcTable, WC_TABLE_BITS);
 
@@ -309,21 +306,25 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
 
   const code = hr.int(CODE_BITS);
   const periodsRaw = hr.int(V1_PERIODS_BITS);
-  const month = hr.int(4);
-  const day = hr.int(5);
-  const hour = hr.int(5);
   const elevation = hr.int(ELEV_BITS) * ELEV_STEP_M;
   const wcTable = hr.int(WC_TABLE_BITS);
 
   // Recover the request-echo fields the slim header omits.
   const ctx = resolve(code);
   if (!ctx) throw new Error(`Unknown forecast code ${code}: no matching request in the store`);
-  const { resolution, models_mask, vars_mask, lat, lon } = ctx;
+  const { resolution, model, vars_mask, lat, lon, start } = ctx;
+  const models_mask = 1 << model; // a response carries exactly one model
+
+  // The start datetime is recovered from the client-supplied UTC start (month/day/hour aren't sent).
+  const startDate = new Date(start);
+  const month = startDate.getUTCMonth() + 1;
+  const day = startDate.getUTCDate();
+  const hour = startDate.getUTCHours();
 
   const resHours = RESOLUTION_HOURS[resolution] ?? 24;
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
   const nPeriods = periodsRaw + 1;
-  const nModels = popcount(models_mask);
+  const nModels = 1;
 
   // The body has no length field: it's self-delimiting given the known structure (nPeriods,
   // nModels, vars_mask). decodeBodyLE materializes the meaningful low bits; reads past them
@@ -357,13 +358,8 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   return { version, code, days, resolution, models_mask, vars_mask, month, day, hour, lat, lon, elevation, periods };
 }
 
-function popcount(n: number): number {
-  let c = 0;
-  while (n) { c += n & 1; n >>>= 1; }
-  return c;
-}
-
 export const v1Codec: VersionedCodec = {
   encode: v1MessageToString,
   decode: v1MessageFromString,
 };
+

@@ -88,9 +88,15 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   };
 }
 
-// The slim response omits lat/lon/models/vars/resolution; the decoder recovers them by code.
+// The slim response omits lat/lon/model/vars/resolution and the start datetime; the decoder recovers
+// them by code. The model is the lowest set bit of models_mask; the start is built (UTC) from m/d/h.
 const ctxOf = (m: ForecastMessage): RequestContext => ({
-  resolution: m.resolution, models_mask: m.models_mask, vars_mask: m.vars_mask, lat: m.lat, lon: m.lon,
+  resolution: m.resolution,
+  model: 31 - Math.clz32(m.models_mask & -m.models_mask),
+  vars_mask: m.vars_mask,
+  lat: m.lat,
+  lon: m.lon,
+  start: Date.UTC(new Date().getUTCFullYear(), m.month - 1, m.day, m.hour),
 });
 const noCtx = (): RequestContext | undefined => undefined;
 
@@ -100,13 +106,13 @@ function roundTrip(m: ForecastMessage): ForecastMessage {
 
 describe("v1 round-trip encoding", () => {
   it("preserves header fields", () => {
-    // resolution=2 (6h) → 4 periods/day; 3 days → 12 periods per model; 2 models
-    const original = msg({ resolution: 2, models_mask: 0b011, month: 1, day: 31, hour: 0 });
+    // resolution=2 (6h) → 4 periods/day; 3 days → 12 periods; single model
+    const original = msg({ resolution: 2, models_mask: 0b001, month: 1, day: 31, hour: 0 });
     const decoded = roundTrip(original);
     expect(decoded.version).toBe(V1_VERSION);
     expect(decoded.days).toBe(3);
     expect(decoded.resolution).toBe(2);
-    expect(decoded.models_mask).toBe(0b011);
+    expect(decoded.models_mask).toBe(0b001);
     expect(decoded.vars_mask).toBe(ALL_VARS);
     expect(decoded.month).toBe(1);
     expect(decoded.day).toBe(31);
@@ -239,21 +245,14 @@ describe("v1 round-trip encoding", () => {
     expect(decoded.periods[0]).toHaveLength(nPeriods);
   });
 
-  it("handles multiple models", () => {
-    const periods = [[PERIOD, PERIOD, PERIOD], [PERIOD, PERIOD, PERIOD]];
-    const decoded = roundTrip(msg({ models_mask: 0b011, periods }));
-    expect(decoded.models_mask).toBe(0b011);
-    expect(decoded.periods).toHaveLength(2);
-    expect(decoded.periods[0]).toHaveLength(3);
-    expect(decoded.periods[1]).toHaveLength(3);
-  });
-
-  it("handles all four models", () => {
-    const row = Array(5).fill(PERIOD);
-    const decoded = roundTrip(msg({ models_mask: 0b1111, periods: [row, row, row, row] }));
-    expect(decoded.models_mask).toBe(0b1111);
-    expect(decoded.periods).toHaveLength(4);
-    expect(decoded.days).toBe(5);
+  it("round-trips each of the four model indices (single model per response)", () => {
+    for (let idx = 0; idx < 4; idx++) {
+      const decoded = roundTrip(msg({ models_mask: 1 << idx, periods: [Array(5).fill(PERIOD)] }));
+      expect(decoded.models_mask).toBe(1 << idx);
+      expect(decoded.periods).toHaveLength(1);
+      expect(decoded.periods[0]).toHaveLength(5);
+      expect(decoded.days).toBe(5);
+    }
   });
 
   it("clamps wind speed to 5 mph steps", () => {
