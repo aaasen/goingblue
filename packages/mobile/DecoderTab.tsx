@@ -5,7 +5,7 @@ import {
 import {
   RESOLUTION_HOURS, modelsFromMask, startDatetime, type ForecastMessage,
 } from '@weather/protocol';
-import { decodeAny, loadCache, addToCache, deleteFromCache, type CacheEntry } from './cache';
+import { decodeAny, loadStore, attachResponse, loadPastForecasts, deleteSlot, type Slot } from './cache';
 import type { Units } from './settings';
 import LocationMap from './LocationMap';
 import Meteogram from './Meteogram';
@@ -64,42 +64,51 @@ interface Props {
 export default function DecoderTab({ forecastData, onForecastDataChange, units }: Props) {
   const [decoded, setDecoded] = useState<ForecastMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [cache, setCache] = useState<CacheEntry[]>([]);
-  // When true, the next decode came from loading a cached entry — don't re-cache it.
+  const [cache, setCache] = useState<Slot[]>([]);
+  // When true, the next decode came from loading a cached entry — don't re-attach it.
   const suppressNextCache = useRef(false);
 
   useEffect(() => {
-    loadCache().then(setCache);
+    loadPastForecasts().then(setCache);
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     if (!forecastData.trim()) {
       setDecoded(null);
       setError(null);
       suppressNextCache.current = false;
       return;
     }
-    try {
-      const msg = decodeAny(forecastData);
-      setDecoded(msg);
-      setError(null);
-      if (suppressNextCache.current) {
+    (async () => {
+      // The store maps the message code → request context; load it before the (sync) decode.
+      await loadStore();
+      if (cancelled) return;
+      try {
+        const msg = decodeAny(forecastData);
+        setDecoded(msg);
+        setError(null);
+        if (suppressNextCache.current) {
+          suppressNextCache.current = false;
+        } else {
+          attachResponse(msg.code, forecastData).then((slots) => { if (!cancelled) setCache(slots); });
+        }
+      } catch (e) {
         suppressNextCache.current = false;
-      } else {
-        addToCache(forecastData).then(setCache);
+        setDecoded(null);
+        const msg = String(e);
+        if (msg.includes('Version mismatch')) {
+          const match = msg.match(/encoded v(\d+)/);
+          const encoded = match ? match[1] : '?';
+          setError(`Version mismatch: this message uses protocol v${encoded}, which this app can't decode. Update the app or request a new forecast.`);
+        } else if (msg.includes('Unknown forecast code')) {
+          setError("This forecast doesn't match a request from this device — it may have been sent elsewhere or cycled out of history. Request a new forecast.");
+        } else {
+          setError('Could not decode forecast — paste the encoded reply from your inReach.');
+        }
       }
-    } catch (e) {
-      suppressNextCache.current = false;
-      setDecoded(null);
-      const msg = String(e);
-      if (msg.includes('Version mismatch')) {
-        const match = msg.match(/encoded v(\d+)/);
-        const encoded = match ? match[1] : '?';
-        setError(`Version mismatch: this message uses protocol v${encoded}, which this app can't decode. Update the app or request a new forecast.`);
-      } else {
-        setError('Could not decode forecast — paste the encoded reply from your inReach.');
-      }
-    }
+    })();
+    return () => { cancelled = true; };
   }, [forecastData]);
 
   const loadPast = useCallback((encoded: string) => {
@@ -107,8 +116,8 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
     onForecastDataChange(encoded);
   }, [onForecastDataChange]);
 
-  const deletePast = useCallback((encoded: string) => {
-    deleteFromCache(encoded).then(setCache);
+  const deletePast = useCallback((code: number) => {
+    deleteSlot(code).then(setCache);
   }, []);
 
   const pastSection = (
@@ -117,14 +126,14 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
       {cache.length === 0 ? (
         <Text style={styles.pastEmpty}>No past forecasts.</Text>
       ) : (
-        cache.map((entry) => (
-          <View key={entry.encoded} style={styles.pastItem}>
-            <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(entry.encoded)}</Text>
+        cache.map((slot) => (
+          <View key={slot.code} style={styles.pastItem}>
+            <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot.encoded!)}</Text>
             <View style={styles.pastBtns}>
-              <TouchableOpacity style={styles.pastLoadBtn} onPress={() => loadPast(entry.encoded)}>
+              <TouchableOpacity style={styles.pastLoadBtn} onPress={() => loadPast(slot.encoded!)}>
                 <Text style={styles.pastLoadText}>Load</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.pastDeleteBtn} onPress={() => deletePast(entry.encoded)}>
+              <TouchableOpacity style={styles.pastDeleteBtn} onPress={() => deletePast(slot.code)}>
                 <Text style={styles.pastDeleteText}>Delete</Text>
               </TouchableOpacity>
             </View>

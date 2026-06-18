@@ -1,65 +1,109 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodeMessage, type ForecastMessage } from '@weather/protocol';
+import { decodeMessage, type ForecastMessage, type RequestContext } from '@weather/protocol';
 
-const CACHE_KEY = 'past_forecasts';
+// The response is slim (see the protocol's message-code scheme): it omits lat/lon/models/vars/
+// resolution and carries only a 7-bit `code`. We store each outgoing request's context under its
+// code, so an incoming response can be matched back and decoded. The store is a ring of CODE_SPACE
+// slots keyed by code — reusing a code (as the index cycles) evicts the old forecast in that slot.
 
-export interface CacheEntry {
-  encoded: string;
-  savedAt: number;
+const STORE_KEY = 'forecast_store_v1';
+const CODE_SPACE = 128; // 7-bit message code, 0..127
+
+export interface Slot {
+  code: number;
+  context: RequestContext;
+  label: string;        // short request label captured at send time (e.g. location)
+  requestedAt: number;
+  encoded?: string;     // the response, once received
+  savedAt?: number;     // when the response was attached
 }
 
-/**
- * Decode an encoded forecast. The protocol's version tag is read up front and dispatched
- * to the matching codec; an unknown (e.g. newer) version throws a clear error.
- */
+interface Store {
+  nextCode: number;
+  slots: Slot[];
+}
+
+// In-memory mirror of the persisted store. Decoding is synchronous and must resolve a code to its
+// context, so we keep the map in memory; callers load the store before decoding.
+let memo: Store = { nextCode: 0, slots: [] };
+let contextMap = new Map<number, RequestContext>();
+
+function isSlot(x: unknown): x is Slot {
+  const s = x as Slot;
+  return !!s && typeof s.code === 'number' && typeof s.label === 'string'
+    && !!s.context && typeof s.context.vars_mask === 'number';
+}
+
+function rebuild(): void {
+  contextMap = new Map(memo.slots.map((s) => [s.code, s.context]));
+}
+
+export async function loadStore(): Promise<Store> {
+  try {
+    const raw = await AsyncStorage.getItem(STORE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<Store>;
+      if (parsed && typeof parsed.nextCode === 'number' && Array.isArray(parsed.slots)) {
+        memo = { nextCode: parsed.nextCode, slots: parsed.slots.filter(isSlot) };
+      }
+    }
+  } catch { /* keep whatever's in memo */ }
+  rebuild();
+  return memo;
+}
+
+async function persist(): Promise<void> {
+  rebuild();
+  try { await AsyncStorage.setItem(STORE_KEY, JSON.stringify(memo)); } catch { /* ignore */ }
+}
+
+// Synchronous resolver passed to the codec. Load the store first (loadStore) so the map is warm.
+export function resolveContext(code: number): RequestContext | undefined {
+  return contextMap.get(code);
+}
+
 export function decodeAny(encoded: string): ForecastMessage {
   const text = encoded.replace(/\s/g, '').replace(/^fw:/i, '');
-  return decodeMessage(text);
+  return decodeMessage(text, resolveContext);
 }
 
-function isDecodable(encoded: string): boolean {
-  try { decodeAny(encoded); return true; } catch { return false; }
+// Allocate the next message code, storing the request context under it (evicting whatever slot the
+// code currently holds — old forecasts drop as the index cycles). Returns the code to embed as `k:`.
+export async function allocCode(context: RequestContext, label: string): Promise<number> {
+  await loadStore();
+  const code = memo.nextCode % CODE_SPACE;
+  memo.slots = memo.slots.filter((s) => s.code !== code);
+  memo.slots.push({ code, context, label, requestedAt: Date.now() });
+  memo.nextCode = (code + 1) % CODE_SPACE;
+  await persist();
+  return code;
 }
 
-export async function loadCache(): Promise<CacheEntry[]> {
-  try {
-    const raw = await AsyncStorage.getItem(CACHE_KEY);
-    if (!raw) return [];
-    const arr: unknown = JSON.parse(raw);
-    if (!Array.isArray(arr)) return [];
-    const valid: CacheEntry[] = [];
-    let dirty = false;
-    for (const item of arr) {
-      if (
-        typeof item !== 'object' || item === null ||
-        typeof (item as CacheEntry).encoded !== 'string' ||
-        typeof (item as CacheEntry).savedAt !== 'number'
-      ) { dirty = true; continue; }
-      if (isDecodable((item as CacheEntry).encoded)) valid.push(item as CacheEntry);
-      else dirty = true;
-    }
-    if (dirty) await persistCache(valid);
-    return valid;
-  } catch {
-    return [];
+// Attach a received response to its slot (matched by the code embedded in the message).
+export async function attachResponse(code: number, encoded: string): Promise<Slot[]> {
+  await loadStore();
+  const slot = memo.slots.find((s) => s.code === code);
+  if (slot) {
+    slot.encoded = encoded.replace(/\s/g, '').replace(/^fw:/i, '');
+    slot.savedAt = Date.now();
+    await persist();
   }
+  return pastForecasts();
 }
 
-async function persistCache(entries: CacheEntry[]): Promise<void> {
-  try { await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(entries)); } catch { /* ignore */ }
+function pastForecasts(): Slot[] {
+  return memo.slots.filter((s) => s.encoded).sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0));
 }
 
-export async function addToCache(encoded: string): Promise<CacheEntry[]> {
-  const text = encoded.replace(/\s/g, '').replace(/^fw:/i, '');
-  if (!isDecodable(text)) return loadCache();
-  const entries = (await loadCache()).filter((e) => e.encoded !== text);
-  entries.unshift({ encoded: text, savedAt: Date.now() });
-  await persistCache(entries);
-  return entries;
+// Received forecasts to display, most recent first.
+export async function loadPastForecasts(): Promise<Slot[]> {
+  await loadStore();
+  return pastForecasts();
 }
 
-export async function deleteFromCache(encoded: string): Promise<CacheEntry[]> {
-  const entries = (await loadCache()).filter((e) => e.encoded !== encoded);
-  await persistCache(entries);
-  return entries;
+export async function deleteSlot(code: number): Promise<Slot[]> {
+  await loadStore();
+  memo.slots = memo.slots.filter((s) => s.code !== code);
+  await persist();
+  return pastForecasts();
 }

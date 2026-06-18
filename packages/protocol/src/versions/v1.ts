@@ -1,29 +1,31 @@
 import {
-  RESOLUTION_HOURS, WMO_CODES, LAT_BITS, LON_BITS,
+  RESOLUTION_HOURS, WMO_CODES,
 } from "../constants.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "../bits.js";
 import { encode, decode, encodeBodyLE, decodeBodyLE, nCharsForBits } from "../codec.js";
 import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js";
 import { WMO2IDX, type Period } from "../model.js";
-import type { ForecastMessage, VersionedCodec } from "../model.js";
+import type { ForecastMessage, VersionedCodec, ContextResolver } from "../model.js";
 import { encodeWeathercode, decodeWeathercode, chooseWcTable } from "../huffman.js";
 
 export const V1_VERSION = 1;
 const VERSION = V1_VERSION;
 
-// Locations are addressed by lat/lon only — there is no location field.
-// The count is a period count (not days), so sub-daily resolutions can carry a partial
-// final day. periods:7 stores (nPeriods - 1), i.e. 1..128 periods.
+// The response is slim: lat/lon/models/vars/resolution are NOT on the wire. The client stores the
+// request under `code` and recovers them via a ContextResolver at decode time (see RequestContext).
+// The count is a period count (not days), so sub-daily resolutions can carry a partial final day.
+// periods:7 stores (nPeriods - 1), i.e. 1..128 periods.
 //
-// The 7-bit version field lives in the shared, self-describing prefix (see version.ts),
-// not in this packed header. Packed header layout (83 bits):
-//   periods:7 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5
-//   lat:15 lon:16 elev:7 wc_table:3
+// The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
+// packed header. Packed header layout (38 bits):
+//   code:7 periods:7 month:4 day:5 hour:5 elev:7 wc_table:3
 // The body carries no length field — it is packed little-endian and self-delimiting (the decoder
 // knows the structure and reads exactly the bits it needs; see encodeBodyLE/decodeBodyLE).
 export const V1_PERIODS_BITS = 7;
 export const V1_MAX_PERIODS = 1 << V1_PERIODS_BITS; // 128
 
+// Message code: client-assigned key the response echoes; see RequestContext / model.ts.
+const CODE_BITS = 7;
 // Huffman codebook selector for the weathercode column (see huffman.ts).
 const WC_TABLE_BITS = 3;
 // Elevation: 7 bits in 100 m steps → 0..12700 m. It's a coarse sanity check (summit vs. valley),
@@ -32,9 +34,9 @@ const ELEV_BITS = 7;
 const ELEV_STEP_M = 100;
 
 export const V1_HEADER_BITS =
-  V1_PERIODS_BITS + 3 + 4 + 14 + 4 + 5 + 5 + LAT_BITS + LON_BITS + ELEV_BITS + WC_TABLE_BITS; // 83
+  CODE_BITS + V1_PERIODS_BITS + 4 + 5 + 5 + ELEV_BITS + WC_TABLE_BITS; // 38
 // Total chars before the body: the shared version prefix plus this version's packed header.
-export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 13 = 14
+export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 6 = 7
 const HEADER_BITS = V1_HEADER_BITS;
 const HEADER_CHARS = nCharsForBits(V1_HEADER_BITS); // packed-header chars (excludes version prefix)
 
@@ -280,23 +282,21 @@ export function v1MessageToString(msg: ForecastMessage): string {
     });
   }
 
+  // lat/lon/models_mask/vars_mask/resolution are recovered client-side via `code` (RequestContext),
+  // so they are intentionally absent from the header.
   const headerBits: number[] = [];
+  putInt(headerBits, msg.code, CODE_BITS);
   putInt(headerBits, nPeriods - 1, V1_PERIODS_BITS);
-  putInt(headerBits, msg.resolution, 3);
-  putInt(headerBits, msg.models_mask, 4);
-  putInt(headerBits, msg.vars_mask, 14);
   putInt(headerBits, msg.month, 4);
   putInt(headerBits, msg.day, 5);
   putInt(headerBits, msg.hour, 5);
-  putInt(headerBits, Math.round((msg.lat + 90) * ((1 << LAT_BITS) - 1) / 180), LAT_BITS);
-  putInt(headerBits, Math.round((msg.lon + 180) * ((1 << LON_BITS) - 1) / 360), LON_BITS);
   putInt(headerBits, Math.min(Math.max(Math.round(msg.elevation / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1), ELEV_BITS);
   putInt(headerBits, wcTable, WC_TABLE_BITS);
 
   return encodeVersion(VERSION) + encode(headerBits) + encodeBodyLE(body);
 }
 
-export function v1MessageFromString(s: string): ForecastMessage {
+export function v1MessageFromString(s: string, resolve: ContextResolver): ForecastMessage {
   const [version, rest] = takeVersion(s);
   if (version !== VERSION)
     throw new Error(`Version mismatch: encoded v${version}, expected v${VERSION}`);
@@ -307,20 +307,18 @@ export function v1MessageFromString(s: string): ForecastMessage {
   const headerBits = decode(rest.slice(0, HEADER_CHARS), HEADER_BITS);
   const hr = reader(headerBits);
 
+  const code = hr.int(CODE_BITS);
   const periodsRaw = hr.int(V1_PERIODS_BITS);
-  const resolution = hr.int(3);
-  const models_mask = hr.int(4);
-  const vars_mask = hr.int(14);
   const month = hr.int(4);
   const day = hr.int(5);
   const hour = hr.int(5);
-  const lat_raw = hr.int(LAT_BITS);
-  const lon_raw = hr.int(LON_BITS);
   const elevation = hr.int(ELEV_BITS) * ELEV_STEP_M;
   const wcTable = hr.int(WC_TABLE_BITS);
 
-  const lat = lat_raw * 180 / ((1 << LAT_BITS) - 1) - 90;
-  const lon = lon_raw * 360 / ((1 << LON_BITS) - 1) - 180;
+  // Recover the request-echo fields the slim header omits.
+  const ctx = resolve(code);
+  if (!ctx) throw new Error(`Unknown forecast code ${code}: no matching request in the store`);
+  const { resolution, models_mask, vars_mask, lat, lon } = ctx;
 
   const resHours = RESOLUTION_HOURS[resolution] ?? 24;
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
@@ -356,7 +354,7 @@ export function v1MessageFromString(s: string): ForecastMessage {
   // `days` is retained on the common message shape for display; it's the calendar-day span
   // implied by the period count (a partial final day rounds up).
   const days = Math.ceil(nPeriods / periodsPerDay);
-  return { version, days, resolution, models_mask, vars_mask, month, day, hour, lat, lon, elevation, periods };
+  return { version, code, days, resolution, models_mask, vars_mask, month, day, hour, lat, lon, elevation, periods };
 }
 
 function popcount(n: number): number {

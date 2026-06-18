@@ -74,6 +74,13 @@ describe("parseRequest", () => {
     expect(richRes).toBe(defaultRes);
   });
 
+  it("k: sets the message code, defaulting to 0", () => {
+    expect(parseRequest("k:42").code).toBe(42);
+    expect(parseRequest("").code).toBe(0);
+    // out-of-range (≥128) is ignored, leaving the default
+    expect(parseRequest("k:200").code).toBe(0);
+  });
+
   it("r: sets resolution index", () => {
     expect(parseRequest("r:1h").resolutionIdx).toBe(4);
     expect(parseRequest("r:3h").resolutionIdx).toBe(3);

@@ -51,6 +51,10 @@ export interface Period {
 // extended type (see `VersionedCodec`).
 export interface ForecastMessage {
   version: number;
+  // Message code (0..127): a client-assigned key that the response echoes. The client stores the
+  // request (lat/lon/models/vars/resolution) under this code; the encoded response omits those
+  // fields and the decoder recovers them via a ContextResolver. See RequestContext.
+  code: number;
   days: number;
   resolution: number;
   models_mask: number;
@@ -64,11 +68,27 @@ export interface ForecastMessage {
   periods: Period[][];
 }
 
+// The request fields the client recovers from its own storage by message code, rather than
+// receiving them in the (slim) response. The encoder still needs them to lay out the body, so
+// they remain on ForecastMessage; the wire just doesn't carry them.
+export interface RequestContext {
+  resolution: number;
+  models_mask: number;
+  vars_mask: number;
+  lat: number;
+  lon: number;
+}
+
+// Resolves a message code to the originating request's context. Returns undefined when the code
+// is unknown (e.g. cycled out of the client's store), in which case decode throws.
+export type ContextResolver = (code: number) => RequestContext | undefined;
+
 // A codec for a single protocol version. The header format is version-specific, so the
 // codec is parameterized by its message type (defaulting to the common `ForecastMessage`).
+// `decode` takes a ContextResolver because the slim response omits the request-echo fields.
 export interface VersionedCodec<M extends ForecastMessage = ForecastMessage> {
   encode(msg: M): string;
-  decode(str: string): M;
+  decode(str: string, resolve: ContextResolver): M;
 }
 
 export function startDatetime(msg: ForecastMessage): Date {

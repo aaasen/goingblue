@@ -1,8 +1,9 @@
 {
   "description": "3-day daily ECMWF HRES, precip+temp+tmin+snow+freeze+w500+w600+w700, Denali 14k camp",
-  "encoded": "\"\"&m.69EkA>,<b'?htJz,,,gpg0hB$n?+Ng0Sh",
+  "encoded": "\"!!g_'l'?htJz,,,gpg0hB$n?+Ng0Sh",
   "decoded": {
     "version": 1,
+    "code": 0,
     "days": 3,
     "resolution": 0,
     "models_mask": 1,

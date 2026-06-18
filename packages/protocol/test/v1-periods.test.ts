@@ -13,6 +13,7 @@ const PERIOD: Period = {
 function msg(nPeriods: number, resolution: number): ForecastMessage {
   return {
     version: 1,
+    code: 0,
     days: 0, // ignored by v1 encode — period count comes from the periods array
     resolution,
     models_mask: 0b0001,
@@ -23,9 +24,16 @@ function msg(nPeriods: number, resolution: number): ForecastMessage {
   };
 }
 
+// Round-trip with a resolver that returns the message's own request context.
+function dec(m: ForecastMessage): ForecastMessage {
+  return v1Codec.decode(v1Codec.encode(m), () => ({
+    resolution: m.resolution, models_mask: m.models_mask, vars_mask: m.vars_mask, lat: m.lat, lon: m.lon,
+  }));
+}
+
 describe("v1 period count", () => {
   it("round-trips a partial day at 1h resolution (46 periods)", () => {
-    const decoded = v1Codec.decode(v1Codec.encode(msg(46, 4)));
+    const decoded = dec(msg(46, 4));
     expect(decoded.periods[0]).toHaveLength(46);
     // 46 hourly periods span two calendar days (rounded up).
     expect(decoded.days).toBe(2);
@@ -33,18 +41,18 @@ describe("v1 period count", () => {
   });
 
   it("round-trips a single period", () => {
-    const decoded = v1Codec.decode(v1Codec.encode(msg(1, 4)));
+    const decoded = dec(msg(1, 4));
     expect(decoded.periods[0]).toHaveLength(1);
     expect(decoded.days).toBe(1);
   });
 
   it("round-trips the max 128 periods", () => {
-    const decoded = v1Codec.decode(v1Codec.encode(msg(128, 4)));
+    const decoded = dec(msg(128, 4));
     expect(decoded.periods[0]).toHaveLength(128);
   });
 
-  it("uses a 14-char header", () => {
-    expect(V1_HEADER_CHARS).toBe(14);
+  it("uses a 7-char header", () => {
+    expect(V1_HEADER_CHARS).toBe(7);
     expect(v1Codec.encode(msg(1, 4)).length).toBeGreaterThanOrEqual(V1_HEADER_CHARS);
   });
 });

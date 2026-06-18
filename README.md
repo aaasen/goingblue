@@ -49,22 +49,26 @@ cheapest per column, so the encoded size is never larger than fixed-width.
 
 ### Header
 
+The response is **slim**: it omits the fields the client itself chose, carrying only a 7-bit
+message `code`. The client assigns a code to each request, stores the request (lat/lon, models,
+variables, resolution) under it, and the response echoes the code so the client can recover those
+fields from its own storage (see `packages/mobile/cache.ts`). The code is a rotating index over 128
+slots; reusing a code (as it cycles) evicts the old forecast in that slot. This trades the protocol's
+"any string decodes anywhere" property for a much smaller header — acceptable because the app is the
+only client.
+
 | Field            | Bits | Notes                                              |
 | ---------------- | ---- | -------------------------------------------------- |
 | version prefix   | 7    | self-describing protocol version (1 char)          |
+| code             | 7    | message code; recovers lat/lon/models/vars/resolution from client storage |
 | periods          | 7    | period count − 1 (1–128 periods)                   |
-| resolution       | 3    | daily / 12h / 6h / 3h / 1h                          |
-| models_mask      | 4    | which forecast models are present                  |
-| vars_mask        | 14   | which variables are present                        |
 | month            | 4    | start month                                        |
 | day              | 5    | start day                                          |
 | hour             | 5    | start hour                                         |
-| lat              | 15   | −90..+90, ~611 m steps                             |
-| lon              | 16   | −180..+180, ~611 m steps at the equator            |
 | elevation        | 7    | 100 m steps, 0–12700 m (coarse sanity check)       |
 | wc_table         | 3    | Huffman codebook selector for weathercode          |
 
-The header is 83 packed bits → 14 chars including the version prefix. The body carries **no length
+The header is 38 packed bits → **7 chars** including the version prefix. The body carries **no length
 field**: it is packed little-endian and self-delimiting — the decoder knows the structure (period
 count, model count, `vars_mask`) and reads exactly the bits each column needs, so trailing
 zero-padding is simply dropped.

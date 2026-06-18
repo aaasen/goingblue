@@ -7,6 +7,7 @@ import {
   decodeMessage,
   type ForecastMessage,
   type Period,
+  type RequestContext,
   CARDINALS,
   DEFAULT_VARS_MASK,
   VARS_BIT,
@@ -71,6 +72,7 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const days = Math.ceil(periods[0].length / periodsPerDay);
   return {
     version: V1_VERSION,
+    code: 0,
     resolution,
     models_mask,
     vars_mask: ALL_VARS,
@@ -86,8 +88,14 @@ function msg(overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   };
 }
 
+// The slim response omits lat/lon/models/vars/resolution; the decoder recovers them by code.
+const ctxOf = (m: ForecastMessage): RequestContext => ({
+  resolution: m.resolution, models_mask: m.models_mask, vars_mask: m.vars_mask, lat: m.lat, lon: m.lon,
+});
+const noCtx = (): RequestContext | undefined => undefined;
+
 function roundTrip(m: ForecastMessage): ForecastMessage {
-  return v1MessageFromString(v1MessageToString(m));
+  return v1MessageFromString(v1MessageToString(m), () => ctxOf(m));
 }
 
 describe("v1 round-trip encoding", () => {
@@ -295,18 +303,28 @@ describe("v1 round-trip encoding", () => {
     // Swap the self-describing version prefix to v3; the v1 codec must reject it.
     const encoded = v1MessageToString(msg());
     const reTagged = encodeVersion(3) + encoded.slice(1);
-    expect(() => v1MessageFromString(reTagged)).toThrow(/Version mismatch.*v3/);
+    expect(() => v1MessageFromString(reTagged, noCtx)).toThrow(/Version mismatch.*v3/);
   });
 
   it("dispatches an unknown version to a clear error", () => {
     const encoded = v1MessageToString(msg());
     const reTagged = encodeVersion(7) + encoded.slice(1);
-    expect(() => decodeMessage(reTagged)).toThrow(/Unsupported protocol version: v7/);
+    expect(() => decodeMessage(reTagged, noCtx)).toThrow(/Unsupported protocol version: v7/);
   });
 
   it("throws on short message", () => {
     // Valid v1 tag but no room for the header.
-    expect(() => v1MessageFromString(encodeVersion(V1_VERSION) + "abc")).toThrow("Unexpected message length");
+    expect(() => v1MessageFromString(encodeVersion(V1_VERSION) + "abc", noCtx)).toThrow("Unexpected message length");
+  });
+
+  it("throws when the message code can't be resolved", () => {
+    const encoded = v1MessageToString(msg({ code: 5 }));
+    expect(() => v1MessageFromString(encoded, () => undefined)).toThrow(/Unknown forecast code 5/);
+  });
+
+  it("round-trips the message code", () => {
+    const decoded = roundTrip(msg({ code: 99 }));
+    expect(decoded.code).toBe(99);
   });
 
   it("round-trips a minimal weathercode-only, all-clear message (self-delimiting body)", () => {

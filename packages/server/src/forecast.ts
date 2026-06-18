@@ -324,6 +324,8 @@ export interface ForecastParams {
   varsMask: number;
   maxChars: number;
   decoderVersion: number;
+  // 7-bit message code from a `k:` request word, echoed in the response (default 0).
+  code: number;
   // Normalized account token from a `u:` request word, or null when absent/malformed.
   // Phase 1 only records it; it does not yet gate the response.
   userToken: string | null;
@@ -361,6 +363,8 @@ export function parseRequest(body: string): ForecastParams {
   let maxChars = DEFAULT_MAX_CHARS; // override with a `c:` token in the request
   let decoderVersion = CURRENT_VERSION; // override with a `vN` token in the request
   let userToken: string | null = null; // set from a `u:` token in the request
+  let code = 0; // client message code (`k:` token); echoed in the response so the client can
+                // match it to the stored request and recover lat/lon/models/vars/resolution
 
   // Compact "X,Y" (message body) takes priority over "Lat X Lon Y" (Garmin email footer)
   const gpsMatch =
@@ -402,6 +406,9 @@ export function parseRequest(body: string): ForecastParams {
         // The body was lowercased above; normalizeToken restores canonical casing. Keep a
         // valid token (check symbol matches), drop a malformed one as if absent.
         if (isValidToken(val)) userToken = normalizeToken(val);
+      } else if (key === "k") {
+        const n = parseInt(val);
+        if (!isNaN(n) && n >= 0 && n <= 127) code = n; // 7-bit message code, 0..127
       }
     } else if (/^v\d+$/.test(word)) {
       decoderVersion = parseInt(word.slice(1));
@@ -415,7 +422,7 @@ export function parseRequest(body: string): ForecastParams {
   // computed up front).
   const nPeriods = horizonPeriods(resolutionIdx);
 
-  return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, maxChars, decoderVersion, userToken };
+  return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, maxChars, decoderVersion, userToken, code };
 }
 
 export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<string> {
@@ -454,6 +461,7 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
 
   const msg: ForecastMessage = {
     version: params.decoderVersion,
+    code: params.code,
     days,
     resolution: params.resolutionIdx,
     models_mask: params.modelsMask,

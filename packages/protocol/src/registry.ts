@@ -1,6 +1,6 @@
 import { v1Codec } from "./versions/v1.js";
 import { peekVersion } from "./version.js";
-import type { ForecastMessage, VersionedCodec } from "./model.js";
+import type { ForecastMessage, VersionedCodec, ContextResolver } from "./model.js";
 
 // The single source of truth mapping a protocol version number to its codec.
 //
@@ -17,15 +17,16 @@ export function supportedVersions(): number[] {
 }
 
 // Decodes a message of any registered version by reading its self-describing version tag
-// and dispatching to exactly one codec.
-export function decodeMessage(s: string): ForecastMessage {
+// and dispatching to exactly one codec. `resolve` recovers the request-echo fields the slim
+// response omits, keyed by the message code (see RequestContext).
+export function decodeMessage(s: string, resolve: ContextResolver): ForecastMessage {
   const version = peekVersion(s);
   const codec = CODECS[version];
   if (!codec) {
     const supported = supportedVersions().map((v) => `v${v}`).join(", ");
     throw new Error(`Unsupported protocol version: v${version}. Supported: ${supported}`);
   }
-  return codec.decode(s);
+  return codec.decode(s, resolve);
 }
 
 // Encodes a message using the codec for its `version` field.
