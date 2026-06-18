@@ -38,13 +38,13 @@ describe("v1 period count", () => {
     expect(decoded.days).toBe(1);
   });
 
-  it("round-trips the max 256 periods", () => {
-    const decoded = v1Codec.decode(v1Codec.encode(msg(256, 4)));
-    expect(decoded.periods[0]).toHaveLength(256);
+  it("round-trips the max 128 periods", () => {
+    const decoded = v1Codec.decode(v1Codec.encode(msg(128, 4)));
+    expect(decoded.periods[0]).toHaveLength(128);
   });
 
-  it("uses an 18-char header", () => {
-    expect(V1_HEADER_CHARS).toBe(18);
+  it("uses a 14-char header", () => {
+    expect(V1_HEADER_CHARS).toBe(14);
     expect(v1Codec.encode(msg(1, 4)).length).toBeGreaterThanOrEqual(V1_HEADER_CHARS);
   });
 });

@@ -17,7 +17,7 @@ const FORECAST_SMS = '+1 (425) 434-5858';
 const FORECAST_SMS_TEL = '+14254345858';
 const DEFAULT_MESSAGES = 1;
 const MESSAGE_OPTIONS = [1, 2, 3, 4, 5];
-const MAX_PERIODS = 256;   // v1 header carries an 8-bit period count
+const MAX_PERIODS = 128;   // v1 header carries a 7-bit period count
 const HORIZON_DAYS = 15;   // upstream forecast horizon
 const FORECAST_URL = `${API_BASE}/forecast`;
 

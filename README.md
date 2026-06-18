@@ -52,7 +52,7 @@ cheapest per column, so the encoded size is never larger than fixed-width.
 | Field            | Bits | Notes                                              |
 | ---------------- | ---- | -------------------------------------------------- |
 | version prefix   | 7    | self-describing protocol version (1 char)          |
-| periods          | 8    | period count − 1 (1–256 periods)                   |
+| periods          | 7    | period count − 1 (1–128 periods)                   |
 | resolution       | 3    | daily / 12h / 6h / 3h / 1h                          |
 | models_mask      | 4    | which forecast models are present                  |
 | vars_mask        | 14   | which variables are present                        |
@@ -61,8 +61,13 @@ cheapest per column, so the encoded size is never larger than fixed-width.
 | hour             | 5    | start hour                                         |
 | lat              | 15   | −90..+90, ~611 m steps                             |
 | lon              | 16   | −180..+180, ~611 m steps at the equator            |
-| elevation        | 14   | 0–16383 m                                          |
+| elevation        | 7    | 100 m steps, 0–12700 m (coarse sanity check)       |
 | wc_table         | 3    | Huffman codebook selector for weathercode          |
+
+The header is 83 packed bits → 14 chars including the version prefix. The body carries **no length
+field**: it is packed little-endian and self-delimiting — the decoder knows the structure (period
+count, model count, `vars_mask`) and reads exactly the bits each column needs, so trailing
+zero-padding is simply dropped.
 
 ### Per-period variables
 
@@ -72,8 +77,8 @@ cheapest per column, so the encoded size is never larger than fixed-width.
 | temperature (max)      | FOR      | 7-bit baseline + `W` (0–7)/value | 1 °C steps, −40 °C offset (−40..+87 °C) |
 | temperature (min)      | FOR      | 7-bit baseline + `W` (0–7)/value | 1 °C steps, −40 °C offset             |
 | freezing level         | FOR      | 4-bit baseline + `W` (0–4)/value | 1000 ft steps (0–15000 ft)            |
-| snow                   | Sparse   | 1 presence bit + magnitude/nonzero | 1 in steps                        |
-| rain                   | Sparse   | 1 presence bit + magnitude/nonzero | 0.5 mm steps                      |
+| snow                   | Sparse   | 1 presence bit + magnitude/nonzero | 6-bit sqrt-companded, 0–200 cm    |
+| rain                   | Sparse   | 1 presence bit + magnitude/nonzero | 6-bit sqrt-companded, 0–144 mm    |
 | precipitation prob.    | Fixed    | 3 bits                        | 0–100% in eighths                     |
 | wind (sfc/500/600/700) | Fixed    | 7 bits each (4 speed + 3 dir) | 5 mph speed steps, 8-point direction  |
 | cloud (total/high/mid/low) | Fixed | 3 bits each                  | 0–100% in eighths                     |

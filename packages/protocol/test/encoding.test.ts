@@ -308,6 +308,15 @@ describe("v1 round-trip encoding", () => {
     // Valid v1 tag but no room for the header.
     expect(() => v1MessageFromString(encodeVersion(V1_VERSION) + "abc")).toThrow("Unexpected message length");
   });
+
+  it("round-trips a minimal weathercode-only, all-clear message (self-delimiting body)", () => {
+    // vars_mask=0 leaves only the weathercode column; all-clear may pack to a near-empty body,
+    // exercising the little-endian self-terminating path (trailing zero bits dropped).
+    const clear = Array.from({ length: 8 }, () => ({ weathercode: 0 }));
+    const decoded = roundTrip(msg({ vars_mask: 0, periods: [clear] }));
+    expect(decoded.periods[0]).toHaveLength(8);
+    decoded.periods[0].forEach((p) => expect(p.weathercode).toBe(0));
+  });
 });
 
 describe("frame-of-reference temperature encoding", () => {

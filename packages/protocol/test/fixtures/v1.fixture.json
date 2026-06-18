@@ -1,6 +1,6 @@
 {
   "description": "3-day daily ECMWF HRES, precip+temp+tmin+snow+freeze+w500+w600+w700, Denali 14k camp",
-  "encoded": "\"!>1QFQfoQK;(PSbyb!3iFL4s65RhWw?5,ULm>/;B0k",
+  "encoded": "\"\"&m.69EkA>,<b'?htJz,,,gpg0hB$n?+Ng0Sh",
   "decoded": {
     "version": 1,
     "days": 3,
@@ -12,7 +12,7 @@
     "hour": 0,
     "lat": 63.06070131534776,
     "lon": -151.0835431448844,
-    "elevation": 4267,
+    "elevation": 4300,
     "periods": [
       [
         {

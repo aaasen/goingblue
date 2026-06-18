@@ -1,8 +1,8 @@
 import {
-  RESOLUTION_HOURS, WMO_CODES, LAT_BITS, LON_BITS, ELEV_BITS,
+  RESOLUTION_HOURS, WMO_CODES, LAT_BITS, LON_BITS,
 } from "../constants.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "../bits.js";
-import { encode, decode, nCharsForBits } from "../codec.js";
+import { encode, decode, encodeBodyLE, decodeBodyLE, nCharsForBits } from "../codec.js";
 import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js";
 import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec } from "../model.js";
@@ -13,26 +13,28 @@ const VERSION = V1_VERSION;
 
 // Locations are addressed by lat/lon only — there is no location field.
 // The count is a period count (not days), so sub-daily resolutions can carry a partial
-// final day. periods:8 stores (nPeriods - 1), i.e. 1..256 periods.
+// final day. periods:7 stores (nPeriods - 1), i.e. 1..128 periods.
 //
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts),
-// not in this packed header. Packed header layout (108 bits):
-//   periods:8 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5
-//   lat:15 lon:16 elev:14 wc_table:3 body_bits:17
-export const V1_PERIODS_BITS = 8;
-export const V1_MAX_PERIODS = 1 << V1_PERIODS_BITS; // 256
+// not in this packed header. Packed header layout (83 bits):
+//   periods:7 resolution:3 models_mask:4 vars_mask:14 month:4 day:5 hour:5
+//   lat:15 lon:16 elev:7 wc_table:3
+// The body carries no length field — it is packed little-endian and self-delimiting (the decoder
+// knows the structure and reads exactly the bits it needs; see encodeBodyLE/decodeBodyLE).
+export const V1_PERIODS_BITS = 7;
+export const V1_MAX_PERIODS = 1 << V1_PERIODS_BITS; // 128
 
-// Huffman codebook selector for the weathercode column (see huffman.ts). Reserved here; the
-// column is still raw WMO-index until the Huffman step lands.
+// Huffman codebook selector for the weathercode column (see huffman.ts).
 const WC_TABLE_BITS = 3;
-// Exact bit length of the (now variable-length) body. The body is self-delimiting once decoded,
-// but the decoder needs the bit count to recover it from the base-85 chars without padding
-// ambiguity. 17 bits covers the worst case (256 periods × 4 models ≈ 81k bits < 131071).
-const BODY_LEN_BITS = 17;
+// Elevation: 7 bits in 100 m steps → 0..12700 m. It's a coarse sanity check (summit vs. valley),
+// so metre precision isn't needed.
+const ELEV_BITS = 7;
+const ELEV_STEP_M = 100;
 
-export const V1_HEADER_BITS = 88 + WC_TABLE_BITS + BODY_LEN_BITS; // 108
+export const V1_HEADER_BITS =
+  V1_PERIODS_BITS + 3 + 4 + 14 + 4 + 5 + 5 + LAT_BITS + LON_BITS + ELEV_BITS + WC_TABLE_BITS; // 83
 // Total chars before the body: the shared version prefix plus this version's packed header.
-export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 17 = 18
+export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 13 = 14
 const HEADER_BITS = V1_HEADER_BITS;
 const HEADER_CHARS = nCharsForBits(V1_HEADER_BITS); // packed-header chars (excludes version prefix)
 
@@ -255,7 +257,8 @@ export function v1MessageToString(msg: ForecastMessage): string {
   const nModels = msg.periods.length;
   const nPeriods = msg.periods[0].length;
 
-  // Body is built first (column-major) so its exact bit length is known for the header.
+  // Body, built column-major. It carries no length field; encodeBodyLE packs it little-endian and
+  // the decoder reads exactly the bits the structure implies.
   const body: number[] = [];
 
   // Weathercode column (always present, Huffman-coded). Gather the indices first so we can pick
@@ -287,11 +290,10 @@ export function v1MessageToString(msg: ForecastMessage): string {
   putInt(headerBits, msg.hour, 5);
   putInt(headerBits, Math.round((msg.lat + 90) * ((1 << LAT_BITS) - 1) / 180), LAT_BITS);
   putInt(headerBits, Math.round((msg.lon + 180) * ((1 << LON_BITS) - 1) / 360), LON_BITS);
-  putInt(headerBits, Math.min(Math.max(Math.round(msg.elevation), 0), (1 << ELEV_BITS) - 1), ELEV_BITS);
+  putInt(headerBits, Math.min(Math.max(Math.round(msg.elevation / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1), ELEV_BITS);
   putInt(headerBits, wcTable, WC_TABLE_BITS);
-  putInt(headerBits, body.length, BODY_LEN_BITS);
 
-  return encodeVersion(VERSION) + encode(headerBits) + encode(body);
+  return encodeVersion(VERSION) + encode(headerBits) + encodeBodyLE(body);
 }
 
 export function v1MessageFromString(s: string): ForecastMessage {
@@ -314,9 +316,8 @@ export function v1MessageFromString(s: string): ForecastMessage {
   const hour = hr.int(5);
   const lat_raw = hr.int(LAT_BITS);
   const lon_raw = hr.int(LON_BITS);
-  const elevation = hr.int(ELEV_BITS);
+  const elevation = hr.int(ELEV_BITS) * ELEV_STEP_M;
   const wcTable = hr.int(WC_TABLE_BITS);
-  const bodyBits = hr.int(BODY_LEN_BITS);
 
   const lat = lat_raw * 180 / ((1 << LAT_BITS) - 1) - 90;
   const lon = lon_raw * 360 / ((1 << LON_BITS) - 1) - 180;
@@ -326,13 +327,10 @@ export function v1MessageFromString(s: string): ForecastMessage {
   const nPeriods = periodsRaw + 1;
   const nModels = popcount(models_mask);
 
-  const expectedBodyChars = nCharsForBits(bodyBits);
-  const actualBodyChars = rest.length - HEADER_CHARS;
-  if (actualBodyChars !== expectedBodyChars)
-    throw new Error(`Unexpected message length: ${s.length} chars`);
-
-  const body = decode(rest.slice(HEADER_CHARS), bodyBits);
-  const rd = reader(body);
+  // The body has no length field: it's self-delimiting given the known structure (nPeriods,
+  // nModels, vars_mask). decodeBodyLE materializes the meaningful low bits; reads past them
+  // return 0 (the implicit high-order padding) via takeInt's `?? 0`.
+  const rd = reader(decodeBodyLE(rest.slice(HEADER_CHARS)));
 
   const periods: Period[][] = Array.from({ length: nModels }, () =>
     Array.from({ length: nPeriods }, () => ({ weathercode: 0 } as Period)));

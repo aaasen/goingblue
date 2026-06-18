@@ -329,8 +329,8 @@ export interface ForecastParams {
   userToken: string | null;
 }
 
-// 8-bit period count in the protocol header → 1..256 periods.
-const MAX_PERIODS = 256;
+// 7-bit period count in the protocol header → 1..128 periods.
+const MAX_PERIODS = 128;
 const DEFAULT_MAX_CHARS = 160; // default response length cap (Garmin inReach reply limit)
 const HORIZON_DAYS = 15;       // upstream forecast horizon
 
@@ -341,7 +341,7 @@ function popcount(n: number): number {
 }
 
 // How many periods to fetch from upstream: the full forecast horizon for the resolution, capped
-// by the protocol's 8-bit period field. The adaptive encoding is variable-length, so we no longer
+// by the protocol's 7-bit period field. The adaptive encoding is variable-length, so we no longer
 // size the response analytically — instead we over-fetch the horizon and trim the encoded message
 // to the budget afterwards (see fitEncodedToBudget). The client may receive fewer periods than
 // fetched; that's expected.
