@@ -18,6 +18,9 @@ export interface Period {
   // Snow accumulation in centimeters.
   snow_cm?: number;
 
+  // Liquid precipitation (rain + showers) accumulation in millimeters.
+  rain_mm?: number;
+
   // Freezing altitude in meters.
   freeze_m?: number;
 

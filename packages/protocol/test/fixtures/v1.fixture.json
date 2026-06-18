@@ -1,6 +1,6 @@
 {
   "description": "3-day daily ECMWF HRES, precip+temp+tmin+snow+freeze+w500+w600+w700, Denali 14k camp",
-  "encoded": "\"!2)BK!Su&(J,$0&9w_kZ),lxwSxIXGk97+*n,Z",
+  "encoded": "\"!2)BK!Su&(J,$0$yiL+ls0x$'A*vMEj-.#*i;N8",
   "decoded": {
     "version": 1,
     "days": 3,
@@ -34,7 +34,7 @@
           "precip": 86,
           "temp_c": -4,
           "temp_min_c": -12,
-          "snow_cm": 5.08,
+          "snow_cm": 5.039052658100277,
           "freeze_m": 2438.4,
           "wind_500_kph": 48.28032,
           "wind_500_dir": 3,

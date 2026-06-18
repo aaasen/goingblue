@@ -40,7 +40,7 @@ export const VARS_BIT: Record<string, number> = {
   cch: 9,    // high cloud cover
   ccm: 10,   // mid cloud cover
   ccl: 11,   // low cloud cover
-  vis: 12,   // visibility
+  rain: 12,  // liquid precipitation (rain + showers), mm
   tmin: 13,  // min temperature
 };
 

@@ -146,6 +146,14 @@ function fmtSnow(cm: number, u: Units): string {
   }
   return cm >= 0.5 ? `${Math.round(cm)}` : '';
 }
+function fmtRain(mm: number, u: Units): string {
+  if (u === 'imperial') {
+    const inches = mm / 25.4;
+    return inches >= 0.01 ? inches.toFixed(2) : '';
+  }
+  if (mm < 0.5) return '';
+  return mm < 10 ? mm.toFixed(1) : `${Math.round(mm)}`;
+}
 function fmtFreeze(m: number | undefined, u: Units): string {
   if (m == null) return '';
   if (u === 'imperial') return `${(Math.round((m * 3.28084) / 500) * 500).toLocaleString()}`;
@@ -158,6 +166,7 @@ function fmtWind(kph: number | undefined, u: Units): string {
 
 function tempUnit(u: Units) { return u === 'imperial' ? '°F' : '°C'; }
 function snowUnit(u: Units) { return u === 'imperial' ? 'in' : 'cm'; }
+function rainUnit(u: Units) { return u === 'imperial' ? 'in' : 'mm'; }
 function freezeUnit(u: Units) { return u === 'imperial' ? 'ft' : 'm'; }
 function windUnit(u: Units) { return u === 'imperial' ? 'mph' : 'kph'; }
 
@@ -177,7 +186,7 @@ function pressureLabel(level: 500 | 600 | 700, u: Units): string {
 // ── Row model ──────────────────────────────────────────────────────────────
 
 type RowKind =
-  | 'clouds' | 'precip' | 'temp' | 'snow' | 'freeze' | 'wind-sfc'
+  | 'clouds' | 'precip' | 'temp' | 'snow' | 'rain' | 'freeze' | 'wind-sfc'
   | 'cloud-total' | 'cloud-high' | 'cloud-mid' | 'cloud-low'
   | 'wind-500' | 'wind-600' | 'wind-700' | 'section';
 
@@ -190,19 +199,20 @@ interface Row {
 function buildRows(periods: Period[], u: Units): Row[] {
   const rows: Row[] = [];
   const has = (fn: (p: Period) => unknown) => periods.some((p) => fn(p) != null);
-  const tU = tempUnit(u), snU = snowUnit(u), frU = freezeUnit(u), wU = windUnit(u);
+  const tU = tempUnit(u), snU = snowUnit(u), rnU = rainUnit(u), frU = freezeUnit(u), wU = windUnit(u);
 
   rows.push({ kind: 'clouds', height: ROW_H.CLOUD, label: 'Sky' });
 
   const hasSurface =
     has((p) => p.precip) || has((p) => p.temp_c) || has((p) => p.temp_min_c) ||
-    has((p) => p.snow_cm) || has((p) => p.freeze_m) || has((p) => p.wind_sfc_kph);
+    has((p) => p.snow_cm) || has((p) => p.rain_mm) || has((p) => p.freeze_m) || has((p) => p.wind_sfc_kph);
   if (hasSurface) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Surface' });
     if (has((p) => p.precip)) rows.push({ kind: 'precip', height: ROW_H.PRECIP, label: 'Precip %' });
     if (has((p) => p.temp_c) || has((p) => p.temp_min_c))
       rows.push({ kind: 'temp', height: ROW_H.TEMP, label: `Temp ${tU}` });
     if (has((p) => p.snow_cm)) rows.push({ kind: 'snow', height: ROW_H.SNOW, label: `Snow ${snU}` });
+    if (has((p) => p.rain_mm)) rows.push({ kind: 'rain', height: ROW_H.SNOW, label: `Rain ${rnU}` });
     if (has((p) => p.freeze_m)) rows.push({ kind: 'freeze', height: ROW_H.DATA, label: `Freezing ${frU}` });
     if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.DATA, label: `Wind ${wU}` });
   }
@@ -360,8 +370,9 @@ function ModelCanvas({ periods, rows, dates, resHours, units, fonts }: {
   const tMin = temps.length ? Math.min(...temps) - 1 : 0;
   const tMax = temps.length ? Math.max(...temps) + 1 : 1;
 
-  // Snow scaling.
+  // Snow / rain bar scaling (each row scales to its own max accumulation).
   const maxSnow = Math.max(0, ...periods.map((p) => p.snow_cm ?? 0));
+  const maxRain = Math.max(0, ...periods.map((p) => p.rain_mm ?? 0));
 
   // 4. Rows.
   let y = ROW_H.DATE;
@@ -454,6 +465,21 @@ function ModelCanvas({ periods, rows, dates, resHours, units, fonts }: {
           const bw = 22;
           els.push(<RoundedRect key={`sb${i}`} x={cx - bw / 2} y={base - bh} width={bw} height={bh} r={2} color="#9ec5e8" />);
           els.push(centerText(`sv${i}`, txt, cx, base - bh - 8, fonts.small, '#3a6ea5'));
+        });
+        break;
+
+      case 'rain':
+        periods.forEach((p, i) => {
+          const mm = p.rain_mm ?? 0;
+          const cx = colCenter(i);
+          const txt = fmtRain(mm, units);
+          if (mm <= 0 || maxRain <= 0 || !txt) { els.push(centerText(`rn${i}`, '—', cx, mid, fonts.data, C.nil)); return; }
+          const base = top + row.height - 6;
+          const maxBarH = row.height - 22;
+          const bh = Math.max(3, (mm / maxRain) * maxBarH);
+          const bw = 22;
+          els.push(<RoundedRect key={`rb${i}`} x={cx - bw / 2} y={base - bh} width={bw} height={bh} r={2} color="#4a90d9" />);
+          els.push(centerText(`rv${i}`, txt, cx, base - bh - 8, fonts.small, '#2a6bb5'));
         });
         break;
 

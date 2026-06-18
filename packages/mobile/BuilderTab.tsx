@@ -55,6 +55,7 @@ const VAR_GROUPS = [
       { value: 'temp', label: 'Max Temp' },
       { value: 'tmin', label: 'Min Temp' },
       { value: 'snow', label: 'Snow' },
+      { value: 'rain', label: 'Rain' },
       { value: 'freeze', label: 'Freezing Level' },
       { value: 'wind', label: 'Wind' },
     ],
@@ -79,7 +80,7 @@ const VAR_GROUPS = [
 ];
 
 const DEFAULT_VARS = new Set([
-  'precip', 'temp', 'tmin', 'snow', 'freeze', 'wind',
+  'precip', 'temp', 'tmin', 'snow', 'rain', 'freeze', 'wind',
   'cch', 'ccm', 'ccl',
   'w500', 'w600', 'w700',
 ]);

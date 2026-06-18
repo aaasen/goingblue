@@ -74,6 +74,8 @@ const SURFACE_VARS = [
   "weather_code",
   "freezing_level_height",
   "snowfall",
+  "rain",
+  "showers",
   "cloud_cover",
   "cloud_cover_high",
   "cloud_cover_mid",
@@ -131,6 +133,8 @@ interface HourlyData {
   weather_code: (number | null)[];
   freezing_level_height: (number | null)[];
   snowfall: (number | null)[];
+  rain: (number | null)[];
+  showers: (number | null)[];
   cloud_cover: (number | null)[];
   cloud_cover_high: (number | null)[];
   cloud_cover_mid: (number | null)[];
@@ -148,6 +152,7 @@ export interface Row {
   weathercode: number | null;
   freezing_level_m: number | null;
   snow_cm: number;
+  rain_mm: number;
   wind_speed_500hPa: number | null;
   wind_direction_500hPa: number | null;
   wind_speed_600hPa: number | null;
@@ -260,6 +265,9 @@ export async function aggregateRows(
       weathercode: maxOf(pick(h.weather_code)),
       freezing_level_m: maxOf(pickUnk("freezing_level_height")),
       snow_cm: sumOf(pick(h.snowfall)),
+      // Liquid precipitation: open-meteo splits convective showers from stratiform rain.
+      // Some models omit one series (returns null), so sum both treating null as 0.
+      rain_mm: sumOf(pickUnk("rain")) + sumOf(pickUnk("showers")),
       wind_speed_500hPa: maxOf(spd500),
       wind_direction_500hPa: dominantDirDeg(spd500, dir500),
       wind_speed_600hPa: maxOf(spd600),
@@ -285,6 +293,7 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period
   if (varsMask & (1 << VARS_BIT.temp))   p.temp_c     = r.temp_max_c ?? 0;
   if (varsMask & (1 << VARS_BIT.tmin))   p.temp_min_c = r.temp_min_c ?? 0;
   if (varsMask & (1 << VARS_BIT.snow))   p.snow_cm    = r.snow_cm ?? 0;
+  if (varsMask & (1 << VARS_BIT.rain))   p.rain_mm    = r.rain_mm ?? 0;
   if (varsMask & (1 << VARS_BIT.freeze)) p.freeze_m   = r.freezing_level_m ?? 0;
   if (varsMask & (1 << VARS_BIT.wind)) {
     p.wind_sfc_kph = r.wind_speed_10m ?? 0;

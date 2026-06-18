@@ -10,12 +10,22 @@ import {
   CARDINALS,
   DEFAULT_VARS_MASK,
   VARS_BIT,
+  compandSqrt,
+  expandSqrt,
+  ACCUM_BITS,
+  SNOW_K,
+  RAIN_K,
 } from "../src/index.js";
 
-// Every v1 variable except `vis` (bit 12), which v1 encodes in 0 bits (dropped).
+// Reproduce what the codec stores for a sqrt-companded accumulation, so round-trip
+// expectations track the quantization exactly rather than the raw input.
+const qSnow = (cm: number) => expandSqrt(compandSqrt(cm, SNOW_K, ACCUM_BITS), SNOW_K);
+const qRain = (mm: number) => expandSqrt(compandSqrt(mm, RAIN_K, ACCUM_BITS), RAIN_K);
+
+// Every v1 variable (bit 12 is `rain`, 6-bit liquid precip).
 const ALL_VARS =
   (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) |
-  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 13);
+  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 12) | (1 << 13);
 
 const RESOLUTIONS_PER_DAY = [1, 2, 4, 8, 24];
 
@@ -24,7 +34,8 @@ const PERIOD: Period = {
   precip: 75,
   temp_c: 0,
   temp_min_c: -20,
-  snow_cm: 4 * 2.54,       // 4 whole inches in cm — round-trips exactly
+  snow_cm: 4 * 2.54,       // ~10cm — sqrt-companded, compared via qSnow()
+  rain_mm: 6.5,            // sqrt-companded, compared via qRain()
   freeze_m: 6 * 304.8,     // 6000 ft in m — round-trips exactly
   wind_sfc_kph: 10 * 1.609344,
   wind_sfc_dir: 2,
@@ -119,7 +130,8 @@ describe("v1 round-trip encoding", () => {
     expect(p.precip).toBe(Math.round(Math.round((PERIOD.precip ?? 0) * 7 / 100) * 100 / 7));
     expect(p.temp_c).toBe(PERIOD.temp_c);
     expect(p.temp_min_c).toBe(PERIOD.temp_min_c);
-    expect(p.snow_cm).toBeCloseTo(PERIOD.snow_cm!, 5);
+    expect(p.snow_cm).toBeCloseTo(qSnow(PERIOD.snow_cm!), 5);
+    expect(p.rain_mm).toBeCloseTo(qRain(PERIOD.rain_mm!), 5);
     expect(p.freeze_m).toBeCloseTo(PERIOD.freeze_m!, 5);
     expect(p.wind_sfc_kph).toBeCloseTo(PERIOD.wind_sfc_kph!, 3);
     expect(p.wind_sfc_dir).toBe(PERIOD.wind_sfc_dir);
@@ -143,6 +155,7 @@ describe("v1 round-trip encoding", () => {
     expect(p.temp_c).toBeUndefined();
     expect(p.temp_min_c).toBeUndefined();
     expect(p.snow_cm).toBeUndefined();
+    expect(p.rain_mm).toBeUndefined();
     expect(p.freeze_m).toBeUndefined();
     expect(p.wind_sfc_kph).toBeUndefined();
     expect(p.wind_500_kph).toBeUndefined();
@@ -240,9 +253,26 @@ describe("v1 round-trip encoding", () => {
     expect(decoded.periods[0][0].wind_700_kph).toBeCloseTo(25 * 1.609344, 3);
   });
 
-  it("clamps snow to 15 in max (38.1 cm)", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, snow_cm: 20 * 2.54 }]] }));
-    expect(decoded.periods[0][0].snow_cm).toBeCloseTo(15 * 2.54, 5);
+  it("clamps snow to 200 cm max", () => {
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, snow_cm: 300 }]] }));
+    expect(decoded.periods[0][0].snow_cm).toBeCloseTo(200, 3);
+  });
+
+  it("keeps fine resolution for light snow (sqrt companding)", () => {
+    // a 1 cm dusting round-trips to well within half a cm
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, snow_cm: 1 }]] }));
+    expect(decoded.periods[0][0].snow_cm).toBeCloseTo(1, 0);
+  });
+
+  it("clamps rain to 144 mm max", () => {
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, rain_mm: 200 }]] }));
+    expect(decoded.periods[0][0].rain_mm).toBeCloseTo(144, 3);
+  });
+
+  it("keeps fine resolution for light rain (sqrt companding)", () => {
+    // light drizzle near 1 mm round-trips to well within half a mm
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, rain_mm: 1 }]] }));
+    expect(decoded.periods[0][0].rain_mm).toBeCloseTo(1, 0);
   });
 
   it("clamps freeze level to 15,000 ft max (4572 m)", () => {

@@ -1,7 +1,7 @@
 import {
   RESOLUTION_HOURS, WMO_CODES, LAT_BITS, LON_BITS, ELEV_BITS,
 } from "../constants.js";
-import { putInt, takeInt } from "../bits.js";
+import { putInt, takeInt, compandSqrt, expandSqrt } from "../bits.js";
 import { encode, decode, periodBitsForMask, nCharsForBits } from "../codec.js";
 import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js";
 import { WMO2IDX, type Period } from "../model.js";
@@ -26,10 +26,22 @@ const HEADER_BITS = V1_HEADER_BITS;
 const HEADER_CHARS = nCharsForBits(V1_HEADER_BITS); // packed-header chars (excludes version prefix)
 
 // temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
-export const VAR_BITS_V1 = [3, 7, 4, 4, 7, 7, 7, 7, 3, 3, 3, 3, 0, 7];
-//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl  -  ^tmin
+// snow/rain: 6 bits each, sqrt-companded (see ACCUM_* below). rain is bit 12, the slot
+// formerly reserved for the removed `vis`.
+export const VAR_BITS_V1 = [3, 7, 6, 4, 7, 7, 7, 7, 3, 3, 3, 3, 6, 7];
+//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^rain ^tmin
 
 const TEMP_OFFSET = 40;
+
+// Snow (cm) and rain (mm) use sqrt companding (see compandSqrt): fine resolution near zero,
+// coarsening with magnitude, so one 6-bit field spans light hourly through heavy daily
+// accumulation. k = (2^bits - 1) / sqrt(maxValue).
+export const ACCUM_BITS = 6;
+const ACCUM_MAX = (1 << ACCUM_BITS) - 1;
+export const SNOW_MAX_CM = 200;
+export const RAIN_MAX_MM = 144;
+export const SNOW_K = ACCUM_MAX / Math.sqrt(SNOW_MAX_CM); // ≈ 4.4548
+export const RAIN_K = ACCUM_MAX / Math.sqrt(RAIN_MAX_MM); // = 5.25
 const KPH_PER_STEP = 5 * 1.609344;
 
 function putWind(bits: number[], kph: number, dir: number): void {
@@ -49,7 +61,8 @@ function periodToBits(p: Period, varsMask: number): number[] {
   if (varsMask & (1 << 0))  putInt(bits, Math.min(Math.round((p.precip ?? 0) * 7 / 100), 7), 3);
   if (varsMask & (1 << 1))  putInt(bits, Math.min(Math.max(Math.round((p.temp_c     ?? 0) + TEMP_OFFSET), 0), 127), 7);
   if (varsMask & (1 << 13)) putInt(bits, Math.min(Math.max(Math.round((p.temp_min_c ?? 0) + TEMP_OFFSET), 0), 127), 7);
-  if (varsMask & (1 << 2))  putInt(bits, Math.min(Math.round((p.snow_cm ?? 0) / 2.54), 15), 4);
+  if (varsMask & (1 << 2))  putInt(bits, compandSqrt(p.snow_cm ?? 0, SNOW_K, ACCUM_BITS), ACCUM_BITS);
+  if (varsMask & (1 << 12)) putInt(bits, compandSqrt(p.rain_mm ?? 0, RAIN_K, ACCUM_BITS), ACCUM_BITS);
   if (varsMask & (1 << 3))  putInt(bits, Math.min(Math.floor((p.freeze_m ?? 0) / 304.8), 15), 4);
   if (varsMask & (1 << 4))  putWind(bits, p.wind_sfc_kph ?? 0, p.wind_sfc_dir ?? 0);
   if (varsMask & (1 << 5))  putWind(bits, p.wind_500_kph ?? 0, p.wind_500_dir ?? 0);
@@ -70,7 +83,8 @@ function periodFromBits(bits: number[], pos: number, varsMask: number): [Period,
   if (varsMask & (1 << 0))  { let v: number; [v, pos] = takeInt(bits, pos, 3); p.precip      = Math.round(v * 100 / 7); }
   if (varsMask & (1 << 1))  { let v: number; [v, pos] = takeInt(bits, pos, 7); p.temp_c      = v - TEMP_OFFSET; }
   if (varsMask & (1 << 13)) { let v: number; [v, pos] = takeInt(bits, pos, 7); p.temp_min_c  = v - TEMP_OFFSET; }
-  if (varsMask & (1 << 2))  { let v: number; [v, pos] = takeInt(bits, pos, 4); p.snow_cm     = v * 2.54; }
+  if (varsMask & (1 << 2))  { let v: number; [v, pos] = takeInt(bits, pos, ACCUM_BITS); p.snow_cm = expandSqrt(v, SNOW_K); }
+  if (varsMask & (1 << 12)) { let v: number; [v, pos] = takeInt(bits, pos, ACCUM_BITS); p.rain_mm = expandSqrt(v, RAIN_K); }
   if (varsMask & (1 << 3))  { let v: number; [v, pos] = takeInt(bits, pos, 4); p.freeze_m    = v * 304.8; }
   if (varsMask & (1 << 4))  { let kph: number, dir: number; [kph, dir, pos] = takeWind(bits, pos); p.wind_sfc_kph = kph; p.wind_sfc_dir = dir; }
   if (varsMask & (1 << 5))  { let kph: number, dir: number; [kph, dir, pos] = takeWind(bits, pos); p.wind_500_kph = kph; p.wind_500_dir = dir; }
