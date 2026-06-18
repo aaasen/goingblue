@@ -43,8 +43,8 @@ describe("v1 period count", () => {
     expect(decoded.periods[0]).toHaveLength(256);
   });
 
-  it("uses a 15-char header", () => {
-    expect(V1_HEADER_CHARS).toBe(15);
+  it("uses an 18-char header", () => {
+    expect(V1_HEADER_CHARS).toBe(18);
     expect(v1Codec.encode(msg(1, 4)).length).toBeGreaterThanOrEqual(V1_HEADER_CHARS);
   });
 });

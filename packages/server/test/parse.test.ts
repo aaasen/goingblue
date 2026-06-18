@@ -48,28 +48,30 @@ describe("parseRequest", () => {
     expect(parseRequest("").maxChars).toBe(160);
   });
 
-  it("c: sets the max response length and yields more periods when raised", () => {
+  it("c: sets the max response length; the fetch count is the resolution horizon, not the budget", () => {
     expect(parseRequest("c:320").maxChars).toBe(320);
+    // The encoding is variable-length, so the response is trimmed to the budget at encode time.
+    // The parsed period count is just the resolution horizon and no longer varies with c:.
     const dflt = parseRequest("r:1h").nPeriods;
     const larger = parseRequest("c:320 r:1h").nPeriods;
     const smaller = parseRequest("c:80 r:1h").nPeriods;
-    expect(larger).toBeGreaterThan(dflt);
-    expect(smaller).toBeLessThan(dflt);
+    expect(larger).toBe(dflt);
+    expect(smaller).toBe(dflt);
   });
 
-  it("c: clamps to a minimum of 1 and still returns at least one period", () => {
+  it("c: clamps the max response length to a minimum of 1", () => {
     expect(parseRequest("c:0").maxChars).toBe(1);
-    expect(parseRequest("c:0").nPeriods).toBe(1);
+    // The fetch count is the horizon regardless of budget; the encoder trims to fit at send time.
+    expect(parseRequest("c:0 r:daily").nPeriods).toBe(15);
   });
 
-  it("the period count always fits the budget; a fuller var set yields fewer hourly periods", () => {
-    // At 1h resolution the default var set fills more periods than an all-vars request,
-    // and both stay within the response budget.
+  it("the fetch count depends only on resolution, not the variable set", () => {
+    // Trimming to the response budget happens at encode time, so the parsed period count is the
+    // resolution horizon regardless of how many variables are requested.
     const defaultRes = parseRequest("r:1h").nPeriods;
     const richRes = parseRequest("r:1h v:precip,temp,tmin,snow,freeze,wind,w500,w600,w700,cc,cch,ccm,ccl").nPeriods;
     expect(defaultRes).toBeGreaterThan(0);
-    expect(richRes).toBeGreaterThan(0);
-    expect(richRes).toBeLessThan(defaultRes);
+    expect(richRes).toBe(defaultRes);
   });
 
   it("r: sets resolution index", () => {

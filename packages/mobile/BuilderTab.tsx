@@ -85,15 +85,18 @@ const DEFAULT_VARS = new Set([
   'w500', 'w600', 'w700',
 ]);
 
-// Chars needed to encode `nPeriods` time periods with the given variables. The period count
-// is carried directly, so resolution no longer affects the body size — only the count does.
+// Chars to encode `nPeriods` periods at fixed (raw) field widths. The server's actual encoding is
+// adaptive and variable-length (Huffman / frame-of-reference / sparse), so it is never larger than
+// this — making the estimate a conservative upper bound on size, i.e. a lower bound on the periods
+// that will actually fit.
 function calcChars(nPeriods: number, varsMask: number): number {
   const bodyBits = nPeriods * periodBitsForMask(varsMask, VAR_BITS_V1);
   return V1_HEADER_CHARS + nCharsForBits(bodyBits);
 }
 
-// As many time periods as fit `maxChars` for the selected variables, bounded by the 8-bit
-// header field and the forecast horizon. Returns 0 only if a single period won't fit.
+// A conservative lower bound on how many periods fit `maxChars`: the server's adaptive encoding
+// will fit at least this many (usually more). Bounded by the 8-bit header field and the horizon.
+// Returns 0 only if even one period won't fit at raw widths.
 function maxPeriodsFor(resHours: number, varsMask: number, maxChars: number): number {
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
   const cap = Math.min(MAX_PERIODS, Math.floor(HORIZON_DAYS * periodsPerDay));
@@ -313,7 +316,7 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
         />
         <Text style={[styles.lenSummary, !fits && styles.lenOver]}>
           {fits
-            ? `${formatSpan(spanDays)} · ${nPeriods} period${nPeriods === 1 ? '' : 's'}`
+            ? `≥ ${formatSpan(spanDays)} · ${nPeriods}+ period${nPeriods === 1 ? '' : 's'}`
             : `Won't fit ${numMessages} message${numMessages === 1 ? '' : 's'} at ${resLabel} resolution — reduce variables or coarsen resolution`}
         </Text>
       </Section>

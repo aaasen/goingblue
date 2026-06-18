@@ -3,10 +3,6 @@ import {
   DEFAULT_VARS_MASK,
   VARS_BIT,
   CURRENT_VERSION,
-  V1_HEADER_CHARS,
-  VAR_BITS_V1,
-  periodBitsForMask,
-  nCharsForBits,
   isValidToken,
   normalizeToken,
   type Period,
@@ -344,26 +340,14 @@ function popcount(n: number): number {
   return c;
 }
 
-// Largest period count whose encoded forecast still fits within `maxChars`, bounded by the
-// protocol's 8-bit period field and the forecast horizon. The request carries no period
-// count, so the server fits as many periods as possible for the chosen resolution, variables,
-// models, and client-requested max length (mirrors the builder app's preview math). Returns
-// at least 1 period even when a single period exceeds `maxChars`.
-function maxPeriodsForBudget(
-  resolutionIdx: number,
-  varsMask: number,
-  modelsMask: number,
-  maxChars: number,
-): number {
+// How many periods to fetch from upstream: the full forecast horizon for the resolution, capped
+// by the protocol's 8-bit period field. The adaptive encoding is variable-length, so we no longer
+// size the response analytically — instead we over-fetch the horizon and trim the encoded message
+// to the budget afterwards (see fitEncodedToBudget). The client may receive fewer periods than
+// fetched; that's expected.
+function horizonPeriods(resolutionIdx: number): number {
   const periodsPerDay = 24 / HOURS_PER_PERIOD[resolutionIdx];
-  const cap = Math.min(MAX_PERIODS, Math.floor(HORIZON_DAYS * periodsPerDay));
-  const nModels = Math.max(1, popcount(modelsMask));
-  const periodBits = periodBitsForMask(varsMask, VAR_BITS_V1);
-  for (let n = cap; n >= 1; n--) {
-    const bodyBits = n * nModels * periodBits;
-    if (V1_HEADER_CHARS + nCharsForBits(bodyBits) <= maxChars) return n;
-  }
-  return 1;
+  return Math.min(MAX_PERIODS, Math.floor(HORIZON_DAYS * periodsPerDay));
 }
 
 export function parseRequest(body: string): ForecastParams {
@@ -426,9 +410,10 @@ export function parseRequest(body: string): ForecastParams {
 
   if (varsMask === 0) varsMask = DEFAULT_VARS_MASK;
 
-  // The request carries no period count: fit as many periods as the requested max length
-  // allows for the chosen resolution, variables, and models.
-  const nPeriods = maxPeriodsForBudget(resolutionIdx, varsMask, modelsMask, maxChars);
+  // The request carries no period count: fetch the full horizon and trim the encoded reply to
+  // the requested max length afterwards (the encoding is variable-length, so the fit can't be
+  // computed up front).
+  const nPeriods = horizonPeriods(resolutionIdx);
 
   return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, maxChars, decoderVersion, userToken };
 }
@@ -484,5 +469,28 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
     ),
   };
 
-  return codec.encode(msg);
+  return fitEncodedToBudget(msg, params.maxChars, codec);
+}
+
+// Encodes the largest leading prefix of periods whose encoded form fits `maxChars`. Encoded length
+// is monotonic non-decreasing in the period count, so we binary-search the cutoff. Always returns
+// at least one period, even if a single period exceeds the budget.
+function fitEncodedToBudget(msg: ForecastMessage, maxChars: number, codec: VersionedCodec): string {
+  const encodeFirst = (n: number): string =>
+    codec.encode({ ...msg, periods: msg.periods.map((rows) => rows.slice(0, n)) });
+
+  let lo = 1;
+  let hi = msg.periods[0].length;
+  let best = encodeFirst(1);
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const encoded = encodeFirst(mid);
+    if (encoded.length <= maxChars) {
+      best = encoded;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best;
 }

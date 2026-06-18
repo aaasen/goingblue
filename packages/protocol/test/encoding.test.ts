@@ -309,3 +309,48 @@ describe("v1 round-trip encoding", () => {
     expect(() => v1MessageFromString(encodeVersion(V1_VERSION) + "abc")).toThrow("Unexpected message length");
   });
 });
+
+describe("frame-of-reference temperature encoding", () => {
+  it("round-trips a clustered temperature column exactly", () => {
+    const temps = [-5, -4, -3, 0, 2, 5, 3, 1, -2, 4];
+    const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
+    const decoded = roundTrip(msg({ resolution: 4, vars_mask: 1 << VARS_BIT.temp, periods }));
+    decoded.periods[0].forEach((p, i) => expect(p.temp_c).toBe(temps[i]));
+  });
+
+  it("encodes a constant column smaller than a wide-spread one (adaptive width)", () => {
+    const vars_mask = 1 << VARS_BIT.temp;
+    const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, temp_c: 5 }));
+    const spread = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, temp_c: i - 20 }));
+    const flatLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods: [flat] })).length;
+    const spreadLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods: [spread] })).length;
+    expect(flatLen).toBeLessThan(spreadLen);
+  });
+});
+
+describe("sparse / empty precipitation encoding", () => {
+  const vars_mask = 1 << VARS_BIT.snow;
+
+  it("collapses an all-dry snow column (empty mode) and round-trips to zero", () => {
+    const dry = Array.from({ length: 48 }, () => ({ ...PERIOD, snow_cm: 0 }));
+    const decoded = roundTrip(msg({ resolution: 4, vars_mask, periods: [dry] }));
+    decoded.periods[0].forEach((p) => expect(p.snow_cm).toBe(0));
+    // The empty column should be far smaller than one with snow every period.
+    const snowy = Array.from({ length: 48 }, () => ({ ...PERIOD, snow_cm: 20 }));
+    const dryLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods: [dry] })).length;
+    const snowyLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods: [snowy] })).length;
+    expect(dryLen).toBeLessThan(snowyLen);
+  });
+
+  it("round-trips a mostly-zero snow column exactly (sparse mode)", () => {
+    const vals = Array.from({ length: 48 }, (_, i) => (i % 12 === 0 ? 10 : 0));
+    const periods = [vals.map((s) => ({ ...PERIOD, snow_cm: s }))];
+    const decoded = roundTrip(msg({ resolution: 4, vars_mask, periods }));
+    decoded.periods[0].forEach((p, i) => expect(p.snow_cm).toBeCloseTo(qSnow(vals[i]), 5));
+    // Sparse beats a column where every cell is nonzero and widely spread (≈ raw cost).
+    const dense = Array.from({ length: 48 }, (_, i) => ({ ...PERIOD, snow_cm: 3 * (i + 1) }));
+    const sparseLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods })).length;
+    const denseLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods: [dense] })).length;
+    expect(sparseLen).toBeLessThan(denseLen);
+  });
+});
