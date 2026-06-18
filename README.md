@@ -20,6 +20,64 @@ This is a pnpm monorepo with three packages:
 - `packages/server` — Hono/Node.js server; receives inbound messages, fetches forecasts, and sends replies
 - `packages/mobile` — Expo React Native app for building requests and decoding forecasts
 
+## Encoding
+
+Forecast responses are bit-packed into a compact binary message, then serialized as base-85 over
+the [GSM-7 basic alphabet](packages/protocol/src/constants.ts) so each character costs a single
+septet over SMS. A message is a fixed header followed by one body cell per period × model.
+
+To squeeze the body, each variable uses the encoding strategy that best fits its distribution. The
+adaptive strategies (Huffman, frame-of-reference, sparse) are the protocol's encoding design; every
+adaptive column can also fall back to **raw** fixed-width, and the encoder picks whichever mode is
+cheapest per column, so the encoded size is never larger than fixed-width.
+
+### Strategies
+
+- **Fixed (linear)** — the value is mapped to a fixed-width integer with a constant step size and
+  offset. Constant width; used where the range is small and roughly uniform.
+- **Huffman** — a static, prefix-free variable-length code so common conditions cost fewer bits.
+  Several regime-tuned codebooks exist (e.g. dry, cold/snow, maritime, convective); the header's
+  `wc_table` field names which one, and the encoder selects the codebook that yields the fewest
+  bits for the message.
+- **Frame-of-reference (FOR)** — store one baseline (the column minimum) plus a per-column bit
+  width `W`; each value is its unsigned offset from the baseline in `W` bits. `W` adapts to the
+  actual spread, so tightly-clustered columns shrink and an all-equal column costs zero bits per
+  value. No error accumulation, and it degrades to raw when the spread is large.
+- **Sparse** — for columns that are usually zero. One presence bit per value, with the magnitude
+  stored (in an adaptive width) only for nonzero values. Suits precipitation, which is mostly zero
+  with a skewed tail.
+
+### Header
+
+| Field            | Bits | Notes                                              |
+| ---------------- | ---- | -------------------------------------------------- |
+| version prefix   | 7    | self-describing protocol version (1 char)          |
+| periods          | 8    | period count − 1 (1–256 periods)                   |
+| resolution       | 3    | daily / 12h / 6h / 3h / 1h                          |
+| models_mask      | 4    | which forecast models are present                  |
+| vars_mask        | 14   | which variables are present                        |
+| month            | 4    | start month                                        |
+| day              | 5    | start day                                          |
+| hour             | 5    | start hour                                         |
+| lat              | 15   | −90..+90, ~611 m steps                             |
+| lon              | 16   | −180..+180, ~611 m steps at the equator            |
+| elevation        | 14   | 0–16383 m                                          |
+| wc_table         | 3    | Huffman codebook selector for weathercode          |
+
+### Per-period variables
+
+| Variable               | Strategy | Size                          | Quantization                          |
+| ---------------------- | -------- | ----------------------------- | ------------------------------------- |
+| weathercode            | Huffman  | ~1–7 bits / value (variable)  | 28 WMO codes, codebook per `wc_table` |
+| temperature (max)      | FOR      | 7-bit baseline + `W` (0–7)/value | 1 °C steps, −40 °C offset (−40..+87 °C) |
+| temperature (min)      | FOR      | 7-bit baseline + `W` (0–7)/value | 1 °C steps, −40 °C offset             |
+| freezing level         | FOR      | 4-bit baseline + `W` (0–4)/value | 1000 ft steps (0–15000 ft)            |
+| snow                   | Sparse   | 1 presence bit + magnitude/nonzero | 1 in steps                        |
+| rain                   | Sparse   | 1 presence bit + magnitude/nonzero | 0.5 mm steps                      |
+| precipitation prob.    | Fixed    | 3 bits                        | 0–100% in eighths                     |
+| wind (sfc/500/600/700) | Fixed    | 7 bits each (4 speed + 3 dir) | 5 mph speed steps, 8-point direction  |
+| cloud (total/high/mid/low) | Fixed | 3 bits each                  | 0–100% in eighths                     |
+
 ## Development
 
 ### Database
