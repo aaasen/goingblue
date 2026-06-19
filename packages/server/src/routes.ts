@@ -6,7 +6,7 @@ import { createAccount, accountExists, recordRequest } from "./accounts.js";
 import { CODECS, isValidToken, normalizeToken } from "@weather/protocol";
 import { twiml, validateTwilioSignature } from "./twilio.js";
 
-const REPLY_ADDRESS = "wx@email.laneaasen.com";
+const REPLY_ADDRESS = "inreach@going.blue";
 
 // Standard HELP keyword response. STOP/START are handled by Twilio's Advanced Opt-Out and never
 // reach this webhook; HELP is forwarded here so we control the reply text. Identifies the brand,
@@ -215,7 +215,7 @@ ${opts.result}
 
 export async function testPage(c: Context) {
   let replyUrl = "";
-  let replyAddress = "wx@email.laneaasen.com";
+  let replyAddress = "inreach@going.blue";
   let message = "";
   let resultHtml = "";
 
