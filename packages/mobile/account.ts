@@ -50,14 +50,11 @@ export async function clearToken(): Promise<void> {
   await AsyncStorage.removeItem(TOKEN_KEY);
 }
 
-// Mint a new account on the server and persist the returned token. `smsConsent` records the
-// user's opt-in to receiving text messages; the server requires it to be true.
-export async function createAccount(smsConsent: boolean): Promise<string> {
-  const resp = await fetch(`${API_BASE}/account`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ smsConsent }),
-  });
+// Mint a new account on the server and persist the returned token. The account token only
+// identifies the user for usage limits; messaging opt-in is consumer-initiated (the user opts
+// in by texting a forecast request to the number), so creating an account records no consent.
+export async function createAccount(): Promise<string> {
+  const resp = await fetch(`${API_BASE}/account`, { method: 'POST' });
   if (!resp.ok) throw new Error(`Account creation failed (${resp.status})`);
   const { token } = await resp.json();
   if (typeof token !== 'string' || !isValidToken(token)) {

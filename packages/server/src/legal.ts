@@ -80,6 +80,15 @@ const PRIVACY_BODY = `
 ${BRAND} SMS forecast service (the "Service") as a sole proprietorship,
 handles information when you request weather forecasts by text message.</p>
 
+<h2>SMS text messaging</h2>
+<p>${BRAND} sends SMS/text-message forecasts only in reply to a request you send first.
+We never send marketing, promotional, recurring, or other unsolicited text messages.
+Message frequency varies and is controlled entirely by you — it depends on how often you
+request a forecast. Message and data rates may apply. Reply <strong>STOP</strong> at any
+time to opt out, or <strong>HELP</strong> for help. <strong>Your mobile information and SMS
+opt-in consent are never sold or shared with third parties or affiliates for any purpose,
+including marketing.</strong></p>
+
 <h2>Information we collect</h2>
 <p>The Service only processes information that you send us when you request a forecast:</p>
 <ul>

@@ -8,6 +8,18 @@ import { twiml, validateTwilioSignature } from "./twilio.js";
 
 const REPLY_ADDRESS = "wx@email.laneaasen.com";
 
+// Standard HELP keyword response. STOP/START are handled by Twilio's Advanced Opt-Out and never
+// reach this webhook; HELP is forwarded here so we control the reply text. Identifies the brand,
+// what the service does, that rates may apply, and how to opt out and get support — the
+// disclosures carriers expect in a HELP response. Kept short to fit a single SMS segment.
+const HELP_REPLY =
+  "Going Blue: weather forecasts by text, sent only in reply to a request you send. " +
+  "Msg&data rates may apply. Reply STOP to opt out. Help: laneaasen@gmail.com";
+
+// Inbound bodies that should get the HELP response rather than a forecast. Matched as the whole
+// trimmed message, case-insensitively, so a forecast request is never mistaken for a keyword.
+const HELP_KEYWORDS = new Set(["help", "info"]);
+
 // Record a served request without ever failing the response: the forecast is already built
 // by the time we get here, so a DB hiccup must not turn a successful reply into an error.
 async function logRequest(token: string | null, chars: number): Promise<void> {
@@ -120,6 +132,10 @@ export async function sms(c: Context) {
   console.log("from:", sender);
   console.log("text:", body);
 
+  if (HELP_KEYWORDS.has(body.trim().toLowerCase())) {
+    return c.text(twiml(HELP_REPLY), 200, { "Content-Type": "text/xml" });
+  }
+
   const encoded = await buildForecast(body.trim());
   // No forecast (unsupported version or upstream failure): reply with a short human-readable note
   // rather than silence, since unlike Garmin the sender expects a direct SMS back.
@@ -134,16 +150,13 @@ export async function health(c: Context) {
   return c.text(`OK db:${dbUp ? "up" : "down"}`, 200);
 }
 
-// POST /account { smsConsent } — mint a new account token. Called once over normal internet
-// during app setup (not over satellite). The user must opt in to receiving text messages, so
-// the request is rejected unless smsConsent is true. Returns { token }.
+// POST /account — mint a new account token. Called once over normal internet during app setup
+// (not over satellite). The token only identifies the user for usage limits; messaging opt-in
+// is consumer-initiated (the user opts in by texting a forecast request to the number), so this
+// records no consent and takes no body. Returns { token }.
 export async function createAccountRoute(c: Context) {
-  const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
-  if (body?.smsConsent !== true) {
-    return c.text("SMS consent is required to create an account", 400);
-  }
   try {
-    const token = await createAccount(true);
+    const token = await createAccount();
     return c.json({ token });
   } catch (e) {
     console.error("createAccount failed:", e);
