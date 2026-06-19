@@ -27,8 +27,7 @@ function alignedStartEpochHour(resHours: number): number {
 }
 
 const CHARS_PER_MESSAGE = 160; // each Garmin inReach message holds 160 characters
-const FORECAST_SMS = '+1 (425) 434-5858';
-const FORECAST_SMS_TEL = '+14254345858';
+const FORECAST_EMAIL = 'inreach@going.blue';
 const DEFAULT_MESSAGES = 1;
 const MESSAGE_OPTIONS = [1, 2, 3, 4, 5];
 const MAX_PERIODS = 128;   // v1 header carries a 7-bit period count
@@ -234,7 +233,7 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
   }
 
   async function copyNumber() {
-    await Clipboard.setStringAsync(FORECAST_SMS_TEL);
+    await Clipboard.setStringAsync(FORECAST_EMAIL);
     setNumCopied(true);
     setTimeout(() => setNumCopied(false), 2000);
   }
@@ -414,11 +413,11 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
       </View>
 
       <Text style={styles.smsHint}>
-        Copy the message and text it to the number below from your inReach. When you get a reply,
+        Copy the message and email it to the address below from your inReach. When you get a reply,
         paste it into the Decoder tab to view the forecast.
       </Text>
       <View style={styles.smsRow}>
-        <Text style={styles.smsNumber} selectable>{FORECAST_SMS}</Text>
+        <Text style={styles.smsNumber} selectable>{FORECAST_EMAIL}</Text>
         <TouchableOpacity style={styles.smsCopyBtn} onPress={copyNumber} activeOpacity={0.7}>
           <Text style={styles.smsCopyText}>{numCopied ? 'Copied' : 'Copy'}</Text>
         </TouchableOpacity>

@@ -6,7 +6,7 @@ import { createAccount } from './account';
 import UnitsToggle from './UnitsToggle';
 import type { Units } from './settings';
 
-const FORECAST_SMS = '+1 (425) 434-5858';
+const FORECAST_EMAIL = 'inreach@going.blue';
 const TERMS_URL = 'https://going.blue/terms';
 const PRIVACY_URL = 'https://going.blue/privacy';
 
@@ -45,9 +45,9 @@ export default function SetupScreen({ onReady, units, onUnitsChange }: Props) {
         On the <Bold>Builder</Bold> tab, choose your location, weather model, and variables.
       </Step>
       <Step n={2} title="Send the request to Going Blue">
-        Copy the request and send it to{' '}
-        <Text style={styles.bold} selectable>{FORECAST_SMS}</Text>{' '}
-        via SMS, Apple iMessage over satellite, Garmin inReach, or ZOLEO.
+        Copy the request and email it to{' '}
+        <Text style={styles.bold} selectable>{FORECAST_EMAIL}</Text>{' '}
+        from your Garmin inReach.
       </Step>
       <Step n={3} title="View the forecast">
         Copy the forecast response into the <Bold>Decoder</Bold> tab to visualize the forecast.
