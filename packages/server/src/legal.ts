@@ -45,8 +45,19 @@ multi-day forecast — small enough to fit within satellite messaging size limit
 
 <p><a class=appbtn href="/app">Open the ${BRAND} app →</a></p>
 
+<div class=cta>
+  <h2 style="margin-top:0">Get weather forecasts by text</h2>
+  <p><strong>Text START to (425) 434-5858 to get weather forecasts from ${BRAND}.</strong>
+  One message is sent in response to each forecast request. Message and data rates may apply.
+  Reply HELP for help, STOP to opt out.
+  Terms: <a href="https://going.blue/terms">https://going.blue/terms</a>
+  Privacy: <a href="https://going.blue/privacy">https://going.blue/privacy</a></p>
+</div>
+
 <h2>How it works</h2>
 <ol>
+  <li>Text <strong>START</strong> to (425) 434-5858 to opt in; ${BRAND} replies with a welcome
+  message.</li>
   <li>Send a text message to ${BRAND} with a location (latitude and longitude) and your
   forecast options, from your satellite messenger or mobile phone.</li>
   <li>${BRAND} fetches the forecast for that location and replies to you with a single
@@ -54,17 +65,9 @@ multi-day forecast — small enough to fit within satellite messaging size limit
   <li>Open the <a href="/app">companion app</a> to decode and view the full forecast.</li>
 </ol>
 
-<div class=cta>
-  <h2 style="margin-top:0">Opt-in &amp; consent</h2>
-  <p>${BRAND} only ever replies to a message you send first. <strong>When you text ${BRAND}
-  to request a forecast, you are opting in to receive a reply message with that forecast.</strong>
-  We send no marketing, promotional, or recurring messages — every message we send is a
-  one-to-one reply to a request you just made. Message frequency depends entirely on how often
-  you choose to request a forecast.</p>
-  <p>Message and data rates may apply. Reply <strong>STOP</strong> at any time to opt out, or
-  <strong>HELP</strong> for assistance. We never sell or share your phone number or opt-in
-  consent with third parties for their own marketing.</p>
-</div>
+<p>${BRAND} only ever replies to a message you send first and sends no marketing, promotional,
+recurring, or unsolicited messages. Message frequency is controlled entirely by you. We never
+sell or share your phone number or opt-in consent with third parties.</p>
 
 <h2>Important: forecasts are informational</h2>
 <p>Forecasts are provided for informational purposes only and may be inaccurate, delayed, or
