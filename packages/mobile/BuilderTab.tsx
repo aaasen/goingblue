@@ -29,7 +29,6 @@ function alignedStartEpochHour(resHours: number): number {
 const CHARS_PER_MESSAGE = 160; // each Garmin inReach message holds 160 characters
 const FORECAST_EMAIL = 'inreach@going.blue';
 const DEFAULT_MESSAGES = 1;
-const MESSAGE_OPTIONS = [1, 2, 3, 4, 5];
 const MAX_PERIODS = 128;   // v1 header carries a 7-bit period count
 const HORIZON_DAYS = 15;   // upstream forecast horizon
 const FORECAST_URL = `${API_BASE}/forecast`;
@@ -38,7 +37,7 @@ const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
   hres: ['freeze', 'w500', 'w600', 'w700'],
   gfs: [],
   icon: [],
-  ifs: [],
+  ifs: ['freeze'],
 };
 
 type LocationMode = 'current' | 'custom';
@@ -60,43 +59,19 @@ const MODELS = [
   { value: 'icon', label: 'ICON' },
 ];
 
+// Variables included in every request; not user-selectable.
+const ALWAYS_VARS = ['precip', 'temp', 'tmin', 'snow', 'rain', 'wind'];
+
+// User-selectable variable groups. Each toggle enables/disables all of its underlying
+// protocol variables together (e.g. "Clouds" covers high/mid/low cloud cover, not total).
 const VAR_GROUPS = [
-  {
-    label: 'Surface',
-    vars: [
-      { value: 'precip', label: 'Precip %' },
-      { value: 'temp', label: 'Max Temp' },
-      { value: 'tmin', label: 'Min Temp' },
-      { value: 'snow', label: 'Snow' },
-      { value: 'rain', label: 'Rain' },
-      { value: 'freeze', label: 'Freezing Level' },
-      { value: 'wind', label: 'Wind' },
-    ],
-  },
-  {
-    label: 'Cloud',
-    vars: [
-      { value: 'cc', label: 'Total' },
-      { value: 'cch', label: 'High' },
-      { value: 'ccm', label: 'Mid' },
-      { value: 'ccl', label: 'Low' },
-    ],
-  },
-  {
-    label: 'Pressure Levels',
-    vars: [
-      { value: 'w500', label: '500mb Wind' },
-      { value: 'w600', label: '600mb Wind' },
-      { value: 'w700', label: '700mb Wind' },
-    ],
-  },
+  { value: 'clouds', label: 'Clouds', vars: ['cch', 'ccm', 'ccl'] },
+  { value: 'highwind', label: 'High Altitude Winds', vars: ['w500', 'w600', 'w700'] },
+  { value: 'freeze', label: 'Freezing Level', vars: ['freeze'] },
 ];
 
-const DEFAULT_VARS = new Set([
-  'precip', 'temp', 'tmin', 'snow', 'rain', 'freeze', 'wind',
-  'cch', 'ccm', 'ccl',
-  'w500', 'w600', 'w700',
-]);
+// Clouds on by default; high altitude winds and freezing level off.
+const DEFAULT_GROUPS = new Set(['clouds']);
 
 // Chars to encode `nPeriods` periods at fixed (raw) field widths. The server's actual encoding is
 // adaptive and variable-length (Huffman / frame-of-reference / sparse), so it is never larger than
@@ -119,9 +94,11 @@ function maxPeriodsFor(resHours: number, varsMask: number, maxChars: number): nu
   return 0;
 }
 
-// Day span as a short label, e.g. 2, 1.5, or "<1 day".
-function formatSpan(days: number): string {
-  if (days < 1) return '<1 day';
+// How much forecast horizon `nPeriods` covers, as a short label. Hourly resolution is
+// reported in hours (days would round to a confusing "<1 day"); coarser resolutions in days.
+function formatSpan(nPeriods: number, resHours: number): string {
+  if (resHours === 1) return `${nPeriods} hour${nPeriods === 1 ? '' : 's'}`;
+  const days = (nPeriods * resHours) / 24;
   const rounded = Math.round(days * 10) / 10;
   return `${rounded} day${rounded === 1 ? '' : 's'}`;
 }
@@ -174,26 +151,27 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [customCoords, setCustomCoords] = useState('');
-  const [resHours, setResHours] = useState(24);
-  const [model, setModel] = useState('ifs');
-  const [vars, setVars] = useState<Set<string>>(new Set(DEFAULT_VARS));
-  const [numMessages, setNumMessages] = useState(DEFAULT_MESSAGES);
+  const [resHours, setResHours] = useState(3);
+  const [model, setModel] = useState('hres');
+  const [groups, setGroups] = useState<Set<string>>(new Set(DEFAULT_GROUPS));
   const [numCopied, setNumCopied] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [locating, setLocating] = useState(false);
 
-  // The user picks how many 160-char messages the reply may span; that sets the response
-  // length budget.
-  const maxChars = numMessages * CHARS_PER_MESSAGE;
+  // The reply always spans a single 160-char message; that sets the response length budget.
+  const maxChars = DEFAULT_MESSAGES * CHARS_PER_MESSAGE;
 
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
-  const activeVars = [...vars].filter((v) => !unavail.includes(v));
+  // Expand the always-on variables plus any enabled groups, then drop ones the model can't supply.
+  const selectedVars = new Set(ALWAYS_VARS);
+  for (const g of VAR_GROUPS) {
+    if (groups.has(g.value)) for (const v of g.vars) selectedVars.add(v);
+  }
+  const activeVars = [...selectedVars].filter((v) => !unavail.includes(v));
   const varsMask = activeVars.reduce((mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)), 0);
   // The period count isn't user-selected: include as many time periods as the char budget allows.
-  const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
   const nPeriods = maxPeriodsFor(resHours, varsMask, maxChars);
   const fits = nPeriods > 0;
-  const spanDays = nPeriods / periodsPerDay;
   const resLabel = RESOLUTIONS.find((r) => r.value === resHours)?.label ?? `${resHours}h`;
 
   const resolvedCoords = locationMode === 'current'
@@ -250,8 +228,8 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
     await Clipboard.setStringAsync(msg);
   }
 
-  function toggleVar(v: string) {
-    setVars((prev) => {
+  function toggleGroup(v: string) {
+    setGroups((prev) => {
       const next = new Set(prev);
       if (next.has(v)) next.delete(v);
       else next.add(v);
@@ -340,18 +318,10 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
           selectedIndex={RESOLUTIONS.findIndex((r) => r.value === resHours)}
           onChange={(e) => setResHours(RESOLUTIONS[e.nativeEvent.selectedSegmentIndex].value)}
         />
-      </Section>
-
-      <Section label="Number of Messages">
-        <SegmentedControl
-          values={MESSAGE_OPTIONS.map(String)}
-          selectedIndex={MESSAGE_OPTIONS.indexOf(numMessages)}
-          onChange={(e) => setNumMessages(MESSAGE_OPTIONS[e.nativeEvent.selectedSegmentIndex])}
-        />
         <Text style={[styles.lenSummary, !fits && styles.lenOver]}>
           {fits
-            ? `≥ ${formatSpan(spanDays)} · ${nPeriods}+ period${nPeriods === 1 ? '' : 's'}`
-            : `Won't fit ${numMessages} message${numMessages === 1 ? '' : 's'} at ${resLabel} resolution — reduce variables or coarsen resolution`}
+            ? `≥ ${formatSpan(nPeriods, resHours)} · ${nPeriods}+ period${nPeriods === 1 ? '' : 's'}`
+            : `Won't fit at ${resLabel} resolution — reduce variables or coarsen resolution`}
         </Text>
       </Section>
 
@@ -363,27 +333,26 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
         />
       </Section>
 
-      {VAR_GROUPS.map((group) => (
-        <Section key={group.label} label={group.label}>
-          <View style={styles.varList}>
-            {group.vars.map((v, idx) => {
-              const disabled = unavail.includes(v.value);
-              const checked = vars.has(v.value) && !disabled;
-              return (
-                <TouchableOpacity
-                  key={v.value}
-                  style={[styles.varRow, idx < group.vars.length - 1 && styles.varRowBorder]}
-                  onPress={() => !disabled && toggleVar(v.value)}
-                  activeOpacity={disabled ? 1 : 0.6}
-                >
-                  <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{v.label}</Text>
-                  <Text style={[styles.varCheck, !checked && styles.varCheckHidden]}>✓</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </Section>
-      ))}
+      <Section label="Variables">
+        <View style={styles.varList}>
+          {VAR_GROUPS.map((group, idx) => {
+            // A group is unavailable when the model can't supply any of its variables.
+            const disabled = group.vars.every((v) => unavail.includes(v));
+            const checked = groups.has(group.value) && !disabled;
+            return (
+              <TouchableOpacity
+                key={group.value}
+                style={[styles.varRow, idx < VAR_GROUPS.length - 1 && styles.varRowBorder]}
+                onPress={() => !disabled && toggleGroup(group.value)}
+                activeOpacity={disabled ? 1 : 0.6}
+              >
+                <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{group.label}</Text>
+                <Text style={[styles.varCheck, !checked && styles.varCheckHidden]}>✓</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </Section>
 
       <Section label="Message">
         <View style={styles.msgBox}>
