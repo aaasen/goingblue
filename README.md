@@ -158,6 +158,13 @@ cd packages/mobile
 npx expo run:ios
 ```
 
+Ad-hoc build:
+
+```
+cd packages/mobile
+eas build --platform ios --profile preview
+```
+
 ### Tests
 
 ```bash
