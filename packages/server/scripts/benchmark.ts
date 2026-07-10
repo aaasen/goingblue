@@ -2,9 +2,9 @@
  * Benchmark the forecast encoding against a corpus of real forecasts.
  *
  * One script, two phases:
- *   1. Collect — pull 10-day hourly HRES forecasts from Open-Meteo's Single Runs API (each run is a
- *      full model initialisation, queryable by its UTC init time via `&run=`), one every ~10 days
- *      from ARCHIVE_START (2026-04-02) to now, per location. Raw responses are cached to disk
+ *   1. Collect — pull 10-day hourly GFS forecasts from Open-Meteo's Historical Forecast API (a
+ *      continuous best-estimate archive, queried by start_date/end_date), sampling one window every
+ *      ~10 days across the past year for seasonal coverage. Raw responses are cached to disk
  *      unchanged (idempotent/resumable), so re-runs don't re-hit the API.
  *   2. Report — for each cached forecast, run the exact production path (aggregateHourly →
  *      toFullPeriod → the v1 codec, via v1EncodeBreakdown) and binary-search the largest prefix of
@@ -12,13 +12,14 @@
  *      across the header and each variable column (with the adaptive mode each column chose).
  *
  *   node packages/server/scripts/benchmark.ts                     # collect (idempotent) then report
+ *   node packages/server/scripts/benchmark.ts --collect-only      # expand the cache, no report
+ *   node packages/server/scripts/benchmark.ts --report-only       # report from cache, no collection
  *   node packages/server/scripts/benchmark.ts --dry-run           # preview collection plan, no fetch
  *   node packages/server/scripts/benchmark.ts --resolution 6h     # daily/12h/6h/3h/1h (default 1h)
- *   node packages/server/scripts/benchmark.ts --location denali --verbose
- *   # other flags: --limit <n> (cap fetches), --max-chars <n>, --include-incomplete
+ *   # other flags: --limit <n>, --max-chars <n>, --location <id>, --verbose, --include-incomplete, --no-open
  *
- * Open-Meteo call weight ≈ max(1, nVars/10) × max(1, weeks/2). HRES drops the pressure/freezing
- * columns, so each 10-day call is ~1.2 units. Free tier is 10,000 units/day.
+ * Open-Meteo call weight ≈ max(1, nVars/10) × max(1, weeks/2). A 10-day GFS call (~18 vars) is ~1.8
+ * units; the full-year, all-locations pull is ~9.1k units. Free tier is 10,000 units/day.
  */
 import { mkdir, readdir, readFile, writeFile, access } from "node:fs/promises";
 import { spawn } from "node:child_process";
@@ -36,12 +37,11 @@ const BENCHMARKS_DIR = join(DATA_DIR, "benchmarks"); // timestamped HTML reports
 // ── Collection config ────────────────────────────────────────────────────────────
 
 // Open-Meteo hourly series, grouped to mirror the app's variable selector (BuilderTab.tsx). Base is
-// always requested; each optional group maps to protocol columns the user can toggle.
-//  - precipitation_probability is NOT requested: it's only produced by ECMWF's ensemble variant,
-//    which single-runs rejects. The protocol's precip column is a constant 3-bit fixed field, so its
-//    absence doesn't affect encoding comparisons (it encodes as a zero column of fixed width).
+// always requested; each optional group maps to protocol columns the user can toggle. The Historical
+// Forecast API provides precipitation_probability (unlike single-runs, where it forced the ensemble
+// variant), so it's collected as a base variable.
 const BASE_HOURLY = [
-  "temperature_2m", "wind_speed_10m", "wind_direction_10m",
+  "temperature_2m", "wind_speed_10m", "wind_direction_10m", "precipitation_probability",
   "weather_code", "snowfall", "rain", "showers",
 ];
 const GROUP_HOURLY = {
@@ -56,34 +56,30 @@ const GROUP_LABEL: Record<GroupId, string> = {
   clouds: "Clouds", highwind: "High Altitude Winds", freeze: "Freezing Level",
 };
 
-// Collected models and which optional groups each supports (verified against the single-runs API).
-// GFS supplies everything and is the fallback source for a selected model's unsupported groups.
+// Collected models and which optional groups each supports. We collect GFS only: encoded size barely
+// differs between models, and GFS supplies every group (clouds + high-alt winds + freezing level), so
+// no cross-model fallback is needed. The array/fallback plumbing is kept so more models can be added.
 interface ModelDef { id: string; api: string; label: string; groups: Record<GroupId, boolean> }
 const MODELS: ModelDef[] = [
-  { id: "hres", api: "ecmwf_ifs",    label: "HRES", groups: { clouds: true, highwind: false, freeze: false } },
-  { id: "gfs",  api: "gfs_seamless", label: "GFS",  groups: { clouds: true, highwind: true,  freeze: true } },
+  { id: "gfs", api: "gfs_seamless", label: "GFS", groups: { clouds: true, highwind: true, freeze: true } },
 ];
-const FALLBACK_MODEL = "gfs"; // supplies groups the selected model lacks
+const FALLBACK_MODEL = "gfs"; // supplies groups a selected model lacks (a no-op while GFS is the only model)
 
 // Open-Meteo hourly variables to request for a model: base + every group it supports.
 function modelHourly(m: ModelDef): string[] {
   return [...BASE_HOURLY, ...GROUP_IDS.filter((g) => m.groups[g]).flatMap((g) => GROUP_HOURLY[g])];
 }
 
-const ENDPOINT = "https://single-runs-api.open-meteo.com/v1/forecast";
-// Sample only from 2026-04-02, when the single-runs archive begins for ALL models (HRES alone goes
-// back to 2024-03-14, but those older runs are frequently incomplete — whole variables come back
-// null — and we want a window that stays valid when other models are added later). This limits us
-// to NH spring/summer for now; southern-hemisphere locations cover the other weather regimes. Re-run
-// with an earlier start once more of the archive matures.
-const ARCHIVE_START = Date.UTC(2026, 3, 2); // 2026-04-02
+// Open-Meteo's Historical Forecast API: a continuous best-estimate archive going back a year+ (no run
+// gaps), queried by start_date/end_date. We sample fixed-length windows across a full year for
+// seasonal coverage. (This is best-estimate data, not a run-anchored 10-day-ahead forecast — fine for
+// measuring how the encoding compresses realistic seasonal weather.)
+const ENDPOINT = "https://historical-forecast-api.open-meteo.com/v1/forecast";
 
-const HORIZON_DAYS = 10;
-// Candidate run hours per sampled day, in preference order: prefer 00Z, fall back to 12Z when a
-// day's 00Z run is missing from the archive (some runs simply aren't stored).
-const RUN_HOURS = [0, 12];
-const CADENCE_DAYS = 10; // one forecast every ~10 days
-const ANCHOR_LAG_DAYS = 2; // start from N days ago so the latest run is fully archived
+const HORIZON_DAYS = 10;       // window length (days)
+const CADENCE_DAYS = 10;       // one window every ~10 days
+const YEARS_BACK = 1;          // sample windows across the past year
+const ANCHOR_LAG_DAYS = 5;     // newest window ends a few days ago so the best-estimate has settled
 
 interface Location {
   id: string;
@@ -276,8 +272,10 @@ const REQUIRED_BASE: string[][] = [
 
 interface Args {
   // collect
-  limit: number;    // max fetches this run (0 = unlimited); use a small value to verify first
-  dryRun: boolean;  // preview the collection plan and estimated weight, fetch nothing, no report
+  limit: number;         // max fetches this run (0 = unlimited); use a small value to verify first
+  dryRun: boolean;       // preview the collection plan and estimated weight, fetch nothing, no report
+  collectOnly: boolean;  // collect (expand the cache) and stop — no report
+  reportOnly: boolean;   // skip collection, build the report from cached data
   // report
   resolution: string;
   maxChars: number;
@@ -290,11 +288,14 @@ interface Args {
 
 function parseArgs(argv: string[]): Args {
   const args: Args = {
-    limit: 0, dryRun: false, resolution: "1h", maxChars: 160, verbose: false, includeIncomplete: false, open: true,
+    limit: 0, dryRun: false, collectOnly: false, reportOnly: false,
+    resolution: "1h", maxChars: 160, verbose: false, includeIncomplete: false, open: true,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dry-run") args.dryRun = true;
+    else if (a === "--collect-only") args.collectOnly = true;
+    else if (a === "--report-only") args.reportOnly = true;
     else if (a === "--verbose") args.verbose = true;
     else if (a === "--no-open") args.open = false;
     else if (a === "--include-incomplete") args.includeIncomplete = true;
@@ -307,6 +308,7 @@ function parseArgs(argv: string[]): Args {
   if (!(args.resolution in RESOLUTION_IDX)) {
     throw new Error(`--resolution must be one of ${Object.keys(RESOLUTION_IDX).join(", ")}`);
   }
+  if (args.collectOnly && args.reportOnly) throw new Error("--collect-only and --report-only are mutually exclusive");
   return args;
 }
 
@@ -315,34 +317,41 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // ── Phase 1: collect ───────────────────────────────────────────────────────────────
 
 function runIso(ms: number): string {
-  // ISO 8601 without seconds, UTC, as required by &run= (e.g. 2026-07-07T00:00).
+  // ISO 8601 without seconds, UTC (e.g. 2025-07-15T00:00) — the window's anchor / start.
   return new Date(ms).toISOString().slice(0, 16);
 }
 
-// The UTC day-midnight timestamps to sample: from (today − ANCHOR_LAG_DAYS) stepping back
-// CADENCE_DAYS to ARCHIVE_START. Each day's actual run is chosen from RUN_HOURS at fetch time.
-function sampleDays(): number[] {
+function ymd(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10); // YYYY-MM-DD, for start_date/end_date
+}
+
+// The window start timestamps (00:00 UTC) to sample: from (today − ANCHOR_LAG_DAYS − HORIZON) back
+// CADENCE_DAYS for YEARS_BACK, giving fixed-length windows spread across the year for seasonal coverage.
+function sampleWindows(): number[] {
   const day = 24 * 3600 * 1000;
   const now = new Date();
+  // Newest window ends ANCHOR_LAG_DAYS ago, so its start is HORIZON before that.
   const anchor = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) -
-    ANCHOR_LAG_DAYS * day;
-  const days: number[] = [];
-  for (let t = anchor; t >= ARCHIVE_START; t -= CADENCE_DAYS * day) days.push(t);
-  return days;
+    (ANCHOR_LAG_DAYS + HORIZON_DAYS - 1) * day;
+  const earliest = anchor - YEARS_BACK * 365 * day;
+  const starts: number[] = [];
+  for (let t = anchor; t >= earliest; t -= CADENCE_DAYS * day) starts.push(t);
+  return starts;
 }
 
 function estWeight(nVars: number, days: number): number {
   return Math.max(1, nVars / 10) * Math.max(1, days / 7 / 2);
 }
 
-function buildUrl(model: ModelDef, loc: Location, run: string): string {
+function buildUrl(model: ModelDef, loc: Location, startMs: number): string {
+  const day = 24 * 3600 * 1000;
   const params = new URLSearchParams({
     latitude: String(loc.lat),
     longitude: String(loc.lon),
-    run,
+    start_date: ymd(startMs),
+    end_date: ymd(startMs + (HORIZON_DAYS - 1) * day),
     hourly: modelHourly(model).join(","),
     timezone: "UTC",
-    forecast_days: String(HORIZON_DAYS),
     models: model.api,
   });
   if (loc.elev_m !== undefined) params.set("elevation", String(loc.elev_m));
@@ -386,14 +395,14 @@ function shapeReport(raw: any, vars: string[]): string {
 }
 
 async function collect(args: Args, locations: Location[]): Promise<void> {
-  const days = sampleDays();
-  const totalCalls = MODELS.length * locations.length * days.length;
-  const totalUnits = MODELS.reduce((s, m) => s + locations.length * days.length * estWeight(modelHourly(m).length, HORIZON_DAYS), 0);
+  const windows = sampleWindows();
+  const totalCalls = MODELS.length * locations.length * windows.length;
+  const totalUnits = MODELS.reduce((s, m) => s + locations.length * windows.length * estWeight(modelHourly(m).length, HORIZON_DAYS), 0);
 
-  console.log(`== Collect (single runs) ==`);
+  console.log(`== Collect (historical forecast) ==`);
   console.log(`  models: ${MODELS.map((m) => `${m.id}(${modelHourly(m).length} vars)`).join(", ")}`);
   console.log(`  locations: ${locations.length}` + (args.location ? ` (${args.location})` : ""));
-  console.log(`  days/location: ${days.length} (${runIso(days.at(-1)!)} … ${runIso(days[0])}), horizon: ${HORIZON_DAYS}d`);
+  console.log(`  windows/location: ${windows.length} (${ymd(windows.at(-1)!)} … ${ymd(windows[0])}), ${HORIZON_DAYS}d each`);
   console.log(`  full plan: ${totalCalls} calls ≈ ${totalUnits.toFixed(0)} units (of 10,000/day)`);
   if (args.limit) console.log(`  --limit ${args.limit}: capping this run to ${args.limit} fetches`);
 
@@ -403,74 +412,52 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
   outer: for (const model of MODELS) {
     const perCallWeight = estWeight(modelHourly(model).length, HORIZON_DAYS);
     for (const loc of locations) {
-      for (const dayMs of days) {
-        const candidates = RUN_HOURS.map((h) => runIso(dayMs + h * 3600 * 1000));
-
-        // Resumable: skip the day if any candidate run (00Z or its 12Z fallback) is already cached.
-        let already = false;
-        for (const run of candidates) {
-          if (await exists(cachePath(model.id, loc, run))) { already = true; break; }
-        }
-        if (already) { cached++; continue; }
+      for (const startMs of windows) {
+        const run = runIso(startMs); // window anchor, 00:00 UTC
+        const path = cachePath(model.id, loc, run);
+        if (await exists(path)) { cached++; continue; } // resumable
 
         if (args.limit && attempts >= args.limit) break outer;
         attempts++;
 
         if (args.dryRun) {
-          console.log(`  DRY ${model.id} ${loc.id} ${candidates[0]} (fallback: ${candidates.slice(1).join(", ")})`);
+          console.log(`  DRY ${model.id} ${loc.id} ${ymd(startMs)}…${ymd(startMs + (HORIZON_DAYS - 1) * 86400000)}`);
           weightSpent += perCallWeight;
           continue;
         }
 
-        // Try each candidate run hour in order; stop at the first that exists.
-        let saved = false, detailLogged = false;
-        for (const run of candidates) {
-          let res: FetchResult;
-          try {
-            res = await fetchRun(buildUrl(model, loc, run));
-          } catch (err) {
-            console.warn(`  FAIL ${model.id} ${loc.id} ${run} → ${(err as Error).message}`);
-            detailLogged = true;
-            break;
-          }
-
-          if (res.ok) {
-            const path = cachePath(model.id, loc, run);
-            await mkdir(dirname(path), { recursive: true });
-            // Store the raw payload plus provenance so the corpus is self-describing.
-            const record = {
-              meta: { location: loc, run, model: model.id, api: model.api, url: buildUrl(model, loc, run), fetched_at: new Date().toISOString() },
-              response: res.raw,
-            };
-            await writeFile(path, JSON.stringify(record));
-            fetched++;
-            weightSpent += perCallWeight;
-            const tag = run.endsWith("T12:00") ? " (12Z fallback)" : "";
-            console.log(`  OK   ${model.id} ${loc.id} ${run}${tag} → ${path.replace(REPO_ROOT + "/", "")}`);
-            if (!shapePrinted.has(model.id)) { console.log(shapeReport(res.raw, modelHourly(model))); shapePrinted.add(model.id); }
-            await sleep(250); // stay well under the 600/min rate limit
-            saved = true;
-            break;
-          }
-
-          if (res.status === 429) {
-            console.warn(`  rate limited on ${run} — backing off 60s`);
-            await sleep(60_000);
-            continue; // retry the next candidate
-          }
-          if (res.unavailable) {
-            await sleep(250);
-            continue; // this run hour isn't archived — try the fallback
-          }
-          console.warn(`  FAIL ${model.id} ${loc.id} ${run} → HTTP ${res.status}: ${(res.body ?? "").slice(0, 200)}`);
-          detailLogged = true;
-          break;
-        }
-
-        if (!saved) {
+        let res: FetchResult;
+        try {
+          res = await fetchRun(buildUrl(model, loc, startMs));
+        } catch (err) {
+          console.warn(`  FAIL ${model.id} ${loc.id} ${run} → ${(err as Error).message}`);
           failed++;
-          if (!detailLogged) console.warn(`  FAIL ${model.id} ${loc.id} ${candidates[0]} → no run archived (tried ${candidates.join(", ")})`);
+          continue;
         }
+        if (res.status === 429) {
+          console.warn(`  rate limited — backing off 60s`);
+          await sleep(60_000);
+          failed++;
+          continue; // re-run later picks it up (not cached)
+        }
+        if (!res.ok) {
+          console.warn(`  FAIL ${model.id} ${loc.id} ${run} → HTTP ${res.status}: ${(res.body ?? "").slice(0, 200)}`);
+          failed++;
+          continue;
+        }
+
+        await mkdir(dirname(path), { recursive: true });
+        // Store the raw payload plus provenance so the corpus is self-describing.
+        const record = {
+          meta: { location: loc, run, model: model.id, api: model.api, url: buildUrl(model, loc, startMs), fetched_at: new Date().toISOString() },
+          response: res.raw,
+        };
+        await writeFile(path, JSON.stringify(record));
+        fetched++;
+        weightSpent += perCallWeight;
+        console.log(`  OK   ${model.id} ${loc.id} ${run} → ${path.replace(REPO_ROOT + "/", "")}`);
+        if (!shapePrinted.has(model.id)) { console.log(shapeReport(res.raw, modelHourly(model))); shapePrinted.add(model.id); }
+        await sleep(250); // stay well under the 600/min rate limit
       }
     }
   }
@@ -897,7 +884,7 @@ function renderHtml(s: ReportData): string {
 
 <div class="selectors">
   <div class="sel"><span class="sel-label">Resolution</span>${resRadios}</div>
-  <div class="sel"><span class="sel-label">Model</span>${modelRadios}</div>
+  <div class="sel"${s.models.length > 1 ? "" : " hidden"}><span class="sel-label">Model</span>${modelRadios}</div>
   <div class="sel"><span class="sel-label">Variables <span class="muted">(base always on)</span></span>${groupChecks}</div>
 </div>
 <p class="hint" id="fallback-note"></p>
@@ -983,8 +970,8 @@ async function main() {
   const locations = args.location ? LOCATIONS.filter((l) => l.id === args.location) : LOCATIONS;
   if (locations.length === 0) throw new Error(`No location matches --location ${args.location}`);
 
-  await collect(args, locations);
-  if (args.dryRun) return; // preview only — don't encode
+  if (!args.reportOnly) await collect(args, locations);
+  if (args.dryRun || args.collectOnly) return; // preview / expand-cache only — don't encode
   await report(args);
 }
 
