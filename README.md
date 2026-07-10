@@ -200,6 +200,7 @@ pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
 4. Huffman codebook regeneration for weathercode. Weathercode total 3.18 bits -> 2.45 bits. Periods/message 53.8 -> 56.
 5. 8 -> 16 codebooks for weathercode. 2.45 bits -> 2.32 bits. Periods/message 56 -> 56.3.
 6. Remove tmin at 1hr resolution. Periods/message 56.3 -> 71.2. 
+7. Always use FOR for temperature. Periods/message 71.2 -> 71.3.
 
 ## License
 

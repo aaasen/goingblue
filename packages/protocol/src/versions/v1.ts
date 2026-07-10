@@ -53,13 +53,13 @@ const MODE_BITS = 2;
 export const MODE_NAMES = ["raw", "for", "sparse", "empty"];
 const SUBWIDTH_BITS = 3; // width of the FOR offset-width / sparse magnitude-width field (0..7)
 
-// temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
+// temp/tmin: 8 bits, 1°C steps, offset -100°C → -100°C to +155°C
 // snow/rain: 6 bits each, sqrt-companded (see ACCUM_* below). rain is bit 12, the slot
 // formerly reserved for the removed `vis`.
-export const VAR_BITS_V1 = [3, 7, 6, 4, 7, 7, 7, 7, 3, 3, 3, 3, 6, 7];
+export const VAR_BITS_V1 = [3, 8, 6, 4, 7, 7, 7, 7, 3, 3, 3, 3, 6, 8];
 //                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^rain ^tmin
 
-const TEMP_OFFSET = 40;
+const TEMP_OFFSET = 100;
 
 // Snow (cm) and rain (mm) use sqrt companding (see compandSqrt): fine resolution near zero,
 // coarsening with magnitude, so one 6-bit field spans light hourly through heavy daily
@@ -100,10 +100,10 @@ const SCALAR_COLUMNS: ScalarColumn[] = [
     set: (p, v) => { p.precip = Math.round(v * 100 / 7); } },
   // temp/tmin: always FOR — the adaptive raw/sparse/empty candidates essentially never win here.
   { bit: 1, mode: "for",
-    get: (p) => clampInt(Math.round((p.temp_c ?? 0) + TEMP_OFFSET), 7),
+    get: (p) => clampInt(Math.round((p.temp_c ?? 0) + TEMP_OFFSET), 8),
     set: (p, v) => { p.temp_c = v - TEMP_OFFSET; } },
   { bit: 13, mode: "for",
-    get: (p) => clampInt(Math.round((p.temp_min_c ?? 0) + TEMP_OFFSET), 7),
+    get: (p) => clampInt(Math.round((p.temp_min_c ?? 0) + TEMP_OFFSET), 8),
     set: (p, v) => { p.temp_min_c = v - TEMP_OFFSET; } },
   { bit: 2, mode: "adaptive",
     get: (p) => compandSqrt(p.snow_cm ?? 0, SNOW_K, ACCUM_BITS),
