@@ -5,6 +5,9 @@ node_modules/
 packages/*/dist/
 *.tsbuildinfo
 
+# Collected forecast corpus (raw Open-Meteo responses)
+corpus/
+
 # macOS
 .DS_Store
 
