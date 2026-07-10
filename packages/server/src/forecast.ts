@@ -120,7 +120,7 @@ export function dominantDirDeg(
   return deg;
 }
 
-interface HourlyData {
+export interface HourlyData {
   time: string[];
   temperature_2m: (number | null)[];
   wind_speed_10m: (number | null)[];
@@ -211,6 +211,20 @@ export async function aggregateRows(
   // All times are UTC; the forecast is anchored to the client-requested start (aligned to the
   // period boundary), not to "now", so delivery delay can't shift which periods come back.
   const [h, times, elevation] = await fetchHourly(modelKey, nDaysToFetch, lat, lon, "UTC", elev_m);
+  return [aggregateHourly(h, times, nPeriods, resolutionIdx, startEpochHour), elevation];
+}
+
+// Window + aggregate already-fetched hourly data into period Rows. Pure (no I/O), so the same
+// aggregation serves both the live fetch path (aggregateRows) and offline corpus analysis over
+// cached single-run responses.
+export function aggregateHourly(
+  h: HourlyData,
+  times: string[],
+  nPeriods: number,
+  resolutionIdx: number,
+  startEpochHour: number,
+): Row[] {
+  const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
   const nTotal = nPeriods;
 
   const anchorKey = new Date(startEpochHour * 3600000).toISOString().slice(0, 13); // "YYYY-MM-DDTHH"
@@ -236,7 +250,10 @@ export async function aggregateRows(
 
   const rows = windows.map((w) => {
     const idx = w.indices;
-    const pick = (arr: (number | null)[]): (number | null)[] => idx.map((i) => arr[i]);
+    // Null-safe: a series may be entirely absent when aggregating injected data (e.g. an offline
+    // corpus that omits precipitation_probability); production always supplies these arrays.
+    const pick = (arr: (number | null)[] | undefined): (number | null)[] =>
+      idx.map((i) => arr?.[i] ?? null);
     const pickUnk = (key: string): (number | null)[] =>
       idx.map((i) => ((h[key] as (number | null)[] | undefined)?.[i] ?? null));
 
@@ -274,7 +291,7 @@ export async function aggregateRows(
       cloud_cover_low: maxOf(pick(h.cloud_cover_low)),
     };
   });
-  return [rows, elevation];
+  return rows;
 }
 
 const PRESSURE_VAR_BITS =

@@ -1,5 +1,5 @@
 import {
-  RESOLUTION_HOURS, WMO_CODES,
+  RESOLUTION_HOURS, WMO_CODES, VARS_BIT,
 } from "../constants.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "../bits.js";
 import { encode, decode, encodeBodyLE, decodeBodyLE, nCharsForBits } from "../codec.js";
@@ -47,6 +47,7 @@ const MODE_FOR = 1;     // baseline + W-bit offsets
 const MODE_SPARSE = 2;  // presence bit + magnitude only when nonzero
 const MODE_EMPTY = 3;   // every cell is zero — no preamble, no data
 const MODE_BITS = 2;
+export const MODE_NAMES = ["raw", "for", "sparse", "empty"];
 const SUBWIDTH_BITS = 3; // width of the FOR offset-width / sparse magnitude-width field (0..7)
 
 // temp/tmin: 7 bits, 1°C steps, offset -40°C → -40°C to +87°C
@@ -194,16 +195,18 @@ function sparseCandidate(vals: number[], maxV: number, nonzero: number): Candida
 // Empty: every cell is zero. No preamble, no data — the column is just its 2-bit mode selector.
 const EMPTY_CANDIDATE: Candidate = { mode: MODE_EMPTY, cost: 0, emit: () => {} };
 
+// Encodes one scalar column into `body`, returning the chosen adaptive mode (MODE_*), or -1 for a
+// non-adaptive (always-raw) column that carries no mode selector.
 function encodeScalarColumn(
   body: number[], col: ScalarColumn, periods: Period[][], nPeriods: number, nModels: number,
-): void {
+): number {
   const width = VAR_BITS_V1[col.bit];
   const vals: number[] = [];
   eachCell(nPeriods, nModels, (p, m) => vals.push(col.get(periods[m][p])));
 
   if (!col.adaptive) {
     for (const v of vals) putInt(body, v, width);
-    return;
+    return -1;
   }
 
   let maxV = 0, nonzero = 0;
@@ -216,6 +219,7 @@ function encodeScalarColumn(
   for (const c of candidates) if (c.cost < best.cost) best = c;
   putInt(body, best.mode, MODE_BITS);
   best.emit(body);
+  return best.mode;
 }
 
 function decodeScalarColumn(
@@ -255,42 +259,98 @@ function decodeScalarColumn(
 
 // ── Top-level codec ────────────────────────────────────────────────────────────
 
-export function v1MessageToString(msg: ForecastMessage): string {
+// Column-name map (bit → var label from VARS_BIT), for the instrumented breakdown below.
+const BIT_NAME: Record<number, string> = Object.fromEntries(
+  Object.entries(VARS_BIT).map(([name, bit]) => [bit, name]),
+);
+
+// Callback receiving each column's contribution as it is emitted: label, bit cost, and the chosen
+// adaptive mode (MODE_*), or -1 for columns with no mode selector (weathercode, wind, non-adaptive).
+type ColumnSink = (name: string, bits: number, mode: number) => void;
+
+// Build the column-major body (shared by the string encoder and the instrumented breakdown). The
+// optional sink observes per-column bit costs without changing the bytes produced.
+function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[]; wcTable: number } {
   const nModels = msg.periods.length;
   const nPeriods = msg.periods[0].length;
-
-  // Body, built column-major. It carries no length field; encodeBodyLE packs it little-endian and
-  // the decoder reads exactly the bits the structure implies.
   const body: number[] = [];
+  const mark = (name: string, before: number, mode: number) => sink?.(name, body.length - before, mode);
 
   // Weathercode column (always present, Huffman-coded). Gather the indices first so we can pick
   // the cheapest codebook, then emit them under it.
+  let before = body.length;
   const wcIdx: number[] = [];
   eachCell(nPeriods, nModels, (p, m) => wcIdx.push(WMO2IDX[msg.periods[m][p].weathercode] ?? 0));
   const wcTable = chooseWcTable(wcIdx);
   for (const idx of wcIdx) encodeWeathercode(body, wcTable, idx);
+  mark("weathercode", before, -1);
 
   for (const col of SCALAR_COLUMNS) {
-    if (msg.vars_mask & (1 << col.bit)) encodeScalarColumn(body, col, msg.periods, nPeriods, nModels);
+    if (!(msg.vars_mask & (1 << col.bit))) continue;
+    before = body.length;
+    const mode = encodeScalarColumn(body, col, msg.periods, nPeriods, nModels);
+    mark(BIT_NAME[col.bit], before, mode);
   }
   for (const col of WIND_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
+    before = body.length;
     eachCell(nPeriods, nModels, (p, m) => {
       const c = msg.periods[m][p];
       putInt(body, Math.min(Math.floor(((c[col.kph] as number) ?? 0) / KPH_PER_STEP), 15), 4);
       putInt(body, ((c[col.dir] as number) ?? 0) % 8, 3);
     });
+    mark(BIT_NAME[col.bit], before, -1);
   }
 
-  // lat/lon/models/vars/resolution and the start datetime are recovered client-side via `code`
-  // (RequestContext), so they are intentionally absent from the header.
+  return { body, wcTable };
+}
+
+// lat/lon/models/vars/resolution and the start datetime are recovered client-side via `code`
+// (RequestContext), so they are intentionally absent from the header.
+function buildHeader(msg: ForecastMessage, nPeriods: number, wcTable: number): number[] {
   const headerBits: number[] = [];
   putInt(headerBits, msg.code, CODE_BITS);
   putInt(headerBits, nPeriods - 1, V1_PERIODS_BITS);
   putInt(headerBits, Math.min(Math.max(Math.round(msg.elevation / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1), ELEV_BITS);
   putInt(headerBits, wcTable, WC_TABLE_BITS);
+  return headerBits;
+}
 
-  return encodeVersion(VERSION) + encode(headerBits) + encodeBodyLE(body);
+export function v1MessageToString(msg: ForecastMessage): string {
+  const nPeriods = msg.periods[0].length;
+  const { body, wcTable } = buildBody(msg);
+  return encodeVersion(VERSION) + encode(buildHeader(msg, nPeriods, wcTable)) + encodeBodyLE(body);
+}
+
+// One column's contribution to a message: its bit cost and, for adaptive columns, the mode picked.
+export interface ColumnBreakdown { name: string; bits: number; mode: string | null }
+
+// Per-column bit accounting for a message, for encoding experiments. Produces the identical string
+// as v1MessageToString (via the same buildBody), plus the bit cost of the version prefix, packed
+// header, weathercode, and every present variable column, with the adaptive mode each column chose.
+export interface V1Breakdown {
+  encoded: string;
+  chars: number;
+  versionBits: number;  // self-describing version prefix
+  headerBits: number;   // packed header (code/periods/elev/wc_table)
+  bodyBits: number;     // total meaningful body bits (sum of column bits)
+  columns: ColumnBreakdown[];
+}
+
+export function v1EncodeBreakdown(msg: ForecastMessage): V1Breakdown {
+  const nPeriods = msg.periods[0].length;
+  const columns: ColumnBreakdown[] = [];
+  const { body, wcTable } = buildBody(msg, (name, bits, mode) =>
+    columns.push({ name, bits, mode: mode < 0 ? null : MODE_NAMES[mode] }));
+  const encoded = encodeVersion(VERSION) + encode(buildHeader(msg, nPeriods, wcTable)) + encodeBodyLE(body);
+  return {
+    encoded,
+    chars: encoded.length,
+    versionBits: VERSION_PREFIX_CHARS * 7, // GSM-7 septet per prefix char
+    headerBits: HEADER_BITS,
+    bodyBits: body.length,
+    columns,
+  };
 }
 
 export function v1MessageFromString(s: string, resolve: ContextResolver): ForecastMessage {

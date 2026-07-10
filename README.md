@@ -171,6 +171,16 @@ eas build --platform ios --profile preview
 pnpm test
 ```
 
+### Encoding benchmarks
+
+The forecast encoding can be tested against real historical forecasts from the [Open-Meteo Single Runs API](https://open-meteo.com/en/docs/single-runs-api). Data for all models is available starting April 2, 2026. There is data for the ECMWF HRES model going back to 2024 but it is sparse so it isn't used for benchmarking. Instead, only data starting April 2 is used and locations are sampled from the southern and northern hemispheres to provide full seasonal coverage.
+
+Benchmarking uses a mix of hand-picked locations and random locations from around the globe. The hand-picked locations are 50 of my Windy favorites which are mostly mountainous locations in Alaska, BC, Cascades, Tetons, Andes, Alps, Norway, and New Zealand. 
+
+```bash
+pnpm benchmark
+```
+
 ## License
 
 This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). You may read, modify, and use the code for any noncommercial purpose. Commercial use is reserved to the copyright holder.

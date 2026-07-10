@@ -17,6 +17,7 @@
   "scripts": {
     "build": "pnpm --filter @weather/protocol build && pnpm --filter @weather/server build",
     "start": "pnpm build && node packages/server/dist/index.js",
-    "test": "pnpm --filter @weather/protocol test && pnpm --filter @weather/server test"
+    "test": "pnpm --filter @weather/protocol test && pnpm --filter @weather/server test",
+    "benchmark": "pnpm --filter @weather/protocol build && node packages/server/scripts/benchmark.ts"
   }
 }
