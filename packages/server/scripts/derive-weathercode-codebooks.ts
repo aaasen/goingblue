@@ -41,7 +41,7 @@ async function collectSamples(): Promise<number[][]> {
       const h = rec.response.hourly as HourlyData;
       const startHour = Math.floor(Date.parse(rec.meta.run + "Z") / 3600000);
       const n = Math.min(128, Math.floor(h.time.length / HOURS_PER_PERIOD[RES_IDX]));
-      const periods = aggregateHourly(h, h.time, n, RES_IDX, startHour).map((r) => toFullPeriod(r, 0, "GFS"));
+      const periods = aggregateHourly(h, h.time, n, RES_IDX, startHour).map((r) => toFullPeriod(r, 0, "GFS", RES_IDX));
       const hist = new Array(NSYM).fill(0);
       for (const p of periods) hist[WMO2IDX[p.weathercode] ?? 0]++;
       const total = periods.length;

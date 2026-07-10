@@ -162,12 +162,16 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
   const maxChars = DEFAULT_MESSAGES * CHARS_PER_MESSAGE;
 
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
-  // Expand the always-on variables plus any enabled groups, then drop ones the model can't supply.
+  // At 1h resolution each period is a single hourly sample, so tmin is identical to temp
+  // (the max) — drop it rather than send a redundant column.
+  const resUnavail = resHours === 1 ? ['tmin'] : [];
+  // Expand the always-on variables plus any enabled groups, then drop ones the model or
+  // resolution can't supply.
   const selectedVars = new Set(ALWAYS_VARS);
   for (const g of VAR_GROUPS) {
     if (groups.has(g.value)) for (const v of g.vars) selectedVars.add(v);
   }
-  const activeVars = [...selectedVars].filter((v) => !unavail.includes(v));
+  const activeVars = [...selectedVars].filter((v) => !unavail.includes(v) && !resUnavail.includes(v));
   const varsMask = activeVars.reduce((mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)), 0);
   // The period count isn't user-selected: include as many time periods as the char budget allows.
   const nPeriods = maxPeriodsFor(resHours, varsMask, maxChars);

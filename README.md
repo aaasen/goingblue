@@ -199,6 +199,7 @@ pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
 3. Huffman coding for wind direction. Wind total 4.81 bits -> 4.05 bits (1h mean). Periods/message 51.4 -> 53.8.
 4. Huffman codebook regeneration for weathercode. Weathercode total 3.18 bits -> 2.45 bits. Periods/message 53.8 -> 56.
 5. 8 -> 16 codebooks for weathercode. 2.45 bits -> 2.32 bits. Periods/message 56 -> 56.3.
+6. Remove tmin at 1hr resolution. Periods/message 56.3 -> 71.2. 
 
 ## License
 

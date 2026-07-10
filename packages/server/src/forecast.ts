@@ -297,8 +297,11 @@ export function aggregateHourly(
 const PRESSURE_VAR_BITS =
   (1 << VARS_BIT.freeze) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
 
-export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period {
+export function toFullPeriod(r: Row, varsMask: number, modelKey: string, resolutionIdx: number): Period {
   if (MODEL_NO_PRESSURE.has(modelKey)) varsMask &= ~PRESSURE_VAR_BITS;
+  // At 1h resolution each period is a single hourly sample, so tmin is identical to temp
+  // (the max) — drop it rather than encode a duplicate column.
+  if (HOURS_PER_PERIOD[resolutionIdx] === 1) varsMask &= ~(1 << VARS_BIT.tmin);
   const p: Period = { weathercode: r.weathercode ?? 0 };
   if (varsMask & (1 << VARS_BIT.precip)) p.precip     = r.precip ?? 0;
   if (varsMask & (1 << VARS_BIT.temp))   p.temp_c     = r.temp_max_c ?? 0;
@@ -438,6 +441,10 @@ export function parseRequest(body: string): ForecastParams {
 
   if (varsMask === 0) varsMask = DEFAULT_VARS_MASK;
 
+  // At 1h resolution each period is a single hourly sample, so tmin is identical to temp
+  // (the max) — drop it so it's never encoded as a wasted, redundant column.
+  if (HOURS_PER_PERIOD[resolutionIdx] === 1) varsMask &= ~(1 << VARS_BIT.tmin);
+
   // Default the forecast start to "now", aligned down to the resolution boundary in UTC. The client
   // normally supplies `t:` so the start is fixed against delivery delay, but a missing one is safe.
   const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
@@ -505,7 +512,7 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
     lon,
     elevation,
     periods: rowsPerModel.map((rows, mi) =>
-      rows.map((r) => toFullPeriod(r, params.varsMask, keys[mi])),
+      rows.map((r) => toFullPeriod(r, params.varsMask, keys[mi], params.resolutionIdx)),
     ),
   };
 

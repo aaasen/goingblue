@@ -250,6 +250,11 @@ const GROUP_VARS: Record<GroupId, string[]> = {
 const maskOf = (vars: string[]) => vars.reduce((m, v) => m | (1 << VARS_BIT[v]), 0);
 const BASE_MASK = maskOf(BASE_VARS);
 
+// At 1h resolution each period is a single hourly sample, so tmin is identical to temp (the
+// max) — drop it so the report doesn't show a wasted, redundant column (mirrors forecast.ts).
+const maskForRes = (mask: number, resolutionIdx: number) =>
+  HOURS_PER_PERIOD[resolutionIdx] === 1 ? mask & ~(1 << VARS_BIT.tmin) : mask;
+
 // All 8 variable-group combinations (bit i = GROUP_IDS[i]); combo 0b001 = Clouds only is the default.
 const COMBOS = [...Array(1 << GROUP_IDS.length).keys()];
 const comboGroups = (c: number): GroupId[] => GROUP_IDS.filter((_, i) => c & (1 << i));
@@ -590,13 +595,14 @@ async function report(args: Args): Promise<void> {
       });
       // One Period array with every field populated; vary only vars_mask per combo (columns encode
       // independently). "GFS" (non-HRES) so toFullPeriod keeps the pressure/freeze columns.
-      const allPeriods = rows.map((r) => toFullPeriod(r, allMask, "GFS"));
+      const resAllMask = maskForRes(allMask, resolutionIdx);
+      const allPeriods = rows.map((r) => toFullPeriod(r, resAllMask, "GFS", resolutionIdx));
 
-      const bd = v1EncodeBreakdown(msgFor(allPeriods, allMask));
+      const bd = v1EncodeBreakdown(msgFor(allPeriods, resAllMask));
       bpp[res].push(Object.fromEntries(bd.columns.map((c) => [c.name, c.bits / allPeriods.length])));
 
       for (const c of COMBOS) {
-        const { n: fittedN, breakdown } = fitBreakdown(msgFor(allPeriods, comboMask(c)), args.maxChars);
+        const { n: fittedN, breakdown } = fitBreakdown(msgFor(allPeriods, maskForRes(comboMask(c), resolutionIdx)), args.maxChars);
         const vk = vkey(res, c);
         periodsFit.get(vk)!.push(fittedN);
         versionBits = breakdown.versionBits; headerBits = breakdown.headerBits;
