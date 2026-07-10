@@ -197,6 +197,7 @@ pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
 1. Adaptive encoding for precipitation probability. 3 bits -> 1.71 bits (1h mean). Periods/message 43.5 -> 49.6
 2. Adaptive encoding for wind speed. Wind total 7 bits -> 4.81 bits (1h mean). Periods/message 46.9 -> 51.4.
 3. Huffman coding for wind direction. Wind total 4.81 bits -> 4.05 bits (1h mean). Periods/message 51.4 -> 53.8.
+4. Huffman codebook regeneration for weathercode. Weathercode total 3.18 bits -> 2.45 bits. Periods/message 53.8 -> 56.
 
 
 ## License

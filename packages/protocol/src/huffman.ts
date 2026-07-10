@@ -8,24 +8,25 @@ import { WMO_CODES } from "./constants.js";
 
 const NSYM = WMO_CODES.length; // 28
 
-// Frequency weights per regime (length NSYM, all > 0). Hand-seeded; retune against real data.
+// Frequency weights per regime (length NSYM, all > 0). Derived by k-means clustering the corpus's
+// per-forecast weathercode distributions — see server/scripts/derive-weathercode-codebooks.ts —
+// plus a uniform table (index 0) so a column is never worse than raw 5 bits.
 // WMO index legend: 0 clear · 1-3 cloud · 4-5 fog · 6-8 drizzle · 9-10 freezing drizzle ·
 // 11-13 rain · 14-15 freezing rain · 16-19 snow · 20-22 rain showers · 23-24 snow showers ·
 // 25-27 thunderstorm.
 const WEIGHTS: number[][] = [
   // 0 general — near-uniform fallback (~5-bit codes; never much worse than raw).
   Array(NSYM).fill(1),
-  // 1 dry — clear/cloud dominated.
-  [100, 80, 70, 60, 10, 8, 4, 4, 4, 2, 2, 6, 6, 6, 1, 1, 2, 2, 2, 2, 3, 3, 3, 1, 1, 1, 1, 1],
-  // 2 cold/snow — snow, freezing, fog.
-  [60, 40, 50, 60, 20, 20, 2, 2, 2, 15, 15, 5, 5, 5, 15, 15, 50, 50, 40, 20, 2, 2, 2, 30, 25, 1, 1, 1],
-  // 3 maritime — cloud, drizzle, steady rain.
-  [20, 30, 60, 70, 25, 5, 40, 35, 25, 2, 2, 50, 45, 30, 3, 3, 3, 3, 3, 3, 40, 35, 10, 2, 2, 10, 4, 2],
-  // 4 convective — clear, showers, thunderstorms.
-  [60, 50, 45, 30, 10, 2, 8, 8, 8, 1, 1, 40, 40, 30, 1, 1, 2, 2, 2, 2, 45, 40, 25, 2, 2, 35, 20, 12],
+  [113, 34, 37, 263, 312, 1, 59, 13, 6, 4, 2, 6, 5, 2, 1, 1, 29, 51, 38, 1, 3, 4, 1, 13, 1, 1, 1, 1],
+  [854, 38, 25, 61, 14, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [417, 72, 65, 282, 53, 1, 46, 10, 3, 1, 1, 2, 2, 1, 1, 1, 11, 15, 6, 1, 3, 2, 1, 7, 1, 1, 1, 1],
+  [624, 74, 56, 180, 32, 1, 14, 3, 1, 1, 1, 1, 1, 1, 1, 1, 5, 5, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1],
+  [250, 65, 69, 410, 59, 1, 52, 12, 4, 1, 1, 5, 4, 1, 1, 1, 20, 24, 8, 1, 3, 4, 1, 9, 1, 1, 1, 1],
+  [80, 37, 48, 564, 55, 1, 68, 10, 3, 2, 1, 2, 1, 1, 1, 1, 53, 40, 9, 1, 2, 1, 1, 23, 2, 1, 1, 1],
+  [90, 32, 35, 284, 51, 1, 277, 83, 24, 1, 1, 12, 11, 1, 1, 1, 11, 8, 3, 1, 25, 15, 2, 31, 2, 1, 1, 1],
 ];
 
-export const WC_TABLE_COUNT = WEIGHTS.length; // 5 (fits in the 3-bit wc_table field)
+export const WC_TABLE_COUNT = WEIGHTS.length; // 8 (fills the 3-bit wc_table field)
 
 interface TrieNode { sym?: number; child: (TrieNode | undefined)[]; }
 interface Table { codes: number[][]; root: TrieNode; }

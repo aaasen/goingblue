@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   v1MessageToString,
   v1MessageFromString,
+  v1EncodeBreakdown,
   V1_VERSION,
   encodeVersion,
   decodeMessage,
@@ -389,11 +390,13 @@ describe("sparse / empty precipitation encoding", () => {
     const dry = Array.from({ length: 48 }, () => ({ ...PERIOD, snow_cm: 0 }));
     const decoded = roundTrip(msg({ resolution: 4, vars_mask, periods: [dry] }));
     decoded.periods[0].forEach((p) => expect(p.snow_cm).toBe(0));
-    // The empty column should be far smaller than one with snow every period.
+    // The empty column should be smaller than one with snow every period. Compare exact body
+    // bits (not the base-85 encoded char length) since a few bits of savings can land on either
+    // side of a char boundary and not move the visible string length.
     const snowy = Array.from({ length: 48 }, () => ({ ...PERIOD, snow_cm: 20 }));
-    const dryLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods: [dry] })).length;
-    const snowyLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods: [snowy] })).length;
-    expect(dryLen).toBeLessThan(snowyLen);
+    const dryBits = v1EncodeBreakdown(msg({ resolution: 4, vars_mask, periods: [dry] })).bodyBits;
+    const snowyBits = v1EncodeBreakdown(msg({ resolution: 4, vars_mask, periods: [snowy] })).bodyBits;
+    expect(dryBits).toBeLessThan(snowyBits);
   });
 
   it("round-trips a mostly-zero snow column exactly (sparse mode)", () => {
