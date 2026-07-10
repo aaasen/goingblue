@@ -78,9 +78,60 @@ interface Location {
   elev_m?: number; // pin model elevation (curated peaks); omit for generic grid points
 }
 
-// Curated locations. Starting with Denali only; more curated peaks + random global points to come.
+// Curated locations. Denali is pinned to the summit elevation (the flagship use case, already
+// collected); the rest are imported Windy favorites, id = kebab-case of the title, using Open-Meteo's
+// grid elevation. Spans the North American ranges, the Alps, the Andes (SH winter), and NZ.
 const LOCATIONS: Location[] = [
   { id: "denali", name: "Denali summit", lat: 63.069, lon: -151.003, elev_m: 6096 },
+  { id: "liberty-bell-mountain", name: "Liberty Bell Mountain", lat: 48.515, lon: -120.658 },
+  { id: "eldorado", name: "Eldorado", lat: 48.537, lon: -121.134 },
+  { id: "aasgard", name: "Aasgard", lat: 47.479, lon: -120.822 },
+  { id: "paradise", name: "Paradise", lat: 46.786, lon: -121.735 },
+  { id: "glacier-peak", name: "Glacier Peak", lat: 48.113, lon: -121.114 },
+  { id: "alta", name: "Alta", lat: 40.59, lon: -111.64 },
+  { id: "snoqualmie-pass", name: "Snoqualmie Pass", lat: 47.42, lon: -121.41 },
+  { id: "panorama-dome", name: "Panorama Dome", lat: 48.855, lon: -121.683 },
+  { id: "crystal", name: "Crystal", lat: 46.926, lon: -121.5 },
+  { id: "mount-glory", name: "Mount Glory, Jackson", lat: 43.508, lon: -110.95 },
+  { id: "chamonix", name: "Chamonix", lat: 45.879, lon: 6.888 },
+  { id: "kitzbuhel", name: "Kitzbühel", lat: 47.418, lon: 12.357 },
+  { id: "rogers-pass", name: "Rogers Pass, Area A", lat: 51.302, lon: -117.52 },
+  { id: "sub-peak", name: "Sub Peak, Area B", lat: 50.963, lon: -118.101 },
+  { id: "cowboy-mountain", name: "Cowboy Mountain, Scenic", lat: 47.744, lon: -121.09 },
+  { id: "jungbrunntobel", name: "Jungbrunntobel, Gemeinde Sankt Anton am Arlberg", lat: 47.133, lon: 10.243 },
+  { id: "pointe-marie-louise", name: "Pointe Marie-Louise, La Grave", lat: 45.001, lon: 6.255 },
+  { id: "seppenalm", name: "Seppenalm, Heiligenblut am Grossglockner", lat: 47.065, lon: 12.858 },
+  { id: "grubegg", name: "Grubegg, Hotting", lat: 47.31, lon: 11.378 },
+  { id: "fraulaskofel", name: "Fraulaskofel, Gemeinde Neustift im Stubaital", lat: 46.983, lon: 11.112 },
+  { id: "gemsstock", name: "Gemsstock, Andermatt", lat: 46.603, lon: 8.612 },
+  { id: "lizumer-grube", name: "Lizumer Grube, Gemeinde Axams", lat: 47.183, lon: 11.282 },
+  { id: "trockener-steg", name: "Trockener Steg, Zermatt", lat: 45.971, lon: 7.724 },
+  { id: "grindelwald-grund", name: "Grindelwald Grund, Grindelwald", lat: 46.623, lon: 8.024 },
+  { id: "le-corridor", name: "Le Corridor, Chamonix-Mont-Blanc", lat: 45.834, lon: 6.864 },
+  { id: "mount-toll", name: "Mount Toll, Ward", lat: 40.089, lon: -105.633 },
+  { id: "narao-peak", name: "Narao Peak, Area A", lat: 51.411, lon: -116.313 },
+  { id: "flattop-mountain", name: "Flattop Mountain, Grand Lake", lat: 40.31, lon: -105.688 },
+  { id: "belen", name: "Belen, Huaraz", lat: -9.53, lon: -77.53 },
+  { id: "chinchey", name: "Chinchey, San Miguel de Aco", lat: -9.382, lon: -77.331 },
+  { id: "cima-andes", name: "Cima Andes, Lo Barnechea", lat: -33.337, lon: -70.264 },
+  { id: "blackcomb-peak", name: "Blackcomb Peak, Whistler Resort Municipality", lat: 50.094, lon: -122.886 },
+  { id: "bald-mountain", name: "Bald Mountain, Ketchum", lat: 43.655, lon: -114.41 },
+  { id: "brewster-rock", name: "Brewster Rock, Banff", lat: 51.075, lon: -115.756 },
+  { id: "mount-columbia", name: "Mount Columbia, Area A", lat: 52.145, lon: -117.441 },
+  { id: "stanley-peak", name: "Stanley Peak, Area G", lat: 51.171, lon: -116.055 },
+  { id: "robson-cirque", name: "Robson Cirque, Area H", lat: 53.108, lon: -119.155 },
+  { id: "mount-andromeda", name: "Mount Andromeda", lat: 52.176, lon: -117.238 },
+  { id: "temple-lake-ridge", name: "Temple Lake Ridge, Lake Louise", lat: 51.36, lon: -116.192 },
+  { id: "mount-adams", name: "Mount Adams", lat: 46.203, lon: -121.492 },
+  { id: "mount-hood", name: "Mount Hood, Government Camp", lat: 45.373, lon: -121.696 },
+  { id: "wolf-peak", name: "Wolf Peak", lat: 48.015, lon: -121.516 },
+  { id: "canoe-peak", name: "Canoe Peak, Skykomish", lat: 47.653, lon: -121.481 },
+  { id: "summit-pyramid", name: "Summit Pyramid, Qutang", lat: 27.988, lon: 86.925 },
+  { id: "ruth-mountain", name: "Ruth Mountain", lat: 48.86, lon: -121.534 },
+  { id: "roman-wall", name: "Roman Wall, Glacier", lat: 48.774, lon: -121.817 },
+  { id: "pisco", name: "Pisco, Caraz", lat: -9.01, lon: -77.633 },
+  { id: "wye-dome", name: "Wye Dome, Jacks Point", lat: -45.054, lon: 168.815 },
+  { id: "mount-cook", name: "Mount Cook", lat: -43.594, lon: 170.142 },
 ];
 
 // ── Report config ────────────────────────────────────────────────────────────────
