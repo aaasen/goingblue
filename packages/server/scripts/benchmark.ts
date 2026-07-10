@@ -239,6 +239,7 @@ const LOCATIONS: Location[] = [
 // ── Report config ────────────────────────────────────────────────────────────────
 
 const RESOLUTION_IDX: Record<string, number> = { daily: 0, "12h": 1, "6h": 2, "3h": 3, "1h": 4 };
+const RESOLUTION_ORDER = ["1h", "3h", "6h", "12h", "daily"]; // selector order (fine → coarse)
 const V1_MAX_PERIODS = 128;
 
 // Protocol variable groups, mirroring the app (BuilderTab.tsx). weathercode is always encoded by the
@@ -557,9 +558,6 @@ function buildView(pf: number[], cb: Map<string, number[]>, cm: Map<string, Map<
 }
 
 async function report(args: Args): Promise<void> {
-  const resolutionIdx = RESOLUTION_IDX[args.resolution];
-  const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
-
   // Load every model, indexed by location|run. Iterate keys present in ALL models so each model's
   // view is computed over the identical forecast set.
   const byModel = new Map<string, Map<string, Record>>();
@@ -572,17 +570,20 @@ async function report(args: Args): Promise<void> {
     .filter((k) => MODELS.every((m) => byModel.get(m.id)!.has(k))).sort();
   if (keys.length === 0) throw new Error("No forecasts present for all models — run collection first");
 
-  const vkey = (modelId: string, combo: number) => `${modelId}:${combo}`;
+  // A view = resolution × model × variable-combo. Every (res, model, combo) is precomputed.
+  const vkey = (res: string, modelId: string, combo: number) => `${res}:${modelId}:${combo}`;
   const periodsFit = new Map<string, number[]>();
   const colBits = new Map<string, Map<string, number[]>>();
   const colModes = new Map<string, Map<string, Map<string, number>>>();
-  for (const m of MODELS) for (const c of COMBOS) {
-    const vk = vkey(m.id, c);
+  for (const res of RESOLUTION_ORDER) for (const m of MODELS) for (const c of COMBOS) {
+    const vk = vkey(res, m.id, c);
     periodsFit.set(vk, []); colBits.set(vk, new Map()); colModes.set(vk, new Map());
   }
 
   const forecasts: { location: string; run: string; lat: number; lon: number }[] = [];
-  const bppByModel = new Map<string, Record<string, number>[]>(MODELS.map((m) => [m.id, []]));
+  // bits/period per (resolution → model → per-forecast {var: bpp}), for the detail table.
+  const bpp: Record<string, Record<string, Record<string, number>[]>> = {};
+  for (const res of RESOLUTION_ORDER) bpp[res] = Object.fromEntries(MODELS.map((m) => [m.id, []]));
   const allMask = comboMask(COMBOS.length - 1); // every group on
   let versionBits = 0, headerBits = 0, skipped = 0;
 
@@ -594,71 +595,77 @@ async function report(args: Args): Promise<void> {
     const [locId, run] = key.split("|");
     const meta = byModel.get(FALLBACK_MODEL)!.get(key)!.meta.location;
     const runHour = Math.floor(Date.parse(run + "Z") / 3600000);
-    const startEpochHour = Math.floor(runHour / hoursPerPeriod) * hoursPerPeriod;
-    const start = new Date(startEpochHour * 3600000);
-
-    // Aggregate each model's rows (aligned by index; all are 10-day hourly on the same run).
-    const rowsByModel = new Map<string, Row[]>();
-    for (const m of MODELS) {
-      const h = byModel.get(m.id)!.get(key)!.response.hourly as HourlyData;
-      const n = Math.min(V1_MAX_PERIODS, Math.floor(h.time.length / hoursPerPeriod));
-      rowsByModel.set(m.id, aggregateHourly(h, h.time, n, resolutionIdx, startEpochHour));
-    }
-    const fbRows = rowsByModel.get(FALLBACK_MODEL)!;
     const elevation = byModel.get(FALLBACK_MODEL)!.get(key)!.response.elevation ?? 0;
-    const msgFor = (periods: Period[], mask: number): ForecastMessage => ({
-      version: 1, code: 0, days: Math.ceil(periods.length / (24 / hoursPerPeriod)),
-      resolution: resolutionIdx, models_mask: 1, vars_mask: mask,
-      month: start.getUTCMonth() + 1, day: start.getUTCDate(), hour: start.getUTCHours(),
-      lat: 0, lon: 0, elevation, periods: [periods],
-    });
-
     forecasts.push({ location: locId, run, lat: meta.lat, lon: meta.lon });
 
-    for (const m of MODELS) {
-      const primaryRows = rowsByModel.get(m.id)!;
-      const nAlign = Math.min(primaryRows.length, fbRows.length);
-      const fbGroups = GROUP_IDS.filter((g) => !m.groups[g]); // groups this model borrows from fallback
-      // Build Period objects with every field populated; vary only vars_mask per combo (each column
-      // encodes independently, so one Period array serves all combos).
-      const allPeriods: Period[] = [];
-      for (let i = 0; i < nAlign; i++) allPeriods.push(toFullPeriod(mergeRow(primaryRows[i], fbRows[i], fbGroups), allMask, FALLBACK_MODEL.toUpperCase()));
+    for (const res of RESOLUTION_ORDER) {
+      const resolutionIdx = RESOLUTION_IDX[res];
+      const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
+      const startEpochHour = Math.floor(runHour / hoursPerPeriod) * hoursPerPeriod;
+      const start = new Date(startEpochHour * 3600000);
 
-      // Per-variable bits/period at the full horizon (combo-independent), for the detail table.
-      const bd = v1EncodeBreakdown(msgFor(allPeriods, allMask));
-      bppByModel.get(m.id)!.push(Object.fromEntries(bd.columns.map((c) => [c.name, c.bits / allPeriods.length])));
+      // Aggregate each model's rows at this resolution (aligned by index).
+      const rowsByModel = new Map<string, Row[]>();
+      for (const m of MODELS) {
+        const h = byModel.get(m.id)!.get(key)!.response.hourly as HourlyData;
+        const n = Math.min(V1_MAX_PERIODS, Math.floor(h.time.length / hoursPerPeriod));
+        rowsByModel.set(m.id, aggregateHourly(h, h.time, n, resolutionIdx, startEpochHour));
+      }
+      const fbRows = rowsByModel.get(FALLBACK_MODEL)!;
+      const msgFor = (periods: Period[], mask: number): ForecastMessage => ({
+        version: 1, code: 0, days: Math.ceil(periods.length / (24 / hoursPerPeriod)),
+        resolution: resolutionIdx, models_mask: 1, vars_mask: mask,
+        month: start.getUTCMonth() + 1, day: start.getUTCDate(), hour: start.getUTCHours(),
+        lat: 0, lon: 0, elevation, periods: [periods],
+      });
 
-      for (const c of COMBOS) {
-        const mask = comboMask(c);
-        const { n: fittedN, breakdown } = fitBreakdown(msgFor(allPeriods, mask), args.maxChars);
-        const vk = vkey(m.id, c);
-        periodsFit.get(vk)!.push(fittedN);
-        versionBits = breakdown.versionBits; headerBits = breakdown.headerBits;
-        const cb = colBits.get(vk)!, cm = colModes.get(vk)!;
-        for (const col of breakdown.columns) {
-          if (!cb.has(col.name)) { cb.set(col.name, []); cm.set(col.name, new Map()); }
-          cb.get(col.name)!.push(col.bits);
-          if (col.mode) { const mm = cm.get(col.name)!; mm.set(col.mode, (mm.get(col.mode) ?? 0) + 1); }
+      for (const m of MODELS) {
+        const primaryRows = rowsByModel.get(m.id)!;
+        const nAlign = Math.min(primaryRows.length, fbRows.length);
+        const fbGroups = GROUP_IDS.filter((g) => !m.groups[g]); // groups borrowed from the fallback
+        // One Period array with every field populated; vary only vars_mask per combo (columns encode
+        // independently).
+        const allPeriods: Period[] = [];
+        for (let i = 0; i < nAlign; i++) allPeriods.push(toFullPeriod(mergeRow(primaryRows[i], fbRows[i], fbGroups), allMask, FALLBACK_MODEL.toUpperCase()));
+
+        const bd = v1EncodeBreakdown(msgFor(allPeriods, allMask));
+        bpp[res][m.id].push(Object.fromEntries(bd.columns.map((c) => [c.name, c.bits / allPeriods.length])));
+
+        for (const c of COMBOS) {
+          const { n: fittedN, breakdown } = fitBreakdown(msgFor(allPeriods, comboMask(c)), args.maxChars);
+          const vk = vkey(res, m.id, c);
+          periodsFit.get(vk)!.push(fittedN);
+          versionBits = breakdown.versionBits; headerBits = breakdown.headerBits;
+          const cb = colBits.get(vk)!, cm = colModes.get(vk)!;
+          for (const col of breakdown.columns) {
+            if (!cb.has(col.name)) { cb.set(col.name, []); cm.set(col.name, new Map()); }
+            cb.get(col.name)!.push(col.bits);
+            if (col.mode) { const mm = cm.get(col.name)!; mm.set(col.mode, (mm.get(col.mode) ?? 0) + 1); }
+          }
         }
       }
     }
   }
 
-  // Build per-view stats + the interactive data island.
+  // Build per-view stats + the interactive period data (res → model → combo → per-forecast periods).
   const views: Record<string, ViewStats> = {};
-  const periodsByView: Record<string, Record<number, number[]>> = {};
-  for (const m of MODELS) {
-    periodsByView[m.id] = {};
-    for (const c of COMBOS) {
-      const vk = vkey(m.id, c);
-      views[vk] = buildView(periodsFit.get(vk)!, colBits.get(vk)!, colModes.get(vk)!);
-      periodsByView[m.id][c] = periodsFit.get(vk)!;
+  const periodsByView: Record<string, Record<string, Record<number, number[]>>> = {};
+  for (const res of RESOLUTION_ORDER) {
+    periodsByView[res] = {};
+    for (const m of MODELS) {
+      periodsByView[res][m.id] = {};
+      for (const c of COMBOS) {
+        const vk = vkey(res, m.id, c);
+        views[vk] = buildView(periodsFit.get(vk)!, colBits.get(vk)!, colModes.get(vk)!);
+        periodsByView[res][m.id][c] = periodsFit.get(vk)!;
+      }
     }
   }
 
   const stats: ReportData = {
     timestamp: new Date().toISOString(),
-    resolution: args.resolution,
+    resolutions: RESOLUTION_ORDER,
+    defaultResolution: args.resolution,
     maxChars: args.maxChars,
     forecasts: forecasts.length,
     locations: new Set(forecasts.map((f) => f.location)).size,
@@ -673,19 +680,19 @@ async function report(args: Args): Promise<void> {
     views,
     forecastRows: forecasts,
     periodsByView,
-    bpp: Object.fromEntries(bppByModel),
+    bpp,
   };
 
   await mkdir(BENCHMARKS_DIR, { recursive: true });
   const stamp = stats.timestamp.replace(/[:.]/g, "-").slice(0, 19);
-  const outPath = join(BENCHMARKS_DIR, `${stamp}_${args.resolution}_${args.maxChars}c.html`);
+  const outPath = join(BENCHMARKS_DIR, `${stamp}_${args.maxChars}c.html`);
   await writeFile(outPath, renderHtml(stats));
 
-  const dv = views[vkey(stats.defaultModel, stats.defaultCombo)];
+  const dv = views[vkey(args.resolution, stats.defaultModel, stats.defaultCombo)];
   console.log(`\n== Benchmark ==`);
-  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${MODELS.length} models  |  resolution=${args.resolution}  max-chars=${args.maxChars}`);
+  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${MODELS.length} models, ${RESOLUTION_ORDER.length} resolutions  |  max-chars=${args.maxChars}`);
   if (skipped) console.log(`  skipped ${skipped} forecast(s) with an incomplete base series`);
-  console.log(`  default view (${stats.defaultModel}, Clouds): periods/msg mean ${dv.periods.mean.toFixed(1)} (min ${dv.periods.min}, max ${dv.periods.max})`);
+  console.log(`  default view (${args.resolution}, ${stats.defaultModel}, Clouds): periods/msg mean ${dv.periods.mean.toFixed(1)} (min ${dv.periods.min}, max ${dv.periods.max})`);
   console.log(`  report: ${outPath.replace(REPO_ROOT + "/", "")}`);
 
   if (args.open) openInBrowser(outPath);
@@ -716,7 +723,8 @@ interface ViewStats {
 // table is rebuilt client-side from forecastRows + periodsByView + bpp.
 interface ReportData {
   timestamp: string;
-  resolution: string;
+  resolutions: string[];
+  defaultResolution: string;
   maxChars: number;
   forecasts: number;
   locations: number;
@@ -729,10 +737,12 @@ interface ReportData {
   baseVars: string[];
   defaultCombo: number;
   defaultModel: string;
-  views: Record<string, ViewStats>;                       // "model:combo" → stats
+  views: Record<string, ViewStats>;                        // "res:model:combo" → stats
   forecastRows: { location: string; run: string; lat: number; lon: number }[];
-  periodsByView: Record<string, Record<number, number[]>>; // model → combo → per-forecast periods
-  bpp: Record<string, Record<string, number>[]>;           // model → per-forecast {var: bits/period}
+  // res → model → combo → per-forecast periods
+  periodsByView: Record<string, Record<string, Record<number, number[]>>>;
+  // res → model → per-forecast {var: bits/period}
+  bpp: Record<string, Record<string, Record<string, number>[]>>;
 }
 
 const esc = (s: string) =>
@@ -773,10 +783,10 @@ function renderHistogram(hist: { period: number; count: number }[]): string {
 const modeText = (m: [string, number][]) =>
   m.length ? m.map(([name, f]) => `${esc(name)} ${Math.round(100 * f)}%`).join(" · ") : "—";
 
-// One toggleable view = a model × variable-combo: histogram, period summary, and the occupancy
-// table (columns sorted by share). All 16 are emitted hidden; the client shows the selected one.
+// One toggleable view = a resolution × model × variable-combo: histogram, period summary, and the
+// occupancy table (columns sorted by share). All are emitted hidden; the client shows the selected.
 function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: number): string {
-  const [model, combo] = vk.split(":");
+  const [res, model, combo] = vk.split(":");
   const occupancyBits = versionBits + headerBits + vs.bodyBits;
   const rows = [
     { name: "version", bits: versionBits, bpp: null as number | null, modes: [] as [string, number][] },
@@ -793,7 +803,7 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
       <td class="modes">${modeText(r.modes)}</td>
     </tr>`).join("\n");
   const p = vs.periods;
-  return `<section class="view" data-model="${model}" data-combo="${combo}" hidden>
+  return `<section class="view" data-res="${res}" data-model="${model}" data-combo="${combo}" hidden>
   ${renderHistogram(vs.histogram)}
   <table class="summary">
     <tr><th>min</th><th>p50</th><th>mean</th><th>p90</th><th>max</th></tr>
@@ -810,6 +820,8 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
 
 function renderHtml(s: ReportData): string {
   const viewFragments = Object.entries(s.views).map(([vk, vs]) => renderView(vk, vs, s.versionBits, s.headerBits)).join("\n");
+  const resRadios = s.resolutions.map((r) =>
+    `<label><input type="radio" name="res" value="${r}"${r === s.defaultResolution ? " checked" : ""}> ${esc(r)}</label>`).join("");
   const modelRadios = s.models.map((m) =>
     `<label><input type="radio" name="model" value="${m.id}"${m.id === s.defaultModel ? " checked" : ""}> ${esc(m.label)}</label>`).join("");
   const groupChecks = s.groups.map((g, i) =>
@@ -819,6 +831,7 @@ function renderHtml(s: ReportData): string {
   // Client data excludes the pre-rendered `views` (avoids duplicating them); the detail table is
   // rebuilt from these on every selection change.
   const clientData = {
+    resolutions: s.resolutions, defaultResolution: s.defaultResolution,
     models: s.models, groups: s.groups, groupVars: s.groupVars, baseVars: s.baseVars,
     defaultCombo: s.defaultCombo, defaultModel: s.defaultModel,
     forecastRows: s.forecastRows, periodsByView: s.periodsByView, bpp: s.bpp,
@@ -879,13 +892,13 @@ function renderHtml(s: ReportData): string {
 <body>
 <h1>Encoding benchmark</h1>
 <div class="meta">
-  ${esc(s.timestamp)} · ${s.forecasts} forecasts · ${s.locations} locations ·
-  resolution <code>${esc(s.resolution)}</code> · max <code>${s.maxChars}</code> chars
+  ${esc(s.timestamp)} · ${s.forecasts} forecasts · ${s.locations} locations · max <code>${s.maxChars}</code> chars
 </div>
 
 <div class="selectors">
+  <div class="sel"><span class="sel-label">Resolution</span>${resRadios}</div>
   <div class="sel"><span class="sel-label">Model</span>${modelRadios}</div>
-  <div class="sel"><span class="sel-label">Variables</span><label><input type="checkbox" checked disabled> Base <span class="muted">(always on)</span></label>${groupChecks}</div>
+  <div class="sel"><span class="sel-label">Variables <span class="muted">(base always on)</span></span>${groupChecks}</div>
 </div>
 <p class="hint" id="fallback-note"></p>
 ${quality}
@@ -905,11 +918,13 @@ ${quality}
 <script>
 const D = JSON.parse(document.getElementById("benchmark-data").textContent);
 const views = [...document.querySelectorAll(".view")];
+const resRadios = [...document.querySelectorAll('input[name=res]')];
 const modelRadios = [...document.querySelectorAll('input[name=model]')];
 const groupBoxes = [...document.querySelectorAll('input.group')];
 const detail = document.getElementById("detail");
 const fallbackNote = document.getElementById("fallback-note");
 
+const resolution = () => resRadios.find((r) => r.checked).value;
 const model = () => modelRadios.find((r) => r.checked).value;
 const combo = () => groupBoxes.reduce((c, b) => c | (b.checked ? +b.dataset.bit : 0), 0);
 const selectedGroups = (c) => D.groups.filter((g, i) => c & (1 << i)).map((g) => g.id);
@@ -929,9 +944,9 @@ function attachSort(table) {
   });
 }
 
-function buildDetail(m, c) {
+function buildDetail(res, m, c) {
   const cols = ["weathercode", ...D.baseVars, ...selectedGroups(c).flatMap((g) => D.groupVars[g])];
-  const periods = D.periodsByView[m][c], bpp = D.bpp[m];
+  const periods = D.periodsByView[res][m][c], bpp = D.bpp[res][m];
   const head = "<thead><tr><th>location</th><th>run</th><th class=rt>lat</th><th class=rt>lon</th><th class=rt>periods</th>" +
     cols.map((k) => "<th class=rt>" + k + "</th>").join("") + "</tr></thead>";
   const body = D.forecastRows.map((f, i) =>
@@ -943,18 +958,17 @@ function buildDetail(m, c) {
 }
 
 function update() {
-  const m = model(), c = combo();
-  views.forEach((v) => v.hidden = !(v.dataset.model === m && +v.dataset.combo === c));
+  const res = resolution(), m = model(), c = combo();
+  views.forEach((v) => v.hidden = !(v.dataset.res === res && v.dataset.model === m && +v.dataset.combo === c));
   const md = D.models.find((x) => x.id === m);
   const borrowed = selectedGroups(c).filter((g) => !md.groups[g]);
   fallbackNote.textContent = borrowed.length
     ? md.label + " doesn't provide " + borrowed.map((g) => D.groups.find((x) => x.id === g).label).join(", ") + " — those columns come from GFS."
     : "";
-  buildDetail(m, c);
+  buildDetail(res, m, c);
 }
 
-modelRadios.forEach((r) => r.addEventListener("change", update));
-groupBoxes.forEach((b) => b.addEventListener("change", update));
+[...resRadios, ...modelRadios, ...groupBoxes].forEach((el) => el.addEventListener("change", update));
 update();
 </script>
 </body>
