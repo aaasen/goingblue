@@ -522,12 +522,16 @@ function buildView(pf: number[], cb: Map<string, number[]>, cm: Map<string, Map<
   const histogram: { period: number; count: number }[] = [];
   for (let p = pMin; p <= pMax; p++) histogram.push({ period: p, count: hcounts.get(p) ?? 0 });
 
-  const columns: ColStat[] = [...cb.entries()].map(([name, bitsArr]) => ({
-    name,
-    bits: mean(bitsArr),
-    bitsPerPeriod: mean(bitsArr.map((b, i) => b / pf[i])),
-    modes: [...cm.get(name)!.entries()].sort((a, b) => b[1] - a[1]).map(([m, c]) => [m, c / bitsArr.length] as [string, number]),
-  }));
+  const columns: ColStat[] = [...cb.entries()].map(([name, bitsArr]) => {
+    const bpp = bitsArr.map((b, i) => b / pf[i]);
+    return {
+      name,
+      bits: mean(bitsArr),
+      bitsPerPeriod: mean(bpp),
+      bppStats: { min: Math.min(...bpp), p25: pct(bpp, 25), p50: pct(bpp, 50), mean: mean(bpp), p75: pct(bpp, 75), max: Math.max(...bpp) },
+      modes: [...cm.get(name)!.entries()].sort((a, b) => b[1] - a[1]).map(([m, c]) => [m, c / bitsArr.length] as [string, number]),
+    };
+  });
   return {
     periods: { min: pMin, p25: pct(pf, 25), p50: pct(pf, 50), mean: mean(pf), p75: pct(pf, 75), p90: pct(pf, 90), max: pMax },
     histogram,
@@ -667,7 +671,8 @@ function openInBrowser(path: string): void {
 
 // ── HTML report ──────────────────────────────────────────────────────────────────
 
-interface ColStat { name: string; bits: number; bitsPerPeriod: number; modes: [string, number][] }
+interface BoxStats { min: number; p25: number; p50: number; mean: number; p75: number; max: number }
+interface ColStat { name: string; bits: number; bitsPerPeriod: number; bppStats: BoxStats; modes: [string, number][] }
 interface ViewStats {
   periods: { min: number; p25: number; p50: number; mean: number; p75: number; p90: number; max: number };
   histogram: { period: number; count: number }[];
@@ -734,28 +739,51 @@ function renderHistogram(hist: { period: number; count: number }[]): string {
 </svg>`;
 }
 
-// Box-and-whisker of periods/message: min–max whiskers, Q1–Q3 box, median line, mean dot. Shares the
-// histogram's period x-scale (drawn directly above), so the histogram's axis labels annotate both.
+// Box-and-whisker of periods/message: min–max whiskers, Q1–Q3 box, median line, mean dot, with value
+// labels (median above the box; min/Q1/Q3/max below). Shares the histogram's period x-scale.
 function renderBoxPlot(p: ViewStats["periods"]): string {
-  const W = 720, H = 66, m = { t: 12, r: 14, b: 12, l: 46 };
+  const W = 720, H = 92, m = { t: 22, r: 14, b: 18, l: 46 };
   const iw = W - m.l - m.r;
   const bins = Math.max(1, p.max - p.min + 1);
   const bw = iw / bins;
   const x = (v: number) => m.l + (v - p.min) * bw + bw / 2;
   const cy = m.t + (H - m.t - m.b) / 2;
-  const half = 13, cap = 8;
+  const half = 13, cap = 8, belowY = cy + cap + 15;
+  const label = (v: number, xv: number, yv: number) => `<text x="${xv.toFixed(1)}" y="${yv}" class="blabel" text-anchor="middle">${v}</text>`;
   return `<svg viewBox="0 0 ${W} ${H}" class="box" role="img" aria-label="Box plot of periods per message">
   <line x1="${x(p.min).toFixed(1)}" y1="${cy}" x2="${x(p.max).toFixed(1)}" y2="${cy}" class="bwhisker"/>
-  <line x1="${x(p.min).toFixed(1)}" y1="${cy - cap}" x2="${x(p.min).toFixed(1)}" y2="${cy + cap}" class="bwhisker"><title>min ${p.min}</title></line>
-  <line x1="${x(p.max).toFixed(1)}" y1="${cy - cap}" x2="${x(p.max).toFixed(1)}" y2="${cy + cap}" class="bwhisker"><title>max ${p.max}</title></line>
-  <rect x="${x(p.p25).toFixed(1)}" y="${cy - half}" width="${Math.max(1, x(p.p75) - x(p.p25)).toFixed(1)}" height="${2 * half}" class="bbox"><title>Q1 ${p.p25} – Q3 ${p.p75}</title></rect>
-  <line x1="${x(p.p50).toFixed(1)}" y1="${cy - half}" x2="${x(p.p50).toFixed(1)}" y2="${cy + half}" class="bmedian"><title>median ${p.p50}</title></line>
+  <line x1="${x(p.min).toFixed(1)}" y1="${cy - cap}" x2="${x(p.min).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>
+  <line x1="${x(p.max).toFixed(1)}" y1="${cy - cap}" x2="${x(p.max).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>
+  <rect x="${x(p.p25).toFixed(1)}" y="${cy - half}" width="${Math.max(1, x(p.p75) - x(p.p25)).toFixed(1)}" height="${2 * half}" class="bbox"/>
+  <line x1="${x(p.p50).toFixed(1)}" y1="${cy - half}" x2="${x(p.p50).toFixed(1)}" y2="${cy + half}" class="bmedian"/>
   <circle cx="${x(p.mean).toFixed(1)}" cy="${cy}" r="3.5" class="bmean"><title>mean ${p.mean.toFixed(1)}</title></circle>
+  ${label(p.p50, x(p.p50), cy - half - 6)}
+  ${label(p.min, x(p.min), belowY)}
+  ${label(p.p25, x(p.p25), belowY)}
+  ${label(p.p75, x(p.p75), belowY)}
+  ${label(p.max, x(p.max), belowY)}
 </svg>`;
 }
 
 const modeText = (m: [string, number][]) =>
   m.length ? m.map(([name, f]) => `${esc(name)} ${Math.round(100 * f)}%`).join(" · ") : "—";
+
+// Compact box-and-whisker for a table cell: min–max whiskers, Q1–Q3 box, median line, mean dot, on a
+// shared 0..scaleMax x-axis so columns are directly comparable. Values are in the hover title.
+function renderMiniBox(s: BoxStats, scaleMax: number): string {
+  const W = 200, H = 20, pad = 3, iw = W - 2 * pad;
+  const x = (v: number) => pad + (v / scaleMax) * iw;
+  const cy = H / 2, half = 5.5, cap = 3.5;
+  return `<svg viewBox="0 0 ${W} ${H}" class="mbox">` +
+    `<title>bits/period — min ${s.min.toFixed(2)} · Q1 ${s.p25.toFixed(2)} · median ${s.p50.toFixed(2)} · mean ${s.mean.toFixed(2)} · Q3 ${s.p75.toFixed(2)} · max ${s.max.toFixed(2)}</title>` +
+    `<line x1="${x(s.min).toFixed(1)}" y1="${cy}" x2="${x(s.max).toFixed(1)}" y2="${cy}" class="bwhisker"/>` +
+    `<line x1="${x(s.min).toFixed(1)}" y1="${cy - cap}" x2="${x(s.min).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
+    `<line x1="${x(s.max).toFixed(1)}" y1="${cy - cap}" x2="${x(s.max).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
+    `<rect x="${x(s.p25).toFixed(1)}" y="${cy - half}" width="${Math.max(1, x(s.p75) - x(s.p25)).toFixed(1)}" height="${2 * half}" class="bbox"/>` +
+    `<line x1="${x(s.p50).toFixed(1)}" y1="${cy - half}" x2="${x(s.p50).toFixed(1)}" y2="${cy + half}" class="bmedian"/>` +
+    `<circle cx="${x(s.mean).toFixed(1)}" cy="${cy}" r="2.5" class="bmean"/>` +
+  `</svg>`;
+}
 
 // One toggleable view = a resolution × variable-combo: histogram, box plot, period summary, and the
 // occupancy table (columns sorted by share). All are emitted hidden; the client shows the selected.
@@ -763,17 +791,17 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
   const [res, combo] = vk.split(":");
   const occupancyBits = versionBits + headerBits + vs.bodyBits;
   const rows = [
-    { name: "version", bits: versionBits, bpp: null as number | null, modes: [] as [string, number][] },
-    { name: "header", bits: headerBits, bpp: null as number | null, modes: [] as [string, number][] },
-    ...vs.columns.map((c) => ({ name: c.name, bits: c.bits, bpp: c.bitsPerPeriod as number | null, modes: c.modes })),
+    { name: "version", bits: versionBits, bpp: null as number | null, modes: [] as [string, number][], bppStats: null as BoxStats | null },
+    { name: "header", bits: headerBits, bpp: null as number | null, modes: [] as [string, number][], bppStats: null as BoxStats | null },
+    ...vs.columns.map((c) => ({ name: c.name, bits: c.bits, bpp: c.bitsPerPeriod as number | null, modes: c.modes, bppStats: c.bppStats as BoxStats | null })),
   ].sort((a, b) => b.bits - a.bits);
-  const maxBits = Math.max(...rows.map((r) => r.bits), 1);
+  const bppScaleMax = Math.max(...vs.columns.map((c) => c.bppStats.max), 1);
   const occHtml = rows.map((r) => `<tr>
       <td class="name">${esc(r.name)}</td>
       <td class="num">${r.bits.toFixed(1)}</td>
       <td class="num">${r.bpp == null ? "—" : r.bpp.toFixed(2)}</td>
       <td class="num">${(100 * r.bits / occupancyBits).toFixed(1)}%</td>
-      <td class="barcell"><div class="bar"><div class="fill${r.modes.length ? " adaptive" : ""}" style="width:${(100 * r.bits / maxBits).toFixed(1)}%"></div></div></td>
+      <td class="boxcell">${r.bppStats ? renderMiniBox(r.bppStats, bppScaleMax) : ""}</td>
       <td class="modes">${modeText(r.modes)}</td>
     </tr>`).join("\n");
   const p = vs.periods;
@@ -786,7 +814,7 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
   </table>
   <h3>Mean bit occupancy per column</h3>
   <table>
-    <tr><th>column</th><th class="rt">bits</th><th class="rt">bits/period</th><th class="rt">share</th><th>occupancy</th><th>modes</th></tr>
+    <tr><th>column</th><th class="rt">bits</th><th class="rt">bits/period</th><th class="rt">share</th><th>bits/period spread <span class="muted">(0–${bppScaleMax.toFixed(1)})</span></th><th>modes</th></tr>
     ${occHtml}
     <tr class="total"><td>total</td><td class="num">${occupancyBits.toFixed(1)}</td><td class="num"></td><td class="num">100%</td><td></td><td class="modes">≈ ${Math.round(occupancyBits / 6.409)} chars</td></tr>
   </table>
@@ -838,13 +866,8 @@ function renderHtml(s: ReportData): string {
   td.name { font-weight: 500; }
   td.modes { color: #888; font-size: .8rem; }
   table.summary { max-width: 360px; }
-  .barcell { width: 34%; }
-  .bar { background: rgba(128,128,128,.15); border-radius: 3px; height: 12px; }
-  .fill { background: #6b7280; height: 100%; border-radius: 3px; }
-  .fill.adaptive { background: #3b82f6; }
   tr.total td { font-weight: 600; border-top: 2px solid rgba(128,128,128,.4); border-bottom: none; }
   .legend { font-size: .75rem; color: #888; margin-top: .5rem; }
-  .swatch { display: inline-block; width: .7rem; height: .7rem; border-radius: 2px; vertical-align: middle; margin: 0 .2rem 0 .6rem; }
   .hist { width: 100%; max-width: 720px; height: auto; margin: .5rem 0 .25rem; }
   .hbar { fill: #3b82f6; }
   .hgrid { stroke: rgba(128,128,128,.25); stroke-width: 1; }
@@ -855,6 +878,9 @@ function renderHtml(s: ReportData): string {
   .bbox { fill: rgba(59,130,246,.25); stroke: #3b82f6; stroke-width: 1.5; }
   .bmedian { stroke: #3b82f6; stroke-width: 2; }
   .bmean { fill: #e6a01e; }
+  .blabel { fill: #888; font-size: 10px; font-variant-numeric: tabular-nums; }
+  .boxcell { width: 210px; }
+  .mbox { display: block; width: 200px; height: 20px; }
   .hint { font-size: .78rem; color: #888; margin: 0 0 .4rem; }
   .scroll { max-height: 460px; overflow: auto; border: 1px solid rgba(128,128,128,.2); border-radius: 6px; }
   table.detail { font-size: .78rem; }
@@ -881,8 +907,8 @@ ${quality}
 <h2>Periods encoded per message</h2>
 <div id="views">${viewFragments}</div>
 <div class="legend">
-  <span class="swatch" style="background:#3b82f6"></span>adaptive column (mode selected per message)
-  <span class="swatch" style="background:#6b7280"></span>fixed-width column
+  Box plots: box = Q1–Q3, blue line = median, orange dot = mean, whiskers = min–max. The per-column
+  bits/period boxes share one x-scale (shown in the header); hover for exact values.
 </div>
 
 <h2>Per-forecast detail (${s.forecasts})</h2>
