@@ -588,6 +588,14 @@ async function report(args: Args): Promise<void> {
   }));
   const bodyBits = columns.reduce((s, c) => s + c.bits, 0);
 
+  // Histogram of periods-per-message: one bin per integer period value across the observed range
+  // (including zero-count bins between, so the x-axis is continuous).
+  const pMin = Math.min(...periodsFit), pMax = Math.max(...periodsFit);
+  const counts = new Map<number, number>();
+  for (const p of periodsFit) counts.set(p, (counts.get(p) ?? 0) + 1);
+  const periodsHistogram: { period: number; count: number }[] = [];
+  for (let p = pMin; p <= pMax; p++) periodsHistogram.push({ period: p, count: counts.get(p) ?? 0 });
+
   const stats: BenchStats = {
     timestamp: new Date().toISOString(),
     resolution: args.resolution,
@@ -598,9 +606,9 @@ async function report(args: Args): Promise<void> {
     skipped,
     skipByColumn: [...skipByColumn.entries()].sort((a, b) => b[1] - a[1]),
     periods: {
-      min: Math.min(...periodsFit), p50: pct(periodsFit, 50), mean: mean(periodsFit),
-      p90: pct(periodsFit, 90), max: Math.max(...periodsFit),
+      min: pMin, p50: pct(periodsFit, 50), mean: mean(periodsFit), p90: pct(periodsFit, 90), max: pMax,
     },
+    periodsHistogram,
     chars: { mean: mean(charsUsed), min: Math.min(...charsUsed), max: Math.max(...charsUsed) },
     versionBits, headerBits, bodyBits,
     occupancyBits: versionBits + headerBits + bodyBits,
@@ -646,6 +654,7 @@ interface BenchStats {
   skipped: number;
   skipByColumn: [string, number][];
   periods: { min: number; p50: number; mean: number; p90: number; max: number };
+  periodsHistogram: { period: number; count: number }[];
   chars: { mean: number; min: number; max: number };
   versionBits: number;
   headerBits: number;
@@ -656,6 +665,38 @@ interface BenchStats {
 
 const esc = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+
+// A static, self-contained SVG bar histogram of periods-per-message (offline-safe, no JS/CDN).
+function renderHistogram(hist: { period: number; count: number }[]): string {
+  const W = 720, H = 240, m = { t: 14, r: 14, b: 38, l: 46 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const n = hist.length;
+  const maxCount = Math.max(...hist.map((h) => h.count), 1);
+  const bw = iw / n;
+  const x = (i: number) => m.l + i * bw;
+  const y = (c: number) => m.t + ih * (1 - c / maxCount);
+
+  // y gridlines/ticks at 0, mid, max
+  const yvals = [...new Set([0, Math.round(maxCount / 2), maxCount])];
+  const yAxis = yvals.map((v) =>
+    `<line x1="${m.l}" y1="${y(v).toFixed(1)}" x2="${W - m.r}" y2="${y(v).toFixed(1)}" class="hgrid"/>` +
+    `<text x="${m.l - 8}" y="${(y(v) + 3.5).toFixed(1)}" class="htick" text-anchor="end">${v}</text>`).join("");
+
+  const bars = hist.map((h, i) =>
+    `<rect x="${(x(i) + bw * 0.12).toFixed(1)}" y="${y(h.count).toFixed(1)}" width="${(bw * 0.76).toFixed(1)}" ` +
+    `height="${(ih * h.count / maxCount).toFixed(1)}" class="hbar"><title>${h.period} periods: ${h.count} forecasts</title></rect>`).join("");
+
+  // Label ~8 evenly spaced x ticks (period values).
+  const step = Math.max(1, Math.round(n / 8));
+  const xAxis = hist.map((h, i) => (i % step === 0 || i === n - 1)
+    ? `<text x="${(x(i) + bw / 2).toFixed(1)}" y="${H - m.b + 16}" class="htick" text-anchor="middle">${h.period}</text>` : "").join("");
+
+  return `<svg viewBox="0 0 ${W} ${H}" class="hist" role="img" aria-label="Histogram of periods encoded per message">
+  ${yAxis}${bars}${xAxis}
+  <text x="${m.l + iw / 2}" y="${H - 4}" class="haxis" text-anchor="middle">periods / message</text>
+  <text x="12" y="${m.t + ih / 2}" class="haxis" text-anchor="middle" transform="rotate(-90 12 ${m.t + ih / 2})">forecasts</text>
+</svg>`;
+}
 
 function renderHtml(s: BenchStats): string {
   const maxBits = Math.max(...s.columns.map((c) => c.bits), 1);
@@ -711,6 +752,11 @@ function renderHtml(s: BenchStats): string {
   tr.total td { font-weight: 600; border-top: 2px solid rgba(128,128,128,.4); border-bottom: none; }
   .legend { font-size: .75rem; color: #888; margin-top: .5rem; }
   .swatch { display: inline-block; width: .7rem; height: .7rem; border-radius: 2px; vertical-align: middle; margin: 0 .2rem 0 .6rem; }
+  .hist { width: 100%; max-width: 720px; height: auto; margin: .5rem 0 1rem; }
+  .hbar { fill: #3b82f6; }
+  .hgrid { stroke: rgba(128,128,128,.25); stroke-width: 1; }
+  .htick { fill: #888; font-size: 11px; }
+  .haxis { fill: #888; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -731,6 +777,7 @@ function renderHtml(s: BenchStats): string {
 ${quality.length ? `<div class="quality">${quality.map((q) => `<p>${q}</p>`).join("")}</div>` : ""}
 
 <h2>Periods encoded per message</h2>
+${renderHistogram(s.periodsHistogram)}
 <table>
   <tr><th>min</th><th>p50</th><th>mean</th><th>p90</th><th>max</th></tr>
   <tr><td class="num">${s.periods.min}</td><td class="num">${s.periods.p50}</td><td class="num">${s.periods.mean.toFixed(1)}</td><td class="num">${s.periods.p90}</td><td class="num">${s.periods.max}</td></tr>
