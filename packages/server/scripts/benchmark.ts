@@ -21,6 +21,7 @@
  * columns, so each 10-day call is ~1.2 units. Free tier is 10,000 units/day.
  */
 import { mkdir, readdir, readFile, writeFile, access } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD, type HourlyData, type Row } from "../src/forecast.ts";
@@ -28,7 +29,9 @@ import { VARS_BIT, v1EncodeBreakdown, type ForecastMessage } from "@weather/prot
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..", "..");
-const CORPUS_DIR = join(REPO_ROOT, "corpus", "raw");
+const DATA_DIR = join(REPO_ROOT, "data");         // gitignored
+const CORPUS_DIR = join(DATA_DIR, "raw");          // cached Open-Meteo responses
+const BENCHMARKS_DIR = join(DATA_DIR, "benchmarks"); // timestamped HTML reports
 
 // ── Collection config ────────────────────────────────────────────────────────────
 
@@ -164,7 +167,6 @@ const LOCATIONS: Location[] = [
   { id: "bloody-mountain", name: "Bloody Mountain, Mammoth Lakes", lat: 37.56, lon: -118.906 },
   { id: "mount-shasta", name: "Mount Shasta", lat: 41.409, lon: -122.193 },
   { id: "mount-tallac", name: "Mount Tallac, Spring Creek", lat: 38.903, lon: -120.099 },
-  { id: "alyeska-south", name: "Alyeska South, Anchorage", lat: 60.962, lon: -149.079 },
   { id: "lynx-peak", name: "Lynx Peak", lat: 61.855, lon: -149.119 },
   { id: "matanuska-susitna-2", name: "Matanuska-Susitna", lat: 62.715, lon: -151.219 },
   { id: "east-twin-peak", name: "East Twin Peak, Palmer", lat: 61.443, lon: -149.147 },
@@ -263,18 +265,20 @@ interface Args {
   maxChars: number;
   verbose: boolean;
   includeIncomplete: boolean;
+  open: boolean; // open the HTML report when done (default true; --no-open to suppress)
   // shared
   location?: string;
 }
 
 function parseArgs(argv: string[]): Args {
   const args: Args = {
-    limit: 0, dryRun: false, resolution: "1h", maxChars: 160, verbose: false, includeIncomplete: false,
+    limit: 0, dryRun: false, resolution: "1h", maxChars: 160, verbose: false, includeIncomplete: false, open: true,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dry-run") args.dryRun = true;
     else if (a === "--verbose") args.verbose = true;
+    else if (a === "--no-open") args.open = false;
     else if (a === "--include-incomplete") args.includeIncomplete = true;
     else if (a === "--limit") args.limit = parseInt(argv[++i], 10) || 0;
     else if (a === "--resolution") args.resolution = argv[++i];
@@ -368,7 +372,7 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
   const perCallWeight = estWeight(HRES_HOURLY_VARS.length, HORIZON_DAYS);
 
   console.log(`== Collect (HRES single runs) ==`);
-  console.log(`  locations: ${locations.map((l) => l.id).join(", ")}`);
+  console.log(`  locations: ${locations.length}` + (args.location ? ` (${args.location})` : ""));
   console.log(`  days/location: ${days.length} (${runIso(days.at(-1)!)} … ${runIso(days[0])})`);
   console.log(`  vars: ${HRES_HOURLY_VARS.length}, horizon: ${HORIZON_DAYS}d, est. weight/call: ${perCallWeight.toFixed(2)} units`);
   console.log(`  full plan: ${locations.length * days.length} days ≈ ` +
@@ -514,7 +518,7 @@ async function report(args: Args): Promise<void> {
   const periodsFit: number[] = [];
   const charsUsed: number[] = [];
   let versionBits = 0, headerBits = 0;
-  let skipped = 0, tempUnderflow = 0, used = 0;
+  let skipped = 0, used = 0;
   const skipByColumn = new Map<string, number>();
 
   for (const rec of records) {
@@ -529,10 +533,6 @@ async function report(args: Args): Promise<void> {
       for (const c of missing) skipByColumn.set(c, (skipByColumn.get(c) ?? 0) + 1);
       continue;
     }
-    // Denali summit temps (~-43°C) underflow the protocol's -40°C floor and clamp to empty — a real
-    // protocol limitation, tracked here as a caveat on the temp/tmin numbers.
-    const coldest = Math.min(...(hourly.temperature_2m ?? []).filter((x): x is number => x != null));
-    if (coldest < -40) tempUnderflow++;
     used++;
 
     // Anchor to the run start, aligned down to the resolution boundary (as parseRequest does).
@@ -576,47 +576,183 @@ async function report(args: Args): Promise<void> {
     }
   }
 
+  // Assemble the stats, then render an HTML report (kept as a timestamped file so old runs can be
+  // compared side by side).
+  const columns: ColStat[] = [...colBits.entries()].map(([name, bitsArr]) => ({
+    name,
+    bits: mean(bitsArr),
+    bitsPerPeriod: mean(colBitsPerPeriod.get(name)!),
+    modes: [...colModes.get(name)!.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([m, c]) => [m, c / bitsArr.length] as [string, number]),
+  }));
+  const bodyBits = columns.reduce((s, c) => s + c.bits, 0);
+
+  const stats: BenchStats = {
+    timestamp: new Date().toISOString(),
+    resolution: args.resolution,
+    maxChars: args.maxChars,
+    encodedVars: ["weathercode", ...BENCH_VARS],
+    forecasts: used,
+    locations: new Set(records.map((r) => r.meta.location.id)).size,
+    skipped,
+    skipByColumn: [...skipByColumn.entries()].sort((a, b) => b[1] - a[1]),
+    periods: {
+      min: Math.min(...periodsFit), p50: pct(periodsFit, 50), mean: mean(periodsFit),
+      p90: pct(periodsFit, 90), max: Math.max(...periodsFit),
+    },
+    chars: { mean: mean(charsUsed), min: Math.min(...charsUsed), max: Math.max(...charsUsed) },
+    versionBits, headerBits, bodyBits,
+    occupancyBits: versionBits + headerBits + bodyBits,
+    columns,
+  };
+
+  await mkdir(BENCHMARKS_DIR, { recursive: true });
+  const stamp = stats.timestamp.replace(/[:.]/g, "-").slice(0, 19);
+  const outPath = join(BENCHMARKS_DIR, `${stamp}_${args.resolution}_${args.maxChars}c.html`);
+  await writeFile(outPath, renderHtml(stats));
+
   console.log(`\n== Benchmark ==`);
-  console.log(`Corpus: ${used} forecasts encoded` +
-    (args.location ? ` (${args.location})` : "") +
+  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations` +
     `  |  resolution=${args.resolution}  max-chars=${args.maxChars}`);
-  console.log(`Encoded vars: weathercode, ${BENCH_VARS.join(", ")}`);
-  if (skipped) {
-    const by = [...skipByColumn.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${n}`).join(", ");
-    console.log(`Data quality: skipped ${skipped} forecast(s) with a fully-null column [${by}] (--include-incomplete to keep)`);
-  }
-  if (tempUnderflow) console.log(`Data quality: ${tempUnderflow}/${used} forecast(s) have temps < -40°C → temp/tmin clamp to the protocol floor`);
-  console.log("");
+  console.log(`  periods/msg: mean ${stats.periods.mean.toFixed(1)} (min ${stats.periods.min}, max ${stats.periods.max})`);
+  console.log(`  report: ${outPath.replace(REPO_ROOT + "/", "")}`);
 
-  console.log(`Periods encoded per message:`);
-  console.log(`  min ${Math.min(...periodsFit)}   p50 ${pct(periodsFit, 50)}   ` +
-    `mean ${mean(periodsFit).toFixed(1)}   p90 ${pct(periodsFit, 90)}   max ${Math.max(...periodsFit)}`);
-  console.log(`Message chars: mean ${mean(charsUsed).toFixed(1)}  min ${Math.min(...charsUsed)}  max ${Math.max(...charsUsed)}\n`);
+  if (args.open) openInBrowser(outPath);
+}
 
-  console.log(`Mean bit occupancy per column of the fitted message (over ${used} forecasts):`);
-  console.log(`  ${"column".padEnd(14)} ${"bits".padStart(7)} ${"bits/period".padStart(12)}   modes`);
-  const fixedRow = (name: string, bits: number) =>
-    console.log(`  ${name.padEnd(14)} ${bits.toFixed(1).padStart(7)} ${"-".padStart(12)}   -`);
-  fixedRow("version", versionBits);
-  fixedRow("header", headerBits);
-  let bodyTotal = 0;
-  for (const [name, bitsArr] of colBits) {
-    const b = mean(bitsArr);
-    bodyTotal += b;
-    const bpp = mean(colBitsPerPeriod.get(name)!);
-    const modes = colModes.get(name)!;
-    const modeStr = modes.size === 0 ? "-"
-      : [...modes.entries()].sort((a, b) => b[1] - a[1])
-          .map(([m, c]) => `${m} ${Math.round((100 * c) / bitsArr.length)}%`).join("  ");
-    console.log(`  ${name.padEnd(14)} ${b.toFixed(1).padStart(7)} ${bpp.toFixed(2).padStart(12)}   ${modeStr}`);
-  }
-  console.log(`  ${"body total".padEnd(14)} ${bodyTotal.toFixed(1).padStart(7)}`);
-  // Occupancy is the bits each column emits into the packed body; the actual payload is smaller when
-  // the most-significant body column is zero-heavy (its high-order zero bits are elided). Base-85
-  // packs ~6.409 bits/char, so payload chars ≈ meaningful body bits / 6.409 + 5 header chars.
-  const occupancy = versionBits + headerBits + bodyTotal;
-  console.log(`  ${"occupancy".padEnd(14)} ${occupancy.toFixed(1).padStart(7)} bits  (~${(occupancy / 6.409).toFixed(0)} chars if no elision)`);
-  console.log(`  actual payload: mean ${mean(charsUsed).toFixed(1)} chars`);
+// Open a file with the OS default handler (the browser, for the HTML report). Best-effort and
+// non-blocking; failures (e.g. headless CI) are ignored.
+function openInBrowser(path: string): void {
+  const cmd = process.platform === "darwin" ? "open"
+    : process.platform === "win32" ? "cmd"
+    : "xdg-open";
+  const cmdArgs = process.platform === "win32" ? ["/c", "start", "", path] : [path];
+  try {
+    spawn(cmd, cmdArgs, { detached: true, stdio: "ignore" }).unref();
+  } catch { /* ignore — opening is a convenience, not required */ }
+}
+
+// ── HTML report ──────────────────────────────────────────────────────────────────
+
+interface ColStat { name: string; bits: number; bitsPerPeriod: number; modes: [string, number][] }
+interface BenchStats {
+  timestamp: string;
+  resolution: string;
+  maxChars: number;
+  encodedVars: string[];
+  forecasts: number;
+  locations: number;
+  skipped: number;
+  skipByColumn: [string, number][];
+  periods: { min: number; p50: number; mean: number; p90: number; max: number };
+  chars: { mean: number; min: number; max: number };
+  versionBits: number;
+  headerBits: number;
+  bodyBits: number;
+  occupancyBits: number;
+  columns: ColStat[];
+}
+
+const esc = (s: string) =>
+  s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+
+function renderHtml(s: BenchStats): string {
+  const maxBits = Math.max(...s.columns.map((c) => c.bits), 1);
+  const modeText = (m: [string, number][]) =>
+    m.length ? m.map(([name, f]) => `${esc(name)} ${Math.round(100 * f)}%`).join(" · ") : "—";
+
+  const bodyRows = s.columns.map((c) => {
+    const share = (100 * c.bits / s.occupancyBits).toFixed(1);
+    return `<tr>
+      <td class="name">${esc(c.name)}</td>
+      <td class="num">${c.bits.toFixed(1)}</td>
+      <td class="num">${c.bitsPerPeriod.toFixed(2)}</td>
+      <td class="num">${share}%</td>
+      <td class="barcell"><div class="bar"><div class="fill${c.modes.length ? " adaptive" : ""}" style="width:${(100 * c.bits / maxBits).toFixed(1)}%"></div></div></td>
+      <td class="modes">${modeText(c.modes)}</td>
+    </tr>`;
+  }).join("\n");
+
+  const card = (num: string, label: string) => `<div class="card"><div class="num">${num}</div><div class="label">${label}</div></div>`;
+
+  const quality: string[] = [];
+  if (s.skipped) quality.push(`Skipped ${s.skipped} forecast(s) with a fully-null column [${s.skipByColumn.map(([c, n]) => `${esc(c)} ${n}`).join(", ")}].`);
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Encoding benchmark — ${esc(s.timestamp)}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 2rem; max-width: 900px; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  .meta { color: #888; font-size: .85rem; margin-bottom: 1.5rem; }
+  .meta code { background: rgba(128,128,128,.15); padding: .05rem .35rem; border-radius: 3px; }
+  .cards { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1.5rem 0; }
+  .card { background: rgba(128,128,128,.1); border-radius: 8px; padding: .9rem 1.2rem; min-width: 120px; }
+  .card .num { font-size: 1.6rem; font-weight: 600; }
+  .card .label { color: #888; font-size: .8rem; }
+  .quality { background: rgba(230,160,30,.12); border-left: 3px solid #e6a01e; padding: .6rem .9rem; border-radius: 4px; font-size: .85rem; margin: 1rem 0; }
+  .quality p { margin: .2rem 0; }
+  h2 { font-size: 1rem; margin: 2rem 0 .6rem; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid rgba(128,128,128,.2); }
+  th { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #888; }
+  td.num { text-align: right; font-family: ui-monospace, monospace; }
+  td.name { font-weight: 500; }
+  td.modes { color: #888; font-size: .8rem; }
+  .barcell { width: 34%; }
+  .bar { background: rgba(128,128,128,.15); border-radius: 3px; height: 12px; }
+  .fill { background: #6b7280; height: 100%; border-radius: 3px; }
+  .fill.adaptive { background: #3b82f6; }
+  tr.total td { font-weight: 600; border-top: 2px solid rgba(128,128,128,.4); border-bottom: none; }
+  .legend { font-size: .75rem; color: #888; margin-top: .5rem; }
+  .swatch { display: inline-block; width: .7rem; height: .7rem; border-radius: 2px; vertical-align: middle; margin: 0 .2rem 0 .6rem; }
+</style>
+</head>
+<body>
+<h1>Encoding benchmark</h1>
+<div class="meta">
+  ${esc(s.timestamp)} · resolution <code>${esc(s.resolution)}</code> · max <code>${s.maxChars}</code> chars ·
+  encoded: ${s.encodedVars.map(esc).join(", ")}
+</div>
+
+<div class="cards">
+  ${card(s.periods.mean.toFixed(1), "mean periods / msg")}
+  ${card(`${s.periods.min}–${s.periods.max}`, "periods range")}
+  ${card(s.chars.mean.toFixed(1), "mean chars")}
+  ${card(String(s.forecasts), "forecasts")}
+  ${card(String(s.locations), "locations")}
+</div>
+
+${quality.length ? `<div class="quality">${quality.map((q) => `<p>${q}</p>`).join("")}</div>` : ""}
+
+<h2>Periods encoded per message</h2>
+<table>
+  <tr><th>min</th><th>p50</th><th>mean</th><th>p90</th><th>max</th></tr>
+  <tr><td class="num">${s.periods.min}</td><td class="num">${s.periods.p50}</td><td class="num">${s.periods.mean.toFixed(1)}</td><td class="num">${s.periods.p90}</td><td class="num">${s.periods.max}</td></tr>
+</table>
+
+<h2>Mean bit occupancy per column</h2>
+<table>
+  <tr><th>column</th><th style="text-align:right">bits</th><th style="text-align:right">bits/period</th><th style="text-align:right">share</th><th>occupancy</th><th>modes</th></tr>
+  <tr><td class="name">version</td><td class="num">${s.versionBits.toFixed(1)}</td><td class="num">—</td><td class="num">${(100 * s.versionBits / s.occupancyBits).toFixed(1)}%</td><td class="barcell"><div class="bar"><div class="fill" style="width:${(100 * s.versionBits / maxBits).toFixed(1)}%"></div></div></td><td class="modes">—</td></tr>
+  <tr><td class="name">header</td><td class="num">${s.headerBits.toFixed(1)}</td><td class="num">—</td><td class="num">${(100 * s.headerBits / s.occupancyBits).toFixed(1)}%</td><td class="barcell"><div class="bar"><div class="fill" style="width:${(100 * s.headerBits / maxBits).toFixed(1)}%"></div></div></td><td class="modes">—</td></tr>
+${bodyRows}
+  <tr class="total"><td>total</td><td class="num">${s.occupancyBits.toFixed(1)}</td><td class="num"></td><td class="num">100%</td><td></td><td class="modes">payload ~${s.chars.mean.toFixed(0)} chars</td></tr>
+</table>
+<div class="legend">
+  <span class="swatch" style="background:#3b82f6"></span>adaptive column (mode selected per message)
+  <span class="swatch" style="background:#6b7280"></span>fixed-width column
+</div>
+
+<script type="application/json" id="benchmark-data">${JSON.stringify(s)}</script>
+</body>
+</html>
+`;
 }
 
 // ── Entry ──────────────────────────────────────────────────────────────────────────

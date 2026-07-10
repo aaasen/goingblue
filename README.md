@@ -175,10 +175,15 @@ pnpm test
 
 The forecast encoding can be tested against real historical forecasts from the [Open-Meteo Single Runs API](https://open-meteo.com/en/docs/single-runs-api). Data for all models is available starting April 2, 2026. There is data for the ECMWF HRES model going back to 2024 but it is sparse so it isn't used for benchmarking. Instead, only data starting April 2 is used and locations are sampled from the southern and northern hemispheres to provide full seasonal coverage.
 
-Benchmarking uses a mix of hand-picked locations and random locations from around the globe. The hand-picked locations are 50 of my Windy favorites which are mostly mountainous locations in Alaska, BC, Cascades, Tetons, Andes, Alps, Norway, and New Zealand. 
+Benchmarking uses a mix of hand-picked locations and random locations from around the globe. The hand-picked locations are 137 of my Windy favorites which are mostly mountainous locations in Alaska, BC, Cascades, Tetons, Andes, Alps, Norway, and New Zealand.
+
+`pnpm benchmark` runs both phases: it collects the forecast corpus (cached under `data/raw`, gitignored, idempotent/resumable) and then encodes each forecast through the production path, writing a timestamped HTML report to `data/benchmarks` (kept so runs can be compared side by side).
 
 ```bash
-pnpm benchmark
+pnpm benchmark                     # collect (idempotent) then report
+pnpm benchmark --dry-run           # preview the collection plan, no fetch
+pnpm benchmark --resolution 6h     # daily/12h/6h/3h/1h (default 1h)
+# other flags: --limit <n> (cap fetches), --max-chars <n>, --location <id>, --verbose, --include-incomplete, --no-open
 ```
 
 ## License

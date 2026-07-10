@@ -5,8 +5,8 @@ node_modules/
 packages/*/dist/
 *.tsbuildinfo
 
-# Collected forecast corpus (raw Open-Meteo responses)
-corpus/
+# Benchmark data: cached Open-Meteo responses (data/raw) and HTML reports (data/benchmarks)
+data/
 
 # macOS
 .DS_Store
