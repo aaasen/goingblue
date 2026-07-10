@@ -85,7 +85,8 @@ zero-padding is simply dropped.
 | snow                   | Sparse   | 1 presence bit + magnitude/nonzero | 6-bit sqrt-companded, 0–200 cm    |
 | rain                   | Sparse   | 1 presence bit + magnitude/nonzero | 6-bit sqrt-companded, 0–144 mm    |
 | precipitation prob.    | Adaptive | mode + FOR/sparse/empty (≤3 bits/value) | 0–100% in eighths                 |
-| wind (sfc/500/600/700) | Fixed    | 7 bits each (4 speed + 3 dir) | 5 mph speed steps, 8-point direction  |
+| wind — surface         | Adaptive speed + raw dir | mode + FOR/sparse/empty speed (≤4 b/val) then 3 b/dir | 5 mph speed steps, 8-point direction |
+| wind — 500/600/700 hPa | Fixed    | 7 bits each (4 speed + 3 dir) | 5 mph speed steps, 8-point direction  |
 | cloud (total/high/mid/low) | Fixed | 3 bits each                  | 0–100% in eighths                     |
 
 ## Development

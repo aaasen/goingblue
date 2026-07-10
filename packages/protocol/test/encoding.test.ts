@@ -334,6 +334,34 @@ describe("v1 round-trip encoding", () => {
     expect(decoded.periods[0]).toHaveLength(8);
     decoded.periods[0].forEach((p) => expect(p.weathercode).toBe(0));
   });
+
+  // Surface wind speed is adaptive (FOR/sparse/empty/raw); direction stays raw 3-bit.
+  const WIND_STEP = 5 * 1.609344;
+  const windMsg = (periods: Period[]) =>
+    msg({ resolution: 4, vars_mask: 1 << VARS_BIT.wind, periods: [periods] });
+
+  it("round-trips varied surface wind speeds (adaptive FOR) and directions", () => {
+    const steps = [3, 5, 4, 6, 7, 4, 5, 3, 6, 5];
+    const dirs = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1];
+    const periods = steps.map((s, i) => ({ weathercode: 0, wind_sfc_kph: s * WIND_STEP, wind_sfc_dir: dirs[i] }));
+    const decoded = roundTrip(windMsg(periods));
+    decoded.periods[0].forEach((p, i) => {
+      expect(p.wind_sfc_kph).toBeCloseTo(steps[i] * WIND_STEP, 3);
+      expect(p.wind_sfc_dir).toBe(dirs[i]);
+    });
+  });
+
+  it("round-trips calm surface wind (all-zero speed → empty column)", () => {
+    const periods = Array.from({ length: 24 }, () => ({ weathercode: 0, wind_sfc_kph: 0, wind_sfc_dir: 0 }));
+    const decoded = roundTrip(windMsg(periods));
+    decoded.periods[0].forEach((p) => { expect(p.wind_sfc_kph).toBe(0); expect(p.wind_sfc_dir).toBe(0); });
+  });
+
+  it("clustered surface wind speeds encode smaller than a full-spread column", () => {
+    const clustered = Array.from({ length: 32 }, (_, i) => ({ weathercode: 0, wind_sfc_kph: (7 + (i % 2)) * WIND_STEP, wind_sfc_dir: 0 }));
+    const spread = Array.from({ length: 32 }, (_, i) => ({ weathercode: 0, wind_sfc_kph: (i % 16) * WIND_STEP, wind_sfc_dir: 0 }));
+    expect(v1MessageToString(windMsg(clustered)).length).toBeLessThan(v1MessageToString(windMsg(spread)).length);
+  });
 });
 
 describe("frame-of-reference temperature encoding", () => {
