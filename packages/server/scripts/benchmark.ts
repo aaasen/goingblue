@@ -459,7 +459,7 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
 
 // ── Phase 2: report ────────────────────────────────────────────────────────────────
 
-interface Record { meta: { location: { id: string }; run: string }; response: any }
+interface Record { meta: { location: { id: string; lat: number; lon: number }; run: string }; response: any }
 
 async function loadCorpus(locationFilter?: string): Promise<Record[]> {
   const locs = (await readdir(CORPUS_DIR, { withFileTypes: true }))
@@ -520,6 +520,7 @@ async function report(args: Args): Promise<void> {
   let versionBits = 0, headerBits = 0;
   let skipped = 0, used = 0;
   const skipByColumn = new Map<string, number>();
+  const detail: ForecastDetail[] = []; // one row per encoded forecast, for the sortable table
 
   for (const rec of records) {
     const hourly = rec.response.hourly as HourlyData;
@@ -571,6 +572,15 @@ async function report(args: Args): Promise<void> {
       }
     }
 
+    detail.push({
+      location: rec.meta.location.id,
+      run: rec.meta.run,
+      lat: rec.meta.location.lat,
+      lon: rec.meta.location.lon,
+      periods: fittedN,
+      bits: Object.fromEntries(breakdown.columns.map((c) => [c.name, c.bits])),
+    });
+
     if (args.verbose) {
       console.log(`  ${rec.meta.location.id} ${rec.meta.run}  periods=${fittedN}  chars=${breakdown.chars}`);
     }
@@ -618,7 +628,7 @@ async function report(args: Args): Promise<void> {
   await mkdir(BENCHMARKS_DIR, { recursive: true });
   const stamp = stats.timestamp.replace(/[:.]/g, "-").slice(0, 19);
   const outPath = join(BENCHMARKS_DIR, `${stamp}_${args.resolution}_${args.maxChars}c.html`);
-  await writeFile(outPath, renderHtml(stats));
+  await writeFile(outPath, renderHtml(stats, detail));
 
   console.log(`\n== Benchmark ==`);
   console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations` +
@@ -644,6 +654,7 @@ function openInBrowser(path: string): void {
 // ── HTML report ──────────────────────────────────────────────────────────────────
 
 interface ColStat { name: string; bits: number; bitsPerPeriod: number; modes: [string, number][] }
+interface ForecastDetail { location: string; run: string; lat: number; lon: number; periods: number; bits: Record<string, number> }
 interface BenchStats {
   timestamp: string;
   resolution: string;
@@ -698,24 +709,41 @@ function renderHistogram(hist: { period: number; count: number }[]): string {
 </svg>`;
 }
 
-function renderHtml(s: BenchStats): string {
-  const maxBits = Math.max(...s.columns.map((c) => c.bits), 1);
+// Sortable per-forecast detail table (click a header to sort; sorting done by the inline script
+// below). One row per encoded forecast with its coordinates, periods, and per-variable bit cost.
+function renderDetailTable(detail: ForecastDetail[], colNames: string[]): string {
+  const head = `<tr><th>location</th><th>run</th><th class="rt">lat</th><th class="rt">lon</th><th class="rt">periods</th>` +
+    colNames.map((c) => `<th class="rt">${esc(c)}</th>`).join("") + `</tr>`;
+  const rows = detail.map((d) =>
+    `<tr><td>${esc(d.location)}</td><td>${esc(d.run)}</td>` +
+    `<td class="num">${d.lat.toFixed(3)}</td><td class="num">${d.lon.toFixed(3)}</td><td class="num">${d.periods}</td>` +
+    colNames.map((c) => `<td class="num">${d.bits[c] ?? 0}</td>`).join("") +
+    `</tr>`).join("\n");
+  return `<div class="scroll"><table class="detail sortable"><thead>${head}</thead><tbody>
+${rows}
+</tbody></table></div>`;
+}
+
+function renderHtml(s: BenchStats, detail: ForecastDetail[]): string {
   const modeText = (m: [string, number][]) =>
     m.length ? m.map(([name, f]) => `${esc(name)} ${Math.round(100 * f)}%`).join(" · ") : "—";
 
-  const bodyRows = s.columns.map((c) => {
-    const share = (100 * c.bits / s.occupancyBits).toFixed(1);
-    return `<tr>
-      <td class="name">${esc(c.name)}</td>
-      <td class="num">${c.bits.toFixed(1)}</td>
-      <td class="num">${c.bitsPerPeriod.toFixed(2)}</td>
-      <td class="num">${share}%</td>
-      <td class="barcell"><div class="bar"><div class="fill${c.modes.length ? " adaptive" : ""}" style="width:${(100 * c.bits / maxBits).toFixed(1)}%"></div></div></td>
-      <td class="modes">${modeText(c.modes)}</td>
-    </tr>`;
-  }).join("\n");
-
-  const card = (num: string, label: string) => `<div class="card"><div class="num">${num}</div><div class="label">${label}</div></div>`;
+  // Occupancy rows: version + header (structural) and every variable column, sorted by share (bits)
+  // descending so the dominant contributors sit at the top.
+  const occRows = [
+    { name: "version", bits: s.versionBits, bpp: null as number | null, modes: [] as [string, number][] },
+    { name: "header", bits: s.headerBits, bpp: null, modes: [] as [string, number][] },
+    ...s.columns.map((c) => ({ name: c.name, bits: c.bits, bpp: c.bitsPerPeriod, modes: c.modes })),
+  ].sort((a, b) => b.bits - a.bits);
+  const maxBits = Math.max(...occRows.map((r) => r.bits), 1);
+  const occRowsHtml = occRows.map((r) => `<tr>
+      <td class="name">${esc(r.name)}</td>
+      <td class="num">${r.bits.toFixed(1)}</td>
+      <td class="num">${r.bpp == null ? "—" : r.bpp.toFixed(2)}</td>
+      <td class="num">${(100 * r.bits / s.occupancyBits).toFixed(1)}%</td>
+      <td class="barcell"><div class="bar"><div class="fill${r.modes.length ? " adaptive" : ""}" style="width:${(100 * r.bits / maxBits).toFixed(1)}%"></div></div></td>
+      <td class="modes">${modeText(r.modes)}</td>
+    </tr>`).join("\n");
 
   const quality: string[] = [];
   if (s.skipped) quality.push(`Skipped ${s.skipped} forecast(s) with a fully-null column [${s.skipByColumn.map(([c, n]) => `${esc(c)} ${n}`).join(", ")}].`);
@@ -732,10 +760,6 @@ function renderHtml(s: BenchStats): string {
   h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
   .meta { color: #888; font-size: .85rem; margin-bottom: 1.5rem; }
   .meta code { background: rgba(128,128,128,.15); padding: .05rem .35rem; border-radius: 3px; }
-  .cards { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1.5rem 0; }
-  .card { background: rgba(128,128,128,.1); border-radius: 8px; padding: .9rem 1.2rem; min-width: 120px; }
-  .card .num { font-size: 1.6rem; font-weight: 600; }
-  .card .label { color: #888; font-size: .8rem; }
   .quality { background: rgba(230,160,30,.12); border-left: 3px solid #e6a01e; padding: .6rem .9rem; border-radius: 4px; font-size: .85rem; margin: 1rem 0; }
   .quality p { margin: .2rem 0; }
   h2 { font-size: 1rem; margin: 2rem 0 .6rem; }
@@ -757,21 +781,23 @@ function renderHtml(s: BenchStats): string {
   .hgrid { stroke: rgba(128,128,128,.25); stroke-width: 1; }
   .htick { fill: #888; font-size: 11px; }
   .haxis { fill: #888; font-size: 11px; }
+  .hint { font-size: .75rem; color: #888; margin: 0 0 .4rem; }
+  .scroll { max-height: 460px; overflow: auto; border: 1px solid rgba(128,128,128,.2); border-radius: 6px; }
+  table.detail { font-size: .78rem; }
+  table.detail th, table.detail td { border-bottom: 1px solid rgba(128,128,128,.12); white-space: nowrap; }
+  table.detail th { position: sticky; top: 0; background: Canvas; cursor: pointer; user-select: none; }
+  table.detail th:hover { color: #3b82f6; }
+  table.detail th.rt, table.detail td.num { text-align: right; }
+  table.detail th[data-dir=asc]::after { content: " ▲"; font-size: .7em; }
+  table.detail th[data-dir=desc]::after { content: " ▼"; font-size: .7em; }
 </style>
 </head>
 <body>
 <h1>Encoding benchmark</h1>
 <div class="meta">
-  ${esc(s.timestamp)} · resolution <code>${esc(s.resolution)}</code> · max <code>${s.maxChars}</code> chars ·
+  ${esc(s.timestamp)} · ${s.forecasts} forecasts · ${s.locations} locations ·
+  resolution <code>${esc(s.resolution)}</code> · max <code>${s.maxChars}</code> chars ·
   encoded: ${s.encodedVars.map(esc).join(", ")}
-</div>
-
-<div class="cards">
-  ${card(s.periods.mean.toFixed(1), "mean periods / msg")}
-  ${card(`${s.periods.min}–${s.periods.max}`, "periods range")}
-  ${card(s.chars.mean.toFixed(1), "mean chars")}
-  ${card(String(s.forecasts), "forecasts")}
-  ${card(String(s.locations), "locations")}
 </div>
 
 ${quality.length ? `<div class="quality">${quality.map((q) => `<p>${q}</p>`).join("")}</div>` : ""}
@@ -786,9 +812,7 @@ ${renderHistogram(s.periodsHistogram)}
 <h2>Mean bit occupancy per column</h2>
 <table>
   <tr><th>column</th><th style="text-align:right">bits</th><th style="text-align:right">bits/period</th><th style="text-align:right">share</th><th>occupancy</th><th>modes</th></tr>
-  <tr><td class="name">version</td><td class="num">${s.versionBits.toFixed(1)}</td><td class="num">—</td><td class="num">${(100 * s.versionBits / s.occupancyBits).toFixed(1)}%</td><td class="barcell"><div class="bar"><div class="fill" style="width:${(100 * s.versionBits / maxBits).toFixed(1)}%"></div></div></td><td class="modes">—</td></tr>
-  <tr><td class="name">header</td><td class="num">${s.headerBits.toFixed(1)}</td><td class="num">—</td><td class="num">${(100 * s.headerBits / s.occupancyBits).toFixed(1)}%</td><td class="barcell"><div class="bar"><div class="fill" style="width:${(100 * s.headerBits / maxBits).toFixed(1)}%"></div></div></td><td class="modes">—</td></tr>
-${bodyRows}
+${occRowsHtml}
   <tr class="total"><td>total</td><td class="num">${s.occupancyBits.toFixed(1)}</td><td class="num"></td><td class="num">100%</td><td></td><td class="modes">payload ~${s.chars.mean.toFixed(0)} chars</td></tr>
 </table>
 <div class="legend">
@@ -796,7 +820,27 @@ ${bodyRows}
   <span class="swatch" style="background:#6b7280"></span>fixed-width column
 </div>
 
+<h2>Per-forecast detail (${detail.length})</h2>
+<p class="hint">Click a column header to sort — e.g. sort by <code>periods</code> to find the outliers. Bits are the exact per-column cost of that forecast's fitted message.</p>
+${renderDetailTable(detail, s.columns.map((c) => c.name))}
+
 <script type="application/json" id="benchmark-data">${JSON.stringify(s)}</script>
+<script>
+for (const table of document.querySelectorAll("table.sortable")) {
+  const ths = table.tHead.rows[0].cells;
+  for (let i = 0; i < ths.length; i++) ths[i].addEventListener("click", () => {
+    const dir = ths[i].dataset.dir === "asc" ? "desc" : "asc";
+    for (const th of ths) delete th.dataset.dir;
+    ths[i].dataset.dir = dir;
+    const mul = dir === "asc" ? 1 : -1, tb = table.tBodies[0];
+    [...tb.rows].sort((a, b) => {
+      const x = a.cells[i].textContent, y = b.cells[i].textContent;
+      const nx = parseFloat(x), ny = parseFloat(y);
+      return mul * (!isNaN(nx) && !isNaN(ny) ? nx - ny : x.localeCompare(y));
+    }).forEach((r) => tb.appendChild(r));
+  });
+}
+</script>
 </body>
 </html>
 `;
