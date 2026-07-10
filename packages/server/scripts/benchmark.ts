@@ -21,7 +21,7 @@
  * Open-Meteo call weight ≈ max(1, nVars/10) × max(1, weeks/2). A 10-day GFS call (~18 vars) is ~1.8
  * units; the full-year, all-locations pull is ~9.1k units. Free tier is 10,000 units/day.
  */
-import { mkdir, readdir, readFile, writeFile, access } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile, rename, access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -452,7 +452,9 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
           meta: { location: loc, run, model: model.id, api: model.api, url: buildUrl(model, loc, startMs), fetched_at: new Date().toISOString() },
           response: res.raw,
         };
-        await writeFile(path, JSON.stringify(record));
+        // Atomic write (tmp + rename) so a concurrent --report-only never reads a half-written file.
+        await writeFile(`${path}.tmp`, JSON.stringify(record));
+        await rename(`${path}.tmp`, path);
         fetched++;
         weightSpent += perCallWeight;
         console.log(`  OK   ${model.id} ${loc.id} ${run} → ${path.replace(REPO_ROOT + "/", "")}`);
@@ -480,7 +482,12 @@ async function loadModel(modelId: string, locationFilter?: string): Promise<Reco
     const dir = join(modelDir, loc);
     for (const f of await readdir(dir)) {
       if (!f.endsWith(".json")) continue;
-      records.push(JSON.parse(await readFile(join(dir, f), "utf8")) as Record);
+      try {
+        records.push(JSON.parse(await readFile(join(dir, f), "utf8")) as Record);
+      } catch {
+        // A concurrent --collect-only may be mid-write (or a leftover .tmp was renamed under us);
+        // skip this file — the next report pass will include it once it's complete.
+      }
     }
   }
   return records;
