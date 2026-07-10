@@ -15,7 +15,7 @@
  *   node packages/server/scripts/benchmark.ts --collect-only      # expand the cache, no report
  *   node packages/server/scripts/benchmark.ts --report-only       # report from cache, no collection
  *   node packages/server/scripts/benchmark.ts --dry-run           # preview collection plan, no fetch
- *   node packages/server/scripts/benchmark.ts --resolution 6h     # daily/12h/6h/3h/1h (default 1h)
+ *   node packages/server/scripts/benchmark.ts --resolution 6h     # 1h/3h/6h (default 1h)
  *   # other flags: --limit <n>, --max-chars <n>, --location <id>, --verbose, --include-incomplete, --no-open
  *
  * Open-Meteo call weight ≈ max(1, nVars/10) × max(1, weeks/2). A 10-day GFS call (~18 vars) is ~1.8
@@ -234,8 +234,10 @@ const LOCATIONS: Location[] = [
 
 // ── Report config ────────────────────────────────────────────────────────────────
 
-const RESOLUTION_IDX: Record<string, number> = { daily: 0, "12h": 1, "6h": 2, "3h": 3, "1h": 4 };
-const RESOLUTION_ORDER = ["1h", "3h", "6h", "12h", "daily"]; // selector order (fine → coarse)
+// daily/12h are omitted: at those resolutions a forecast almost always fits every period, so they're
+// not size-constrained and add compute without insight. (Values are the v1 protocol resolution index.)
+const RESOLUTION_IDX: Record<string, number> = { "6h": 2, "3h": 3, "1h": 4 };
+const RESOLUTION_ORDER = ["1h", "3h", "6h"]; // selector order (fine → coarse)
 const V1_MAX_PERIODS = 128;
 
 // Protocol variable groups, mirroring the app (BuilderTab.tsx). weathercode is always encoded by the

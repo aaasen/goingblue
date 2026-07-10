@@ -179,7 +179,7 @@ The forecast encoding is tested against real weather from Open-Meteo's [Historic
 
 Benchmarking uses a mix of hand-picked locations and random locations from around the globe. The hand-picked locations are 137 of my Windy favorites which are mostly mountainous locations in Alaska, BC, Cascades, Tetons, Andes, Alps, Norway, and New Zealand.
 
-The HTML report has interactive **time resolution** (1h/3h/6h/12h/daily) and **variable** selectors matching the app (Clouds, High Altitude Winds, Freezing Level, on top of the always-on base). The periods histogram, bit-occupancy table, and per-forecast detail table all update with the selection so you can see how periods/forecast depends on the chosen resolution and variables. (`--resolution` sets which one the report opens on; all resolutions are always computed.)
+The HTML report has interactive **time resolution** (1h/3h/6h) and **variable** selectors matching the app (Clouds, High Altitude Winds, Freezing Level, on top of the always-on base). The periods histogram, bit-occupancy table, and per-forecast detail table all update with the selection so you can see how periods/forecast depends on the chosen resolution and variables. (`--resolution` sets which one the report opens on; all resolutions are always computed.)
 
 `pnpm benchmark` runs both phases: it collects the forecast corpus (cached under `data/raw/<model>`, gitignored, idempotent/resumable) and then encodes each forecast through the production path, writing a timestamped HTML report to `data/benchmarks` (kept so runs can be compared side by side).
 
@@ -188,7 +188,7 @@ pnpm benchmark                     # collect (idempotent) then report
 pnpm benchmark --report-only       # skip collection; report from cached data
 pnpm benchmark --collect-only      # expand the cache without reporting (the pull can be long)
 pnpm benchmark --dry-run           # preview the collection plan, no fetch
-pnpm benchmark --resolution 6h     # daily/12h/6h/3h/1h (default 1h)
+pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
 # other flags: --limit <n> (cap fetches), --max-chars <n>, --location <id>, --verbose, --include-incomplete, --no-open
 ```
 
