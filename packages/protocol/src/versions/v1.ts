@@ -20,8 +20,8 @@ const VERSION = V1_VERSION;
 // a partial final day. periods:7 stores (nPeriods - 1), i.e. 1..128 periods.
 //
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
-// packed header. Packed header layout (24 bits):
-//   code:7 periods:7 elev:7 wc_table:3
+// packed header. Packed header layout (25 bits):
+//   code:7 periods:7 elev:7 wc_table:4
 // The body carries no length field — it is packed little-endian and self-delimiting (the decoder
 // knows the structure and reads exactly the bits it needs; see encodeBodyLE/decodeBodyLE).
 export const V1_PERIODS_BITS = 7;
@@ -30,14 +30,14 @@ export const V1_MAX_PERIODS = 1 << V1_PERIODS_BITS; // 128
 // Message code: client-assigned key the response echoes; see RequestContext / model.ts.
 const CODE_BITS = 7;
 // Huffman codebook selector for the weathercode column (see huffman.ts).
-const WC_TABLE_BITS = 3;
+const WC_TABLE_BITS = 4;
 // Elevation: 7 bits in 100 m steps → 0..12700 m. It's a coarse sanity check (summit vs. valley),
 // so metre precision isn't needed.
 const ELEV_BITS = 7;
 const ELEV_STEP_M = 100;
 
 export const V1_HEADER_BITS =
-  CODE_BITS + V1_PERIODS_BITS + ELEV_BITS + WC_TABLE_BITS; // 24
+  CODE_BITS + V1_PERIODS_BITS + ELEV_BITS + WC_TABLE_BITS; // 25
 // Total chars before the body: the shared version prefix plus this version's packed header.
 export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 4 = 5
 const HEADER_BITS = V1_HEADER_BITS;

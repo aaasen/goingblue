@@ -13,7 +13,7 @@ import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD, type HourlyData } from
 import { WMO2IDX } from "@weather/protocol";
 
 const CORPUS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "data", "raw", "gfs");
-const K = 8;                    // codebook count — fills the 3-bit wc_table selector
+const K = 16;                   // codebook count — fills the 4-bit wc_table selector
 const NSYM = Object.keys(WMO2IDX).length; // 28
 const RES_IDX = 4;              // 1h — finest, most samples
 const WEIGHT_SCALE = 1000;      // centroid (sums to 1) → integer frequency weights
