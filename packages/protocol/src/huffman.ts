@@ -119,3 +119,55 @@ export function chooseWcTable(wmoIdxs: number[]): number {
   }
   return best;
 }
+
+// ── Wind direction codebooks ────────────────────────────────────────────────────
+// Static Huffman codebooks for the 8-point wind direction (symbols are direction indices 0..7; see
+// CARDINALS). Derived by k-means clustering the corpus's per-column direction distributions across
+// all wind levels (see server/scripts/derive-wind-dir-codebooks.ts) — each codebook captures a
+// dominant-direction regime, plus a uniform table so a column is never worse than raw 3 bits. The
+// encoder picks the cheapest per wind column and stores its index in a 3-bit selector.
+const WIND_DIR_WEIGHTS: number[][] = [
+  [34, 17, 13, 21, 98, 503, 243, 71],
+  [97, 34, 21, 23, 43, 129, 352, 301],
+  [1, 1, 1, 1, 1, 1, 1, 1],
+  [120, 23, 12, 19, 22, 39, 140, 624],
+  [53, 46, 123, 428, 156, 63, 47, 84],
+  [13, 6, 6, 8, 24, 166, 651, 126],
+  [451, 102, 27, 28, 34, 54, 69, 236],
+  [45, 32, 35, 105, 417, 221, 90, 55],
+];
+
+export const WIND_DIR_TABLE_COUNT = WIND_DIR_WEIGHTS.length; // 8
+export const WIND_DIR_TABLE_BITS = 3;                        // per-column codebook selector width
+
+const WIND_DIR_TABLES: Table[] = WIND_DIR_WEIGHTS.map((w) => {
+  const codes = canonicalCodes(huffmanLengths(w));
+  return { codes, root: buildTrie(codes) };
+});
+
+// Appends the Huffman code for direction index `dirIdx` (0..7) under `table`.
+export function encodeWindDir(bits: number[], table: number, dirIdx: number): void {
+  for (const b of WIND_DIR_TABLES[table].codes[dirIdx]) bits.push(b);
+}
+
+// Reads one Huffman-coded direction (under `table`), returning [dirIdx, nextPos].
+export function decodeWindDir(bits: number[], pos: number, table: number): [number, number] {
+  let node = WIND_DIR_TABLES[table].root;
+  while (node.sym === undefined) {
+    node = node.child[bits[pos++] ?? 0]!;
+    if (!node) throw new Error("huffman: invalid wind-direction bitstream");
+  }
+  return [node.sym, pos];
+}
+
+// Picks the codebook that encodes `dirIdxs` in the fewest total bits.
+export function chooseWindDirTable(dirIdxs: number[]): number {
+  let best = 0;
+  let bestBits = Infinity;
+  for (let t = 0; t < WIND_DIR_TABLES.length; t++) {
+    let total = 0;
+    for (const idx of dirIdxs) total += WIND_DIR_TABLES[t].codes[idx].length;
+    if (total < bestBits) { bestBits = total; best = t; }
+  }
+  return best;
+}

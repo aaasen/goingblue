@@ -5,6 +5,10 @@ import {
   chooseWcTable,
   WC_TABLE_COUNT,
   WMO_CODES,
+  encodeWindDir,
+  decodeWindDir,
+  chooseWindDirTable,
+  WIND_DIR_TABLE_COUNT,
 } from "../src/index.js";
 
 function totalBits(idxs: number[], table: number): number {
@@ -53,5 +57,50 @@ describe("weathercode Huffman", () => {
     }
     // And it beats the near-uniform general table (0) for this skewed input.
     expect(totalBits(allClear, chosen)).toBeLessThan(totalBits(allClear, 0));
+  });
+});
+
+function dirBits(idxs: number[], table: number): number {
+  const bits: number[] = [];
+  for (const i of idxs) encodeWindDir(bits, table, i);
+  return bits.length;
+}
+
+describe("wind direction Huffman", () => {
+  it("round-trips every direction under every codebook", () => {
+    for (let table = 0; table < WIND_DIR_TABLE_COUNT; table++) {
+      for (let dir = 0; dir < 8; dir++) {
+        const bits: number[] = [];
+        encodeWindDir(bits, table, dir);
+        expect(bits.length).toBeGreaterThan(0);
+        const [out, pos] = decodeWindDir(bits, 0, table);
+        expect(out).toBe(dir);
+        expect(pos).toBe(bits.length); // consumed exactly the code
+      }
+    }
+  });
+
+  it("decodes a concatenated direction sequence unambiguously (prefix-free)", () => {
+    const seq = [6, 6, 7, 6, 0, 3, 4, 5, 6, 6, 1, 2, 6];
+    for (let table = 0; table < WIND_DIR_TABLE_COUNT; table++) {
+      const bits: number[] = [];
+      for (const d of seq) encodeWindDir(bits, table, d);
+      const out: number[] = [];
+      let pos = 0;
+      for (let k = 0; k < seq.length; k++) { const [sym, p] = decodeWindDir(bits, pos, table); out.push(sym); pos = p; }
+      expect(out).toEqual(seq);
+      expect(pos).toBe(bits.length);
+    }
+  });
+
+  it("a peaked column costs fewer bits than a uniform spread, and beats raw 3-bit", () => {
+    const peaked = Array(64).fill(6); // all from one direction (W)
+    const spread = Array.from({ length: 64 }, (_, i) => i % 8);
+    const chosen = chooseWindDirTable(peaked);
+    for (let t = 0; t < WIND_DIR_TABLE_COUNT; t++) {
+      expect(dirBits(peaked, chosen)).toBeLessThanOrEqual(dirBits(peaked, t));
+    }
+    expect(dirBits(peaked, chosen)).toBeLessThan(dirBits(spread, chooseWindDirTable(spread)));
+    expect(dirBits(peaked, chosen)).toBeLessThan(peaked.length * 3); // beats raw 3 bits/value
   });
 });

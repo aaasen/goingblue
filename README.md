@@ -36,9 +36,10 @@ cheapest per column, so the encoded size is never larger than fixed-width.
 - **Fixed (linear)** — the value is mapped to a fixed-width integer with a constant step size and
   offset. Constant width; used where the range is small and roughly uniform.
 - **Huffman** — a static, prefix-free variable-length code so common conditions cost fewer bits.
-  Several regime-tuned codebooks exist (e.g. dry, cold/snow, maritime, convective); the header's
-  `wc_table` field names which one, and the encoder selects the codebook that yields the fewest
-  bits for the message.
+  Used for weathercode (several regime-tuned codebooks — dry, cold/snow, maritime, convective — named
+  by the header's `wc_table` field) and for surface wind direction (8 codebooks derived by clustering
+  the corpus's per-column direction distributions, selected by a 3-bit index before the column). In
+  both cases the encoder picks the codebook that yields the fewest bits.
 - **Frame-of-reference (FOR)** — store one baseline (the column minimum) plus a per-column bit
   width `W`; each value is its unsigned offset from the baseline in `W` bits. `W` adapts to the
   actual spread, so tightly-clustered columns shrink and an all-equal column costs zero bits per
@@ -85,7 +86,7 @@ zero-padding is simply dropped.
 | snow                   | Sparse   | 1 presence bit + magnitude/nonzero | 6-bit sqrt-companded, 0–200 cm    |
 | rain                   | Sparse   | 1 presence bit + magnitude/nonzero | 6-bit sqrt-companded, 0–144 mm    |
 | precipitation prob.    | Adaptive | mode + FOR/sparse/empty (≤3 bits/value) | 0–100% in eighths                 |
-| wind — surface         | Adaptive speed + raw dir | mode + FOR/sparse/empty speed (≤4 b/val) then 3 b/dir | 5 mph speed steps, 8-point direction |
+| wind — surface         | Adaptive speed + Huffman dir | speed: mode + FOR/sparse/empty (≤4 b/val); dir: 3-bit codebook + Huffman (~1–3 b/val) | 5 mph speed steps, 8-point direction |
 | wind — 500/600/700 hPa | Fixed    | 7 bits each (4 speed + 3 dir) | 5 mph speed steps, 8-point direction  |
 | cloud (total/high/mid/low) | Fixed | 3 bits each                  | 0–100% in eighths                     |
 
@@ -190,6 +191,13 @@ pnpm benchmark --dry-run           # preview the collection plan, no fetch
 pnpm benchmark --resolution 6h     # daily/12h/6h/3h/1h (default 1h)
 # other flags: --limit <n> (cap fetches), --max-chars <n>, --location <id>, --verbose, --include-incomplete, --no-open
 ```
+
+## Encoding improvements
+
+1. Adaptive encoding for precipitation probability. 3 bits -> 1.71 bits (1h mean). Periods/message 43.5 -> 49.6
+2. Adaptive encoding for wind speed. Wind total 7 bits -> 4.81 bits (1h mean). Periods/message 46.9 -> 51.4.
+3. Huffman coding for wind direction. Wind total 4.81 bits -> 4.05 bits (1h mean). Periods/message 51.4 -> 53.8.
+
 
 ## License
 
