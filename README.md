@@ -177,7 +177,9 @@ The forecast encoding can be tested against real historical forecasts from the [
 
 Benchmarking uses a mix of hand-picked locations and random locations from around the globe. The hand-picked locations are 137 of my Windy favorites which are mostly mountainous locations in Alaska, BC, Cascades, Tetons, Andes, Alps, Norway, and New Zealand.
 
-`pnpm benchmark` runs both phases: it collects the forecast corpus (cached under `data/raw`, gitignored, idempotent/resumable) and then encodes each forecast through the production path, writing a timestamped HTML report to `data/benchmarks` (kept so runs can be compared side by side).
+Forecasts are collected from multiple models (HRES and GFS) because HRES doesn't provide high-altitude winds or freezing level. The HTML report has an interactive **model** selector (HRES/GFS) and a **variable** selector matching the app (Clouds, High Altitude Winds, Freezing Level, on top of the always-on base). When a model can't supply a selected variable, that column is pulled from GFS. The periods histogram, bit-occupancy table, and per-forecast detail table all update with the selection so you can see how periods/forecast depends on the chosen variables.
+
+`pnpm benchmark` runs both phases: it collects the forecast corpus (cached under `data/raw/<model>`, gitignored, idempotent/resumable) and then encodes each forecast through the production path, writing a timestamped HTML report to `data/benchmarks` (kept so runs can be compared side by side).
 
 ```bash
 pnpm benchmark                     # collect (idempotent) then report

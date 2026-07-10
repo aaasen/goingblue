@@ -35,29 +35,41 @@ const BENCHMARKS_DIR = join(DATA_DIR, "benchmarks"); // timestamped HTML reports
 
 // ── Collection config ────────────────────────────────────────────────────────────
 
-// HRES (ecmwf_ifs) surface variables — mirrors SURFACE_VARS in server/src/forecast.ts minus:
-//  - freezing_level_height: HRES does not provide it (see MODEL_NO_PRESSURE there);
-//  - precipitation_probability: only produced by ECMWF's *ensemble* model (ecmwf_ifs025_ensemble),
-//    which single-runs rejects as "model run not available". HRES has no deterministic precip
-//    probability anyway, and the protocol's precip-prob column is a constant 3-bit fixed field, so
-//    its absence does not affect encoding-strategy comparisons.
-// Pressure-level wind/temp are also absent from HRES, so they are not requested.
-const HRES_HOURLY_VARS = [
-  "temperature_2m",
-  "wind_speed_10m",
-  "wind_direction_10m",
-  "wind_gusts_10m",
-  "weather_code",
-  "snowfall",
-  "rain",
-  "showers",
-  "cloud_cover",
-  "cloud_cover_high",
-  "cloud_cover_mid",
-  "cloud_cover_low",
+// Open-Meteo hourly series, grouped to mirror the app's variable selector (BuilderTab.tsx). Base is
+// always requested; each optional group maps to protocol columns the user can toggle.
+//  - precipitation_probability is NOT requested: it's only produced by ECMWF's ensemble variant,
+//    which single-runs rejects. The protocol's precip column is a constant 3-bit fixed field, so its
+//    absence doesn't affect encoding comparisons (it encodes as a zero column of fixed width).
+const BASE_HOURLY = [
+  "temperature_2m", "wind_speed_10m", "wind_direction_10m",
+  "weather_code", "snowfall", "rain", "showers",
 ];
+const GROUP_HOURLY = {
+  clouds: ["cloud_cover_high", "cloud_cover_mid", "cloud_cover_low"], // app "Clouds" = high/mid/low
+  highwind: ["wind_speed_500hPa", "wind_direction_500hPa", "wind_speed_600hPa",
+    "wind_direction_600hPa", "wind_speed_700hPa", "wind_direction_700hPa"],
+  freeze: ["freezing_level_height"],
+} as const;
+type GroupId = keyof typeof GROUP_HOURLY;
+const GROUP_IDS: GroupId[] = ["clouds", "highwind", "freeze"];
+const GROUP_LABEL: Record<GroupId, string> = {
+  clouds: "Clouds", highwind: "High Altitude Winds", freeze: "Freezing Level",
+};
 
-const COLLECT_MODEL = "ecmwf_ifs"; // HRES, as named by the Open-Meteo API
+// Collected models and which optional groups each supports (verified against the single-runs API).
+// GFS supplies everything and is the fallback source for a selected model's unsupported groups.
+interface ModelDef { id: string; api: string; label: string; groups: Record<GroupId, boolean> }
+const MODELS: ModelDef[] = [
+  { id: "hres", api: "ecmwf_ifs",    label: "HRES", groups: { clouds: true, highwind: false, freeze: false } },
+  { id: "gfs",  api: "gfs_seamless", label: "GFS",  groups: { clouds: true, highwind: true,  freeze: true } },
+];
+const FALLBACK_MODEL = "gfs"; // supplies groups the selected model lacks
+
+// Open-Meteo hourly variables to request for a model: base + every group it supports.
+function modelHourly(m: ModelDef): string[] {
+  return [...BASE_HOURLY, ...GROUP_IDS.filter((g) => m.groups[g]).flatMap((g) => GROUP_HOURLY[g])];
+}
+
 const ENDPOINT = "https://single-runs-api.open-meteo.com/v1/forecast";
 // Sample only from 2026-04-02, when the single-runs archive begins for ALL models (HRES alone goes
 // back to 2024-03-14, but those older runs are frequently incomplete — whole variables come back
@@ -227,31 +239,36 @@ const LOCATIONS: Location[] = [
 // ── Report config ────────────────────────────────────────────────────────────────
 
 const RESOLUTION_IDX: Record<string, number> = { daily: 0, "12h": 1, "6h": 2, "3h": 3, "1h": 4 };
-const ENCODE_MODEL = "HRES"; // corpus is HRES-only; toFullPeriod strips the pressure/freeze columns
-
-// Variables encoded in the benchmark: the HRES-available surface columns the v1 protocol can carry.
-// weathercode is always encoded. precip (probability) is excluded — HRES has no deterministic value
-// and it isn't collected; freeze / 500-700 hPa winds are excluded — HRES doesn't provide them.
-// wind_gusts_10m is collected but the v1 model has no gust field yet, so it isn't encoded here.
-const BENCH_VARS = ["temp", "tmin", "snow", "rain", "wind", "cc", "cch", "ccm", "ccl"] as const;
-const BENCH_MASK = BENCH_VARS.reduce((m, v) => m | (1 << VARS_BIT[v]), 0);
-
 const V1_MAX_PERIODS = 128;
 
-// Raw Open-Meteo series backing each encoded column. A forecast is skipped if any column has no
-// data at all (every value null), because nulls coerce to 0 downstream and would silently encode as
-// an all-zero column — indistinguishable from a genuinely calm/clear/0°C forecast, and it inflates
-// how many periods "fit". rain sums rain + showers, so it counts as present if either has data.
-const REQUIRED_COLUMNS: { column: string; anyOf: string[] }[] = [
-  { column: "weathercode", anyOf: ["weather_code"] },
-  { column: "temp/tmin", anyOf: ["temperature_2m"] },
-  { column: "snow", anyOf: ["snowfall"] },
-  { column: "rain", anyOf: ["rain", "showers"] },
-  { column: "wind", anyOf: ["wind_speed_10m"] },
-  { column: "cc", anyOf: ["cloud_cover"] },
-  { column: "cch", anyOf: ["cloud_cover_high"] },
-  { column: "ccm", anyOf: ["cloud_cover_mid"] },
-  { column: "ccl", anyOf: ["cloud_cover_low"] },
+// Protocol variable groups, mirroring the app (BuilderTab.tsx). weathercode is always encoded by the
+// protocol (not in a mask). BASE is always on; each toggleable group maps to protocol var bits.
+const BASE_VARS = ["precip", "temp", "tmin", "snow", "rain", "wind"];
+const GROUP_VARS: Record<GroupId, string[]> = {
+  clouds: ["cch", "ccm", "ccl"],
+  highwind: ["w500", "w600", "w700"],
+  freeze: ["freeze"],
+};
+const maskOf = (vars: string[]) => vars.reduce((m, v) => m | (1 << VARS_BIT[v]), 0);
+const BASE_MASK = maskOf(BASE_VARS);
+// The Row fields each group pulls from a (possibly fallback) model, for merging across models.
+const GROUP_ROW_FIELDS: Record<GroupId, (keyof Row)[]> = {
+  clouds: ["cloud_cover_high", "cloud_cover_mid", "cloud_cover_low"],
+  highwind: ["wind_speed_500hPa", "wind_direction_500hPa", "wind_speed_600hPa",
+    "wind_direction_600hPa", "wind_speed_700hPa", "wind_direction_700hPa"],
+  freeze: ["freezing_level_m"],
+};
+
+// All 8 variable-group combinations (bit i = GROUP_IDS[i]); combo 0b001 = Clouds only is the default.
+const COMBOS = [...Array(1 << GROUP_IDS.length).keys()];
+const comboGroups = (c: number): GroupId[] => GROUP_IDS.filter((_, i) => c & (1 << i));
+const comboMask = (c: number) => BASE_MASK | maskOf(comboGroups(c).flatMap((g) => GROUP_VARS[g]));
+const DEFAULT_COMBO = 1 << GROUP_IDS.indexOf("clouds"); // Clouds on
+
+// Base Open-Meteo series required for a usable forecast (a fully-null one would encode as a silent
+// zero column). rain counts as present if rain OR showers has data.
+const REQUIRED_BASE: string[][] = [
+  ["temperature_2m"], ["weather_code"], ["snowfall"], ["rain", "showers"], ["wind_speed_10m"],
 ];
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────
@@ -317,22 +334,22 @@ function estWeight(nVars: number, days: number): number {
   return Math.max(1, nVars / 10) * Math.max(1, days / 7 / 2);
 }
 
-function buildUrl(loc: Location, run: string): string {
+function buildUrl(model: ModelDef, loc: Location, run: string): string {
   const params = new URLSearchParams({
     latitude: String(loc.lat),
     longitude: String(loc.lon),
     run,
-    hourly: HRES_HOURLY_VARS.join(","),
+    hourly: modelHourly(model).join(","),
     timezone: "UTC",
     forecast_days: String(HORIZON_DAYS),
-    models: COLLECT_MODEL,
+    models: model.api,
   });
   if (loc.elev_m !== undefined) params.set("elevation", String(loc.elev_m));
   return `${ENDPOINT}?${params}`;
 }
 
-function cachePath(loc: Location, run: string): string {
-  return join(CORPUS_DIR, loc.id, `${run.replace(/[:]/g, "")}.json`);
+function cachePath(modelId: string, loc: Location, run: string): string {
+  return join(CORPUS_DIR, modelId, loc.id, `${run.replace(/[:]/g, "")}.json`);
 }
 
 async function exists(p: string): Promise<boolean> {
@@ -355,11 +372,11 @@ async function fetchRun(url: string): Promise<FetchResult> {
   return { ok: false, status: resp.status, body, unavailable };
 }
 
-// Summarise one raw response so the first fetch reveals whether HRES actually returns each variable.
-function shapeReport(raw: any): string {
+// Summarise one raw response so the first fetch reveals whether the model returns each variable.
+function shapeReport(raw: any, vars: string[]): string {
   const hourly = raw?.hourly ?? {};
   const n = Array.isArray(hourly.time) ? hourly.time.length : 0;
-  const lines = HRES_HOURLY_VARS.map((v) => {
+  const lines = vars.map((v) => {
     const arr: (number | null)[] | undefined = hourly[v];
     if (!Array.isArray(arr)) return `    ${v.padEnd(28)} MISSING`;
     return `    ${v.padEnd(28)} ${arr.filter((x) => x != null).length}/${arr.length} non-null`;
@@ -369,87 +386,90 @@ function shapeReport(raw: any): string {
 
 async function collect(args: Args, locations: Location[]): Promise<void> {
   const days = sampleDays();
-  const perCallWeight = estWeight(HRES_HOURLY_VARS.length, HORIZON_DAYS);
+  const totalCalls = MODELS.length * locations.length * days.length;
+  const totalUnits = MODELS.reduce((s, m) => s + locations.length * days.length * estWeight(modelHourly(m).length, HORIZON_DAYS), 0);
 
-  console.log(`== Collect (HRES single runs) ==`);
+  console.log(`== Collect (single runs) ==`);
+  console.log(`  models: ${MODELS.map((m) => `${m.id}(${modelHourly(m).length} vars)`).join(", ")}`);
   console.log(`  locations: ${locations.length}` + (args.location ? ` (${args.location})` : ""));
-  console.log(`  days/location: ${days.length} (${runIso(days.at(-1)!)} … ${runIso(days[0])})`);
-  console.log(`  vars: ${HRES_HOURLY_VARS.length}, horizon: ${HORIZON_DAYS}d, est. weight/call: ${perCallWeight.toFixed(2)} units`);
-  console.log(`  full plan: ${locations.length * days.length} days ≈ ` +
-    `${(locations.length * days.length * perCallWeight).toFixed(0)} units (of 10,000/day)`);
+  console.log(`  days/location: ${days.length} (${runIso(days.at(-1)!)} … ${runIso(days[0])}), horizon: ${HORIZON_DAYS}d`);
+  console.log(`  full plan: ${totalCalls} calls ≈ ${totalUnits.toFixed(0)} units (of 10,000/day)`);
   if (args.limit) console.log(`  --limit ${args.limit}: capping this run to ${args.limit} fetches`);
 
   let fetched = 0, cached = 0, failed = 0, attempts = 0, weightSpent = 0;
-  let firstShapePrinted = false;
+  const shapePrinted = new Set<string>(); // one shape summary per model
 
-  outer: for (const loc of locations) {
-    for (const dayMs of days) {
-      const candidates = RUN_HOURS.map((h) => runIso(dayMs + h * 3600 * 1000));
+  outer: for (const model of MODELS) {
+    const perCallWeight = estWeight(modelHourly(model).length, HORIZON_DAYS);
+    for (const loc of locations) {
+      for (const dayMs of days) {
+        const candidates = RUN_HOURS.map((h) => runIso(dayMs + h * 3600 * 1000));
 
-      // Resumable: skip the day if any candidate run (00Z or its 12Z fallback) is already cached.
-      let already = false;
-      for (const run of candidates) {
-        if (await exists(cachePath(loc, run))) { already = true; break; }
-      }
-      if (already) { cached++; continue; }
+        // Resumable: skip the day if any candidate run (00Z or its 12Z fallback) is already cached.
+        let already = false;
+        for (const run of candidates) {
+          if (await exists(cachePath(model.id, loc, run))) { already = true; break; }
+        }
+        if (already) { cached++; continue; }
 
-      if (args.limit && attempts >= args.limit) break outer;
-      attempts++;
+        if (args.limit && attempts >= args.limit) break outer;
+        attempts++;
 
-      if (args.dryRun) {
-        console.log(`  DRY ${loc.id} ${candidates[0]} (fallback: ${candidates.slice(1).join(", ")})`);
-        weightSpent += perCallWeight;
-        continue;
-      }
+        if (args.dryRun) {
+          console.log(`  DRY ${model.id} ${loc.id} ${candidates[0]} (fallback: ${candidates.slice(1).join(", ")})`);
+          weightSpent += perCallWeight;
+          continue;
+        }
 
-      // Try each candidate run hour in order; stop at the first that exists.
-      let saved = false, detailLogged = false;
-      for (const run of candidates) {
-        let res: FetchResult;
-        try {
-          res = await fetchRun(buildUrl(loc, run));
-        } catch (err) {
-          console.warn(`  FAIL ${loc.id} ${run} → ${(err as Error).message}`);
+        // Try each candidate run hour in order; stop at the first that exists.
+        let saved = false, detailLogged = false;
+        for (const run of candidates) {
+          let res: FetchResult;
+          try {
+            res = await fetchRun(buildUrl(model, loc, run));
+          } catch (err) {
+            console.warn(`  FAIL ${model.id} ${loc.id} ${run} → ${(err as Error).message}`);
+            detailLogged = true;
+            break;
+          }
+
+          if (res.ok) {
+            const path = cachePath(model.id, loc, run);
+            await mkdir(dirname(path), { recursive: true });
+            // Store the raw payload plus provenance so the corpus is self-describing.
+            const record = {
+              meta: { location: loc, run, model: model.id, api: model.api, url: buildUrl(model, loc, run), fetched_at: new Date().toISOString() },
+              response: res.raw,
+            };
+            await writeFile(path, JSON.stringify(record));
+            fetched++;
+            weightSpent += perCallWeight;
+            const tag = run.endsWith("T12:00") ? " (12Z fallback)" : "";
+            console.log(`  OK   ${model.id} ${loc.id} ${run}${tag} → ${path.replace(REPO_ROOT + "/", "")}`);
+            if (!shapePrinted.has(model.id)) { console.log(shapeReport(res.raw, modelHourly(model))); shapePrinted.add(model.id); }
+            await sleep(250); // stay well under the 600/min rate limit
+            saved = true;
+            break;
+          }
+
+          if (res.status === 429) {
+            console.warn(`  rate limited on ${run} — backing off 60s`);
+            await sleep(60_000);
+            continue; // retry the next candidate
+          }
+          if (res.unavailable) {
+            await sleep(250);
+            continue; // this run hour isn't archived — try the fallback
+          }
+          console.warn(`  FAIL ${model.id} ${loc.id} ${run} → HTTP ${res.status}: ${(res.body ?? "").slice(0, 200)}`);
           detailLogged = true;
           break;
         }
 
-        if (res.ok) {
-          const path = cachePath(loc, run);
-          await mkdir(dirname(path), { recursive: true });
-          // Store the raw payload plus provenance so the corpus is self-describing.
-          const record = {
-            meta: { location: loc, run, model: COLLECT_MODEL, url: buildUrl(loc, run), fetched_at: new Date().toISOString() },
-            response: res.raw,
-          };
-          await writeFile(path, JSON.stringify(record));
-          fetched++;
-          weightSpent += perCallWeight;
-          const tag = run.endsWith("T12:00") ? " (12Z fallback)" : "";
-          console.log(`  OK   ${loc.id} ${run}${tag} → ${path.replace(REPO_ROOT + "/", "")}`);
-          if (!firstShapePrinted) { console.log(shapeReport(res.raw)); firstShapePrinted = true; }
-          await sleep(250); // stay well under the 600/min rate limit
-          saved = true;
-          break;
+        if (!saved) {
+          failed++;
+          if (!detailLogged) console.warn(`  FAIL ${model.id} ${loc.id} ${candidates[0]} → no run archived (tried ${candidates.join(", ")})`);
         }
-
-        if (res.status === 429) {
-          console.warn(`  rate limited on ${run} — backing off 60s`);
-          await sleep(60_000);
-          continue; // retry the next candidate
-        }
-        if (res.unavailable) {
-          await sleep(250);
-          continue; // this run hour isn't archived — try the fallback
-        }
-        console.warn(`  FAIL ${loc.id} ${run} → HTTP ${res.status}: ${(res.body ?? "").slice(0, 200)}`);
-        detailLogged = true;
-        break;
-      }
-
-      if (!saved) {
-        failed++;
-        if (!detailLogged) console.warn(`  FAIL ${loc.id} ${candidates[0]} → no run archived (tried ${candidates.join(", ")})`);
       }
     }
   }
@@ -461,13 +481,15 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
 
 interface Record { meta: { location: { id: string; lat: number; lon: number }; run: string }; response: any }
 
-async function loadCorpus(locationFilter?: string): Promise<Record[]> {
-  const locs = (await readdir(CORPUS_DIR, { withFileTypes: true }))
+async function loadModel(modelId: string, locationFilter?: string): Promise<Record[]> {
+  const modelDir = join(CORPUS_DIR, modelId);
+  if (!(await exists(modelDir))) return [];
+  const locs = (await readdir(modelDir, { withFileTypes: true }))
     .filter((d) => d.isDirectory() && (!locationFilter || d.name === locationFilter))
     .map((d) => d.name);
   const records: Record[] = [];
   for (const loc of locs) {
-    const dir = join(CORPUS_DIR, loc);
+    const dir = join(modelDir, loc);
     for (const f of await readdir(dir)) {
       if (!f.endsWith(".json")) continue;
       records.push(JSON.parse(await readFile(join(dir, f), "utf8")) as Record);
@@ -476,11 +498,10 @@ async function loadCorpus(locationFilter?: string): Promise<Record[]> {
   return records;
 }
 
-// Columns whose backing series is entirely null in this response (a single trailing null at the
-// horizon boundary is fine — `some` still sees the rest).
-function missingColumns(h: HourlyData): string[] {
+// True if any base series is entirely null (a single trailing null at the horizon boundary is fine).
+function baseComplete(h: HourlyData): boolean {
   const hasData = (v: string) => (h[v] as (number | null)[] | undefined)?.some((x) => x != null) ?? false;
-  return REQUIRED_COLUMNS.filter((r) => !r.anyOf.some(hasData)).map((r) => r.column);
+  return REQUIRED_BASE.every((anyOf) => anyOf.some(hasData));
 }
 
 // Largest prefix of `periods` whose encoded message fits `maxChars`, with its breakdown. Encoded
@@ -505,135 +526,166 @@ function pct(xs: number[], p: number): number {
   return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
 }
 
+// Merge aligned Rows: base + clouds from `primary`, and the `fbGroups` fields from `fb` (so a
+// selected model borrows the groups it doesn't supply — e.g. HRES ← GFS for high winds / freeze).
+function mergeRow(primary: Row, fb: Row, fbGroups: GroupId[]): Row {
+  if (fbGroups.length === 0) return primary;
+  const merged = { ...primary };
+  for (const g of fbGroups) for (const f of GROUP_ROW_FIELDS[g]) (merged as any)[f] = (fb as any)[f];
+  return merged;
+}
+
+function buildView(pf: number[], cb: Map<string, number[]>, cm: Map<string, Map<string, number>>): ViewStats {
+  const pMin = Math.min(...pf), pMax = Math.max(...pf);
+  const hcounts = new Map<number, number>();
+  for (const p of pf) hcounts.set(p, (hcounts.get(p) ?? 0) + 1);
+  const histogram: { period: number; count: number }[] = [];
+  for (let p = pMin; p <= pMax; p++) histogram.push({ period: p, count: hcounts.get(p) ?? 0 });
+
+  const columns: ColStat[] = [...cb.entries()].map(([name, bitsArr]) => ({
+    name,
+    bits: mean(bitsArr),
+    bitsPerPeriod: mean(bitsArr.map((b, i) => b / pf[i])),
+    modes: [...cm.get(name)!.entries()].sort((a, b) => b[1] - a[1]).map(([m, c]) => [m, c / bitsArr.length] as [string, number]),
+  }));
+  return {
+    periods: { min: pMin, p50: pct(pf, 50), mean: mean(pf), p90: pct(pf, 90), max: pMax },
+    histogram,
+    bodyBits: columns.reduce((s, c) => s + c.bits, 0),
+    columns,
+  };
+}
+
 async function report(args: Args): Promise<void> {
   const resolutionIdx = RESOLUTION_IDX[args.resolution];
   const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
-  const records = await loadCorpus(args.location);
-  if (records.length === 0) throw new Error("No forecasts found in corpus");
 
-  // Per-column accumulators, keyed by column name in first-seen (body) order.
-  const colBits = new Map<string, number[]>();       // bits per fitted message
-  const colBitsPerPeriod = new Map<string, number[]>();
-  const colModes = new Map<string, Map<string, number>>(); // name → mode → count
-  const periodsFit: number[] = [];
-  const charsUsed: number[] = [];
-  let versionBits = 0, headerBits = 0;
-  let skipped = 0, used = 0;
-  const skipByColumn = new Map<string, number>();
-  const detail: ForecastDetail[] = []; // one row per encoded forecast, for the sortable table
+  // Load every model, indexed by location|run. Iterate keys present in ALL models so each model's
+  // view is computed over the identical forecast set.
+  const byModel = new Map<string, Map<string, Record>>();
+  for (const m of MODELS) {
+    const map = new Map<string, Record>();
+    for (const rec of await loadModel(m.id, args.location)) map.set(`${rec.meta.location.id}|${rec.meta.run}`, rec);
+    byModel.set(m.id, map);
+  }
+  const keys = [...(byModel.get(FALLBACK_MODEL)?.keys() ?? [])]
+    .filter((k) => MODELS.every((m) => byModel.get(m.id)!.has(k))).sort();
+  if (keys.length === 0) throw new Error("No forecasts present for all models — run collection first");
 
-  for (const rec of records) {
-    const hourly = rec.response.hourly as HourlyData;
-    const times = hourly.time;
+  const vkey = (modelId: string, combo: number) => `${modelId}:${combo}`;
+  const periodsFit = new Map<string, number[]>();
+  const colBits = new Map<string, Map<string, number[]>>();
+  const colModes = new Map<string, Map<string, Map<string, number>>>();
+  for (const m of MODELS) for (const c of COMBOS) {
+    const vk = vkey(m.id, c);
+    periodsFit.set(vk, []); colBits.set(vk, new Map()); colModes.set(vk, new Map());
+  }
 
-    // Data-quality guard: skip a forecast if any encoded column has no data (all null) in the raw
-    // response, since it would encode as a silent all-zero column and inflate the fit count.
-    const missing = missingColumns(hourly);
-    if (missing.length && !args.includeIncomplete) {
+  const forecasts: { location: string; run: string; lat: number; lon: number }[] = [];
+  const bppByModel = new Map<string, Record<string, number>[]>(MODELS.map((m) => [m.id, []]));
+  const allMask = comboMask(COMBOS.length - 1); // every group on
+  let versionBits = 0, headerBits = 0, skipped = 0;
+
+  for (const key of keys) {
+    if (!MODELS.every((m) => baseComplete(byModel.get(m.id)!.get(key)!.response.hourly as HourlyData))) {
       skipped++;
-      for (const c of missing) skipByColumn.set(c, (skipByColumn.get(c) ?? 0) + 1);
       continue;
     }
-    used++;
-
-    // Anchor to the run start, aligned down to the resolution boundary (as parseRequest does).
-    const runHour = Math.floor(Date.parse(rec.meta.run + "Z") / 3600000);
+    const [locId, run] = key.split("|");
+    const meta = byModel.get(FALLBACK_MODEL)!.get(key)!.meta.location;
+    const runHour = Math.floor(Date.parse(run + "Z") / 3600000);
     const startEpochHour = Math.floor(runHour / hoursPerPeriod) * hoursPerPeriod;
-    const available = Math.floor(times.length / hoursPerPeriod);
-    const nPeriods = Math.min(V1_MAX_PERIODS, available);
-
-    const rows: Row[] = aggregateHourly(hourly, times, nPeriods, resolutionIdx, startEpochHour);
-    const periods = rows.map((r) => toFullPeriod(r, BENCH_MASK, ENCODE_MODEL));
-    const elevation = rec.response.elevation ?? 0;
     const start = new Date(startEpochHour * 3600000);
 
-    const base: ForecastMessage = {
-      version: 1, code: 0, days: Math.ceil(nPeriods / (24 / hoursPerPeriod)),
-      resolution: resolutionIdx, models_mask: 1, vars_mask: BENCH_MASK,
+    // Aggregate each model's rows (aligned by index; all are 10-day hourly on the same run).
+    const rowsByModel = new Map<string, Row[]>();
+    for (const m of MODELS) {
+      const h = byModel.get(m.id)!.get(key)!.response.hourly as HourlyData;
+      const n = Math.min(V1_MAX_PERIODS, Math.floor(h.time.length / hoursPerPeriod));
+      rowsByModel.set(m.id, aggregateHourly(h, h.time, n, resolutionIdx, startEpochHour));
+    }
+    const fbRows = rowsByModel.get(FALLBACK_MODEL)!;
+    const elevation = byModel.get(FALLBACK_MODEL)!.get(key)!.response.elevation ?? 0;
+    const msgFor = (periods: Period[], mask: number): ForecastMessage => ({
+      version: 1, code: 0, days: Math.ceil(periods.length / (24 / hoursPerPeriod)),
+      resolution: resolutionIdx, models_mask: 1, vars_mask: mask,
       month: start.getUTCMonth() + 1, day: start.getUTCDate(), hour: start.getUTCHours(),
       lat: 0, lon: 0, elevation, periods: [periods],
-    };
-
-    const { n: fittedN, breakdown } = fitBreakdown(base, args.maxChars);
-    periodsFit.push(fittedN);
-    charsUsed.push(breakdown.chars);
-    versionBits = breakdown.versionBits;
-    headerBits = breakdown.headerBits;
-
-    for (const c of breakdown.columns) {
-      if (!colBits.has(c.name)) {
-        colBits.set(c.name, []); colBitsPerPeriod.set(c.name, []); colModes.set(c.name, new Map());
-      }
-      colBits.get(c.name)!.push(c.bits);
-      colBitsPerPeriod.get(c.name)!.push(c.bits / fittedN);
-      if (c.mode) {
-        const mm = colModes.get(c.name)!;
-        mm.set(c.mode, (mm.get(c.mode) ?? 0) + 1);
-      }
-    }
-
-    detail.push({
-      location: rec.meta.location.id,
-      run: rec.meta.run,
-      lat: rec.meta.location.lat,
-      lon: rec.meta.location.lon,
-      periods: fittedN,
-      bits: Object.fromEntries(breakdown.columns.map((c) => [c.name, c.bits])),
     });
 
-    if (args.verbose) {
-      console.log(`  ${rec.meta.location.id} ${rec.meta.run}  periods=${fittedN}  chars=${breakdown.chars}`);
+    forecasts.push({ location: locId, run, lat: meta.lat, lon: meta.lon });
+
+    for (const m of MODELS) {
+      const primaryRows = rowsByModel.get(m.id)!;
+      const nAlign = Math.min(primaryRows.length, fbRows.length);
+      const fbGroups = GROUP_IDS.filter((g) => !m.groups[g]); // groups this model borrows from fallback
+      // Build Period objects with every field populated; vary only vars_mask per combo (each column
+      // encodes independently, so one Period array serves all combos).
+      const allPeriods: Period[] = [];
+      for (let i = 0; i < nAlign; i++) allPeriods.push(toFullPeriod(mergeRow(primaryRows[i], fbRows[i], fbGroups), allMask, FALLBACK_MODEL.toUpperCase()));
+
+      // Per-variable bits/period at the full horizon (combo-independent), for the detail table.
+      const bd = v1EncodeBreakdown(msgFor(allPeriods, allMask));
+      bppByModel.get(m.id)!.push(Object.fromEntries(bd.columns.map((c) => [c.name, c.bits / allPeriods.length])));
+
+      for (const c of COMBOS) {
+        const mask = comboMask(c);
+        const { n: fittedN, breakdown } = fitBreakdown(msgFor(allPeriods, mask), args.maxChars);
+        const vk = vkey(m.id, c);
+        periodsFit.get(vk)!.push(fittedN);
+        versionBits = breakdown.versionBits; headerBits = breakdown.headerBits;
+        const cb = colBits.get(vk)!, cm = colModes.get(vk)!;
+        for (const col of breakdown.columns) {
+          if (!cb.has(col.name)) { cb.set(col.name, []); cm.set(col.name, new Map()); }
+          cb.get(col.name)!.push(col.bits);
+          if (col.mode) { const mm = cm.get(col.name)!; mm.set(col.mode, (mm.get(col.mode) ?? 0) + 1); }
+        }
+      }
     }
   }
 
-  // Assemble the stats, then render an HTML report (kept as a timestamped file so old runs can be
-  // compared side by side).
-  const columns: ColStat[] = [...colBits.entries()].map(([name, bitsArr]) => ({
-    name,
-    bits: mean(bitsArr),
-    bitsPerPeriod: mean(colBitsPerPeriod.get(name)!),
-    modes: [...colModes.get(name)!.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([m, c]) => [m, c / bitsArr.length] as [string, number]),
-  }));
-  const bodyBits = columns.reduce((s, c) => s + c.bits, 0);
+  // Build per-view stats + the interactive data island.
+  const views: Record<string, ViewStats> = {};
+  const periodsByView: Record<string, Record<number, number[]>> = {};
+  for (const m of MODELS) {
+    periodsByView[m.id] = {};
+    for (const c of COMBOS) {
+      const vk = vkey(m.id, c);
+      views[vk] = buildView(periodsFit.get(vk)!, colBits.get(vk)!, colModes.get(vk)!);
+      periodsByView[m.id][c] = periodsFit.get(vk)!;
+    }
+  }
 
-  // Histogram of periods-per-message: one bin per integer period value across the observed range
-  // (including zero-count bins between, so the x-axis is continuous).
-  const pMin = Math.min(...periodsFit), pMax = Math.max(...periodsFit);
-  const counts = new Map<number, number>();
-  for (const p of periodsFit) counts.set(p, (counts.get(p) ?? 0) + 1);
-  const periodsHistogram: { period: number; count: number }[] = [];
-  for (let p = pMin; p <= pMax; p++) periodsHistogram.push({ period: p, count: counts.get(p) ?? 0 });
-
-  const stats: BenchStats = {
+  const stats: ReportData = {
     timestamp: new Date().toISOString(),
     resolution: args.resolution,
     maxChars: args.maxChars,
-    encodedVars: ["weathercode", ...BENCH_VARS],
-    forecasts: used,
-    locations: new Set(records.map((r) => r.meta.location.id)).size,
+    forecasts: forecasts.length,
+    locations: new Set(forecasts.map((f) => f.location)).size,
     skipped,
-    skipByColumn: [...skipByColumn.entries()].sort((a, b) => b[1] - a[1]),
-    periods: {
-      min: pMin, p50: pct(periodsFit, 50), mean: mean(periodsFit), p90: pct(periodsFit, 90), max: pMax,
-    },
-    periodsHistogram,
-    chars: { mean: mean(charsUsed), min: Math.min(...charsUsed), max: Math.max(...charsUsed) },
-    versionBits, headerBits, bodyBits,
-    occupancyBits: versionBits + headerBits + bodyBits,
-    columns,
+    versionBits, headerBits,
+    models: MODELS.map((m) => ({ id: m.id, label: m.label, groups: m.groups })),
+    groups: GROUP_IDS.map((g) => ({ id: g, label: GROUP_LABEL[g] })),
+    groupVars: GROUP_VARS,
+    baseVars: BASE_VARS,
+    defaultCombo: DEFAULT_COMBO,
+    defaultModel: MODELS[0].id,
+    views,
+    forecastRows: forecasts,
+    periodsByView,
+    bpp: Object.fromEntries(bppByModel),
   };
 
   await mkdir(BENCHMARKS_DIR, { recursive: true });
   const stamp = stats.timestamp.replace(/[:.]/g, "-").slice(0, 19);
   const outPath = join(BENCHMARKS_DIR, `${stamp}_${args.resolution}_${args.maxChars}c.html`);
-  await writeFile(outPath, renderHtml(stats, detail));
+  await writeFile(outPath, renderHtml(stats));
 
+  const dv = views[vkey(stats.defaultModel, stats.defaultCombo)];
   console.log(`\n== Benchmark ==`);
-  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations` +
-    `  |  resolution=${args.resolution}  max-chars=${args.maxChars}`);
-  console.log(`  periods/msg: mean ${stats.periods.mean.toFixed(1)} (min ${stats.periods.min}, max ${stats.periods.max})`);
+  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${MODELS.length} models  |  resolution=${args.resolution}  max-chars=${args.maxChars}`);
+  if (skipped) console.log(`  skipped ${skipped} forecast(s) with an incomplete base series`);
+  console.log(`  default view (${stats.defaultModel}, Clouds): periods/msg mean ${dv.periods.mean.toFixed(1)} (min ${dv.periods.min}, max ${dv.periods.max})`);
   console.log(`  report: ${outPath.replace(REPO_ROOT + "/", "")}`);
 
   if (args.open) openInBrowser(outPath);
@@ -654,24 +706,33 @@ function openInBrowser(path: string): void {
 // ── HTML report ──────────────────────────────────────────────────────────────────
 
 interface ColStat { name: string; bits: number; bitsPerPeriod: number; modes: [string, number][] }
-interface ForecastDetail { location: string; run: string; lat: number; lon: number; periods: number; bits: Record<string, number> }
-interface BenchStats {
+interface ViewStats {
+  periods: { min: number; p50: number; mean: number; p90: number; max: number };
+  histogram: { period: number; count: number }[];
+  bodyBits: number;
+  columns: ColStat[];
+}
+// Everything the report embeds. `views` holds one ViewStats per model:combo; the interactive detail
+// table is rebuilt client-side from forecastRows + periodsByView + bpp.
+interface ReportData {
   timestamp: string;
   resolution: string;
   maxChars: number;
-  encodedVars: string[];
   forecasts: number;
   locations: number;
   skipped: number;
-  skipByColumn: [string, number][];
-  periods: { min: number; p50: number; mean: number; p90: number; max: number };
-  periodsHistogram: { period: number; count: number }[];
-  chars: { mean: number; min: number; max: number };
   versionBits: number;
   headerBits: number;
-  bodyBits: number;
-  occupancyBits: number;
-  columns: ColStat[];
+  models: { id: string; label: string; groups: Record<GroupId, boolean> }[];
+  groups: { id: GroupId; label: string }[];
+  groupVars: Record<GroupId, string[]>;
+  baseVars: string[];
+  defaultCombo: number;
+  defaultModel: string;
+  views: Record<string, ViewStats>;                       // "model:combo" → stats
+  forecastRows: { location: string; run: string; lat: number; lon: number }[];
+  periodsByView: Record<string, Record<number, number[]>>; // model → combo → per-forecast periods
+  bpp: Record<string, Record<string, number>[]>;           // model → per-forecast {var: bits/period}
 }
 
 const esc = (s: string) =>
@@ -709,44 +770,59 @@ function renderHistogram(hist: { period: number; count: number }[]): string {
 </svg>`;
 }
 
-// Sortable per-forecast detail table (click a header to sort; sorting done by the inline script
-// below). One row per encoded forecast with its coordinates, periods, and per-variable bit cost.
-function renderDetailTable(detail: ForecastDetail[], colNames: string[]): string {
-  const head = `<tr><th>location</th><th>run</th><th class="rt">lat</th><th class="rt">lon</th><th class="rt">periods</th>` +
-    colNames.map((c) => `<th class="rt">${esc(c)}</th>`).join("") + `</tr>`;
-  const rows = detail.map((d) =>
-    `<tr><td>${esc(d.location)}</td><td>${esc(d.run)}</td>` +
-    `<td class="num">${d.lat.toFixed(3)}</td><td class="num">${d.lon.toFixed(3)}</td><td class="num">${d.periods}</td>` +
-    colNames.map((c) => `<td class="num">${d.bits[c] ?? 0}</td>`).join("") +
-    `</tr>`).join("\n");
-  return `<div class="scroll"><table class="detail sortable"><thead>${head}</thead><tbody>
-${rows}
-</tbody></table></div>`;
-}
+const modeText = (m: [string, number][]) =>
+  m.length ? m.map(([name, f]) => `${esc(name)} ${Math.round(100 * f)}%`).join(" · ") : "—";
 
-function renderHtml(s: BenchStats, detail: ForecastDetail[]): string {
-  const modeText = (m: [string, number][]) =>
-    m.length ? m.map(([name, f]) => `${esc(name)} ${Math.round(100 * f)}%`).join(" · ") : "—";
-
-  // Occupancy rows: version + header (structural) and every variable column, sorted by share (bits)
-  // descending so the dominant contributors sit at the top.
-  const occRows = [
-    { name: "version", bits: s.versionBits, bpp: null as number | null, modes: [] as [string, number][] },
-    { name: "header", bits: s.headerBits, bpp: null, modes: [] as [string, number][] },
-    ...s.columns.map((c) => ({ name: c.name, bits: c.bits, bpp: c.bitsPerPeriod, modes: c.modes })),
+// One toggleable view = a model × variable-combo: histogram, period summary, and the occupancy
+// table (columns sorted by share). All 16 are emitted hidden; the client shows the selected one.
+function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: number): string {
+  const [model, combo] = vk.split(":");
+  const occupancyBits = versionBits + headerBits + vs.bodyBits;
+  const rows = [
+    { name: "version", bits: versionBits, bpp: null as number | null, modes: [] as [string, number][] },
+    { name: "header", bits: headerBits, bpp: null as number | null, modes: [] as [string, number][] },
+    ...vs.columns.map((c) => ({ name: c.name, bits: c.bits, bpp: c.bitsPerPeriod as number | null, modes: c.modes })),
   ].sort((a, b) => b.bits - a.bits);
-  const maxBits = Math.max(...occRows.map((r) => r.bits), 1);
-  const occRowsHtml = occRows.map((r) => `<tr>
+  const maxBits = Math.max(...rows.map((r) => r.bits), 1);
+  const occHtml = rows.map((r) => `<tr>
       <td class="name">${esc(r.name)}</td>
       <td class="num">${r.bits.toFixed(1)}</td>
       <td class="num">${r.bpp == null ? "—" : r.bpp.toFixed(2)}</td>
-      <td class="num">${(100 * r.bits / s.occupancyBits).toFixed(1)}%</td>
+      <td class="num">${(100 * r.bits / occupancyBits).toFixed(1)}%</td>
       <td class="barcell"><div class="bar"><div class="fill${r.modes.length ? " adaptive" : ""}" style="width:${(100 * r.bits / maxBits).toFixed(1)}%"></div></div></td>
       <td class="modes">${modeText(r.modes)}</td>
     </tr>`).join("\n");
+  const p = vs.periods;
+  return `<section class="view" data-model="${model}" data-combo="${combo}" hidden>
+  ${renderHistogram(vs.histogram)}
+  <table class="summary">
+    <tr><th>min</th><th>p50</th><th>mean</th><th>p90</th><th>max</th></tr>
+    <tr><td class="num">${p.min}</td><td class="num">${p.p50}</td><td class="num">${p.mean.toFixed(1)}</td><td class="num">${p.p90}</td><td class="num">${p.max}</td></tr>
+  </table>
+  <h3>Mean bit occupancy per column</h3>
+  <table>
+    <tr><th>column</th><th class="rt">bits</th><th class="rt">bits/period</th><th class="rt">share</th><th>occupancy</th><th>modes</th></tr>
+    ${occHtml}
+    <tr class="total"><td>total</td><td class="num">${occupancyBits.toFixed(1)}</td><td class="num"></td><td class="num">100%</td><td></td><td class="modes">≈ ${Math.round(occupancyBits / 6.409)} chars</td></tr>
+  </table>
+</section>`;
+}
 
-  const quality: string[] = [];
-  if (s.skipped) quality.push(`Skipped ${s.skipped} forecast(s) with a fully-null column [${s.skipByColumn.map(([c, n]) => `${esc(c)} ${n}`).join(", ")}].`);
+function renderHtml(s: ReportData): string {
+  const viewFragments = Object.entries(s.views).map(([vk, vs]) => renderView(vk, vs, s.versionBits, s.headerBits)).join("\n");
+  const modelRadios = s.models.map((m) =>
+    `<label><input type="radio" name="model" value="${m.id}"${m.id === s.defaultModel ? " checked" : ""}> ${esc(m.label)}</label>`).join("");
+  const groupChecks = s.groups.map((g, i) =>
+    `<label><input type="checkbox" class="group" value="${g.id}" data-bit="${1 << i}"${s.defaultCombo & (1 << i) ? " checked" : ""}> ${esc(g.label)}</label>`).join("");
+  const quality = s.skipped ? `<div class="quality"><p>Skipped ${s.skipped} forecast(s) with an incomplete base series.</p></div>` : "";
+
+  // Client data excludes the pre-rendered `views` (avoids duplicating them); the detail table is
+  // rebuilt from these on every selection change.
+  const clientData = {
+    models: s.models, groups: s.groups, groupVars: s.groupVars, baseVars: s.baseVars,
+    defaultCombo: s.defaultCombo, defaultModel: s.defaultModel,
+    forecastRows: s.forecastRows, periodsByView: s.periodsByView, bpp: s.bpp,
+  };
 
   return `<!doctype html>
 <html lang="en">
@@ -758,17 +834,25 @@ function renderHtml(s: BenchStats, detail: ForecastDetail[]): string {
   :root { color-scheme: light dark; }
   body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 2rem; max-width: 900px; }
   h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
-  .meta { color: #888; font-size: .85rem; margin-bottom: 1.5rem; }
+  h2 { font-size: 1rem; margin: 2rem 0 .6rem; }
+  h3 { font-size: .9rem; margin: 1.5rem 0 .4rem; color: #666; }
+  .meta { color: #888; font-size: .85rem; margin-bottom: 1rem; }
   .meta code { background: rgba(128,128,128,.15); padding: .05rem .35rem; border-radius: 3px; }
+  .selectors { display: flex; flex-wrap: wrap; gap: 1.5rem; padding: .9rem 1.1rem; background: rgba(128,128,128,.08); border-radius: 8px; margin: 1rem 0 .4rem; }
+  .sel { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
+  .sel-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: #888; }
+  .sel label { display: inline-flex; align-items: center; gap: .3rem; font-size: .85rem; cursor: pointer; }
+  .muted { color: #999; }
   .quality { background: rgba(230,160,30,.12); border-left: 3px solid #e6a01e; padding: .6rem .9rem; border-radius: 4px; font-size: .85rem; margin: 1rem 0; }
   .quality p { margin: .2rem 0; }
-  h2 { font-size: 1rem; margin: 2rem 0 .6rem; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid rgba(128,128,128,.2); }
   th { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #888; }
+  th.rt { text-align: right; }
   td.num { text-align: right; font-family: ui-monospace, monospace; }
   td.name { font-weight: 500; }
   td.modes { color: #888; font-size: .8rem; }
+  table.summary { max-width: 360px; }
   .barcell { width: 34%; }
   .bar { background: rgba(128,128,128,.15); border-radius: 3px; height: 12px; }
   .fill { background: #6b7280; height: 100%; border-radius: 3px; }
@@ -781,13 +865,13 @@ function renderHtml(s: BenchStats, detail: ForecastDetail[]): string {
   .hgrid { stroke: rgba(128,128,128,.25); stroke-width: 1; }
   .htick { fill: #888; font-size: 11px; }
   .haxis { fill: #888; font-size: 11px; }
-  .hint { font-size: .75rem; color: #888; margin: 0 0 .4rem; }
+  .hint { font-size: .78rem; color: #888; margin: 0 0 .4rem; }
   .scroll { max-height: 460px; overflow: auto; border: 1px solid rgba(128,128,128,.2); border-radius: 6px; }
   table.detail { font-size: .78rem; }
   table.detail th, table.detail td { border-bottom: 1px solid rgba(128,128,128,.12); white-space: nowrap; }
   table.detail th { position: sticky; top: 0; background: Canvas; cursor: pointer; user-select: none; }
   table.detail th:hover { color: #3b82f6; }
-  table.detail th.rt, table.detail td.num { text-align: right; }
+  table.detail td.num { text-align: right; }
   table.detail th[data-dir=asc]::after { content: " ▲"; font-size: .7em; }
   table.detail th[data-dir=desc]::after { content: " ▼"; font-size: .7em; }
 </style>
@@ -796,37 +880,41 @@ function renderHtml(s: BenchStats, detail: ForecastDetail[]): string {
 <h1>Encoding benchmark</h1>
 <div class="meta">
   ${esc(s.timestamp)} · ${s.forecasts} forecasts · ${s.locations} locations ·
-  resolution <code>${esc(s.resolution)}</code> · max <code>${s.maxChars}</code> chars ·
-  encoded: ${s.encodedVars.map(esc).join(", ")}
+  resolution <code>${esc(s.resolution)}</code> · max <code>${s.maxChars}</code> chars
 </div>
 
-${quality.length ? `<div class="quality">${quality.map((q) => `<p>${q}</p>`).join("")}</div>` : ""}
+<div class="selectors">
+  <div class="sel"><span class="sel-label">Model</span>${modelRadios}</div>
+  <div class="sel"><span class="sel-label">Variables</span><label><input type="checkbox" checked disabled> Base <span class="muted">(always on)</span></label>${groupChecks}</div>
+</div>
+<p class="hint" id="fallback-note"></p>
+${quality}
 
 <h2>Periods encoded per message</h2>
-${renderHistogram(s.periodsHistogram)}
-<table>
-  <tr><th>min</th><th>p50</th><th>mean</th><th>p90</th><th>max</th></tr>
-  <tr><td class="num">${s.periods.min}</td><td class="num">${s.periods.p50}</td><td class="num">${s.periods.mean.toFixed(1)}</td><td class="num">${s.periods.p90}</td><td class="num">${s.periods.max}</td></tr>
-</table>
-
-<h2>Mean bit occupancy per column</h2>
-<table>
-  <tr><th>column</th><th style="text-align:right">bits</th><th style="text-align:right">bits/period</th><th style="text-align:right">share</th><th>occupancy</th><th>modes</th></tr>
-${occRowsHtml}
-  <tr class="total"><td>total</td><td class="num">${s.occupancyBits.toFixed(1)}</td><td class="num"></td><td class="num">100%</td><td></td><td class="modes">payload ~${s.chars.mean.toFixed(0)} chars</td></tr>
-</table>
+<div id="views">${viewFragments}</div>
 <div class="legend">
   <span class="swatch" style="background:#3b82f6"></span>adaptive column (mode selected per message)
   <span class="swatch" style="background:#6b7280"></span>fixed-width column
 </div>
 
-<h2>Per-forecast detail (${detail.length})</h2>
-<p class="hint">Click a column header to sort — e.g. sort by <code>periods</code> to find the outliers. Bits are the exact per-column cost of that forecast's fitted message.</p>
-${renderDetailTable(detail, s.columns.map((c) => c.name))}
+<h2>Per-forecast detail (${s.forecasts})</h2>
+<p class="hint">Click a header to sort — e.g. by <code>periods</code> to find outliers. Per-variable values are bits/period at the full horizon (independent of the current selection).</p>
+<div class="scroll"><table class="detail sortable" id="detail"></table></div>
 
-<script type="application/json" id="benchmark-data">${JSON.stringify(s)}</script>
+<script type="application/json" id="benchmark-data">${JSON.stringify(clientData)}</script>
 <script>
-for (const table of document.querySelectorAll("table.sortable")) {
+const D = JSON.parse(document.getElementById("benchmark-data").textContent);
+const views = [...document.querySelectorAll(".view")];
+const modelRadios = [...document.querySelectorAll('input[name=model]')];
+const groupBoxes = [...document.querySelectorAll('input.group')];
+const detail = document.getElementById("detail");
+const fallbackNote = document.getElementById("fallback-note");
+
+const model = () => modelRadios.find((r) => r.checked).value;
+const combo = () => groupBoxes.reduce((c, b) => c | (b.checked ? +b.dataset.bit : 0), 0);
+const selectedGroups = (c) => D.groups.filter((g, i) => c & (1 << i)).map((g) => g.id);
+
+function attachSort(table) {
   const ths = table.tHead.rows[0].cells;
   for (let i = 0; i < ths.length; i++) ths[i].addEventListener("click", () => {
     const dir = ths[i].dataset.dir === "asc" ? "desc" : "asc";
@@ -840,6 +928,34 @@ for (const table of document.querySelectorAll("table.sortable")) {
     }).forEach((r) => tb.appendChild(r));
   });
 }
+
+function buildDetail(m, c) {
+  const cols = ["weathercode", ...D.baseVars, ...selectedGroups(c).flatMap((g) => D.groupVars[g])];
+  const periods = D.periodsByView[m][c], bpp = D.bpp[m];
+  const head = "<thead><tr><th>location</th><th>run</th><th class=rt>lat</th><th class=rt>lon</th><th class=rt>periods</th>" +
+    cols.map((k) => "<th class=rt>" + k + "</th>").join("") + "</tr></thead>";
+  const body = D.forecastRows.map((f, i) =>
+    "<tr><td>" + f.location + "</td><td>" + f.run + "</td><td class=num>" + f.lat.toFixed(3) +
+    "</td><td class=num>" + f.lon.toFixed(3) + "</td><td class=num>" + periods[i] + "</td>" +
+    cols.map((k) => "<td class=num>" + (bpp[i][k] ?? 0).toFixed(2) + "</td>").join("") + "</tr>").join("");
+  detail.innerHTML = head + "<tbody>" + body + "</tbody>";
+  attachSort(detail);
+}
+
+function update() {
+  const m = model(), c = combo();
+  views.forEach((v) => v.hidden = !(v.dataset.model === m && +v.dataset.combo === c));
+  const md = D.models.find((x) => x.id === m);
+  const borrowed = selectedGroups(c).filter((g) => !md.groups[g]);
+  fallbackNote.textContent = borrowed.length
+    ? md.label + " doesn't provide " + borrowed.map((g) => D.groups.find((x) => x.id === g).label).join(", ") + " — those columns come from GFS."
+    : "";
+  buildDetail(m, c);
+}
+
+modelRadios.forEach((r) => r.addEventListener("change", update));
+groupBoxes.forEach((b) => b.addEventListener("change", update));
+update();
 </script>
 </body>
 </html>
