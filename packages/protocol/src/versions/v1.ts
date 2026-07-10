@@ -75,12 +75,15 @@ const WIND_SPEED_BITS = 4; // speed steps 0..15
 const WIND_DIR_BITS = 3;   // 8-point direction
 const WIND_SPEED_MAX = (1 << WIND_SPEED_BITS) - 1;
 
-// A scalar column: one non-negative integer per cell, in a fixed quantized domain. `adaptive`
-// columns carry a 2-bit mode selector and can use the FOR / SPARSE / EMPTY strategies; the rest
-// are always raw fixed-width. Width is sourced from VAR_BITS_V1 so there is a single source of truth.
+// A scalar column: one non-negative integer per cell, in a fixed quantized domain.
+// "adaptive" columns carry a 2-bit mode selector and pick the cheapest of FOR / SPARSE / EMPTY /
+// raw per message. "for" columns always use frame-of-reference (no mode selector — temperature
+// picks FOR upward of 99% of the time in practice, so the selector and the raw/sparse/empty
+// candidates are pure overhead there). "raw" columns are always fixed-width, no selector.
+// Width is sourced from VAR_BITS_V1 so there is a single source of truth.
 interface ScalarColumn {
   bit: number;
-  adaptive: boolean;
+  mode: "raw" | "adaptive" | "for";
   get(p: Period): number;          // quantized integer (clamped to the field width)
   set(p: Period, v: number): void; // dequantize the integer back onto the period
 }
@@ -92,34 +95,35 @@ function clampInt(v: number, width: number): number {
 // Scalar columns, in body (column-major) order. Wind is handled separately (two ints per cell).
 const SCALAR_COLUMNS: ScalarColumn[] = [
   // precip chance: adaptive — sparse/empty when mostly dry (often 0%), FOR when clustered, raw otherwise.
-  { bit: 0, adaptive: true,
+  { bit: 0, mode: "adaptive",
     get: (p) => clampInt(Math.round((p.precip ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.precip = Math.round(v * 100 / 7); } },
-  { bit: 1, adaptive: true,
+  // temp/tmin: always FOR — the adaptive raw/sparse/empty candidates essentially never win here.
+  { bit: 1, mode: "for",
     get: (p) => clampInt(Math.round((p.temp_c ?? 0) + TEMP_OFFSET), 7),
     set: (p, v) => { p.temp_c = v - TEMP_OFFSET; } },
-  { bit: 13, adaptive: true,
+  { bit: 13, mode: "for",
     get: (p) => clampInt(Math.round((p.temp_min_c ?? 0) + TEMP_OFFSET), 7),
     set: (p, v) => { p.temp_min_c = v - TEMP_OFFSET; } },
-  { bit: 2, adaptive: true,
+  { bit: 2, mode: "adaptive",
     get: (p) => compandSqrt(p.snow_cm ?? 0, SNOW_K, ACCUM_BITS),
     set: (p, v) => { p.snow_cm = expandSqrt(v, SNOW_K); } },
-  { bit: 12, adaptive: true,
+  { bit: 12, mode: "adaptive",
     get: (p) => compandSqrt(p.rain_mm ?? 0, RAIN_K, ACCUM_BITS),
     set: (p, v) => { p.rain_mm = expandSqrt(v, RAIN_K); } },
-  { bit: 3, adaptive: true,
+  { bit: 3, mode: "adaptive",
     get: (p) => clampInt(Math.floor((p.freeze_m ?? 0) / 304.8), 4),
     set: (p, v) => { p.freeze_m = v * 304.8; } },
-  { bit: 8, adaptive: false,
+  { bit: 8, mode: "raw",
     get: (p) => clampInt(Math.round((p.cloud_total ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.cloud_total = Math.round(v * 100 / 7); } },
-  { bit: 9, adaptive: false,
+  { bit: 9, mode: "raw",
     get: (p) => clampInt(Math.round((p.cloud_high ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.cloud_high = Math.round(v * 100 / 7); } },
-  { bit: 10, adaptive: false,
+  { bit: 10, mode: "raw",
     get: (p) => clampInt(Math.round((p.cloud_mid ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.cloud_mid = Math.round(v * 100 / 7); } },
-  { bit: 11, adaptive: false,
+  { bit: 11, mode: "raw",
     get: (p) => clampInt(Math.round((p.cloud_low ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.cloud_low = Math.round(v * 100 / 7); } },
 ];
@@ -223,6 +227,15 @@ function encodeAdaptive(body: number[], vals: number[], width: number): number {
   return best.mode;
 }
 
+// Reads a payload written by forCandidate.emit: baseline + width field, then n W-bit offsets.
+function decodeForPayload(rd: ReturnType<typeof reader>, width: number, n: number): number[] {
+  const baseline = rd.int(width);
+  const W = rd.int(SUBWIDTH_BITS);
+  const out = new Array<number>(n).fill(0);
+  for (let i = 0; i < n; i++) out[i] = baseline + (W > 0 ? rd.int(W) : 0);
+  return out;
+}
+
 // Reads `n` ints written by encodeAdaptive (mode selector + payload), in emit order.
 function decodeAdaptive(rd: ReturnType<typeof reader>, width: number, n: number): number[] {
   const out = new Array<number>(n).fill(0);
@@ -231,12 +244,8 @@ function decodeAdaptive(rd: ReturnType<typeof reader>, width: number, n: number)
     case MODE_RAW:
       for (let i = 0; i < n; i++) out[i] = rd.int(width);
       break;
-    case MODE_FOR: {
-      const baseline = rd.int(width);
-      const W = rd.int(SUBWIDTH_BITS);
-      for (let i = 0; i < n; i++) out[i] = baseline + (W > 0 ? rd.int(W) : 0);
-      break;
-    }
+    case MODE_FOR:
+      return decodeForPayload(rd, width, n);
     case MODE_SPARSE: {
       const magW = rd.int(SUBWIDTH_BITS);
       for (let i = 0; i < n; i++) out[i] = rd.int(1) ? rd.int(magW) : 0;
@@ -251,7 +260,8 @@ function decodeAdaptive(rd: ReturnType<typeof reader>, width: number, n: number)
 }
 
 // Encodes one scalar column into `body`, returning the chosen adaptive mode (MODE_*), or -1 for a
-// non-adaptive (always-raw) column that carries no mode selector.
+// column with no mode selector (raw, and forced-FOR columns report MODE_FOR for the breakdown even
+// though they carry no selector bit).
 function encodeScalarColumn(
   body: number[], col: ScalarColumn, periods: Period[][], nPeriods: number, nModels: number,
 ): number {
@@ -259,11 +269,16 @@ function encodeScalarColumn(
   const vals: number[] = [];
   eachCell(nPeriods, nModels, (p, m) => vals.push(col.get(periods[m][p])));
 
-  if (!col.adaptive) {
-    for (const v of vals) putInt(body, v, width);
-    return -1;
+  switch (col.mode) {
+    case "raw":
+      for (const v of vals) putInt(body, v, width);
+      return -1;
+    case "for":
+      forCandidate(vals, width).emit(body);
+      return MODE_FOR;
+    case "adaptive":
+      return encodeAdaptive(body, vals, width);
   }
-  return encodeAdaptive(body, vals, width);
 }
 
 function decodeScalarColumn(
@@ -271,11 +286,12 @@ function decodeScalarColumn(
   nPeriods: number, nModels: number,
 ): void {
   const width = VAR_BITS_V1[col.bit];
-  if (!col.adaptive) {
+  if (col.mode === "raw") {
     eachCell(nPeriods, nModels, (p, m) => col.set(periods[m][p], rd.int(width)));
     return;
   }
-  const vals = decodeAdaptive(rd, width, nPeriods * nModels);
+  const n = nPeriods * nModels;
+  const vals = col.mode === "for" ? decodeForPayload(rd, width, n) : decodeAdaptive(rd, width, n);
   let i = 0;
   eachCell(nPeriods, nModels, (p, m) => col.set(periods[m][p], vals[i++]));
 }

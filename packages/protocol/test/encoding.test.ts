@@ -373,13 +373,23 @@ describe("frame-of-reference temperature encoding", () => {
     decoded.periods[0].forEach((p, i) => expect(p.temp_c).toBe(temps[i]));
   });
 
-  it("encodes a constant column smaller than a wide-spread one (adaptive width)", () => {
+  it("encodes a constant column smaller than a wide-spread one (FOR offset width)", () => {
     const vars_mask = 1 << VARS_BIT.temp;
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, temp_c: 5 }));
     const spread = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, temp_c: i - 20 }));
     const flatLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods: [flat] })).length;
     const spreadLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods: [spread] })).length;
     expect(flatLen).toBeLessThan(spreadLen);
+  });
+
+  it("always chooses FOR for temp/tmin, never falling back to raw/sparse/empty", () => {
+    const vars_mask = (1 << VARS_BIT.temp) | (1 << VARS_BIT.tmin);
+    // A single-value column: previously the cheapest adaptive choice here would be EMPTY-like
+    // (zero spread), not FOR. Temperature must still report FOR for both columns.
+    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, temp_c: 0, temp_min_c: 0 }))];
+    const { columns } = v1EncodeBreakdown(msg({ resolution: 4, vars_mask, periods }));
+    expect(columns.find((c) => c.name === "temp")?.mode).toBe("for");
+    expect(columns.find((c) => c.name === "tmin")?.mode).toBe("for");
   });
 });
 
