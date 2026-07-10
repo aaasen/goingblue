@@ -84,7 +84,7 @@ zero-padding is simply dropped.
 | freezing level         | FOR      | 4-bit baseline + `W` (0–4)/value | 1000 ft steps (0–15000 ft)            |
 | snow                   | Sparse   | 1 presence bit + magnitude/nonzero | 6-bit sqrt-companded, 0–200 cm    |
 | rain                   | Sparse   | 1 presence bit + magnitude/nonzero | 6-bit sqrt-companded, 0–144 mm    |
-| precipitation prob.    | Fixed    | 3 bits                        | 0–100% in eighths                     |
+| precipitation prob.    | Adaptive | mode + FOR/sparse/empty (≤3 bits/value) | 0–100% in eighths                 |
 | wind (sfc/500/600/700) | Fixed    | 7 bits each (4 speed + 3 dir) | 5 mph speed steps, 8-point direction  |
 | cloud (total/high/mid/low) | Fixed | 3 bits each                  | 0–100% in eighths                     |
 

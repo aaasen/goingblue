@@ -85,7 +85,8 @@ function clampInt(v: number, width: number): number {
 
 // Scalar columns, in body (column-major) order. Wind is handled separately (two ints per cell).
 const SCALAR_COLUMNS: ScalarColumn[] = [
-  { bit: 0, adaptive: false,
+  // precip chance: adaptive — sparse/empty when mostly dry (often 0%), FOR when clustered, raw otherwise.
+  { bit: 0, adaptive: true,
     get: (p) => clampInt(Math.round((p.precip ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.precip = Math.round(v * 100 / 7); } },
   { bit: 1, adaptive: true,
