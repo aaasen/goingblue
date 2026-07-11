@@ -9,6 +9,7 @@ import type { ForecastMessage, VersionedCodec, ContextResolver } from "../model.
 import {
   encodeWeathercode, decodeWeathercode,
   encodeWindDir, decodeWindDir,
+  encodeWindSpeedDelta, decodeWindSpeedDelta, chooseWindSpeedDeltaTable, WIND_SPEED_DELTA_TABLE_BITS,
   encodeTempDelta, decodeTempDelta, chooseTempDeltaTable, TEMP_DELTA_TABLE_BITS,
 } from "../huffman.js";
 
@@ -134,13 +135,14 @@ const SCALAR_COLUMNS: ScalarColumn[] = [
     set: (p, v) => { p.cloud_low = Math.round(v * 100 / 7); } },
 ];
 
-// Wind columns (surface + 500/600/700 hPa): speed + direction per cell. Direction is always
-// Huffman-coded (see encodeWindDir in huffman.ts), each column tracking its own previous-direction
-// context independently. Surface wind encodes speed adaptively (FOR/sparse/empty/raw, as a
-// contiguous sub-column, direction interleaved after); the pressure-level columns keep speed raw,
-// interleaved with the Huffman-coded direction (revisited later).
-const WIND_COLUMNS: { bit: number; kph: keyof Period; dir: keyof Period; speedAdaptive?: boolean }[] = [
-  { bit: 4, kph: "wind_sfc_kph", dir: "wind_sfc_dir", speedAdaptive: true },
+// Wind columns (surface + 500/600/700 hPa): speed + direction per cell, both Huffman-coded, same
+// shape as temp/tmin and weathercode respectively. Speed: per model, an anchor (first period, full
+// width) followed by Huffman-coded period-over-period deltas (see WIND_SPEED_DELTA_* in
+// huffman.ts), never diffed across a model boundary. Direction: each symbol's codebook is keyed by
+// the previously decoded direction (see encodeWindDir in huffman.ts), each column tracking its own
+// context independently.
+const WIND_COLUMNS: { bit: number; kph: keyof Period; dir: keyof Period }[] = [
+  { bit: 4, kph: "wind_sfc_kph", dir: "wind_sfc_dir" },
   { bit: 5, kph: "wind_500_kph", dir: "wind_500_dir" },
   { bit: 6, kph: "wind_600_kph", dir: "wind_600_dir" },
   { bit: 7, kph: "wind_700_kph", dir: "wind_700_dir" },
@@ -156,6 +158,9 @@ function reader(bits: number[]) {
     },
     windDir(prevDir: number | null): number {
       const [sym, p] = decodeWindDir(bits, pos, prevDir); pos = p; return sym;
+    },
+    windSpeedDelta(table: number): number {
+      const [delta, p] = decodeWindSpeedDelta(bits, pos, table); pos = p; return delta;
     },
     tempDelta(table: number): number {
       const [delta, p] = decodeTempDelta(bits, pos, table); pos = p; return delta;
@@ -371,28 +376,33 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
   for (const col of WIND_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
     before = body.length;
-    let prevDir: number | null = null;
-    if (col.speedAdaptive) {
-      // Adaptive speed sub-column, then Huffman-coded direction (order-1, keyed by prev direction).
-      const speeds: number[] = [];
-      eachCell(nPeriods, nModels, (p, m) => speeds.push(windSpeed(msg.periods[m][p], col.kph)));
-      const mode = encodeAdaptive(body, speeds, WIND_SPEED_BITS);
-      eachCell(nPeriods, nModels, (p, m) => {
-        const d = ((msg.periods[m][p][col.dir] as number) ?? 0) % 8;
-        encodeWindDir(body, prevDir, d);
-        prevDir = d;
-      });
-      mark(BIT_NAME[col.bit], before, mode);
-    } else {
-      eachCell(nPeriods, nModels, (p, m) => {
-        const c = msg.periods[m][p];
-        putInt(body, windSpeed(c, col.kph), WIND_SPEED_BITS);
-        const d = ((c[col.dir] as number) ?? 0) % 8;
-        encodeWindDir(body, prevDir, d);
-        prevDir = d;
-      });
-      mark(BIT_NAME[col.bit], before, -1);
+
+    // Speed: per model, an anchor (first period, full width) then Huffman-coded period-over-period
+    // deltas under the cheapest-of-16 table for this column.
+    const allSpeedDeltas: number[] = [];
+    for (let m = 0; m < nModels; m++) {
+      for (let p = 1; p < nPeriods; p++) {
+        allSpeedDeltas.push(windSpeed(msg.periods[m][p], col.kph) - windSpeed(msg.periods[m][p - 1], col.kph));
+      }
     }
+    const speedTable = chooseWindSpeedDeltaTable(allSpeedDeltas);
+    putInt(body, speedTable, WIND_SPEED_DELTA_TABLE_BITS);
+    for (let m = 0; m < nModels; m++) {
+      putInt(body, windSpeed(msg.periods[m][0], col.kph), WIND_SPEED_BITS);
+      for (let p = 1; p < nPeriods; p++) {
+        encodeWindSpeedDelta(body, speedTable, windSpeed(msg.periods[m][p], col.kph) - windSpeed(msg.periods[m][p - 1], col.kph));
+      }
+    }
+
+    // Direction: order-1 Huffman, keyed by the previously decoded direction.
+    let prevDir: number | null = null;
+    eachCell(nPeriods, nModels, (p, m) => {
+      const d = ((msg.periods[m][p][col.dir] as number) ?? 0) % 8;
+      encodeWindDir(body, prevDir, d);
+      prevDir = d;
+    });
+
+    mark(BIT_NAME[col.bit], before, -1);
   }
 
   return { body };
@@ -511,25 +521,23 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   }
   for (const col of WIND_COLUMNS) {
     if (!(vars_mask & (1 << col.bit))) continue;
-    let prevDir: number | null = null;
-    if (col.speedAdaptive) {
-      const speeds = decodeAdaptive(rd, WIND_SPEED_BITS, nPeriods * nModels);
-      let i = 0;
-      eachCell(nPeriods, nModels, (p, m) => { (periods[m][p][col.kph] as number) = speeds[i++] * KPH_PER_STEP; });
-      eachCell(nPeriods, nModels, (p, m) => {
-        const d = rd.windDir(prevDir);
-        (periods[m][p][col.dir] as number) = d;
-        prevDir = d;
-      });
-    } else {
-      eachCell(nPeriods, nModels, (p, m) => {
-        const spd = rd.int(WIND_SPEED_BITS);
-        const dir = rd.windDir(prevDir);
-        (periods[m][p][col.kph] as number) = spd * KPH_PER_STEP;
-        (periods[m][p][col.dir] as number) = dir;
-        prevDir = dir;
-      });
+
+    const speedTable = rd.int(WIND_SPEED_DELTA_TABLE_BITS);
+    for (let m = 0; m < nModels; m++) {
+      let speed = rd.int(WIND_SPEED_BITS);
+      (periods[m][0][col.kph] as number) = speed * KPH_PER_STEP;
+      for (let p = 1; p < nPeriods; p++) {
+        speed += rd.windSpeedDelta(speedTable);
+        (periods[m][p][col.kph] as number) = speed * KPH_PER_STEP;
+      }
     }
+
+    let prevDir: number | null = null;
+    eachCell(nPeriods, nModels, (p, m) => {
+      const d = rd.windDir(prevDir);
+      (periods[m][p][col.dir] as number) = d;
+      prevDir = d;
+    });
   }
 
   // `days` is retained on the common message shape for display; it's the calendar-day span

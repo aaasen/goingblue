@@ -196,6 +196,75 @@ export function decodeWindDir(bits: number[], pos: number, prevDir: number | nul
   return [node.sym, pos];
 }
 
+// ── Wind speed delta codebooks ──────────────────────────────────────────────────
+// Static Huffman codebooks for period-over-period wind-speed change, in quantized steps (see
+// WIND_SPEED_BITS in v1.ts: 0..15). Unlike temperature the domain is already small and bounded, so
+// the full delta range -15..15 (31 symbols) fits directly in the alphabet — no escape/raw-payload
+// fallback needed. Derived by k-means clustering per-(forecast × wind level) delta histograms
+// pooled across all four wind levels (surface + 500/600/700 hPa) — same call as wind direction
+// (pooling barely changes the bit cost vs. separate tables per level) — see
+// server/scripts/derive-wind-speed-delta-codebooks.ts. The encoder picks the cheapest per column
+// and stores its index in a 4-bit selector.
+const WIND_SPEED_DELTA_WEIGHTS: number[][] = [
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 8, 127, 707, 151, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 56, 889, 55, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 8, 40, 165, 541, 201, 34, 6, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 10, 183, 635, 154, 14, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5, 160, 690, 137, 7, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 7, 35, 213, 479, 224, 32, 6, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 29, 943, 28, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 104, 790, 101, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 11, 151, 655, 171, 8, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 18, 209, 578, 161, 24, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 15, 175, 602, 193, 11, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5, 28, 238, 505, 174, 39, 7, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 81, 838, 79, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 127, 744, 120, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 16, 209, 546, 209, 14, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+];
+
+const WIND_SPEED_DELTA_MAX = 15; // must mirror WIND_SPEED_BITS in v1.ts (0..15)
+export const WIND_SPEED_DELTA_TABLE_COUNT = WIND_SPEED_DELTA_WEIGHTS.length; // 16
+export const WIND_SPEED_DELTA_TABLE_BITS = 4;
+
+const WIND_SPEED_DELTA_TABLES: Table[] = WIND_SPEED_DELTA_WEIGHTS.map((w) => {
+  const codes = canonicalCodes(huffmanLengths(w));
+  return { codes, root: buildTrie(codes) };
+});
+
+function windSpeedDeltaSym(delta: number): number {
+  return delta + WIND_SPEED_DELTA_MAX;
+}
+
+// Appends the Huffman code for a period-over-period wind-speed change `delta` (quantized steps)
+// under `table`.
+export function encodeWindSpeedDelta(bits: number[], table: number, delta: number): void {
+  for (const b of WIND_SPEED_DELTA_TABLES[table].codes[windSpeedDeltaSym(delta)]) bits.push(b);
+}
+
+// Reads one Huffman-coded wind-speed delta (under `table`), returning [delta, nextPos].
+export function decodeWindSpeedDelta(bits: number[], pos: number, table: number): [number, number] {
+  let node = WIND_SPEED_DELTA_TABLES[table].root;
+  while (node.sym === undefined) {
+    node = node.child[bits[pos++] ?? 0]!;
+    if (!node) throw new Error("huffman: invalid wind-speed-delta bitstream");
+  }
+  return [node.sym - WIND_SPEED_DELTA_MAX, pos];
+}
+
+// Picks the codebook that encodes `deltas` in the fewest total bits.
+export function chooseWindSpeedDeltaTable(deltas: number[]): number {
+  let best = 0;
+  let bestBits = Infinity;
+  for (let t = 0; t < WIND_SPEED_DELTA_TABLES.length; t++) {
+    let total = 0;
+    for (const d of deltas) total += WIND_SPEED_DELTA_TABLES[t].codes[windSpeedDeltaSym(d)].length;
+    if (total < bestBits) { bestBits = total; best = t; }
+  }
+  return best;
+}
+
 // ── Temperature delta codebooks ─────────────────────────────────────────────────
 // Static Huffman codebooks for period-over-period temp_c change. Symbols are quantized deltas
 // -7..7 (indices 0..14) plus an ESCAPE symbol (index 15) for rarer bigger jumps, followed by a raw
