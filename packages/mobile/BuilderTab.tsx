@@ -143,9 +143,11 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
   const varsMask = activeVars.reduce((mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)), 0);
   const resLabel = RESOLUTIONS.find((r) => r.value === resHours)?.label ?? `${resHours}h`;
 
+  const parsedCustomCoords = parseLatLon(customCoords);
+  const customCoordsInvalid = customCoords.trim().length > 0 && parsedCustomCoords == null;
   const resolvedCoords = locationMode === 'current'
     ? gpsCoords
-    : parseLatLon(customCoords);
+    : parsedCustomCoords;
   const coordsValid = resolvedCoords != null
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
   // In current-location mode we always show a preview (coords are omitted until GPS resolves);
@@ -243,14 +245,14 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
         />
         {locationMode === 'custom' && (
           <>
-            <View style={styles.customCoords}>
+            <View style={[styles.customCoords, customCoordsInvalid && styles.customCoordsInvalid]}>
               <View style={[styles.coordRow, styles.coordRowLast]}>
                 <Text style={[styles.coordLabel, styles.coordLabelWide]}>Coordinates</Text>
                 <TextInput
-                  style={styles.coordInput}
+                  style={[styles.coordInput, customCoordsInvalid && styles.coordInputInvalid]}
                   value={customCoords}
                   onChangeText={setCustomCoords}
-                  placeholder="47.45915, -121.45958"
+                  placeholder="latitude, longitude"
                   keyboardType="numbers-and-punctuation"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -370,11 +372,13 @@ const styles = StyleSheet.create({
   varCheckHidden: { opacity: 0 },
 
   customCoords: { marginTop: 10, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
+  customCoordsInvalid: { borderWidth: 1, borderColor: '#cc2222' },
   coordRow: { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
   coordRowLast: { borderBottomWidth: 0 },
   coordLabel: { width: 30, fontSize: 15, fontWeight: '600', color: '#6e6e73' },
   coordLabelWide: { width: 104 },
   coordInput: { flex: 1, fontSize: 15, color: '#1c1c1e' },
+  coordInputInvalid: { color: '#cc2222' },
   mapHint: { fontSize: 12, color: '#8e8e93', marginTop: 10 },
 
   msgBox: { backgroundColor: '#fff', borderRadius: 12, padding: 14 },

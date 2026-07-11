@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { StyleSheet, View, Platform } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE, PROVIDER_DEFAULT, type MapPressEvent } from 'react-native-maps';
 
@@ -27,10 +28,21 @@ const provider = Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT;
 // react-native-maps native map. A `.web.tsx` sibling renders nothing on web, where the map module
 // isn't available — callers fall back to the lat/lon text inputs there.
 export default function LocationMap({ coord, onPick, height = 200 }: Props) {
+  const mapRef = useRef<MapView>(null);
   const interactive = onPick != null;
   const initialRegion = coord
     ? { latitude: coord.lat, longitude: coord.lon, latitudeDelta: PICKED_DELTA, longitudeDelta: PICKED_DELTA }
     : DEFAULT_REGION;
+
+  useEffect(() => {
+    if (!coord) return;
+    mapRef.current?.animateToRegion({
+      latitude: coord.lat,
+      longitude: coord.lon,
+      latitudeDelta: PICKED_DELTA,
+      longitudeDelta: PICKED_DELTA,
+    }, 250);
+  }, [coord?.lat, coord?.lon]);
 
   function report(latitude: number, longitude: number) {
     onPick?.({ lat: latitude, lon: longitude });
@@ -39,6 +51,7 @@ export default function LocationMap({ coord, onPick, height = 200 }: Props) {
   return (
     <View style={[styles.wrap, { height }]}>
       <MapView
+        ref={mapRef}
         style={StyleSheet.absoluteFill}
         provider={provider}
         initialRegion={initialRegion}
