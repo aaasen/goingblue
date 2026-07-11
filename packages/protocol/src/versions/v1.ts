@@ -93,10 +93,17 @@ function clampInt(v: number, width: number): number {
   return Math.min(Math.max(v, 0), (1 << width) - 1);
 }
 
-// temp: Huffman-coded period-over-period deltas (see TEMP_DELTA_* in huffman.ts), not a plain
-// scalar column — each model's first period is an anchor at full width, quantized the same way.
+// temp/tmin: Huffman-coded period-over-period deltas (see TEMP_DELTA_* in huffman.ts), not plain
+// scalar columns — each model's first period is an anchor at full width, quantized the same way.
+// Both fields share one codebook set: a min-of-window series behaves like a max-of-window one
+// (same offset, same ~1°C-step physical process), so there's no need to derive a second table.
 const TEMP_ANCHOR_BITS = VAR_BITS_V1[VARS_BIT.temp];
-const quantTemp = (p: Period): number => clampInt(Math.round((p.temp_c ?? 0) + TEMP_OFFSET), TEMP_ANCHOR_BITS);
+const quantTemp = (p: Period, field: "temp_c" | "temp_min_c"): number =>
+  clampInt(Math.round((p[field] ?? 0) + TEMP_OFFSET), TEMP_ANCHOR_BITS);
+const TEMP_DELTA_COLUMNS: [bit: number, field: "temp_c" | "temp_min_c", name: string][] = [
+  [VARS_BIT.temp, "temp_c", "temp"],
+  [VARS_BIT.tmin, "temp_min_c", "tmin"],
+];
 
 // Scalar columns, in body (column-major) order. Wind is handled separately (two ints per cell).
 const SCALAR_COLUMNS: ScalarColumn[] = [
@@ -104,11 +111,7 @@ const SCALAR_COLUMNS: ScalarColumn[] = [
   { bit: 0, mode: "adaptive",
     get: (p) => clampInt(Math.round((p.precip ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.precip = Math.round(v * 100 / 7); } },
-  // temp (bit 1) is handled separately in buildBody/decode below — Huffman-coded period-over-period
-  // deltas, not a per-cell scalar (see TEMP_DELTA_* in huffman.ts). tmin still uses plain FOR.
-  { bit: 13, mode: "for",
-    get: (p) => clampInt(Math.round((p.temp_min_c ?? 0) + TEMP_OFFSET), 8),
-    set: (p, v) => { p.temp_min_c = v - TEMP_OFFSET; } },
+  // temp (bit 1) and tmin (bit 13) are handled separately in buildBody/decode below.
   { bit: 2, mode: "adaptive",
     get: (p) => compandSqrt(p.snow_cm ?? 0, SNOW_K, ACCUM_BITS),
     set: (p, v) => { p.snow_cm = expandSqrt(v, SNOW_K); } },
@@ -331,26 +334,27 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[]; w
   for (const idx of wcIdx) encodeWeathercode(body, wcTable, idx);
   mark("weathercode", before, -1);
 
-  // Temp column: per model, an anchor (first period, full width) followed by Huffman-coded
-  // period-over-period deltas — never diffed across a model boundary. One cheapest-of-16 table
-  // for the whole column (see TEMP_DELTA_* in huffman.ts).
-  if (msg.vars_mask & (1 << VARS_BIT.temp)) {
+  // temp/tmin: per model, an anchor (first period, full width) followed by Huffman-coded
+  // period-over-period deltas — never diffed across a model boundary. Each column picks its own
+  // cheapest-of-16 table (see TEMP_DELTA_* in huffman.ts) from the same shared codebook set.
+  for (const [bit, field, name] of TEMP_DELTA_COLUMNS) {
+    if (!(msg.vars_mask & (1 << bit))) continue;
     before = body.length;
     const allDeltas: number[] = [];
     for (let m = 0; m < nModels; m++) {
       for (let p = 1; p < nPeriods; p++) {
-        allDeltas.push(quantTemp(msg.periods[m][p]) - quantTemp(msg.periods[m][p - 1]));
+        allDeltas.push(quantTemp(msg.periods[m][p], field) - quantTemp(msg.periods[m][p - 1], field));
       }
     }
     const table = chooseTempDeltaTable(allDeltas);
     putInt(body, table, TEMP_DELTA_TABLE_BITS);
     for (let m = 0; m < nModels; m++) {
-      putInt(body, quantTemp(msg.periods[m][0]), TEMP_ANCHOR_BITS);
+      putInt(body, quantTemp(msg.periods[m][0], field), TEMP_ANCHOR_BITS);
       for (let p = 1; p < nPeriods; p++) {
-        encodeTempDelta(body, table, quantTemp(msg.periods[m][p]) - quantTemp(msg.periods[m][p - 1]));
+        encodeTempDelta(body, table, quantTemp(msg.periods[m][p], field) - quantTemp(msg.periods[m][p - 1], field));
       }
     }
-    mark("temp", before, -1);
+    mark(name, before, -1);
   }
 
   for (const col of SCALAR_COLUMNS) {
@@ -482,14 +486,15 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
     periods[m][p].weathercode = WMO_CODES[rd.weathercode(wcTable)] ?? 0;
   });
 
-  if (vars_mask & (1 << VARS_BIT.temp)) {
+  for (const [bit, field] of TEMP_DELTA_COLUMNS) {
+    if (!(vars_mask & (1 << bit))) continue;
     const table = rd.int(TEMP_DELTA_TABLE_BITS);
     for (let m = 0; m < nModels; m++) {
       let quant = rd.int(TEMP_ANCHOR_BITS);
-      periods[m][0].temp_c = quant - TEMP_OFFSET;
+      periods[m][0][field] = quant - TEMP_OFFSET;
       for (let p = 1; p < nPeriods; p++) {
         quant += rd.tempDelta(table);
-        periods[m][p].temp_c = quant - TEMP_OFFSET;
+        periods[m][p][field] = quant - TEMP_OFFSET;
       }
     }
   }

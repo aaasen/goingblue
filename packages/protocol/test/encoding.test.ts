@@ -382,20 +382,19 @@ describe("frame-of-reference temperature encoding", () => {
     expect(flatLen).toBeLessThan(spreadLen);
   });
 
-  it("always chooses FOR for tmin, never falling back to raw/sparse/empty", () => {
-    const vars_mask = 1 << VARS_BIT.tmin;
-    // A single-value column: previously the cheapest adaptive choice here would be EMPTY-like
-    // (zero spread), not FOR. tmin must still report FOR.
-    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, temp_min_c: 0 }))];
-    const { columns } = v1EncodeBreakdown(msg({ resolution: 4, vars_mask, periods }));
-    expect(columns.find((c) => c.name === "tmin")?.mode).toBe("for");
-  });
-
-  it("temp reports no adaptive mode — it's Huffman-coded deltas, not a raw/for/sparse/empty column", () => {
-    const vars_mask = 1 << VARS_BIT.temp;
-    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, temp_c: 0 }))];
+  it("temp and tmin report no adaptive mode — they're Huffman-coded deltas, not raw/for/sparse/empty columns", () => {
+    const vars_mask = (1 << VARS_BIT.temp) | (1 << VARS_BIT.tmin);
+    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, temp_c: 0, temp_min_c: 0 }))];
     const { columns } = v1EncodeBreakdown(msg({ resolution: 4, vars_mask, periods }));
     expect(columns.find((c) => c.name === "temp")?.mode).toBeNull();
+    expect(columns.find((c) => c.name === "tmin")?.mode).toBeNull();
+  });
+
+  it("round-trips a clustered tmin column exactly", () => {
+    const temps = [-8, -6, -5, -2, 0, 3, 1, -1, -4, 2];
+    const periods = [temps.map((t) => ({ ...PERIOD, temp_min_c: t }))];
+    const decoded = roundTrip(msg({ resolution: 4, vars_mask: 1 << VARS_BIT.tmin, periods }));
+    decoded.periods[0].forEach((p, i) => expect(p.temp_min_c).toBe(temps[i]));
   });
 });
 
