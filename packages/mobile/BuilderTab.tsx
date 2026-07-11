@@ -239,7 +239,7 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
           <>
             <View style={styles.customCoords}>
               <View style={[styles.coordRow, styles.coordRowLast]}>
-                <Text style={[styles.coordLabel, styles.coordLabelWide]}>Lat, Lon</Text>
+                <Text style={[styles.coordLabel, styles.coordLabelWide]}>Coordinates</Text>
                 <TextInput
                   style={styles.coordInput}
                   value={customCoords}
@@ -252,7 +252,7 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
                 />
               </View>
             </View>
-            <Text style={styles.mapHint}>Paste “lat, lon”, or tap the map / drag the pin to set a location.</Text>
+            <Text style={styles.mapHint}>Tap the map to set a location</Text>
             <LocationMap
               coord={coordsValid ? resolvedCoords : null}
               onPick={(c) => setCustomCoords(`${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`)}
@@ -364,11 +364,11 @@ const styles = StyleSheet.create({
   varCheckHidden: { opacity: 0 },
 
   customCoords: { marginTop: 10, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
-  coordRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
+  coordRow: { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
   coordRowLast: { borderBottomWidth: 0 },
-  coordLabel: { width: 30, fontSize: 14, fontWeight: '600', color: '#6e6e73' },
-  coordLabelWide: { width: 64 },
-  coordInput: { flex: 1, fontSize: 14, color: '#1c1c1e', fontFamily: 'Courier' },
+  coordLabel: { width: 30, fontSize: 15, fontWeight: '600', color: '#6e6e73' },
+  coordLabelWide: { width: 104 },
+  coordInput: { flex: 1, fontSize: 15, color: '#1c1c1e' },
   mapHint: { fontSize: 12, color: '#8e8e93', marginTop: 10 },
 
   msgBox: { backgroundColor: '#fff', borderRadius: 12, padding: 14 },
