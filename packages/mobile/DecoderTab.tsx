@@ -3,7 +3,7 @@ import {
   StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView,
 } from 'react-native';
 import {
-  RESOLUTION_HOURS, startDatetime, type ForecastMessage,
+  RESOLUTION_HOURS, VARS_BIT, startDatetime, type ForecastMessage,
 } from '@weather/protocol';
 import { decodeAny, loadStore, attachResponse, loadPastForecasts, type Slot } from './cache';
 import type { Units } from './settings';
@@ -26,6 +26,11 @@ function spanLabel(msg: ForecastMessage): string {
   return resHours >= 24 ? `${n}d daily` : `${n}×${resHours}h`;
 }
 
+function resolutionLabel(msg: ForecastMessage): string {
+  const resHours = RESOLUTION_HOURS[msg.resolution] ?? 24;
+  return resHours >= 24 ? 'daily' : `${resHours}h`;
+}
+
 function metaLabel(msg: ForecastMessage, units: Units): string {
   const models = modelLabelsFromMask(msg.models_mask);
   const elevStr = msg.elevation > 0
@@ -46,14 +51,31 @@ function normalizedForecastData(encoded: string): string {
   return encoded.replace(/\s/g, '').replace(/^fw:/i, '');
 }
 
-/** Compact label for a cached forecast (request time · location · span · models). */
+/** Compact label for a cached forecast (request time · location · resolution · models). */
 function cacheMetaLabel(slot: Slot, token: string): string {
   try {
     const msg = decodeAny(slot.encoded!, token);
     const models = modelLabelsFromMask(msg.models_mask).join(' + ');
-    return `${requestTimeLabel(slot.requestedAt)} · ${latLonLabel(msg)} · ${spanLabel(msg)} · ${models}`;
+    return `${requestTimeLabel(slot.requestedAt)} · ${latLonLabel(msg)} · ${resolutionLabel(msg)} · ${models}`;
   } catch {
     return 'Unknown';
+  }
+}
+
+const OPTIONAL_VARIABLE_ICONS = [
+  { vars: ['cch', 'ccm', 'ccl'], symbol: '☁️', label: 'Detailed clouds' },
+  { vars: ['w500', 'w600', 'w700'], symbol: '💨', label: 'High altitude winds' },
+  { vars: ['freeze'], symbol: '🌡️', label: 'Freezing level' },
+];
+
+function cacheVariableIcons(slot: Slot, token: string) {
+  try {
+    const mask = decodeAny(slot.encoded!, token).vars_mask;
+    return OPTIONAL_VARIABLE_ICONS.filter(({ vars }) =>
+      vars.some((variable) => mask & (1 << VARS_BIT[variable])),
+    );
+  } catch {
+    return [];
   }
 }
 
@@ -167,12 +189,28 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
             {group.slots.map((slot) => {
               const isLoaded = normalizedForecastData(forecastData)
                 === normalizedForecastData(slot.encoded!);
+              const variableIcons = cacheVariableIcons(slot, token);
               return (
                 <View
                   key={slot.code}
                   style={[styles.pastItem, isLoaded && styles.pastItemLoaded]}
                 >
-                  <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, token)}</Text>
+                  <View style={styles.pastDetails}>
+                    <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, token)}</Text>
+                    {variableIcons.length > 0 && (
+                      <View style={styles.pastIcons}>
+                        {variableIcons.map((icon) => (
+                          <Text
+                            key={icon.label}
+                            style={styles.pastIcon}
+                            accessibilityLabel={icon.label}
+                          >
+                            {icon.symbol}
+                          </Text>
+                        ))}
+                      </View>
+                    )}
+                  </View>
                   <View style={styles.pastBtns}>
                     <TouchableOpacity
                       style={[styles.pastLoadBtn, isLoaded && styles.pastLoadBtnDisabled]}
@@ -331,7 +369,10 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e5ea',
   },
   pastItemLoaded: { backgroundColor: '#e8f1fb', borderRadius: 8, borderTopColor: '#c7dff5' },
-  pastMeta: { flex: 1, fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
+  pastDetails: { flex: 1, gap: 3 },
+  pastMeta: { fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
+  pastIcons: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  pastIcon: { fontSize: 15, lineHeight: 19 },
   pastBtns: { flexDirection: 'row', gap: 8 },
   pastLoadBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: '#2a6bb5' },
   pastLoadBtnDisabled: { backgroundColor: '#aeaeb2' },
