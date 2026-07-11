@@ -1,42 +1,61 @@
 /**
- * Run every codebook derivation script (scripts/derive-*.ts, auto-discovered) against the cached
- * corpus, in sequence:
+ * Run every codebook derivation script (scripts/derive-*-codebooks.ts, auto-discovered) against
+ * the cached corpus and write the resulting weight tables to
+ * packages/protocol/src/codebooks.gen.ts:
  *
  *   pnpm generate                       # from the repo root (builds the protocol first)
  *
  * The corpus lives in data/raw/gfs — expand it with `node scripts/benchmark.ts --collect-only`.
- * Each derive script prints the weight tables to paste into packages/protocol/src/huffman.ts.
- * After pasting, regenerate the wire fixture (packages/protocol/scripts/generate-fixture.ts) and
- * run the protocol tests: test/codebooks.test.ts fails until the protocol version is bumped and
- * the new codebook digest recorded — changed tables change what already-encoded messages mean.
+ * The tables are v1 wire format, so after regenerating: rebuild the protocol, regenerate the wire
+ * fixture (packages/protocol/scripts/generate-fixture.ts), and run the protocol tests —
+ * test/codebooks.test.ts fails until the protocol version is bumped (the deliberate manual step)
+ * and the new codebook digest recorded.
  */
-import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { renderTable, CORPUS, type DerivedTables } from "./derive-lib.ts";
 
 const dir = dirname(fileURLToPath(import.meta.url));
+const OUT = join(dir, "..", "..", "protocol", "src", "codebooks.gen.ts");
 
-const corpus = join(dir, "..", "..", "..", "data", "raw", "gfs");
-if (!existsSync(corpus)) {
-  console.error(`No cached corpus at ${corpus} — run \`node scripts/benchmark.ts --collect-only\` first.`);
+if (!existsSync(CORPUS)) {
+  console.error(`No cached corpus at ${CORPUS} — run \`node scripts/benchmark.ts --collect-only\` first.`);
   process.exit(1);
 }
 
-const scripts = readdirSync(dir).filter((f) => f.startsWith("derive-") && f.endsWith(".ts")).sort();
+const scripts = readdirSync(dir).filter((f) => f.startsWith("derive-") && f.endsWith("-codebooks.ts")).sort();
 
+const tables: DerivedTables = {};
 for (const script of scripts) {
   console.log(`\n── ${script} ${"─".repeat(Math.max(2, 76 - script.length))}`);
   const started = Date.now();
-  const res = spawnSync(process.execPath, [join(dir, script)], { stdio: "inherit" });
-  if (res.status !== 0) {
-    console.error(`\n${script} failed (exit ${res.status ?? "signal"}) — stopping.`);
-    process.exit(res.status ?? 1);
+  const mod = await import(pathToFileURL(join(dir, script)).href);
+  if (typeof mod.derive !== "function") {
+    console.error(`${script} exports no derive() — stopping.`);
+    process.exit(1);
+  }
+  for (const [name, t] of Object.entries(await mod.derive())) {
+    if (tables[name]) {
+      console.error(`${script} rederived ${name}, already produced by an earlier script — stopping.`);
+      process.exit(1);
+    }
+    tables[name] = t as number[] | number[][];
   }
   console.log(`(${((Date.now() - started) / 1000).toFixed(1)}s)`);
 }
 
-console.log(`\nAll ${scripts.length} derivations done. To ship changed tables: paste the printed
-weights into packages/protocol/src/huffman.ts, bump the protocol version, regenerate the fixture
-(node packages/protocol/scripts/generate-fixture.ts after a build), and run the protocol tests —
-the codebook digest test walks you through recording the new digest.`);
+const header = `// GENERATED FILE — do not edit by hand. Written by \`pnpm generate\`
+// (packages/server/scripts/generate-codebooks.ts): integer Huffman weight tables derived from
+// the cached forecast corpus (data/raw/gfs). These tables are v1 wire format — regenerating
+// changes what already-encoded messages mean, so test/codebooks.test.ts pins their digest per
+// protocol version and fails until the version is bumped and the new digest recorded. See
+// packages/protocol/src/huffman.ts for how each table is used and the derive-*-codebooks.ts
+// scripts for methodology.
+`;
+const body = Object.entries(tables).map(([name, t]) => renderTable(name, t)).join("\n\n");
+writeFileSync(OUT, `${header}\n${body}\n`);
+
+console.log(`\nWrote ${Object.keys(tables).length} tables from ${scripts.length} scripts to ${OUT}
+To ship: rebuild the protocol, regenerate the fixture (node packages/protocol/scripts/generate-fixture.ts),
+and run the protocol tests — the codebook digest test enforces the manual version bump.`);

@@ -5,25 +5,23 @@
  * message can even mix resolutions in a future dynamic-duration scheme), so the codebook selector
  * must earn its keep on the actual delta shape, not a hardcoded resolution. Alphabet: deltas -7..7
  * (15 symbols) map to indices 0..14, plus an ESCAPE symbol (index 15) for |delta|>7, followed by a
- * raw 6-bit signed (bias 32) field. k=TEMP_DELTA_TABLE_COUNT clusters → that many codebooks whose
- * integer weight vectors are printed for pasting into packages/protocol/src/huffman.ts.
+ * raw 6-bit signed (bias 32) field. k=TEMP_DELTA_TABLE_COUNT clusters → that many codebooks.
+ *
+ * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
+ * (below) to derive and print without writing:
  *
  *   node packages/server/scripts/derive-temp-delta-codebooks.ts
  */
-import { readdir, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD, type HourlyData } from "../src/forecast.ts";
+import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import { VARS_BIT } from "@weather/protocol";
+import { eachForecast, huffmanLengths, WEIGHT_SCALE, runStandalone, type DerivedTables } from "./derive-lib.ts";
 
-const CORPUS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "data", "raw", "gfs");
 const K = 16;                    // codebook count — fills a 4-bit table selector
 const CORE_RADIUS = 7;           // symbols 0..14 = deltas -7..7
 const NSYM = 2 * CORE_RADIUS + 2; // 16: 15 core + 1 escape
 const ESCAPE_SYM = NSYM - 1;     // 15
 const ESCAPE_BITS = 6;           // raw payload width when escape fires (bias 32, range -32..31)
 const RES_IDXS = [0, 1, 2, 3, 4]; // 24h, 12h, 6h, 3h, 1h
-const WEIGHT_SCALE = 1000;
 const RAW_BITS = 8;              // cost of the fixed-width fallback (current 8-bit raw field)
 
 function rng(seed: number) {
@@ -44,30 +42,22 @@ interface Sample { resIdx: number; hist: number[]; }
 // One normalized NSYM-bin delta histogram per (forecast, resolution).
 async function collectSamples(): Promise<Sample[]> {
   const out: Sample[] = [];
-  for (const loc of await readdir(CORPUS)) {
-    const dir = join(CORPUS, loc);
-    for (const f of await readdir(dir)) {
-      if (!f.endsWith(".json")) continue;
-      let rec: any;
-      try { rec = JSON.parse(await readFile(join(dir, f), "utf8")); } catch { continue; } // mid-write
-      const h = rec.response.hourly as HourlyData;
-      const startHour = Math.floor(Date.parse(rec.meta.run + "Z") / 3600000);
-      for (const resIdx of RES_IDXS) {
-        const n = Math.floor(h.time.length / HOURS_PER_PERIOD[resIdx]);
-        if (n < 3) continue; // need at least 2 deltas for a meaningful sample
-        const periods = aggregateHourly(h, h.time, n, resIdx, startHour).map((r) => toFullPeriod(r, 1 << VARS_BIT.temp, "GFS", resIdx));
-        const hist = new Array(NSYM).fill(0);
-        let count = 0;
-        for (let i = 1; i < periods.length; i++) {
-          const prev = periods[i - 1].temp_c, cur = periods[i].temp_c;
-          if (prev == null || cur == null) continue;
-          hist[deltaSym(Math.round(cur) - Math.round(prev))]++;
-          count++;
-        }
-        if (count > 0) out.push({ resIdx, hist: hist.map((c) => c / count) });
+  await eachForecast((h, startHour) => {
+    for (const resIdx of RES_IDXS) {
+      const n = Math.floor(h.time.length / HOURS_PER_PERIOD[resIdx]);
+      if (n < 3) continue; // need at least 2 deltas for a meaningful sample
+      const periods = aggregateHourly(h, h.time, n, resIdx, startHour).map((r) => toFullPeriod(r, 1 << VARS_BIT.temp, "GFS", resIdx));
+      const hist = new Array(NSYM).fill(0);
+      let count = 0;
+      for (let i = 1; i < periods.length; i++) {
+        const prev = periods[i - 1].temp_c, cur = periods[i].temp_c;
+        if (prev == null || cur == null) continue;
+        hist[deltaSym(Math.round(cur) - Math.round(prev))]++;
+        count++;
       }
+      if (count > 0) out.push({ resIdx, hist: hist.map((c) => c / count) });
     }
-  }
+  });
   return out;
 }
 
@@ -106,39 +96,18 @@ function kmeans(data: number[][], k: number, restarts = 10) {
   return best!.centroids;
 }
 
-function huffmanLengths(weights: number[]): number[] {
-  const n = weights.length;
-  interface Node { w: number; sym: number; left: number; right: number; }
-  const nodes: Node[] = weights.map((w, i) => ({ w, sym: i, left: -1, right: -1 }));
-  let alive = nodes.map((_, i) => i);
-  while (alive.length > 1) {
-    alive.sort((a, b) => nodes[a].w - nodes[b].w);
-    const a = alive.shift()!, b = alive.shift()!;
-    nodes.push({ w: nodes[a].w + nodes[b].w, sym: -1, left: a, right: b });
-    alive.push(nodes.length - 1);
-  }
-  const lengths = new Array(n).fill(0);
-  const walk = (i: number, depth: number) => {
-    const nd = nodes[i];
-    if (nd.sym >= 0) { lengths[nd.sym] = Math.max(depth, 1); return; }
-    walk(nd.left, depth + 1); walk(nd.right, depth + 1);
-  };
-  walk(alive[0], 0);
-  return lengths;
-}
-
 // Cost of a symbol under a length set — ESCAPE additionally pays its raw payload.
 function symCost(len: number[], sym: number): number {
   return len[sym] + (sym === ESCAPE_SYM ? ESCAPE_BITS : 0);
 }
 
-async function main() {
+export async function derive(): Promise<DerivedTables> {
   const samples = await collectSamples();
   const data = samples.map((s) => s.hist);
   console.log(`Samples (forecast × resolution): ${data.length}`);
 
   const centroids = kmeans(data, K);
-  let weights = centroids.map((c) => c.map((v) => Math.max(1, Math.round(v * WEIGHT_SCALE))));
+  const weights = centroids.map((c) => c.map((v) => Math.max(1, Math.round(v * WEIGHT_SCALE))));
 
   const lengths = () => weights.map(huffmanLengths);
   const uniform = new Array(NSYM).fill(1 / NSYM);
@@ -159,7 +128,7 @@ async function main() {
   console.log(`Mean bits/period (cheapest-of-${K}, escape-aware): ${meanBits.toFixed(3)}  (raw = ${RAW_BITS})`);
 
   // Report per-resolution breakdown so we can see whether pooling actually serves every resolution.
-  console.log(`\nPer-resolution mean bits/period (cheapest-of-${K}):`);
+  console.log(`Per-resolution mean bits/period (cheapest-of-${K}):`);
   const RES_LABEL: Record<number, string> = { 0: "24h", 1: "12h", 2: "6h", 3: "3h", 4: "1h" };
   for (const resIdx of RES_IDXS) {
     const forRes = samples.filter((s) => s.resIdx === resIdx).map((s) => s.hist);
@@ -167,10 +136,7 @@ async function main() {
     console.log(`  ${RES_LABEL[resIdx]}: n=${forRes.length} mean=${mean.toFixed(3)}`);
   }
 
-  console.log(`\n// Paste into packages/protocol/src/huffman.ts as TEMP_DELTA_WEIGHTS:`);
-  console.log("const TEMP_DELTA_WEIGHTS: number[][] = [");
-  for (const w of weights) console.log(`  [${w.join(", ")}],`);
-  console.log("];");
+  return { TEMP_DELTA_WEIGHTS: weights };
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+runStandalone(import.meta.url, derive);
