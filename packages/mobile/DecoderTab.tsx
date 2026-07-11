@@ -51,12 +51,12 @@ function normalizedForecastData(encoded: string): string {
   return encoded.replace(/\s/g, '').replace(/^fw:/i, '');
 }
 
-/** Compact label for a cached forecast (request time · location · resolution · models). */
+/** Compact label for a cached forecast (request time · models · resolution · location). */
 function cacheMetaLabel(slot: Slot, token: string): string {
   try {
     const msg = decodeAny(slot.encoded!, token);
     const models = modelLabelsFromMask(msg.models_mask).join(' + ');
-    return `${requestTimeLabel(slot.requestedAt)} · ${latLonLabel(msg)} · ${resolutionLabel(msg)} · ${models}`;
+    return `${requestTimeLabel(slot.requestedAt)} · ${models} · ${resolutionLabel(msg)} · ${latLonLabel(msg)}`;
   } catch {
     return 'Unknown';
   }
