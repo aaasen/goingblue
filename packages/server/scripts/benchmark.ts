@@ -768,6 +768,63 @@ function renderMiniBox(s: BoxStats, scaleMax: number): string {
   `</svg>`;
 }
 
+// Compact comparison plot for days/message. Every plot shares the same zero-based scale, making
+// resolutions and optional variable groups directly comparable.
+function renderDaysMiniBox(p: BoxStats, scaleMax: number): string {
+  const W = 180, H = 24, pad = 4, iw = W - 2 * pad;
+  const x = (v: number) => pad + (v / scaleMax) * iw;
+  const cy = H / 2, half = 6, cap = 4;
+  return `<svg viewBox="0 0 ${W} ${H}" class="pbox" role="img" aria-label="Days per message: mean ${p.mean.toFixed(1)}">` +
+    `<title>days/message · min ${p.min.toFixed(1)} · Q1 ${p.p25.toFixed(1)} · median ${p.p50.toFixed(1)} · mean ${p.mean.toFixed(1)} · Q3 ${p.p75.toFixed(1)} · max ${p.max.toFixed(1)}</title>` +
+    `<line x1="${x(p.min).toFixed(1)}" y1="${cy}" x2="${x(p.max).toFixed(1)}" y2="${cy}" class="bwhisker"/>` +
+    `<line x1="${x(p.min).toFixed(1)}" y1="${cy - cap}" x2="${x(p.min).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
+    `<line x1="${x(p.max).toFixed(1)}" y1="${cy - cap}" x2="${x(p.max).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
+    `<rect x="${x(p.p25).toFixed(1)}" y="${cy - half}" width="${Math.max(1, x(p.p75) - x(p.p25)).toFixed(1)}" height="${2 * half}" class="bbox"/>` +
+    `<line x1="${x(p.p50).toFixed(1)}" y1="${cy - half}" x2="${x(p.p50).toFixed(1)}" y2="${cy + half}" class="bmedian"/>` +
+    `<circle cx="${x(p.mean).toFixed(1)}" cy="${cy}" r="2.5" class="bmean"/>` +
+  `</svg>`;
+}
+
+function renderPeriodComparison(s: ReportData): string {
+  const configurations = [
+    { label: "Base", combo: 0 },
+    ...s.groups.map((g, i) => ({ label: `+${g.label}`, combo: 1 << i })),
+  ];
+  const head = s.resolutions.map((res) => `<th>${esc(res)}</th>`).join("");
+  const daysFor = (res: string, combo: number): BoxStats => {
+    const factor = HOURS_PER_PERIOD[RESOLUTION_IDX[res]] / 24;
+    const p = s.views[`${res}:${combo}`].periods;
+    return { min: p.min * factor, p25: p.p25 * factor, p50: p.p50 * factor,
+      mean: p.mean * factor, p75: p.p75 * factor, max: p.max * factor };
+  };
+  const dayScaleMax = Math.max(...configurations.flatMap(({ combo }) =>
+    s.resolutions.map((res) => daysFor(res, combo).max)), 1);
+  const means = configurations.flatMap(({ combo }) =>
+    s.resolutions.map((res) => s.views[`${res}:${combo}`].periods.mean));
+  const score = mean(means);
+  const averageDays = s.resolutions.map((res) => {
+    const hoursPerPeriod = HOURS_PER_PERIOD[RESOLUTION_IDX[res]];
+    const days = mean(configurations.map(({ combo }) => s.views[`${res}:${combo}`].periods.mean)) * hoursPerPeriod / 24;
+    return `<div class="score"><div class="score-label">${esc(res)} average</div>` +
+      `<div><strong class="score-value">${days.toFixed(1)}</strong> days/message</div></div>`;
+  }).join("");
+  const rows = configurations.map(({ label, combo }) => `<tr><td class="name">${esc(label)}</td>` +
+    s.resolutions.map((res) => {
+      const p = s.views[`${res}:${combo}`].periods;
+      const days = p.mean * HOURS_PER_PERIOD[RESOLUTION_IDX[res]] / 24;
+      return `<td><div class="pcell"><span class="pmean">${days.toFixed(1)} days</span>` +
+        `${renderDaysMiniBox(daysFor(res, combo), dayScaleMax)}</div></td>`;
+    }).join("") + `</tr>`).join("\n");
+  return `<h2>Overall benchmark score</h2>
+  <div class="score-grid"><div class="score"><div class="score-label">Overall average</div>` +
+    `<div><strong class="score-value">${score.toFixed(1)}</strong> periods/message</div></div>${averageDays}</div>
+  <h2>Days per message</h2>
+  <table class="period-comparison">
+    <tr><th>Variables</th>${head}</tr>
+    ${rows}
+  </table>`;
+}
+
 // One toggleable view = a resolution × variable-combo: histogram, box plot, period summary, and the
 // occupancy table (columns sorted by share). All are emitted hidden; the client shows the selected.
 function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: number): string {
@@ -788,13 +845,14 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
       <td class="modes">${modeText(r.modes)}</td>
     </tr>`).join("\n");
   const p = vs.periods;
+  const days = p.mean * HOURS_PER_PERIOD[RESOLUTION_IDX[res]] / 24;
   return `<section class="view" data-res="${res}" data-combo="${combo}" hidden>
+  <div class="score-grid detail-score"><div class="score"><div class="score-label">Average periods per message</div>` +
+    `<div><strong class="score-value">${p.mean.toFixed(1)}</strong> periods/message</div></div>` +
+    `<div class="score"><div class="score-label">Average days per message</div>` +
+    `<div><strong class="score-value">${days.toFixed(1)}</strong> days/message</div></div></div>
   ${renderHistogram(vs.histogram)}
   ${renderBoxPlot(p)}
-  <table class="summary">
-    <tr><th>min</th><th>Q1</th><th>median</th><th>mean</th><th>Q3</th><th>p90</th><th>max</th></tr>
-    <tr><td class="num">${p.min}</td><td class="num">${p.p25}</td><td class="num">${p.p50}</td><td class="num">${p.mean.toFixed(1)}</td><td class="num">${p.p75}</td><td class="num">${p.p90}</td><td class="num">${p.max}</td></tr>
-  </table>
   <h3>Mean bit occupancy per column</h3>
   <table>
     <tr><th>column</th><th class="rt">bits</th><th class="rt">bits/period</th><th class="rt">share</th><th>bits/period spread <span class="muted">(0–${bppScaleMax.toFixed(1)})</span></th><th>modes</th></tr>
@@ -806,6 +864,7 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
 
 function renderHtml(s: ReportData): string {
   const viewFragments = Object.entries(s.views).map(([vk, vs]) => renderView(vk, vs, s.versionBits, s.headerBits)).join("\n");
+  const periodComparison = renderPeriodComparison(s);
   const resRadios = s.resolutions.map((r) =>
     `<label><input type="radio" name="res" value="${r}"${r === s.defaultResolution ? " checked" : ""}> ${esc(r)}</label>`).join("");
   const groupChecks = s.groups.map((g, i) =>
@@ -840,9 +899,7 @@ function renderHtml(s: ReportData): string {
   td.num { text-align: right; font-family: ui-monospace, monospace; }
   td.name { font-weight: 500; }
   td.modes { color: #888; font-size: .8rem; }
-  table.summary { max-width: 360px; }
   tr.total td { font-weight: 600; border-top: 2px solid rgba(128,128,128,.4); border-bottom: none; }
-  .legend { font-size: .75rem; color: #888; margin-top: .5rem; }
   .hist { width: 100%; max-width: 720px; height: auto; margin: .5rem 0 .25rem; }
   .hbar { fill: #3b82f6; }
   .hgrid { stroke: rgba(128,128,128,.25); stroke-width: 1; }
@@ -856,6 +913,16 @@ function renderHtml(s: ReportData): string {
   .blabel { fill: #888; font-size: 10px; font-variant-numeric: tabular-nums; }
   .boxcell { width: 210px; }
   .mbox { display: block; width: 200px; height: 20px; }
+  table.period-comparison { max-width: 900px; }
+  table.period-comparison th:not(:first-child) { min-width: 210px; }
+  .pcell { display: grid; grid-template-columns: 8.5rem 1fr; align-items: center; gap: .4rem; }
+  .pbox { display: block; width: 180px; height: 24px; }
+  .pmean { font: .78rem ui-monospace, monospace; white-space: nowrap; }
+  .score-grid { display: flex; flex-wrap: wrap; gap: .6rem; margin: .2rem 0 .7rem; }
+  .score { padding: .7rem 1rem; background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.45); border-radius: 8px; font-variant-numeric: tabular-nums; }
+  .score-value { font-size: 1.6rem; color: #3b82f6; }
+  .score-label { color: #777; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+  .detail-score { margin: 1rem 0 1.25rem; }
 </style>
 </head>
 <body>
@@ -864,18 +931,16 @@ function renderHtml(s: ReportData): string {
   ${esc(s.timestamp)} · ${s.forecasts} forecasts · ${s.locations} locations · ${esc(s.model)} · max <code>${s.maxChars}</code> chars
 </div>
 
+${periodComparison}
+
+<h2>Benchmark detail</h2>
 <div class="selectors">
   <div class="sel"><span class="sel-label">Resolution</span>${resRadios}</div>
-  <div class="sel"><span class="sel-label">Variables <span class="muted">(base always on)</span></span>${groupChecks}</div>
+  <div class="sel"><span class="sel-label">Variables</span>${groupChecks}</div>
 </div>
 ${quality}
 
-<h2>Periods encoded per message</h2>
 <div id="views">${viewFragments}</div>
-<div class="legend">
-  Box plots: box = Q1–Q3, blue line = median, orange dot = mean, whiskers = min–max. The per-column
-  bits/period boxes share one x-scale (shown in the header); hover for exact values.
-</div>
 
 <script>
 const views = [...document.querySelectorAll(".view")];

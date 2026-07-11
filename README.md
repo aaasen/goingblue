@@ -179,7 +179,7 @@ The forecast encoding is tested against real weather from Open-Meteo's [Historic
 
 Benchmarking uses a mix of hand-picked locations and random locations from around the globe. The hand-picked locations are 137 of my Windy favorites which are mostly mountainous locations in Alaska, BC, Cascades, Tetons, Andes, Alps, Norway, and New Zealand.
 
-The HTML report has interactive **time resolution** (1h/3h/6h) and **variable** selectors matching the app (Clouds, High Altitude Winds, Freezing Level, on top of the always-on base, which is the default). The periods histogram, box-and-whisker summary, and bit-occupancy table all update with the selection so you can see how periods/forecast depends on the chosen resolution and variables. (`--resolution` sets which one the report opens on; all resolutions are always computed.)
+The HTML report compares days/message with box plots for **1h**, **3h**, and **6h** forecasts using base variables alone and base plus each optional group (Clouds, High Altitude Winds, and Freezing Level). It reports an overall score averaging the corresponding periods/message means. Interactive resolution and variable selectors matching the app control the detailed histogram, box-and-whisker summary, and bit-occupancy table. (`--resolution` sets which detail view the report opens on; all resolutions are always computed.)
 
 `pnpm benchmark` runs both phases: it collects the forecast corpus (cached under `data/raw/<model>`, gitignored, idempotent/resumable) and then encodes each forecast through the production path, writing a timestamped HTML report to `data/benchmarks` (kept so runs can be compared side by side).
 
