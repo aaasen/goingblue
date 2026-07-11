@@ -265,54 +265,38 @@ export function chooseWindSpeedDeltaTable(deltas: number[]): number {
   return best;
 }
 
-// ── Freezing-level delta codebooks ──────────────────────────────────────────────
-// Static Huffman codebooks for period-over-period freezing-level change, in quantized steps (see
+// ── Freezing-level delta codebook ───────────────────────────────────────────────
+// Static Huffman codebook for period-over-period freezing-level change, in quantized steps (see
 // the freeze column in v1.ts: 0..15, 304.8 m / 1000 ft steps). Like wind speed the domain is
 // already small and bounded, so the full delta range -15..15 (31 symbols) fits directly in the
-// alphabet — no escape/raw-payload fallback needed. Derived by k-means clustering per-forecast
-// delta histograms — see server/scripts/derive-freeze-delta-codebooks.ts. The encoder picks the
-// cheapest per column and stores its index in a 4-bit selector.
-const FREEZE_DELTA_WEIGHTS: number[][] = [
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 118, 773, 94, 5, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 57, 884, 55, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 10, 165, 667, 130, 14, 4, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 997, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 6, 116, 746, 123, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 23, 952, 23, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 4, 15, 135, 667, 162, 9, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 4, 13, 123, 705, 133, 11, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 5, 8, 18, 102, 736, 88, 20, 10, 5, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 73, 851, 69, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 42, 916, 40, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 93, 817, 83, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 7, 89, 786, 108, 4, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 6, 146, 717, 109, 10, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 6, 16, 73, 801, 68, 16, 6, 4, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-];
+// alphabet — no escape/raw-payload fallback needed. A SINGLE shared table, no per-message selector:
+// unlike weathercode/wind direction, freeze-level deltas don't have genuinely distinct regimes
+// across locations/seasons — everywhere is dominated by "usually 0, occasionally ±1" — so k-means
+// clustering into several per-message tables was checked and found to not pay off (held-out:
+// cheapest-of-16 with a 4-bit selector cost 1.371 b/period vs 1.340 b/period for one shared table).
+// Derived from the corpus's pooled delta distribution — see
+// server/scripts/derive-freeze-delta-codebooks.ts.
+const FREEZE_DELTA_WEIGHTS: number[] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 5, 88, 812, 83, 5, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
 
 const FREEZE_DELTA_MAX = 15; // must mirror the freeze column width in v1.ts (0..15)
-export const FREEZE_DELTA_TABLE_COUNT = FREEZE_DELTA_WEIGHTS.length; // 16
-export const FREEZE_DELTA_TABLE_BITS = 4;
 
-const FREEZE_DELTA_TABLES: Table[] = FREEZE_DELTA_WEIGHTS.map((w) => {
-  const codes = canonicalCodes(huffmanLengths(w));
+const FREEZE_DELTA_TABLE: Table = (() => {
+  const codes = canonicalCodes(huffmanLengths(FREEZE_DELTA_WEIGHTS));
   return { codes, root: buildTrie(codes) };
-});
+})();
 
 function freezeDeltaSym(delta: number): number {
   return delta + FREEZE_DELTA_MAX;
 }
 
-// Appends the Huffman code for a period-over-period freezing-level change `delta` (quantized steps)
-// under `table`.
-export function encodeFreezeDelta(bits: number[], table: number, delta: number): void {
-  for (const b of FREEZE_DELTA_TABLES[table].codes[freezeDeltaSym(delta)]) bits.push(b);
+// Appends the Huffman code for a period-over-period freezing-level change `delta` (quantized steps).
+export function encodeFreezeDelta(bits: number[], delta: number): void {
+  for (const b of FREEZE_DELTA_TABLE.codes[freezeDeltaSym(delta)]) bits.push(b);
 }
 
-// Reads one Huffman-coded freezing-level delta (under `table`), returning [delta, nextPos].
-export function decodeFreezeDelta(bits: number[], pos: number, table: number): [number, number] {
-  let node = FREEZE_DELTA_TABLES[table].root;
+// Reads one Huffman-coded freezing-level delta, returning [delta, nextPos].
+export function decodeFreezeDelta(bits: number[], pos: number): [number, number] {
+  let node = FREEZE_DELTA_TABLE.root;
   while (node.sym === undefined) {
     node = node.child[bits[pos++] ?? 0]!;
     if (!node) throw new Error("huffman: invalid freeze-delta bitstream");
@@ -320,13 +304,190 @@ export function decodeFreezeDelta(bits: number[], pos: number, table: number): [
   return [node.sym - FREEZE_DELTA_MAX, pos];
 }
 
+// ── Cloud cover delta codebooks ─────────────────────────────────────────────────
+// Static Huffman codebooks for period-over-period cloud-cover change, in quantized steps (see the
+// cloud columns in v1.ts: 0..7, 3-bit). Like wind speed and freezing level the domain is already
+// small and bounded, so the full delta range -7..7 (15 symbols) fits directly in the alphabet — no
+// escape/raw-payload fallback needed. Low/mid/high clouds get INDEPENDENT codebook pools (not
+// shared, unlike temp/tmin) — low clouds are local/convective and change quickly, high clouds are
+// broad cirrus sheets that persist for hours, so a shared codebook would blur two genuinely
+// different persistence regimes. Derived by k-means clustering per-forecast delta histograms, one
+// clustering per level — see server/scripts/derive-cloud-delta-codebooks.ts. The encoder picks the
+// cheapest per column and stores its index in a 4-bit selector.
+const CLOUD_DELTA_MAX = 7; // must mirror the cloud column width in v1.ts (0..7)
+
+const CLOUD_LOW_DELTA_WEIGHTS: number[][] = [
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [39, 6, 4, 6, 10, 8, 16, 828, 13, 6, 7, 6, 4, 6, 40],
+  [9, 9, 12, 20, 26, 38, 64, 638, 69, 39, 26, 19, 12, 10, 9],
+  [1, 1, 1, 1, 1, 1, 1, 993, 1, 1, 1, 1, 1, 1, 1],
+  [6, 5, 6, 7, 10, 15, 31, 843, 31, 15, 10, 7, 5, 4, 6],
+  [7, 2, 2, 3, 4, 5, 11, 935, 9, 5, 3, 2, 2, 2, 8],
+  [6, 8, 10, 16, 22, 32, 101, 601, 110, 37, 20, 14, 9, 9, 5],
+  [8, 7, 9, 14, 18, 25, 46, 745, 48, 28, 17, 13, 8, 7, 9],
+  [52, 12, 13, 18, 28, 26, 42, 631, 38, 23, 22, 17, 12, 14, 54],
+  [10, 10, 13, 26, 40, 51, 106, 479, 119, 56, 35, 24, 14, 9, 9],
+  [14, 9, 11, 18, 25, 33, 43, 694, 44, 31, 25, 18, 10, 10, 14],
+  [4, 4, 5, 8, 10, 18, 55, 787, 59, 19, 11, 7, 5, 4, 3],
+  [12, 6, 7, 11, 17, 20, 30, 796, 28, 19, 16, 10, 7, 6, 13],
+  [48, 8, 7, 11, 16, 16, 29, 742, 23, 13, 13, 9, 8, 8, 50],
+  [8, 4, 4, 6, 8, 10, 19, 887, 18, 9, 7, 6, 3, 4, 9],
+  [5, 6, 8, 14, 15, 25, 75, 703, 77, 25, 16, 11, 8, 6, 6],
+];
+
+export const CLOUD_LOW_DELTA_TABLE_COUNT = CLOUD_LOW_DELTA_WEIGHTS.length; // 16
+export const CLOUD_LOW_DELTA_TABLE_BITS = 4;
+
+const CLOUD_LOW_DELTA_TABLES: Table[] = CLOUD_LOW_DELTA_WEIGHTS.map((w) => {
+  const codes = canonicalCodes(huffmanLengths(w));
+  return { codes, root: buildTrie(codes) };
+});
+
+function cloudLowDeltaSym(delta: number): number {
+  return delta + CLOUD_DELTA_MAX;
+}
+
+// Appends the Huffman code for a period-over-period low-cloud change `delta` (quantized steps)
+// under `table`.
+export function encodeCloudLowDelta(bits: number[], table: number, delta: number): void {
+  for (const b of CLOUD_LOW_DELTA_TABLES[table].codes[cloudLowDeltaSym(delta)]) bits.push(b);
+}
+
+// Reads one Huffman-coded low-cloud delta (under `table`), returning [delta, nextPos].
+export function decodeCloudLowDelta(bits: number[], pos: number, table: number): [number, number] {
+  let node = CLOUD_LOW_DELTA_TABLES[table].root;
+  while (node.sym === undefined) {
+    node = node.child[bits[pos++] ?? 0]!;
+    if (!node) throw new Error("huffman: invalid cloud-low-delta bitstream");
+  }
+  return [node.sym - CLOUD_DELTA_MAX, pos];
+}
+
 // Picks the codebook that encodes `deltas` in the fewest total bits.
-export function chooseFreezeDeltaTable(deltas: number[]): number {
+export function chooseCloudLowDeltaTable(deltas: number[]): number {
   let best = 0;
   let bestBits = Infinity;
-  for (let t = 0; t < FREEZE_DELTA_TABLES.length; t++) {
+  for (let t = 0; t < CLOUD_LOW_DELTA_TABLES.length; t++) {
     let total = 0;
-    for (const d of deltas) total += FREEZE_DELTA_TABLES[t].codes[freezeDeltaSym(d)].length;
+    for (const d of deltas) total += CLOUD_LOW_DELTA_TABLES[t].codes[cloudLowDeltaSym(d)].length;
+    if (total < bestBits) { bestBits = total; best = t; }
+  }
+  return best;
+}
+
+const CLOUD_MID_DELTA_WEIGHTS: number[][] = [
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [11, 5, 5, 7, 8, 9, 16, 880, 16, 9, 7, 7, 5, 5, 11],
+  [15, 16, 16, 23, 30, 43, 84, 546, 80, 42, 32, 24, 17, 15, 16],
+  [17, 12, 13, 17, 22, 26, 39, 712, 40, 24, 20, 18, 11, 14, 17],
+  [2, 1, 1, 1, 1, 1, 4, 977, 4, 2, 1, 1, 1, 1, 2],
+  [8, 8, 8, 12, 16, 21, 49, 754, 50, 21, 14, 11, 10, 8, 8],
+  [7, 3, 3, 4, 4, 6, 12, 925, 11, 6, 4, 4, 3, 3, 7],
+  [8, 12, 12, 18, 24, 33, 83, 624, 82, 33, 21, 17, 12, 13, 9],
+  [8, 8, 8, 10, 12, 17, 39, 800, 37, 16, 13, 9, 8, 8, 9],
+  [24, 12, 10, 13, 16, 17, 29, 758, 28, 17, 16, 14, 10, 12, 24],
+  [25, 9, 7, 10, 11, 9, 18, 819, 19, 11, 10, 9, 8, 10, 24],
+  [27, 18, 17, 20, 21, 27, 49, 647, 47, 22, 21, 18, 16, 18, 30],
+  [11, 10, 12, 19, 27, 38, 53, 664, 53, 36, 24, 19, 12, 11, 11],
+  [21, 18, 16, 24, 32, 36, 55, 593, 59, 35, 29, 25, 17, 18, 22],
+  [9, 9, 10, 13, 17, 24, 67, 702, 68, 24, 15, 12, 9, 11, 9],
+  [6, 5, 6, 8, 10, 12, 29, 845, 30, 13, 9, 7, 6, 6, 6],
+];
+
+export const CLOUD_MID_DELTA_TABLE_COUNT = CLOUD_MID_DELTA_WEIGHTS.length; // 16
+export const CLOUD_MID_DELTA_TABLE_BITS = 4;
+
+const CLOUD_MID_DELTA_TABLES: Table[] = CLOUD_MID_DELTA_WEIGHTS.map((w) => {
+  const codes = canonicalCodes(huffmanLengths(w));
+  return { codes, root: buildTrie(codes) };
+});
+
+function cloudMidDeltaSym(delta: number): number {
+  return delta + CLOUD_DELTA_MAX;
+}
+
+// Appends the Huffman code for a period-over-period mid-cloud change `delta` (quantized steps)
+// under `table`.
+export function encodeCloudMidDelta(bits: number[], table: number, delta: number): void {
+  for (const b of CLOUD_MID_DELTA_TABLES[table].codes[cloudMidDeltaSym(delta)]) bits.push(b);
+}
+
+// Reads one Huffman-coded mid-cloud delta (under `table`), returning [delta, nextPos].
+export function decodeCloudMidDelta(bits: number[], pos: number, table: number): [number, number] {
+  let node = CLOUD_MID_DELTA_TABLES[table].root;
+  while (node.sym === undefined) {
+    node = node.child[bits[pos++] ?? 0]!;
+    if (!node) throw new Error("huffman: invalid cloud-mid-delta bitstream");
+  }
+  return [node.sym - CLOUD_DELTA_MAX, pos];
+}
+
+// Picks the codebook that encodes `deltas` in the fewest total bits.
+export function chooseCloudMidDeltaTable(deltas: number[]): number {
+  let best = 0;
+  let bestBits = Infinity;
+  for (let t = 0; t < CLOUD_MID_DELTA_TABLES.length; t++) {
+    let total = 0;
+    for (const d of deltas) total += CLOUD_MID_DELTA_TABLES[t].codes[cloudMidDeltaSym(d)].length;
+    if (total < bestBits) { bestBits = total; best = t; }
+  }
+  return best;
+}
+
+const CLOUD_HIGH_DELTA_WEIGHTS: number[][] = [
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [2, 1, 1, 2, 2, 3, 7, 967, 6, 2, 2, 2, 1, 1, 2],
+  [8, 8, 9, 12, 17, 25, 57, 731, 56, 25, 17, 14, 8, 8, 8],
+  [7, 10, 9, 15, 23, 31, 74, 658, 76, 32, 22, 17, 10, 9, 7],
+  [7, 6, 6, 9, 11, 15, 35, 818, 36, 16, 12, 9, 6, 7, 7],
+  [19, 12, 8, 13, 16, 19, 29, 765, 32, 20, 16, 12, 10, 12, 17],
+  [31, 19, 15, 17, 23, 23, 45, 652, 46, 25, 24, 18, 15, 19, 29],
+  [11, 5, 5, 7, 8, 11, 22, 857, 23, 12, 9, 8, 5, 6, 10],
+  [6, 6, 6, 9, 12, 17, 54, 781, 56, 16, 12, 9, 6, 6, 5],
+  [36, 16, 9, 12, 16, 16, 33, 719, 35, 16, 16, 15, 11, 16, 33],
+  [7, 10, 13, 19, 24, 38, 90, 594, 92, 39, 25, 18, 12, 11, 7],
+  [8, 4, 3, 5, 6, 8, 17, 900, 18, 8, 6, 5, 4, 4, 7],
+  [14, 12, 10, 18, 23, 29, 45, 692, 50, 28, 24, 16, 12, 13, 13],
+  [19, 18, 17, 24, 32, 37, 58, 593, 57, 36, 30, 24, 18, 18, 19],
+  [10, 17, 16, 24, 36, 45, 92, 518, 91, 45, 36, 26, 17, 16, 11],
+  [32, 11, 8, 8, 10, 11, 17, 803, 19, 13, 11, 9, 8, 11, 29],
+];
+
+export const CLOUD_HIGH_DELTA_TABLE_COUNT = CLOUD_HIGH_DELTA_WEIGHTS.length; // 16
+export const CLOUD_HIGH_DELTA_TABLE_BITS = 4;
+
+const CLOUD_HIGH_DELTA_TABLES: Table[] = CLOUD_HIGH_DELTA_WEIGHTS.map((w) => {
+  const codes = canonicalCodes(huffmanLengths(w));
+  return { codes, root: buildTrie(codes) };
+});
+
+function cloudHighDeltaSym(delta: number): number {
+  return delta + CLOUD_DELTA_MAX;
+}
+
+// Appends the Huffman code for a period-over-period high-cloud change `delta` (quantized steps)
+// under `table`.
+export function encodeCloudHighDelta(bits: number[], table: number, delta: number): void {
+  for (const b of CLOUD_HIGH_DELTA_TABLES[table].codes[cloudHighDeltaSym(delta)]) bits.push(b);
+}
+
+// Reads one Huffman-coded high-cloud delta (under `table`), returning [delta, nextPos].
+export function decodeCloudHighDelta(bits: number[], pos: number, table: number): [number, number] {
+  let node = CLOUD_HIGH_DELTA_TABLES[table].root;
+  while (node.sym === undefined) {
+    node = node.child[bits[pos++] ?? 0]!;
+    if (!node) throw new Error("huffman: invalid cloud-high-delta bitstream");
+  }
+  return [node.sym - CLOUD_DELTA_MAX, pos];
+}
+
+// Picks the codebook that encodes `deltas` in the fewest total bits.
+export function chooseCloudHighDeltaTable(deltas: number[]): number {
+  let best = 0;
+  let bestBits = Infinity;
+  for (let t = 0; t < CLOUD_HIGH_DELTA_TABLES.length; t++) {
+    let total = 0;
+    for (const d of deltas) total += CLOUD_HIGH_DELTA_TABLES[t].codes[cloudHighDeltaSym(d)].length;
     if (total < bestBits) { bestBits = total; best = t; }
   }
   return best;

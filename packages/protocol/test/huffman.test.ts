@@ -11,8 +11,18 @@ import {
   WIND_SPEED_DELTA_TABLE_COUNT,
   encodeFreezeDelta,
   decodeFreezeDelta,
-  chooseFreezeDeltaTable,
-  FREEZE_DELTA_TABLE_COUNT,
+  encodeCloudLowDelta,
+  decodeCloudLowDelta,
+  chooseCloudLowDeltaTable,
+  CLOUD_LOW_DELTA_TABLE_COUNT,
+  encodeCloudMidDelta,
+  decodeCloudMidDelta,
+  chooseCloudMidDeltaTable,
+  CLOUD_MID_DELTA_TABLE_COUNT,
+  encodeCloudHighDelta,
+  decodeCloudHighDelta,
+  chooseCloudHighDeltaTable,
+  CLOUD_HIGH_DELTA_TABLE_COUNT,
   encodeTempDelta,
   decodeTempDelta,
   chooseTempDeltaTable,
@@ -172,20 +182,66 @@ describe("wind speed delta Huffman", () => {
   });
 });
 
-function freezeBits(deltas: number[], table: number): number {
+function freezeBits(deltas: number[]): number {
   const bits: number[] = [];
-  for (const d of deltas) encodeFreezeDelta(bits, table, d);
+  for (const d of deltas) encodeFreezeDelta(bits, d);
   return bits.length;
 }
 
 describe("freezing level delta Huffman", () => {
-  it("round-trips every delta in the bounded range (-15..15) under every codebook", () => {
-    for (let table = 0; table < FREEZE_DELTA_TABLE_COUNT; table++) {
-      for (let d = -15; d <= 15; d++) {
+  it("round-trips every delta in the bounded range (-15..15)", () => {
+    for (let d = -15; d <= 15; d++) {
+      const bits: number[] = [];
+      encodeFreezeDelta(bits, d);
+      expect(bits.length).toBeGreaterThan(0);
+      const [out, pos] = decodeFreezeDelta(bits, 0);
+      expect(out).toBe(d);
+      expect(pos).toBe(bits.length); // consumed exactly the code, no more
+    }
+  });
+
+  it("decodes a concatenated delta sequence unambiguously (prefix-free)", () => {
+    const seq = [0, 1, -1, 0, 2, -3, 0, 1, -2, 0, 0];
+    const bits: number[] = [];
+    for (const d of seq) encodeFreezeDelta(bits, d);
+    const out: number[] = [];
+    let pos = 0;
+    for (let k = 0; k < seq.length; k++) { const [d, p] = decodeFreezeDelta(bits, pos); out.push(d); pos = p; }
+    expect(out).toEqual(seq);
+    expect(pos).toBe(bits.length);
+  });
+
+  it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 4-bit", () => {
+    const flat = Array(64).fill(0);
+    const swings = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? 5 : -5));
+    expect(freezeBits(flat)).toBeLessThan(freezeBits(swings));
+    expect(freezeBits(flat)).toBeLessThan(flat.length * 4); // beats raw 4 bits/value
+  });
+});
+
+// Low/mid/high clouds are structurally identical codecs (bounded -7..7 delta, no escape) but each
+// has its own independent codebook pool — see huffman.ts. Table-driven so the three levels get the
+// same coverage without tripling the test body.
+const CLOUD_CODECS = [
+  { label: "low", encode: encodeCloudLowDelta, decode: decodeCloudLowDelta, choose: chooseCloudLowDeltaTable, tableCount: CLOUD_LOW_DELTA_TABLE_COUNT },
+  { label: "mid", encode: encodeCloudMidDelta, decode: decodeCloudMidDelta, choose: chooseCloudMidDeltaTable, tableCount: CLOUD_MID_DELTA_TABLE_COUNT },
+  { label: "high", encode: encodeCloudHighDelta, decode: decodeCloudHighDelta, choose: chooseCloudHighDeltaTable, tableCount: CLOUD_HIGH_DELTA_TABLE_COUNT },
+];
+
+describe.each(CLOUD_CODECS)("cloud $label delta Huffman", ({ encode, decode, choose, tableCount }) => {
+  const bitsFor = (deltas: number[], table: number): number => {
+    const bits: number[] = [];
+    for (const d of deltas) encode(bits, table, d);
+    return bits.length;
+  };
+
+  it("round-trips every delta in the bounded range (-7..7) under every codebook", () => {
+    for (let table = 0; table < tableCount; table++) {
+      for (let d = -7; d <= 7; d++) {
         const bits: number[] = [];
-        encodeFreezeDelta(bits, table, d);
+        encode(bits, table, d);
         expect(bits.length).toBeGreaterThan(0);
-        const [out, pos] = decodeFreezeDelta(bits, 0, table);
+        const [out, pos] = decode(bits, 0, table);
         expect(out).toBe(d);
         expect(pos).toBe(bits.length); // consumed exactly the code, no more
       }
@@ -194,26 +250,26 @@ describe("freezing level delta Huffman", () => {
 
   it("decodes a concatenated delta sequence unambiguously (prefix-free)", () => {
     const seq = [0, 1, -1, 0, 2, -3, 0, 1, -2, 0, 0];
-    for (let table = 0; table < FREEZE_DELTA_TABLE_COUNT; table++) {
+    for (let table = 0; table < tableCount; table++) {
       const bits: number[] = [];
-      for (const d of seq) encodeFreezeDelta(bits, table, d);
+      for (const d of seq) encode(bits, table, d);
       const out: number[] = [];
       let pos = 0;
-      for (let k = 0; k < seq.length; k++) { const [d, p] = decodeFreezeDelta(bits, pos, table); out.push(d); pos = p; }
+      for (let k = 0; k < seq.length; k++) { const [d, p] = decode(bits, pos, table); out.push(d); pos = p; }
       expect(out).toEqual(seq);
       expect(pos).toBe(bits.length);
     }
   });
 
-  it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 4-bit", () => {
+  it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 3-bit", () => {
     const flat = Array(64).fill(0);
-    const swings = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? 5 : -5));
-    const chosen = chooseFreezeDeltaTable(flat);
-    for (let t = 0; t < FREEZE_DELTA_TABLE_COUNT; t++) {
-      expect(freezeBits(flat, chosen)).toBeLessThanOrEqual(freezeBits(flat, t));
+    const swings = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? 3 : -3));
+    const chosen = choose(flat);
+    for (let t = 0; t < tableCount; t++) {
+      expect(bitsFor(flat, chosen)).toBeLessThanOrEqual(bitsFor(flat, t));
     }
-    expect(freezeBits(flat, chosen)).toBeLessThan(freezeBits(swings, chooseFreezeDeltaTable(swings)));
-    expect(freezeBits(flat, chosen)).toBeLessThan(flat.length * 4); // beats raw 4 bits/value
+    expect(bitsFor(flat, chosen)).toBeLessThan(bitsFor(swings, choose(swings)));
+    expect(bitsFor(flat, chosen)).toBeLessThan(flat.length * 3); // beats raw 3 bits/value
   });
 });
 

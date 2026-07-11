@@ -10,7 +10,10 @@ import {
   encodeWeathercode, decodeWeathercode,
   encodeWindDir, decodeWindDir,
   encodeWindSpeedDelta, decodeWindSpeedDelta, chooseWindSpeedDeltaTable, WIND_SPEED_DELTA_TABLE_BITS,
-  encodeFreezeDelta, decodeFreezeDelta, chooseFreezeDeltaTable, FREEZE_DELTA_TABLE_BITS,
+  encodeFreezeDelta, decodeFreezeDelta,
+  encodeCloudHighDelta, decodeCloudHighDelta, chooseCloudHighDeltaTable, CLOUD_HIGH_DELTA_TABLE_BITS,
+  encodeCloudMidDelta, decodeCloudMidDelta, chooseCloudMidDeltaTable, CLOUD_MID_DELTA_TABLE_BITS,
+  encodeCloudLowDelta, decodeCloudLowDelta, chooseCloudLowDeltaTable, CLOUD_LOW_DELTA_TABLE_BITS,
   encodeTempDelta, decodeTempDelta, chooseTempDeltaTable, TEMP_DELTA_TABLE_BITS,
 } from "../huffman.js";
 
@@ -106,11 +109,34 @@ const TEMP_DELTA_COLUMNS: [bit: number, field: "temp_c" | "temp_min_c", name: st
   [VARS_BIT.tmin, "temp_min_c", "tmin"],
 ];
 
-// freeze: Huffman-coded period-over-period deltas (see FREEZE_DELTA_* in huffman.ts), not a plain
-// scalar column — same shape as temp/tmin. 304.8 m (1000 ft) steps, 0..15 (0-15000 ft).
+// freeze: Huffman-coded period-over-period deltas under a single shared table (see
+// encodeFreezeDelta in huffman.ts — no per-message selector; freeze-level delta shape doesn't vary
+// enough by location/season to be worth one), not a plain scalar column. 304.8 m (1000 ft) steps,
+// 0..15 (0-15000 ft).
 const FREEZE_STEP_M = 304.8;
 const FREEZE_ANCHOR_BITS = VAR_BITS_V1[VARS_BIT.freeze];
 const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0) / FREEZE_STEP_M), FREEZE_ANCHOR_BITS);
+
+// cloud cover (low/mid/high): Huffman-coded period-over-period deltas (see CLOUD_*_DELTA_* in
+// huffman.ts), not plain scalar columns — same anchor+delta shape as temp/tmin/freeze, but each
+// level keeps its OWN codebook pool (not shared, unlike temp/tmin) since low/mid/high cloud
+// persistence differs meaningfully by altitude. Total cloud cover (bit cc) stays a plain raw
+// scalar column (see SCALAR_COLUMNS below) — untouched.
+const CLOUD_ANCHOR_BITS = VAR_BITS_V1[VARS_BIT.cch]; // 3; ccm/ccl share the same width
+const quantCloud = (p: Period, field: "cloud_high" | "cloud_mid" | "cloud_low"): number =>
+  clampInt(Math.round((p[field] ?? 0) * 7 / 100), CLOUD_ANCHOR_BITS);
+const CLOUD_DELTA_COLUMNS: {
+  bit: number;
+  field: "cloud_high" | "cloud_mid" | "cloud_low";
+  encode: typeof encodeCloudHighDelta;
+  decode: typeof decodeCloudHighDelta;
+  choose: typeof chooseCloudHighDeltaTable;
+  tableBits: number;
+}[] = [
+  { bit: VARS_BIT.cch, field: "cloud_high", encode: encodeCloudHighDelta, decode: decodeCloudHighDelta, choose: chooseCloudHighDeltaTable, tableBits: CLOUD_HIGH_DELTA_TABLE_BITS },
+  { bit: VARS_BIT.ccm, field: "cloud_mid", encode: encodeCloudMidDelta, decode: decodeCloudMidDelta, choose: chooseCloudMidDeltaTable, tableBits: CLOUD_MID_DELTA_TABLE_BITS },
+  { bit: VARS_BIT.ccl, field: "cloud_low", encode: encodeCloudLowDelta, decode: decodeCloudLowDelta, choose: chooseCloudLowDeltaTable, tableBits: CLOUD_LOW_DELTA_TABLE_BITS },
+];
 
 // Scalar columns, in body (column-major) order. Wind is handled separately (two ints per cell).
 const SCALAR_COLUMNS: ScalarColumn[] = [
@@ -125,19 +151,11 @@ const SCALAR_COLUMNS: ScalarColumn[] = [
   { bit: 12, mode: "adaptive",
     get: (p) => compandSqrt(p.rain_mm ?? 0, RAIN_K, ACCUM_BITS),
     set: (p, v) => { p.rain_mm = expandSqrt(v, RAIN_K); } },
-  // freeze (bit 3) is handled separately in buildBody/decode below (Huffman-coded deltas).
+  // freeze (bit 3) and cloud_high/mid/low (bits 9/10/11) are handled separately in
+  // buildBody/decode below (Huffman-coded deltas).
   { bit: 8, mode: "raw",
     get: (p) => clampInt(Math.round((p.cloud_total ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.cloud_total = Math.round(v * 100 / 7); } },
-  { bit: 9, mode: "raw",
-    get: (p) => clampInt(Math.round((p.cloud_high ?? 0) * 7 / 100), 3),
-    set: (p, v) => { p.cloud_high = Math.round(v * 100 / 7); } },
-  { bit: 10, mode: "raw",
-    get: (p) => clampInt(Math.round((p.cloud_mid ?? 0) * 7 / 100), 3),
-    set: (p, v) => { p.cloud_mid = Math.round(v * 100 / 7); } },
-  { bit: 11, mode: "raw",
-    get: (p) => clampInt(Math.round((p.cloud_low ?? 0) * 7 / 100), 3),
-    set: (p, v) => { p.cloud_low = Math.round(v * 100 / 7); } },
 ];
 
 // Wind columns (surface + 500/600/700 hPa): speed + direction per cell, both Huffman-coded, same
@@ -167,8 +185,11 @@ function reader(bits: number[]) {
     windSpeedDelta(table: number): number {
       const [delta, p] = decodeWindSpeedDelta(bits, pos, table); pos = p; return delta;
     },
-    freezeDelta(table: number): number {
-      const [delta, p] = decodeFreezeDelta(bits, pos, table); pos = p; return delta;
+    freezeDelta(): number {
+      const [delta, p] = decodeFreezeDelta(bits, pos); pos = p; return delta;
+    },
+    cloudDelta(decode: typeof decodeCloudHighDelta, table: number): number {
+      const [delta, p] = decode(bits, pos, table); pos = p; return delta;
     },
     tempDelta(table: number): number {
       const [delta, p] = decodeTempDelta(bits, pos, table); pos = p; return delta;
@@ -374,24 +395,40 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
   }
 
   // freeze: per model, an anchor (first period, full width) followed by Huffman-coded
-  // period-over-period deltas (see FREEZE_DELTA_* in huffman.ts) — same shape as temp/tmin.
+  // period-over-period deltas under a single shared table (see encodeFreezeDelta in huffman.ts —
+  // no per-message selector).
   if (msg.vars_mask & (1 << VARS_BIT.freeze)) {
+    before = body.length;
+    for (let m = 0; m < nModels; m++) {
+      putInt(body, quantFreeze(msg.periods[m][0]), FREEZE_ANCHOR_BITS);
+      for (let p = 1; p < nPeriods; p++) {
+        encodeFreezeDelta(body, quantFreeze(msg.periods[m][p]) - quantFreeze(msg.periods[m][p - 1]));
+      }
+    }
+    mark("freeze", before, -1);
+  }
+
+  // cloud cover (low/mid/high): per model, an anchor (first period, full width) followed by
+  // Huffman-coded period-over-period deltas — each level picks its own cheapest-of-16 table from
+  // its own independent codebook pool (see CLOUD_*_DELTA_* in huffman.ts).
+  for (const col of CLOUD_DELTA_COLUMNS) {
+    if (!(msg.vars_mask & (1 << col.bit))) continue;
     before = body.length;
     const allDeltas: number[] = [];
     for (let m = 0; m < nModels; m++) {
       for (let p = 1; p < nPeriods; p++) {
-        allDeltas.push(quantFreeze(msg.periods[m][p]) - quantFreeze(msg.periods[m][p - 1]));
+        allDeltas.push(quantCloud(msg.periods[m][p], col.field) - quantCloud(msg.periods[m][p - 1], col.field));
       }
     }
-    const table = chooseFreezeDeltaTable(allDeltas);
-    putInt(body, table, FREEZE_DELTA_TABLE_BITS);
+    const table = col.choose(allDeltas);
+    putInt(body, table, col.tableBits);
     for (let m = 0; m < nModels; m++) {
-      putInt(body, quantFreeze(msg.periods[m][0]), FREEZE_ANCHOR_BITS);
+      putInt(body, quantCloud(msg.periods[m][0], col.field), CLOUD_ANCHOR_BITS);
       for (let p = 1; p < nPeriods; p++) {
-        encodeFreezeDelta(body, table, quantFreeze(msg.periods[m][p]) - quantFreeze(msg.periods[m][p - 1]));
+        col.encode(body, table, quantCloud(msg.periods[m][p], col.field) - quantCloud(msg.periods[m][p - 1], col.field));
       }
     }
-    mark("freeze", before, -1);
+    mark(BIT_NAME[col.bit], before, -1);
   }
 
   for (const col of SCALAR_COLUMNS) {
@@ -546,13 +583,25 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   }
 
   if (vars_mask & (1 << VARS_BIT.freeze)) {
-    const table = rd.int(FREEZE_DELTA_TABLE_BITS);
     for (let m = 0; m < nModels; m++) {
       let quant = rd.int(FREEZE_ANCHOR_BITS);
       periods[m][0].freeze_m = quant * FREEZE_STEP_M;
       for (let p = 1; p < nPeriods; p++) {
-        quant += rd.freezeDelta(table);
+        quant += rd.freezeDelta();
         periods[m][p].freeze_m = quant * FREEZE_STEP_M;
+      }
+    }
+  }
+
+  for (const col of CLOUD_DELTA_COLUMNS) {
+    if (!(vars_mask & (1 << col.bit))) continue;
+    const table = rd.int(col.tableBits);
+    for (let m = 0; m < nModels; m++) {
+      let quant = rd.int(CLOUD_ANCHOR_BITS);
+      periods[m][0][col.field] = Math.round((quant * 100) / 7);
+      for (let p = 1; p < nPeriods; p++) {
+        quant += rd.cloudDelta(col.decode, table);
+        periods[m][p][col.field] = Math.round((quant * 100) / 7);
       }
     }
   }
