@@ -47,16 +47,24 @@ function requestTimeLabel(requestedAt: number): string {
   }).replace(/\s/g, '').toLowerCase();
 }
 
+function requestDateTimeLabel(requestedAt: number): string {
+  const date = new Date(requestedAt);
+  return `${date.toLocaleDateString()} ${requestTimeLabel(requestedAt)}`;
+}
+
 function normalizedForecastData(encoded: string): string {
   return encoded.replace(/\s/g, '').replace(/^fw:/i, '');
 }
 
-/** Compact label for a cached forecast (request time · models · resolution · location). */
-function cacheMetaLabel(slot: Slot, token: string): string {
+/** Compact cached-forecast label (request time · models · resolution · location). */
+function cacheMetaLabel(slot: Slot, token: string, includeDate = false): string {
   try {
     const msg = decodeAny(slot.encoded!, token);
     const models = modelLabelsFromMask(msg.models_mask).join(' + ');
-    return `${requestTimeLabel(slot.requestedAt)} · ${models} · ${resolutionLabel(msg)} · ${latLonLabel(msg)}`;
+    const requested = includeDate
+      ? requestDateTimeLabel(slot.requestedAt)
+      : requestTimeLabel(slot.requestedAt);
+    return `${requested} · ${models} · ${resolutionLabel(msg)} · ${latLonLabel(msg)}`;
   } catch {
     return 'Unknown';
   }
@@ -68,15 +76,15 @@ const OPTIONAL_VARIABLE_ICONS = [
   { vars: ['freeze'], symbol: '🌡️', label: 'Freezing level' },
 ];
 
+function variableIconsForMask(mask: number) {
+  return OPTIONAL_VARIABLE_ICONS.filter(({ vars }) =>
+    vars.some((variable) => mask & (1 << VARS_BIT[variable])),
+  );
+}
+
 function cacheVariableIcons(slot: Slot, token: string) {
-  try {
-    const mask = decodeAny(slot.encoded!, token).vars_mask;
-    return OPTIONAL_VARIABLE_ICONS.filter(({ vars }) =>
-      vars.some((variable) => mask & (1 << VARS_BIT[variable])),
-    );
-  } catch {
-    return [];
-  }
+  try { return variableIconsForMask(decodeAny(slot.encoded!, token).vars_mask); }
+  catch { return []; }
 }
 
 interface PastForecastGroup {
@@ -103,8 +111,9 @@ function dayLabel(day: number): string {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
-  if (day === today) return 'Today';
-  if (day === yesterday) return 'Yesterday';
+  const numericDate = `${date.getMonth() + 1}/${date.getDate()}`;
+  if (day === today) return `Today ${numericDate}`;
+  if (day === yesterday) return `Yesterday ${numericDate}`;
   return date.toLocaleDateString(undefined, {
     weekday: 'long', month: 'short', day: 'numeric',
     ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
@@ -176,6 +185,10 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
   }, [onForecastDataChange]);
 
   const pastGroups = groupPastForecasts(cache, token);
+  const loadedSlot = cache.find((slot) =>
+    normalizedForecastData(slot.encoded!) === normalizedForecastData(forecastData),
+  );
+  const decodedVariableIcons = decoded ? variableIconsForMask(decoded.vars_mask) : [];
 
   const pastSection = (
     <View style={styles.pastSection}>
@@ -198,7 +211,8 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
                   <View style={styles.pastDetails}>
                     <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, token)}</Text>
                     {variableIcons.length > 0 && (
-                      <View style={styles.pastIcons}>
+                      <View style={styles.variableRow}>
+                        <Text style={styles.variableLabel}>Variables:</Text>
                         {variableIcons.map((icon) => (
                           <Text
                             key={icon.label}
@@ -269,7 +283,23 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
         <>
           {/* Meta */}
           <View style={styles.metaRow}>
-            <Text style={styles.metaText} numberOfLines={3}>{metaLabel(decoded, units)}</Text>
+            <Text style={styles.metaText} numberOfLines={3}>
+              {loadedSlot ? cacheMetaLabel(loadedSlot, token, true) : metaLabel(decoded, units)}
+            </Text>
+            {decodedVariableIcons.length > 0 && (
+              <View style={styles.variableRow}>
+                <Text style={styles.variableLabel}>Variables:</Text>
+                {decodedVariableIcons.map((icon) => (
+                  <Text
+                    key={icon.label}
+                    style={styles.pastIcon}
+                    accessibilityLabel={icon.label}
+                  >
+                    {icon.symbol}
+                  </Text>
+                ))}
+              </View>
+            )}
           </View>
 
           {/* Forecast location. Keyed on the coordinate so loading a new forecast recenters the map. */}
@@ -350,7 +380,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     gap: 10,
   },
-  metaText: { fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
+  metaText: { flexShrink: 1, fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
+  variableRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  variableLabel: { fontSize: 12, color: '#636366' },
 
   mapRow: { marginHorizontal: 16, marginBottom: 8 },
 
@@ -370,8 +402,7 @@ const styles = StyleSheet.create({
   },
   pastItemLoaded: { backgroundColor: '#e8f1fb', borderRadius: 8, borderTopColor: '#c7dff5' },
   pastDetails: { flex: 1, gap: 3 },
-  pastMeta: { fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
-  pastIcons: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  pastMeta: { flexShrink: 1, fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
   pastIcon: { fontSize: 15, lineHeight: 19 },
   pastBtns: { flexDirection: 'row', gap: 8 },
   pastLoadBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: '#2a6bb5' },
