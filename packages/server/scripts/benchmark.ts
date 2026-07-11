@@ -26,7 +26,7 @@ import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD, type HourlyData } from "../src/forecast.ts";
-import { VARS_BIT, v1EncodeBreakdown, type ForecastMessage } from "@weather/protocol";
+import { VARS_BIT, v1EncodeBreakdown, V1_MAX_PERIODS, type ForecastMessage } from "@weather/protocol";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..", "..");
@@ -237,7 +237,6 @@ const LOCATIONS: Location[] = [
 // not size-constrained and add compute without insight. (Values are the v1 protocol resolution index.)
 const RESOLUTION_IDX: Record<string, number> = { "6h": 2, "3h": 3, "1h": 4 };
 const RESOLUTION_ORDER = ["1h", "3h", "6h"]; // selector order (fine → coarse)
-const V1_MAX_PERIODS = 128;
 
 // Protocol variable groups, mirroring the app (BuilderTab.tsx). weathercode is always encoded by the
 // protocol (not in a mask). BASE is always on; each toggleable group maps to protocol var bits.

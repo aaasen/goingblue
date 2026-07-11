@@ -49,9 +49,9 @@ describe("v1 period count", () => {
     expect(decoded.days).toBe(1);
   });
 
-  it("round-trips the max 128 periods", () => {
-    const decoded = dec(msg(128, 4));
-    expect(decoded.periods[0]).toHaveLength(128);
+  it("round-trips the max 256 periods", () => {
+    const decoded = dec(msg(256, 4));
+    expect(decoded.periods[0]).toHaveLength(256);
   });
 
   it("uses a 5-char header", () => {

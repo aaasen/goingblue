@@ -18,17 +18,17 @@ const VERSION = V1_VERSION;
 // The response is slim: lat/lon/models/vars/resolution AND the start datetime are NOT on the wire.
 // The client stores the request under `code` and recovers them via a ContextResolver at decode time
 // (see RequestContext). The count is a period count (not days), so sub-daily resolutions can carry
-// a partial final day. periods:7 stores (nPeriods - 1), i.e. 1..128 periods.
+// a partial final day. periods:8 stores (nPeriods - 1), i.e. 1..256 periods.
 //
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
-// packed header. Packed header layout (21 bits):
-//   code:7 periods:7 elev:7
+// packed header. Packed header layout (22 bits):
+//   code:7 periods:8 elev:7
 // The body carries no length field — it is packed little-endian and self-delimiting (the decoder
 // knows the structure and reads exactly the bits it needs; see encodeBodyLE/decodeBodyLE).
 // The weathercode column has no codebook selector either: each symbol's Huffman table is keyed by
 // the previously decoded symbol, which both sides already have (see huffman.ts).
-export const V1_PERIODS_BITS = 7;
-export const V1_MAX_PERIODS = 1 << V1_PERIODS_BITS; // 128
+export const V1_PERIODS_BITS = 8;
+export const V1_MAX_PERIODS = 1 << V1_PERIODS_BITS; // 256
 
 // Message code: client-assigned key the response echoes; see RequestContext / model.ts.
 const CODE_BITS = 7;
@@ -38,7 +38,7 @@ const ELEV_BITS = 7;
 const ELEV_STEP_M = 100;
 
 export const V1_HEADER_BITS =
-  CODE_BITS + V1_PERIODS_BITS + ELEV_BITS; // 21
+  CODE_BITS + V1_PERIODS_BITS + ELEV_BITS; // 22
 // Total chars before the body: the shared version prefix plus this version's packed header.
 export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 4 = 5
 const HEADER_BITS = V1_HEADER_BITS;

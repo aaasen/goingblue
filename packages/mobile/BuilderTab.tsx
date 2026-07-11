@@ -8,7 +8,7 @@ import * as Location from 'expo-location';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
   V1_HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, V1_VERSION, VAR_BITS_V1,
-  RESOLUTION_HOURS, DEFAULT_VARS_MASK, MODEL_BIT, type RequestContext,
+  RESOLUTION_HOURS, DEFAULT_VARS_MASK, MODEL_BIT, V1_MAX_PERIODS, type RequestContext,
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import { allocCode } from './cache';
@@ -29,7 +29,6 @@ function alignedStartEpochHour(resHours: number): number {
 const CHARS_PER_MESSAGE = 160; // each Garmin inReach message holds 160 characters
 const FORECAST_EMAIL = 'inreach@going.blue';
 const DEFAULT_MESSAGES = 1;
-const MAX_PERIODS = 128;   // v1 header carries a 7-bit period count
 const HORIZON_DAYS = 15;   // upstream forecast horizon
 const FORECAST_URL = `${API_BASE}/forecast`;
 
@@ -87,7 +86,7 @@ function calcChars(nPeriods: number, varsMask: number): number {
 // Returns 0 only if even one period won't fit at raw widths.
 function maxPeriodsFor(resHours: number, varsMask: number, maxChars: number): number {
   const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
-  const cap = Math.min(MAX_PERIODS, Math.floor(HORIZON_DAYS * periodsPerDay));
+  const cap = Math.min(V1_MAX_PERIODS, Math.floor(HORIZON_DAYS * periodsPerDay));
   for (let n = cap; n >= 1; n--) {
     if (calcChars(n, varsMask) <= maxChars) return n;
   }
