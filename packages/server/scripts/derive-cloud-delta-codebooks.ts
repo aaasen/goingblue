@@ -1,15 +1,18 @@
 /**
- * Derive cloud-cover-delta Huffman codebooks by k-means clustering the corpus's per-forecast
- * hour-to-hour quantized cloud-cover delta distributions — same method as
- * derive-freeze-delta-codebooks.ts. The quantized cloud-cover step (0..7, 3-bit — see the cloud
- * columns in v1.ts) is bounded, so the full delta range -7..7 (15 symbols) fits directly in the
- * alphabet — no escape/raw-payload fallback needed. Unlike wind direction/speed, low/mid/high
- * clouds are derived SEPARATELY (not pooled): low clouds are local/convective and change quickly,
- * high clouds are broad cirrus sheets that persist for hours, so a shared codebook would blur two
- * genuinely different persistence regimes (confirmed by materially different in-sample bits/period
- * below when run per-field vs pooled). k=CLOUD_*_DELTA_TABLE_COUNT clusters per field → that many
- * codebooks whose integer weight vectors are printed for pasting into
- * packages/protocol/src/huffman.ts.
+ * Derive single cloud-cover-delta Huffman codebooks from the corpus's pooled hour-to-hour
+ * quantized cloud-cover delta distributions — same method as derive-freeze-delta-codebooks.ts.
+ * The quantized cloud-cover step (0..7, 3-bit — see the cloud columns in v1.ts) is bounded, so the
+ * full delta range -7..7 (15 symbols) fits directly in the alphabet — no escape/raw-payload
+ * fallback needed. Low/mid/high clouds are derived SEPARATELY (not pooled): low clouds are
+ * local/convective and change quickly, high clouds are broad cirrus sheets that persist for hours,
+ * so a shared codebook would blur two genuinely different persistence regimes.
+ *
+ * Earlier versions of this script k-means clustered per-forecast delta histograms into 16 tables
+ * per level, selected per message. Like freezing level and wind speed, that doesn't pay off: a
+ * held-out check (split by location) found cheapest-of-16 with a 4-bit selector within 0.01
+ * b/period of one shared table per level (low 1.688 vs 1.696, mid 1.826 vs 1.826, high 1.908 vs
+ * 1.915) — a wash that doesn't justify 48 tables and three selectors. The integer weight vectors
+ * are printed for pasting into packages/protocol/src/huffman.ts.
  *
  *   node packages/server/scripts/derive-cloud-delta-codebooks.ts
  */
@@ -20,7 +23,6 @@ import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD, type HourlyData } from
 import { VARS_BIT } from "@weather/protocol";
 
 const CORPUS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "data", "raw", "gfs");
-const K = 16;                      // codebook count — fills a 4-bit table selector
 const STEP_BITS = 3;               // matches the cloud column width in v1.ts (steps 0..7)
 const STEP_MAX = (1 << STEP_BITS) - 1;
 const NSYM = 2 * STEP_MAX + 1;     // 15: deltas -7..7, no escape needed (already bounded)
@@ -34,21 +36,12 @@ const CLOUD_FIELDS = [
   { field: "cloud_high", bit: VARS_BIT.cch, name: "CLOUD_HIGH" },
 ] as const;
 
-function rng(seed: number) {
-  return () => {
-    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 const quantCloud = (pct: number): number => Math.min(Math.max(Math.round(pct * 7 / 100), 0), STEP_MAX);
 const deltaSym = (delta: number): number => delta + STEP_MAX; // -7..7 -> 0..14
 
-// One normalized NSYM-bin delta histogram per forecast, for a single cloud field.
-async function collectSamples(field: "cloud_low" | "cloud_mid" | "cloud_high", bit: number): Promise<number[][]> {
-  const out: number[][] = [];
+// Pooled delta counts across the whole corpus, for a single cloud field.
+async function collectCounts(field: "cloud_low" | "cloud_mid" | "cloud_high", bit: number): Promise<number[]> {
+  const counts = new Array(NSYM).fill(0);
   for (const loc of await readdir(CORPUS)) {
     const dir = join(CORPUS, loc);
     for (const f of await readdir(dir)) {
@@ -59,53 +52,14 @@ async function collectSamples(field: "cloud_low" | "cloud_mid" | "cloud_high", b
       const startHour = Math.floor(Date.parse(rec.meta.run + "Z") / 3600000);
       const n = Math.min(128, Math.floor(h.time.length / HOURS_PER_PERIOD[RES_IDX]));
       const periods = aggregateHourly(h, h.time, n, RES_IDX, startHour).map((r) => toFullPeriod(r, 1 << bit, "GFS", RES_IDX));
-      const hist = new Array(NSYM).fill(0);
-      let count = 0;
       for (let i = 1; i < periods.length; i++) {
         const prev = quantCloud((periods[i - 1] as any)[field] ?? 0);
         const cur = quantCloud((periods[i] as any)[field] ?? 0);
-        hist[deltaSym(cur - prev)]++;
-        count++;
+        counts[deltaSym(cur - prev)]++;
       }
-      if (count > 0) out.push(hist.map((c) => c / count));
     }
   }
-  return out;
-}
-
-const dist2 = (a: number[], b: number[]) => a.reduce((s, x, i) => s + (x - b[i]) ** 2, 0);
-const nearest = (x: number[], cs: number[][]) => {
-  let best = 0, bd = Infinity;
-  for (let c = 0; c < cs.length; c++) { const d = dist2(x, cs[c]); if (d < bd) { bd = d; best = c; } }
-  return best;
-};
-
-function kmeans(data: number[][], k: number, restarts = 10) {
-  const rand = rng(42);
-  let best: { centroids: number[][]; inertia: number } | null = null;
-  for (let r = 0; r < restarts; r++) {
-    const centroids: number[][] = [data[Math.floor(rand() * data.length)].slice()];
-    while (centroids.length < k) {
-      const d2 = data.map((x) => dist2(x, centroids[nearest(x, centroids)]));
-      const sum = d2.reduce((a, b) => a + b, 0) || 1;
-      let t = rand() * sum, i = 0;
-      while (t > d2[i] && i < data.length - 1) t -= d2[i++];
-      centroids.push(data[i].slice());
-    }
-    const assign = new Array(data.length).fill(-1);
-    for (let it = 0; it < 100; it++) {
-      let changed = false;
-      for (let i = 0; i < data.length; i++) { const a = nearest(data[i], centroids); if (a !== assign[i]) { assign[i] = a; changed = true; } }
-      if (!changed) break;
-      const sums = centroids.map(() => new Array(NSYM).fill(0));
-      const counts = new Array(k).fill(0);
-      for (let i = 0; i < data.length; i++) { counts[assign[i]]++; for (let d = 0; d < NSYM; d++) sums[assign[i]][d] += data[i][d]; }
-      for (let c = 0; c < k; c++) if (counts[c] > 0) centroids[c] = sums[c].map((s) => s / counts[c]);
-    }
-    const inertia = data.reduce((s, x) => s + dist2(x, centroids[nearest(x, centroids)]), 0);
-    if (!best || inertia < best.inertia) best = { centroids, inertia };
-  }
-  return best!.centroids;
+  return counts;
 }
 
 function huffmanLengths(weights: number[]): number[] {
@@ -129,38 +83,19 @@ function huffmanLengths(weights: number[]): number[] {
   return lengths;
 }
 
-async function deriveField(field: "cloud_low" | "cloud_mid" | "cloud_high", bit: number, name: string) {
-  const data = await collectSamples(field, bit);
-  console.log(`\n${name}: samples (forecasts) = ${data.length}`);
-
-  const centroids = kmeans(data, K);
-  let weights = centroids.map((c) => c.map((v) => Math.max(1, Math.round(v * WEIGHT_SCALE))));
-
-  const lengths = () => weights.map(huffmanLengths);
-  const uniform = new Array(NSYM).fill(1 / NSYM);
-  const costUnder = (len: number[], hist: number[]) => hist.reduce((s, p, sym) => s + p * len[sym], 0);
-  const cheapest = (hist: number[], lens: number[][]) => Math.min(...lens.map((l) => costUnder(l, hist)));
-  if (cheapest(uniform, lengths()) > RAW_BITS + 1e-9) {
-    const flattest = weights
-      .map((w, i) => [i, Math.max(...w) / Math.min(...w)] as const)
-      .sort((a, b) => a[1] - b[1])[0][0];
-    weights[flattest] = new Array(NSYM).fill(1);
-  }
-  const uniformIdx = weights.findIndex((w) => w.every((v) => v === w[0]));
-  if (uniformIdx > 0) weights.unshift(weights.splice(uniformIdx, 1)[0]);
-
-  const lens = lengths();
-  const meanBits = data.reduce((s, h) => s + cheapest(h, lens), 0) / data.length;
-  console.log(`${name} mean bits/period (cheapest-of-${K}): ${meanBits.toFixed(3)}  (raw = ${RAW_BITS})`);
-
-  console.log(`\n// Paste into packages/protocol/src/huffman.ts as ${name}_DELTA_WEIGHTS:`);
-  console.log(`const ${name}_DELTA_WEIGHTS: number[][] = [`);
-  for (const w of weights) console.log(`  [${w.join(", ")}],`);
-  console.log("];");
-}
-
 async function main() {
-  for (const { field, bit, name } of CLOUD_FIELDS) await deriveField(field, bit, name);
+  for (const { field, bit, name } of CLOUD_FIELDS) {
+    const counts = await collectCounts(field, bit);
+    const total = counts.reduce((a, b) => a + b, 0);
+
+    const weights = counts.map((c) => Math.max(1, Math.round((c / total) * WEIGHT_SCALE)));
+    const lens = huffmanLengths(weights);
+    const meanBits = counts.reduce((s, c, sym) => s + c * lens[sym], 0) / total;
+    console.log(`\n${name}: delta samples = ${total}, mean bits/period (single table) = ${meanBits.toFixed(3)}  (raw = ${RAW_BITS})`);
+
+    console.log(`// Paste into packages/protocol/src/huffman.ts as ${name}_DELTA_WEIGHTS:`);
+    console.log(`const ${name}_DELTA_WEIGHTS: number[] = [${weights.join(", ")}];`);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

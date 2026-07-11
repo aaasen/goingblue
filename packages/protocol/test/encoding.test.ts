@@ -410,7 +410,7 @@ describe("v1 round-trip encoding", () => {
   });
 });
 
-describe("frame-of-reference temperature encoding", () => {
+describe("delta temperature encoding", () => {
   it("round-trips a clustered temperature column exactly", () => {
     const temps = [-5, -4, -3, 0, 2, 5, 3, 1, -2, 4];
     const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
@@ -440,6 +440,31 @@ describe("frame-of-reference temperature encoding", () => {
     const periods = [temps.map((t) => ({ ...PERIOD, temp_min_c: t }))];
     const decoded = roundTrip(msg({ resolution: 4, vars_mask: 1 << VARS_BIT.tmin, periods }));
     decoded.periods[0].forEach((p, i) => expect(p.temp_min_c).toBe(temps[i]));
+  });
+
+  it("round-trips a >31°C period-over-period swing at the escape field's edge exactly", () => {
+    // ±31 is the largest delta the escape payload can carry — no clamping yet.
+    const temps = [-15, 16, 14, 15, -16, -14];
+    const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
+    const decoded = roundTrip(msg({ resolution: 4, vars_mask: 1 << VARS_BIT.temp, periods }));
+    decoded.periods[0].forEach((p, i) => expect(p.temp_c).toBe(temps[i]));
+  });
+
+  it("clamps a delta beyond the escape range and heals on the next period instead of offsetting the rest of the chain", () => {
+    // -30 → +10 is a +40 delta, beyond the escape payload's range (-32..31, signed 6-bit). The
+    // encoder clamps that one delta but diffs later periods against its own reconstruction, so
+    // only the swing period is off (by the clamped amount) and everything after it round-trips
+    // exactly.
+    for (const swing of [40, -40]) {
+      const start = swing > 0 ? -30 : 30;
+      const temps = [start, start + swing, start + swing + 2, start + swing + 1, start + swing + 3];
+      const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
+      const decoded = roundTrip(msg({ resolution: 4, vars_mask: 1 << VARS_BIT.temp, periods }));
+      const out = decoded.periods[0].map((p) => p.temp_c!);
+      expect(out[0]).toBe(temps[0]);
+      expect(out[1]).toBe(start + Math.min(Math.max(swing, -32), 31)); // clamped
+      for (let i = 2; i < temps.length; i++) expect(out[i]).toBe(temps[i]); // healed
+    }
   });
 });
 

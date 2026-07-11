@@ -5,29 +5,19 @@ import {
   WMO_CODES,
   encodeWindDir,
   decodeWindDir,
-  encodeWindSpeedDelta,
-  decodeWindSpeedDelta,
-  chooseWindSpeedDeltaTable,
-  WIND_SPEED_DELTA_TABLE_COUNT,
-  encodeFreezeDelta,
-  decodeFreezeDelta,
-  encodeCloudLowDelta,
-  decodeCloudLowDelta,
-  chooseCloudLowDeltaTable,
-  CLOUD_LOW_DELTA_TABLE_COUNT,
-  encodeCloudMidDelta,
-  decodeCloudMidDelta,
-  chooseCloudMidDeltaTable,
-  CLOUD_MID_DELTA_TABLE_COUNT,
-  encodeCloudHighDelta,
-  decodeCloudHighDelta,
-  chooseCloudHighDeltaTable,
-  CLOUD_HIGH_DELTA_TABLE_COUNT,
+  WIND_SPEED_DELTA,
+  FREEZE_DELTA,
+  CLOUD_LOW_DELTA,
+  CLOUD_MID_DELTA,
+  CLOUD_HIGH_DELTA,
+  type DeltaCodec,
   encodeTempDelta,
   decodeTempDelta,
   chooseTempDeltaTable,
   TEMP_DELTA_TABLE_COUNT,
   TEMP_DELTA_CORE_RADIUS,
+  TEMP_DELTA_MIN,
+  TEMP_DELTA_MAX,
 } from "../src/index.js";
 
 // All contexts a weathercode symbol can be keyed by: no predecessor (bootstrap), or any WMO index.
@@ -137,64 +127,30 @@ describe("wind direction Huffman", () => {
   });
 });
 
-function windSpeedBits(deltas: number[], table: number): number {
-  const bits: number[] = [];
-  for (const d of deltas) encodeWindSpeedDelta(bits, table, d);
-  return bits.length;
-}
+// Wind speed, freezing level, and the three cloud levels all use single-table bounded delta
+// codecs from makeDeltaCodec — same shape, different weights/range. Table-driven so all five get
+// the same coverage without quintupling the test body.
+const DELTA_CODECS: { label: string; codec: DeltaCodec; maxDelta: number; rawBits: number }[] = [
+  { label: "wind speed", codec: WIND_SPEED_DELTA, maxDelta: 15, rawBits: 4 },
+  { label: "freezing level", codec: FREEZE_DELTA, maxDelta: 15, rawBits: 4 },
+  { label: "cloud low", codec: CLOUD_LOW_DELTA, maxDelta: 7, rawBits: 3 },
+  { label: "cloud mid", codec: CLOUD_MID_DELTA, maxDelta: 7, rawBits: 3 },
+  { label: "cloud high", codec: CLOUD_HIGH_DELTA, maxDelta: 7, rawBits: 3 },
+];
 
-describe("wind speed delta Huffman", () => {
-  it("round-trips every delta in the bounded range (-15..15) under every codebook", () => {
-    for (let table = 0; table < WIND_SPEED_DELTA_TABLE_COUNT; table++) {
-      for (let d = -15; d <= 15; d++) {
-        const bits: number[] = [];
-        encodeWindSpeedDelta(bits, table, d);
-        expect(bits.length).toBeGreaterThan(0);
-        const [out, pos] = decodeWindSpeedDelta(bits, 0, table);
-        expect(out).toBe(d);
-        expect(pos).toBe(bits.length); // consumed exactly the code, no more
-      }
-    }
-  });
+describe.each(DELTA_CODECS)("$label delta Huffman", ({ codec, maxDelta, rawBits }) => {
+  const bitsFor = (deltas: number[]): number => {
+    const bits: number[] = [];
+    for (const d of deltas) codec.encode(bits, d);
+    return bits.length;
+  };
 
-  it("decodes a concatenated delta sequence unambiguously (prefix-free)", () => {
-    const seq = [0, 1, -1, 0, 2, -3, 0, 1, -2, 0, 0];
-    for (let table = 0; table < WIND_SPEED_DELTA_TABLE_COUNT; table++) {
+  it(`round-trips every delta in the bounded range (-${maxDelta}..${maxDelta})`, () => {
+    for (let d = -maxDelta; d <= maxDelta; d++) {
       const bits: number[] = [];
-      for (const d of seq) encodeWindSpeedDelta(bits, table, d);
-      const out: number[] = [];
-      let pos = 0;
-      for (let k = 0; k < seq.length; k++) { const [d, p] = decodeWindSpeedDelta(bits, pos, table); out.push(d); pos = p; }
-      expect(out).toEqual(seq);
-      expect(pos).toBe(bits.length);
-    }
-  });
-
-  it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 4-bit", () => {
-    const flat = Array(64).fill(0);
-    const swings = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? 5 : -5));
-    const chosen = chooseWindSpeedDeltaTable(flat);
-    for (let t = 0; t < WIND_SPEED_DELTA_TABLE_COUNT; t++) {
-      expect(windSpeedBits(flat, chosen)).toBeLessThanOrEqual(windSpeedBits(flat, t));
-    }
-    expect(windSpeedBits(flat, chosen)).toBeLessThan(windSpeedBits(swings, chooseWindSpeedDeltaTable(swings)));
-    expect(windSpeedBits(flat, chosen)).toBeLessThan(flat.length * 4); // beats raw 4 bits/value
-  });
-});
-
-function freezeBits(deltas: number[]): number {
-  const bits: number[] = [];
-  for (const d of deltas) encodeFreezeDelta(bits, d);
-  return bits.length;
-}
-
-describe("freezing level delta Huffman", () => {
-  it("round-trips every delta in the bounded range (-15..15)", () => {
-    for (let d = -15; d <= 15; d++) {
-      const bits: number[] = [];
-      encodeFreezeDelta(bits, d);
+      codec.encode(bits, d);
       expect(bits.length).toBeGreaterThan(0);
-      const [out, pos] = decodeFreezeDelta(bits, 0);
+      const [out, pos] = codec.decode(bits, 0);
       expect(out).toBe(d);
       expect(pos).toBe(bits.length); // consumed exactly the code, no more
     }
@@ -203,73 +159,20 @@ describe("freezing level delta Huffman", () => {
   it("decodes a concatenated delta sequence unambiguously (prefix-free)", () => {
     const seq = [0, 1, -1, 0, 2, -3, 0, 1, -2, 0, 0];
     const bits: number[] = [];
-    for (const d of seq) encodeFreezeDelta(bits, d);
+    for (const d of seq) codec.encode(bits, d);
     const out: number[] = [];
     let pos = 0;
-    for (let k = 0; k < seq.length; k++) { const [d, p] = decodeFreezeDelta(bits, pos); out.push(d); pos = p; }
+    for (let k = 0; k < seq.length; k++) { const [d, p] = codec.decode(bits, pos); out.push(d); pos = p; }
     expect(out).toEqual(seq);
     expect(pos).toBe(bits.length);
   });
 
-  it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 4-bit", () => {
+  it(`a near-constant column costs fewer bits than a wide-swinging one, and beats raw ${rawBits}-bit`, () => {
     const flat = Array(64).fill(0);
-    const swings = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? 5 : -5));
-    expect(freezeBits(flat)).toBeLessThan(freezeBits(swings));
-    expect(freezeBits(flat)).toBeLessThan(flat.length * 4); // beats raw 4 bits/value
-  });
-});
-
-// Low/mid/high clouds are structurally identical codecs (bounded -7..7 delta, no escape) but each
-// has its own independent codebook pool — see huffman.ts. Table-driven so the three levels get the
-// same coverage without tripling the test body.
-const CLOUD_CODECS = [
-  { label: "low", encode: encodeCloudLowDelta, decode: decodeCloudLowDelta, choose: chooseCloudLowDeltaTable, tableCount: CLOUD_LOW_DELTA_TABLE_COUNT },
-  { label: "mid", encode: encodeCloudMidDelta, decode: decodeCloudMidDelta, choose: chooseCloudMidDeltaTable, tableCount: CLOUD_MID_DELTA_TABLE_COUNT },
-  { label: "high", encode: encodeCloudHighDelta, decode: decodeCloudHighDelta, choose: chooseCloudHighDeltaTable, tableCount: CLOUD_HIGH_DELTA_TABLE_COUNT },
-];
-
-describe.each(CLOUD_CODECS)("cloud $label delta Huffman", ({ encode, decode, choose, tableCount }) => {
-  const bitsFor = (deltas: number[], table: number): number => {
-    const bits: number[] = [];
-    for (const d of deltas) encode(bits, table, d);
-    return bits.length;
-  };
-
-  it("round-trips every delta in the bounded range (-7..7) under every codebook", () => {
-    for (let table = 0; table < tableCount; table++) {
-      for (let d = -7; d <= 7; d++) {
-        const bits: number[] = [];
-        encode(bits, table, d);
-        expect(bits.length).toBeGreaterThan(0);
-        const [out, pos] = decode(bits, 0, table);
-        expect(out).toBe(d);
-        expect(pos).toBe(bits.length); // consumed exactly the code, no more
-      }
-    }
-  });
-
-  it("decodes a concatenated delta sequence unambiguously (prefix-free)", () => {
-    const seq = [0, 1, -1, 0, 2, -3, 0, 1, -2, 0, 0];
-    for (let table = 0; table < tableCount; table++) {
-      const bits: number[] = [];
-      for (const d of seq) encode(bits, table, d);
-      const out: number[] = [];
-      let pos = 0;
-      for (let k = 0; k < seq.length; k++) { const [d, p] = decode(bits, pos, table); out.push(d); pos = p; }
-      expect(out).toEqual(seq);
-      expect(pos).toBe(bits.length);
-    }
-  });
-
-  it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 3-bit", () => {
-    const flat = Array(64).fill(0);
-    const swings = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? 3 : -3));
-    const chosen = choose(flat);
-    for (let t = 0; t < tableCount; t++) {
-      expect(bitsFor(flat, chosen)).toBeLessThanOrEqual(bitsFor(flat, t));
-    }
-    expect(bitsFor(flat, chosen)).toBeLessThan(bitsFor(swings, choose(swings)));
-    expect(bitsFor(flat, chosen)).toBeLessThan(flat.length * 3); // beats raw 3 bits/value
+    const swing = Math.min(5, maxDelta);
+    const swings = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? swing : -swing));
+    expect(bitsFor(flat)).toBeLessThan(bitsFor(swings));
+    expect(bitsFor(flat)).toBeLessThan(flat.length * rawBits);
   });
 });
 
@@ -293,8 +196,8 @@ describe("temperature delta Huffman", () => {
     }
   });
 
-  it("round-trips escape-path deltas (|delta| > 7) via the raw 6-bit payload", () => {
-    const jumps = [8, -8, 11, -11, 20, -20, 31, -32]; // -32..31 is the escape field's full range
+  it("round-trips escape-path deltas (|delta| > 7) via the raw 6-bit payload, including the exact field bounds", () => {
+    const jumps = [8, -8, 11, -11, 20, -20, 31, -32, TEMP_DELTA_MAX, TEMP_DELTA_MIN];
     for (let table = 0; table < TEMP_DELTA_TABLE_COUNT; table++) {
       for (const d of jumps) {
         const bits: number[] = [];
@@ -303,6 +206,15 @@ describe("temperature delta Huffman", () => {
         expect(out).toBe(d);
         expect(pos).toBe(bits.length);
       }
+    }
+  });
+
+  it("throws on deltas outside the escape field's range instead of silently truncating", () => {
+    // putInt masks to the field width, so an unchecked encode of e.g. +40 would decode as -24 and
+    // corrupt every later temperature in the chain. The guard makes that impossible to emit;
+    // v1.ts clamps before calling (see the healing round-trip test in encoding.test.ts).
+    for (const d of [TEMP_DELTA_MAX + 1, TEMP_DELTA_MIN - 1, 40, -40, 100]) {
+      expect(() => encodeTempDelta([], 0, d)).toThrow(/temp delta/);
     }
   });
 
