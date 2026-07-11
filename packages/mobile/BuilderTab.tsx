@@ -269,20 +269,6 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
           selectedIndex={LOCATION_MODES.indexOf(locationMode)}
           onChange={(e) => setLocationMode(LOCATION_MODES[e.nativeEvent.selectedSegmentIndex])}
         />
-        {locationMode === 'current' && (locating || gpsCoords) && (
-          <View style={styles.locationStatus}>
-            {locating ? (
-              <ActivityIndicator size="small" color="#2a6bb5" />
-            ) : (
-              <Text style={styles.coordsText}>
-                {gpsCoords!.lat.toFixed(4)}, {gpsCoords!.lon.toFixed(4)}
-              </Text>
-            )}
-          </View>
-        )}
-        {locationMode === 'current' && gpsCoords && (
-          <LocationMap coord={gpsCoords} height={160} />
-        )}
         {locationMode === 'custom' && (
           <>
             <View style={styles.customCoords}>
@@ -419,8 +405,6 @@ const styles = StyleSheet.create({
   lenSummary: { fontSize: 13, color: '#6e6e73', marginTop: 8 },
   lenOver: { color: '#cc2222', fontWeight: '500' },
 
-  locationStatus: { marginTop: 10, alignItems: 'flex-start' },
-  coordsText: { fontFamily: 'Courier', fontSize: 13, color: '#2a6bb5' },
   customCoords: { marginTop: 10, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
   coordRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
   coordRowLast: { borderBottomWidth: 0 },
