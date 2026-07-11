@@ -7,8 +7,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
-  V1_HEADER_CHARS, periodBitsForMask, nCharsForBits, VARS_BIT, V1_VERSION, VAR_BITS_V1,
-  RESOLUTION_HOURS, DEFAULT_VARS_MASK, MODEL_BIT, V1_MAX_PERIODS, type RequestContext,
+  VARS_BIT, V1_VERSION,
+  RESOLUTION_HOURS, DEFAULT_VARS_MASK, MODEL_BIT, type RequestContext,
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import { allocCode } from './cache';
@@ -30,7 +30,6 @@ function alignedStartEpochHour(resHours: number): number {
 const CHARS_PER_MESSAGE = 160; // each Garmin inReach message holds 160 characters
 const FORECAST_EMAIL = 'inreach@going.blue';
 const DEFAULT_MESSAGES = 1;
-const HORIZON_DAYS = 15;   // upstream forecast horizon
 const FORECAST_URL = `${API_BASE}/forecast`;
 
 const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
@@ -65,36 +64,6 @@ const VAR_GROUPS = [
 
 // Clouds on by default; high altitude winds and freezing level off.
 const DEFAULT_GROUPS = new Set(['clouds']);
-
-// Chars to encode `nPeriods` periods at fixed (raw) field widths. The server's actual encoding is
-// adaptive and variable-length (Huffman / frame-of-reference / sparse), so it is never larger than
-// this — making the estimate a conservative upper bound on size, i.e. a lower bound on the periods
-// that will actually fit.
-function calcChars(nPeriods: number, varsMask: number): number {
-  const bodyBits = nPeriods * periodBitsForMask(varsMask, VAR_BITS_V1);
-  return V1_HEADER_CHARS + nCharsForBits(bodyBits);
-}
-
-// A conservative lower bound on how many periods fit `maxChars`: the server's adaptive encoding
-// will fit at least this many (usually more). Bounded by the 8-bit header field and the horizon.
-// Returns 0 only if even one period won't fit at raw widths.
-function maxPeriodsFor(resHours: number, varsMask: number, maxChars: number): number {
-  const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
-  const cap = Math.min(V1_MAX_PERIODS, Math.floor(HORIZON_DAYS * periodsPerDay));
-  for (let n = cap; n >= 1; n--) {
-    if (calcChars(n, varsMask) <= maxChars) return n;
-  }
-  return 0;
-}
-
-// How much forecast horizon `nPeriods` covers, as a short label. Hourly resolution is
-// reported in hours (days would round to a confusing "<1 day"); coarser resolutions in days.
-function formatSpan(nPeriods: number, resHours: number): string {
-  if (resHours === 1) return `${nPeriods} hour${nPeriods === 1 ? '' : 's'}`;
-  const days = (nPeriods * resHours) / 24;
-  const rounded = Math.round(days * 10) / 10;
-  return `${rounded} day${rounded === 1 ? '' : 's'}`;
-}
 
 // The request leads with the protocol version and omits any period count — the server fits
 // as many periods as the max response length (`c:`, in chars) allows for the chosen
@@ -166,9 +135,6 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
   }
   const activeVars = [...selectedVars].filter((v) => !unavail.includes(v) && !resUnavail.includes(v));
   const varsMask = activeVars.reduce((mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)), 0);
-  // The period count isn't user-selected: include as many time periods as the char budget allows.
-  const nPeriods = maxPeriodsFor(resHours, varsMask, maxChars);
-  const fits = nPeriods > 0;
   const resLabel = RESOLUTIONS.find((r) => r.value === resHours)?.label ?? `${resHours}h`;
 
   const resolvedCoords = locationMode === 'current'
@@ -178,13 +144,13 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
   // In current-location mode we always show a preview (coords are omitted until GPS resolves);
   // in custom mode we only show a message once valid coords are entered.
-  const showMessage = fits && (coordsValid || locationMode === 'current');
+  const showMessage = coordsValid || locationMode === 'current';
   // Preview only — the real message code is allocated on copy/fetch (buildContext + allocCode).
   const message = showMessage
     ? buildMsg(token, coordsValid ? resolvedCoords : null, resHours, model, activeVars, maxChars, 0, alignedStartEpochHour(resHours))
     : '';
   // In current-location mode the buttons stay tappable so they can request GPS on demand.
-  const copyDisabled = locating || !fits || (locationMode === 'custom' && !coordsValid);
+  const copyDisabled = locating || (locationMode === 'custom' && !coordsValid);
   const fetchDisabled = copyDisabled || fetching;
 
   async function requestCurrentLocation(): Promise<{ lat: number; lon: number } | null> {
@@ -301,11 +267,6 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
           selectedIndex={RESOLUTIONS.findIndex((r) => r.value === resHours)}
           onChange={(e) => setResHours(RESOLUTIONS[e.nativeEvent.selectedSegmentIndex].value)}
         />
-        <Text style={[styles.lenSummary, !fits && styles.lenOver]}>
-          {fits
-            ? `≥ ${formatSpan(nPeriods, resHours)} · ${nPeriods}+ period${nPeriods === 1 ? '' : 's'}`
-            : `Won't fit at ${resLabel} resolution — reduce variables or coarsen resolution`}
-        </Text>
       </Section>
 
       <Section label="Model">
@@ -342,7 +303,7 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
           {message ? (
             <Text style={styles.msgText} selectable>{message}</Text>
           ) : (
-            <Text style={styles.msgPlaceholder}>{fits ? 'Enter lat/lon above' : 'Reduce variables or coarsen resolution'}</Text>
+            <Text style={styles.msgPlaceholder}>Enter lat/lon above</Text>
           )}
         </View>
       </Section>
@@ -401,9 +362,6 @@ const styles = StyleSheet.create({
   varLabelDim: { color: '#aeaeb2' },
   varCheck: { fontSize: 17, fontWeight: '600', color: '#2a6bb5' },
   varCheckHidden: { opacity: 0 },
-
-  lenSummary: { fontSize: 13, color: '#6e6e73', marginTop: 8 },
-  lenOver: { color: '#cc2222', fontWeight: '500' },
 
   customCoords: { marginTop: 10, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
   coordRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
