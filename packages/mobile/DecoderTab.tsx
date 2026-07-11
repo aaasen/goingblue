@@ -3,12 +3,13 @@ import {
   StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView,
 } from 'react-native';
 import {
-  RESOLUTION_HOURS, modelsFromMask, startDatetime, type ForecastMessage,
+  RESOLUTION_HOURS, startDatetime, type ForecastMessage,
 } from '@weather/protocol';
 import { decodeAny, loadStore, attachResponse, loadPastForecasts, type Slot } from './cache';
 import type { Units } from './settings';
 import LocationMap from './LocationMap';
 import Meteogram from './Meteogram';
+import { modelLabelsFromMask } from './models';
 
 // ── Meta labels ────────────────────────────────────────────────────────────
 
@@ -26,7 +27,7 @@ function spanLabel(msg: ForecastMessage): string {
 }
 
 function metaLabel(msg: ForecastMessage, units: Units): string {
-  const models = modelsFromMask(msg.models_mask);
+  const models = modelLabelsFromMask(msg.models_mask);
   const elevStr = msg.elevation > 0
     ? units === 'imperial'
       ? ` · ${Math.round(msg.elevation * 3.28084).toLocaleString()}ft`
@@ -49,7 +50,7 @@ function normalizedForecastData(encoded: string): string {
 function cacheMetaLabel(slot: Slot, token: string): string {
   try {
     const msg = decodeAny(slot.encoded!, token);
-    const models = modelsFromMask(msg.models_mask).join(' + ');
+    const models = modelLabelsFromMask(msg.models_mask).join(' + ');
     return `${requestTimeLabel(slot.requestedAt)} · ${latLonLabel(msg)} · ${spanLabel(msg)} · ${models}`;
   } catch {
     return 'Unknown';

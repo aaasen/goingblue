@@ -13,6 +13,7 @@ import {
 import { API_BASE } from './account';
 import { allocCode } from './cache';
 import LocationMap from './LocationMap';
+import { MODELS } from './models';
 
 // Resolution hours → protocol resolution index (inverse of RESOLUTION_HOURS).
 const RES_HOURS_TO_IDX: Record<number, number> = Object.fromEntries(
@@ -49,13 +50,6 @@ const RESOLUTIONS = [
   { value: 6, label: '6h' },
   { value: 12, label: '12h' },
   { value: 24, label: '24h' },
-];
-
-const MODELS = [
-  { value: 'hres', label: 'HRES' },
-  { value: 'ifs', label: 'ECMWF' },
-  { value: 'gfs', label: 'GFS' },
-  { value: 'icon', label: 'ICON' },
 ];
 
 // Variables included in every request; not user-selectable.

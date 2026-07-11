@@ -99,10 +99,10 @@ export async function attachResponse(token: string, code: number, encoded: strin
 }
 
 function pastForecasts(store: Store): Slot[] {
-  return store.slots.filter((s) => s.encoded).sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0));
+  return store.slots.filter((s) => s.encoded).sort((a, b) => b.requestedAt - a.requestedAt);
 }
 
-// Received forecasts to display, most recent first.
+// Received forecasts to display, most recently requested first.
 export async function loadPastForecasts(token: string): Promise<Slot[]> {
   return pastForecasts(await loadStore(token));
 }
