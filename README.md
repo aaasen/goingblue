@@ -22,14 +22,12 @@ This is a pnpm monorepo with three packages:
 
 ## Encoding
 
+
+The core of Going Blue is a super compact message format that maximizes the amount of weather data that can fit in a single message.
+
 Forecast responses are bit-packed into a compact binary message, then serialized as base-85 over
 the [GSM-7 basic alphabet](packages/protocol/src/constants.ts) so each character costs a single
 septet over SMS. A message is a fixed header followed by one body cell per period × model.
-
-To squeeze the body, each variable uses the encoding strategy that best fits its distribution. The
-adaptive strategies (Huffman, frame-of-reference, sparse) are the protocol's encoding design; every
-adaptive column can also fall back to **raw** fixed-width, and the encoder picks whichever mode is
-cheapest per column, so the encoded size is never larger than fixed-width.
 
 ### Strategies
 
@@ -92,29 +90,38 @@ zero-padding is simply dropped.
 
 ## Development
 
-### Database
+To get running locally:
 
-The server uses a PostgreSQL database to store user tokens and forecast requests.
+1. Start a local Postgres database through Docker:
 
-```bash
+```
 docker run --rm -d --name goingblue -p 5432:5432 -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=goingblue postgres:18
 ```
 
-### Server
+2. Start the forecast server:
 
-Install dependencies:
-
-```bash
-pnpm install
 ```
-
-Start the server:
-
-```bash
+pnpm install
 DB_USER=postgres DB_PASS=dev DB_NAME=goingblue pnpm start
 ```
 
-The server starts at `http://localhost:8080`. 
+3. Build the app
+
+```
+cd packages/mobile
+eas build -p ios --profile development
+```
+
+4. Install the app on your iOS device with the QR code in the step above.
+
+5. Start the Expo development server
+
+```
+cd packages/mobile
+npx expo start -c
+```
+
+6. Open the mobile app. It should find the running Expo development server.
 
 #### Inbound messages
 
@@ -132,14 +139,9 @@ request body and replying on the same channel:
 
 ### Client
 
-The client is an Expo React Native app. The app works on iOS, Android, and the web. To run the web client:
+The client is an Expo React Native app which currently works only on iOS.
 
-```bash
-cd packages/mobile
-pnpm run web
-```
-
-Or, build an iOS app:
+First, build an iOS app:
 
 ```
 cd packages/mobile
