@@ -382,14 +382,20 @@ describe("frame-of-reference temperature encoding", () => {
     expect(flatLen).toBeLessThan(spreadLen);
   });
 
-  it("always chooses FOR for temp/tmin, never falling back to raw/sparse/empty", () => {
-    const vars_mask = (1 << VARS_BIT.temp) | (1 << VARS_BIT.tmin);
+  it("always chooses FOR for tmin, never falling back to raw/sparse/empty", () => {
+    const vars_mask = 1 << VARS_BIT.tmin;
     // A single-value column: previously the cheapest adaptive choice here would be EMPTY-like
-    // (zero spread), not FOR. Temperature must still report FOR for both columns.
-    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, temp_c: 0, temp_min_c: 0 }))];
+    // (zero spread), not FOR. tmin must still report FOR.
+    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, temp_min_c: 0 }))];
     const { columns } = v1EncodeBreakdown(msg({ resolution: 4, vars_mask, periods }));
-    expect(columns.find((c) => c.name === "temp")?.mode).toBe("for");
     expect(columns.find((c) => c.name === "tmin")?.mode).toBe("for");
+  });
+
+  it("temp reports no adaptive mode — it's Huffman-coded deltas, not a raw/for/sparse/empty column", () => {
+    const vars_mask = 1 << VARS_BIT.temp;
+    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, temp_c: 0 }))];
+    const { columns } = v1EncodeBreakdown(msg({ resolution: 4, vars_mask, periods }));
+    expect(columns.find((c) => c.name === "temp")?.mode).toBeNull();
   });
 });
 

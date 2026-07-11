@@ -1,4 +1,5 @@
 import { WMO_CODES } from "./constants.js";
+import { putInt, takeInt } from "./bits.js";
 
 // Static, regime-tuned Huffman codebooks for the weathercode column. Weathercodes are strongly
 // skewed toward a few common conditions, and which conditions are common depends on the climate,
@@ -176,6 +177,87 @@ export function chooseWindDirTable(dirIdxs: number[]): number {
   for (let t = 0; t < WIND_DIR_TABLES.length; t++) {
     let total = 0;
     for (const idx of dirIdxs) total += WIND_DIR_TABLES[t].codes[idx].length;
+    if (total < bestBits) { bestBits = total; best = t; }
+  }
+  return best;
+}
+
+// ── Temperature delta codebooks ─────────────────────────────────────────────────
+// Static Huffman codebooks for period-over-period temp_c change. Symbols are quantized deltas
+// -7..7 (indices 0..14) plus an ESCAPE symbol (index 15) for rarer bigger jumps, followed by a raw
+// 6-bit signed (bias 32) field covering -32..31°C. Derived by k-means clustering per-(forecast ×
+// resolution) delta histograms pooled across 1h/3h/6h/12h/24h — see
+// server/scripts/derive-temp-delta-codebooks.ts — deliberately NOT keyed by resolution: resolution
+// is never on the wire (see v1.ts), and a future dynamic-duration message could mix resolutions
+// within one column, so the codebook has to earn its keep on the actual delta shape alone. The
+// encoder picks the cheapest per column and stores its index in a 4-bit selector.
+const TEMP_DELTA_WEIGHTS: number[][] = [
+  [8, 15, 27, 45, 69, 107, 205, 124, 119, 79, 76, 50, 33, 19, 10, 14],
+  [1, 1, 1, 3, 8, 26, 148, 622, 152, 27, 7, 3, 1, 1, 1, 1],
+  [4, 8, 13, 22, 43, 80, 261, 277, 80, 81, 53, 34, 20, 10, 5, 8],
+  [3, 5, 10, 21, 38, 72, 97, 354, 272, 66, 31, 14, 7, 3, 2, 5],
+  [12, 22, 41, 75, 136, 97, 74, 81, 120, 87, 83, 53, 36, 29, 20, 33],
+  [1, 1, 3, 7, 18, 52, 230, 391, 201, 62, 20, 7, 4, 1, 1, 1],
+  [1, 1, 1, 4, 11, 38, 192, 508, 187, 41, 12, 4, 1, 1, 1, 1],
+  [9, 15, 22, 39, 61, 72, 126, 145, 120, 256, 59, 32, 18, 8, 4, 14],
+  [4, 7, 13, 26, 43, 86, 373, 108, 110, 89, 55, 37, 22, 11, 6, 11],
+  [2, 5, 9, 20, 41, 91, 210, 252, 199, 85, 41, 21, 12, 5, 3, 4],
+  [12, 21, 33, 51, 65, 80, 108, 223, 128, 77, 70, 45, 32, 21, 12, 22],
+  [5, 10, 17, 29, 47, 85, 123, 372, 98, 91, 49, 30, 18, 11, 5, 9],
+  [5, 10, 16, 24, 47, 258, 126, 143, 105, 100, 65, 43, 24, 13, 8, 14],
+  [39, 35, 36, 40, 41, 54, 72, 99, 72, 46, 39, 38, 37, 42, 35, 275],
+  [44, 66, 64, 58, 37, 47, 83, 82, 42, 61, 104, 110, 85, 49, 24, 44],
+  [5, 11, 17, 27, 46, 81, 139, 138, 353, 86, 45, 22, 11, 6, 3, 9],
+];
+
+export const TEMP_DELTA_CORE_RADIUS = 7;
+const TEMP_DELTA_ESCAPE_SYM = 2 * TEMP_DELTA_CORE_RADIUS + 1; // 15
+export const TEMP_DELTA_ESCAPE_BITS = 6;
+const TEMP_DELTA_ESCAPE_BIAS = 1 << (TEMP_DELTA_ESCAPE_BITS - 1); // 32, covers -32..31°C jumps
+export const TEMP_DELTA_TABLE_COUNT = TEMP_DELTA_WEIGHTS.length; // 16
+export const TEMP_DELTA_TABLE_BITS = 4;
+
+const TEMP_DELTA_TABLES: Table[] = TEMP_DELTA_WEIGHTS.map((w) => {
+  const codes = canonicalCodes(huffmanLengths(w));
+  return { codes, root: buildTrie(codes) };
+});
+
+function tempDeltaSym(delta: number): number {
+  return Math.abs(delta) <= TEMP_DELTA_CORE_RADIUS ? delta + TEMP_DELTA_CORE_RADIUS : TEMP_DELTA_ESCAPE_SYM;
+}
+
+// Appends the Huffman code for a period-over-period temp change `delta` (°C) under `table`; jumps
+// outside ±7°C fall back to the escape symbol plus a raw 6-bit field.
+export function encodeTempDelta(bits: number[], table: number, delta: number): void {
+  const sym = tempDeltaSym(delta);
+  for (const b of TEMP_DELTA_TABLES[table].codes[sym]) bits.push(b);
+  if (sym === TEMP_DELTA_ESCAPE_SYM) putInt(bits, delta + TEMP_DELTA_ESCAPE_BIAS, TEMP_DELTA_ESCAPE_BITS);
+}
+
+// Reads one Huffman-coded temp delta (under `table`), returning [delta, nextPos].
+export function decodeTempDelta(bits: number[], pos: number, table: number): [number, number] {
+  let node = TEMP_DELTA_TABLES[table].root;
+  while (node.sym === undefined) {
+    node = node.child[bits[pos++] ?? 0]!;
+    if (!node) throw new Error("huffman: invalid temp-delta bitstream");
+  }
+  if (node.sym === TEMP_DELTA_ESCAPE_SYM) {
+    const [raw, next] = takeInt(bits, pos, TEMP_DELTA_ESCAPE_BITS);
+    return [raw - TEMP_DELTA_ESCAPE_BIAS, next];
+  }
+  return [node.sym - TEMP_DELTA_CORE_RADIUS, pos];
+}
+
+// Picks the codebook that encodes `deltas` in the fewest total bits (escape payload included).
+export function chooseTempDeltaTable(deltas: number[]): number {
+  let best = 0;
+  let bestBits = Infinity;
+  for (let t = 0; t < TEMP_DELTA_TABLES.length; t++) {
+    let total = 0;
+    for (const d of deltas) {
+      const sym = tempDeltaSym(d);
+      total += TEMP_DELTA_TABLES[t].codes[sym].length + (sym === TEMP_DELTA_ESCAPE_SYM ? TEMP_DELTA_ESCAPE_BITS : 0);
+    }
     if (total < bestBits) { bestBits = total; best = t; }
   }
   return best;

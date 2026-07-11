@@ -9,6 +9,7 @@ import type { ForecastMessage, VersionedCodec, ContextResolver } from "../model.
 import {
   encodeWeathercode, decodeWeathercode, chooseWcTable,
   encodeWindDir, decodeWindDir, chooseWindDirTable, WIND_DIR_TABLE_BITS,
+  encodeTempDelta, decodeTempDelta, chooseTempDeltaTable, TEMP_DELTA_TABLE_BITS,
 } from "../huffman.js";
 
 export const V1_VERSION = 1;
@@ -92,16 +93,19 @@ function clampInt(v: number, width: number): number {
   return Math.min(Math.max(v, 0), (1 << width) - 1);
 }
 
+// temp: Huffman-coded period-over-period deltas (see TEMP_DELTA_* in huffman.ts), not a plain
+// scalar column — each model's first period is an anchor at full width, quantized the same way.
+const TEMP_ANCHOR_BITS = VAR_BITS_V1[VARS_BIT.temp];
+const quantTemp = (p: Period): number => clampInt(Math.round((p.temp_c ?? 0) + TEMP_OFFSET), TEMP_ANCHOR_BITS);
+
 // Scalar columns, in body (column-major) order. Wind is handled separately (two ints per cell).
 const SCALAR_COLUMNS: ScalarColumn[] = [
   // precip chance: adaptive — sparse/empty when mostly dry (often 0%), FOR when clustered, raw otherwise.
   { bit: 0, mode: "adaptive",
     get: (p) => clampInt(Math.round((p.precip ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.precip = Math.round(v * 100 / 7); } },
-  // temp/tmin: always FOR — the adaptive raw/sparse/empty candidates essentially never win here.
-  { bit: 1, mode: "for",
-    get: (p) => clampInt(Math.round((p.temp_c ?? 0) + TEMP_OFFSET), 8),
-    set: (p, v) => { p.temp_c = v - TEMP_OFFSET; } },
+  // temp (bit 1) is handled separately in buildBody/decode below — Huffman-coded period-over-period
+  // deltas, not a per-cell scalar (see TEMP_DELTA_* in huffman.ts). tmin still uses plain FOR.
   { bit: 13, mode: "for",
     get: (p) => clampInt(Math.round((p.temp_min_c ?? 0) + TEMP_OFFSET), 8),
     set: (p, v) => { p.temp_min_c = v - TEMP_OFFSET; } },
@@ -148,6 +152,9 @@ function reader(bits: number[]) {
     },
     windDir(table: number): number {
       const [sym, p] = decodeWindDir(bits, pos, table); pos = p; return sym;
+    },
+    tempDelta(table: number): number {
+      const [delta, p] = decodeTempDelta(bits, pos, table); pos = p; return delta;
     },
   };
 }
@@ -324,6 +331,28 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[]; w
   for (const idx of wcIdx) encodeWeathercode(body, wcTable, idx);
   mark("weathercode", before, -1);
 
+  // Temp column: per model, an anchor (first period, full width) followed by Huffman-coded
+  // period-over-period deltas — never diffed across a model boundary. One cheapest-of-16 table
+  // for the whole column (see TEMP_DELTA_* in huffman.ts).
+  if (msg.vars_mask & (1 << VARS_BIT.temp)) {
+    before = body.length;
+    const allDeltas: number[] = [];
+    for (let m = 0; m < nModels; m++) {
+      for (let p = 1; p < nPeriods; p++) {
+        allDeltas.push(quantTemp(msg.periods[m][p]) - quantTemp(msg.periods[m][p - 1]));
+      }
+    }
+    const table = chooseTempDeltaTable(allDeltas);
+    putInt(body, table, TEMP_DELTA_TABLE_BITS);
+    for (let m = 0; m < nModels; m++) {
+      putInt(body, quantTemp(msg.periods[m][0]), TEMP_ANCHOR_BITS);
+      for (let p = 1; p < nPeriods; p++) {
+        encodeTempDelta(body, table, quantTemp(msg.periods[m][p]) - quantTemp(msg.periods[m][p - 1]));
+      }
+    }
+    mark("temp", before, -1);
+  }
+
   for (const col of SCALAR_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
     before = body.length;
@@ -452,6 +481,18 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   eachCell(nPeriods, nModels, (p, m) => {
     periods[m][p].weathercode = WMO_CODES[rd.weathercode(wcTable)] ?? 0;
   });
+
+  if (vars_mask & (1 << VARS_BIT.temp)) {
+    const table = rd.int(TEMP_DELTA_TABLE_BITS);
+    for (let m = 0; m < nModels; m++) {
+      let quant = rd.int(TEMP_ANCHOR_BITS);
+      periods[m][0].temp_c = quant - TEMP_OFFSET;
+      for (let p = 1; p < nPeriods; p++) {
+        quant += rd.tempDelta(table);
+        periods[m][p].temp_c = quant - TEMP_OFFSET;
+      }
+    }
+  }
 
   for (const col of SCALAR_COLUMNS) {
     if (vars_mask & (1 << col.bit)) decodeScalarColumn(rd, col, periods, nPeriods, nModels);

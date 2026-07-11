@@ -1,6 +1,6 @@
 {
   "description": "3-day daily ECMWF HRES, all v1 variables, Denali 14k camp",
-  "encoded": "\"!!Y:=VC_mg<TTK2;OY=Yz8eglU3&,n6k<#9Kms2#",
+  "encoded": "\"!!Y:Kn-#wfoME!l40Y>Xy+y(=Jp5MB#7;*,z?Ym)",
   "decoded": {
     "version": 1,
     "code": 0,
@@ -18,8 +18,8 @@
       [
         {
           "weathercode": 3,
-          "precip": 57,
           "temp_c": -8,
+          "precip": 57,
           "temp_min_c": -15,
           "snow_cm": 0,
           "rain_mm": 0,
@@ -39,8 +39,8 @@
         },
         {
           "weathercode": 61,
-          "precip": 86,
           "temp_c": -4,
+          "precip": 86,
           "temp_min_c": -12,
           "snow_cm": 5.039052658100277,
           "rain_mm": 3.6281179138321993,
@@ -60,8 +60,8 @@
         },
         {
           "weathercode": 2,
-          "precip": 14,
           "temp_c": -12,
+          "precip": 14,
           "temp_min_c": -20,
           "snow_cm": 0,
           "rain_mm": 0,
