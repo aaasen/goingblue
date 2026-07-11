@@ -163,23 +163,27 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
         pastGroups.map((group) => (
           <View key={group.day} style={styles.pastGroup}>
             <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
-            {group.slots.map((slot) => (
-              <View
-                key={slot.code}
-                style={[
-                  styles.pastItem,
-                  normalizedForecastData(forecastData) === normalizedForecastData(slot.encoded!)
-                    && styles.pastItemLoaded,
-                ]}
-              >
-                <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, token)}</Text>
-                <View style={styles.pastBtns}>
-                  <TouchableOpacity style={styles.pastLoadBtn} onPress={() => loadPast(slot.encoded!)}>
-                    <Text style={styles.pastLoadText}>Load</Text>
-                  </TouchableOpacity>
+            {group.slots.map((slot) => {
+              const isLoaded = normalizedForecastData(forecastData)
+                === normalizedForecastData(slot.encoded!);
+              return (
+                <View
+                  key={slot.code}
+                  style={[styles.pastItem, isLoaded && styles.pastItemLoaded]}
+                >
+                  <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, token)}</Text>
+                  <View style={styles.pastBtns}>
+                    <TouchableOpacity
+                      style={[styles.pastLoadBtn, isLoaded && styles.pastLoadBtnDisabled]}
+                      onPress={() => loadPast(slot.encoded!)}
+                      disabled={isLoaded}
+                    >
+                      <Text style={styles.pastLoadText}>Load</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         ))
       )}
@@ -329,5 +333,6 @@ const styles = StyleSheet.create({
   pastMeta: { flex: 1, fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
   pastBtns: { flexDirection: 'row', gap: 8 },
   pastLoadBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: '#2a6bb5' },
+  pastLoadBtnDisabled: { backgroundColor: '#aeaeb2' },
   pastLoadText: { color: '#fff', fontSize: 13, fontWeight: '600' },
 });
