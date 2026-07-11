@@ -96,10 +96,16 @@ function buildContext(coords: { lat: number; lon: number }, resHours: number, mo
   };
 }
 
-// Parse a single "lat, lon" string into coordinates. Accepts comma- or whitespace-separated pairs
-// (e.g. "47.45915, -121.45958" pasted from CalTopo). Returns null unless it's exactly two numbers.
+// Parse a single "lat, lon" string into coordinates. Accepts comma- or whitespace-separated pairs,
+// optionally wrapped in parentheses (e.g. "(-44.9412396, -99.8386085)"). Returns null unless it's
+// exactly two numbers.
 function parseLatLon(s: string): { lat: number; lon: number } | null {
-  const m = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/);
+  let value = s.trim();
+  const hasOpeningParen = value.startsWith('(');
+  const hasClosingParen = value.endsWith(')');
+  if (hasOpeningParen !== hasClosingParen) return null;
+  if (hasOpeningParen) value = value.slice(1, -1).trim();
+  const m = value.match(/^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/);
   if (!m) return null;
   return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
 }
