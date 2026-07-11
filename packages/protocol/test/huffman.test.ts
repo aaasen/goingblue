@@ -2,8 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   encodeWeathercode,
   decodeWeathercode,
-  chooseWcTable,
-  WC_TABLE_COUNT,
   WMO_CODES,
   encodeWindDir,
   decodeWindDir,
@@ -16,52 +14,56 @@ import {
   TEMP_DELTA_CORE_RADIUS,
 } from "../src/index.js";
 
-function totalBits(idxs: number[], table: number): number {
+// All contexts a weathercode symbol can be keyed by: no predecessor (bootstrap), or any WMO index.
+const WC_CONTEXTS: (number | null)[] = [null, ...WMO_CODES.map((_, i) => i)];
+
+function sequenceBits(seq: number[]): number {
   const bits: number[] = [];
-  for (const i of idxs) encodeWeathercode(bits, table, i);
+  let prev: number | null = null;
+  for (const idx of seq) { encodeWeathercode(bits, prev, idx); prev = idx; }
   return bits.length;
 }
 
 describe("weathercode Huffman", () => {
-  it("round-trips every WMO index under every table", () => {
-    for (let table = 0; table < WC_TABLE_COUNT; table++) {
+  it("round-trips every WMO index under every context", () => {
+    for (const prevSym of WC_CONTEXTS) {
       for (let idx = 0; idx < WMO_CODES.length; idx++) {
         const bits: number[] = [];
-        encodeWeathercode(bits, table, idx);
+        encodeWeathercode(bits, prevSym, idx);
         expect(bits.length).toBeGreaterThan(0);
-        const [out, pos] = decodeWeathercode(bits, 0, table);
+        const [out, pos] = decodeWeathercode(bits, 0, prevSym);
         expect(out).toBe(idx);
         expect(pos).toBe(bits.length); // consumed exactly the code, no more
       }
     }
   });
 
-  it("decodes a concatenated sequence unambiguously (prefix-free)", () => {
+  it("decodes a concatenated sequence unambiguously (prefix-free), context threaded from the previous symbol", () => {
     const seq = [0, 3, 3, 16, 17, 25, 11, 2, 0, 0, 27, 8, 20];
-    for (let table = 0; table < WC_TABLE_COUNT; table++) {
-      const bits: number[] = [];
-      for (const i of seq) encodeWeathercode(bits, table, i);
-      const out: number[] = [];
-      let pos = 0;
-      for (let k = 0; k < seq.length; k++) {
-        const [sym, p] = decodeWeathercode(bits, pos, table);
-        out.push(sym);
-        pos = p;
-      }
-      expect(out).toEqual(seq);
-      expect(pos).toBe(bits.length);
+    const bits: number[] = [];
+    let prev: number | null = null;
+    for (const idx of seq) { encodeWeathercode(bits, prev, idx); prev = idx; }
+
+    const out: number[] = [];
+    let pos = 0;
+    prev = null;
+    for (let k = 0; k < seq.length; k++) {
+      const [sym, p] = decodeWeathercode(bits, pos, prev);
+      out.push(sym);
+      pos = p;
+      prev = sym;
     }
+    expect(out).toEqual(seq);
+    expect(pos).toBe(bits.length);
   });
 
-  it("picks the codebook that minimizes total bits", () => {
-    // An all-clear column should be cheaper under the chosen table than under any other.
+  it("a persistent (all-clear) sequence costs fewer bits under order-1 context than under the bootstrap table alone", () => {
     const allClear = Array(64).fill(0); // index 0 = WMO clear
-    const chosen = chooseWcTable(allClear);
-    for (let t = 0; t < WC_TABLE_COUNT; t++) {
-      expect(totalBits(allClear, chosen)).toBeLessThanOrEqual(totalBits(allClear, t));
-    }
-    // And it beats the near-uniform general table (0) for this skewed input.
-    expect(totalBits(allClear, chosen)).toBeLessThan(totalBits(allClear, 0));
+    const contextual = sequenceBits(allClear);
+    const bootstrapOnly = allClear.reduce((bits, idx) => {
+      const b: number[] = []; encodeWeathercode(b, null, idx); return bits + b.length;
+    }, 0);
+    expect(contextual).toBeLessThan(bootstrapOnly);
   });
 });
 

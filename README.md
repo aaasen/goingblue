@@ -202,6 +202,7 @@ pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
 6. Remove tmin at 1hr resolution. Periods/message 56.3 -> 71.2. 
 7. Always use FOR for temperature. Periods/message 71.2 -> 71.3.
 8. Huffman coding for temperature deltas. Temp 3.98 bits -> 2.13 bits. Periods/message 71.3 -> 81.7
+9. Huffman coding for weathercode dependent on previous weathercode. Weathercode 2.38 bits -> 1.84 bits. Periods per message 81.7 -> 84.5. 
 
 ## License
 

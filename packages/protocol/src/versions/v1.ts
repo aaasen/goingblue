@@ -7,7 +7,7 @@ import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js"
 import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec, ContextResolver } from "../model.js";
 import {
-  encodeWeathercode, decodeWeathercode, chooseWcTable,
+  encodeWeathercode, decodeWeathercode,
   encodeWindDir, decodeWindDir, chooseWindDirTable, WIND_DIR_TABLE_BITS,
   encodeTempDelta, decodeTempDelta, chooseTempDeltaTable, TEMP_DELTA_TABLE_BITS,
 } from "../huffman.js";
@@ -21,24 +21,24 @@ const VERSION = V1_VERSION;
 // a partial final day. periods:7 stores (nPeriods - 1), i.e. 1..128 periods.
 //
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
-// packed header. Packed header layout (25 bits):
-//   code:7 periods:7 elev:7 wc_table:4
+// packed header. Packed header layout (21 bits):
+//   code:7 periods:7 elev:7
 // The body carries no length field — it is packed little-endian and self-delimiting (the decoder
 // knows the structure and reads exactly the bits it needs; see encodeBodyLE/decodeBodyLE).
+// The weathercode column has no codebook selector either: each symbol's Huffman table is keyed by
+// the previously decoded symbol, which both sides already have (see huffman.ts).
 export const V1_PERIODS_BITS = 7;
 export const V1_MAX_PERIODS = 1 << V1_PERIODS_BITS; // 128
 
 // Message code: client-assigned key the response echoes; see RequestContext / model.ts.
 const CODE_BITS = 7;
-// Huffman codebook selector for the weathercode column (see huffman.ts).
-const WC_TABLE_BITS = 4;
 // Elevation: 7 bits in 100 m steps → 0..12700 m. It's a coarse sanity check (summit vs. valley),
 // so metre precision isn't needed.
 const ELEV_BITS = 7;
 const ELEV_STEP_M = 100;
 
 export const V1_HEADER_BITS =
-  CODE_BITS + V1_PERIODS_BITS + ELEV_BITS + WC_TABLE_BITS; // 25
+  CODE_BITS + V1_PERIODS_BITS + ELEV_BITS; // 21
 // Total chars before the body: the shared version prefix plus this version's packed header.
 export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 4 = 5
 const HEADER_BITS = V1_HEADER_BITS;
@@ -150,8 +150,8 @@ function reader(bits: number[]) {
   let pos = 0;
   return {
     int(n: number): number { const [v, p] = takeInt(bits, pos, n); pos = p; return v; },
-    weathercode(table: number): number {
-      const [sym, p] = decodeWeathercode(bits, pos, table); pos = p; return sym;
+    weathercode(prevSym: number | null): number {
+      const [sym, p] = decodeWeathercode(bits, pos, prevSym); pos = p; return sym;
     },
     windDir(table: number): number {
       const [sym, p] = decodeWindDir(bits, pos, table); pos = p; return sym;
@@ -319,19 +319,21 @@ type ColumnSink = (name: string, bits: number, mode: number) => void;
 
 // Build the column-major body (shared by the string encoder and the instrumented breakdown). The
 // optional sink observes per-column bit costs without changing the bytes produced.
-function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[]; wcTable: number } {
+function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } {
   const nModels = msg.periods.length;
   const nPeriods = msg.periods[0].length;
   const body: number[] = [];
   const mark = (name: string, before: number, mode: number) => sink?.(name, body.length - before, mode);
 
-  // Weathercode column (always present, Huffman-coded). Gather the indices first so we can pick
-  // the cheapest codebook, then emit them under it.
+  // Weathercode column (always present, Huffman-coded). Each symbol's codebook is keyed by the
+  // previously encoded symbol — null (the bootstrap table) for the first symbol of the sequence.
   let before = body.length;
-  const wcIdx: number[] = [];
-  eachCell(nPeriods, nModels, (p, m) => wcIdx.push(WMO2IDX[msg.periods[m][p].weathercode] ?? 0));
-  const wcTable = chooseWcTable(wcIdx);
-  for (const idx of wcIdx) encodeWeathercode(body, wcTable, idx);
+  let prevWcSym: number | null = null;
+  eachCell(nPeriods, nModels, (p, m) => {
+    const idx = WMO2IDX[msg.periods[m][p].weathercode] ?? 0;
+    encodeWeathercode(body, prevWcSym, idx);
+    prevWcSym = idx;
+  });
   mark("weathercode", before, -1);
 
   // temp/tmin: per model, an anchor (first period, full width) followed by Huffman-coded
@@ -389,24 +391,23 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[]; w
     }
   }
 
-  return { body, wcTable };
+  return { body };
 }
 
 // lat/lon/models/vars/resolution and the start datetime are recovered client-side via `code`
 // (RequestContext), so they are intentionally absent from the header.
-function buildHeader(msg: ForecastMessage, nPeriods: number, wcTable: number): number[] {
+function buildHeader(msg: ForecastMessage, nPeriods: number): number[] {
   const headerBits: number[] = [];
   putInt(headerBits, msg.code, CODE_BITS);
   putInt(headerBits, nPeriods - 1, V1_PERIODS_BITS);
   putInt(headerBits, Math.min(Math.max(Math.round(msg.elevation / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1), ELEV_BITS);
-  putInt(headerBits, wcTable, WC_TABLE_BITS);
   return headerBits;
 }
 
 export function v1MessageToString(msg: ForecastMessage): string {
   const nPeriods = msg.periods[0].length;
-  const { body, wcTable } = buildBody(msg);
-  return encodeVersion(VERSION) + encode(buildHeader(msg, nPeriods, wcTable)) + encodeBodyLE(body);
+  const { body } = buildBody(msg);
+  return encodeVersion(VERSION) + encode(buildHeader(msg, nPeriods)) + encodeBodyLE(body);
 }
 
 // One column's contribution to a message: its bit cost and, for adaptive columns, the mode picked.
@@ -419,7 +420,7 @@ export interface V1Breakdown {
   encoded: string;
   chars: number;
   versionBits: number;  // self-describing version prefix
-  headerBits: number;   // packed header (code/periods/elev/wc_table)
+  headerBits: number;   // packed header (code/periods/elev)
   bodyBits: number;     // total meaningful body bits (sum of column bits)
   columns: ColumnBreakdown[];
 }
@@ -427,9 +428,9 @@ export interface V1Breakdown {
 export function v1EncodeBreakdown(msg: ForecastMessage): V1Breakdown {
   const nPeriods = msg.periods[0].length;
   const columns: ColumnBreakdown[] = [];
-  const { body, wcTable } = buildBody(msg, (name, bits, mode) =>
+  const { body } = buildBody(msg, (name, bits, mode) =>
     columns.push({ name, bits, mode: mode < 0 ? null : MODE_NAMES[mode] }));
-  const encoded = encodeVersion(VERSION) + encode(buildHeader(msg, nPeriods, wcTable)) + encodeBodyLE(body);
+  const encoded = encodeVersion(VERSION) + encode(buildHeader(msg, nPeriods)) + encodeBodyLE(body);
   return {
     encoded,
     chars: encoded.length,
@@ -454,7 +455,6 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   const code = hr.int(CODE_BITS);
   const periodsRaw = hr.int(V1_PERIODS_BITS);
   const elevation = hr.int(ELEV_BITS) * ELEV_STEP_M;
-  const wcTable = hr.int(WC_TABLE_BITS);
 
   // Recover the request-echo fields the slim header omits.
   const ctx = resolve(code);
@@ -481,9 +481,12 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   const periods: Period[][] = Array.from({ length: nModels }, () =>
     Array.from({ length: nPeriods }, () => ({ weathercode: 0 } as Period)));
 
-  // Weathercode column (Huffman-coded under wcTable).
+  // Weathercode column (Huffman-coded, each symbol keyed by the previously decoded symbol).
+  let prevWcSym: number | null = null;
   eachCell(nPeriods, nModels, (p, m) => {
-    periods[m][p].weathercode = WMO_CODES[rd.weathercode(wcTable)] ?? 0;
+    const sym = rd.weathercode(prevWcSym);
+    periods[m][p].weathercode = WMO_CODES[sym] ?? 0;
+    prevWcSym = sym;
   });
 
   for (const [bit, field] of TEMP_DELTA_COLUMNS) {

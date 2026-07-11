@@ -1,41 +1,56 @@
 import { WMO_CODES } from "./constants.js";
 import { putInt, takeInt } from "./bits.js";
 
-// Static, regime-tuned Huffman codebooks for the weathercode column. Weathercodes are strongly
-// skewed toward a few common conditions, and which conditions are common depends on the climate,
-// so we keep several codebooks and let the encoder pick the cheapest per message (its index is
-// stored in the header's `wc_table` field). Symbols are WMO indices (0..NSYM-1), mapping to
+// Static, order-1 Huffman codebooks for the weathercode column. Weather persists hour-to-hour far
+// more than it varies by climate/region (a "clear" hour is followed by "clear" 85% of the time
+// regardless of location), so rather than picking one of several regime-tuned tables per message,
+// each symbol is coded under a table keyed by the *previously decoded* symbol — context both
+// encoder and decoder already have, so it costs no header bits. Derived from the corpus's
+// prev-symbol -> next-symbol transition counts — see
+// server/scripts/derive-weathercode-codebooks.ts. Symbols are WMO indices (0..NSYM-1), mapping to
 // WMO_CODES; every table assigns a code to every symbol so any outlier is representable.
 
 const NSYM = WMO_CODES.length; // 28
 
-// Frequency weights per regime (length NSYM, all > 0). Derived by k-means clustering the corpus's
-// per-forecast weathercode distributions — see server/scripts/derive-weathercode-codebooks.ts —
-// plus a uniform table (index 0) so a column is never worse than raw 5 bits.
+// Distribution of the *first* weathercode of a sequence, which has no predecessor to key off of.
+const BOOTSTRAP_WEIGHTS: number[] = [282, 50, 50, 295, 80, 1, 76, 19, 7, 1, 1, 5, 3, 1, 1, 1, 32, 37, 18, 1, 4, 3, 2, 30, 6, 1, 1, 1];
+
+// WEIGHTS[prevSym] is the codebook for the symbol that follows `prevSym` (frequency weights,
+// length NSYM, all > 0). A prevSym never observed as a predecessor in the corpus falls back to
+// the corpus-wide marginal distribution.
 // WMO index legend: 0 clear · 1-3 cloud · 4-5 fog · 6-8 drizzle · 9-10 freezing drizzle ·
 // 11-13 rain · 14-15 freezing rain · 16-19 snow · 20-22 rain showers · 23-24 snow showers ·
 // 25-27 thunderstorm.
 const WEIGHTS: number[][] = [
-  // 0 general — near-uniform fallback (~5-bit codes; never much worse than raw).
-  Array(NSYM).fill(1),
-  [95, 39, 43, 367, 248, 1, 55, 11, 5, 4, 2, 5, 4, 1, 1, 1, 33, 48, 17, 1, 2, 4, 1, 14, 2, 1, 1, 1],
-  [65, 34, 43, 663, 42, 1, 51, 6, 1, 1, 1, 1, 1, 1, 1, 1, 45, 27, 5, 1, 1, 1, 1, 14, 1, 1, 1, 1],
-  [873, 34, 22, 51, 14, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [52, 24, 27, 218, 171, 1, 25, 6, 3, 8, 5, 5, 7, 3, 3, 6, 42, 171, 193, 1, 1, 1, 1, 20, 8, 1, 1, 1],
-  [304, 74, 70, 248, 181, 1, 20, 5, 3, 4, 1, 3, 2, 1, 1, 1, 13, 37, 21, 1, 1, 3, 1, 5, 1, 1, 1, 1],
-  [682, 70, 51, 148, 26, 1, 11, 2, 1, 1, 1, 1, 1, 1, 1, 1, 4, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [376, 67, 67, 374, 32, 1, 28, 5, 2, 1, 1, 2, 1, 1, 1, 1, 14, 16, 3, 1, 2, 2, 1, 6, 1, 1, 1, 1],
-  [518, 79, 64, 244, 35, 1, 22, 5, 2, 1, 1, 2, 1, 1, 1, 1, 7, 10, 3, 1, 1, 1, 1, 5, 1, 1, 1, 1],
-  [95, 41, 48, 407, 40, 1, 216, 56, 15, 1, 1, 10, 8, 1, 1, 1, 7, 6, 2, 1, 13, 8, 1, 23, 1, 1, 1, 1],
-  [83, 23, 27, 198, 427, 1, 94, 18, 7, 3, 1, 8, 6, 2, 1, 1, 24, 29, 15, 1, 4, 5, 2, 20, 2, 1, 1, 1],
-  [210, 61, 69, 475, 52, 1, 42, 9, 3, 1, 1, 5, 4, 1, 1, 1, 21, 23, 7, 1, 2, 3, 1, 9, 1, 1, 1, 1],
-  [58, 25, 28, 223, 60, 1, 332, 102, 31, 1, 1, 13, 10, 1, 1, 1, 12, 10, 4, 1, 36, 17, 3, 33, 1, 2, 1, 1],
-  [27, 7, 13, 156, 52, 1, 54, 4, 1, 1, 1, 1, 1, 1, 1, 1, 208, 275, 68, 1, 1, 1, 1, 110, 22, 1, 1, 1],
-  [60, 22, 31, 405, 59, 1, 56, 5, 1, 2, 1, 2, 2, 1, 1, 1, 141, 122, 25, 1, 1, 1, 1, 56, 8, 1, 1, 1],
-  [307, 54, 51, 237, 37, 1, 164, 42, 13, 1, 1, 7, 9, 1, 1, 1, 14, 11, 4, 1, 14, 12, 3, 16, 1, 2, 1, 1],
+  [854, 51, 32, 47, 11, 1, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [328, 270, 147, 215, 21, 1, 14, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [215, 160, 227, 350, 26, 1, 16, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [50, 36, 59, 754, 41, 1, 34, 2, 1, 1, 1, 1, 1, 1, 1, 1, 10, 7, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1],
+  [39, 13, 17, 179, 632, 1, 53, 3, 1, 4, 1, 1, 1, 1, 1, 1, 23, 23, 6, 1, 1, 1, 1, 2, 1, 1, 1, 1],
+  [312, 50, 48, 297, 74, 1, 71, 17, 5, 1, 1, 4, 3, 1, 1, 1, 30, 36, 15, 1, 5, 3, 1, 22, 3, 1, 1, 1],
+  [21, 10, 12, 158, 67, 1, 557, 74, 12, 1, 1, 7, 3, 1, 1, 1, 35, 8, 1, 1, 6, 1, 1, 26, 1, 1, 1, 1],
+  [5, 2, 3, 41, 17, 1, 329, 361, 92, 1, 1, 36, 12, 1, 1, 1, 12, 7, 1, 1, 44, 10, 1, 22, 1, 2, 1, 1],
+  [2, 1, 4, 30, 15, 1, 164, 285, 179, 1, 1, 81, 32, 1, 1, 1, 16, 8, 2, 1, 132, 24, 1, 18, 1, 4, 1, 1],
+  [5, 3, 1, 152, 244, 1, 40, 6, 1, 284, 73, 1, 1, 1, 16, 12, 43, 71, 26, 1, 1, 1, 1, 21, 1, 1, 1, 1],
+  [1, 1, 1, 82, 144, 1, 26, 10, 3, 180, 229, 10, 1, 1, 54, 21, 62, 101, 62, 1, 3, 1, 1, 13, 1, 1, 1, 1],
+  [3, 1, 2, 50, 24, 1, 130, 149, 110, 1, 1, 255, 153, 4, 1, 1, 26, 15, 6, 1, 37, 28, 2, 2, 1, 1, 1, 1],
+  [1, 1, 2, 29, 13, 1, 44, 58, 41, 1, 1, 155, 422, 48, 1, 2, 27, 11, 10, 1, 31, 89, 13, 1, 1, 1, 1, 1],
+  [1, 1, 1, 5, 10, 1, 12, 10, 7, 1, 1, 27, 214, 428, 2, 2, 27, 12, 7, 1, 7, 91, 135, 1, 2, 1, 1, 1],
+  [1, 1, 1, 77, 105, 1, 11, 6, 1, 72, 110, 6, 22, 6, 182, 144, 28, 94, 138, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [5, 1, 1, 42, 78, 1, 1, 1, 5, 42, 73, 16, 31, 1, 115, 271, 5, 68, 240, 1, 5, 1, 1, 5, 1, 1, 1, 1],
+  [1, 1, 2, 73, 38, 1, 105, 7, 3, 3, 1, 4, 3, 1, 1, 1, 534, 164, 13, 1, 1, 1, 1, 46, 1, 1, 1, 1],
+  [2, 2, 3, 53, 47, 1, 27, 5, 1, 2, 2, 2, 2, 1, 1, 1, 110, 588, 97, 1, 1, 1, 1, 48, 7, 1, 1, 1],
+  [1, 1, 1, 25, 37, 1, 7, 4, 2, 3, 2, 2, 3, 2, 2, 5, 22, 204, 621, 1, 1, 1, 1, 18, 37, 1, 1, 1],
+  [312, 50, 48, 297, 74, 1, 71, 17, 5, 1, 1, 4, 3, 1, 1, 1, 30, 36, 15, 1, 5, 3, 1, 22, 3, 1, 1, 1],
+  [3, 1, 2, 8, 1, 1, 102, 188, 135, 1, 1, 26, 14, 1, 1, 1, 5, 1, 1, 1, 334, 123, 6, 42, 2, 8, 1, 1],
+  [2, 1, 1, 3, 1, 1, 31, 56, 46, 1, 1, 31, 61, 9, 1, 1, 1, 5, 1, 1, 198, 467, 60, 24, 1, 1, 1, 1],
+  [1, 1, 1, 4, 1, 1, 8, 15, 2, 1, 1, 6, 40, 33, 1, 1, 1, 1, 6, 1, 63, 335, 443, 19, 11, 15, 1, 1],
+  [1, 1, 1, 27, 8, 1, 107, 27, 4, 1, 1, 1, 1, 1, 1, 1, 63, 64, 10, 1, 8, 2, 1, 641, 32, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 16, 12, 1, 1, 1, 1, 1, 1, 1, 1, 3, 54, 120, 1, 5, 1, 1, 273, 513, 1, 1, 1],
+  [1, 1, 1, 25, 1, 1, 50, 75, 65, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 196, 90, 40, 5, 1, 432, 20, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 600, 400, 1],
+  [312, 50, 48, 297, 74, 1, 71, 17, 5, 1, 1, 4, 3, 1, 1, 1, 30, 36, 15, 1, 5, 3, 1, 22, 3, 1, 1, 1],
 ];
-
-export const WC_TABLE_COUNT = WEIGHTS.length; // 16 (fills the 4-bit wc_table field)
 
 interface TrieNode { sym?: number; child: (TrieNode | undefined)[]; }
 interface Table { codes: number[][]; root: TrieNode; }
@@ -102,32 +117,28 @@ const TABLES: Table[] = WEIGHTS.map((w) => {
   const codes = canonicalCodes(huffmanLengths(w));
   return { codes, root: buildTrie(codes) };
 });
+const BOOTSTRAP_TABLE: Table = (() => {
+  const codes = canonicalCodes(huffmanLengths(BOOTSTRAP_WEIGHTS));
+  return { codes, root: buildTrie(codes) };
+})();
 
-// Appends the Huffman code for `wmoIdx` (under `table`) to `bits`.
-export function encodeWeathercode(bits: number[], table: number, wmoIdx: number): void {
-  for (const b of TABLES[table].codes[wmoIdx]) bits.push(b);
+// Appends the Huffman code for `wmoIdx` to `bits`, under the table keyed by `prevSym` — the
+// previously decoded symbol, or null for the first symbol of a sequence (no predecessor).
+export function encodeWeathercode(bits: number[], prevSym: number | null, wmoIdx: number): void {
+  const table = prevSym === null ? BOOTSTRAP_TABLE : TABLES[prevSym];
+  for (const b of table.codes[wmoIdx]) bits.push(b);
 }
 
-// Reads one Huffman-coded weathercode (under `table`), returning [wmoIdx, nextPos].
-export function decodeWeathercode(bits: number[], pos: number, table: number): [number, number] {
-  let node = TABLES[table].root;
+// Reads one Huffman-coded weathercode keyed by `prevSym` (see encodeWeathercode), returning
+// [wmoIdx, nextPos].
+export function decodeWeathercode(bits: number[], pos: number, prevSym: number | null): [number, number] {
+  const table = prevSym === null ? BOOTSTRAP_TABLE : TABLES[prevSym];
+  let node = table.root;
   while (node.sym === undefined) {
     node = node.child[bits[pos++] ?? 0]!;
     if (!node) throw new Error("huffman: invalid weathercode bitstream");
   }
   return [node.sym, pos];
-}
-
-// Picks the codebook that encodes `wmoIdxs` in the fewest total bits.
-export function chooseWcTable(wmoIdxs: number[]): number {
-  let best = 0;
-  let bestBits = Infinity;
-  for (let t = 0; t < TABLES.length; t++) {
-    let total = 0;
-    for (const idx of wmoIdxs) total += TABLES[t].codes[idx].length;
-    if (total < bestBits) { bestBits = total; best = t; }
-  }
-  return best;
 }
 
 // ── Wind direction codebooks ────────────────────────────────────────────────────
