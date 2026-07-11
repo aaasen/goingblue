@@ -562,10 +562,7 @@ async function report(args: Args): Promise<void> {
     periodsFit.set(vk, []); colBits.set(vk, new Map()); colModes.set(vk, new Map());
   }
 
-  const forecasts: { location: string; run: string; lat: number; lon: number }[] = [];
-  // bits/period per (resolution → per-forecast {var: bpp}), for the detail table.
-  const bpp: Record<string, Record<string, number>[]> = {};
-  for (const res of RESOLUTION_ORDER) bpp[res] = [];
+  const forecasts: { location: string }[] = [];
   const allMask = comboMask(COMBOS.length - 1); // every group on
   let versionBits = 0, headerBits = 0, skipped = 0;
 
@@ -576,7 +573,7 @@ async function report(args: Args): Promise<void> {
     const meta = rec.meta.location;
     const runHour = Math.floor(Date.parse(run + "Z") / 3600000);
     const elevation = rec.response.elevation ?? 0;
-    forecasts.push({ location: locId, run, lat: meta.lat, lon: meta.lon });
+    forecasts.push({ location: locId });
 
     for (const res of RESOLUTION_ORDER) {
       const resolutionIdx = RESOLUTION_IDX[res];
@@ -597,9 +594,6 @@ async function report(args: Args): Promise<void> {
       const resAllMask = maskForRes(allMask, resolutionIdx);
       const allPeriods = rows.map((r) => toFullPeriod(r, resAllMask, "GFS", resolutionIdx));
 
-      const bd = v1EncodeBreakdown(msgFor(allPeriods, resAllMask));
-      bpp[res].push(Object.fromEntries(bd.columns.map((c) => [c.name, c.bits / allPeriods.length])));
-
       for (const c of COMBOS) {
         const { n: fittedN, breakdown } = fitBreakdown(msgFor(allPeriods, maskForRes(comboMask(c), resolutionIdx)), args.maxChars);
         const vk = vkey(res, c);
@@ -615,15 +609,12 @@ async function report(args: Args): Promise<void> {
     }
   }
 
-  // Build per-view stats + the interactive period data (res → combo → per-forecast periods).
+  // Build per-view stats.
   const views: Record<string, ViewStats> = {};
-  const periodsByView: Record<string, Record<number, number[]>> = {};
   for (const res of RESOLUTION_ORDER) {
-    periodsByView[res] = {};
     for (const c of COMBOS) {
       const vk = vkey(res, c);
       views[vk] = buildView(periodsFit.get(vk)!, colBits.get(vk)!, colModes.get(vk)!);
-      periodsByView[res][c] = periodsFit.get(vk)!;
     }
   }
 
@@ -638,13 +629,8 @@ async function report(args: Args): Promise<void> {
     versionBits, headerBits,
     model: model.label,
     groups: GROUP_IDS.map((g) => ({ id: g, label: GROUP_LABEL[g] })),
-    groupVars: GROUP_VARS,
-    baseVars: BASE_VARS,
     defaultCombo: DEFAULT_COMBO,
     views,
-    forecastRows: forecasts,
-    periodsByView,
-    bpp,
   };
 
   await mkdir(BENCHMARKS_DIR, { recursive: true });
@@ -684,8 +670,7 @@ interface ViewStats {
   bodyBits: number;
   columns: ColStat[];
 }
-// Everything the report embeds. `views` holds one ViewStats per res:combo; the interactive detail
-// table is rebuilt client-side from forecastRows + periodsByView + bpp.
+// Everything the report embeds. `views` holds one ViewStats per res:combo.
 interface ReportData {
   timestamp: string;
   resolutions: string[];
@@ -698,15 +683,8 @@ interface ReportData {
   headerBits: number;
   model: string; // single model (label), shown in the meta line
   groups: { id: GroupId; label: string }[];
-  groupVars: Record<GroupId, string[]>;
-  baseVars: string[];
   defaultCombo: number;
   views: Record<string, ViewStats>;                        // "res:combo" → stats
-  forecastRows: { location: string; run: string; lat: number; lon: number }[];
-  // res → combo → per-forecast periods
-  periodsByView: Record<string, Record<number, number[]>>;
-  // res → per-forecast {var: bits/period}
-  bpp: Record<string, Record<string, number>[]>;
 }
 
 const esc = (s: string) =>
@@ -834,14 +812,6 @@ function renderHtml(s: ReportData): string {
     `<label><input type="checkbox" class="group" value="${g.id}" data-bit="${1 << i}"${s.defaultCombo & (1 << i) ? " checked" : ""}> ${esc(g.label)}</label>`).join("");
   const quality = s.skipped ? `<div class="quality"><p>Skipped ${s.skipped} forecast(s) with an incomplete base series.</p></div>` : "";
 
-  // Client data excludes the pre-rendered `views` (avoids duplicating them); the detail table is
-  // rebuilt from these on every selection change.
-  const clientData = {
-    resolutions: s.resolutions, defaultResolution: s.defaultResolution,
-    groups: s.groups, groupVars: s.groupVars, baseVars: s.baseVars, defaultCombo: s.defaultCombo,
-    forecastRows: s.forecastRows, periodsByView: s.periodsByView, bpp: s.bpp,
-  };
-
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -886,15 +856,6 @@ function renderHtml(s: ReportData): string {
   .blabel { fill: #888; font-size: 10px; font-variant-numeric: tabular-nums; }
   .boxcell { width: 210px; }
   .mbox { display: block; width: 200px; height: 20px; }
-  .hint { font-size: .78rem; color: #888; margin: 0 0 .4rem; }
-  .scroll { max-height: 460px; overflow: auto; border: 1px solid rgba(128,128,128,.2); border-radius: 6px; }
-  table.detail { font-size: .78rem; }
-  table.detail th, table.detail td { border-bottom: 1px solid rgba(128,128,128,.12); white-space: nowrap; }
-  table.detail th { position: sticky; top: 0; background: Canvas; cursor: pointer; user-select: none; }
-  table.detail th:hover { color: #3b82f6; }
-  table.detail td.num { text-align: right; }
-  table.detail th[data-dir=asc]::after { content: " ▲"; font-size: .7em; }
-  table.detail th[data-dir=desc]::after { content: " ▼"; font-size: .7em; }
 </style>
 </head>
 <body>
@@ -916,54 +877,17 @@ ${quality}
   bits/period boxes share one x-scale (shown in the header); hover for exact values.
 </div>
 
-<h2>Per-forecast detail (${s.forecasts})</h2>
-<p class="hint">Click a header to sort — e.g. by <code>periods</code> to find outliers. Per-variable values are bits/period at the full horizon (independent of the current selection).</p>
-<div class="scroll"><table class="detail sortable" id="detail"></table></div>
-
-<script type="application/json" id="benchmark-data">${JSON.stringify(clientData)}</script>
 <script>
-const D = JSON.parse(document.getElementById("benchmark-data").textContent);
 const views = [...document.querySelectorAll(".view")];
 const resRadios = [...document.querySelectorAll('input[name=res]')];
 const groupBoxes = [...document.querySelectorAll('input.group')];
-const detail = document.getElementById("detail");
 
 const resolution = () => resRadios.find((r) => r.checked).value;
 const combo = () => groupBoxes.reduce((c, b) => c | (b.checked ? +b.dataset.bit : 0), 0);
-const selectedGroups = (c) => D.groups.filter((g, i) => c & (1 << i)).map((g) => g.id);
-
-function attachSort(table) {
-  const ths = table.tHead.rows[0].cells;
-  for (let i = 0; i < ths.length; i++) ths[i].addEventListener("click", () => {
-    const dir = ths[i].dataset.dir === "asc" ? "desc" : "asc";
-    for (const th of ths) delete th.dataset.dir;
-    ths[i].dataset.dir = dir;
-    const mul = dir === "asc" ? 1 : -1, tb = table.tBodies[0];
-    [...tb.rows].sort((a, b) => {
-      const x = a.cells[i].textContent, y = b.cells[i].textContent;
-      const nx = parseFloat(x), ny = parseFloat(y);
-      return mul * (!isNaN(nx) && !isNaN(ny) ? nx - ny : x.localeCompare(y));
-    }).forEach((r) => tb.appendChild(r));
-  });
-}
-
-function buildDetail(res, c) {
-  const cols = ["weathercode", ...D.baseVars, ...selectedGroups(c).flatMap((g) => D.groupVars[g])];
-  const periods = D.periodsByView[res][c], bpp = D.bpp[res];
-  const head = "<thead><tr><th>location</th><th>run</th><th class=rt>lat</th><th class=rt>lon</th><th class=rt>periods</th>" +
-    cols.map((k) => "<th class=rt>" + k + "</th>").join("") + "</tr></thead>";
-  const body = D.forecastRows.map((f, i) =>
-    "<tr><td>" + f.location + "</td><td>" + f.run + "</td><td class=num>" + f.lat.toFixed(3) +
-    "</td><td class=num>" + f.lon.toFixed(3) + "</td><td class=num>" + periods[i] + "</td>" +
-    cols.map((k) => "<td class=num>" + (bpp[i][k] ?? 0).toFixed(2) + "</td>").join("") + "</tr>").join("");
-  detail.innerHTML = head + "<tbody>" + body + "</tbody>";
-  attachSort(detail);
-}
 
 function update() {
   const res = resolution(), c = combo();
   views.forEach((v) => v.hidden = !(v.dataset.res === res && +v.dataset.combo === c));
-  buildDetail(res, c);
 }
 
 [...resRadios, ...groupBoxes].forEach((el) => el.addEventListener("change", update));
