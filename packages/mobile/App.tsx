@@ -66,13 +66,27 @@ export default function App() {
         <TabBtn label="Decoder" active={tab === 'decoder'} onPress={() => setTab('decoder')} />
         <TabBtn label="Settings" active={tab === 'settings'} onPress={() => setTab('settings')} />
       </View>
-      {tab === 'builder' && <BuilderTab token={token} onForecastReceived={onForecastReceived} />}
-      {tab === 'decoder' && (
+      <View
+        style={[styles.tabContent, tab !== 'builder' && styles.tabHidden]}
+        accessibilityElementsHidden={tab !== 'builder'}
+        importantForAccessibility={tab === 'builder' ? 'auto' : 'no-hide-descendants'}
+      >
+        <BuilderTab token={token} onForecastReceived={onForecastReceived} />
+      </View>
+      <View
+        style={[styles.tabContent, tab !== 'decoder' && styles.tabHidden]}
+        accessibilityElementsHidden={tab !== 'decoder'}
+        importantForAccessibility={tab === 'decoder' ? 'auto' : 'no-hide-descendants'}
+      >
         <DecoderTab token={token} forecastData={forecastData} onForecastDataChange={setForecastData} units={units} />
-      )}
-      {tab === 'settings' && (
+      </View>
+      <View
+        style={[styles.tabContent, tab !== 'settings' && styles.tabHidden]}
+        accessibilityElementsHidden={tab !== 'settings'}
+        importantForAccessibility={tab === 'settings' ? 'auto' : 'no-hide-descendants'}
+      >
         <SettingsTab token={token} onReset={handleReset} units={units} onUnitsChange={setUnits} />
-      )}
+      </View>
     </SafeAreaView>
   );
 }
@@ -104,4 +118,6 @@ const styles = StyleSheet.create({
   tabActive: { borderBottomColor: '#2a6bb5' },
   tabText: { fontSize: 15, fontWeight: '500', color: '#8e8e93' },
   tabTextActive: { color: '#2a6bb5' },
+  tabContent: { flex: 1 },
+  tabHidden: { display: 'none' },
 });
