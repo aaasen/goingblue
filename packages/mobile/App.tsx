@@ -35,6 +35,7 @@ export default function App() {
 
   async function handleReset() {
     await clearToken();
+    setForecastData('');
     setTab('builder');
     setToken(null);
   }
@@ -67,7 +68,7 @@ export default function App() {
       </View>
       {tab === 'builder' && <BuilderTab token={token} onForecastReceived={onForecastReceived} />}
       {tab === 'decoder' && (
-        <DecoderTab forecastData={forecastData} onForecastDataChange={setForecastData} units={units} />
+        <DecoderTab token={token} forecastData={forecastData} onForecastDataChange={setForecastData} units={units} />
       )}
       {tab === 'settings' && (
         <SettingsTab token={token} onReset={handleReset} units={units} onUnitsChange={setUnits} />

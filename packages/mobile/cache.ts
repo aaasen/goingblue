@@ -6,7 +6,7 @@ import { decodeMessage, type ForecastMessage, type RequestContext } from '@weath
 // code, so an incoming response can be matched back and decoded. The store is a ring of CODE_SPACE
 // slots keyed by code — reusing a code (as the index cycles) evicts the old forecast in that slot.
 
-const STORE_KEY = 'forecast_store_v1';
+const STORE_KEY_PREFIX = 'forecast_store_v1:';
 const CODE_SPACE = 128; // 7-bit message code, 0..127
 
 export interface Slot {
@@ -25,8 +25,12 @@ interface Store {
 
 // In-memory mirror of the persisted store. Decoding is synchronous and must resolve a code to its
 // context, so we keep the map in memory; callers load the store before decoding.
-let memo: Store = { nextCode: 0, slots: [] };
-let contextMap = new Map<number, RequestContext>();
+const memos = new Map<string, Store>();
+const contextMaps = new Map<string, Map<number, RequestContext>>();
+
+function storeKey(token: string): string {
+  return `${STORE_KEY_PREFIX}${token}`;
+}
 
 function isSlot(x: unknown): x is Slot {
   const s = x as Slot;
@@ -34,76 +38,78 @@ function isSlot(x: unknown): x is Slot {
     && !!s.context && typeof s.context.vars_mask === 'number';
 }
 
-function rebuild(): void {
-  contextMap = new Map(memo.slots.map((s) => [s.code, s.context]));
+function rebuild(token: string, store: Store): void {
+  contextMaps.set(token, new Map(store.slots.map((s) => [s.code, s.context])));
 }
 
-export async function loadStore(): Promise<Store> {
+export async function loadStore(token: string): Promise<Store> {
+  let store = memos.get(token) ?? { nextCode: 0, slots: [] };
   try {
-    const raw = await AsyncStorage.getItem(STORE_KEY);
+    const raw = await AsyncStorage.getItem(storeKey(token));
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<Store>;
       if (parsed && typeof parsed.nextCode === 'number' && Array.isArray(parsed.slots)) {
-        memo = { nextCode: parsed.nextCode, slots: parsed.slots.filter(isSlot) };
+        store = { nextCode: parsed.nextCode, slots: parsed.slots.filter(isSlot) };
       }
     }
-  } catch { /* keep whatever's in memo */ }
-  rebuild();
-  return memo;
+  } catch { /* keep whatever is in memory for this account */ }
+  memos.set(token, store);
+  rebuild(token, store);
+  return store;
 }
 
-async function persist(): Promise<void> {
-  rebuild();
-  try { await AsyncStorage.setItem(STORE_KEY, JSON.stringify(memo)); } catch { /* ignore */ }
+async function persist(token: string, store: Store): Promise<void> {
+  memos.set(token, store);
+  rebuild(token, store);
+  try { await AsyncStorage.setItem(storeKey(token), JSON.stringify(store)); } catch { /* ignore */ }
 }
 
 // Synchronous resolver passed to the codec. Load the store first (loadStore) so the map is warm.
-export function resolveContext(code: number): RequestContext | undefined {
-  return contextMap.get(code);
+export function resolveContext(token: string, code: number): RequestContext | undefined {
+  return contextMaps.get(token)?.get(code);
 }
 
-export function decodeAny(encoded: string): ForecastMessage {
+export function decodeAny(encoded: string, token: string): ForecastMessage {
   const text = encoded.replace(/\s/g, '').replace(/^fw:/i, '');
-  return decodeMessage(text, resolveContext);
+  return decodeMessage(text, (code) => resolveContext(token, code));
 }
 
 // Allocate the next message code, storing the request context under it (evicting whatever slot the
 // code currently holds — old forecasts drop as the index cycles). Returns the code to embed as `k:`.
-export async function allocCode(context: RequestContext, label: string): Promise<number> {
-  await loadStore();
-  const code = memo.nextCode % CODE_SPACE;
-  memo.slots = memo.slots.filter((s) => s.code !== code);
-  memo.slots.push({ code, context, label, requestedAt: Date.now() });
-  memo.nextCode = (code + 1) % CODE_SPACE;
-  await persist();
+export async function allocCode(token: string, context: RequestContext, label: string): Promise<number> {
+  const store = await loadStore(token);
+  const code = store.nextCode % CODE_SPACE;
+  store.slots = store.slots.filter((s) => s.code !== code);
+  store.slots.push({ code, context, label, requestedAt: Date.now() });
+  store.nextCode = (code + 1) % CODE_SPACE;
+  await persist(token, store);
   return code;
 }
 
 // Attach a received response to its slot (matched by the code embedded in the message).
-export async function attachResponse(code: number, encoded: string): Promise<Slot[]> {
-  await loadStore();
-  const slot = memo.slots.find((s) => s.code === code);
+export async function attachResponse(token: string, code: number, encoded: string): Promise<Slot[]> {
+  const store = await loadStore(token);
+  const slot = store.slots.find((s) => s.code === code);
   if (slot) {
     slot.encoded = encoded.replace(/\s/g, '').replace(/^fw:/i, '');
     slot.savedAt = Date.now();
-    await persist();
+    await persist(token, store);
   }
-  return pastForecasts();
+  return pastForecasts(store);
 }
 
-function pastForecasts(): Slot[] {
-  return memo.slots.filter((s) => s.encoded).sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0));
+function pastForecasts(store: Store): Slot[] {
+  return store.slots.filter((s) => s.encoded).sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0));
 }
 
 // Received forecasts to display, most recent first.
-export async function loadPastForecasts(): Promise<Slot[]> {
-  await loadStore();
-  return pastForecasts();
+export async function loadPastForecasts(token: string): Promise<Slot[]> {
+  return pastForecasts(await loadStore(token));
 }
 
-export async function deleteSlot(code: number): Promise<Slot[]> {
-  await loadStore();
-  memo.slots = memo.slots.filter((s) => s.code !== code);
-  await persist();
-  return pastForecasts();
+export async function deleteSlot(token: string, code: number): Promise<Slot[]> {
+  const store = await loadStore(token);
+  store.slots = store.slots.filter((s) => s.code !== code);
+  await persist(token, store);
+  return pastForecasts(store);
 }

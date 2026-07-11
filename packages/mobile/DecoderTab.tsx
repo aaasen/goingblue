@@ -46,9 +46,9 @@ function normalizedForecastData(encoded: string): string {
 }
 
 /** Compact label for a cached forecast (request time · location · span · models). */
-function cacheMetaLabel(slot: Slot): string {
+function cacheMetaLabel(slot: Slot, token: string): string {
   try {
-    const msg = decodeAny(slot.encoded!);
+    const msg = decodeAny(slot.encoded!, token);
     const models = modelsFromMask(msg.models_mask).join(' + ');
     return `${requestTimeLabel(slot.requestedAt)} · ${latLonLabel(msg)} · ${spanLabel(msg)} · ${models}`;
   } catch {
@@ -62,11 +62,11 @@ interface PastForecastGroup {
 }
 
 /** Group forecasts by their local start day while preserving newest-first order. */
-function groupPastForecasts(slots: Slot[]): PastForecastGroup[] {
+function groupPastForecasts(slots: Slot[], token: string): PastForecastGroup[] {
   const groups: PastForecastGroup[] = [];
   for (const slot of slots) {
     let start = new Date(slot.savedAt ?? slot.requestedAt);
-    try { start = startDatetime(decodeAny(slot.encoded!)); } catch { /* use saved/request time */ }
+    try { start = startDatetime(decodeAny(slot.encoded!, token)); } catch { /* use saved/request time */ }
     const day = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
     const group = groups.find((candidate) => candidate.day === day);
     if (group) group.slots.push(slot);
@@ -91,12 +91,13 @@ function dayLabel(day: number): string {
 // ── DecoderTab ─────────────────────────────────────────────────────────────
 
 interface Props {
+  token: string;
   forecastData: string;
   onForecastDataChange: (v: string) => void;
   units: Units;
 }
 
-export default function DecoderTab({ forecastData, onForecastDataChange, units }: Props) {
+export default function DecoderTab({ token, forecastData, onForecastDataChange, units }: Props) {
   const [decoded, setDecoded] = useState<ForecastMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cache, setCache] = useState<Slot[]>([]);
@@ -104,8 +105,8 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
   const suppressNextCache = useRef(false);
 
   useEffect(() => {
-    loadPastForecasts().then(setCache);
-  }, []);
+    loadPastForecasts(token).then(setCache);
+  }, [token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,16 +118,16 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
     }
     (async () => {
       // The store maps the message code → request context; load it before the (sync) decode.
-      await loadStore();
+      await loadStore(token);
       if (cancelled) return;
       try {
-        const msg = decodeAny(forecastData);
+        const msg = decodeAny(forecastData, token);
         setDecoded(msg);
         setError(null);
         if (suppressNextCache.current) {
           suppressNextCache.current = false;
         } else {
-          attachResponse(msg.code, forecastData).then((slots) => { if (!cancelled) setCache(slots); });
+          attachResponse(token, msg.code, forecastData).then((slots) => { if (!cancelled) setCache(slots); });
         }
       } catch (e) {
         suppressNextCache.current = false;
@@ -144,14 +145,14 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
       }
     })();
     return () => { cancelled = true; };
-  }, [forecastData]);
+  }, [forecastData, token]);
 
   const loadPast = useCallback((encoded: string) => {
     suppressNextCache.current = true;
     onForecastDataChange(encoded);
   }, [onForecastDataChange]);
 
-  const pastGroups = groupPastForecasts(cache);
+  const pastGroups = groupPastForecasts(cache, token);
 
   const pastSection = (
     <View style={styles.pastSection}>
@@ -171,7 +172,7 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
                     && styles.pastItemLoaded,
                 ]}
               >
-                <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot)}</Text>
+                <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, token)}</Text>
                 <View style={styles.pastBtns}>
                   <TouchableOpacity style={styles.pastLoadBtn} onPress={() => loadPast(slot.encoded!)}>
                     <Text style={styles.pastLoadText}>Load</Text>

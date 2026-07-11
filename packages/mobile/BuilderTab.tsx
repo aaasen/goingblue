@@ -226,7 +226,7 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return;
     const startHour = alignedStartEpochHour(resHours);
-    const code = await allocCode(buildContext(coords, resHours, model, varsMask, startHour), `${resLabel} · ${model.toUpperCase()}`);
+    const code = await allocCode(token, buildContext(coords, resHours, model, varsMask, startHour), `${resLabel} · ${model.toUpperCase()}`);
     const msg = buildMsg(token, coords, resHours, model, activeVars, maxChars, code, startHour);
     await Clipboard.setStringAsync(msg);
   }
@@ -252,7 +252,7 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
     setFetching(true);
     try {
       const startHour = alignedStartEpochHour(resHours);
-      const code = await allocCode(buildContext(coords, resHours, model, varsMask, startHour), `${resLabel} · ${model.toUpperCase()}`);
+      const code = await allocCode(token, buildContext(coords, resHours, model, varsMask, startHour), `${resLabel} · ${model.toUpperCase()}`);
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
