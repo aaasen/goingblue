@@ -468,6 +468,27 @@ describe("delta temperature encoding", () => {
   });
 });
 
+describe("body decode desync detection", () => {
+  it("throws when meaningful body bits remain past the last column read (e.g. context-store drift)", () => {
+    // Vary the last-decoded column (700 hPa wind) so its bits are guaranteed non-zero — set bits
+    // at the top of the body survive encodeBodyLE's high-order-zero trimming.
+    const periods = [[
+      { ...PERIOD, wind_700_dir: 2 },
+      { ...PERIOD, wind_700_dir: 5 },
+      { ...PERIOD, wind_700_dir: 7 },
+    ]];
+    const m = msg({ resolution: 4, periods });
+    const encoded = v1MessageToString(m);
+    // Resolve with a vars_mask missing that final column: the decoder reads every earlier column
+    // identically, then stops with the wind-700 bits unread — the shape of codebook or
+    // request-store drift, which would otherwise return garbage values silently.
+    const drifted = { ...ctxOf(m), vars_mask: m.vars_mask & ~(1 << VARS_BIT.w700) };
+    expect(() => v1MessageFromString(encoded, () => drifted)).toThrow(/desynced/);
+    // The same message with the true context still decodes.
+    expect(() => v1MessageFromString(encoded, () => ctxOf(m))).not.toThrow();
+  });
+});
+
 describe("sparse / empty precipitation encoding", () => {
   const vars_mask = 1 << VARS_BIT.snow;
 

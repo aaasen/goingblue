@@ -327,6 +327,29 @@ export function decodeTempDelta(bits: number[], pos: number, table: number): [nu
   return [sym - TEMP_DELTA_CORE_RADIUS, next];
 }
 
+// ── Wire-format freeze ──────────────────────────────────────────────────────────
+// Every table above is wire format: re-deriving any of them changes what already-encoded v1
+// messages mean, silently — a Huffman decode under drifted tables produces plausible garbage, not
+// an error. This bundle exists so test/codebooks.test.ts can pin a digest of it per protocol
+// version; change a table (or the temp escape geometry) and that test fails until the protocol
+// version is bumped and the new digest recorded. The delta ranges need no separate entries: each
+// weight array's length encodes its range (2·maxDelta+1 symbols, +1 escape for temp).
+export const V1_CODEBOOKS = {
+  weathercode: { bootstrap: BOOTSTRAP_WEIGHTS, weights: WEIGHTS },
+  windDir: { bootstrap: WIND_DIR_BOOTSTRAP_WEIGHTS, weights: WIND_DIR_WEIGHTS },
+  windSpeedDelta: WIND_SPEED_DELTA_WEIGHTS,
+  freezeDelta: FREEZE_DELTA_WEIGHTS,
+  cloudLowDelta: CLOUD_LOW_DELTA_WEIGHTS,
+  cloudMidDelta: CLOUD_MID_DELTA_WEIGHTS,
+  cloudHighDelta: CLOUD_HIGH_DELTA_WEIGHTS,
+  tempDelta: {
+    weights: TEMP_DELTA_WEIGHTS,
+    coreRadius: TEMP_DELTA_CORE_RADIUS,
+    escapeBits: TEMP_DELTA_ESCAPE_BITS,
+    tableBits: TEMP_DELTA_TABLE_BITS,
+  },
+} as const;
+
 // Picks the codebook that encodes `deltas` in the fewest total bits (escape payload included).
 export function chooseTempDeltaTable(deltas: number[]): number {
   let best = 0;

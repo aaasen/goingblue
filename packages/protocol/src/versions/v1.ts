@@ -183,6 +183,7 @@ function reader(bits: number[]) {
     tempDelta(table: number): number {
       const [delta, p] = decodeTempDelta(bits, pos, table); pos = p; return delta;
     },
+    bitPos(): number { return pos; },
   };
 }
 
@@ -541,7 +542,8 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   // The body has no length field: it's self-delimiting given the known structure (nPeriods,
   // nModels, vars_mask). decodeBodyLE materializes the meaningful low bits; reads past them
   // return 0 (the implicit high-order padding) via takeInt's `?? 0`.
-  const rd = reader(decodeBodyLE(rest.slice(HEADER_CHARS)));
+  const bodyBits = decodeBodyLE(rest.slice(HEADER_CHARS));
+  const rd = reader(bodyBits);
 
   const periods: Period[][] = Array.from({ length: nModels }, () =>
     Array.from({ length: nPeriods }, () => ({ weathercode: 0 } as Period)));
@@ -612,6 +614,17 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
       prevDir = d;
     });
   }
+
+  // A valid decode always consumes at least up to the body's highest set bit (encodeBodyLE only
+  // drops high-order zeros), so meaningful bits left past the cursor mean the column reads
+  // desynced from what the encoder wrote — codebook drift or a corrupted message — and the values
+  // above are garbage. The converse (reading past the materialized bits into implicit zero
+  // padding) is what every valid decode does, so over-reads are undetectable here; the codebook
+  // digest test (test/codebooks.test.ts) guards the drift half of that at CI time.
+  if (rd.bitPos() < bodyBits.length)
+    throw new Error(
+      `v1: body decode desynced (${bodyBits.length - rd.bitPos()} meaningful bits unread) — ` +
+      `codebook mismatch or corrupted message`);
 
   // `days` is retained on the common message shape for display; it's the calendar-day span
   // implied by the period count (a partial final day rounds up).
