@@ -10,6 +10,7 @@ import {
   encodeWeathercode, decodeWeathercode,
   encodeWindDir, decodeWindDir,
   encodeWindSpeedDelta, decodeWindSpeedDelta, chooseWindSpeedDeltaTable, WIND_SPEED_DELTA_TABLE_BITS,
+  encodeFreezeDelta, decodeFreezeDelta, chooseFreezeDeltaTable, FREEZE_DELTA_TABLE_BITS,
   encodeTempDelta, decodeTempDelta, chooseTempDeltaTable, TEMP_DELTA_TABLE_BITS,
 } from "../huffman.js";
 
@@ -105,6 +106,12 @@ const TEMP_DELTA_COLUMNS: [bit: number, field: "temp_c" | "temp_min_c", name: st
   [VARS_BIT.tmin, "temp_min_c", "tmin"],
 ];
 
+// freeze: Huffman-coded period-over-period deltas (see FREEZE_DELTA_* in huffman.ts), not a plain
+// scalar column — same shape as temp/tmin. 304.8 m (1000 ft) steps, 0..15 (0-15000 ft).
+const FREEZE_STEP_M = 304.8;
+const FREEZE_ANCHOR_BITS = VAR_BITS_V1[VARS_BIT.freeze];
+const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0) / FREEZE_STEP_M), FREEZE_ANCHOR_BITS);
+
 // Scalar columns, in body (column-major) order. Wind is handled separately (two ints per cell).
 const SCALAR_COLUMNS: ScalarColumn[] = [
   // precip chance: adaptive — sparse/empty when mostly dry (often 0%), FOR when clustered, raw otherwise.
@@ -118,9 +125,7 @@ const SCALAR_COLUMNS: ScalarColumn[] = [
   { bit: 12, mode: "adaptive",
     get: (p) => compandSqrt(p.rain_mm ?? 0, RAIN_K, ACCUM_BITS),
     set: (p, v) => { p.rain_mm = expandSqrt(v, RAIN_K); } },
-  { bit: 3, mode: "adaptive",
-    get: (p) => clampInt(Math.floor((p.freeze_m ?? 0) / 304.8), 4),
-    set: (p, v) => { p.freeze_m = v * 304.8; } },
+  // freeze (bit 3) is handled separately in buildBody/decode below (Huffman-coded deltas).
   { bit: 8, mode: "raw",
     get: (p) => clampInt(Math.round((p.cloud_total ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.cloud_total = Math.round(v * 100 / 7); } },
@@ -161,6 +166,9 @@ function reader(bits: number[]) {
     },
     windSpeedDelta(table: number): number {
       const [delta, p] = decodeWindSpeedDelta(bits, pos, table); pos = p; return delta;
+    },
+    freezeDelta(table: number): number {
+      const [delta, p] = decodeFreezeDelta(bits, pos, table); pos = p; return delta;
     },
     tempDelta(table: number): number {
       const [delta, p] = decodeTempDelta(bits, pos, table); pos = p; return delta;
@@ -365,6 +373,27 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
     mark(name, before, -1);
   }
 
+  // freeze: per model, an anchor (first period, full width) followed by Huffman-coded
+  // period-over-period deltas (see FREEZE_DELTA_* in huffman.ts) — same shape as temp/tmin.
+  if (msg.vars_mask & (1 << VARS_BIT.freeze)) {
+    before = body.length;
+    const allDeltas: number[] = [];
+    for (let m = 0; m < nModels; m++) {
+      for (let p = 1; p < nPeriods; p++) {
+        allDeltas.push(quantFreeze(msg.periods[m][p]) - quantFreeze(msg.periods[m][p - 1]));
+      }
+    }
+    const table = chooseFreezeDeltaTable(allDeltas);
+    putInt(body, table, FREEZE_DELTA_TABLE_BITS);
+    for (let m = 0; m < nModels; m++) {
+      putInt(body, quantFreeze(msg.periods[m][0]), FREEZE_ANCHOR_BITS);
+      for (let p = 1; p < nPeriods; p++) {
+        encodeFreezeDelta(body, table, quantFreeze(msg.periods[m][p]) - quantFreeze(msg.periods[m][p - 1]));
+      }
+    }
+    mark("freeze", before, -1);
+  }
+
   for (const col of SCALAR_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
     before = body.length;
@@ -512,6 +541,18 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
       for (let p = 1; p < nPeriods; p++) {
         quant += rd.tempDelta(table);
         periods[m][p][field] = quant - TEMP_OFFSET;
+      }
+    }
+  }
+
+  if (vars_mask & (1 << VARS_BIT.freeze)) {
+    const table = rd.int(FREEZE_DELTA_TABLE_BITS);
+    for (let m = 0; m < nModels; m++) {
+      let quant = rd.int(FREEZE_ANCHOR_BITS);
+      periods[m][0].freeze_m = quant * FREEZE_STEP_M;
+      for (let p = 1; p < nPeriods; p++) {
+        quant += rd.freezeDelta(table);
+        periods[m][p].freeze_m = quant * FREEZE_STEP_M;
       }
     }
   }

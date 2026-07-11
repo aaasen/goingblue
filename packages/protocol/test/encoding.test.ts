@@ -288,6 +288,22 @@ describe("v1 round-trip encoding", () => {
     expect(decoded.periods[0][0].freeze_m).toBeCloseTo(15 * 304.8, 5);
   });
 
+  it("encodes a near-constant freeze-level column smaller than a wide-swinging one (Huffman-coded deltas)", () => {
+    const vars_mask = 1 << VARS_BIT.freeze;
+    const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, freeze_m: 6 * 304.8 }));
+    const swings = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, freeze_m: (i % 2 === 0 ? 2 : 13) * 304.8 }));
+    const flatLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods: [flat] })).length;
+    const swingsLen = v1MessageToString(msg({ resolution: 4, vars_mask, periods: [swings] })).length;
+    expect(flatLen).toBeLessThan(swingsLen);
+  });
+
+  it("freeze reports no adaptive mode — it's Huffman-coded deltas, not raw/for/sparse/empty columns", () => {
+    const vars_mask = 1 << VARS_BIT.freeze;
+    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, freeze_m: 6 * 304.8 }))];
+    const { columns } = v1EncodeBreakdown(msg({ resolution: 4, vars_mask, periods }));
+    expect(columns.find((c) => c.name === "freeze")?.mode).toBeNull();
+  });
+
   it("rounds precip to nearest 3-bit step", () => {
     const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, precip: 73 }]] }));
     expect(decoded.periods[0][0].precip).toBe(Math.round(Math.round(73 * 7 / 100) * 100 / 7));

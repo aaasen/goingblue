@@ -265,6 +265,73 @@ export function chooseWindSpeedDeltaTable(deltas: number[]): number {
   return best;
 }
 
+// ── Freezing-level delta codebooks ──────────────────────────────────────────────
+// Static Huffman codebooks for period-over-period freezing-level change, in quantized steps (see
+// the freeze column in v1.ts: 0..15, 304.8 m / 1000 ft steps). Like wind speed the domain is
+// already small and bounded, so the full delta range -15..15 (31 symbols) fits directly in the
+// alphabet — no escape/raw-payload fallback needed. Derived by k-means clustering per-forecast
+// delta histograms — see server/scripts/derive-freeze-delta-codebooks.ts. The encoder picks the
+// cheapest per column and stores its index in a 4-bit selector.
+const FREEZE_DELTA_WEIGHTS: number[][] = [
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 118, 773, 94, 5, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 57, 884, 55, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 10, 165, 667, 130, 14, 4, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 997, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 6, 116, 746, 123, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 23, 952, 23, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 4, 15, 135, 667, 162, 9, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 4, 13, 123, 705, 133, 11, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 5, 8, 18, 102, 736, 88, 20, 10, 5, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 73, 851, 69, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 42, 916, 40, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 93, 817, 83, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 7, 89, 786, 108, 4, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 6, 146, 717, 109, 10, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 6, 16, 73, 801, 68, 16, 6, 4, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+];
+
+const FREEZE_DELTA_MAX = 15; // must mirror the freeze column width in v1.ts (0..15)
+export const FREEZE_DELTA_TABLE_COUNT = FREEZE_DELTA_WEIGHTS.length; // 16
+export const FREEZE_DELTA_TABLE_BITS = 4;
+
+const FREEZE_DELTA_TABLES: Table[] = FREEZE_DELTA_WEIGHTS.map((w) => {
+  const codes = canonicalCodes(huffmanLengths(w));
+  return { codes, root: buildTrie(codes) };
+});
+
+function freezeDeltaSym(delta: number): number {
+  return delta + FREEZE_DELTA_MAX;
+}
+
+// Appends the Huffman code for a period-over-period freezing-level change `delta` (quantized steps)
+// under `table`.
+export function encodeFreezeDelta(bits: number[], table: number, delta: number): void {
+  for (const b of FREEZE_DELTA_TABLES[table].codes[freezeDeltaSym(delta)]) bits.push(b);
+}
+
+// Reads one Huffman-coded freezing-level delta (under `table`), returning [delta, nextPos].
+export function decodeFreezeDelta(bits: number[], pos: number, table: number): [number, number] {
+  let node = FREEZE_DELTA_TABLES[table].root;
+  while (node.sym === undefined) {
+    node = node.child[bits[pos++] ?? 0]!;
+    if (!node) throw new Error("huffman: invalid freeze-delta bitstream");
+  }
+  return [node.sym - FREEZE_DELTA_MAX, pos];
+}
+
+// Picks the codebook that encodes `deltas` in the fewest total bits.
+export function chooseFreezeDeltaTable(deltas: number[]): number {
+  let best = 0;
+  let bestBits = Infinity;
+  for (let t = 0; t < FREEZE_DELTA_TABLES.length; t++) {
+    let total = 0;
+    for (const d of deltas) total += FREEZE_DELTA_TABLES[t].codes[freezeDeltaSym(d)].length;
+    if (total < bestBits) { bestBits = total; best = t; }
+  }
+  return best;
+}
+
 // ── Temperature delta codebooks ─────────────────────────────────────────────────
 // Static Huffman codebooks for period-over-period temp_c change. Symbols are quantized deltas
 // -7..7 (indices 0..14) plus an ESCAPE symbol (index 15) for rarer bigger jumps, followed by a raw

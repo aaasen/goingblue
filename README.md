@@ -206,6 +206,7 @@ pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
 10. Period count 7 -> 8 bits (256 periods max). Periods per message 84.5 -> 85.
 11. Huffman coding for wind direction based on previous direction. Wind total 4.22 bits -> 3.39 bits. Periods per message 85 -> 91.9.
 12. Huffman coding for wind speed deltas. Wind total 3.39 bits -> 2.87 bits. Periods per message 91.9 -> 96.4.
+13. Huffman coding for freezing level. 2.52 bits -> 1.41 bits. Periods per message 77.7 -> 84.8.
 
 ## License
 
