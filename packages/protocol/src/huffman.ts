@@ -142,55 +142,58 @@ export function decodeWeathercode(bits: number[], pos: number, prevSym: number |
 }
 
 // ── Wind direction codebooks ────────────────────────────────────────────────────
-// Static Huffman codebooks for the 8-point wind direction (symbols are direction indices 0..7; see
-// CARDINALS). Derived by k-means clustering the corpus's per-column direction distributions across
-// all wind levels (see server/scripts/derive-wind-dir-codebooks.ts) — each codebook captures a
-// dominant-direction regime, plus a uniform table so a column is never worse than raw 3 bits. The
-// encoder picks the cheapest per wind column and stores its index in a 3-bit selector.
-const WIND_DIR_WEIGHTS: number[][] = [
-  [34, 17, 13, 21, 98, 503, 243, 71],
-  [97, 34, 21, 23, 43, 129, 352, 301],
-  [1, 1, 1, 1, 1, 1, 1, 1],
-  [120, 23, 12, 19, 22, 39, 140, 624],
-  [53, 46, 123, 428, 156, 63, 47, 84],
-  [13, 6, 6, 8, 24, 166, 651, 126],
-  [451, 102, 27, 28, 34, 54, 69, 236],
-  [45, 32, 35, 105, 417, 221, 90, 55],
-];
+// Static, order-1 Huffman codebooks for the 8-point wind direction (symbols are direction indices
+// 0..7; see CARDINALS). Wind direction persists hour-to-hour far more than it varies by regime (see
+// server/scripts/analyze-wind-dir-transitions.ts: P(next=prev) 68-90% depending on level), so like
+// weathercode, each direction is coded under a table keyed by the *previously decoded* direction —
+// context both sides already have, so it costs no header bits. One shared codebook set across all
+// four wind levels (surface + 500/600/700 hPa): pooling the transition counts across levels barely
+// changes the bit cost vs. deriving separate tables per level (<0.01 b/dir), so a single set keeps
+// things simple and lets every wind column reuse it — each column tracks its own previous-direction
+// context independently (a separate chain per wind level). Derived from the corpus's pooled
+// prev-direction -> next-direction transition counts — see
+// server/scripts/derive-wind-dir-codebooks.ts.
+const WIND_DIR_BOOTSTRAP_WEIGHTS: number[] = [90, 50, 35, 66, 112, 185, 265, 196];
 
-export const WIND_DIR_TABLE_COUNT = WIND_DIR_WEIGHTS.length; // 8
-export const WIND_DIR_TABLE_BITS = 3;                        // per-column codebook selector width
+// WIND_DIR_WEIGHTS[prevDir] is the codebook for the direction that follows `prevDir`.
+const WIND_DIR_WEIGHTS: number[][] = [
+  [810, 63, 6, 3, 3, 3, 6, 107],
+  [109, 763, 96, 11, 4, 3, 4, 10],
+  [13, 114, 731, 117, 12, 4, 3, 5],
+  [5, 9, 79, 774, 117, 9, 3, 3],
+  [3, 2, 5, 64, 802, 115, 7, 3],
+  [2, 1, 1, 3, 58, 841, 90, 4],
+  [3, 1, 1, 1, 2, 64, 868, 61],
+  [57, 3, 1, 1, 2, 4, 80, 853],
+];
 
 const WIND_DIR_TABLES: Table[] = WIND_DIR_WEIGHTS.map((w) => {
   const codes = canonicalCodes(huffmanLengths(w));
   return { codes, root: buildTrie(codes) };
 });
+const WIND_DIR_BOOTSTRAP_TABLE: Table = (() => {
+  const codes = canonicalCodes(huffmanLengths(WIND_DIR_BOOTSTRAP_WEIGHTS));
+  return { codes, root: buildTrie(codes) };
+})();
 
-// Appends the Huffman code for direction index `dirIdx` (0..7) under `table`.
-export function encodeWindDir(bits: number[], table: number, dirIdx: number): void {
-  for (const b of WIND_DIR_TABLES[table].codes[dirIdx]) bits.push(b);
+// Appends the Huffman code for direction index `dirIdx` (0..7) to `bits`, under the table keyed by
+// `prevDir` — the previously decoded direction, or null for the first direction of a sequence (no
+// predecessor).
+export function encodeWindDir(bits: number[], prevDir: number | null, dirIdx: number): void {
+  const table = prevDir === null ? WIND_DIR_BOOTSTRAP_TABLE : WIND_DIR_TABLES[prevDir];
+  for (const b of table.codes[dirIdx]) bits.push(b);
 }
 
-// Reads one Huffman-coded direction (under `table`), returning [dirIdx, nextPos].
-export function decodeWindDir(bits: number[], pos: number, table: number): [number, number] {
-  let node = WIND_DIR_TABLES[table].root;
+// Reads one Huffman-coded direction keyed by `prevDir` (see encodeWindDir), returning
+// [dirIdx, nextPos].
+export function decodeWindDir(bits: number[], pos: number, prevDir: number | null): [number, number] {
+  const table = prevDir === null ? WIND_DIR_BOOTSTRAP_TABLE : WIND_DIR_TABLES[prevDir];
+  let node = table.root;
   while (node.sym === undefined) {
     node = node.child[bits[pos++] ?? 0]!;
     if (!node) throw new Error("huffman: invalid wind-direction bitstream");
   }
   return [node.sym, pos];
-}
-
-// Picks the codebook that encodes `dirIdxs` in the fewest total bits.
-export function chooseWindDirTable(dirIdxs: number[]): number {
-  let best = 0;
-  let bestBits = Infinity;
-  for (let t = 0; t < WIND_DIR_TABLES.length; t++) {
-    let total = 0;
-    for (const idx of dirIdxs) total += WIND_DIR_TABLES[t].codes[idx].length;
-    if (total < bestBits) { bestBits = total; best = t; }
-  }
-  return best;
 }
 
 // ── Temperature delta codebooks ─────────────────────────────────────────────────

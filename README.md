@@ -204,6 +204,7 @@ pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
 8. Huffman coding for temperature deltas. Temp 3.98 bits -> 2.13 bits. Periods/message 71.3 -> 81.7
 9. Huffman coding for weathercode dependent on previous weathercode. Weathercode 2.38 bits -> 1.84 bits. Periods per message 81.7 -> 84.5. 
 10. Period count 7 -> 8 bits (256 periods max). Periods per message 84.5 -> 85.
+11. Huffman coding for wind direction based on previous direction. Wind total 4.22 bits -> 3.39 bits. Periods per message 85 -> 91.9.
 
 ## License
 

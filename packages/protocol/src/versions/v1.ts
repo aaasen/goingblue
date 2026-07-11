@@ -8,7 +8,7 @@ import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec, ContextResolver } from "../model.js";
 import {
   encodeWeathercode, decodeWeathercode,
-  encodeWindDir, decodeWindDir, chooseWindDirTable, WIND_DIR_TABLE_BITS,
+  encodeWindDir, decodeWindDir,
   encodeTempDelta, decodeTempDelta, chooseTempDeltaTable, TEMP_DELTA_TABLE_BITS,
 } from "../huffman.js";
 
@@ -73,7 +73,6 @@ export const SNOW_K = ACCUM_MAX / Math.sqrt(SNOW_MAX_CM); // ≈ 4.4548
 export const RAIN_K = ACCUM_MAX / Math.sqrt(RAIN_MAX_MM); // = 5.25
 const KPH_PER_STEP = 5 * 1.609344;
 const WIND_SPEED_BITS = 4; // speed steps 0..15
-const WIND_DIR_BITS = 3;   // 8-point direction
 const WIND_SPEED_MAX = (1 << WIND_SPEED_BITS) - 1;
 
 // A scalar column: one non-negative integer per cell, in a fixed quantized domain.
@@ -135,9 +134,11 @@ const SCALAR_COLUMNS: ScalarColumn[] = [
     set: (p, v) => { p.cloud_low = Math.round(v * 100 / 7); } },
 ];
 
-// Wind columns (surface + 500/600/700 hPa): 4-bit speed + 3-bit direction per cell. Surface wind
-// encodes speed adaptively (FOR/sparse/empty/raw, as a contiguous sub-column) followed by raw
-// direction; the pressure-level columns stay interleaved raw for now (revisited later).
+// Wind columns (surface + 500/600/700 hPa): speed + direction per cell. Direction is always
+// Huffman-coded (see encodeWindDir in huffman.ts), each column tracking its own previous-direction
+// context independently. Surface wind encodes speed adaptively (FOR/sparse/empty/raw, as a
+// contiguous sub-column, direction interleaved after); the pressure-level columns keep speed raw,
+// interleaved with the Huffman-coded direction (revisited later).
 const WIND_COLUMNS: { bit: number; kph: keyof Period; dir: keyof Period; speedAdaptive?: boolean }[] = [
   { bit: 4, kph: "wind_sfc_kph", dir: "wind_sfc_dir", speedAdaptive: true },
   { bit: 5, kph: "wind_500_kph", dir: "wind_500_dir" },
@@ -153,8 +154,8 @@ function reader(bits: number[]) {
     weathercode(prevSym: number | null): number {
       const [sym, p] = decodeWeathercode(bits, pos, prevSym); pos = p; return sym;
     },
-    windDir(table: number): number {
-      const [sym, p] = decodeWindDir(bits, pos, table); pos = p; return sym;
+    windDir(prevDir: number | null): number {
+      const [sym, p] = decodeWindDir(bits, pos, prevDir); pos = p; return sym;
     },
     tempDelta(table: number): number {
       const [delta, p] = decodeTempDelta(bits, pos, table); pos = p; return delta;
@@ -370,22 +371,25 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
   for (const col of WIND_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
     before = body.length;
+    let prevDir: number | null = null;
     if (col.speedAdaptive) {
-      // Adaptive speed sub-column, then Huffman direction under the cheapest per-column codebook.
+      // Adaptive speed sub-column, then Huffman-coded direction (order-1, keyed by prev direction).
       const speeds: number[] = [];
       eachCell(nPeriods, nModels, (p, m) => speeds.push(windSpeed(msg.periods[m][p], col.kph)));
       const mode = encodeAdaptive(body, speeds, WIND_SPEED_BITS);
-      const dirs: number[] = [];
-      eachCell(nPeriods, nModels, (p, m) => dirs.push(((msg.periods[m][p][col.dir] as number) ?? 0) % 8));
-      const table = chooseWindDirTable(dirs);
-      putInt(body, table, WIND_DIR_TABLE_BITS);
-      for (const d of dirs) encodeWindDir(body, table, d);
+      eachCell(nPeriods, nModels, (p, m) => {
+        const d = ((msg.periods[m][p][col.dir] as number) ?? 0) % 8;
+        encodeWindDir(body, prevDir, d);
+        prevDir = d;
+      });
       mark(BIT_NAME[col.bit], before, mode);
     } else {
       eachCell(nPeriods, nModels, (p, m) => {
         const c = msg.periods[m][p];
         putInt(body, windSpeed(c, col.kph), WIND_SPEED_BITS);
-        putInt(body, ((c[col.dir] as number) ?? 0) % 8, WIND_DIR_BITS);
+        const d = ((c[col.dir] as number) ?? 0) % 8;
+        encodeWindDir(body, prevDir, d);
+        prevDir = d;
       });
       mark(BIT_NAME[col.bit], before, -1);
     }
@@ -507,18 +511,23 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   }
   for (const col of WIND_COLUMNS) {
     if (!(vars_mask & (1 << col.bit))) continue;
+    let prevDir: number | null = null;
     if (col.speedAdaptive) {
       const speeds = decodeAdaptive(rd, WIND_SPEED_BITS, nPeriods * nModels);
       let i = 0;
       eachCell(nPeriods, nModels, (p, m) => { (periods[m][p][col.kph] as number) = speeds[i++] * KPH_PER_STEP; });
-      const table = rd.int(WIND_DIR_TABLE_BITS);
-      eachCell(nPeriods, nModels, (p, m) => { (periods[m][p][col.dir] as number) = rd.windDir(table); });
+      eachCell(nPeriods, nModels, (p, m) => {
+        const d = rd.windDir(prevDir);
+        (periods[m][p][col.dir] as number) = d;
+        prevDir = d;
+      });
     } else {
       eachCell(nPeriods, nModels, (p, m) => {
         const spd = rd.int(WIND_SPEED_BITS);
-        const dir = rd.int(WIND_DIR_BITS);
+        const dir = rd.windDir(prevDir);
         (periods[m][p][col.kph] as number) = spd * KPH_PER_STEP;
         (periods[m][p][col.dir] as number) = dir;
+        prevDir = dir;
       });
     }
   }

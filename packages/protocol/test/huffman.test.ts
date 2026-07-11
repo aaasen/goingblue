@@ -5,8 +5,6 @@ import {
   WMO_CODES,
   encodeWindDir,
   decodeWindDir,
-  chooseWindDirTable,
-  WIND_DIR_TABLE_COUNT,
   encodeTempDelta,
   decodeTempDelta,
   chooseTempDeltaTable,
@@ -67,48 +65,57 @@ describe("weathercode Huffman", () => {
   });
 });
 
-function dirBits(idxs: number[], table: number): number {
+// All contexts a direction symbol can be keyed by: no predecessor (bootstrap), or any of 0..7.
+const DIR_CONTEXTS: (number | null)[] = [null, 0, 1, 2, 3, 4, 5, 6, 7];
+
+function dirSequenceBits(seq: number[]): number {
   const bits: number[] = [];
-  for (const i of idxs) encodeWindDir(bits, table, i);
+  let prev: number | null = null;
+  for (const d of seq) { encodeWindDir(bits, prev, d); prev = d; }
   return bits.length;
 }
 
 describe("wind direction Huffman", () => {
-  it("round-trips every direction under every codebook", () => {
-    for (let table = 0; table < WIND_DIR_TABLE_COUNT; table++) {
+  it("round-trips every direction under every context", () => {
+    for (const prevDir of DIR_CONTEXTS) {
       for (let dir = 0; dir < 8; dir++) {
         const bits: number[] = [];
-        encodeWindDir(bits, table, dir);
+        encodeWindDir(bits, prevDir, dir);
         expect(bits.length).toBeGreaterThan(0);
-        const [out, pos] = decodeWindDir(bits, 0, table);
+        const [out, pos] = decodeWindDir(bits, 0, prevDir);
         expect(out).toBe(dir);
         expect(pos).toBe(bits.length); // consumed exactly the code
       }
     }
   });
 
-  it("decodes a concatenated direction sequence unambiguously (prefix-free)", () => {
+  it("decodes a concatenated direction sequence unambiguously (prefix-free), context threaded from the previous direction", () => {
     const seq = [6, 6, 7, 6, 0, 3, 4, 5, 6, 6, 1, 2, 6];
-    for (let table = 0; table < WIND_DIR_TABLE_COUNT; table++) {
-      const bits: number[] = [];
-      for (const d of seq) encodeWindDir(bits, table, d);
-      const out: number[] = [];
-      let pos = 0;
-      for (let k = 0; k < seq.length; k++) { const [sym, p] = decodeWindDir(bits, pos, table); out.push(sym); pos = p; }
-      expect(out).toEqual(seq);
-      expect(pos).toBe(bits.length);
+    const bits: number[] = [];
+    let prev: number | null = null;
+    for (const d of seq) { encodeWindDir(bits, prev, d); prev = d; }
+
+    const out: number[] = [];
+    let pos = 0;
+    prev = null;
+    for (let k = 0; k < seq.length; k++) {
+      const [sym, p] = decodeWindDir(bits, pos, prev);
+      out.push(sym);
+      pos = p;
+      prev = sym;
     }
+    expect(out).toEqual(seq);
+    expect(pos).toBe(bits.length);
   });
 
-  it("a peaked column costs fewer bits than a uniform spread, and beats raw 3-bit", () => {
-    const peaked = Array(64).fill(6); // all from one direction (W)
-    const spread = Array.from({ length: 64 }, (_, i) => i % 8);
-    const chosen = chooseWindDirTable(peaked);
-    for (let t = 0; t < WIND_DIR_TABLE_COUNT; t++) {
-      expect(dirBits(peaked, chosen)).toBeLessThanOrEqual(dirBits(peaked, t));
-    }
-    expect(dirBits(peaked, chosen)).toBeLessThan(dirBits(spread, chooseWindDirTable(spread)));
-    expect(dirBits(peaked, chosen)).toBeLessThan(peaked.length * 3); // beats raw 3 bits/value
+  it("a persistent (all-W) sequence costs fewer bits under order-1 context than under the bootstrap table alone, and beats raw 3-bit", () => {
+    const allW = Array(64).fill(6); // direction index 6 = W
+    const contextual = dirSequenceBits(allW);
+    const bootstrapOnly = allW.reduce((bits, d) => {
+      const b: number[] = []; encodeWindDir(b, null, d); return bits + b.length;
+    }, 0);
+    expect(contextual).toBeLessThan(bootstrapOnly);
+    expect(contextual).toBeLessThan(allW.length * 3); // beats raw 3 bits/value
   });
 });
 
