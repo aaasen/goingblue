@@ -5,7 +5,7 @@ import {
 import {
   RESOLUTION_HOURS, modelsFromMask, startDatetime, type ForecastMessage,
 } from '@weather/protocol';
-import { decodeAny, loadStore, attachResponse, loadPastForecasts, deleteSlot, type Slot } from './cache';
+import { decodeAny, loadStore, attachResponse, loadPastForecasts, type Slot } from './cache';
 import type { Units } from './settings';
 import LocationMap from './LocationMap';
 import Meteogram from './Meteogram';
@@ -35,22 +35,57 @@ function metaLabel(msg: ForecastMessage, units: Units): string {
   return `${latLonLabel(msg)}${elevStr} · ${spanLabel(msg)} · ${models.join(' + ')}`;
 }
 
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function requestTimeLabel(requestedAt: number): string {
+  return new Date(requestedAt).toLocaleTimeString('en-US', {
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  }).replace(/\s/g, '').toLowerCase();
+}
 
-/** Compact label for a cached forecast (location · start · NNd res · models). */
-function cacheMetaLabel(encoded: string): string {
+function normalizedForecastData(encoded: string): string {
+  return encoded.replace(/\s/g, '').replace(/^fw:/i, '');
+}
+
+/** Compact label for a cached forecast (request time · location · span · models). */
+function cacheMetaLabel(slot: Slot): string {
   try {
-    const msg = decodeAny(encoded);
+    const msg = decodeAny(slot.encoded!);
     const models = modelsFromMask(msg.models_mask).join(' + ');
-    const resHours = RESOLUTION_HOURS[msg.resolution] ?? 24;
-    const start = startDatetime(msg);
-    const startStr = resHours >= 24
-      ? `${DAY_NAMES[start.getDay()]} ${start.getMonth() + 1}/${start.getDate()}`
-      : `${DAY_NAMES[start.getDay()]} ${start.getMonth() + 1}/${start.getDate()} ${start.getHours()}h`;
-    return `${latLonLabel(msg)} · ${startStr} · ${spanLabel(msg)} · ${models}`;
+    return `${requestTimeLabel(slot.requestedAt)} · ${latLonLabel(msg)} · ${spanLabel(msg)} · ${models}`;
   } catch {
     return 'Unknown';
   }
+}
+
+interface PastForecastGroup {
+  day: number;
+  slots: Slot[];
+}
+
+/** Group forecasts by their local start day while preserving newest-first order. */
+function groupPastForecasts(slots: Slot[]): PastForecastGroup[] {
+  const groups: PastForecastGroup[] = [];
+  for (const slot of slots) {
+    let start = new Date(slot.savedAt ?? slot.requestedAt);
+    try { start = startDatetime(decodeAny(slot.encoded!)); } catch { /* use saved/request time */ }
+    const day = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
+    const group = groups.find((candidate) => candidate.day === day);
+    if (group) group.slots.push(slot);
+    else groups.push({ day, slots: [slot] });
+  }
+  return groups.sort((a, b) => b.day - a.day);
+}
+
+function dayLabel(day: number): string {
+  const date = new Date(day);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+  if (day === today) return 'Today';
+  if (day === yesterday) return 'Yesterday';
+  return date.toLocaleDateString(undefined, {
+    weekday: 'long', month: 'short', day: 'numeric',
+    ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
+  });
 }
 
 // ── DecoderTab ─────────────────────────────────────────────────────────────
@@ -116,9 +151,7 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
     onForecastDataChange(encoded);
   }, [onForecastDataChange]);
 
-  const deletePast = useCallback((code: number) => {
-    deleteSlot(code).then(setCache);
-  }, []);
+  const pastGroups = groupPastForecasts(cache);
 
   const pastSection = (
     <View style={styles.pastSection}>
@@ -126,17 +159,26 @@ export default function DecoderTab({ forecastData, onForecastDataChange, units }
       {cache.length === 0 ? (
         <Text style={styles.pastEmpty}>No past forecasts.</Text>
       ) : (
-        cache.map((slot) => (
-          <View key={slot.code} style={styles.pastItem}>
-            <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot.encoded!)}</Text>
-            <View style={styles.pastBtns}>
-              <TouchableOpacity style={styles.pastLoadBtn} onPress={() => loadPast(slot.encoded!)}>
-                <Text style={styles.pastLoadText}>Load</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.pastDeleteBtn} onPress={() => deletePast(slot.code)}>
-                <Text style={styles.pastDeleteText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
+        pastGroups.map((group) => (
+          <View key={group.day} style={styles.pastGroup}>
+            <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
+            {group.slots.map((slot) => (
+              <View
+                key={slot.code}
+                style={[
+                  styles.pastItem,
+                  normalizedForecastData(forecastData) === normalizedForecastData(slot.encoded!)
+                    && styles.pastItemLoaded,
+                ]}
+              >
+                <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot)}</Text>
+                <View style={styles.pastBtns}>
+                  <TouchableOpacity style={styles.pastLoadBtn} onPress={() => loadPast(slot.encoded!)}>
+                    <Text style={styles.pastLoadText}>Load</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
           </View>
         ))
       )}
@@ -275,15 +317,16 @@ const styles = StyleSheet.create({
   pastSection: { marginTop: 8, marginHorizontal: 16 },
   pastHeaderText: { fontSize: 12, fontWeight: '700', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: 0.5, paddingVertical: 12 },
   pastEmpty: { fontSize: 13, color: '#aeaeb2', fontFamily: 'Courier', paddingVertical: 12 },
+  pastGroup: { marginBottom: 8 },
+  pastDayText: { fontSize: 13, fontWeight: '600', color: '#636366', paddingTop: 4, paddingBottom: 6 },
   pastItem: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 10, gap: 12,
+    paddingVertical: 10, paddingHorizontal: 8, gap: 12,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e5ea',
   },
+  pastItemLoaded: { backgroundColor: '#e8f1fb', borderRadius: 8, borderTopColor: '#c7dff5' },
   pastMeta: { flex: 1, fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
   pastBtns: { flexDirection: 'row', gap: 8 },
   pastLoadBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: '#2a6bb5' },
   pastLoadText: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  pastDeleteBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d1d6' },
-  pastDeleteText: { color: '#8e8e93', fontSize: 13, fontWeight: '600' },
 });
