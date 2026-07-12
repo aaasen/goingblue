@@ -1,7 +1,7 @@
-import { useMemo, useRef, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, View, Text as RNText, StyleSheet } from 'react-native';
 import {
-  Canvas, Group, Rect, RoundedRect, Circle, Line, Path, Text,
+  Canvas, DashPathEffect, Group, Rect, RoundedRect, Circle, Line, Path, Text,
   LinearGradient, Skia, vec, matchFont, type SkFont,
 } from '@shopify/react-native-skia';
 import {
@@ -327,10 +327,10 @@ function cloudGlyph(key: string, cx: number, top: number, h: number, code: numbe
 
 // ── Meteogram canvas (one per model) ─────────────────────────────────────--
 
-function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, fonts }: {
+function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, fonts }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
-  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; fonts: Fonts;
+  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; fonts: Fonts;
 }) {
   const scrollX = useRef(new Animated.Value(0)).current;
   const n = periods.length;
@@ -379,6 +379,39 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, fonts }: 
   // Snow / rain bar scaling (each row scales to its own max accumulation).
   const maxSnow = Math.max(0, ...periods.map((p) => p.snow_cm ?? 0));
   const maxRain = Math.max(0, ...periods.map((p) => p.rain_mm ?? 0));
+
+  // Current time, positioned proportionally within its period. Run it through the date/time
+  // header and visual weather rows down to freezing level, excluding wind and lower sections.
+  const markerRows = new Set<RowKind>(['clouds', 'precip', 'temp', 'snow', 'rain', 'freeze']);
+  let markerTop: number | undefined;
+  let markerBottom: number | undefined;
+  let markerY = ROW_H.DATE;
+  rows.forEach((row) => {
+    if (markerRows.has(row.kind)) {
+      markerTop ??= markerY;
+      markerBottom = markerY + row.height;
+    }
+    markerY += row.height;
+  });
+  const currentPeriod = dates.findIndex((date, i) =>
+    now >= date.getTime() && now < date.getTime() + steps[i] * 3600000,
+  );
+  if (currentPeriod >= 0 && markerTop != null && markerBottom != null) {
+    const periodStart = dates[currentPeriod].getTime();
+    const fraction = (now - periodStart) / (steps[currentPeriod] * 3600000);
+    const x = colLeft(currentPeriod) + fraction * CELL_W;
+    els.push(
+      <Line
+        key="current-time"
+        p1={vec(x, 0)}
+        p2={vec(x, markerBottom)}
+        color="rgba(255,59,48,0.5)"
+        strokeWidth={1}
+      >
+        <DashPathEffect intervals={[5, 4]} />
+      </Line>,
+    );
+  }
 
   // 4. Rows.
   let y = ROW_H.DATE;
@@ -577,6 +610,12 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, fonts }: 
 
 export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMessage; units: Units; timeFormat: TimeFormat }) {
   const models = modelsFromMask(msg.models_mask);
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const fonts = useMemo<Fonts>(() => ({
     label: matchFont({ fontSize: 12, fontWeight: '500' }),
@@ -617,7 +656,7 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
               <RNText style={styles.modelHeaderText}>{b.name}</RNText>
             </View>
           )}
-          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} steps={b.steps} units={units} timeFormat={timeFormat} fonts={fonts} />
+          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} steps={b.steps} units={units} timeFormat={timeFormat} now={now} fonts={fonts} />
           {bi < blocks.length - 1 && <View style={styles.sep} />}
         </View>
       ))}
