@@ -179,6 +179,60 @@ function hourLabel(d: Date, step: number, timeFormat: TimeFormat): string {
   return `${hour % 12 || 12}${hour < 12 ? 'am' : 'pm'}`;
 }
 
+// Solar altitude using the standard low-precision solar-position equations. The apparent
+// sunrise/sunset threshold is -0.833° to account for refraction and the sun's visible radius.
+function isNight(time: number, lat: number, lon: number): boolean {
+  const rad = Math.PI / 180;
+  const days = time / 86400000 + 2440587.5 - 2451545;
+  const meanLongitude = (280.46 + 0.9856474 * days) * rad;
+  const anomaly = (357.528 + 0.9856003 * days) * rad;
+  const eclipticLongitude = meanLongitude + (1.915 * Math.sin(anomaly) + 0.02 * Math.sin(2 * anomaly)) * rad;
+  const obliquity = (23.439 - 0.0000004 * days) * rad;
+  const rightAscension = Math.atan2(Math.cos(obliquity) * Math.sin(eclipticLongitude), Math.cos(eclipticLongitude));
+  const declination = Math.asin(Math.sin(obliquity) * Math.sin(eclipticLongitude));
+  const siderealTime = (280.46061837 + 360.98564736629 * days + lon) * rad;
+  const hourAngle = siderealTime - rightAscension;
+  const latitude = lat * rad;
+  const altitude = Math.asin(
+    Math.sin(latitude) * Math.sin(declination)
+      + Math.cos(latitude) * Math.cos(declination) * Math.cos(hourAngle),
+  );
+  return altitude < -0.833 * rad;
+}
+
+// Night portions of an arbitrary forecast period, as 0–1 fractions. A short scan locates each
+// sunrise/sunset, then binary search places the boundary to within roughly one second.
+function nightSegments(start: number, end: number, lat: number, lon: number): [number, number][] {
+  const crossings: number[] = [];
+  const scanStep = 30 * 60000;
+  let previousTime = start;
+  let previousNight = isNight(start, lat, lon);
+  for (let time = Math.min(start + scanStep, end); previousTime < end; time = Math.min(time + scanStep, end)) {
+    const night = isNight(time, lat, lon);
+    if (night !== previousNight) {
+      let low = previousTime;
+      let high = time;
+      for (let i = 0; i < 16; i++) {
+        const mid = (low + high) / 2;
+        if (isNight(mid, lat, lon) === previousNight) low = mid;
+        else high = mid;
+      }
+      crossings.push((low + high) / 2);
+    }
+    previousTime = time;
+    previousNight = night;
+  }
+
+  const boundaries = [start, ...crossings, end];
+  const segments: [number, number][] = [];
+  for (let i = 0; i < boundaries.length - 1; i++) {
+    const a = boundaries[i];
+    const b = boundaries[i + 1];
+    if (isNight((a + b) / 2, lat, lon)) segments.push([(a - start) / (end - start), (b - start) / (end - start)]);
+  }
+  return segments;
+}
+
 function pressureLabel(level: 500 | 600 | 700, u: Units): string {
   const ft: Record<number, string> = { 500: '18,000', 600: '14,000', 700: '10,000' };
   const m: Record<number, string> = { 500: '5,500', 600: '4,200', 700: '3,000' };
@@ -327,10 +381,10 @@ function cloudGlyph(key: string, cx: number, top: number, h: number, code: numbe
 
 // ── Meteogram canvas (one per model) ─────────────────────────────────────--
 
-function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, fonts }: {
+function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
-  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; fonts: Fonts;
+  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; lat: number; lon: number; fonts: Fonts;
 }) {
   const scrollX = useRef(new Animated.Value(0)).current;
   const n = periods.length;
@@ -341,13 +395,14 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, font
 
   const els: ReactNode[] = [];
 
-  // 1. Day/night shading (only meaningful sub-daily; 6am–6pm = day).
+  // 1. Location-aware astronomical night shading. Partial rectangles place sunrise and sunset
+  // within a column rather than rounding them to the forecast period boundary.
   dates.forEach((d, i) => {
-    if (steps[i] >= 24) return;
-    const h = d.getHours();
-    if (h < 6 || h >= 18) {
-      els.push(<Rect key={`night${i}`} x={colLeft(i)} y={ROW_H.DATE} width={CELL_W} height={totalH - ROW_H.DATE} color={C.night} />);
-    }
+    const start = d.getTime();
+    const end = start + steps[i] * 3600000;
+    nightSegments(start, end, lat, lon).forEach(([from, to], segment) => {
+      els.push(<Rect key={`night${i}-${segment}`} x={colLeft(i) + from * CELL_W} y={ROW_H.DATE} width={(to - from) * CELL_W} height={totalH - ROW_H.DATE} color={C.night} />);
+    });
   });
 
   // 2. Column separators + header underline.
@@ -656,7 +711,7 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
               <RNText style={styles.modelHeaderText}>{b.name}</RNText>
             </View>
           )}
-          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} steps={b.steps} units={units} timeFormat={timeFormat} now={now} fonts={fonts} />
+          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} steps={b.steps} units={units} timeFormat={timeFormat} now={now} lat={msg.lat} lon={msg.lon} fonts={fonts} />
           {bi < blocks.length - 1 && <View style={styles.sep} />}
         </View>
       ))}
