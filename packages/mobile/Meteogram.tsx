@@ -143,17 +143,17 @@ function fmtTemp(c: number | undefined, u: Units): string {
 function fmtSnow(cm: number, u: Units): string {
   if (u === 'imperial') {
     const inches = cm / 2.54;
-    return inches >= 0.1 ? inches.toFixed(inches < 1 ? 1 : 0) : '';
+    return inches >= 0.1 ? `${inches.toFixed(inches < 1 ? 1 : 0)}IN` : '';
   }
-  return cm >= 0.5 ? `${Math.round(cm)}` : '';
+  return cm >= 0.5 ? `${Math.round(cm)}CM` : '';
 }
 function fmtRain(mm: number, u: Units): string {
   if (u === 'imperial') {
     const inches = mm / 25.4;
-    return inches >= 0.01 ? inches.toFixed(2) : '';
+    return inches >= 0.01 ? `${inches.toFixed(2)}IN` : '';
   }
   if (mm < 0.5) return '';
-  return mm < 10 ? mm.toFixed(1) : `${Math.round(mm)}`;
+  return `${mm < 10 ? mm.toFixed(1) : Math.round(mm)}MM`;
 }
 function fmtFreeze(m: number | undefined, u: Units): string {
   if (m == null) return '';
@@ -166,8 +166,6 @@ function fmtWind(kph: number | undefined, u: Units): string {
 }
 
 function tempUnit(u: Units) { return u === 'imperial' ? '°F' : '°C'; }
-function snowUnit(u: Units) { return u === 'imperial' ? 'in' : 'cm'; }
-function rainUnit(u: Units) { return u === 'imperial' ? 'in' : 'mm'; }
 function freezeUnit(u: Units) { return u === 'imperial' ? 'ft' : 'm'; }
 function windUnit(u: Units) { return u === 'imperial' ? 'mph' : 'kph'; }
 
@@ -243,7 +241,7 @@ function pressureLabel(level: 500 | 600 | 700, u: Units): string {
 // ── Row model ──────────────────────────────────────────────────────────────
 
 type RowKind =
-  | 'clouds' | 'precip' | 'temp' | 'snow' | 'rain' | 'freeze' | 'wind-sfc'
+  | 'clouds' | 'precip' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc'
   | 'cloud-total' | 'cloud-high' | 'cloud-mid' | 'cloud-low'
   | 'wind-500' | 'wind-600' | 'wind-700' | 'section';
 
@@ -256,7 +254,7 @@ interface Row {
 function buildRows(periods: Period[], u: Units): Row[] {
   const rows: Row[] = [];
   const has = (fn: (p: Period) => unknown) => periods.some((p) => fn(p) != null);
-  const tU = tempUnit(u), snU = snowUnit(u), rnU = rainUnit(u), frU = freezeUnit(u), wU = windUnit(u);
+  const tU = tempUnit(u), frU = freezeUnit(u), wU = windUnit(u);
 
   rows.push({ kind: 'clouds', height: ROW_H.CLOUD, label: '' });
 
@@ -268,8 +266,8 @@ function buildRows(periods: Period[], u: Units): Row[] {
       rows.push({ kind: 'temp', height: ROW_H.TEMP, label: `Temp ${tU}` });
     if (has((p) => p.freeze_m)) rows.push({ kind: 'freeze', height: ROW_H.DATA, label: `Freezing ${frU}` });
     if (has((p) => p.precip)) rows.push({ kind: 'precip', height: ROW_H.PRECIP, label: 'Precip %' });
-    if (has((p) => p.snow_cm)) rows.push({ kind: 'snow', height: ROW_H.SNOW, label: `Snow ${snU}` });
-    if (has((p) => p.rain_mm)) rows.push({ kind: 'rain', height: ROW_H.SNOW, label: `Rain ${rnU}` });
+    if (has((p) => p.snow_cm) || has((p) => p.rain_mm))
+      rows.push({ kind: 'accumulation', height: ROW_H.SNOW, label: 'Snow / rain' });
     if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.DATA, label: `Wind ${wU}` });
   }
 
@@ -470,13 +468,91 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
     );
   }
 
-  // Snow / rain bar scaling (each row scales to its own max accumulation).
+  // Precipitation probability as a smooth 0–100% area behind its value labels.
+  let precipRowTop = ROW_H.DATE;
+  const precipRow = rows.find((row) => {
+    if (row.kind === 'precip') return true;
+    precipRowTop += row.height;
+    return false;
+  });
+  const precipValues = periods.map((period) => period.precip);
+  if (precipRow && precipValues.some((value) => value != null)) {
+    const precipBottom = precipRowTop + precipRow.height;
+    const precipPlotTop = precipRowTop + 4;
+    const first = precipValues.find((value): value is number => value != null)!;
+    const last = [...precipValues].reverse().find((value): value is number => value != null)!;
+    const precipY = (value: number) => precipBottom - (value / 100) * (precipBottom - precipPlotTop);
+    const points = [
+      { x: colLeft(0), y: precipY(first) },
+      ...precipValues.flatMap((value, i) => value == null ? [] : [{ x: colCenter(i), y: precipY(value) }]),
+      { x: colLeft(n), y: precipY(last) },
+    ];
+    const area = Skia.Path.Make();
+    smoothTo(area, points);
+    area.lineTo(colLeft(n), precipBottom);
+    area.lineTo(colLeft(0), precipBottom);
+    area.close();
+    els.splice(headerInsertIndex, 0,
+      <Path key="precip-area" path={area}>
+        <LinearGradient
+          start={vec(0, precipPlotTop)}
+          end={vec(0, precipBottom)}
+          colors={['rgba(64,128,200,0.55)', 'rgba(255,255,255,0.55)']}
+        />
+      </Path>,
+    );
+  }
+
+  // Snow and rain share a stacked area. Snow is converted to liquid-equivalent depth at 10:1,
+  // so 10 inches of snow plots at the same height as 1 inch of rain.
   const maxSnow = Math.max(0, ...periods.map((p) => p.snow_cm ?? 0));
   const maxRain = Math.max(0, ...periods.map((p) => p.rain_mm ?? 0));
+  let accumulationTop: number | undefined;
+  let accumulationBottom: number | undefined;
+  let accumulationY = ROW_H.DATE;
+  rows.forEach((row) => {
+    if (row.kind === 'accumulation') {
+      accumulationTop ??= accumulationY;
+      accumulationBottom = accumulationY + row.height;
+    }
+    accumulationY += row.height;
+  });
+  const rainEquivalent = periods.map((period) => period.rain_mm ?? 0);
+  // 1 cm snow / 10 = 1 mm liquid equivalent, so the numeric cm value already matches rain mm.
+  const snowEquivalent = periods.map((period) => period.snow_cm ?? 0);
+  const totalEquivalent = rainEquivalent.map((rain, i) => rain + snowEquivalent[i]);
+  const maxEquivalent = Math.max(0, ...totalEquivalent);
+  if (accumulationTop != null && accumulationBottom != null && maxEquivalent > 0) {
+    const plotTop = accumulationTop + 4;
+    const valueY = (value: number) =>
+      accumulationBottom! - (value / maxEquivalent) * (accumulationBottom! - plotTop);
+    const boundary = (values: number[]) => [
+      { x: colLeft(0), y: valueY(values[0]) },
+      ...values.map((value, i) => ({ x: colCenter(i), y: valueY(value) })),
+      { x: colLeft(n), y: valueY(values[values.length - 1]) },
+    ];
+    const rainPoints = boundary(rainEquivalent);
+    const totalPoints = boundary(totalEquivalent);
+    const rainArea = Skia.Path.Make();
+    smoothTo(rainArea, rainPoints);
+    rainArea.lineTo(colLeft(n), accumulationBottom);
+    rainArea.lineTo(colLeft(0), accumulationBottom);
+    rainArea.close();
+    const snowArea = Skia.Path.Make();
+    smoothTo(snowArea, totalPoints);
+    smoothTo(snowArea, rainPoints, true);
+    snowArea.close();
+    els.splice(headerInsertIndex, 0,
+      <Group key="accumulation-area">
+        <Path path={rainArea} color="#4b8fc8" />
+        <Path path={snowArea} color="#c6e1f5" />
+      </Group>,
+    );
+  }
 
   // Current time, positioned proportionally within its period. Run it through the date/time
   // header and visual weather rows down to freezing level, excluding wind and lower sections.
-  const markerRows = new Set<RowKind>(['clouds', 'precip', 'temp', 'snow', 'rain', 'freeze']);
+  const markerRows = new Set<RowKind>(['clouds', 'precip', 'temp', 'accumulation', 'freeze']);
   let markerTop: number | undefined;
   let markerBottom: number | undefined;
   let markerY = ROW_H.DATE;
@@ -539,9 +615,6 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
           const col = precipColor(p.precip);
           const cx = colCenter(i);
           els.push(centerText(`pp${i}`, `${p.precip}`, cx, mid - 6, fonts.bold, col));
-          const tw = 40;
-          els.push(<RoundedRect key={`pt${i}`} x={cx - tw / 2} y={mid + 8} width={tw} height={4} r={2} color="#e5e8ee" />);
-          els.push(<RoundedRect key={`pf${i}`} x={cx - tw / 2} y={mid + 8} width={(tw * p.precip) / 100} height={4} r={2} color={col} />);
         });
         break;
 
@@ -555,33 +628,22 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
         break;
       }
 
-      case 'snow':
+      case 'accumulation':
         periods.forEach((p, i) => {
           const cm = p.snow_cm ?? 0;
-          const cx = colCenter(i);
-          const txt = fmtSnow(cm, units);
-          if (cm <= 0 || maxSnow <= 0 || !txt) { els.push(centerText(`sn${i}`, '—', cx, mid, fonts.data, C.nil)); return; }
-          const base = top + row.height - 6;
-          const maxBarH = row.height - 22;
-          const bh = Math.max(3, (cm / maxSnow) * maxBarH);
-          const bw = 22;
-          els.push(<RoundedRect key={`sb${i}`} x={cx - bw / 2} y={base - bh} width={bw} height={bh} r={2} color="#9ec5e8" />);
-          els.push(centerText(`sv${i}`, txt, cx, base - bh - 8, fonts.small, '#3a6ea5'));
-        });
-        break;
-
-      case 'rain':
-        periods.forEach((p, i) => {
           const mm = p.rain_mm ?? 0;
           const cx = colCenter(i);
-          const txt = fmtRain(mm, units);
-          if (mm <= 0 || maxRain <= 0 || !txt) { els.push(centerText(`rn${i}`, '—', cx, mid, fonts.data, C.nil)); return; }
-          const base = top + row.height - 6;
-          const maxBarH = row.height - 22;
-          const bh = Math.max(3, (mm / maxRain) * maxBarH);
-          const bw = 22;
-          els.push(<RoundedRect key={`rb${i}`} x={cx - bw / 2} y={base - bh} width={bw} height={bh} r={2} color="#4a90d9" />);
-          els.push(centerText(`rv${i}`, txt, cx, base - bh - 8, fonts.small, '#2a6bb5'));
+          const snowText = cm > 0 && maxSnow > 0 ? fmtSnow(cm, units) : '';
+          const rainText = mm > 0 && maxRain > 0 ? fmtRain(mm, units) : '';
+          if (snowText && rainText) {
+            const rainY = top + row.height - 10;
+            els.push(centerText(`sv${i}`, snowText, cx, rainY - 18, fonts.small, '#4f82ae'));
+            els.push(centerText(`rv${i}`, rainText, cx, rainY, fonts.small, '#245d91'));
+          } else if (snowText) {
+            els.push(centerText(`sv${i}`, snowText, cx, top + row.height - 10, fonts.small, '#4f82ae'));
+          } else if (rainText) {
+            els.push(centerText(`rv${i}`, rainText, cx, top + row.height - 10, fonts.small, '#245d91'));
+          }
         });
         break;
 
