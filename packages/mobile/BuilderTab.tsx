@@ -113,9 +113,10 @@ function parseLatLon(s: string): { lat: number; lon: number } | null {
 interface Props {
   token: string;
   onForecastReceived: (encoded: string) => void;
+  active: boolean;
 }
 
-export default function BuilderTab({ token, onForecastReceived }: Props) {
+export default function BuilderTab({ token, onForecastReceived, active }: Props) {
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [customCoords, setCustomCoords] = useState('');
@@ -264,6 +265,7 @@ export default function BuilderTab({ token, onForecastReceived }: Props) {
             <LocationMap
               coord={coordsValid ? resolvedCoords : null}
               onPick={(c) => setCustomCoords(`${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`)}
+              active={active}
             />
           </>
         )}

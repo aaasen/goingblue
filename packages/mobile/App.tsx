@@ -71,7 +71,7 @@ export default function App() {
         accessibilityElementsHidden={tab !== 'builder'}
         importantForAccessibility={tab === 'builder' ? 'auto' : 'no-hide-descendants'}
       >
-        <BuilderTab token={token} onForecastReceived={onForecastReceived} />
+        <BuilderTab token={token} onForecastReceived={onForecastReceived} active={tab === 'builder'} />
       </View>
       <View
         style={[styles.tabContent, tab !== 'decoder' && styles.tabHidden]}

@@ -14,6 +14,7 @@ interface Props {
   // When omitted, the map is a read-only preview (no panning, so it doesn't fight a parent ScrollView).
   onPick?: (c: LatLon) => void;
   height?: number;
+  active?: boolean;
 }
 
 // Wide view of the contiguous US, used as the picker's starting point before any coordinate is set.
@@ -27,14 +28,23 @@ const provider = Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT;
 
 // react-native-maps native map. A `.web.tsx` sibling renders nothing on web, where the map module
 // isn't available — callers fall back to the lat/lon text inputs there.
-export default function LocationMap({ coord, onPick, height }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true }: Props) {
   const mapRef = useRef<MapView>(null);
   const fullscreenMapRef = useRef<MapView>(null);
+  const wasActive = useRef(active);
   const [fullscreen, setFullscreen] = useState(false);
+  const [mapRevision, setMapRevision] = useState(0);
   const interactive = onPick != null;
   const initialRegion = coord
     ? { latitude: coord.lat, longitude: coord.lon, latitudeDelta: PICKED_DELTA, longitudeDelta: PICKED_DELTA }
     : DEFAULT_REGION;
+
+  // A react-native-maps surface can lose its native annotations while its parent has
+  // `display: none`. Recreate that surface when its tab becomes visible again.
+  useEffect(() => {
+    if (active && !wasActive.current) setMapRevision((revision) => revision + 1);
+    wasActive.current = active;
+  }, [active]);
 
   useEffect(() => {
     if (!coord) return;
@@ -57,6 +67,7 @@ export default function LocationMap({ coord, onPick, height }: Props) {
       {!fullscreen && (
         <>
           <MapView
+            key={mapRevision}
             ref={mapRef}
             style={StyleSheet.absoluteFill}
             provider={provider}

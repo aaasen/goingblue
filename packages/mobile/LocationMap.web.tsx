@@ -11,6 +11,7 @@ interface Props {
   coord: LatLon | null;
   onPick?: (c: LatLon) => void;
   height?: number;
+  active?: boolean;
 }
 
 export default function LocationMap(_props: Props) {
