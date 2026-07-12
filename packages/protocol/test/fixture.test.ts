@@ -4,14 +4,20 @@ import { decodeMessage } from "../src/registry.js";
 import type { ForecastMessage } from "../src/model.js";
 import v1Fixture from "./fixtures/v1.fixture.json";
 
+// The decoder derives the period layout from the request context (see layout.ts), so this
+// fixture freezes the layout arithmetic — a drifted layoutFor fails here, not just a drifted
+// byte format. The request datetime/duration/offset live in fixture.request (the year floats:
+// it's not on the wire, and the layout only depends on the hour-of-day).
 const d = v1Fixture.decoded as ForecastMessage;
+const req = v1Fixture.request;
 const ctx = () => ({
-  resolution: d.resolution,
   model: 31 - Math.clz32(d.models_mask & -d.models_mask),
   vars_mask: d.vars_mask,
   lat: d.lat,
   lon: d.lon,
-  start: Date.UTC(new Date().getUTCFullYear(), d.month - 1, d.day, d.hour),
+  start: Date.UTC(new Date().getUTCFullYear(), req.month - 1, req.day, req.hour),
+  durationDays: req.durationDays,
+  utcOffsetHours: req.utcOffsetHours,
 });
 
 describe("v1 fixture stability", () => {

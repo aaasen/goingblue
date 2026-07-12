@@ -5,7 +5,7 @@ Going Blue is a tool for retrieving weather forecasts over satellite. It is depl
 I built Going Blue before a Denali ski expedition because I wasn't satisfied with the existing weather forecast tools. For Denali, it was important to have high-altitude wind data, hourly forecasts, and compare multiple models.
 
 Going Blue works like this:
-1. Build a forecast request from the mobile app. Choose time resolution, weather model, and the variables that you need.
+1. Build a forecast request from the mobile app. Choose forecast duration (3–10 days), weather model, and the variables that you need. The server fills the reply with as much time resolution as fits, refining near-term days first.
 2. Send the forecast request to (425) 434-5858 via Garmin inReach, ZOLEO, SMS, or any other satellite messenger.
 3. Copy the forecast response into the mobile app. Responses are encoded in a custom format to maximize space.
 4. View the forecast on the mobile app.
@@ -60,21 +60,31 @@ doubles as an integrity check: desynced reads throw instead of returning plausib
 
 The response is **slim**: it omits everything the client itself chose, carrying only a 7-bit message
 `code`. The client assigns a code to each request and stores the request under it — lat/lon, the
-single model index, variables, resolution, and the requested **UTC** start time — then the response
-echoes the code so the client recovers those fields from its own storage (see
-`packages/mobile/cache.ts`). The code is a rotating index over 128 slots; reusing a code (as it
-cycles) evicts the old forecast in that slot. This trades the protocol's "any string decodes
-anywhere" property for a much smaller header — acceptable because the app is the only client.
+single model index, variables, the requested duration (`d:`, days), the location's UTC offset
+(`z:`, whole hours), and the request time (**UTC**) — then the response echoes the code so the
+client recovers those fields from its own storage (see `packages/mobile/cache.ts`). The code is a
+rotating index over 128 slots; reusing a code (as it cycles) evicts the old forecast in that slot.
+This trades the protocol's "any string decodes anywhere" property for a much smaller header —
+acceptable because the app is the only client.
 
-The client sends the requested start time in the request (`t:`, UTC hours since the epoch, aligned to
-the resolution); the server anchors the forecast to it rather than to "now", so delivery delay can't
-shift which periods come back. **All times are UTC.**
+The client sends the request time in the request (`t:`, UTC hours since the epoch, aligned to the
+hour); the server anchors the forecast window to it rather than to "now", so delivery delay can't
+shift which periods come back.
+
+The **period layout isn't on the wire either**. The server fills the response budget by refining
+whole days from the front of the window, one resolution step at a time (24h → 12h → 6h → 3h → 1h),
+along a canonical fill sequence, and the header carries only the resulting sequence number `seq` —
+both sides derive the identical layout (period count + per-period resolution) from
+`layoutFor(duration, request time, UTC offset, seq)` (see `packages/protocol/src/layout.ts`, which
+is therefore wire format). Periods align to **local midnight** (the `z:` offset); day 0 is partial —
+its first period is the one containing the request time, so refining day 0 discards earlier hours of
+today. `seq < duration` is the truncation fallback: that many whole days, all daily.
 
 | Field            | Bits | Notes                                              |
 | ---------------- | ---- | -------------------------------------------------- |
 | version prefix   | 7    | self-describing protocol version (1 char)          |
-| code             | 7    | message code; recovers lat/lon, model, vars, resolution, and start time from client storage |
-| periods          | 8    | period count − 1 (1–256 periods)                   |
+| code             | 7    | message code; recovers lat/lon, model, vars, duration, UTC offset, and request time from client storage |
+| seq              | 8    | fill-sequence number − 1; the period layout is derived from it |
 | elevation        | 7    | 100 m steps, 0–12700 m (coarse sanity check)       |
 
 The header is 22 packed bits → **5 chars** including the version prefix. The body carries **no length

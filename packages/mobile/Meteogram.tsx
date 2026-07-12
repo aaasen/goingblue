@@ -5,7 +5,7 @@ import {
   LinearGradient, Skia, vec, matchFont, type SkFont,
 } from '@shopify/react-native-skia';
 import {
-  CARDINALS, RESOLUTION_HOURS, modelsFromMask, startDatetime,
+  CARDINALS, modelsFromMask, startDatetime,
   type ForecastMessage, type Period,
 } from '@weather/protocol';
 import type { Units } from './settings';
@@ -325,8 +325,10 @@ function cloudGlyph(key: string, cx: number, top: number, h: number, code: numbe
 
 // ── Meteogram canvas (one per model) ─────────────────────────────────────--
 
-function ModelCanvas({ periods, rows, dates, resHours, units, fonts }: {
-  periods: Period[]; rows: Row[]; dates: Date[]; resHours: number; units: Units; fonts: Fonts;
+function ModelCanvas({ periods, rows, dates, steps, units, fonts }: {
+  // `steps` is each period's span in hours — the fill mixes resolutions within one message.
+  // Columns stay equal-width; the span drives labels and shading.
+  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; fonts: Fonts;
 }) {
   const n = periods.length;
   const width = NAME_W + n * CELL_W;
@@ -337,14 +339,13 @@ function ModelCanvas({ periods, rows, dates, resHours, units, fonts }: {
   const els: ReactNode[] = [];
 
   // 1. Day/night shading (only meaningful sub-daily; 6am–6pm = day).
-  if (resHours < 24) {
-    dates.forEach((d, i) => {
-      const h = d.getHours();
-      if (h < 6 || h >= 18) {
-        els.push(<Rect key={`night${i}`} x={colLeft(i)} y={ROW_H.DATE} width={CELL_W} height={totalH - ROW_H.DATE} color={C.night} />);
-      }
-    });
-  }
+  dates.forEach((d, i) => {
+    if (steps[i] >= 24) return;
+    const h = d.getHours();
+    if (h < 6 || h >= 18) {
+      els.push(<Rect key={`night${i}`} x={colLeft(i)} y={ROW_H.DATE} width={CELL_W} height={totalH - ROW_H.DATE} color={C.night} />);
+    }
+  });
 
   // 2. Column separators + header underline.
   for (let i = 0; i <= n; i++) {
@@ -354,7 +355,7 @@ function ModelCanvas({ periods, rows, dates, resHours, units, fonts }: {
 
   // 3. Date header.
   dates.forEach((d, i) => {
-    const lines = periodLabel(d, resHours).split('\n');
+    const lines = periodLabel(d, steps[i]).split('\n');
     const cx = colCenter(i);
     if (lines.length === 2) {
       els.push(centerText(`dt${i}a`, lines[0], cx, ROW_H.DATE / 2 - 9, fonts.date, C.date));
@@ -536,7 +537,6 @@ function ModelCanvas({ periods, rows, dates, resHours, units, fonts }: {
 
 export default function Meteogram({ msg, units }: { msg: ForecastMessage; units: Units }) {
   const models = modelsFromMask(msg.models_mask);
-  const resHours = RESOLUTION_HOURS[msg.resolution] ?? 24;
 
   const fonts = useMemo<Fonts>(() => ({
     label: matchFont({ fontSize: 12, fontWeight: '500' }),
@@ -549,15 +549,22 @@ export default function Meteogram({ msg, units }: { msg: ForecastMessage; units:
 
   const blocks = useMemo(() => msg.periods.map((periods, mi) => {
     const start = startDatetime(msg);
-    const stepMs = resHours * 3600000;
-    const dates = periods.map((_, i) => new Date(start.getTime() + i * stepMs));
+    // Per-period spans can be mixed (the layout refines near-term days first). Each period
+    // starts where the previous one ended.
+    const steps = msg.periodHours;
+    const dates: Date[] = [];
+    let t = start.getTime();
+    for (const step of steps) {
+      dates.push(new Date(t));
+      t += step * 3600000;
+    }
     return {
       name: models[mi] ?? `Model ${mi + 1}`,
       color: MODEL_COLORS[models[mi]] ?? '#666',
       rows: buildRows(periods, units),
-      periods, dates,
+      periods, dates, steps,
     };
-  }), [msg, models, resHours, units]);
+  }), [msg, models, units]);
 
   return (
     <View style={styles.container}>
@@ -569,7 +576,7 @@ export default function Meteogram({ msg, units }: { msg: ForecastMessage; units:
               <RNText style={styles.modelHeaderText}>{b.name}</RNText>
             </View>
           )}
-          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} resHours={resHours} units={units} fonts={fonts} />
+          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} steps={b.steps} units={units} fonts={fonts} />
           {bi < blocks.length - 1 && <View style={styles.sep} />}
         </View>
       ))}

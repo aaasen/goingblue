@@ -14,14 +14,9 @@ export const ELEV_BITS = 14; // 0..16383m
 export const ALPHABET =
   "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
 
+// The refinement ladder: resolution index (0..4, coarse → fine) → hours per period.
+// Indices are the fill sequence's stages — see layout.ts.
 export const RESOLUTION_HOURS: Record<number, number> = { 0: 24, 1: 12, 2: 6, 3: 3, 4: 1 };
-export const RESOLUTION_LABEL: Record<number, string> = {
-  0: "daily",
-  1: "12h",
-  2: "6h",
-  3: "3h",
-  4: "1h",
-};
 
 export const MODEL_BIT: Record<string, number> = { HRES: 0, GFS: 1, ICON: 2, IFS: 3 };
 export const MODEL_NAMES: string[] = ["ECMWF IFS HRES", "GFS", "ICON", "ECMWF IFS 0.25"];

@@ -26,7 +26,7 @@ import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD, type HourlyData } from "../src/forecast.ts";
-import { VARS_BIT, v1EncodeBreakdown, V1_MAX_PERIODS, type ForecastMessage } from "@weather/protocol";
+import { VARS_BIT, v1EncodeBreakdown, type ForecastMessage, type Period } from "@weather/protocol";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..", "..");
@@ -248,11 +248,6 @@ const GROUP_VARS: Record<GroupId, string[]> = {
 };
 const maskOf = (vars: string[]) => vars.reduce((m, v) => m | (1 << VARS_BIT[v]), 0);
 const BASE_MASK = maskOf(BASE_VARS);
-
-// At 1h resolution each period is a single hourly sample, so tmin is identical to temp (the
-// max) — drop it so the report doesn't show a wasted, redundant column (mirrors forecast.ts).
-const maskForRes = (mask: number, resolutionIdx: number) =>
-  HOURS_PER_PERIOD[resolutionIdx] === 1 ? mask & ~(1 << VARS_BIT.tmin) : mask;
 
 // All 8 variable-group combinations (bit i = GROUP_IDS[i]); combo 0b001 = Clouds only is the default.
 const COMBOS = [...Array(1 << GROUP_IDS.length).keys()];
@@ -581,21 +576,24 @@ async function report(args: Args): Promise<void> {
       const startEpochHour = Math.floor(runHour / hoursPerPeriod) * hoursPerPeriod;
       const start = new Date(startEpochHour * 3600000);
       const h = rec.response.hourly as HourlyData;
-      const n = Math.min(V1_MAX_PERIODS, Math.floor(h.time.length / hoursPerPeriod));
+      const n = Math.min(256, Math.floor(h.time.length / hoursPerPeriod));
       const rows = aggregateHourly(h, h.time, n, resolutionIdx, startEpochHour);
+      // This sweep measures per-column costs on uniform-resolution slices, not canonical fill
+      // layouts — seq/durationDays/periodHours are placeholders (the header is the same width
+      // for any seq, and the encoder reads only seq + periods).
       const msgFor = (periods: Period[], mask: number): ForecastMessage => ({
         version: 1, code: 0, days: Math.ceil(periods.length / (24 / hoursPerPeriod)),
-        resolution: resolutionIdx, models_mask: 1, vars_mask: mask,
+        models_mask: 1, vars_mask: mask,
         month: start.getUTCMonth() + 1, day: start.getUTCDate(), hour: start.getUTCHours(),
         lat: 0, lon: 0, elevation, periods: [periods],
+        seq: 1, durationDays: 1, periodHours: periods.map(() => hoursPerPeriod),
       });
       // One Period array with every field populated; vary only vars_mask per combo (columns encode
       // independently). "GFS" (non-HRES) so toFullPeriod keeps the pressure/freeze columns.
-      const resAllMask = maskForRes(allMask, resolutionIdx);
-      const allPeriods = rows.map((r) => toFullPeriod(r, resAllMask, "GFS", resolutionIdx));
+      const allPeriods = rows.map((r) => toFullPeriod(r, allMask, "GFS"));
 
       for (const c of COMBOS) {
-        const { n: fittedN, breakdown } = fitBreakdown(msgFor(allPeriods, maskForRes(comboMask(c), resolutionIdx)), args.maxChars);
+        const { n: fittedN, breakdown } = fitBreakdown(msgFor(allPeriods, comboMask(c)), args.maxChars);
         const vk = vkey(res, c);
         periodsFit.get(vk)!.push(fittedN);
         versionBits = breakdown.versionBits; headerBits = breakdown.headerBits;

@@ -1,0 +1,175 @@
+import { describe, it, expect } from "vitest";
+import {
+  v1MessageToString,
+  v1MessageFromString,
+  v1EncodeBreakdown,
+  V1_VERSION,
+  layoutFor,
+  maxFillSeq,
+  decodeMessage,
+  type ForecastMessage,
+  type Period,
+  type RequestContext,
+  type FillLayout,
+} from "../src/index.js";
+
+// Every variable (bit 12 is `rain`, bit 13 `tmin`).
+const ALL_VARS = (1 << 14) - 1;
+
+// Request: 2026-07-12 at 13:00 local, UTC-9, 10 days.
+const DURATION_DAYS = 10;
+const UTC_OFFSET = -9;
+const REQ_UTC_HOUR = Date.UTC(2026, 6, 12, 13) / 3600000 - UTC_OFFSET;
+
+// Deterministic per-period values, varied so delta columns get exercised.
+function periodAt(i: number): Period {
+  return {
+    weathercode: [0, 3, 61, 71, 95][i % 5],
+    precip: (i * 13) % 101,
+    temp_c: -5 + (i % 7),
+    temp_min_c: -9 + (i % 7),
+    snow_cm: i % 4 === 0 ? i % 11 : 0,
+    rain_mm: i % 3 === 0 ? (i % 5) : 0,
+    freeze_m: (2 + (i % 3)) * 304.8,
+    wind_sfc_kph: ((i % 6) + 1) * 5 * 1.609344,
+    wind_sfc_dir: i % 8,
+    wind_500_kph: ((i % 4) + 4) * 5 * 1.609344,
+    wind_500_dir: (i + 2) % 8,
+    wind_600_kph: ((i % 5) + 3) * 5 * 1.609344,
+    wind_600_dir: (i + 4) % 8,
+    wind_700_kph: ((i % 3) + 2) * 5 * 1.609344,
+    wind_700_dir: (i + 6) % 8,
+    cloud_total: Math.round(((i * 29) % 8) * 100 / 7),
+    cloud_high: Math.round((i % 8) * 100 / 7),
+    cloud_mid: Math.round(((i + 3) % 8) * 100 / 7),
+    cloud_low: Math.round(((i + 5) % 8) * 100 / 7),
+  };
+}
+
+function msgFor(layout: FillLayout, overrides: Partial<ForecastMessage> = {}): ForecastMessage {
+  const first = new Date(layout.periodStartUtcHour[0] * 3600000);
+  return {
+    version: V1_VERSION,
+    code: 42,
+    days: layout.days,
+    models_mask: 0b001,
+    vars_mask: ALL_VARS,
+    month: first.getUTCMonth() + 1,
+    day: first.getUTCDate(),
+    hour: first.getUTCHours(),
+    lat: 63.135,
+    lon: -150.989,
+    elevation: 500,
+    periods: [layout.periodHours.map((_, i) => periodAt(i))],
+    seq: layout.seq,
+    durationDays: layout.durationDays,
+    periodHours: layout.periodHours,
+    ...overrides,
+  };
+}
+
+const ctx: RequestContext = {
+  model: 0,
+  vars_mask: ALL_VARS,
+  lat: 63.135,
+  lon: -150.989,
+  start: REQ_UTC_HOUR * 3600000,
+  durationDays: DURATION_DAYS,
+  utcOffsetHours: UTC_OFFSET,
+};
+
+function roundTrip(seq: number): { original: ForecastMessage; decoded: ForecastMessage } {
+  const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, seq);
+  const original = msgFor(layout);
+  const decoded = v1MessageFromString(v1MessageToString(original), () => ctx);
+  return { original, decoded };
+}
+
+describe("mixed-layout round-trip encoding", () => {
+  it("recovers the layout from seq alone — header, periodHours, and count", () => {
+    // A mixed layout: seq = 2D + 3 → days 0-2 at 6h, the rest at 12h.
+    const seq = 2 * DURATION_DAYS + 3;
+    const { original, decoded } = roundTrip(seq);
+    expect(decoded.version).toBe(V1_VERSION);
+    expect(decoded.code).toBe(42);
+    expect(decoded.seq).toBe(seq);
+    expect(decoded.durationDays).toBe(DURATION_DAYS);
+    expect(decoded.days).toBe(DURATION_DAYS);
+    expect(decoded.periodHours).toEqual(original.periodHours);
+    expect(decoded.periods[0]).toHaveLength(original.periods[0].length);
+    expect(decoded.elevation).toBe(500);
+    expect(decoded.models_mask).toBe(0b001);
+    expect(decoded.vars_mask).toBe(ALL_VARS);
+  });
+
+  it("month/day/hour describe the first period's start, not the request time", () => {
+    // All-1h layout: the first period is the request hour itself (13:00 local = 22:00 UTC).
+    const all1h = roundTrip(5 * DURATION_DAYS).decoded;
+    expect([all1h.month, all1h.day, all1h.hour]).toEqual([7, 12, 22]);
+    // All-24h layout: day 0's period starts at local midnight (09:00 UTC).
+    const all24h = roundTrip(DURATION_DAYS).decoded;
+    expect([all24h.month, all24h.day, all24h.hour]).toEqual([7, 12, 9]);
+  });
+
+  it("round-trips period values across a mixed layout", () => {
+    const { original, decoded } = roundTrip(3 * DURATION_DAYS + 2);
+    original.periods[0].forEach((p, i) => {
+      const d = decoded.periods[0][i];
+      expect(d.weathercode).toBe(p.weathercode);
+      expect(d.temp_c).toBe(p.temp_c);
+      expect(d.temp_min_c).toBe(p.temp_min_c);
+      expect(d.freeze_m).toBeCloseTo(p.freeze_m!, 5);
+      expect(d.wind_sfc_kph).toBeCloseTo(p.wind_sfc_kph!, 5);
+      expect(d.wind_sfc_dir).toBe(p.wind_sfc_dir);
+      expect(d.cloud_high).toBe(p.cloud_high);
+      expect(d.cloud_low).toBe(p.cloud_low);
+    });
+  });
+
+  it("round-trips every seq in the sequence", () => {
+    for (let seq = 1; seq <= maxFillSeq(DURATION_DAYS); seq++) {
+      const { original, decoded } = roundTrip(seq);
+      expect(decoded.periodHours).toEqual(original.periodHours);
+      expect(decoded.periods[0]).toHaveLength(original.periods[0].length);
+    }
+  });
+
+  it("truncated layouts decode with days < durationDays", () => {
+    const { decoded } = roundTrip(4);
+    expect(decoded.days).toBe(4);
+    expect(decoded.periodHours).toEqual([24, 24, 24, 24]);
+  });
+
+  it("dispatches through the version registry", () => {
+    const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, 15);
+    const encoded = v1MessageToString(msgFor(layout));
+    const decoded = decodeMessage(encoded, () => ctx);
+    expect(decoded.version).toBe(V1_VERSION);
+    expect(decoded.seq).toBe(15);
+  });
+
+  it("rejects a context without duration fields (e.g. a stale store entry)", () => {
+    const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, 10);
+    const encoded = v1MessageToString(msgFor(layout));
+    const staleCtx = { ...ctx, durationDays: undefined, utcOffsetHours: undefined } as unknown as RequestContext;
+    expect(() => v1MessageFromString(encoded, () => staleCtx)).toThrow(/duration/);
+  });
+
+  it("rejects a message without a seq", () => {
+    const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, 10);
+    expect(() => v1MessageToString(msgFor(layout, { seq: undefined }))).toThrow(/seq/);
+  });
+
+  it("breakdown produces the identical encoding and accounts every column", () => {
+    const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, 2 * DURATION_DAYS + 5);
+    const m = msgFor(layout);
+    const b = v1EncodeBreakdown(m);
+    expect(b.encoded).toBe(v1MessageToString(m));
+    expect(b.chars).toBe(b.encoded.length);
+    expect(b.bodyBits).toBeGreaterThan(0);
+    const names = b.columns.map((c) => c.name);
+    expect(names).toContain("weathercode");
+    expect(names).toContain("temp");
+    expect(names).toContain("tmin");
+  });
+});

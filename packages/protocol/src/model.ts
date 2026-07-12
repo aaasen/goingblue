@@ -52,13 +52,15 @@ export interface Period {
 export interface ForecastMessage {
   version: number;
   // Message code (0..127): a client-assigned key that the response echoes. The client stores the
-  // request (lat/lon/models/vars/resolution) under this code; the encoded response omits those
+  // request (lat/lon/models/vars/duration) under this code; the encoded response omits those
   // fields and the decoder recovers them via a ContextResolver. See RequestContext.
   code: number;
+  // Calendar days covered (< durationDays when the budget forced truncation).
   days: number;
-  resolution: number;
   models_mask: number;
   vars_mask: number;
+  // The FIRST PERIOD's start datetime (UTC) — at local midnight or earlier than the request
+  // time, since the first period is the one containing it (see layout.ts).
   month: number;
   day: number;
   hour: number;
@@ -66,22 +68,34 @@ export interface ForecastMessage {
   lon: number;
   elevation: number;
   periods: Period[][];
+  // Fill-sequence number carried in the header; the period layout — count and per-period
+  // resolution — is derived from it (see layout.ts).
+  seq: number;
+  // Requested forecast duration in days (from the request context).
+  durationDays: number;
+  // Span of each period in hours (periodHours.length === periods[m].length). Periods within
+  // one message can span different resolutions.
+  periodHours: number[];
 }
 
 // The request fields the client recovers from its own storage by message code, rather than
 // receiving them in the (slim) response. The encoder still needs them to lay out the body, so
 // they remain on ForecastMessage; the wire just doesn't carry them.
 export interface RequestContext {
-  resolution: number;
   // A response carries exactly one model, identified by index (0..3 → MODEL_NAMES). The decoded
   // message exposes it as a single-bit models_mask for display.
   model: number;
   vars_mask: number;
   lat: number;
   lon: number;
-  // Forecast start as UTC epoch milliseconds, aligned to the resolution. The client chooses it
-  // (so delivery delay can't shift it) and stores it; the slim header omits month/day/hour.
+  // Request time as UTC epoch milliseconds, aligned to the hour. The client chooses it (so
+  // delivery delay can't shift it) and stores it; the slim header omits month/day/hour.
   start: number;
+  // The requested duration in days and the location's fixed UTC offset in whole hours,
+  // captured at request time (the `d:`/`z:` tokens). Both feed layoutFor(), which recovers
+  // the period layout the slim header omits — see layout.ts.
+  durationDays: number;
+  utcOffsetHours: number;
 }
 
 // Resolves a message code to the originating request's context. Returns undefined when the code

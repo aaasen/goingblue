@@ -95,25 +95,18 @@ function row(snow_cm: number): Row {
 
 describe("toFullPeriod — snow", () => {
   it("passes snow_cm through unchanged", () => {
-    expect(toFullPeriod(row(0.28), DEFAULT_VARS_MASK, "HRES", 0).snow_cm).toBe(0.28);
-    expect(toFullPeriod(row(5.08), DEFAULT_VARS_MASK, "HRES", 0).snow_cm).toBe(5.08);
-    expect(toFullPeriod(row(100), DEFAULT_VARS_MASK, "HRES", 0).snow_cm).toBe(100);
+    expect(toFullPeriod(row(0.28), DEFAULT_VARS_MASK, "HRES").snow_cm).toBe(0.28);
+    expect(toFullPeriod(row(5.08), DEFAULT_VARS_MASK, "HRES").snow_cm).toBe(5.08);
+    expect(toFullPeriod(row(100), DEFAULT_VARS_MASK, "HRES").snow_cm).toBe(100);
   });
 });
 
 describe("toFullPeriod — tmin", () => {
   const maskWithTmin = DEFAULT_VARS_MASK | (1 << VARS_BIT.tmin);
 
-  it("drops tmin at 1h resolution — a single hourly sample has no min distinct from temp", () => {
-    const p = toFullPeriod(row(0), maskWithTmin, "HRES", 4);
-    expect(p.temp_min_c).toBeUndefined();
-  });
-
-  it("keeps tmin at coarser resolutions", () => {
-    for (const resolutionIdx of [0, 1, 2, 3]) {
-      const p = toFullPeriod(row(0), maskWithTmin, "HRES", resolutionIdx);
-      expect(p.temp_min_c).toBe(-15);
-    }
+  it("keeps tmin (even 1h periods carry it, so mixed-resolution columns stay uniform)", () => {
+    const p = toFullPeriod(row(0), maskWithTmin, "HRES");
+    expect(p.temp_min_c).toBe(-15);
   });
 });
 
@@ -145,7 +138,7 @@ describe("aggregateRows — 1h resolution", () => {
   it("toFullPeriod passes snow_cm through from row", () => {
     const idx = fixture.hourly.snowfall.findIndex((v) => v === 0.28);
     expect(idx).toBeGreaterThanOrEqual(0);
-    const p = toFullPeriod(rows[idx], DEFAULT_VARS_MASK, "HRES", 4);
+    const p = toFullPeriod(rows[idx], DEFAULT_VARS_MASK, "HRES");
     expect(p.snow_cm).toBe(0.28);
   });
 });
@@ -186,7 +179,7 @@ describe("aggregateRows — daily resolution", () => {
   });
 
   it("toFullPeriod passes daily snow_cm through from row", () => {
-    const p = toFullPeriod(rows[0], DEFAULT_VARS_MASK, "HRES", 0);
+    const p = toFullPeriod(rows[0], DEFAULT_VARS_MASK, "HRES");
     expect(p.snow_cm).toBe(rows[0].snow_cm);
   });
 });

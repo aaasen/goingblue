@@ -10,11 +10,9 @@ const GFS  = 1 << MODEL_BIT["GFS"];
 const IFS  = 1 << MODEL_BIT["IFS"];
 
 describe("parseRequest", () => {
-  it("defaults: fills the budget (15 daily periods at horizon), daily, HRES, default vars, location 0", () => {
-    // No d: → the server fits as many periods as the response budget allows; at daily
-    // resolution that's the 15-day forecast horizon.
+  it("defaults: 7-day duration, UTC grid, HRES, default vars, location 0", () => {
     const p = parseRequest("");
-    expect(p).toMatchObject({ nPeriods: 15, resolutionIdx: 0, modelsMask: HRES, locationIdx: 0 });
+    expect(p).toMatchObject({ durationDays: 7, utcOffsetHours: 0, modelsMask: HRES, locationIdx: 0 });
     expect(p.varsMask).toBe(DEFAULT_VARS_MASK);
   });
 
@@ -48,30 +46,15 @@ describe("parseRequest", () => {
     expect(parseRequest("").maxChars).toBe(160);
   });
 
-  it("c: sets the max response length; the fetch count is the resolution horizon, not the budget", () => {
+  it("c: sets the max response length; the fill trims to it at encode time, not parse time", () => {
     expect(parseRequest("c:320").maxChars).toBe(320);
-    // The encoding is variable-length, so the response is trimmed to the budget at encode time.
-    // The parsed period count is just the resolution horizon and no longer varies with c:.
-    const dflt = parseRequest("r:1h").nPeriods;
-    const larger = parseRequest("c:320 r:1h").nPeriods;
-    const smaller = parseRequest("c:80 r:1h").nPeriods;
-    expect(larger).toBe(dflt);
-    expect(smaller).toBe(dflt);
+    // The budget doesn't change what's parsed — only how far the fill refines.
+    expect(parseRequest("c:320 d:7").durationDays).toBe(7);
+    expect(parseRequest("c:80 d:7").durationDays).toBe(7);
   });
 
   it("c: clamps the max response length to a minimum of 1", () => {
     expect(parseRequest("c:0").maxChars).toBe(1);
-    // The fetch count is the horizon regardless of budget; the encoder trims to fit at send time.
-    expect(parseRequest("c:0 r:daily").nPeriods).toBe(15);
-  });
-
-  it("the fetch count depends only on resolution, not the variable set", () => {
-    // Trimming to the response budget happens at encode time, so the parsed period count is the
-    // resolution horizon regardless of how many variables are requested.
-    const defaultRes = parseRequest("r:1h").nPeriods;
-    const richRes = parseRequest("r:1h v:precip,temp,tmin,snow,freeze,wind,w500,w600,w700,cc,cch,ccm,ccl").nPeriods;
-    expect(defaultRes).toBeGreaterThan(0);
-    expect(richRes).toBe(defaultRes);
   });
 
   it("k: sets the message code, defaulting to 0", () => {
@@ -81,22 +64,9 @@ describe("parseRequest", () => {
     expect(parseRequest("k:200").code).toBe(0);
   });
 
-  it("t: sets the requested UTC start hour, defaulting to a recent aligned hour", () => {
+  it("t: sets the request time, defaulting to the current hour", () => {
     expect(parseRequest("t:480000").startEpochHour).toBe(480000);
-    const dflt = parseRequest("").startEpochHour;
-    expect(Number.isInteger(dflt)).toBe(true);
-    expect(dflt).toBeGreaterThan(0);
-    // daily default aligns down to a UTC day boundary (multiple of 24 epoch-hours)
-    expect(dflt % 24).toBe(0);
-  });
-
-  it("r: sets resolution index", () => {
-    expect(parseRequest("r:1h").resolutionIdx).toBe(4);
-    expect(parseRequest("r:3h").resolutionIdx).toBe(3);
-    expect(parseRequest("r:6h").resolutionIdx).toBe(2);
-    expect(parseRequest("r:12h").resolutionIdx).toBe(1);
-    expect(parseRequest("r:daily").resolutionIdx).toBe(0);
-    expect(parseRequest("r:24h").resolutionIdx).toBe(0);
+    expect(parseRequest("").startEpochHour).toBe(Math.floor(Date.now() / 3600000));
   });
 
   it("m: single model", () => {
@@ -131,14 +101,43 @@ describe("parseRequest", () => {
   });
 
   it("full message parses all fields", () => {
-    const p = parseRequest("l:14k r:3h m:ifs v:precip,temp");
+    const p = parseRequest("l:14k d:5 z:-9 m:ifs v:precip,temp");
     expect(p).toMatchObject({
       locationIdx: 2,
-      resolutionIdx: 3,
+      durationDays: 5,
+      utcOffsetHours: -9,
       modelsMask: IFS,
     });
-    expect(p.nPeriods).toBeGreaterThan(0);
     expect(p.varsMask).toBe((1 << VARS_BIT["precip"]) | (1 << VARS_BIT["temp"]));
+  });
+
+  it("vN token overrides the decoder version, defaulting to the current version", () => {
+    expect(parseRequest("").decoderVersion).toBe(1);
+    expect(parseRequest("v1 d:7").decoderVersion).toBe(1);
+    expect(parseRequest("v3").decoderVersion).toBe(3); // routed to a clear unsupported-version error
+  });
+
+  it("d: sets the duration in days, clamped to 1..10, defaulting to 7", () => {
+    expect(parseRequest("d:3").durationDays).toBe(3);
+    expect(parseRequest("d:10").durationDays).toBe(10);
+    expect(parseRequest("d:7d").durationDays).toBe(7); // trailing "d" tolerated
+    expect(parseRequest("d:0").durationDays).toBe(1);
+    expect(parseRequest("d:99").durationDays).toBe(10);
+    expect(parseRequest("").durationDays).toBe(7);
+  });
+
+  it("z: sets the UTC offset in whole hours, ignoring out-of-range values", () => {
+    expect(parseRequest("z:-9").utcOffsetHours).toBe(-9);
+    expect(parseRequest("z:14").utcOffsetHours).toBe(14);
+    expect(parseRequest("z:0").utcOffsetHours).toBe(0);
+    expect(parseRequest("z:15").utcOffsetHours).toBe(0);
+    expect(parseRequest("z:-13").utcOffsetHours).toBe(0);
+    expect(parseRequest("").utcOffsetHours).toBe(0);
+  });
+
+  it("keeps tmin in the vars mask (mixed messages need uniform columns)", () => {
+    const p = parseRequest("d:3 v:temp,tmin");
+    expect(p.varsMask & (1 << VARS_BIT["tmin"])).not.toBe(0);
   });
 
   it("u: extracts a valid account token", () => {

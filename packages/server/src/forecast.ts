@@ -5,7 +5,8 @@ import {
   CURRENT_VERSION,
   isValidToken,
   normalizeToken,
-  V1_MAX_PERIODS,
+  layoutFor,
+  maxFillSeq,
   type Period,
   type ForecastMessage,
   type VersionedCodec,
@@ -43,15 +44,6 @@ export const HOURS_PER_PERIOD: Record<number, number> = {
   2: 6,
   3: 3,
   4: 1,
-};
-
-const RESOLUTION_LABEL_TO_IDX: Record<string, number> = {
-  daily: 0,
-  "24h": 0,
-  "12h": 1,
-  "6h": 2,
-  "3h": 3,
-  "1h": 4,
 };
 
 const MODEL_NAME_TO_BIT: Record<string, number> = {
@@ -169,6 +161,7 @@ async function fetchHourly(
   lon: number,
   tz: string,
   elev_m?: number,
+  pastDays = 0,
 ): Promise<[HourlyData, string[], number]> {
   const hasPressure = !MODEL_NO_PRESSURE.has(modelKey);
   const pressureVars = hasPressure
@@ -187,6 +180,7 @@ async function fetchHourly(
     models: OPENMETEO_MODELS[modelKey],
   });
   if (elev_m !== undefined) params.set("elevation", String(elev_m));
+  if (pastDays > 0) params.set("past_days", String(pastDays));
   const url = `https://api.open-meteo.com/v1/forecast?${params}`;
   console.log("Open-Meteo request:", url);
   const resp = await fetch(url);
@@ -230,9 +224,8 @@ export function aggregateHourly(
 
   const anchorKey = new Date(startEpochHour * 3600000).toISOString().slice(0, 13); // "YYYY-MM-DDTHH"
 
-  type Window = { indices: number[] };
-  const windows: Window[] = [];
-  const windowMap = new Map<string, Window>();
+  const windows: number[][] = [];
+  const windowMap = new Map<string, number[]>();
 
   for (let i = 0; i < times.length; i++) {
     const date = times[i].slice(0, 10);
@@ -242,15 +235,20 @@ export function aggregateHourly(
     if (key < anchorKey) continue;
     if (!windowMap.has(key)) {
       if (windows.length >= nTotal) break;
-      const w: Window = { indices: [] };
+      const w: number[] = [];
       windowMap.set(key, w);
       windows.push(w);
     }
-    windowMap.get(key)!.indices.push(i);
+    windowMap.get(key)!.push(i);
   }
 
-  const rows = windows.map((w) => {
-    const idx = w.indices;
+  return rowsFromWindows(h, times, windows);
+}
+
+// Aggregate hourly samples into one Row per window (a window is the hourly indices it covers).
+// Shared by the uniform-resolution keying above and the layout-driven windows (v2) below.
+function rowsFromWindows(h: HourlyData, times: string[], windows: number[][]): Row[] {
+  const rows = windows.map((idx) => {
     // Null-safe: a series may be entirely absent when aggregating injected data (e.g. an offline
     // corpus that omits precipitation_probability); production always supplies these arrays.
     const pick = (arr: (number | null)[] | undefined): (number | null)[] =>
@@ -298,11 +296,10 @@ export function aggregateHourly(
 const PRESSURE_VAR_BITS =
   (1 << VARS_BIT.freeze) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
 
-export function toFullPeriod(r: Row, varsMask: number, modelKey: string, resolutionIdx: number): Period {
+// tmin is kept even for 1h periods (where it equals temp — the delta columns encode the
+// duplication away) so a mixed-resolution message has uniform columns.
+export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period {
   if (MODEL_NO_PRESSURE.has(modelKey)) varsMask &= ~PRESSURE_VAR_BITS;
-  // At 1h resolution each period is a single hourly sample, so tmin is identical to temp
-  // (the max) — drop it rather than encode a duplicate column.
-  if (HOURS_PER_PERIOD[resolutionIdx] === 1) varsMask &= ~(1 << VARS_BIT.tmin);
   const p: Period = { weathercode: r.weathercode ?? 0 };
   if (varsMask & (1 << VARS_BIT.precip)) p.precip     = r.precip ?? 0;
   if (varsMask & (1 << VARS_BIT.temp))   p.temp_c     = r.temp_max_c ?? 0;
@@ -337,15 +334,17 @@ export interface ForecastParams {
   locationIdx: number;
   lat?: number;
   lon?: number;
-  nPeriods: number;
-  resolutionIdx: number;
+  // The requested duration in days (`d:`) and the location's fixed UTC offset in whole
+  // hours (`z:`).
+  durationDays: number;
+  utcOffsetHours: number;
   modelsMask: number;
   varsMask: number;
   maxChars: number;
   decoderVersion: number;
   // 7-bit message code from a `k:` request word, echoed in the response (default 0).
   code: number;
-  // Requested UTC forecast start as hours since the epoch (`t:`), aligned to the resolution.
+  // Request time as UTC hours since the epoch (`t:`), aligned to the hour.
   startEpochHour: number;
   // Normalized account token from a `u:` request word, or null when absent/malformed.
   // Phase 1 only records it; it does not yet gate the response.
@@ -353,38 +352,24 @@ export interface ForecastParams {
 }
 
 const DEFAULT_MAX_CHARS = 160; // default response length cap (Garmin inReach reply limit)
-const HORIZON_DAYS = 15;       // upstream forecast horizon
-
-function popcount(n: number): number {
-  let c = 0;
-  while (n) { c += n & 1; n >>>= 1; }
-  return c;
-}
-
-// How many periods to fetch from upstream: the full forecast horizon for the resolution, capped
-// by the protocol's period field (V1_MAX_PERIODS). The adaptive encoding is variable-length, so we
-// no longer size the response analytically — instead we over-fetch the horizon and trim the
-// encoded message to the budget afterwards (see fitEncodedToBudget). The client may receive fewer
-// periods than fetched; that's expected.
-function horizonPeriods(resolutionIdx: number): number {
-  const periodsPerDay = 24 / HOURS_PER_PERIOD[resolutionIdx];
-  return Math.min(V1_MAX_PERIODS, Math.floor(HORIZON_DAYS * periodsPerDay));
-}
+const DEFAULT_DURATION_DAYS = 7; // default when the request has no `d:` token
+const MAX_DURATION_DAYS = 10;
 
 export function parseRequest(body: string): ForecastParams {
   const words = body.toLowerCase().trim().split(/\s+/);
   let locationIdx = 0;
   let lat: number | undefined;
   let lon: number | undefined;
-  let resolutionIdx = 0;
+  let durationDays = DEFAULT_DURATION_DAYS; // forecast duration, override with `d:` (days)
+  let utcOffsetHours = 0; // local-midnight offset, override with `z:` (whole hours east of UTC)
   let modelsMask = 1; // ECMWF default
   let varsMask = 0;
   let maxChars = DEFAULT_MAX_CHARS; // override with a `c:` token in the request
   let decoderVersion = CURRENT_VERSION; // override with a `vN` token in the request
   let userToken: string | null = null; // set from a `u:` token in the request
   let code = 0; // client message code (`k:` token); echoed in the response so the client can
-                // match it to the stored request and recover lat/lon/models/vars/resolution
-  let startEpochHour = NaN; // requested UTC forecast start (`t:`, hours since epoch); see below
+                // match it to the stored request and recover lat/lon/models/vars/duration
+  let startEpochHour = NaN; // request time (`t:`, UTC hours since epoch); see below
 
   // Compact "X,Y" (message body) takes priority over "Lat X Lon Y" (Garmin email footer)
   const gpsMatch =
@@ -407,8 +392,14 @@ export function parseRequest(body: string): ForecastParams {
         } else if (val in LOCATION_NAME_TO_IDX) {
           locationIdx = LOCATION_NAME_TO_IDX[val];
         }
-      } else if (key === "r") {
-        if (val in RESOLUTION_LABEL_TO_IDX) resolutionIdx = RESOLUTION_LABEL_TO_IDX[val];
+      } else if (key === "d") {
+        // Duration in days, with or without a trailing "d" (d:7 or d:7d).
+        const n = parseInt(val);
+        if (!isNaN(n)) durationDays = Math.min(Math.max(n, 1), MAX_DURATION_DAYS);
+      } else if (key === "z") {
+        // The location's UTC offset in whole hours; out-of-range values are ignored.
+        const n = parseInt(val);
+        if (!isNaN(n) && n >= -12 && n <= 14) utcOffsetHours = n;
       } else if (key === "c") {
         const n = parseInt(val);
         if (!isNaN(n)) maxChars = Math.max(1, n);
@@ -440,98 +431,133 @@ export function parseRequest(body: string): ForecastParams {
 
   if (varsMask === 0) varsMask = DEFAULT_VARS_MASK;
 
-  // At 1h resolution each period is a single hourly sample, so tmin is identical to temp
-  // (the max) — drop it so it's never encoded as a wasted, redundant column.
-  if (HOURS_PER_PERIOD[resolutionIdx] === 1) varsMask &= ~(1 << VARS_BIT.tmin);
-
-  // Default the forecast start to "now", aligned down to the resolution boundary in UTC. The client
-  // normally supplies `t:` so the start is fixed against delivery delay, but a missing one is safe.
-  const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
+  // Default the request time to "now", aligned down to the hour. The client normally supplies
+  // `t:` so the forecast window is fixed against delivery delay, but a missing one is safe.
   if (isNaN(startEpochHour)) {
-    startEpochHour = Math.floor(Math.floor(Date.now() / 3600000) / hoursPerPeriod) * hoursPerPeriod;
+    startEpochHour = Math.floor(Date.now() / 3600000);
   }
 
-  // The request carries no period count: fetch the full horizon and trim the encoded reply to
-  // the requested max length afterwards (the encoding is variable-length, so the fit can't be
-  // computed up front).
-  const nPeriods = horizonPeriods(resolutionIdx);
-
-  return { locationIdx, lat, lon, nPeriods, resolutionIdx, modelsMask, varsMask, maxChars, decoderVersion, userToken, code, startEpochHour };
+  return { locationIdx, lat, lon, durationDays, utcOffsetHours, modelsMask, varsMask, maxChars, decoderVersion, userToken, code, startEpochHour };
 }
 
-export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<string> {
-  let lat: number, lon: number, elev_m: number | undefined;
+function resolveLocation(params: ForecastParams): { lat: number; lon: number; elev_m?: number } {
   if (params.locationIdx === 0) {
     if (params.lat == null || params.lon == null)
       throw new Error("current location requested but no GPS coordinates in message");
-    [lat, lon] = [params.lat, params.lon];
-    elev_m = undefined;
-  } else {
-    const loc = NAMED_LOCATIONS[params.locationIdx];
-    if (!loc) throw new Error(`Unknown location index: ${params.locationIdx}`);
-    ({ lat, lon, elev_m } = loc);
+    return { lat: params.lat, lon: params.lon };
   }
+  const loc = NAMED_LOCATIONS[params.locationIdx];
+  if (!loc) throw new Error(`Unknown location index: ${params.locationIdx}`);
+  return { lat: loc.lat, lon: loc.lon, elev_m: loc.elev_m };
+}
 
-  // A response carries exactly one model (the decoder assumes nModels=1), so take the first
-  // requested model bit only.
+// A response carries exactly one model (the decoder assumes nModels=1), so take the first
+// requested model bit only.
+function firstModelKey(modelsMask: number): "HRES" | "GFS" | "ICON" | "IFS" {
   const modelKeys = (["HRES", "GFS", "ICON", "IFS"] as const).filter(
-    (_, bit) => params.modelsMask & (1 << bit),
+    (_, bit) => modelsMask & (1 << bit),
   );
-  const keys = [modelKeys[0] ?? "HRES"] as const;
+  return modelKeys[0] ?? "HRES";
+}
 
-  const results = await Promise.all(
-    keys.map((key) => aggregateRows(key, params.nPeriods, params.resolutionIdx, lat, lon, params.startEpochHour, elev_m)),
-  );
-  const rowsPerModel = results.map(([rows]) => rows);
-  const elevation = results[0][1];
+// ── Duration-first fill ─────────────────────────────────────────────────────────
 
-  // The protocol encodes the period count directly; `days` is the calendar-day span (for
-  // display) implied by however many period rows the upstream API actually returned.
-  const periodsPerDay = 24 / HOURS_PER_PERIOD[params.resolutionIdx];
-  const days = Math.max(1, Math.ceil(rowsPerModel[0].length / periodsPerDay));
+// Builds and encodes the layout for one fill-sequence number from already-fetched hourly data,
+// or returns null when the upstream data doesn't cover some period (a data gap — treat the
+// layout as unservable). See layoutFor in the protocol package for the sequence definition.
+export function encodeFillSeq(
+  h: HourlyData,
+  times: string[],
+  params: ForecastParams,
+  seq: number,
+  lat: number,
+  lon: number,
+  elevation: number,
+  modelKey: string,
+  codec: VersionedCodec,
+): string | null {
+  const layout = layoutFor(params.durationDays, params.startEpochHour, params.utcOffsetHours, seq);
 
-  // month/day/hour are carried on the message for display but not on the wire (the client recovers
-  // the start from its stored request). Derive them from the requested UTC start.
-  const startDate = new Date(params.startEpochHour * 3600000);
-  const month = startDate.getUTCMonth() + 1;
-  const day = startDate.getUTCDate();
-  const hour = startDate.getUTCHours();
+  // Hourly samples are keyed by UTC epoch hour; each period's window is just its hour range.
+  const idxByHour = new Map<number, number>();
+  for (let i = 0; i < times.length; i++) {
+    idxByHour.set(Math.floor(Date.parse(`${times[i]}:00Z`) / 3600000), i);
+  }
+  const windows: number[][] = layout.periodStartUtcHour.map((start, p) => {
+    const idx: number[] = [];
+    for (let eh = start; eh < start + layout.periodHours[p]; eh++) {
+      const i = idxByHour.get(eh);
+      if (i !== undefined) idx.push(i);
+    }
+    return idx;
+  });
+  if (windows.some((w) => w.length === 0)) return null;
+
+  const rows = rowsFromWindows(h, times, windows);
+  const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
 
   const msg: ForecastMessage = {
     version: params.decoderVersion,
     code: params.code,
-    days,
-    resolution: params.resolutionIdx,
+    days: layout.days,
     models_mask: params.modelsMask,
     vars_mask: params.varsMask,
-    month,
-    day,
-    hour,
+    month: firstStart.getUTCMonth() + 1,
+    day: firstStart.getUTCDate(),
+    hour: firstStart.getUTCHours(),
     lat,
     lon,
     elevation,
-    periods: rowsPerModel.map((rows, mi) =>
-      rows.map((r) => toFullPeriod(r, params.varsMask, keys[mi], params.resolutionIdx)),
-    ),
+    periods: [rows.map((r) => toFullPeriod(r, params.varsMask, modelKey))],
+    seq,
+    durationDays: params.durationDays,
+    periodHours: layout.periodHours,
   };
-
-  return fitEncodedToBudget(msg, params.maxChars, codec);
+  return codec.encode(msg);
 }
 
-// Encodes the largest leading prefix of periods whose encoded form fits `maxChars`. Encoded length
-// is monotonic non-decreasing in the period count, so we binary-search the cutoff. Always returns
-// at least one period, even if a single period exceeds the budget.
-function fitEncodedToBudget(msg: ForecastMessage, maxChars: number, codec: VersionedCodec): string {
-  const encodeFirst = (n: number): string =>
-    codec.encode({ ...msg, periods: msg.periods.map((rows) => rows.slice(0, n)) });
+// Duration-first fill: one upstream fetch covers every candidate layout, then a binary search
+// finds the largest fill-sequence number whose encoding fits the budget (encoded size grows
+// along the sequence — see layout.ts). Always returns at least the seq=1 layout (a single 24h
+// period), even if it exceeds the budget.
+export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<string> {
+  const { lat, lon, elev_m } = resolveLocation(params);
+  const modelKey = firstModelKey(params.modelsMask);
 
+  // The window runs from local midnight of the request day (≤ 24h in the past for any UTC
+  // offset — hence past_days=1) through durationDays full local days; +2 forecast days cover
+  // the offset shift past the last UTC day boundary.
+  const [h, times, elevation] = await fetchHourly(
+    modelKey, params.durationDays + 2, lat, lon, "UTC", elev_m, 1,
+  );
+
+  const best = fitFillToBudget(
+    (seq) => encodeFillSeq(h, times, params, seq, lat, lon, elevation, modelKey, codec),
+    maxFillSeq(params.durationDays),
+    params.maxChars,
+  );
+  if (best === null) throw new Error("upstream data does not cover the requested window");
+  return best;
+}
+
+// Binary-searches the largest fill-sequence number whose encoding fits `maxChars`, keeping the
+// largest candidate KNOWN to fit (encoded size can dip non-monotonically at a stage boundary
+// when the request lands late in the day, so a fitting result is guaranteed, strict optimality
+// is not). A null encoding (upstream data gap) is treated as not fitting. Returns the seq=1
+// layout even when it exceeds the budget, and null only if even that is unservable.
+export function fitFillToBudget(
+  encodeSeq: (seq: number) => string | null,
+  maxSeq: number,
+  maxChars: number,
+): string | null {
   let lo = 1;
-  let hi = msg.periods[0].length;
-  let best = encodeFirst(1);
+  let hi = maxSeq;
+  let best = encodeSeq(1);
+  if (best === null) return null;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    const encoded = encodeFirst(mid);
-    if (encoded.length <= maxChars) {
+    const encoded = encodeSeq(mid);
+    if (encoded !== null && encoded.length <= maxChars) {
       best = encoded;
       lo = mid + 1;
     } else {

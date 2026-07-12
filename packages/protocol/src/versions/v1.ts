@@ -1,6 +1,7 @@
 import {
-  RESOLUTION_HOURS, WMO_CODES, VARS_BIT,
+  WMO_CODES, VARS_BIT,
 } from "../constants.js";
+import { layoutFor, maxFillSeq } from "../layout.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "../bits.js";
 import { encode, decode, encodeBodyLE, decodeBodyLE, nCharsForBits } from "../codec.js";
 import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js";
@@ -19,21 +20,29 @@ import {
 export const V1_VERSION = 1;
 const VERSION = V1_VERSION;
 
-// The response is slim: lat/lon/models/vars/resolution AND the start datetime are NOT on the wire.
-// The client stores the request under `code` and recovers them via a ContextResolver at decode time
-// (see RequestContext). The count is a period count (not days), so sub-daily resolutions can carry
-// a partial final day. periods:8 stores (nPeriods - 1), i.e. 1..256 periods.
+// Duration-first fill: the user requests a duration in days and the server fills the message
+// budget by refining days from the front of the window (see layout.ts).
+//
+// The response is slim: lat/lon/model/vars, the requested duration, the UTC offset, AND the
+// request datetime are NOT on the wire. The client stores the request under `code` and recovers
+// them via a ContextResolver at decode time (see RequestContext). The period layout — count and
+// per-period resolution — isn't on the wire either: the header carries only the fill-sequence
+// number, from which both sides derive the identical layout via layoutFor(). Periods within one
+// message can span different resolutions, which the column codecs already handle (the temp-delta
+// codebooks were derived across resolutions for exactly this reason, see entropy.ts); tmin is
+// kept even for 1h periods (where it equals temp and the delta columns encode the duplication
+// away) so a mixed message has uniform columns.
 //
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
 // packed header. Packed header layout (22 bits):
-//   code:7 periods:8 elev:7
+//   code:7 seq:8 elev:7
+// seq:8 stores (seq - 1), i.e. 1..256; the largest layout is seq = 5 × durationDays.
 // The body carries no length field — it is a single rANS stream (see rans.ts), serialized
 // little-endian and self-delimiting: the decoder knows the structure and consumes exactly the
 // symbols the encoder wrote (see encodeBodyLE/decodeBodyLE and SymSource.assertDone).
 // The weathercode column has no codebook selector either: each symbol's codebook is keyed by
 // the previously decoded symbol, which both sides already have (see entropy.ts).
-export const V1_PERIODS_BITS = 8;
-export const V1_MAX_PERIODS = 1 << V1_PERIODS_BITS; // 256
+export const V1_SEQ_BITS = 8;
 
 // Message code: client-assigned key the response echoes; see RequestContext / model.ts.
 const CODE_BITS = 7;
@@ -43,7 +52,7 @@ const ELEV_BITS = 7;
 const ELEV_STEP_M = 100;
 
 export const V1_HEADER_BITS =
-  CODE_BITS + V1_PERIODS_BITS + ELEV_BITS; // 22
+  CODE_BITS + V1_SEQ_BITS + ELEV_BITS; // 22
 // Total chars before the body: the shared version prefix plus this version's packed header.
 export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 4 = 5
 const HEADER_BITS = V1_HEADER_BITS;
@@ -468,20 +477,23 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
   return { body: em.bits };
 }
 
-// lat/lon/models/vars/resolution and the start datetime are recovered client-side via `code`
-// (RequestContext), so they are intentionally absent from the header.
-function buildHeader(msg: ForecastMessage, nPeriods: number): number[] {
+// lat/lon/model/vars/duration/offset and the request datetime are recovered client-side via
+// `code` (RequestContext), and the period layout is derived from `seq` — so all of them are
+// intentionally absent from the header.
+function buildHeader(msg: ForecastMessage): number[] {
+  const seq = msg.seq;
+  if (!Number.isInteger(seq) || seq < 1 || seq > 1 << V1_SEQ_BITS)
+    throw new Error(`v1: message has no valid fill-sequence number (seq=${seq})`);
   const headerBits: number[] = [];
   putInt(headerBits, msg.code, CODE_BITS);
-  putInt(headerBits, nPeriods - 1, V1_PERIODS_BITS);
+  putInt(headerBits, seq - 1, V1_SEQ_BITS);
   putInt(headerBits, Math.min(Math.max(Math.round(msg.elevation / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1), ELEV_BITS);
   return headerBits;
 }
 
 export function v1MessageToString(msg: ForecastMessage): string {
-  const nPeriods = msg.periods[0].length;
   const { body } = buildBody(msg);
-  return encodeVersion(VERSION) + encode(buildHeader(msg, nPeriods)) + encodeBodyLE(body);
+  return encodeVersion(VERSION) + encode(buildHeader(msg)) + encodeBodyLE(body);
 }
 
 // One column's contribution to a message: its model cost in (fractional) bits and, for adaptive
@@ -502,11 +514,10 @@ export interface V1Breakdown {
 }
 
 export function v1EncodeBreakdown(msg: ForecastMessage): V1Breakdown {
-  const nPeriods = msg.periods[0].length;
   const columns: ColumnBreakdown[] = [];
   const { body } = buildBody(msg, (name, bits, mode) =>
     columns.push({ name, bits, mode: mode < 0 ? null : MODE_NAMES[mode] }));
-  const encoded = encodeVersion(VERSION) + encode(buildHeader(msg, nPeriods)) + encodeBodyLE(body);
+  const encoded = encodeVersion(VERSION) + encode(buildHeader(msg)) + encodeBodyLE(body);
   const modelBits = columns.reduce((s, c) => s + c.bits, 0);
   return {
     encoded,
@@ -531,30 +542,57 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   const hr = headerReader(headerBits);
 
   const code = hr.int(CODE_BITS);
-  const periodsRaw = hr.int(V1_PERIODS_BITS);
+  const seq = hr.int(V1_SEQ_BITS) + 1;
   const elevation = hr.int(ELEV_BITS) * ELEV_STEP_M;
 
   // Recover the request-echo fields the slim header omits.
   const ctx = resolve(code);
   if (!ctx) throw new Error(`Unknown forecast code ${code}: no matching request in the store`);
-  const { resolution, model, vars_mask, lat, lon, start } = ctx;
+  const { model, vars_mask, lat, lon, start, durationDays, utcOffsetHours } = ctx;
+  if (durationDays == null || utcOffsetHours == null)
+    throw new Error(`Forecast code ${code} matches a request without a duration`);
+  if (seq > maxFillSeq(durationDays))
+    throw new Error(`v1: seq ${seq} exceeds the ${durationDays}d fill sequence`);
   const models_mask = 1 << model; // a response carries exactly one model
 
-  // The start datetime is recovered from the client-supplied UTC start (month/day/hour aren't sent).
-  const startDate = new Date(start);
-  const month = startDate.getUTCMonth() + 1;
-  const day = startDate.getUTCDate();
-  const hour = startDate.getUTCHours();
-
-  const resHours = RESOLUTION_HOURS[resolution] ?? 24;
-  const periodsPerDay = resHours >= 24 ? 1 : 24 / resHours;
-  const nPeriods = periodsRaw + 1;
-  const nModels = 1;
+  // The period layout is derived, not decoded: both sides compute it from the stored request.
+  const requestUtcHour = Math.floor(start / 3600000);
+  const layout = layoutFor(durationDays, requestUtcHour, utcOffsetHours, seq);
+  const nPeriods = layout.periodHours.length;
 
   // The body has no length field: the rANS stream is self-delimiting given the known structure
   // (nPeriods, nModels, vars_mask). decodeBodyLE materializes the meaningful low bits; renorm
   // words past them read as 0 — exactly the trailing zero words encodeBodyLE dropped.
-  const bodyBits = decodeBodyLE(rest.slice(HEADER_CHARS));
+  const periods = decodeBody(decodeBodyLE(rest.slice(HEADER_CHARS)), vars_mask, nPeriods, 1);
+
+  // month/day/hour describe the FIRST PERIOD's start (which precedes the request time — the
+  // first period is the one containing it), so display code can lay periods out from it.
+  const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
+
+  return {
+    version,
+    code,
+    days: layout.days,
+    models_mask,
+    vars_mask,
+    month: firstStart.getUTCMonth() + 1,
+    day: firstStart.getUTCDate(),
+    hour: firstStart.getUTCHours(),
+    lat,
+    lon,
+    elevation,
+    periods,
+    seq,
+    durationDays,
+    periodHours: layout.periodHours,
+  };
+}
+
+// Decodes the column-major body written by buildBody, given the structure the header/context
+// implies. Throws unless the stream is consumed exactly (see SymSource.assertDone).
+function decodeBody(
+  bodyBits: number[], vars_mask: number, nPeriods: number, nModels: number,
+): Period[][] {
   const rd = reader(bodyBits);
 
   const periods: Period[][] = Array.from({ length: nModels }, () =>
@@ -632,10 +670,7 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   // that here (see SymSource.assertDone in entropy.ts).
   rd.assertDone();
 
-  // `days` is retained on the common message shape for display; it's the calendar-day span
-  // implied by the period count (a partial final day rounds up).
-  const days = Math.ceil(nPeriods / periodsPerDay);
-  return { version, code, days, resolution, models_mask, vars_mask, month, day, hour, lat, lon, elevation, periods };
+  return periods;
 }
 
 export const v1Codec: VersionedCodec = {

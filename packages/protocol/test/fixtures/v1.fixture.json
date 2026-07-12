@@ -1,16 +1,22 @@
 {
-  "description": "3-day daily ECMWF HRES, all v1 variables, Denali 14k camp",
-  "encoded": "\"!!$Mg/Ep15p1\":HEF+nP(=!UuYN;MJfM#)QX2SSlJ2vJS;QCPU,&",
+  "description": "3-day duration-first fill (seq 5: 12h/12h/daily), all variables, Denali 14k camp",
+  "request": {
+    "month": 6,
+    "day": 15,
+    "hour": 22,
+    "durationDays": 3,
+    "utcOffsetHours": -9
+  },
+  "encoded": "\"!!'N!Ne,d<VI#CmSY,sl+3SPsSFqlPYlDq3ZtVPe9ZoztO,lPrOdf54HQ8U9Mc2,O('",
   "decoded": {
     "version": 1,
     "code": 0,
     "days": 3,
-    "resolution": 0,
     "models_mask": 1,
     "vars_mask": 16383,
     "month": 6,
     "day": 15,
-    "hour": 0,
+    "hour": 21,
     "lat": 63.063,
     "lon": -151.081,
     "elevation": 4300,
@@ -78,8 +84,37 @@
           "wind_600_dir": 4,
           "wind_700_kph": 8.04672,
           "wind_700_dir": 5
+        },
+        {
+          "weathercode": 71,
+          "temp_c": -10,
+          "temp_min_c": -17,
+          "freeze_m": 2743.2000000000003,
+          "cloud_high": 86,
+          "cloud_mid": 57,
+          "cloud_low": 29,
+          "precip": 43,
+          "snow_cm": 1.8140589569160999,
+          "rain_mm": 0,
+          "cloud_total": 86,
+          "wind_sfc_kph": 8.04672,
+          "wind_sfc_dir": 4,
+          "wind_500_kph": 32.18688,
+          "wind_500_dir": 4,
+          "wind_600_kph": 24.14016,
+          "wind_600_dir": 4,
+          "wind_700_kph": 16.09344,
+          "wind_700_dir": 3
         }
       ]
+    ],
+    "seq": 5,
+    "durationDays": 3,
+    "periodHours": [
+      12,
+      12,
+      12,
+      24
     ]
   }
 }

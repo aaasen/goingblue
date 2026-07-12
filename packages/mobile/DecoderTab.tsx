@@ -3,7 +3,7 @@ import {
   StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView,
 } from 'react-native';
 import {
-  RESOLUTION_HOURS, VARS_BIT, startDatetime, type ForecastMessage,
+  VARS_BIT, startDatetime, type ForecastMessage,
 } from '@weather/protocol';
 import { decodeAny, loadStore, attachResponse, loadPastForecasts, type Slot } from './cache';
 import type { Units } from './settings';
@@ -19,16 +19,24 @@ function latLonLabel(msg: ForecastMessage): string {
   return `${latStr} ${lonStr}`;
 }
 
-/** Span label from the actual period count: "7d daily" for daily, "46×1h" for sub-daily. */
-function spanLabel(msg: ForecastMessage): string {
-  const resHours = RESOLUTION_HOURS[msg.resolution] ?? 24;
-  const n = msg.periods[0]?.length ?? 0;
-  return resHours >= 24 ? `${n}d daily` : `${n}×${resHours}h`;
+function hoursLabel(h: number): string {
+  return h >= 24 ? 'daily' : `${h}h`;
 }
 
+/**
+ * The resolution(s) a message carries: uniform ("daily", "3h") or, for a mixed
+ * layout, the finest–coarsest range ("1h–12h").
+ */
 function resolutionLabel(msg: ForecastMessage): string {
-  const resHours = RESOLUTION_HOURS[msg.resolution] ?? 24;
-  return resHours >= 24 ? 'daily' : `${resHours}h`;
+  const finest = Math.min(...msg.periodHours);
+  const coarsest = Math.max(...msg.periodHours);
+  if (finest === coarsest) return hoursLabel(finest);
+  return `${hoursLabel(finest)}–${hoursLabel(coarsest)}`;
+}
+
+/** Span label: days covered plus the resolution(s), e.g. "7d daily" or "10d 6h–daily". */
+function spanLabel(msg: ForecastMessage): string {
+  return `${msg.days}d ${resolutionLabel(msg)}`;
 }
 
 function metaLabel(msg: ForecastMessage, units: Units): string {
