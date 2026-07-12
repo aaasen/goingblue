@@ -21,7 +21,6 @@ const ROW_H = {
   DATE: 58,
   SECTION: 22,
   CLOUD: 58,
-  PRECIP: 44,
   TEMP: 52,
   SNOW: 50,
   DATA: 42,
@@ -126,12 +125,6 @@ function beaufort(kph: number): { bg: string; fg: string } {
   const mph = kph / 1.60934;
   const [, bg, fg] = BEAUFORT.find(([lim]) => mph < lim)!;
   return { bg, fg };
-}
-
-function precipColor(pct: number): string {
-  if (pct >= 60) return '#c04040';
-  if (pct >= 30) return '#c08020';
-  return '#4080c8';
 }
 
 // ── Unit-aware formatting (no suffix; unit lives in the row label) ──────────--
@@ -241,7 +234,7 @@ function pressureLabel(level: 500 | 600 | 700, u: Units): string {
 // ── Row model ──────────────────────────────────────────────────────────────
 
 type RowKind =
-  | 'clouds' | 'precip' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc'
+  | 'clouds' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc'
   | 'cloud-total' | 'cloud-high' | 'cloud-mid' | 'cloud-low'
   | 'wind-500' | 'wind-600' | 'wind-700' | 'section';
 
@@ -265,9 +258,8 @@ function buildRows(periods: Period[], u: Units): Row[] {
     if (has((p) => p.temp_c) || has((p) => p.temp_min_c))
       rows.push({ kind: 'temp', height: ROW_H.TEMP, label: `Temp ${tU}` });
     if (has((p) => p.freeze_m)) rows.push({ kind: 'freeze', height: ROW_H.DATA, label: `Freezing ${frU}` });
-    if (has((p) => p.precip)) rows.push({ kind: 'precip', height: ROW_H.PRECIP, label: 'Precip %' });
-    if (has((p) => p.snow_cm) || has((p) => p.rain_mm))
-      rows.push({ kind: 'accumulation', height: ROW_H.SNOW, label: 'Snow / rain' });
+    if (has((p) => p.precip) || has((p) => p.snow_cm) || has((p) => p.rain_mm))
+      rows.push({ kind: 'accumulation', height: ROW_H.SNOW, label: 'Precip' });
     if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.DATA, label: `Wind ${wU}` });
   }
 
@@ -469,40 +461,6 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
   }
 
   // Precipitation probability as a smooth 0–100% area behind its value labels.
-  let precipRowTop = ROW_H.DATE;
-  const precipRow = rows.find((row) => {
-    if (row.kind === 'precip') return true;
-    precipRowTop += row.height;
-    return false;
-  });
-  const precipValues = periods.map((period) => period.precip);
-  if (precipRow && precipValues.some((value) => value != null)) {
-    const precipBottom = precipRowTop + precipRow.height;
-    const precipPlotTop = precipRowTop + 4;
-    const first = precipValues.find((value): value is number => value != null)!;
-    const last = [...precipValues].reverse().find((value): value is number => value != null)!;
-    const precipY = (value: number) => precipBottom - (value / 100) * (precipBottom - precipPlotTop);
-    const points = [
-      { x: colLeft(0), y: precipY(first) },
-      ...precipValues.flatMap((value, i) => value == null ? [] : [{ x: colCenter(i), y: precipY(value) }]),
-      { x: colLeft(n), y: precipY(last) },
-    ];
-    const area = Skia.Path.Make();
-    smoothTo(area, points);
-    area.lineTo(colLeft(n), precipBottom);
-    area.lineTo(colLeft(0), precipBottom);
-    area.close();
-    els.splice(headerInsertIndex, 0,
-      <Path key="precip-area" path={area}>
-        <LinearGradient
-          start={vec(0, precipPlotTop)}
-          end={vec(0, precipBottom)}
-          colors={['rgba(64,128,200,0.55)', 'rgba(255,255,255,0.55)']}
-        />
-      </Path>,
-    );
-  }
-
   // Snow and rain share a stacked area. Snow is converted to liquid-equivalent depth at 10:1,
   // so 10 inches of snow plots at the same height as 1 inch of rain.
   const maxSnow = Math.max(0, ...periods.map((p) => p.snow_cm ?? 0));
@@ -550,9 +508,31 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
     );
   }
 
+  // Precipitation chance overlays the accumulation chart as a line with its own fixed 0–100%
+  // scale. It intentionally has no fill or value labels.
+  const precipValues = periods.map((period) => period.precip);
+  if (accumulationTop != null && accumulationBottom != null && precipValues.some((value) => value != null)) {
+    const plotTop = accumulationTop + 4;
+    const first = precipValues.find((value): value is number => value != null)!;
+    const last = [...precipValues].reverse().find((value): value is number => value != null)!;
+    const precipY = (value: number) => accumulationBottom! - (value / 100) * (accumulationBottom! - plotTop);
+    const points = [
+      { x: colLeft(0), y: precipY(first) },
+      ...precipValues.flatMap((value, i) => value == null ? [] : [{ x: colCenter(i), y: precipY(value) }]),
+      { x: colLeft(n), y: precipY(last) },
+    ];
+    const line = Skia.Path.Make();
+    smoothTo(line, points);
+    els.push(
+      <Path key="precip-line" path={line} style="stroke" strokeWidth={1} color="#245d91">
+        <DashPathEffect intervals={[4, 3]} />
+      </Path>,
+    );
+  }
+
   // Current time, positioned proportionally within its period. Run it through the date/time
   // header and visual weather rows down to freezing level, excluding wind and lower sections.
-  const markerRows = new Set<RowKind>(['clouds', 'precip', 'temp', 'accumulation', 'freeze']);
+  const markerRows = new Set<RowKind>(['clouds', 'temp', 'accumulation', 'freeze']);
   let markerTop: number | undefined;
   let markerBottom: number | undefined;
   let markerY = ROW_H.DATE;
@@ -606,15 +586,6 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
         periods.forEach((p, i) => {
           const cov = p.cloud_total ?? codeCoverage(p.weathercode);
           els.push(cloudGlyph(`cl${i}`, colCenter(i), top, row.height, p.weathercode, cov));
-        });
-        break;
-
-      case 'precip':
-        periods.forEach((p, i) => {
-          if (p.precip == null) { els.push(centerText(`pn${i}`, '—', colCenter(i), mid, fonts.data, C.nil)); return; }
-          const col = precipColor(p.precip);
-          const cx = colCenter(i);
-          els.push(centerText(`pp${i}`, `${p.precip}`, cx, mid - 6, fonts.bold, col));
         });
         break;
 
