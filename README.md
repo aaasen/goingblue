@@ -1,16 +1,19 @@
 # Going Blue: Weather Forecasts via Satellite
 
-Going Blue is a tool for retrieving weather forecasts over satellite. It is deployed at [going.blue](https://going.blue/).
+Going Blue is a weather app specifically designed for satellite messengers and SMS. By using a highly optimized encoding scheme, Going Blue is able to deliver over 100 hourly data points in a single 160-character message. Going Blue is deployed at [going.blue](https://going.blue/).
 
-I built Going Blue before a Denali ski expedition because I wasn't satisfied with the existing weather forecast tools. For Denali, it was important to have high-altitude wind data, hourly forecasts, and compare multiple models.
+I built Going Blue before a Denali ski expedition because I wasn't satisfied with the existing weather forecasting tools that are accessible over satellite. The gap between the information I had available in the field and the information I had at home felt huge. I built Going Blue to bridge that gap and provide detailed weather forecasts everywhere.
+
+Going Blue has several advantages over existing tools:
+1. Choice of weather models. Going Blue uses forecasts from [Open-Meteo](https://open-meteo.com/), which supports over 30 different weather models from ECMWF, NOAA, and other weather services. You can choose whichever model you prefer and compare the forecasts across different models.
+2. Choice of weather variables. Going Blue forecasts always include temperature, wind, and precipitation. They optionally include detailed cloud cover, high altitude winds, and freezing level.
+3. Meteogram visualization. Unlike other forecasts that operate over SMS that use abbreviated weather codes, Going Blue provides a rich visual representation of the forecast. 
+4. Information density. Going Blue's compact encoding scheme allows it to deliver over 100 hourly data points in a single 160-character message. That's a 3 day forecast at 1 hour resolution, a 7 day forecast at 3 hour resolution, or a 10 day forecast at 6 hour resolution.
 
 Going Blue works like this:
 1. Build a forecast request from the mobile app. Choose forecast duration (3–10 days), weather model, and the variables that you need. The server fills the reply with as much time resolution as fits, refining near-term days first.
 2. Send the forecast request to (425) 434-5858 via Garmin inReach, ZOLEO, SMS, or any other satellite messenger.
-3. Copy the forecast response into the mobile app. Responses are encoded in a custom format to maximize space.
-4. View the forecast on the mobile app.
-
-Forecasts are provided by [Open-Meteo](https://open-meteo.com/).
+3. Copy the forecast response into the mobile app to visualize it.
 
 ## Architecture
 
@@ -21,7 +24,6 @@ This is a pnpm monorepo with three packages:
 - `packages/mobile` — Expo React Native app for building requests and decoding forecasts
 
 ## Encoding
-
 
 The core of Going Blue is a super compact message format that maximizes the amount of weather data that can fit in a single message.
 
@@ -102,9 +104,28 @@ encoder wrote, so trailing zero words are simply dropped.
 | snow                   | Adaptive | mode + sparse/FOR/empty       | 6-bit sqrt-companded, 0–200 cm        |
 | rain                   | Adaptive | mode + sparse/FOR/empty       | 6-bit sqrt-companded, 0–144 mm        |
 | precipitation prob.    | Adaptive | mode + FOR/sparse/empty (≤3 bits/value) | 0–100% in eighths           |
-| wind — all levels      | anchor + entropy deltas; order-1 entropy dir | 4-bit speed anchor + ~2.4 bits/period (1h mean, speed + dir) | 5 mph speed steps, 8-point direction |
+| wind — all levels      | see [Wind](#wind) | 5-bit speed anchor + ~1.8–2.5 bits/period (1h mean, speed + dir) | 5 mph speed steps, 0–155 mph, 8-point direction |
 | cloud (high/mid/low)   | anchor + entropy deltas | 3-bit anchor + ~1.6 bits/delta | 0–100% in eighths          |
 | cloud (total)          | Fixed    | 3 bits each                   | 0–100% in eighths                     |
+
+### Wind
+
+Each wind column (surface, then 500/600/700 hPa) carries its quantized speeds first — a 5-bit
+anchor followed by entropy-coded period-over-period deltas — and then its directions. Everything
+that picks a codebook is context both sides already know, so it costs no wire bits:
+
+- **Resolution and level** key the tables. Wind persists far more hour-to-hour than
+  6h-to-6h, and surface deltas are far more peaked than jet-level ones, so each
+  (resolution, level) pair gets its own distribution. The fill mixes resolutions within one
+  message, so the key is **each period's own resolution** — derived from the layout on both
+  sides (a delta at a resolution boundary is keyed by the arriving period's step).
+- **The level above** conditions the 600/700 hPa columns: they decode after the level above
+  them, so its already-decoded same-period values sharpen their tables (direction keyed by
+  previous × upper direction, speed delta by the upper level's bucketed delta). Adjacent
+  pressure levels share the synoptic flow, so this is the strongest single context.
+- **Calm periods carry no direction symbol.** When the speed quantizes to 0 the direction is
+  weather-model noise (~35% of 1h surface periods), so it's skipped entirely; the app shows
+  the last known direction, and the direction context chain carries it across the gap.
 
 ## Development
 
@@ -235,6 +256,16 @@ pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
     dir/speed tables are overconfident at 3h/6h (+0.36 b/p on wind columns there — Huffman's
     integer rounding had masked the miscalibration); recovered by resolution-keyed tables,
     planned alongside the dynamic time-frame change.
+16. Wind encoding overhaul (all context both sides already know, so no wire cost): dir/speed
+    tables keyed by resolution × level; 600/700 hPa conditioned on the upper level's decoded
+    same-period values (dir keyed by prev × upper dir, speed delta by the upper's delta bucket);
+    calm gating — no direction symbol when the quantized speed is 0 (35% of 1h surface periods,
+    where direction is model dither); speed domain 4 -> 5 bits (cap 75 -> 155 mph — the old cap
+    clamped 6-8.6% of 500 hPa values). Surface wind 2.45 -> 1.84 b/p (1h), w600 4.99 -> 3.58
+    (6h). Periods/message (1h base) 101.2 -> 107.9; overall score 54.3 -> 57.1; days/message at
+    6h with high-altitude winds 6.8 -> 7.7. Fixes the 3h/6h regression noted in #15. Scheme
+    selection was held-out validated (5-fold by location) — see
+    packages/server/scripts/analyze-wind-heldout.ts.
 
 ## License
 

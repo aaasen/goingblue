@@ -13,19 +13,28 @@ import type { HourlyData } from "../src/forecast.ts";
 export const CORPUS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "data", "raw", "gfs");
 
 // Tables a derive script contributes, keyed by their codebooks.gen.ts constant name.
-export type DerivedTables = Record<string, number[] | number[][]>;
+export type DerivedTables = Record<string, number[] | number[][] | number[][][]>;
 
 // Visits every cached forecast in the corpus (files mid-write by the collector are skipped).
-export async function eachForecast(cb: (hourly: HourlyData, startHour: number) => void): Promise<void> {
+// `loc` is the corpus location id — the unit held-out splits divide on.
+export async function eachForecast(cb: (hourly: HourlyData, startHour: number, loc: string) => void): Promise<void> {
   for (const loc of await readdir(CORPUS)) {
     const dir = join(CORPUS, loc);
     for (const f of await readdir(dir)) {
       if (!f.endsWith(".json")) continue;
       let rec: any;
       try { rec = JSON.parse(await readFile(join(dir, f), "utf8")); } catch { continue; } // mid-write
-      cb(rec.response.hourly as HourlyData, Math.floor(Date.parse(rec.meta.run + "Z") / 3600000));
+      cb(rec.response.hourly as HourlyData, Math.floor(Date.parse(rec.meta.run + "Z") / 3600000), loc);
     }
   }
+}
+
+// Deterministic 5-fold assignment by location id, for held-out (split-by-location) checks.
+export const N_FOLDS = 5;
+export function foldOf(loc: string): number {
+  let h = 0;
+  for (let i = 0; i < loc.length; i++) h = (h * 31 + loc.charCodeAt(i)) >>> 0;
+  return h % N_FOLDS;
 }
 
 // Huffman code lengths per symbol via repeated merge of the two lowest-weight nodes (mirrors
@@ -62,7 +71,12 @@ export function scaledWeights(counts: number[]): number[] {
 }
 
 // Renders one table as the `export const` declaration it gets in codebooks.gen.ts.
-export function renderTable(name: string, t: number[] | number[][]): string {
+export function renderTable(name: string, t: number[] | number[][] | number[][][]): string {
+  if (Array.isArray(t[0]) && Array.isArray((t[0] as number[][])[0])) {
+    const outer = (t as number[][][]).map((m, i) =>
+      `  [ // ${i}\n${m.map((r) => `    [${r.join(", ")}],`).join("\n")}\n  ],`).join("\n");
+    return `export const ${name}: number[][][] = [\n${outer}\n];`;
+  }
   if (Array.isArray(t[0]))
     return `export const ${name}: number[][] = [\n${(t as number[][]).map((r) => `  [${r.join(", ")}],`).join("\n")}\n];`;
   return `export const ${name}: number[] = [${(t as number[]).join(", ")}];`;

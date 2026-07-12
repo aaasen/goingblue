@@ -2,8 +2,9 @@
 // never edited by hand. They are wire format; see V1_CODEBOOKS at the bottom of this file.
 import {
   WEATHERCODE_BOOTSTRAP_WEIGHTS, WEATHERCODE_WEIGHTS,
-  WIND_DIR_BOOTSTRAP_WEIGHTS, WIND_DIR_WEIGHTS,
-  WIND_SPEED_DELTA_WEIGHTS, FREEZE_DELTA_WEIGHTS,
+  WIND_DIR_BOOTSTRAP_WEIGHTS, WIND_DIR_WEIGHTS_BY_RES, WIND_DIR_UPPER_WEIGHTS_BY_RES,
+  WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL, WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES,
+  FREEZE_DELTA_WEIGHTS,
   CLOUD_LOW_DELTA_WEIGHTS, CLOUD_MID_DELTA_WEIGHTS, CLOUD_HIGH_DELTA_WEIGHTS,
   TEMP_DELTA_WEIGHTS,
 } from "./codebooks.gen.js";
@@ -138,37 +139,77 @@ export const encodeWeathercode = WEATHERCODE_CODEC.encode;
 export const decodeWeathercode = WEATHERCODE_CODEC.decode;
 
 // ── Wind direction ──────────────────────────────────────────────────────────────
-// Static, order-1 codebooks for the 8-point wind direction (symbols are direction indices
-// 0..7; see CARDINALS). Wind direction persists hour-to-hour far more than it varies by regime (see
-// server/scripts/analyze-wind-dir-transitions.ts: P(next=prev) 68-90% depending on level), so like
-// weathercode, each direction is coded under a table keyed by the previously decoded direction.
-// One shared codebook set across all four wind levels (surface + 500/600/700 hPa): pooling the
-// transition counts across levels barely changes the bit cost vs. deriving separate tables per
-// level (<0.01 b/dir), so a single set keeps things simple and lets every wind column reuse it —
-// each column tracks its own previous-direction context independently (a separate chain per wind
-// level). Derived from the corpus's pooled prev-direction -> next-direction transition counts —
-// see server/scripts/derive-wind-dir-codebooks.ts. WIND_DIR_WEIGHTS[prevDir] is the codebook for
-// the direction that follows `prevDir`.
-const WIND_DIR_CODEC = makeConditionalCodec(WIND_DIR_BOOTSTRAP_WEIGHTS, WIND_DIR_WEIGHTS);
+// Static codebooks for the 8-point wind direction (symbols are direction indices 0..7; see
+// CARDINALS), keyed by every piece of context both sides already have — so none of it costs
+// wire bits:
+//
+//   - the previously *encoded* direction in the column (order-1; calm periods emit no direction
+//     symbol at all, so the chain carries the last encoded direction across gaps — see v1.ts);
+//   - the message's resolution: direction persistence falls sharply with the aggregation step
+//     (P(next=prev) ≈ 0.85 at 1h vs ≈ 0.55 at 6h), and a single 1h-derived table was measurably
+//     overconfident at coarser resolutions;
+//   - for the 600/700 hPa columns, the *upper* pressure level's same-period displayed direction
+//     (already decoded — column order is 500 → 600 → 700), when that column is in vars_mask.
+//     Adjacent levels share the synoptic flow, so this is the strongest single context: held-out
+//     (5-fold by location) 1.49 → 1.12 b/dir at 6h, 0.71 → 0.64 at 1h.
+//
+// The bootstrap table covers a column's first encoded direction (no predecessor); it fires once
+// per column, so it is shared across resolutions and levels. Derived from the corpus's
+// calm-gated transition counts — see server/scripts/derive-wind-dir-codebooks.ts and the scheme
+// comparison in analyze-wind-heldout.ts.
+const NDIR = 8;
+const WIND_DIR_BOOTSTRAP = buildTable(WIND_DIR_BOOTSTRAP_WEIGHTS);
+const WIND_DIR_TABLES = WIND_DIR_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
+const WIND_DIR_UPPER_TABLES = WIND_DIR_UPPER_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
 
-// Emits the code for direction index `dirIdx` (0..7), under the table keyed by
-// `prevDir` — the previously decoded direction, or null for the first direction of a sequence (no
-// predecessor).
-export const encodeWindDir = WIND_DIR_CODEC.encode;
-
-// Reads one coded direction keyed by `prevDir` (see encodeWindDir).
-export const decodeWindDir = WIND_DIR_CODEC.decode;
+// The codebook for one direction symbol. `prev` is the last direction encoded in this column
+// (null for the column's first — bootstrap), `upper` the upper level's same-period displayed
+// direction (null when that column is absent or this level has none).
+export function windDirBook(res: number, prev: number | null, upper: number | null): CodeBook {
+  if (prev === null) return WIND_DIR_BOOTSTRAP;
+  return upper === null
+    ? WIND_DIR_TABLES[res][prev]
+    : WIND_DIR_UPPER_TABLES[res][prev * NDIR + upper];
+}
 
 // ── Wind speed deltas ───────────────────────────────────────────────────────────
-// Period-over-period wind-speed change, in quantized steps (see WIND_SPEED_BITS in v1.ts: 0..15,
-// so deltas -15..15). One table pooled across all four wind levels (surface + 500/600/700 hPa) —
-// same call as wind direction. A held-out check (split by location) found a cheapest-of-16 k-means
-// selector at 1.529 b/period vs 1.514 b/period for this single table — the selector was only
-// fitting local volatility. Derived from the corpus's pooled delta distribution — see
+// Period-over-period wind-speed change, in quantized steps (see WIND_SPEED_BITS in v1.ts: 0..31,
+// so deltas -31..31). Tables are keyed by (resolution, level) — the old level-pooled, 1h-derived
+// table taxed the surface column hardest (its deltas are far more peaked than the jet levels')
+// and was overconfident at coarse resolutions (held-out 3.01 → 2.49 b/Δ at 6h). For the 600/700
+// hPa columns, when the upper level's column is present its already-decoded same-period delta,
+// bucketed to {≤-2, -1, 0, +1, ≥+2}, replaces the level key and does better still (held-out
+// 2.64 → 2.37 b/Δ at 6h) — adjacent pressure levels move together. Derived from the corpus's
+// per-(resolution × level) delta distributions — see
 // server/scripts/derive-wind-speed-delta-codebooks.ts.
 
-// must mirror WIND_SPEED_BITS in v1.ts (0..15)
-export const WIND_SPEED_DELTA = makeDeltaCodec(WIND_SPEED_DELTA_WEIGHTS, 15);
+// must mirror WIND_SPEED_BITS in v1.ts (0..31)
+export const WIND_SPEED_DELTA_MAX = 31;
+const WIND_SPEED_TABLES = WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL.map((rows) => rows.map(buildTable));
+const WIND_SPEED_UPPER_TABLES = WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
+
+// Buckets an upper-level same-period speed delta for table selection (must match the derive
+// script): ≤-2, -1, 0, +1, ≥+2.
+export function upperDeltaBucket(d: number): number {
+  return d <= -2 ? 0 : d === -1 ? 1 : d === 0 ? 2 : d === 1 ? 3 : 4;
+}
+
+// The codebook for one speed delta. `level` indexes WIND_COLUMNS order (sfc, 500, 600, 700);
+// `upperDelta` is the upper level's same-period delta (null when that column is absent or this
+// level has none).
+export function windSpeedBook(res: number, level: number, upperDelta: number | null): CodeBook {
+  return upperDelta === null
+    ? WIND_SPEED_TABLES[res][level]
+    : WIND_SPEED_UPPER_TABLES[res][upperDeltaBucket(upperDelta)];
+}
+
+export function encodeWindSpeedDelta(sink: SymSink, book: CodeBook, delta: number): void {
+  sink.sym(book, delta + WIND_SPEED_DELTA_MAX);
+}
+
+export function decodeWindSpeedDelta(src: SymSource, book: CodeBook): number {
+  return src.sym(book) - WIND_SPEED_DELTA_MAX;
+}
 
 // ── Freezing-level deltas ───────────────────────────────────────────────────────
 // Period-over-period freezing-level change, in quantized steps (see the freeze column in v1.ts:
@@ -259,8 +300,16 @@ const qf = (w: number[]) => quantizeFreqs(w);
 export const V1_CODEBOOKS = {
   rans: { probBits: RANS_PROB_BITS, stateLow: RANS_L, wordBits: RANS_WORD_BITS },
   weathercode: { bootstrap: qf(WEATHERCODE_BOOTSTRAP_WEIGHTS), weights: WEATHERCODE_WEIGHTS.map(qf) },
-  windDir: { bootstrap: qf(WIND_DIR_BOOTSTRAP_WEIGHTS), weights: WIND_DIR_WEIGHTS.map(qf) },
-  windSpeedDelta: qf(WIND_SPEED_DELTA_WEIGHTS),
+  windDir: {
+    bootstrap: qf(WIND_DIR_BOOTSTRAP_WEIGHTS),
+    byRes: WIND_DIR_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+    upperByRes: WIND_DIR_UPPER_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  },
+  windSpeedDelta: {
+    byResLevel: WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL.map((rows) => rows.map(qf)),
+    upperByRes: WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+    maxDelta: WIND_SPEED_DELTA_MAX,
+  },
   freezeDelta: qf(FREEZE_DELTA_WEIGHTS),
   cloudLowDelta: qf(CLOUD_LOW_DELTA_WEIGHTS),
   cloudMidDelta: qf(CLOUD_MID_DELTA_WEIGHTS),

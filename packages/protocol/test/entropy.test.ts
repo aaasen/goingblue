@@ -3,9 +3,12 @@ import {
   encodeWeathercode,
   decodeWeathercode,
   WMO_CODES,
-  encodeWindDir,
-  decodeWindDir,
-  WIND_SPEED_DELTA,
+  windDirBook,
+  windSpeedBook,
+  encodeWindSpeedDelta,
+  decodeWindSpeedDelta,
+  WIND_SPEED_DELTA_MAX,
+  upperDeltaBucket,
   FREEZE_DELTA,
   CLOUD_LOW_DELTA,
   CLOUD_MID_DELTA,
@@ -83,31 +86,34 @@ describe("weathercode entropy coding", () => {
   });
 });
 
-// All contexts a direction symbol can be keyed by: no predecessor (bootstrap), or any of 0..7.
-const DIR_CONTEXTS: (number | null)[] = [null, 0, 1, 2, 3, 4, 5, 6, 7];
-
 describe("wind direction entropy coding", () => {
-  it("round-trips every direction under every context", () => {
-    for (const prevDir of DIR_CONTEXTS) {
-      for (let dir = 0; dir < 8; dir++) {
-        const { cost, source } = encoded((sink) => encodeWindDir(sink, prevDir, dir));
-        expect(cost).toBeGreaterThan(0);
-        expect(decodeWindDir(source, prevDir)).toBe(dir);
-        source.assertDone(); // consumed exactly the coded symbol
+  it("round-trips every direction under every (resolution, prev, upper) context", () => {
+    for (let res = 0; res <= 4; res++) {
+      for (const prev of [null, 0, 1, 2, 3, 4, 5, 6, 7]) {
+        for (const upper of [null, 0, 3, 7]) {
+          for (let dir = 0; dir < 8; dir++) {
+            const book = windDirBook(res, prev, upper);
+            const { cost, source } = encoded((sink) => sink.sym(book, dir));
+            expect(cost).toBeGreaterThan(0);
+            expect(source.sym(book)).toBe(dir);
+            source.assertDone(); // consumed exactly the coded symbol
+          }
+        }
       }
     }
   });
 
   it("decodes a concatenated direction sequence unambiguously, context threaded from the previous direction", () => {
     const seq = [6, 6, 7, 6, 0, 3, 4, 5, 6, 6, 1, 2, 6];
+    const uppers = seq.map((_, i) => (i % 3 === 0 ? null : (i * 5) % 8)); // mix of with/without upper
     const { source } = encoded((sink) => {
       let prev: number | null = null;
-      for (const d of seq) { encodeWindDir(sink, prev, d); prev = d; }
+      seq.forEach((d, i) => { sink.sym(windDirBook(2, prev, uppers[i]), d); prev = d; });
     });
     let prev: number | null = null;
     const out: number[] = [];
     for (let k = 0; k < seq.length; k++) {
-      const sym = decodeWindDir(source, prev);
+      const sym = source.sym(windDirBook(2, prev, uppers[k]));
       out.push(sym);
       prev = sym;
     }
@@ -115,25 +121,89 @@ describe("wind direction entropy coding", () => {
     source.assertDone();
   });
 
+  const seqCost = (dirs: number[], res: number, upper: (i: number) => number | null, bootstrapOnly = false) =>
+    costOf((sink) => {
+      let prev: number | null = null;
+      dirs.forEach((d, i) => {
+        sink.sym(windDirBook(res, bootstrapOnly ? null : prev, bootstrapOnly ? null : upper(i)), d);
+        prev = d;
+      });
+    });
+
   it("a persistent (all-W) sequence costs fewer bits under order-1 context than under the bootstrap table alone, and beats raw 3-bit", () => {
     const allW = Array(64).fill(6); // direction index 6 = W
-    const contextual = costOf((sink) => {
-      let prev: number | null = null;
-      for (const d of allW) { encodeWindDir(sink, prev, d); prev = d; }
-    });
-    const bootstrapOnly = costOf((sink) => {
-      for (const d of allW) encodeWindDir(sink, null, d);
-    });
+    const contextual = seqCost(allW, 4, () => null);
+    const bootstrapOnly = seqCost(allW, 4, () => null, true);
     expect(contextual).toBeLessThan(bootstrapOnly);
     expect(contextual).toBeLessThan(allW.length * 3); // beats raw 3 bits/value
   });
+
+  it("persistence is cheaper at 1h than at 6h (resolution-keyed tables)", () => {
+    const allW = Array(64).fill(6);
+    expect(seqCost(allW, 4, () => null)).toBeLessThan(seqCost(allW, 2, () => null));
+  });
+
+  it("an agreeing upper level makes a persistent sequence cheaper (cross-level context)", () => {
+    const allW = Array(64).fill(6);
+    expect(seqCost(allW, 2, () => 6)).toBeLessThan(seqCost(allW, 2, () => null));
+  });
 });
 
-// Wind speed, freezing level, and the three cloud levels all use single-table bounded delta
-// codecs from makeDeltaCodec — same shape, different weights/range. Table-driven so all five get
-// the same coverage without quintupling the test body.
+describe("wind speed delta entropy coding", () => {
+  const allBooks = () => {
+    const books = [];
+    for (let res = 0; res <= 4; res++) {
+      for (let level = 0; level < 4; level++) books.push(windSpeedBook(res, level, null));
+      for (const upperDelta of [-5, -1, 0, 1, 5]) books.push(windSpeedBook(res, 0, upperDelta));
+    }
+    return books;
+  };
+
+  it(`round-trips every delta (-${WIND_SPEED_DELTA_MAX}..${WIND_SPEED_DELTA_MAX}) under every (resolution, level, upper-bucket) book`, () => {
+    for (const book of allBooks()) {
+      for (let d = -WIND_SPEED_DELTA_MAX; d <= WIND_SPEED_DELTA_MAX; d++) {
+        const { cost, source } = encoded((sink) => encodeWindSpeedDelta(sink, book, d));
+        expect(cost).toBeGreaterThan(0);
+        expect(decodeWindSpeedDelta(source, book)).toBe(d);
+        source.assertDone();
+      }
+    }
+  });
+
+  it("decodes a concatenated delta sequence unambiguously", () => {
+    const seq = [0, 1, -1, 0, 2, -3, 17, 0, 1, -25, 0, 0];
+    const book = windSpeedBook(4, 1, null);
+    const { source } = encoded((sink) => { for (const d of seq) encodeWindSpeedDelta(sink, book, d); });
+    const out: number[] = [];
+    for (let k = 0; k < seq.length; k++) out.push(decodeWindSpeedDelta(source, book));
+    expect(out).toEqual(seq);
+    source.assertDone();
+  });
+
+  it("buckets upper deltas as ≤-2, -1, 0, +1, ≥+2", () => {
+    expect([-31, -2, -1, 0, 1, 2, 31].map(upperDeltaBucket)).toEqual([0, 0, 1, 2, 3, 4, 4]);
+  });
+
+  const bitsFor = (deltas: number[], book = windSpeedBook(4, 0, null)) =>
+    costOf((sink) => { for (const d of deltas) encodeWindSpeedDelta(sink, book, d); });
+
+  it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 5-bit", () => {
+    const flat = Array(64).fill(0);
+    const swings = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? 5 : -5));
+    expect(bitsFor(flat)).toBeLessThan(bitsFor(swings));
+    expect(bitsFor(flat)).toBeLessThan(flat.length * 5); // beats raw 5 bits/value
+  });
+
+  it("a matching upper-level delta makes the same delta cheaper (cross-level context)", () => {
+    const rising = Array(64).fill(2);
+    expect(bitsFor(rising, windSpeedBook(2, 2, 2))).toBeLessThan(bitsFor(rising, windSpeedBook(2, 2, null)));
+  });
+});
+
+// Freezing level and the three cloud levels all use single-table bounded delta codecs from
+// makeDeltaCodec — same shape, different weights/range. Table-driven so all four get the same
+// coverage without quadrupling the test body.
 const DELTA_CODECS: { label: string; codec: DeltaCodec; maxDelta: number; rawBits: number }[] = [
-  { label: "wind speed", codec: WIND_SPEED_DELTA, maxDelta: 15, rawBits: 4 },
   { label: "freezing level", codec: FREEZE_DELTA, maxDelta: 15, rawBits: 4 },
   { label: "cloud low", codec: CLOUD_LOW_DELTA, maxDelta: 7, rawBits: 3 },
   { label: "cloud mid", codec: CLOUD_MID_DELTA, maxDelta: 7, rawBits: 3 },

@@ -7,7 +7,7 @@
     "durationDays": 3,
     "utcOffsetHours": -9
   },
-  "encoded": "\"!!'N!Ne,d<VI#CmSY,sl+3SPsSFqlPYlDq3ZtVPe9ZoztO,lPrOdf54HQ8U9Mc2,O('",
+  "encoded": "\"!!'N&6'x%bbMW;UtF..RRT,X.cOeQO4):x)(Rkui:'A==+Kuv;-JMxe1Ig*",
   "decoded": {
     "version": 1,
     "code": 0,
@@ -77,7 +77,7 @@
           "rain_mm": 0,
           "cloud_total": 14,
           "wind_sfc_kph": 0,
-          "wind_sfc_dir": 6,
+          "wind_sfc_dir": 5,
           "wind_500_kph": 24.14016,
           "wind_500_dir": 5,
           "wind_600_kph": 16.09344,
