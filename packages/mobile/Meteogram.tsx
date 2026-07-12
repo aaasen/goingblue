@@ -453,7 +453,7 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
         <LinearGradient
           start={vec(0, plotTop)}
           end={vec(0, tempRowBottom)}
-          colors={[tempColor(tMax, 0.55), tempColor((tMax + tMin) / 2, 0.55), tempColor(tMin, 0.55), 'rgba(255,255,255,0.55)']}
+          colors={[tempColor(tMax, 0.55), tempColor((tMax + tMin) / 2, 0.55), tempColor(tMin, 0.55), 'rgba(255,255,255,0)']}
           positions={[0, rangeEnd / 2, rangeEnd, 1]}
         />
       </Path>,
