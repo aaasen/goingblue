@@ -1,16 +1,19 @@
 # Going Blue: Weather Forecasts via Satellite
 
-Going Blue is a tool for retrieving weather forecasts over satellite. It is deployed at [going.blue](https://going.blue/).
+Going Blue is a weather app specifically designed for satellite messengers and SMS. By using a highly optimized encoding scheme, Going Blue is able to deliver over 100 hourly data points in a single 160-character message. Going Blue is deployed at [going.blue](https://going.blue/).
 
-I built Going Blue before a Denali ski expedition because I wasn't satisfied with the existing weather forecast tools. For Denali, it was important to have high-altitude wind data, hourly forecasts, and compare multiple models.
+I built Going Blue before a Denali ski expedition because I wasn't satisfied with the existing weather forecasting tools that are accessible over satellite. The gap between the information I had available in the field and the information I had at home felt huge. I built Going Blue to bridge that gap and provide detailed weather forecasts everywhere.
+
+Going Blue has several advantages over existing tools:
+1. Choice of weather models. Going Blue uses forecasts from [Open-Meteo](https://open-meteo.com/), which supports over 30 different weather models from ECMWF, NOAA, and other weather services. You can choose whichever model you prefer and compare the forecasts across different models.
+2. Choice of weather variables. Going Blue forecasts always include temperature, wind, and precipitation. They optionally include detailed cloud cover, high altitude winds, and freezing level.
+3. Meteogram visualization. Unlike other forecasts that operate over SMS that use abbreviated weather codes, Going Blue provides a rich visual representation of the forecast. 
+4. Information density. Going Blue's compact encoding scheme allows it to deliver over 100 hourly data points in a single 160-character message. That's a 3 day forecast at 1 hour resolution, a 7 day forecast at 3 hour resolution, or a 10 day forecast at 6 hour resolution.
 
 Going Blue works like this:
 1. Build a forecast request from the mobile app. Choose time resolution, weather model, and the variables that you need.
 2. Send the forecast request to (425) 434-5858 via Garmin inReach, ZOLEO, SMS, or any other satellite messenger.
-3. Copy the forecast response into the mobile app. Responses are encoded in a custom format to maximize space.
-4. View the forecast on the mobile app.
-
-Forecasts are provided by [Open-Meteo](https://open-meteo.com/).
+3. Copy the forecast response into the mobile app to visualize it.
 
 ## Architecture
 
@@ -21,7 +24,6 @@ This is a pnpm monorepo with three packages:
 - `packages/mobile` — Expo React Native app for building requests and decoding forecasts
 
 ## Encoding
-
 
 The core of Going Blue is a super compact message format that maximizes the amount of weather data that can fit in a single message.
 
