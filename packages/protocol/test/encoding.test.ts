@@ -374,13 +374,14 @@ describe("v1 round-trip encoding", () => {
     decoded.periods[0].forEach((p) => expect(p.weathercode).toBe(0));
   });
 
-  // Surface wind speed is an anchor + Huffman-coded period-over-period delta (like temp/tmin);
-  // direction is order-1 Huffman, keyed by the previously decoded direction.
+  // Surface wind speed is an anchor + entropy-coded period-over-period delta (like temp/tmin);
+  // direction is entropy-coded under (resolution, prev, upper-level) context, with calm periods
+  // carrying no direction symbol at all.
   const WIND_STEP = 5 * 1.609344;
   const windMsg = (periods: Period[]) =>
     msg({ resolution: 4, vars_mask: 1 << VARS_BIT.wind, periods: [periods] });
 
-  it("round-trips varied surface wind speeds (Huffman-coded deltas) and directions", () => {
+  it("round-trips varied surface wind speeds (entropy-coded deltas) and directions", () => {
     const steps = [3, 5, 4, 6, 7, 4, 5, 3, 6, 5];
     const dirs = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1];
     const periods = steps.map((s, i) => ({ weathercode: 0, wind_sfc_kph: s * WIND_STEP, wind_sfc_dir: dirs[i] }));
@@ -403,10 +404,69 @@ describe("v1 round-trip encoding", () => {
     expect(v1MessageToString(windMsg(flat)).length).toBeLessThan(v1MessageToString(windMsg(swings)).length);
   });
 
-  it("wind speed reports no adaptive mode — it's Huffman-coded deltas, not raw/for/sparse/empty columns", () => {
+  it("wind speed reports no adaptive mode — it's entropy-coded deltas, not raw/for/sparse/empty columns", () => {
     const periods = [Array.from({ length: 8 }, () => ({ weathercode: 0, wind_sfc_kph: 5 * WIND_STEP, wind_sfc_dir: 0 }))];
     const { columns } = v1EncodeBreakdown(windMsg(periods[0]));
     expect(columns.find((c) => c.name === "wind")?.mode).toBeNull();
+  });
+
+  it("round-trips wind speeds above the old 75 mph cap (5-bit domain, up to 155 mph)", () => {
+    const periods = [[
+      { ...PERIOD, wind_500_kph: 24 * WIND_STEP },  // 120 mph
+      { ...PERIOD, wind_500_kph: 28 * WIND_STEP },  // 140 mph
+      { ...PERIOD, wind_500_kph: 31 * WIND_STEP },  // 155 mph (domain max)
+    ]];
+    const decoded = roundTrip(msg({ resolution: 4, periods }));
+    expect(decoded.periods[0][0].wind_500_kph).toBeCloseTo(24 * WIND_STEP, 3);
+    expect(decoded.periods[0][1].wind_500_kph).toBeCloseTo(28 * WIND_STEP, 3);
+    expect(decoded.periods[0][2].wind_500_kph).toBeCloseTo(31 * WIND_STEP, 3);
+  });
+
+  it("clamps wind speed at 155 mph", () => {
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, wind_700_kph: 40 * WIND_STEP }]] }));
+    expect(decoded.periods[0][0].wind_700_kph).toBeCloseTo(31 * WIND_STEP, 3);
+  });
+
+  it("calm periods carry no direction bits: direction values during calm can't change the encoding", () => {
+    const dirsA = [3, 0, 0, 0, 5];
+    const dirsB = [3, 7, 1, 4, 5]; // differs only where the wind is calm
+    const speeds = [4, 0, 0, 0, 6];
+    const build = (dirs: number[]) =>
+      windMsg(speeds.map((s, i) => ({ weathercode: 0, wind_sfc_kph: s * WIND_STEP, wind_sfc_dir: dirs[i] })));
+    expect(v1MessageToString(build(dirsA))).toBe(v1MessageToString(build(dirsB)));
+  });
+
+  it("calm periods display the last decoded direction (0 before any)", () => {
+    const speeds = [0, 4, 0, 0, 6, 0];
+    const dirs = [7, 3, 7, 7, 5, 7]; // calm-period values are noise the encoder must ignore
+    const decoded = roundTrip(windMsg(speeds.map((s, i) => ({ weathercode: 0, wind_sfc_kph: s * WIND_STEP, wind_sfc_dir: dirs[i] }))));
+    expect(decoded.periods[0].map((p) => p.wind_sfc_dir)).toEqual([0, 3, 3, 3, 5, 5]);
+    expect(decoded.periods[0].map((p) => p.wind_sfc_kph! / WIND_STEP)).toEqual(speeds);
+  });
+
+  it("round-trips w600 without w500 present (no upper-level context available)", () => {
+    const vars_mask = 1 << VARS_BIT.w600;
+    const steps = [10, 12, 11, 13, 12];
+    const dirs = [2, 2, 3, 3, 4];
+    const periods = [steps.map((s, i) => ({ weathercode: 0, wind_600_kph: s * WIND_STEP, wind_600_dir: dirs[i] }))];
+    const decoded = roundTrip(msg({ resolution: 4, vars_mask, periods }));
+    decoded.periods[0].forEach((p, i) => {
+      expect(p.wind_600_kph).toBeCloseTo(steps[i] * WIND_STEP, 3);
+      expect(p.wind_600_dir).toBe(dirs[i]);
+    });
+  });
+
+  it("an upper level that agrees makes the lower direction column cheaper (cross-level context)", () => {
+    // w500+w600 both steady W vs w600 alone steady W: with the upper column present, the joint
+    // message's w600 model cost must undercut the standalone one.
+    const n = 64;
+    const both = msg({ resolution: 2, vars_mask: (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600),
+      periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_500_kph: 20 * WIND_STEP, wind_500_dir: 6, wind_600_kph: 15 * WIND_STEP, wind_600_dir: 6 }))] });
+    const alone = msg({ resolution: 2, vars_mask: 1 << VARS_BIT.w600,
+      periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_600_kph: 15 * WIND_STEP, wind_600_dir: 6 }))] });
+    const w600Bits = (m: ForecastMessage) =>
+      v1EncodeBreakdown(m).columns.find((c) => c.name === "w600")!.bits;
+    expect(w600Bits(both)).toBeLessThan(w600Bits(alone));
   });
 });
 

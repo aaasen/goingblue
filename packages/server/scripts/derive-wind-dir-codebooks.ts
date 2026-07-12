@@ -1,14 +1,25 @@
 /**
- * Derive wind-direction Huffman codebooks from the corpus's order-1 transition structure: wind
- * direction persists hour-to-hour far more than it varies by regime (see
- * analyze-wind-dir-transitions.ts: P(next=prev) 68-90% depending on level), so instead of k-means
- * clustering per-message regime histograms into a handful of tables selected per column, each
- * direction gets a codebook keyed by the *previously decoded* direction — context both sides
- * already have, so it costs no header bits. 8 tables (one per possible previous direction) plus one
- * bootstrap table (the first-direction-of-sequence distribution) for the start of each sequence,
- * where there is no predecessor. Pooled across all four wind levels (surface + 500/600/700 hPa):
- * held-out bits/dir barely differs from deriving separate tables per level (<0.01 b/dir), so one
- * shared codebook set keeps things simple and lets every wind column reuse it.
+ * Derive wind-direction codebooks: order-1 transition tables keyed by resolution, plus
+ * upper-level-conditioned tables for the 600/700 hPa columns.
+ *
+ * Three context schemes were compared held-out (5-fold, split by location, rANS cost — see
+ * analyze-wind-heldout.ts):
+ *
+ *   prev only, trained at 1h, applied everywhere (old design):  3.04 (24h) … 0.76 (1h) b/dir
+ *   [res][prev]:                                                2.15 (24h) … 0.76 (1h)
+ *   [res][prev × same-period upper dir] (w600/w700):            1.21 (24h) … 0.64 (1h)
+ *
+ * Resolution keying pays because direction persistence falls sharply with the aggregation step
+ * (P(next=prev) ≈ 0.85 at 1h vs ≈ 0.55 at 6h) — the shipped 1h-only table was overconfident at
+ * coarser resolutions, which rANS (unlike Huffman's integer rounding) faithfully charges for.
+ * The full 64-context upper conditioning beat a compact circular-distance variant at every
+ * resolution held-out, so it earns its table count. Resolution and the upper column's decoded
+ * value are context both sides already have, so none of this costs wire bits.
+ *
+ * Sequences are collected under calm gating (no direction symbol when the quantized speed is 0;
+ * the context chain carries the last encoded direction), matching the wire behavior in v1.ts.
+ * The bootstrap table (a column's first encoded direction, no predecessor) is shared across
+ * resolutions and levels — it fires once per column, so keying it isn't worth the tables.
  *
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
@@ -16,75 +27,84 @@
  *   node packages/server/scripts/derive-wind-dir-codebooks.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
-import { VARS_BIT } from "@weather/protocol";
-import { eachForecast, huffmanLengths, scaledWeights, runStandalone, type DerivedTables } from "./derive-lib.ts";
+import { VARS_BIT, V1_MAX_PERIODS, type Period } from "@weather/protocol";
+import { eachForecast, scaledWeights, runStandalone, type DerivedTables } from "./derive-lib.ts";
 
-const NDIR = 8;                 // 8-point compass
-const RES_IDX = 4;              // 1h — finest, most samples
+const NDIR = 8;
+const NRES = 5; // resolution indices 0..4 (24h/12h/6h/3h/1h)
 const WIND_MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
+const SPEED_FIELDS = ["wind_sfc_kph", "wind_500_kph", "wind_600_kph", "wind_700_kph"] as const;
 const DIR_FIELDS = ["wind_sfc_dir", "wind_500_dir", "wind_600_dir", "wind_700_dir"] as const;
-const RAW_BITS = 3;             // cost of a fixed-width fallback
+// level -> the level it conditions on when present (already decoded), or -1 (see v1.ts)
+const UPPER_OF = [-1, -1, 1, 2];
+const KPH_PER_STEP = 5 * 1.609344; // must match v1.ts
+const SPEED_MAX = 31;              // must match v1.ts (WIND_SPEED_BITS = 5)
 
-// One sequence of direction indices per (forecast, wind level), in order.
-async function collectSequences(): Promise<number[][]> {
-  const out: number[][] = [];
-  await eachForecast((h, startHour) => {
-    const n = Math.min(128, Math.floor(h.time.length / HOURS_PER_PERIOD[RES_IDX]));
-    const periods = aggregateHourly(h, h.time, n, RES_IDX, startHour).map((r) => toFullPeriod(r, WIND_MASK, "GFS", RES_IDX));
-    for (const field of DIR_FIELDS) out.push(periods.map((p) => (p as any)[field] as number));
-  });
-  return out;
-}
+const qSpeed = (kph: number | undefined) =>
+  Math.min(Math.floor(((kph ?? 0) / KPH_PER_STEP) + 1e-9), SPEED_MAX);
 
 export async function derive(): Promise<DerivedTables> {
-  const sequences = await collectSequences();
-  const totalSymbols = sequences.reduce((s, seq) => s + seq.length, 0);
-  console.log(`Sequences (forecast × wind level): ${sequences.length}, symbols: ${totalSymbols}`);
-
-  // Marginal (order-0) counts — the fallback for a prev-direction that's never actually seen as a
-  // predecessor in the (pooled) corpus (still needs a representable codebook; in practice all 8
-  // directions occur constantly, so this fallback is unused).
-  const marginal = new Array(NDIR).fill(0);
-  for (const seq of sequences) for (const d of seq) marginal[d]++;
-
-  // First-direction distribution — what the bootstrap table encodes (no predecessor exists yet).
   const firstCounts = new Array(NDIR).fill(0);
-  for (const seq of sequences) if (seq.length > 0) firstCounts[seq[0]]++;
+  // trans[res][prev][next], all levels pooled; upper[res][prev*8+u][next], w600/w700 only.
+  const trans = Array.from({ length: NRES }, () =>
+    Array.from({ length: NDIR }, () => new Array(NDIR).fill(0)));
+  const upper = Array.from({ length: NRES }, () =>
+    Array.from({ length: NDIR * NDIR }, () => new Array(NDIR).fill(0)));
+  let symbols = 0;
 
-  // Transition counts: transitions[prev][next], pooled across all sequences (all forecasts × levels).
-  const transitions: number[][] = Array.from({ length: NDIR }, () => new Array(NDIR).fill(0));
-  for (const seq of sequences) for (let i = 1; i < seq.length; i++) transitions[seq[i - 1]][seq[i]]++;
-
-  const bootstrapWeights = scaledWeights(firstCounts);
-  const weights = transitions.map((row) => {
-    const total = row.reduce((a, b) => a + b, 0);
-    return scaledWeights(total > 0 ? row : marginal);
-  });
-
-  // Sanity check: every table beats the raw 3-bit fallback on its own training distribution.
-  const bootstrapLens = huffmanLengths(bootstrapWeights);
-  const lens = weights.map(huffmanLengths);
-  const costUnder = (len: number[], hist: number[]) => {
-    const total = hist.reduce((a, b) => a + b, 0) || 1;
-    return hist.reduce((s, c, i) => s + (c / total) * len[i], 0);
-  };
-  console.log(`Bootstrap table cost on its own distribution: ${costUnder(bootstrapLens, firstCounts).toFixed(3)} bits (raw = ${RAW_BITS})`);
-  for (let s = 0; s < NDIR; s++) {
-    const c = costUnder(lens[s], transitions[s]);
-    if (c > RAW_BITS) console.warn(`  prev=${s}: ${c.toFixed(3)} bits > raw fallback (${RAW_BITS}) — thin/noisy row`);
-  }
-
-  // Overall mean bits/direction: bootstrap for each sequence's first direction, order-1 table
-  // (keyed by the true previous direction) for the rest.
-  let bits = 0;
-  for (const seq of sequences) {
-    for (let i = 0; i < seq.length; i++) {
-      bits += i === 0 ? bootstrapLens[seq[0]] : lens[seq[i - 1]][seq[i]];
+  await eachForecast((h, startHour) => {
+    for (let resIdx = 0; resIdx < NRES; resIdx++) {
+      const hpp = HOURS_PER_PERIOD[resIdx];
+      const start = Math.floor(startHour / hpp) * hpp;
+      const n = Math.min(V1_MAX_PERIODS, Math.floor(h.time.length / hpp));
+      if (n < 2) continue;
+      const rows = aggregateHourly(h, h.time, n, resIdx, start);
+      const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "GFS", resIdx));
+      const sp = SPEED_FIELDS.map((f) => periods.map((p) => qSpeed((p as any)[f])));
+      const dr = DIR_FIELDS.map((f) => periods.map((p) => (((p as any)[f] as number) ?? 0) % 8));
+      // Displayed dir under calm gating: last encoded dir, 0 before any (mirrors v1.ts).
+      const disp = SPEED_FIELDS.map((_, L) => {
+        let eff = 0;
+        return periods.map((_, p) => (sp[L][p] > 0 ? (eff = dr[L][p]) : eff));
+      });
+      for (let L = 0; L < SPEED_FIELDS.length; L++) {
+        const U = UPPER_OF[L];
+        let prev: number | null = null;
+        for (let p = 0; p < n; p++) {
+          if (sp[L][p] === 0) continue; // calm: no symbol on the wire
+          const d = dr[L][p];
+          symbols++;
+          if (prev === null) firstCounts[d]++;
+          else {
+            trans[resIdx][prev][d]++;
+            if (U >= 0) upper[resIdx][prev * NDIR + disp[U][p]][d]++;
+          }
+          prev = d;
+        }
+      }
     }
-  }
-  console.log(`Mean bits/direction (order-1): ${(bits / totalSymbols).toFixed(3)}  (raw = ${RAW_BITS.toFixed(3)})`);
+  });
+  console.log(`Encoded (calm-gated) direction symbols across 5 resolutions: ${symbols}`);
 
-  return { WIND_DIR_BOOTSTRAP_WEIGHTS: bootstrapWeights, WIND_DIR_WEIGHTS: weights };
+  // Thin/unseen contexts fall back to broader priors so every table stays representable:
+  // an empty [res][prev] row borrows the resolution's marginal; an empty [res][prev×u] row
+  // borrows its [res][prev] row.
+  const marginal = trans.map((byPrev) => {
+    const m = new Array(NDIR).fill(0);
+    for (const row of byPrev) for (let i = 0; i < NDIR; i++) m[i] += row[i];
+    return m;
+  });
+  const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
+  const byRes = trans.map((byPrev, res) =>
+    byPrev.map((row) => scaledWeights(sum(row) > 0 ? row : marginal[res])));
+  const upperByRes = upper.map((byCtx, res) =>
+    byCtx.map((row, ctx) => scaledWeights(sum(row) > 0 ? row : trans[res][Math.floor(ctx / NDIR)])));
+
+  return {
+    WIND_DIR_BOOTSTRAP_WEIGHTS: scaledWeights(firstCounts),
+    WIND_DIR_WEIGHTS_BY_RES: byRes,
+    WIND_DIR_UPPER_WEIGHTS_BY_RES: upperByRes,
+  };
 }
 
 runStandalone(import.meta.url, derive);

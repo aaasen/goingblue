@@ -1,6 +1,6 @@
 {
   "description": "3-day daily ECMWF HRES, all v1 variables, Denali 14k camp",
-  "encoded": "\"!!$Mg/Ep15p1\":HEF+nP(=!UuYN;MJfM#)QX2SSlJ2vJS;QCPU,&",
+  "encoded": "\"!!$My39<gDb&oJpJhePX1'jSmAdd\"Va#R+wPvGzdsAm5r!'",
   "decoded": {
     "version": 1,
     "code": 0,
@@ -71,7 +71,7 @@
           "rain_mm": 0,
           "cloud_total": 14,
           "wind_sfc_kph": 0,
-          "wind_sfc_dir": 6,
+          "wind_sfc_dir": 5,
           "wind_500_kph": 24.14016,
           "wind_500_dir": 5,
           "wind_600_kph": 16.09344,

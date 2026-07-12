@@ -92,7 +92,7 @@ encoder wrote, so trailing zero words are simply dropped.
 | snow                   | Adaptive | mode + sparse/FOR/empty       | 6-bit sqrt-companded, 0–200 cm        |
 | rain                   | Adaptive | mode + sparse/FOR/empty       | 6-bit sqrt-companded, 0–144 mm        |
 | precipitation prob.    | Adaptive | mode + FOR/sparse/empty (≤3 bits/value) | 0–100% in eighths           |
-| wind — all levels      | anchor + entropy deltas; order-1 entropy dir | 4-bit speed anchor + ~2.4 bits/period (1h mean, speed + dir) | 5 mph speed steps, 8-point direction |
+| wind — all levels      | anchor + entropy deltas; contextual entropy dir, no dir symbol when calm | 5-bit speed anchor + ~1.8–2.5 bits/period (1h mean, speed + dir); tables keyed by resolution × level, 600/700 hPa also by the upper level's decoded values | 5 mph speed steps, 0–155 mph, 8-point direction |
 | cloud (high/mid/low)   | anchor + entropy deltas | 3-bit anchor + ~1.6 bits/delta | 0–100% in eighths          |
 | cloud (total)          | Fixed    | 3 bits each                   | 0–100% in eighths                     |
 
@@ -225,6 +225,16 @@ pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
     dir/speed tables are overconfident at 3h/6h (+0.36 b/p on wind columns there — Huffman's
     integer rounding had masked the miscalibration); recovered by resolution-keyed tables,
     planned alongside the dynamic time-frame change.
+16. Wind encoding overhaul (all context both sides already know, so no wire cost): dir/speed
+    tables keyed by resolution × level; 600/700 hPa conditioned on the upper level's decoded
+    same-period values (dir keyed by prev × upper dir, speed delta by the upper's delta bucket);
+    calm gating — no direction symbol when the quantized speed is 0 (35% of 1h surface periods,
+    where direction is model dither); speed domain 4 -> 5 bits (cap 75 -> 155 mph — the old cap
+    clamped 6-8.6% of 500 hPa values). Surface wind 2.45 -> 1.84 b/p (1h), w600 4.99 -> 3.58
+    (6h). Periods/message (1h base) 101.2 -> 107.9; overall score 54.3 -> 57.1; days/message at
+    6h with high-altitude winds 6.8 -> 7.7. Fixes the 3h/6h regression noted in #15. Scheme
+    selection was held-out validated (5-fold by location) — see
+    packages/server/scripts/analyze-wind-heldout.ts.
 
 ## License
 
