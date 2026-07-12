@@ -33,9 +33,10 @@ const C = {
   bg: '#ffffff',
   night: '#eceef3',
   grid: '#f0f1f4',
+  keyBg: '#e5e5ea',
   section: '#eef1f6',
   sectionText: '#8a8f99',
-  label: '#48484a',
+  label: '#2c2c2e',
   unit: '#9aa0aa',
   date: '#48484a',
   nil: '#d1d1d6',
@@ -257,13 +258,12 @@ function buildRows(periods: Period[], u: Units): Row[] {
   const has = (fn: (p: Period) => unknown) => periods.some((p) => fn(p) != null);
   const tU = tempUnit(u), snU = snowUnit(u), rnU = rainUnit(u), frU = freezeUnit(u), wU = windUnit(u);
 
-  rows.push({ kind: 'clouds', height: ROW_H.CLOUD, label: 'Sky' });
+  rows.push({ kind: 'clouds', height: ROW_H.CLOUD, label: '' });
 
   const hasSurface =
     has((p) => p.precip) || has((p) => p.temp_c) || has((p) => p.temp_min_c) ||
     has((p) => p.snow_cm) || has((p) => p.rain_mm) || has((p) => p.freeze_m) || has((p) => p.wind_sfc_kph);
   if (hasSurface) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Surface' });
     if (has((p) => p.temp_c) || has((p) => p.temp_min_c))
       rows.push({ kind: 'temp', height: ROW_H.TEMP, label: `Temp ${tU}` });
     if (has((p) => p.freeze_m)) rows.push({ kind: 'freeze', height: ROW_H.DATA, label: `Freezing ${frU}` });
@@ -394,6 +394,7 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
   const colCenter = (i: number) => NAME_W + i * CELL_W + CELL_W / 2;
 
   const els: ReactNode[] = [];
+  els.push(<Rect key="key-column-bg" x={0} y={0} width={NAME_W} height={totalH} color={C.keyBg} />);
 
   // 1. Location-aware astronomical night shading. Partial rectangles place sunrise and sunset
   // within a column rather than rounding them to the forecast period boundary.
@@ -401,17 +402,11 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
     const start = d.getTime();
     const end = start + steps[i] * 3600000;
     nightSegments(start, end, lat, lon).forEach(([from, to], segment) => {
-      els.push(<Rect key={`night${i}-${segment}`} x={colLeft(i) + from * CELL_W} y={ROW_H.DATE} width={(to - from) * CELL_W} height={totalH - ROW_H.DATE} color={C.night} />);
+      els.push(<Rect key={`night${i}-${segment}`} x={colLeft(i) + from * CELL_W} y={31} width={(to - from) * CELL_W} height={totalH - 31} color={C.night} />);
     });
   });
 
-  // 2. Column separators + header underline.
-  for (let i = 0; i <= n; i++) {
-    els.push(<Line key={`grid${i}`} p1={vec(colLeft(i), ROW_H.DATE)} p2={vec(colLeft(i), totalH)} color={C.grid} strokeWidth={1} />);
-  }
-  els.push(<Line key="hdr-rule" p1={vec(0, ROW_H.DATE)} p2={vec(width, ROW_H.DATE)} color="#d1d1d6" strokeWidth={1} />);
-
-  // 3. Date header. Hours occupy their own row. Each day label sticks to the visible left
+  // 2. Date header. Hours occupy their own row. Each day label sticks to the visible left
   // edge while its columns are being scrolled, then yields to the following day.
   const dayGroups: { start: number; end: number; date: Date }[] = [];
   dates.forEach((d, i) => {
@@ -422,6 +417,10 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
       previous.end = i + 1;
     }
     els.push(centerText(`hour${i}`, hourLabel(d, steps[i], timeFormat), colCenter(i), 44, fonts.hour, C.date));
+  });
+  dayGroups.slice(1).forEach((group, i) => {
+    const x = colLeft(group.start);
+    els.push(<Line key={`day-boundary${i}`} p1={vec(x, 0)} p2={vec(x, 31)} color={C.grid} strokeWidth={1} />);
   });
   els.push(<Line key="date-row-rule" p1={vec(NAME_W, 31)} p2={vec(width, 31)} color={C.grid} strokeWidth={1} />);
 
@@ -482,7 +481,9 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
     }
 
     // Row label (left column, scrolls with data).
-    els.push(<Text key={`lbl${ri}`} x={12} y={baseline(mid, fonts.label.getSize())} text={row.label} font={fonts.label} color={C.label} />);
+    if (row.label) {
+      els.push(<Text key={`lbl${ri}`} x={12} y={baseline(mid, fonts.label.getSize())} text={row.label} font={fonts.label} color={C.label} />);
+    }
 
     switch (row.kind) {
       case 'clouds':
@@ -639,14 +640,14 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
           const textWidth = fonts.date.getTextWidth(label);
           const start = colLeft(group.start);
           const end = colLeft(group.end);
-          const stickyEnd = end - textWidth - 10;
+          const stickyEnd = end - textWidth - 20;
           const translateX = stickyEnd > start
             ? scrollX.interpolate({
                 inputRange: [0, start, stickyEnd, width],
-                outputRange: [start + 5, 5, 5, end - textWidth - 5 - width],
+                outputRange: [start + 10, 10, 10, end - textWidth - 10 - width],
                 extrapolate: 'extend',
               })
-            : Animated.subtract(start + 5, scrollX);
+            : Animated.subtract(start + 10, scrollX);
           return (
             <Animated.Text
               key={`day${i}`}
