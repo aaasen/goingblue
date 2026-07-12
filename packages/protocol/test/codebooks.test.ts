@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { V1_CODEBOOKS, V1_VERSION } from "../src/index.js";
 
-// The Huffman codebooks are wire format: a message encoded under one set of tables decodes to
+// The entropy codebooks are wire format: a message encoded under one set of tables decodes to
 // plausible garbage — not an error — under another. So the tables are frozen per protocol
 // version, and this test is the tripwire: it fails the moment any weight table (or the temp
 // escape geometry) changes without a version bump.
@@ -13,7 +13,7 @@ import { V1_CODEBOOKS, V1_VERSION } from "../src/index.js";
 //     below. Never overwrite an existing entry: that would re-freeze the old version's tables
 //     to new values, which is exactly the silent drift this test exists to catch.
 const FROZEN_DIGESTS: Record<number, string> = {
-  1: "fb76a19a69523da8", // pre-ship; re-recorded freely until v1 has real deployed clients
+  1: "9e21133577e4edc4", // pre-ship; re-recorded freely until v1 has real deployed clients
 };
 
 const digest = createHash("sha256").update(JSON.stringify(V1_CODEBOOKS)).digest("hex").slice(0, 16);

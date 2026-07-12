@@ -13,7 +13,8 @@ import {
   CLOUD_HIGH_DELTA, CLOUD_MID_DELTA, CLOUD_LOW_DELTA, type DeltaCodec,
   encodeTempDelta, decodeTempDelta, chooseTempDeltaTable,
   TEMP_DELTA_TABLE_BITS, TEMP_DELTA_MIN, TEMP_DELTA_MAX,
-} from "../huffman.js";
+  makeBitSink, makeBitSource, type SymSink,
+} from "../entropy.js";
 
 export const V1_VERSION = 1;
 const VERSION = V1_VERSION;
@@ -26,10 +27,11 @@ const VERSION = V1_VERSION;
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
 // packed header. Packed header layout (22 bits):
 //   code:7 periods:8 elev:7
-// The body carries no length field — it is packed little-endian and self-delimiting (the decoder
-// knows the structure and reads exactly the bits it needs; see encodeBodyLE/decodeBodyLE).
-// The weathercode column has no codebook selector either: each symbol's Huffman table is keyed by
-// the previously decoded symbol, which both sides already have (see huffman.ts).
+// The body carries no length field — it is a single rANS stream (see rans.ts), serialized
+// little-endian and self-delimiting: the decoder knows the structure and consumes exactly the
+// symbols the encoder wrote (see encodeBodyLE/decodeBodyLE and SymSource.assertDone).
+// The weathercode column has no codebook selector either: each symbol's codebook is keyed by
+// the previously decoded symbol, which both sides already have (see entropy.ts).
 export const V1_PERIODS_BITS = 8;
 export const V1_MAX_PERIODS = 1 << V1_PERIODS_BITS; // 256
 
@@ -95,7 +97,7 @@ function clampInt(v: number, width: number): number {
   return Math.min(Math.max(v, 0), (1 << width) - 1);
 }
 
-// temp/tmin: Huffman-coded period-over-period deltas (see TEMP_DELTA_* in huffman.ts), not plain
+// temp/tmin: entropy-coded period-over-period deltas (see TEMP_DELTA_* in entropy.ts), not plain
 // scalar columns — each model's first period is an anchor at full width, quantized the same way.
 // Both fields share one codebook set: a min-of-window series behaves like a max-of-window one
 // (same offset, same ~1°C-step physical process), so there's no need to derive a second table.
@@ -107,16 +109,18 @@ const TEMP_DELTA_COLUMNS: [bit: number, field: "temp_c" | "temp_min_c", name: st
   [VARS_BIT.tmin, "temp_min_c", "tmin"],
 ];
 
-// freeze: Huffman-coded period-over-period deltas under a single shared table (see FREEZE_DELTA
-// in huffman.ts — no per-message selector; freeze-level delta shape doesn't vary enough by
+// freeze: entropy-coded period-over-period deltas under a single shared table (see FREEZE_DELTA
+// in entropy.ts — no per-message selector; freeze-level delta shape doesn't vary enough by
 // location/season to be worth one), not a plain scalar column. 304.8 m (1000 ft) steps,
 // 0..15 (0-15000 ft).
 const FREEZE_STEP_M = 304.8;
 const FREEZE_ANCHOR_BITS = VAR_BITS_V1[VARS_BIT.freeze];
-const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0) / FREEZE_STEP_M), FREEZE_ANCHOR_BITS);
+// The 1e-9 rescues float dust only (14 × 304.8 / 304.8 = 13.999999999999998 → 13 without it, so
+// a decoded value would re-quantize one step down); genuine sub-step values still floor down.
+const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0) / FREEZE_STEP_M + 1e-9), FREEZE_ANCHOR_BITS);
 
-// cloud cover (low/mid/high): Huffman-coded period-over-period deltas (see CLOUD_*_DELTA in
-// huffman.ts), not plain scalar columns — same anchor+delta shape as freeze, each level under its
+// cloud cover (low/mid/high): entropy-coded period-over-period deltas (see CLOUD_*_DELTA in
+// entropy.ts), not plain scalar columns — same anchor+delta shape as freeze, each level under its
 // own single shared table (not pooled across levels) since low/mid/high cloud persistence differs
 // meaningfully by altitude. Total cloud cover (bit cc) stays a plain raw scalar column (see
 // SCALAR_COLUMNS below) — untouched.
@@ -147,17 +151,17 @@ const SCALAR_COLUMNS: ScalarColumn[] = [
     get: (p) => compandSqrt(p.rain_mm ?? 0, RAIN_K, ACCUM_BITS),
     set: (p, v) => { p.rain_mm = expandSqrt(v, RAIN_K); } },
   // freeze (bit 3) and cloud_high/mid/low (bits 9/10/11) are handled separately in
-  // buildBody/decode below (Huffman-coded deltas).
+  // buildBody/decode below (entropy-coded deltas).
   { bit: 8, mode: "raw",
     get: (p) => clampInt(Math.round((p.cloud_total ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.cloud_total = Math.round(v * 100 / 7); } },
 ];
 
-// Wind columns (surface + 500/600/700 hPa): speed + direction per cell, both Huffman-coded, same
+// Wind columns (surface + 500/600/700 hPa): speed + direction per cell, both entropy-coded, same
 // shape as temp/tmin and weathercode respectively. Speed: per model, an anchor (first period, full
-// width) followed by Huffman-coded period-over-period deltas under a single shared table (see
-// WIND_SPEED_DELTA in huffman.ts — no per-message selector), never diffed across a model boundary. Direction: each symbol's codebook is keyed by
-// the previously decoded direction (see encodeWindDir in huffman.ts), each column tracking its own
+// width) followed by entropy-coded period-over-period deltas under a single shared table (see
+// WIND_SPEED_DELTA in entropy.ts — no per-message selector), never diffed across a model boundary. Direction: each symbol's codebook is keyed by
+// the previously decoded direction (see encodeWindDir in entropy.ts), each column tracking its own
 // context independently.
 const WIND_COLUMNS: { bit: number; kph: keyof Period; dir: keyof Period }[] = [
   { bit: 4, kph: "wind_sfc_kph", dir: "wind_sfc_dir" },
@@ -166,24 +170,26 @@ const WIND_COLUMNS: { bit: number; kph: keyof Period; dir: keyof Period }[] = [
   { bit: 7, kph: "wind_700_kph", dir: "wind_700_dir" },
 ];
 
-// A sequential bit-cursor reader over a decoded bit array.
+// A sequential reader over the entropy-coded body: convenience wrappers for each codec around
+// the shared SymSource (which owns the coder state).
 function reader(bits: number[]) {
+  const src = makeBitSource(bits);
+  return {
+    int: (n: number): number => src.raw(n),
+    weathercode: (prevSym: number | null): number => decodeWeathercode(src, prevSym),
+    windDir: (prevDir: number | null): number => decodeWindDir(src, prevDir),
+    delta: (codec: DeltaCodec): number => codec.decode(src),
+    tempDelta: (table: number): number => decodeTempDelta(src, table),
+    assertDone: (): void => src.assertDone(),
+  };
+}
+
+// The packed header is plain fixed-width MSB-first bits — not part of the body's rANS stream —
+// so it gets a plain bit cursor, not a SymSource.
+function headerReader(bits: number[]) {
   let pos = 0;
   return {
     int(n: number): number { const [v, p] = takeInt(bits, pos, n); pos = p; return v; },
-    weathercode(prevSym: number | null): number {
-      const [sym, p] = decodeWeathercode(bits, pos, prevSym); pos = p; return sym;
-    },
-    windDir(prevDir: number | null): number {
-      const [sym, p] = decodeWindDir(bits, pos, prevDir); pos = p; return sym;
-    },
-    delta(codec: DeltaCodec): number {
-      const [delta, p] = codec.decode(bits, pos); pos = p; return delta;
-    },
-    tempDelta(table: number): number {
-      const [delta, p] = decodeTempDelta(bits, pos, table); pos = p; return delta;
-    },
-    bitPos(): number { return pos; },
   };
 }
 
@@ -200,13 +206,14 @@ function bitWidth(n: number): number {
 }
 
 // A chosen per-column encoding: its mode tag, total bit cost, and an emitter for the body.
-interface Candidate { mode: number; cost: number; emit: (body: number[]) => void; }
+// Every payload here is raw (bypass) bits, so `cost` is exact under any coding substrate.
+interface Candidate { mode: number; cost: number; emit: (sink: SymSink) => void; }
 
 function rawCandidate(vals: number[], width: number): Candidate {
   return {
     mode: MODE_RAW,
     cost: vals.length * width,
-    emit: (body) => { for (const v of vals) putInt(body, v, width); },
+    emit: (sink) => { for (const v of vals) sink.raw(v, width); },
   };
 }
 
@@ -218,10 +225,10 @@ function forCandidate(vals: number[], width: number): Candidate {
   return {
     mode: MODE_FOR,
     cost: width + SUBWIDTH_BITS + vals.length * W,
-    emit: (body) => {
-      putInt(body, min, width);
-      putInt(body, W, SUBWIDTH_BITS);
-      if (W > 0) for (const v of vals) putInt(body, v - min, W);
+    emit: (sink) => {
+      sink.raw(min, width);
+      sink.raw(W, SUBWIDTH_BITS);
+      if (W > 0) for (const v of vals) sink.raw(v - min, W);
     },
   };
 }
@@ -233,11 +240,11 @@ function sparseCandidate(vals: number[], maxV: number, nonzero: number): Candida
   return {
     mode: MODE_SPARSE,
     cost: SUBWIDTH_BITS + vals.length + nonzero * magW,
-    emit: (body) => {
-      putInt(body, magW, SUBWIDTH_BITS);
+    emit: (sink) => {
+      sink.raw(magW, SUBWIDTH_BITS);
       for (const v of vals) {
-        putInt(body, v > 0 ? 1 : 0, 1);
-        if (v > 0) putInt(body, v, magW);
+        sink.raw(v > 0 ? 1 : 0, 1);
+        if (v > 0) sink.raw(v, magW);
       }
     },
   };
@@ -248,7 +255,7 @@ const EMPTY_CANDIDATE: Candidate = { mode: MODE_EMPTY, cost: 0, emit: () => {} }
 
 // Encodes a run of non-negative ints (each fitting `width` bits) with the cheapest adaptive mode —
 // a 2-bit MODE_* selector plus the mode's payload. Shared by adaptive scalar columns and wind speed.
-function encodeAdaptive(body: number[], vals: number[], width: number): number {
+function encodeAdaptive(sink: SymSink, vals: number[], width: number): number {
   let maxV = 0, nonzero = 0;
   for (const v of vals) { if (v > 0) { nonzero++; if (v > maxV) maxV = v; } }
 
@@ -257,8 +264,8 @@ function encodeAdaptive(body: number[], vals: number[], width: number): number {
     : [rawCandidate(vals, width), forCandidate(vals, width), sparseCandidate(vals, maxV, nonzero)];
   let best = candidates[0];
   for (const c of candidates) if (c.cost < best.cost) best = c;
-  putInt(body, best.mode, MODE_BITS);
-  best.emit(body);
+  sink.raw(best.mode, MODE_BITS);
+  best.emit(sink);
   return best.mode;
 }
 
@@ -298,7 +305,7 @@ function decodeAdaptive(rd: ReturnType<typeof reader>, width: number, n: number)
 // column with no mode selector (raw, and forced-FOR columns report MODE_FOR for the breakdown even
 // though they carry no selector bit).
 function encodeScalarColumn(
-  body: number[], col: ScalarColumn, periods: Period[][], nPeriods: number, nModels: number,
+  sink: SymSink, col: ScalarColumn, periods: Period[][], nPeriods: number, nModels: number,
 ): number {
   const width = VAR_BITS_V1[col.bit];
   const vals: number[] = [];
@@ -306,13 +313,13 @@ function encodeScalarColumn(
 
   switch (col.mode) {
     case "raw":
-      for (const v of vals) putInt(body, v, width);
+      for (const v of vals) sink.raw(v, width);
       return -1;
     case "for":
-      forCandidate(vals, width).emit(body);
+      forCandidate(vals, width).emit(sink);
       return MODE_FOR;
     case "adaptive":
-      return encodeAdaptive(body, vals, width);
+      return encodeAdaptive(sink, vals, width);
   }
 }
 
@@ -347,30 +354,30 @@ type ColumnSink = (name: string, bits: number, mode: number) => void;
 function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } {
   const nModels = msg.periods.length;
   const nPeriods = msg.periods[0].length;
-  const body: number[] = [];
-  const mark = (name: string, before: number, mode: number) => sink?.(name, body.length - before, mode);
+  const em = makeBitSink();
+  const mark = (name: string, before: number, mode: number) => sink?.(name, em.cost - before, mode);
 
-  // Weathercode column (always present, Huffman-coded). Each symbol's codebook is keyed by the
+  // Weathercode column (always present, entropy-coded). Each symbol's codebook is keyed by the
   // previously encoded symbol — null (the bootstrap table) for the first symbol of the sequence.
-  let before = body.length;
+  let before = em.cost;
   let prevWcSym: number | null = null;
   eachCell(nPeriods, nModels, (p, m) => {
     const idx = WMO2IDX[msg.periods[m][p].weathercode] ?? 0;
-    encodeWeathercode(body, prevWcSym, idx);
+    encodeWeathercode(em, prevWcSym, idx);
     prevWcSym = idx;
   });
   mark("weathercode", before, -1);
 
-  // temp/tmin: per model, an anchor (first period, full width) followed by Huffman-coded
+  // temp/tmin: per model, an anchor (first period, full width) followed by entropy-coded
   // period-over-period deltas — never diffed across a model boundary. Each column picks its own
-  // cheapest-of-16 table (see TEMP_DELTA_* in huffman.ts) from the same shared codebook set.
+  // cheapest-of-16 table (see TEMP_DELTA_* in entropy.ts) from the same shared codebook set.
   // A delta beyond the escape field's range (|jump| > 32°C between periods — possible at daily
   // resolution) is clamped to TEMP_DELTA_MIN..TEMP_DELTA_MAX, and every later delta is diffed
   // against the decoder's reconstruction, so the error heals on the next period instead of
   // offsetting the rest of the column.
   for (const [bit, field, name] of TEMP_DELTA_COLUMNS) {
     if (!(msg.vars_mask & (1 << bit))) continue;
-    before = body.length;
+    before = em.cost;
     const anchors: number[] = [];
     const modelDeltas: number[][] = [];
     const allDeltas: number[] = [];
@@ -388,38 +395,38 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
       modelDeltas.push(deltas);
     }
     const table = chooseTempDeltaTable(allDeltas);
-    putInt(body, table, TEMP_DELTA_TABLE_BITS);
+    em.raw(table, TEMP_DELTA_TABLE_BITS);
     for (let m = 0; m < nModels; m++) {
-      putInt(body, anchors[m], TEMP_ANCHOR_BITS);
-      for (const delta of modelDeltas[m]) encodeTempDelta(body, table, delta);
+      em.raw(anchors[m], TEMP_ANCHOR_BITS);
+      for (const delta of modelDeltas[m]) encodeTempDelta(em, table, delta);
     }
     mark(name, before, -1);
   }
 
-  // freeze: per model, an anchor (first period, full width) followed by Huffman-coded
-  // period-over-period deltas under a single shared table (see FREEZE_DELTA in huffman.ts —
+  // freeze: per model, an anchor (first period, full width) followed by entropy-coded
+  // period-over-period deltas under a single shared table (see FREEZE_DELTA in entropy.ts —
   // no per-message selector).
   if (msg.vars_mask & (1 << VARS_BIT.freeze)) {
-    before = body.length;
+    before = em.cost;
     for (let m = 0; m < nModels; m++) {
-      putInt(body, quantFreeze(msg.periods[m][0]), FREEZE_ANCHOR_BITS);
+      em.raw(quantFreeze(msg.periods[m][0]), FREEZE_ANCHOR_BITS);
       for (let p = 1; p < nPeriods; p++) {
-        FREEZE_DELTA.encode(body, quantFreeze(msg.periods[m][p]) - quantFreeze(msg.periods[m][p - 1]));
+        FREEZE_DELTA.encode(em, quantFreeze(msg.periods[m][p]) - quantFreeze(msg.periods[m][p - 1]));
       }
     }
     mark("freeze", before, -1);
   }
 
   // cloud cover (low/mid/high): per model, an anchor (first period, full width) followed by
-  // Huffman-coded period-over-period deltas, each level under its own single shared table (see
-  // CLOUD_*_DELTA in huffman.ts — no per-message selector).
+  // entropy-coded period-over-period deltas, each level under its own single shared table (see
+  // CLOUD_*_DELTA in entropy.ts — no per-message selector).
   for (const col of CLOUD_DELTA_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
-    before = body.length;
+    before = em.cost;
     for (let m = 0; m < nModels; m++) {
-      putInt(body, quantCloud(msg.periods[m][0], col.field), CLOUD_ANCHOR_BITS);
+      em.raw(quantCloud(msg.periods[m][0], col.field), CLOUD_ANCHOR_BITS);
       for (let p = 1; p < nPeriods; p++) {
-        col.codec.encode(body, quantCloud(msg.periods[m][p], col.field) - quantCloud(msg.periods[m][p - 1], col.field));
+        col.codec.encode(em, quantCloud(msg.periods[m][p], col.field) - quantCloud(msg.periods[m][p - 1], col.field));
       }
     }
     mark(BIT_NAME[col.bit], before, -1);
@@ -427,37 +434,38 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
 
   for (const col of SCALAR_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
-    before = body.length;
-    const mode = encodeScalarColumn(body, col, msg.periods, nPeriods, nModels);
+    before = em.cost;
+    const mode = encodeScalarColumn(em, col, msg.periods, nPeriods, nModels);
     mark(BIT_NAME[col.bit], before, mode);
   }
+  // Same float-dust epsilon as quantFreeze: a decoded speed (s × step) must re-quantize to s.
   const windSpeed = (c: Period, kph: keyof Period) =>
-    Math.min(Math.floor(((c[kph] as number) ?? 0) / KPH_PER_STEP), WIND_SPEED_MAX);
+    Math.min(Math.floor(((c[kph] as number) ?? 0) / KPH_PER_STEP + 1e-9), WIND_SPEED_MAX);
   for (const col of WIND_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
-    before = body.length;
+    before = em.cost;
 
-    // Speed: per model, an anchor (first period, full width) then Huffman-coded period-over-period
-    // deltas under the single shared table (see WIND_SPEED_DELTA in huffman.ts).
+    // Speed: per model, an anchor (first period, full width) then entropy-coded period-over-period
+    // deltas under the single shared table (see WIND_SPEED_DELTA in entropy.ts).
     for (let m = 0; m < nModels; m++) {
-      putInt(body, windSpeed(msg.periods[m][0], col.kph), WIND_SPEED_BITS);
+      em.raw(windSpeed(msg.periods[m][0], col.kph), WIND_SPEED_BITS);
       for (let p = 1; p < nPeriods; p++) {
-        WIND_SPEED_DELTA.encode(body, windSpeed(msg.periods[m][p], col.kph) - windSpeed(msg.periods[m][p - 1], col.kph));
+        WIND_SPEED_DELTA.encode(em, windSpeed(msg.periods[m][p], col.kph) - windSpeed(msg.periods[m][p - 1], col.kph));
       }
     }
 
-    // Direction: order-1 Huffman, keyed by the previously decoded direction.
+    // Direction: order-1 conditional, keyed by the previously decoded direction.
     let prevDir: number | null = null;
     eachCell(nPeriods, nModels, (p, m) => {
       const d = ((msg.periods[m][p][col.dir] as number) ?? 0) % 8;
-      encodeWindDir(body, prevDir, d);
+      encodeWindDir(em, prevDir, d);
       prevDir = d;
     });
 
     mark(BIT_NAME[col.bit], before, -1);
   }
 
-  return { body };
+  return { body: em.bits };
 }
 
 // lat/lon/models/vars/resolution and the start datetime are recovered client-side via `code`
@@ -476,7 +484,8 @@ export function v1MessageToString(msg: ForecastMessage): string {
   return encodeVersion(VERSION) + encode(buildHeader(msg, nPeriods)) + encodeBodyLE(body);
 }
 
-// One column's contribution to a message: its bit cost and, for adaptive columns, the mode picked.
+// One column's contribution to a message: its model cost in (fractional) bits and, for adaptive
+// columns, the mode picked.
 export interface ColumnBreakdown { name: string; bits: number; mode: string | null }
 
 // Per-column bit accounting for a message, for encoding experiments. Produces the identical string
@@ -485,9 +494,10 @@ export interface ColumnBreakdown { name: string; bits: number; mode: string | nu
 export interface V1Breakdown {
   encoded: string;
   chars: number;
-  versionBits: number;  // self-describing version prefix
-  headerBits: number;   // packed header (code/periods/elev)
-  bodyBits: number;     // total meaningful body bits (sum of column bits)
+  versionBits: number;   // self-describing version prefix
+  headerBits: number;    // packed header (code/periods/elev)
+  bodyBits: number;      // actual serialized body bits (rANS state + renorm words)
+  overheadBits: number;  // bodyBits − Σ columns[].bits: the coder's flush/renorm slack
   columns: ColumnBreakdown[];
 }
 
@@ -497,12 +507,14 @@ export function v1EncodeBreakdown(msg: ForecastMessage): V1Breakdown {
   const { body } = buildBody(msg, (name, bits, mode) =>
     columns.push({ name, bits, mode: mode < 0 ? null : MODE_NAMES[mode] }));
   const encoded = encodeVersion(VERSION) + encode(buildHeader(msg, nPeriods)) + encodeBodyLE(body);
+  const modelBits = columns.reduce((s, c) => s + c.bits, 0);
   return {
     encoded,
     chars: encoded.length,
     versionBits: VERSION_PREFIX_CHARS * 7, // GSM-7 septet per prefix char
     headerBits: HEADER_BITS,
     bodyBits: body.length,
+    overheadBits: body.length - modelBits,
     columns,
   };
 }
@@ -516,7 +528,7 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
     throw new Error(`Unexpected message length: ${s.length} chars`);
 
   const headerBits = decode(rest.slice(0, HEADER_CHARS), HEADER_BITS);
-  const hr = reader(headerBits);
+  const hr = headerReader(headerBits);
 
   const code = hr.int(CODE_BITS);
   const periodsRaw = hr.int(V1_PERIODS_BITS);
@@ -539,16 +551,16 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   const nPeriods = periodsRaw + 1;
   const nModels = 1;
 
-  // The body has no length field: it's self-delimiting given the known structure (nPeriods,
-  // nModels, vars_mask). decodeBodyLE materializes the meaningful low bits; reads past them
-  // return 0 (the implicit high-order padding) via takeInt's `?? 0`.
+  // The body has no length field: the rANS stream is self-delimiting given the known structure
+  // (nPeriods, nModels, vars_mask). decodeBodyLE materializes the meaningful low bits; renorm
+  // words past them read as 0 — exactly the trailing zero words encodeBodyLE dropped.
   const bodyBits = decodeBodyLE(rest.slice(HEADER_CHARS));
   const rd = reader(bodyBits);
 
   const periods: Period[][] = Array.from({ length: nModels }, () =>
     Array.from({ length: nPeriods }, () => ({ weathercode: 0 } as Period)));
 
-  // Weathercode column (Huffman-coded, each symbol keyed by the previously decoded symbol).
+  // Weathercode column (entropy-coded, each symbol keyed by the previously decoded symbol).
   let prevWcSym: number | null = null;
   eachCell(nPeriods, nModels, (p, m) => {
     const sym = rd.weathercode(prevWcSym);
@@ -615,16 +627,10 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
     });
   }
 
-  // A valid decode always consumes at least up to the body's highest set bit (encodeBodyLE only
-  // drops high-order zeros), so meaningful bits left past the cursor mean the column reads
-  // desynced from what the encoder wrote — codebook drift or a corrupted message — and the values
-  // above are garbage. The converse (reading past the materialized bits into implicit zero
-  // padding) is what every valid decode does, so over-reads are undetectable here; the codebook
-  // digest test (test/codebooks.test.ts) guards the drift half of that at CI time.
-  if (rd.bitPos() < bodyBits.length)
-    throw new Error(
-      `v1: body decode desynced (${bodyBits.length - rd.bitPos()} meaningful bits unread) — ` +
-      `codebook mismatch or corrupted message`);
+  // Column reads that desynced from what the encoder wrote — codebook drift or a corrupted
+  // message — mean the values above are garbage; the source's end-of-stream invariant catches
+  // that here (see SymSource.assertDone in entropy.ts).
+  rd.assertDone();
 
   // `days` is retained on the common message shape for display; it's the calendar-day span
   // implied by the period count (a partial final day rounds up).

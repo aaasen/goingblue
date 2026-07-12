@@ -605,6 +605,10 @@ async function report(args: Args): Promise<void> {
           cb.get(col.name)!.push(col.bits);
           if (col.mode) { const mm = cm.get(col.name)!; mm.set(col.mode, (mm.get(col.mode) ?? 0) + 1); }
         }
+        // Column bits are model costs; the rANS stream adds a constant flush/renorm slack per
+        // message. Track it as a pseudo-column so the occupancy total reconciles with the chars.
+        if (!cb.has("coder")) { cb.set("coder", []); cm.set("coder", new Map()); }
+        cb.get("coder")!.push(breakdown.overheadBits);
       }
     }
   }

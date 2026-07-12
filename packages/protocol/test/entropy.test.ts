@@ -11,6 +11,7 @@ import {
   CLOUD_MID_DELTA,
   CLOUD_HIGH_DELTA,
   type DeltaCodec,
+  type SymSink,
   encodeTempDelta,
   decodeTempDelta,
   chooseTempDeltaTable,
@@ -18,57 +19,66 @@ import {
   TEMP_DELTA_CORE_RADIUS,
   TEMP_DELTA_MIN,
   TEMP_DELTA_MAX,
+  makeBitSink,
+  makeBitSource,
 } from "../src/index.js";
+
+// Encode via `fn`, then return a source over the produced stream. Callers decode from it and
+// finish with assertDone() to prove the exact stream was consumed.
+function encoded(fn: (sink: SymSink) => void): { cost: number; source: ReturnType<typeof makeBitSource> } {
+  const sink = makeBitSink();
+  fn(sink);
+  return { cost: sink.cost, source: makeBitSource(sink.bits) };
+}
+
+// Model cost (in bits) of encoding a whole sequence through `fn`.
+function costOf(fn: (sink: SymSink) => void): number {
+  const sink = makeBitSink();
+  fn(sink);
+  return sink.cost;
+}
 
 // All contexts a weathercode symbol can be keyed by: no predecessor (bootstrap), or any WMO index.
 const WC_CONTEXTS: (number | null)[] = [null, ...WMO_CODES.map((_, i) => i)];
 
-function sequenceBits(seq: number[]): number {
-  const bits: number[] = [];
-  let prev: number | null = null;
-  for (const idx of seq) { encodeWeathercode(bits, prev, idx); prev = idx; }
-  return bits.length;
-}
-
-describe("weathercode Huffman", () => {
+describe("weathercode entropy coding", () => {
   it("round-trips every WMO index under every context", () => {
     for (const prevSym of WC_CONTEXTS) {
       for (let idx = 0; idx < WMO_CODES.length; idx++) {
-        const bits: number[] = [];
-        encodeWeathercode(bits, prevSym, idx);
-        expect(bits.length).toBeGreaterThan(0);
-        const [out, pos] = decodeWeathercode(bits, 0, prevSym);
-        expect(out).toBe(idx);
-        expect(pos).toBe(bits.length); // consumed exactly the code, no more
+        const { cost, source } = encoded((sink) => encodeWeathercode(sink, prevSym, idx));
+        expect(cost).toBeGreaterThan(0);
+        expect(decodeWeathercode(source, prevSym)).toBe(idx);
+        source.assertDone(); // consumed exactly the coded symbol, no more
       }
     }
   });
 
-  it("decodes a concatenated sequence unambiguously (prefix-free), context threaded from the previous symbol", () => {
+  it("decodes a concatenated sequence unambiguously, context threaded from the previous symbol", () => {
     const seq = [0, 3, 3, 16, 17, 25, 11, 2, 0, 0, 27, 8, 20];
-    const bits: number[] = [];
+    const { source } = encoded((sink) => {
+      let prev: number | null = null;
+      for (const idx of seq) { encodeWeathercode(sink, prev, idx); prev = idx; }
+    });
     let prev: number | null = null;
-    for (const idx of seq) { encodeWeathercode(bits, prev, idx); prev = idx; }
-
     const out: number[] = [];
-    let pos = 0;
-    prev = null;
     for (let k = 0; k < seq.length; k++) {
-      const [sym, p] = decodeWeathercode(bits, pos, prev);
+      const sym = decodeWeathercode(source, prev);
       out.push(sym);
-      pos = p;
       prev = sym;
     }
     expect(out).toEqual(seq);
-    expect(pos).toBe(bits.length);
+    source.assertDone();
   });
 
   it("a persistent (all-clear) sequence costs fewer bits under order-1 context than under the bootstrap table alone", () => {
     const allClear = Array(64).fill(0); // index 0 = WMO clear
-    const contextual = sequenceBits(allClear);
-    const bootstrapOnly = allClear.reduce((bits, idx) => {
-      const b: number[] = []; encodeWeathercode(b, null, idx); return bits + b.length;
-    }, 0);
+    const contextual = costOf((sink) => {
+      let prev: number | null = null;
+      for (const idx of allClear) { encodeWeathercode(sink, prev, idx); prev = idx; }
+    });
+    const bootstrapOnly = costOf((sink) => {
+      for (const idx of allClear) encodeWeathercode(sink, null, idx);
+    });
     expect(contextual).toBeLessThan(bootstrapOnly);
   });
 });
@@ -76,52 +86,44 @@ describe("weathercode Huffman", () => {
 // All contexts a direction symbol can be keyed by: no predecessor (bootstrap), or any of 0..7.
 const DIR_CONTEXTS: (number | null)[] = [null, 0, 1, 2, 3, 4, 5, 6, 7];
 
-function dirSequenceBits(seq: number[]): number {
-  const bits: number[] = [];
-  let prev: number | null = null;
-  for (const d of seq) { encodeWindDir(bits, prev, d); prev = d; }
-  return bits.length;
-}
-
-describe("wind direction Huffman", () => {
+describe("wind direction entropy coding", () => {
   it("round-trips every direction under every context", () => {
     for (const prevDir of DIR_CONTEXTS) {
       for (let dir = 0; dir < 8; dir++) {
-        const bits: number[] = [];
-        encodeWindDir(bits, prevDir, dir);
-        expect(bits.length).toBeGreaterThan(0);
-        const [out, pos] = decodeWindDir(bits, 0, prevDir);
-        expect(out).toBe(dir);
-        expect(pos).toBe(bits.length); // consumed exactly the code
+        const { cost, source } = encoded((sink) => encodeWindDir(sink, prevDir, dir));
+        expect(cost).toBeGreaterThan(0);
+        expect(decodeWindDir(source, prevDir)).toBe(dir);
+        source.assertDone(); // consumed exactly the coded symbol
       }
     }
   });
 
-  it("decodes a concatenated direction sequence unambiguously (prefix-free), context threaded from the previous direction", () => {
+  it("decodes a concatenated direction sequence unambiguously, context threaded from the previous direction", () => {
     const seq = [6, 6, 7, 6, 0, 3, 4, 5, 6, 6, 1, 2, 6];
-    const bits: number[] = [];
+    const { source } = encoded((sink) => {
+      let prev: number | null = null;
+      for (const d of seq) { encodeWindDir(sink, prev, d); prev = d; }
+    });
     let prev: number | null = null;
-    for (const d of seq) { encodeWindDir(bits, prev, d); prev = d; }
-
     const out: number[] = [];
-    let pos = 0;
-    prev = null;
     for (let k = 0; k < seq.length; k++) {
-      const [sym, p] = decodeWindDir(bits, pos, prev);
+      const sym = decodeWindDir(source, prev);
       out.push(sym);
-      pos = p;
       prev = sym;
     }
     expect(out).toEqual(seq);
-    expect(pos).toBe(bits.length);
+    source.assertDone();
   });
 
   it("a persistent (all-W) sequence costs fewer bits under order-1 context than under the bootstrap table alone, and beats raw 3-bit", () => {
     const allW = Array(64).fill(6); // direction index 6 = W
-    const contextual = dirSequenceBits(allW);
-    const bootstrapOnly = allW.reduce((bits, d) => {
-      const b: number[] = []; encodeWindDir(b, null, d); return bits + b.length;
-    }, 0);
+    const contextual = costOf((sink) => {
+      let prev: number | null = null;
+      for (const d of allW) { encodeWindDir(sink, prev, d); prev = d; }
+    });
+    const bootstrapOnly = costOf((sink) => {
+      for (const d of allW) encodeWindDir(sink, null, d);
+    });
     expect(contextual).toBeLessThan(bootstrapOnly);
     expect(contextual).toBeLessThan(allW.length * 3); // beats raw 3 bits/value
   });
@@ -138,33 +140,26 @@ const DELTA_CODECS: { label: string; codec: DeltaCodec; maxDelta: number; rawBit
   { label: "cloud high", codec: CLOUD_HIGH_DELTA, maxDelta: 7, rawBits: 3 },
 ];
 
-describe.each(DELTA_CODECS)("$label delta Huffman", ({ codec, maxDelta, rawBits }) => {
-  const bitsFor = (deltas: number[]): number => {
-    const bits: number[] = [];
-    for (const d of deltas) codec.encode(bits, d);
-    return bits.length;
-  };
+describe.each(DELTA_CODECS)("$label delta entropy coding", ({ codec, maxDelta, rawBits }) => {
+  const bitsFor = (deltas: number[]): number =>
+    costOf((sink) => { for (const d of deltas) codec.encode(sink, d); });
 
   it(`round-trips every delta in the bounded range (-${maxDelta}..${maxDelta})`, () => {
     for (let d = -maxDelta; d <= maxDelta; d++) {
-      const bits: number[] = [];
-      codec.encode(bits, d);
-      expect(bits.length).toBeGreaterThan(0);
-      const [out, pos] = codec.decode(bits, 0);
-      expect(out).toBe(d);
-      expect(pos).toBe(bits.length); // consumed exactly the code, no more
+      const { cost, source } = encoded((sink) => codec.encode(sink, d));
+      expect(cost).toBeGreaterThan(0);
+      expect(codec.decode(source)).toBe(d);
+      source.assertDone(); // consumed exactly the coded symbol, no more
     }
   });
 
-  it("decodes a concatenated delta sequence unambiguously (prefix-free)", () => {
+  it("decodes a concatenated delta sequence unambiguously", () => {
     const seq = [0, 1, -1, 0, 2, -3, 0, 1, -2, 0, 0];
-    const bits: number[] = [];
-    for (const d of seq) codec.encode(bits, d);
+    const { source } = encoded((sink) => { for (const d of seq) codec.encode(sink, d); });
     const out: number[] = [];
-    let pos = 0;
-    for (let k = 0; k < seq.length; k++) { const [d, p] = codec.decode(bits, pos); out.push(d); pos = p; }
+    for (let k = 0; k < seq.length; k++) out.push(codec.decode(source));
     expect(out).toEqual(seq);
-    expect(pos).toBe(bits.length);
+    source.assertDone();
   });
 
   it(`a near-constant column costs fewer bits than a wide-swinging one, and beats raw ${rawBits}-bit`, () => {
@@ -177,21 +172,17 @@ describe.each(DELTA_CODECS)("$label delta Huffman", ({ codec, maxDelta, rawBits 
 });
 
 function tempBits(deltas: number[], table: number): number {
-  const bits: number[] = [];
-  for (const d of deltas) encodeTempDelta(bits, table, d);
-  return bits.length;
+  return costOf((sink) => { for (const d of deltas) encodeTempDelta(sink, table, d); });
 }
 
-describe("temperature delta Huffman", () => {
+describe("temperature delta entropy coding", () => {
   it("round-trips every core delta (-7..7) under every codebook", () => {
     for (let table = 0; table < TEMP_DELTA_TABLE_COUNT; table++) {
       for (let d = -TEMP_DELTA_CORE_RADIUS; d <= TEMP_DELTA_CORE_RADIUS; d++) {
-        const bits: number[] = [];
-        encodeTempDelta(bits, table, d);
-        expect(bits.length).toBeGreaterThan(0);
-        const [out, pos] = decodeTempDelta(bits, 0, table);
-        expect(out).toBe(d);
-        expect(pos).toBe(bits.length); // consumed exactly the code, no more
+        const { cost, source } = encoded((sink) => encodeTempDelta(sink, table, d));
+        expect(cost).toBeGreaterThan(0);
+        expect(decodeTempDelta(source, table)).toBe(d);
+        source.assertDone(); // consumed exactly the coded symbol, no more
       }
     }
   });
@@ -200,34 +191,30 @@ describe("temperature delta Huffman", () => {
     const jumps = [8, -8, 11, -11, 20, -20, 31, -32, TEMP_DELTA_MAX, TEMP_DELTA_MIN];
     for (let table = 0; table < TEMP_DELTA_TABLE_COUNT; table++) {
       for (const d of jumps) {
-        const bits: number[] = [];
-        encodeTempDelta(bits, table, d);
-        const [out, pos] = decodeTempDelta(bits, 0, table);
-        expect(out).toBe(d);
-        expect(pos).toBe(bits.length);
+        const { source } = encoded((sink) => encodeTempDelta(sink, table, d));
+        expect(decodeTempDelta(source, table)).toBe(d);
+        source.assertDone();
       }
     }
   });
 
   it("throws on deltas outside the escape field's range instead of silently truncating", () => {
-    // putInt masks to the field width, so an unchecked encode of e.g. +40 would decode as -24 and
-    // corrupt every later temperature in the chain. The guard makes that impossible to emit;
+    // An unchecked encode of e.g. +40 would silently wrap in the 6-bit escape field and corrupt
+    // every later temperature in the chain. The guard makes that impossible to emit;
     // v1.ts clamps before calling (see the healing round-trip test in encoding.test.ts).
     for (const d of [TEMP_DELTA_MAX + 1, TEMP_DELTA_MIN - 1, 40, -40, 100]) {
-      expect(() => encodeTempDelta([], 0, d)).toThrow(/temp delta/);
+      expect(() => encodeTempDelta(makeBitSink(), 0, d)).toThrow(/temp delta/);
     }
   });
 
-  it("decodes a concatenated delta sequence unambiguously (prefix-free), mixing core and escape", () => {
+  it("decodes a concatenated delta sequence unambiguously, mixing core and escape", () => {
     const seq = [0, 1, -1, 0, 2, -3, 9, 0, 1, -14, 0, 0];
     for (let table = 0; table < TEMP_DELTA_TABLE_COUNT; table++) {
-      const bits: number[] = [];
-      for (const d of seq) encodeTempDelta(bits, table, d);
+      const { source } = encoded((sink) => { for (const d of seq) encodeTempDelta(sink, table, d); });
       const out: number[] = [];
-      let pos = 0;
-      for (let k = 0; k < seq.length; k++) { const [d, p] = decodeTempDelta(bits, pos, table); out.push(d); pos = p; }
+      for (let k = 0; k < seq.length; k++) out.push(decodeTempDelta(source, table));
       expect(out).toEqual(seq);
-      expect(pos).toBe(bits.length);
+      source.assertDone();
     }
   });
 

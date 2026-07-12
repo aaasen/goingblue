@@ -29,15 +29,25 @@ Forecast responses are bit-packed into a compact binary message, then serialized
 the [GSM-7 basic alphabet](packages/protocol/src/constants.ts) so each character costs a single
 septet over SMS. A message is a fixed header followed by one body cell per period × model.
 
+The body is emitted through a single **rANS** (range Asymmetric Numeral System) entropy coder
+(`packages/protocol/src/rans.ts`), so every modeled symbol costs its exact information content in
+fractional bits — the peaked distributions here (P(Δ=0) ≈ 0.7–0.8) cost well under the
+1-bit-per-symbol floor a prefix code can't cross. The stream is one rANS state per message
+(LIFO-encoded, ~20–25 bits of constant flush/renorm overhead), and the decoder's final state
+doubles as an integrity check: desynced reads throw instead of returning plausible garbage.
+
 ### Strategies
 
 - **Fixed (linear)** — the value is mapped to a fixed-width integer with a constant step size and
-  offset. Constant width; used where the range is small and roughly uniform.
-- **Huffman** — a static, prefix-free variable-length code so common conditions cost fewer bits.
-  Used for weathercode (several regime-tuned codebooks — dry, cold/snow, maritime, convective — named
-  by the header's `wc_table` field) and for surface wind direction (8 codebooks derived by clustering
-  the corpus's per-column direction distributions, selected by a 3-bit index before the column). In
-  both cases the encoder picks the codebook that yields the fewest bits.
+  offset. Constant width; used where the range is small and roughly uniform. Passes through the
+  coder's bypass path at exactly its nominal width.
+- **Entropy-coded deltas** — most columns store one full-width anchor per model, then
+  period-over-period deltas under static, corpus-derived frequency tables
+  (`packages/protocol/src/entropy.ts`, weights in `codebooks.gen.ts`). Weathercode and wind
+  direction are order-1 conditional: each symbol's table is keyed by the previously decoded
+  symbol — context both sides already have, so it costs no header bits. Temp deltas pick the
+  cheapest of 16 tables (4-bit selector, ±7 °C core plus a 6-bit escape); wind speed, freezing
+  level, and the three cloud levels each use one shared table.
 - **Frame-of-reference (FOR)** — store one baseline (the column minimum) plus a per-column bit
   width `W`; each value is its unsigned offset from the baseline in `W` bits. `W` adapts to the
   actual spread, so tightly-clustered columns shrink and an all-equal column costs zero bits per
@@ -64,29 +74,27 @@ shift which periods come back. **All times are UTC.**
 | ---------------- | ---- | -------------------------------------------------- |
 | version prefix   | 7    | self-describing protocol version (1 char)          |
 | code             | 7    | message code; recovers lat/lon, model, vars, resolution, and start time from client storage |
-| periods          | 7    | period count − 1 (1–128 periods)                   |
+| periods          | 8    | period count − 1 (1–256 periods)                   |
 | elevation        | 7    | 100 m steps, 0–12700 m (coarse sanity check)       |
-| wc_table         | 3    | Huffman codebook selector for weathercode          |
 
-The header is 24 packed bits → **5 chars** including the version prefix. The body carries **no length
-field**: it is packed little-endian and self-delimiting — the decoder knows the structure (period
-count, single model, `vars_mask`) and reads exactly the bits each column needs, so trailing
-zero-padding is simply dropped.
+The header is 22 packed bits → **5 chars** including the version prefix. The body carries **no length
+field**: it is a single rANS stream, serialized little-endian and self-delimiting — the decoder
+knows the structure (period count, single model, `vars_mask`) and consumes exactly the symbols the
+encoder wrote, so trailing zero words are simply dropped.
 
 ### Per-period variables
 
-| Variable               | Strategy | Size                          | Quantization                          |
+| Variable               | Strategy | Size (model cost)             | Quantization                          |
 | ---------------------- | -------- | ----------------------------- | ------------------------------------- |
-| weathercode            | Huffman  | ~1–7 bits / value (variable)  | 28 WMO codes, codebook per `wc_table` |
-| temperature (max)      | FOR      | 7-bit baseline + `W` (0–7)/value | 1 °C steps, −40 °C offset (−40..+87 °C) |
-| temperature (min)      | FOR      | 7-bit baseline + `W` (0–7)/value | 1 °C steps, −40 °C offset             |
-| freezing level         | FOR      | 4-bit baseline + `W` (0–4)/value | 1000 ft steps (0–15000 ft)            |
-| snow                   | Sparse   | 1 presence bit + magnitude/nonzero | 6-bit sqrt-companded, 0–200 cm    |
-| rain                   | Sparse   | 1 presence bit + magnitude/nonzero | 6-bit sqrt-companded, 0–144 mm    |
-| precipitation prob.    | Adaptive | mode + FOR/sparse/empty (≤3 bits/value) | 0–100% in eighths                 |
-| wind — surface         | Adaptive speed + Huffman dir | speed: mode + FOR/sparse/empty (≤4 b/val); dir: 3-bit codebook + Huffman (~1–3 b/val) | 5 mph speed steps, 8-point direction |
-| wind — 500/600/700 hPa | Fixed    | 7 bits each (4 speed + 3 dir) | 5 mph speed steps, 8-point direction  |
-| cloud (total/high/mid/low) | Fixed | 3 bits each                  | 0–100% in eighths                     |
+| weathercode            | order-1 entropy | ~1.7 bits/value (1h mean) | 28 WMO codes, table keyed by previous code |
+| temperature (max/min)  | anchor + entropy deltas | 8-bit anchor + ~2.1 bits/delta; 4-bit table selector | 1 °C steps, −100 °C offset |
+| freezing level         | anchor + entropy deltas | 4-bit anchor + ~1.1 bits/delta | 1000 ft steps (0–15000 ft)  |
+| snow                   | Adaptive | mode + sparse/FOR/empty       | 6-bit sqrt-companded, 0–200 cm        |
+| rain                   | Adaptive | mode + sparse/FOR/empty       | 6-bit sqrt-companded, 0–144 mm        |
+| precipitation prob.    | Adaptive | mode + FOR/sparse/empty (≤3 bits/value) | 0–100% in eighths           |
+| wind — all levels      | anchor + entropy deltas; order-1 entropy dir | 4-bit speed anchor + ~2.4 bits/period (1h mean, speed + dir) | 5 mph speed steps, 8-point direction |
+| cloud (high/mid/low)   | anchor + entropy deltas | 3-bit anchor + ~1.6 bits/delta | 0–100% in eighths          |
+| cloud (total)          | Fixed    | 3 bits each                   | 0–100% in eighths                     |
 
 ## Development
 
@@ -210,6 +218,13 @@ pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
 12. Huffman coding for wind speed deltas. Wind total 3.39 bits -> 2.87 bits. Periods per message 91.9 -> 96.4.
 13. Huffman coding for freezing level. 2.52 bits -> 1.41 bits. Periods per message 77.7 -> 84.8.
 14. Huffman coding for cloud cover. 3 bits -> 1.9 bits. Periods per message 51.3 -> 63.6.
+15. rANS entropy coding replacing Huffman throughout the body (same models and corpus-derived
+    tables, now charged fractional bits). Periods/message (1h base) 96.4 -> 101.2; wind
+    2.85 -> 2.41 bits/period, weathercode 1.84 -> 1.64; overall score 52.6 -> 54.3. Costs a
+    constant ~22-bit stream overhead per message, and surfaced that the 1h-derived wind
+    dir/speed tables are overconfident at 3h/6h (+0.36 b/p on wind columns there — Huffman's
+    integer rounding had masked the miscalibration); recovered by resolution-keyed tables,
+    planned alongside the dynamic time-frame change.
 
 ## License
 

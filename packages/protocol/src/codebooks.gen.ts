@@ -1,9 +1,9 @@
 // GENERATED FILE — do not edit by hand. Written by `pnpm generate`
-// (packages/server/scripts/generate-codebooks.ts): integer Huffman weight tables derived from
+// (packages/server/scripts/generate-codebooks.ts): integer weight tables derived from
 // the cached forecast corpus (data/raw/gfs). These tables are v1 wire format — regenerating
 // changes what already-encoded messages mean, so test/codebooks.test.ts pins their digest per
 // protocol version and fails until the version is bumped and the new digest recorded. See
-// packages/protocol/src/huffman.ts for how each table is used and the derive-*-codebooks.ts
+// packages/protocol/src/entropy.ts for how each table is used and the derive-*-codebooks.ts
 // scripts for methodology.
 
 export const CLOUD_LOW_DELTA_WEIGHTS: number[] = [11, 5, 6, 10, 13, 18, 35, 804, 36, 18, 12, 9, 6, 5, 12];
