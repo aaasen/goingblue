@@ -264,12 +264,12 @@ function buildRows(periods: Period[], u: Units): Row[] {
     has((p) => p.snow_cm) || has((p) => p.rain_mm) || has((p) => p.freeze_m) || has((p) => p.wind_sfc_kph);
   if (hasSurface) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Surface' });
-    if (has((p) => p.precip)) rows.push({ kind: 'precip', height: ROW_H.PRECIP, label: 'Precip %' });
     if (has((p) => p.temp_c) || has((p) => p.temp_min_c))
       rows.push({ kind: 'temp', height: ROW_H.TEMP, label: `Temp ${tU}` });
+    if (has((p) => p.freeze_m)) rows.push({ kind: 'freeze', height: ROW_H.DATA, label: `Freezing ${frU}` });
+    if (has((p) => p.precip)) rows.push({ kind: 'precip', height: ROW_H.PRECIP, label: 'Precip %' });
     if (has((p) => p.snow_cm)) rows.push({ kind: 'snow', height: ROW_H.SNOW, label: `Snow ${snU}` });
     if (has((p) => p.rain_mm)) rows.push({ kind: 'rain', height: ROW_H.SNOW, label: `Rain ${rnU}` });
-    if (has((p) => p.freeze_m)) rows.push({ kind: 'freeze', height: ROW_H.DATA, label: `Freezing ${frU}` });
     if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.DATA, label: `Wind ${wU}` });
   }
 
