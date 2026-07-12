@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { createAccount } from './account';
 import UnitsToggle from './UnitsToggle';
-import type { Units } from './settings';
+import type { TimeFormat, Units } from './settings';
 
 const FORECAST_EMAIL = 'inreach@going.blue';
 const TERMS_URL = 'https://going.blue/terms';
@@ -15,11 +15,13 @@ interface Props {
   onReady: (token: string) => void;
   units: Units;
   onUnitsChange: (u: Units) => void;
+  timeFormat: TimeFormat;
+  onTimeFormatChange: (format: TimeFormat) => void;
 }
 
 // First-run gate. The account token identifies the user for usage limits and is created once,
 // here, over normal internet — not over satellite.
-export default function SetupScreen({ onReady, units, onUnitsChange }: Props) {
+export default function SetupScreen({ onReady, units, onUnitsChange, timeFormat, onTimeFormatChange }: Props) {
   const [busy, setBusy] = useState(false);
 
   async function handleStart() {
@@ -53,9 +55,27 @@ export default function SetupScreen({ onReady, units, onUnitsChange }: Props) {
         Copy the forecast response into the <Bold>Decoder</Bold> tab to visualize the forecast.
       </Step>
 
-      <Text style={styles.label}>Units</Text>
-      <View style={styles.unitsRow}>
-        <UnitsToggle units={units} onChange={onUnitsChange} />
+      <Text style={styles.label}>Preferences</Text>
+      <View style={styles.preferencesCard}>
+        <View style={styles.preferenceRow}>
+          <Text style={styles.preferenceLabel}>Units</Text>
+          <UnitsToggle units={units} onChange={onUnitsChange} />
+        </View>
+        <View style={[styles.preferenceRow, styles.preferenceRowSpacing]}>
+          <Text style={styles.preferenceLabel}>Time format</Text>
+          <View style={styles.toggle}>
+            {(['12h', '24h'] as const).map((format) => (
+              <TouchableOpacity
+                key={format}
+                style={[styles.toggleBtn, timeFormat === format && styles.toggleBtnActive]}
+                onPress={() => onTimeFormatChange(format)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.toggleText, timeFormat === format && styles.toggleTextActive]}>{format}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
       </View>
 
       <Text style={styles.consentNote}>
@@ -114,7 +134,15 @@ const styles = StyleSheet.create({
   btnDisabled: { backgroundColor: '#aeaeb2' },
   btnPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 
-  unitsRow: { marginBottom: 20 },
+  preferencesCard: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 20 },
+  preferenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  preferenceRowSpacing: { marginTop: 14 },
+  preferenceLabel: { fontSize: 13, fontWeight: '600', color: '#3a3a3c' },
+  toggle: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: '#e5e5ea', borderRadius: 8, padding: 2 },
+  toggleBtn: { paddingHorizontal: 20, paddingVertical: 6, borderRadius: 6 },
+  toggleBtnActive: { backgroundColor: '#fff' },
+  toggleText: { fontSize: 13, color: '#6e6e73', fontWeight: '500' },
+  toggleTextActive: { color: '#1c1c1e' },
 
   gsHeading: { fontSize: 13, fontWeight: '700', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
   gsPara: { fontSize: 14, color: '#3a3a3c', lineHeight: 21, marginBottom: 12 },

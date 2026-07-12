@@ -7,8 +7,8 @@ export type TimeFormat = '12h' | '24h';
 
 const UNITS_KEY = 'display_units';
 const TIME_FORMAT_KEY = 'time_format';
-const DEFAULT_UNITS: Units = 'imperial';
-const DEFAULT_TIME_FORMAT: TimeFormat = '12h';
+const DEFAULT_UNITS: Units = 'metric';
+const DEFAULT_TIME_FORMAT: TimeFormat = '24h';
 
 export async function loadUnits(): Promise<Units> {
   try {

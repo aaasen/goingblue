@@ -15,8 +15,8 @@ export default function App() {
   const [forecastData, setForecastData] = useState('');
   // undefined = still loading from storage; null = no account yet (show setup); string = ready.
   const [token, setToken] = useState<string | null | undefined>(undefined);
-  const [units, setUnitsState] = useState<Units>('imperial');
-  const [timeFormat, setTimeFormatState] = useState<TimeFormat>('12h');
+  const [units, setUnitsState] = useState<Units>('metric');
+  const [timeFormat, setTimeFormatState] = useState<TimeFormat>('24h');
 
   useEffect(() => {
     loadToken().then(setToken);
@@ -60,7 +60,13 @@ export default function App() {
     return (
       <SafeAreaView style={styles.safe}>
         <StatusBar style="dark" />
-        <SetupScreen onReady={setToken} units={units} onUnitsChange={setUnits} />
+        <SetupScreen
+          onReady={setToken}
+          units={units}
+          onUnitsChange={setUnits}
+          timeFormat={timeFormat}
+          onTimeFormatChange={setTimeFormat}
+        />
       </SafeAreaView>
     );
   }
