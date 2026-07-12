@@ -6,7 +6,7 @@ import {
   VARS_BIT, startDatetime, type ForecastMessage,
 } from '@weather/protocol';
 import { decodeAny, loadStore, attachResponse, loadPastForecasts, type Slot } from './cache';
-import type { Units } from './settings';
+import type { TimeFormat, Units } from './settings';
 import LocationMap from './LocationMap';
 import Meteogram from './Meteogram';
 import { modelLabelsFromMask } from './models';
@@ -135,9 +135,10 @@ interface Props {
   forecastData: string;
   onForecastDataChange: (v: string) => void;
   units: Units;
+  timeFormat: TimeFormat;
 }
 
-export default function DecoderTab({ token, forecastData, onForecastDataChange, units }: Props) {
+export default function DecoderTab({ token, forecastData, onForecastDataChange, units, timeFormat }: Props) {
   const [decoded, setDecoded] = useState<ForecastMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cache, setCache] = useState<Slot[]>([]);
@@ -320,7 +321,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
           </View>
 
           {/* Forecast meteogram */}
-          <Meteogram msg={decoded} units={units} />
+          <Meteogram msg={decoded} units={units} timeFormat={timeFormat} />
         </>
       )}
 

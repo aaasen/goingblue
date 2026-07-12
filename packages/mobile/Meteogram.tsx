@@ -1,5 +1,5 @@
-import { useMemo, type ReactNode } from 'react';
-import { View, Text as RNText, StyleSheet, ScrollView } from 'react-native';
+import { useMemo, useRef, type ReactNode } from 'react';
+import { Animated, View, Text as RNText, StyleSheet } from 'react-native';
 import {
   Canvas, Group, Rect, RoundedRect, Circle, Line, Path, Text,
   LinearGradient, Skia, vec, matchFont, type SkFont,
@@ -8,7 +8,7 @@ import {
   CARDINALS, modelsFromMask, startDatetime,
   type ForecastMessage, type Period,
 } from '@weather/protocol';
-import type { Units } from './settings';
+import type { TimeFormat, Units } from './settings';
 
 // ── Layout constants ───────────────────────────────────────────────────────
 // The row-label column lives inside the canvas and scrolls horizontally with the
@@ -18,7 +18,7 @@ const NAME_W = 96;
 const CELL_W = 60;
 
 const ROW_H = {
-  DATE: 52,
+  DATE: 58,
   SECTION: 22,
   CLOUD: 58,
   PRECIP: 44,
@@ -170,11 +170,13 @@ function rainUnit(u: Units) { return u === 'imperial' ? 'in' : 'mm'; }
 function freezeUnit(u: Units) { return u === 'imperial' ? 'ft' : 'm'; }
 function windUnit(u: Units) { return u === 'imperial' ? 'mph' : 'kph'; }
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-function periodLabel(d: Date, step: number): string {
-  if (step >= 24) return `${DAYS[d.getDay()]}\n${d.getMonth() + 1}/${d.getDate()}`;
-  if (step === 1) return `${String(d.getHours()).padStart(2, '0')}:00`;
-  return `${DAYS[d.getDay()]}\n${d.getHours()}h`;
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function dayLabel(d: Date): string { return `${DAYS[d.getDay()]} ${d.getDate()}`; }
+function hourLabel(d: Date, step: number, timeFormat: TimeFormat): string {
+  if (step >= 24) return '';
+  const hour = d.getHours();
+  if (timeFormat === '24h') return `${hour}`;
+  return `${hour % 12 || 12}${hour < 12 ? 'am' : 'pm'}`;
 }
 
 function pressureLabel(level: 500 | 600 | 700, u: Units): string {
@@ -244,7 +246,7 @@ function buildRows(periods: Period[], u: Units): Row[] {
 function baseline(cy: number, size: number) { return cy + size * 0.35; }
 
 interface Fonts {
-  label: SkFont; sub: SkFont; data: SkFont; small: SkFont; bold: SkFont; date: SkFont;
+  label: SkFont; sub: SkFont; data: SkFont; small: SkFont; bold: SkFont; date: SkFont; hour: SkFont;
 }
 
 function centerText(key: string, text: string, cx: number, cy: number, font: SkFont, color: string): ReactNode {
@@ -325,11 +327,12 @@ function cloudGlyph(key: string, cx: number, top: number, h: number, code: numbe
 
 // ── Meteogram canvas (one per model) ─────────────────────────────────────--
 
-function ModelCanvas({ periods, rows, dates, steps, units, fonts }: {
+function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, fonts }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
-  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; fonts: Fonts;
+  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; fonts: Fonts;
 }) {
+  const scrollX = useRef(new Animated.Value(0)).current;
   const n = periods.length;
   const width = NAME_W + n * CELL_W;
   const totalH = ROW_H.DATE + rows.reduce((s, r) => s + r.height, 0);
@@ -353,17 +356,19 @@ function ModelCanvas({ periods, rows, dates, steps, units, fonts }: {
   }
   els.push(<Line key="hdr-rule" p1={vec(0, ROW_H.DATE)} p2={vec(width, ROW_H.DATE)} color="#d1d1d6" strokeWidth={1} />);
 
-  // 3. Date header.
+  // 3. Date header. Hours occupy their own row. Each day label sticks to the visible left
+  // edge while its columns are being scrolled, then yields to the following day.
+  const dayGroups: { start: number; end: number; date: Date }[] = [];
   dates.forEach((d, i) => {
-    const lines = periodLabel(d, steps[i]).split('\n');
-    const cx = colCenter(i);
-    if (lines.length === 2) {
-      els.push(centerText(`dt${i}a`, lines[0], cx, ROW_H.DATE / 2 - 9, fonts.date, C.date));
-      els.push(centerText(`dt${i}b`, lines[1], cx, ROW_H.DATE / 2 + 9, fonts.date, C.date));
+    const previous = dayGroups[dayGroups.length - 1];
+    if (!previous || previous.date.toDateString() !== d.toDateString()) {
+      dayGroups.push({ start: i, end: i + 1, date: d });
     } else {
-      els.push(centerText(`dt${i}`, lines[0], cx, ROW_H.DATE / 2, fonts.date, C.date));
+      previous.end = i + 1;
     }
+    els.push(centerText(`hour${i}`, hourLabel(d, steps[i], timeFormat), colCenter(i), 44, fonts.hour, C.date));
   });
+  els.push(<Line key="date-row-rule" p1={vec(NAME_W, 31)} p2={vec(width, 31)} color={C.grid} strokeWidth={1} />);
 
   // Temperature domain across all periods (max + min).
   const temps: number[] = [];
@@ -527,15 +532,50 @@ function ModelCanvas({ periods, rows, dates, steps, units, fonts }: {
   });
 
   return (
-    <ScrollView horizontal bounces={false} showsHorizontalScrollIndicator>
-      <Canvas style={{ width, height: totalH }}>{els}</Canvas>
-    </ScrollView>
+    <View style={{ height: totalH }}>
+      <Animated.ScrollView
+        horizontal
+        bounces={false}
+        showsHorizontalScrollIndicator
+        scrollEventThrottle={16}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+          { useNativeDriver: true },
+        )}
+      >
+        <Canvas style={{ width, height: totalH }}>{els}</Canvas>
+      </Animated.ScrollView>
+      <View pointerEvents="none" style={styles.stickyDayRow}>
+        {dayGroups.map((group, i) => {
+          const label = dayLabel(group.date);
+          const textWidth = fonts.date.getTextWidth(label);
+          const start = colLeft(group.start);
+          const end = colLeft(group.end);
+          const stickyEnd = end - textWidth - 10;
+          const translateX = stickyEnd > start
+            ? scrollX.interpolate({
+                inputRange: [0, start, stickyEnd, width],
+                outputRange: [start + 5, 5, 5, end - textWidth - 5 - width],
+                extrapolate: 'extend',
+              })
+            : Animated.subtract(start + 5, scrollX);
+          return (
+            <Animated.Text
+              key={`day${i}`}
+              style={[styles.stickyDayText, { transform: [{ translateX }] }]}
+            >
+              {label}
+            </Animated.Text>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 
 // ── Public component ─────────────────────────────────────────────────────--
 
-export default function Meteogram({ msg, units }: { msg: ForecastMessage; units: Units }) {
+export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMessage; units: Units; timeFormat: TimeFormat }) {
   const models = modelsFromMask(msg.models_mask);
 
   const fonts = useMemo<Fonts>(() => ({
@@ -544,7 +584,8 @@ export default function Meteogram({ msg, units }: { msg: ForecastMessage; units:
     data: matchFont({ fontSize: 13 }),
     small: matchFont({ fontSize: 10.5, fontWeight: '600' }),
     bold: matchFont({ fontSize: 12.5, fontWeight: '700' }),
-    date: matchFont({ fontSize: 12.5, fontWeight: '600' }),
+    date: matchFont({ fontSize: 14, fontWeight: '600' }),
+    hour: matchFont({ fontSize: 14, fontWeight: '400' }),
   }), []);
 
   const blocks = useMemo(() => msg.periods.map((periods, mi) => {
@@ -576,7 +617,7 @@ export default function Meteogram({ msg, units }: { msg: ForecastMessage; units:
               <RNText style={styles.modelHeaderText}>{b.name}</RNText>
             </View>
           )}
-          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} steps={b.steps} units={units} fonts={fonts} />
+          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} steps={b.steps} units={units} timeFormat={timeFormat} fonts={fonts} />
           {bi < blocks.length - 1 && <View style={styles.sep} />}
         </View>
       ))}
@@ -586,6 +627,8 @@ export default function Meteogram({ msg, units }: { msg: ForecastMessage; units:
 
 const styles = StyleSheet.create({
   container: { backgroundColor: '#fff' },
+  stickyDayRow: { position: 'absolute', top: 0, left: 0, right: 0, height: 31, overflow: 'hidden' },
+  stickyDayText: { position: 'absolute', top: 4, color: C.date, fontSize: 14, fontWeight: '600', lineHeight: 24 },
   modelHeaderBar: { paddingHorizontal: 14, paddingVertical: 7 },
   modelHeaderText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   sep: { height: 10, backgroundColor: '#f2f2f7' },

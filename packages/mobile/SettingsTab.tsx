@@ -2,7 +2,7 @@ import { StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity, Alert, P
 import * as Clipboard from 'expo-clipboard';
 import { formatToken } from '@weather/protocol';
 import UnitsToggle from './UnitsToggle';
-import type { Units } from './settings';
+import type { TimeFormat, Units } from './settings';
 
 // ── Reference data (mirrors the web decoder's "Model details" section) ───────
 
@@ -78,11 +78,13 @@ const VARIABLES: VarInfo[] = [
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function SettingsTab({ token, onReset, units, onUnitsChange }: {
+export default function SettingsTab({ token, onReset, units, onUnitsChange, timeFormat, onTimeFormatChange }: {
   token: string;
   onReset: () => void;
   units: Units;
   onUnitsChange: (u: Units) => void;
+  timeFormat: TimeFormat;
+  onTimeFormatChange: (format: TimeFormat) => void;
 }) {
   const RESET_MESSAGE =
     'This forgets the token on this device and returns to setup. The account still exists on the server — make sure you’ve saved the token if you want to get back to it.';
@@ -103,13 +105,28 @@ export default function SettingsTab({ token, onReset, units, onUnitsChange }: {
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-      {/* Units */}
-      <Text style={styles.heading}>Units</Text>
+      {/* Preferences */}
+      <Text style={styles.heading}>Preferences</Text>
       <View style={styles.card}>
-        <UnitsToggle units={units} onChange={onUnitsChange} />
-        <Text style={[styles.tokenNote, { marginBottom: 0, marginTop: 12 }]}>
-          Controls how decoded forecasts are displayed. Saved on this device.
-        </Text>
+        <View style={styles.preferenceRow}>
+          <Text style={styles.controlLabel}>Units</Text>
+          <UnitsToggle units={units} onChange={onUnitsChange} />
+        </View>
+        <View style={[styles.preferenceRow, styles.preferenceRowSpacing]}>
+          <Text style={styles.controlLabel}>Time format</Text>
+          <View style={styles.toggle}>
+            {(['12h', '24h'] as const).map((format) => (
+              <TouchableOpacity
+                key={format}
+                style={[styles.toggleBtn, timeFormat === format && styles.toggleBtnActive]}
+                onPress={() => onTimeFormatChange(format)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.toggleText, timeFormat === format && styles.toggleTextActive]}>{format}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
       </View>
 
       {/* Account */}
@@ -198,6 +215,14 @@ const styles = StyleSheet.create({
   link: { color: '#2a6bb5', textDecorationLine: 'underline' },
 
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12 },
+  preferenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  preferenceRowSpacing: { marginTop: 14 },
+  controlLabel: { fontSize: 13, fontWeight: '600', color: '#3a3a3c' },
+  toggle: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: '#e5e5ea', borderRadius: 8, padding: 2 },
+  toggleBtn: { paddingHorizontal: 20, paddingVertical: 6, borderRadius: 6 },
+  toggleBtnActive: { backgroundColor: '#fff' },
+  toggleText: { fontSize: 13, color: '#6e6e73', fontWeight: '500' },
+  toggleTextActive: { color: '#1c1c1e' },
   tokenValue: { fontSize: 20, fontWeight: '600', fontFamily: 'Courier', color: '#1c1c1e', letterSpacing: 1, marginBottom: 10 },
   tokenNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginBottom: 12 },
   accountBtns: { flexDirection: 'row', gap: 10 },

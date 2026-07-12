@@ -6,7 +6,7 @@ import DecoderTab from './DecoderTab';
 import SettingsTab from './SettingsTab';
 import SetupScreen from './SetupScreen';
 import { loadToken, clearToken } from './account';
-import { loadUnits, saveUnits, type Units } from './settings';
+import { loadTimeFormat, loadUnits, saveTimeFormat, saveUnits, type TimeFormat, type Units } from './settings';
 
 type Tab = 'builder' | 'decoder' | 'settings';
 
@@ -16,16 +16,23 @@ export default function App() {
   // undefined = still loading from storage; null = no account yet (show setup); string = ready.
   const [token, setToken] = useState<string | null | undefined>(undefined);
   const [units, setUnitsState] = useState<Units>('imperial');
+  const [timeFormat, setTimeFormatState] = useState<TimeFormat>('12h');
 
   useEffect(() => {
     loadToken().then(setToken);
     loadUnits().then(setUnitsState);
+    loadTimeFormat().then(setTimeFormatState);
   }, []);
 
   // Persist unit changes so the choice survives across sessions.
   function setUnits(u: Units) {
     setUnitsState(u);
     saveUnits(u);
+  }
+
+  function setTimeFormat(format: TimeFormat) {
+    setTimeFormatState(format);
+    saveTimeFormat(format);
   }
 
   function onForecastReceived(encoded: string) {
@@ -78,14 +85,14 @@ export default function App() {
         accessibilityElementsHidden={tab !== 'decoder'}
         importantForAccessibility={tab === 'decoder' ? 'auto' : 'no-hide-descendants'}
       >
-        <DecoderTab token={token} forecastData={forecastData} onForecastDataChange={setForecastData} units={units} />
+        <DecoderTab token={token} forecastData={forecastData} onForecastDataChange={setForecastData} units={units} timeFormat={timeFormat} />
       </View>
       <View
         style={[styles.tabContent, tab !== 'settings' && styles.tabHidden]}
         accessibilityElementsHidden={tab !== 'settings'}
         importantForAccessibility={tab === 'settings' ? 'auto' : 'no-hide-descendants'}
       >
-        <SettingsTab token={token} onReset={handleReset} units={units} onUnitsChange={setUnits} />
+        <SettingsTab token={token} onReset={handleReset} units={units} onUnitsChange={setUnits} timeFormat={timeFormat} onTimeFormatChange={setTimeFormat} />
       </View>
     </SafeAreaView>
   );
