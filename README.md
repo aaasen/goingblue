@@ -92,9 +92,26 @@ encoder wrote, so trailing zero words are simply dropped.
 | snow                   | Adaptive | mode + sparse/FOR/empty       | 6-bit sqrt-companded, 0–200 cm        |
 | rain                   | Adaptive | mode + sparse/FOR/empty       | 6-bit sqrt-companded, 0–144 mm        |
 | precipitation prob.    | Adaptive | mode + FOR/sparse/empty (≤3 bits/value) | 0–100% in eighths           |
-| wind — all levels      | anchor + entropy deltas; contextual entropy dir, no dir symbol when calm | 5-bit speed anchor + ~1.8–2.5 bits/period (1h mean, speed + dir); tables keyed by resolution × level, 600/700 hPa also by the upper level's decoded values | 5 mph speed steps, 0–155 mph, 8-point direction |
+| wind — all levels      | see [Wind](#wind) | 5-bit speed anchor + ~1.8–2.5 bits/period (1h mean, speed + dir) | 5 mph speed steps, 0–155 mph, 8-point direction |
 | cloud (high/mid/low)   | anchor + entropy deltas | 3-bit anchor + ~1.6 bits/delta | 0–100% in eighths          |
 | cloud (total)          | Fixed    | 3 bits each                   | 0–100% in eighths                     |
+
+### Wind
+
+Each wind column (surface, then 500/600/700 hPa) carries its quantized speeds first — a 5-bit
+anchor followed by entropy-coded period-over-period deltas — and then its directions. Everything
+that picks a codebook is context both sides already know, so it costs no wire bits:
+
+- **Resolution and level** key the tables. Wind persists far more hour-to-hour than
+  6h-to-6h, and surface deltas are far more peaked than jet-level ones, so each
+  (resolution, level) pair gets its own distribution.
+- **The level above** conditions the 600/700 hPa columns: they decode after the level above
+  them, so its already-decoded same-period values sharpen their tables (direction keyed by
+  previous × upper direction, speed delta by the upper level's bucketed delta). Adjacent
+  pressure levels share the synoptic flow, so this is the strongest single context.
+- **Calm periods carry no direction symbol.** When the speed quantizes to 0 the direction is
+  weather-model noise (~35% of 1h surface periods), so it's skipped entirely; the app shows
+  the last known direction, and the direction context chain carries it across the gap.
 
 ## Development
 
