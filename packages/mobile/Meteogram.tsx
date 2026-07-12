@@ -22,7 +22,7 @@ const ROW_H = {
   SECTION: 22,
   CLOUD: 58,
   PRECIP: 44,
-  TEMP: 88,
+  TEMP: 52,
   SNOW: 50,
   DATA: 42,
 } as const;
@@ -103,20 +103,20 @@ function lerp(a: number, b: number, t: number): number {
   return Math.round(a + (b - a) * t);
 }
 
-function rgb([r, g, b]: [number, number, number]): string {
-  return `rgb(${r}, ${g}, ${b})`;
+function rgb([r, g, b]: [number, number, number], alpha = 1): string {
+  return alpha < 1 ? `rgba(${r}, ${g}, ${b}, ${alpha})` : `rgb(${r}, ${g}, ${b})`;
 }
 
-function tempColor(c: number): string {
+function tempColor(c: number, alpha = 1): string {
   const s = TEMP_STOPS;
-  if (c <= s[0][0]) return rgb(s[0][1]);
-  if (c >= s[s.length - 1][0]) return rgb(s[s.length - 1][1]);
+  if (c <= s[0][0]) return rgb(s[0][1], alpha);
+  if (c >= s[s.length - 1][0]) return rgb(s[s.length - 1][1], alpha);
   for (let i = 0; i < s.length - 1; i++) {
     const [t0, c0] = s[i];
     const [t1, c1] = s[i + 1];
     if (c >= t0 && c <= t1) {
       const t = (c - t0) / (t1 - t0);
-      return rgb([lerp(c0[0], c1[0], t), lerp(c0[1], c1[1], t), lerp(c0[2], c1[2], t)]);
+      return rgb([lerp(c0[0], c1[0], t), lerp(c0[1], c1[1], t), lerp(c0[2], c1[2], t)], alpha);
     }
   }
   return '#1c1c1e';
@@ -138,7 +138,7 @@ function precipColor(pct: number): string {
 
 function fmtTemp(c: number | undefined, u: Units): string {
   if (c == null) return '';
-  return u === 'imperial' ? `${Math.round((c * 9) / 5 + 32)}` : `${Math.round(c)}`;
+  return u === 'imperial' ? `${Math.round((c * 9) / 5 + 32)}°` : `${Math.round(c)}°`;
 }
 function fmtSnow(cm: number, u: Units): string {
   if (u === 'imperial') {
@@ -405,6 +405,7 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
       els.push(<Rect key={`night${i}-${segment}`} x={colLeft(i) + from * CELL_W} y={31} width={(to - from) * CELL_W} height={totalH - 31} color={C.night} />);
     });
   });
+  const headerInsertIndex = els.length;
 
   // 2. Date header. Hours occupy their own row. Each day label sticks to the visible left
   // edge while its columns are being scrolled, then yields to the following day.
@@ -429,6 +430,45 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
   periods.forEach((p) => { if (p.temp_c != null) temps.push(p.temp_c); if (p.temp_min_c != null) temps.push(p.temp_min_c); });
   const tMin = temps.length ? Math.min(...temps) - 1 : 0;
   const tMax = temps.length ? Math.max(...temps) + 1 : 1;
+
+  // Temperature is a background area behind the time, weather-code, and temperature rows. Its
+  // vertical shape is normalized to this forecast's range, while the gradient colors are chosen
+  // from absolute temperatures and fade to white beneath the plotted range.
+  let tempRowBottom = ROW_H.DATE;
+  for (const row of rows) {
+    tempRowBottom += row.height;
+    if (row.kind === 'temp') break;
+  }
+  const plottedTemps = periods.map((p) => p.temp_c ?? p.temp_min_c);
+  if (temps.length && plottedTemps.some((temperature) => temperature != null)) {
+    const plotTop = 39;
+    const plotBottom = tempRowBottom - 18;
+    const scaleTempY = (temperature: number) =>
+      plotTop + ((tMax - temperature) / (tMax - tMin)) * (plotBottom - plotTop);
+    const first = plottedTemps.find((temperature): temperature is number => temperature != null)!;
+    const last = [...plottedTemps].reverse().find((temperature): temperature is number => temperature != null)!;
+    const points = [
+      { x: colLeft(0), y: scaleTempY(first) },
+      ...plottedTemps.flatMap((temperature, i) => temperature == null ? [] : [{ x: colCenter(i), y: scaleTempY(temperature) }]),
+      { x: colLeft(n), y: scaleTempY(last) },
+    ];
+    const area = Skia.Path.Make();
+    smoothTo(area, points);
+    area.lineTo(colLeft(n), tempRowBottom);
+    area.lineTo(colLeft(0), tempRowBottom);
+    area.close();
+    const rangeEnd = Math.max(0, Math.min(1, (plotBottom - plotTop) / (tempRowBottom - plotTop)));
+    els.splice(headerInsertIndex, 0,
+      <Path key="temperature-area" path={area}>
+        <LinearGradient
+          start={vec(0, plotTop)}
+          end={vec(0, tempRowBottom)}
+          colors={[tempColor(tMax, 0.55), tempColor((tMax + tMin) / 2, 0.55), tempColor(tMin, 0.55), 'rgba(255,255,255,0.55)']}
+          positions={[0, rangeEnd / 2, rangeEnd, 1]}
+        />
+      </Path>,
+    );
+  }
 
   // Snow / rain bar scaling (each row scales to its own max accumulation).
   const maxSnow = Math.max(0, ...periods.map((p) => p.snow_cm ?? 0));
@@ -506,43 +546,10 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
         break;
 
       case 'temp': {
-        const tp = 16, bp = 22;
-        const span = row.height - tp - bp;
-        const scaleY = (t: number) => top + tp + ((tMax - t) / (tMax - tMin)) * span;
-        const maxPts: { x: number; y: number }[] = [];
-        const minPts: { x: number; y: number }[] = [];
-        periods.forEach((p, i) => {
-          const hi = p.temp_c ?? p.temp_min_c;
-          const lo = p.temp_min_c ?? p.temp_c;
-          if (hi != null) maxPts.push({ x: colCenter(i), y: scaleY(hi) });
-          if (lo != null) minPts.push({ x: colCenter(i), y: scaleY(lo) });
-        });
-        if (maxPts.length) {
-          // Filled band between max and min curves with a warm→cool vertical gradient.
-          const band = Skia.Path.Make();
-          smoothTo(band, maxPts);
-          smoothTo(band, minPts, true);
-          band.close();
-          els.push(
-            <Path key="tband" path={band}>
-              <LinearGradient start={vec(0, top + tp)} end={vec(0, top + tp + span)}
-                colors={[tempColor(tMax), tempColor((tMax + tMin) / 2), tempColor(tMin)]} />
-            </Path>,
-          );
-          // The high-temperature curve, emphasized.
-          const line = Skia.Path.Make();
-          smoothTo(line, maxPts);
-          els.push(<Path key="tline" path={line} style="stroke" strokeWidth={2} color={tempColor(tMax)} />);
-        }
         periods.forEach((p, i) => {
           const cx = colCenter(i);
           if (p.temp_c != null) {
-            const yHi = scaleY(p.temp_c);
-            els.push(centerText(`th${i}`, fmtTemp(p.temp_c, units), cx, yHi - 9, fonts.bold, tempColor(p.temp_c)));
-          }
-          if (p.temp_min_c != null && p.temp_min_c !== p.temp_c) {
-            const yLo = scaleY(p.temp_min_c);
-            els.push(centerText(`tl${i}`, fmtTemp(p.temp_min_c, units), cx, yLo + 11, fonts.small, tempColor(p.temp_min_c)));
+            els.push(centerText(`th${i}`, fmtTemp(p.temp_c, units), cx, top + 14, fonts.bold, '#1c1c1e'));
           }
         });
         break;
