@@ -676,11 +676,16 @@ async function report(args: Args): Promise<void> {
 
   const forecasts: { location: string }[] = [];
   const allMask = comboMask(COMBOS.length - 1); // every group on
-  let versionBits = 0, headerBits = 0, skipped = 0, uncovered = 0;
+  let versionBits = 0, headerBits = 0, skipped = 0, short = 0, uncovered = 0;
 
   for (const key of keys) {
     const rec = records.get(key)!;
     const h = rec.response.hourly as HourlyData;
+    // Records from a pull with a shorter HORIZON_DAYS are still on disk (growing the horizon moves
+    // the window anchor, so re-collection writes new keys rather than overwriting them). Skip them:
+    // a short record can't serve the longest durations, and mixing them in would silently give each
+    // duration a different sample of forecasts.
+    if (h.time.length < REQUIRED_HOURS) { short++; continue; }
     if (!baseComplete(h)) { skipped++; continue; }
     const [locId, run] = key.split("|");
     const { lat, lon } = rec.meta.location;
@@ -757,6 +762,7 @@ async function report(args: Args): Promise<void> {
     forecasts: forecasts.length,
     locations: new Set(forecasts.map((f) => f.location)).size,
     skipped,
+    short,
     uncovered,
     versionBits, headerBits,
     model: model.label,
@@ -773,6 +779,7 @@ async function report(args: Args): Promise<void> {
   const dv = views[vkey(defaultDuration, stats.defaultCombo)];
   console.log(`\n== Benchmark ==`);
   console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${model.label}, durations ${durations.join("/")}d  |  max-chars=${args.maxChars}, request ${args.requestHour}:00 local`);
+  if (short) console.log(`  ignored ${short} cached forecast(s) from a shorter-window pull (< ${HORIZON_DAYS}d — leftovers, safe to delete)`);
   if (skipped) console.log(`  skipped ${skipped} forecast(s) with an incomplete base series`);
   if (uncovered) console.log(`  skipped ${uncovered} (forecast, duration) pair(s) the corpus window doesn't cover`);
   if (dropped.length) console.log(`  dropped ${dropped.join("/")}d entirely — no forecast in the corpus covers them (re-collect: the window must be ≥ ${HORIZON_DAYS}d)`);
@@ -825,6 +832,7 @@ interface ReportData {
   forecasts: number;
   locations: number;
   skipped: number;
+  short: number;      // cached records from a shorter-window pull, ignored
   uncovered: number;
   versionBits: number;
   headerBits: number;
@@ -834,13 +842,15 @@ interface ReportData {
   views: Record<string, ViewStats>;                        // "duration:combo" → stats
 }
 
-// Fill progress in rungs: seq / S, so 1.0 = the whole window at 12h, 2.0 = at 6h, 3.0 = 3h, 4.0 = 1h.
-// Normalizing by S is what makes different durations comparable on one axis.
-const rungBox = (vs: ViewStats): BoxStats => {
-  const f = 1 / vs.slots;
+// Fill as a fraction of the sequence: seq / 4S. 100% is the top of the ladder — the whole window at
+// 1h — and the four rungs land at 25/50/75/100% (the whole window at 12h/6h/3h/1h). Normalizing by
+// the sequence length is what makes different durations comparable on one axis.
+const fillBox = (vs: ViewStats): BoxStats => {
+  const f = 1 / vs.maxSeq;
   const s = vs.seq;
   return { min: s.min * f, p25: s.p25 * f, p50: s.p50 * f, mean: s.mean * f, p75: s.p75 * f, max: s.max * f };
 };
+const pctText = (fraction: number) => `${(100 * fraction).toFixed(1)}%`;
 
 const esc = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
@@ -856,7 +866,7 @@ const seqX = (seq: number, maxSeq: number) =>
 function renderMarks(vs: ViewStats, y1: number, y2: number, labelY: number | null): string {
   return vs.stages.map((st) => {
     const x = seqX(st.seq, vs.maxSeq).toFixed(1);
-    const line = `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" class="mark"><title>seq ${st.seq} — ${esc(seqLabel(vs.durationDays, st.seq))} (${(100 * st.share).toFixed(0)}% of messages reach it)</title></line>`;
+    const line = `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" class="mark"><title>seq ${st.seq} — ${esc(seqLabel(vs.durationDays, st.seq))} (${(100 * st.share).toFixed(1)}% of messages reach it)</title></line>`;
     const text = labelY === null ? ""
       : `<text x="${x}" y="${labelY}" class="marklabel" text-anchor="middle">${esc(st.label)}</text>`;
     return line + text;
@@ -940,17 +950,21 @@ function renderMiniBox(s: BoxStats, scaleMax: number): string {
   `</svg>`;
 }
 
-// Compact comparison plot of fill progress in rungs. The scale is fixed at 0..FILL_STAGES with a
-// tick per rung, so every duration and variable combo is read against the same ladder: past the
-// "12h" tick the whole window is covered at 12h, past "1h" the message is fully refined.
-function renderRungMiniBox(p: BoxStats, meanSeq: number, maxSeq: number): string {
-  const W = 180, H = 24, pad = 4, iw = W - 2 * pad;
-  const x = (v: number) => pad + (v / FILL_STAGES) * iw;
-  const cy = H / 2, half = 6, cap = 4;
-  const ticks = Array.from({ length: FILL_STAGES }, (_, k) =>
-    `<line x1="${x(k + 1).toFixed(1)}" y1="1" x2="${x(k + 1).toFixed(1)}" y2="${H - 1}" class="mark"/>`).join("");
-  return `<svg viewBox="0 0 ${W} ${H}" class="pbox" role="img" aria-label="Fill progress: mean ${p.mean.toFixed(2)} rungs">` +
-    `<title>fill progress in rungs (1 = whole window at 12h, 2 = 6h, 3 = 3h, 4 = 1h) · min ${p.min.toFixed(2)} · Q1 ${p.p25.toFixed(2)} · median ${p.p50.toFixed(2)} · mean ${p.mean.toFixed(2)} · Q3 ${p.p75.toFixed(2)} · max ${p.max.toFixed(2)} — mean seq ${meanSeq.toFixed(1)} of ${maxSeq}</title>` +
+// Compact comparison plot of fill, as a fraction of the sequence. The scale is fixed at 0..100% with
+// a labelled tick per rung, so every duration and variable combo is read against the same ladder:
+// past the "12h" tick the whole window is covered at 12h; 100% is the whole window at 1h.
+function renderFillMiniBox(vs: ViewStats): string {
+  const W = 210, H = 44, pad = 5, iw = W - 2 * pad;
+  const p = fillBox(vs);
+  const x = (v: number) => pad + v * iw;
+  const cy = 15, half = 6, cap = 4, tickTop = 3, tickBottom = 27;
+  const ticks = vs.stages.map((st, k) => {
+    const tx = x((k + 1) / FILL_STAGES).toFixed(1);
+    return `<line x1="${tx}" y1="${tickTop}" x2="${tx}" y2="${tickBottom}" class="mark"/>` +
+      `<text x="${tx}" y="${H - 2}" class="marklabel" text-anchor="${k + 1 === FILL_STAGES ? "end" : "middle"}">${esc(st.label)}</text>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="pbox" role="img" aria-label="Fill: mean ${pctText(p.mean)} of a full 1h fill">` +
+    `<title>fill (seq as a share of the full 1h sequence) · min ${pctText(p.min)} · Q1 ${pctText(p.p25)} · median ${pctText(p.p50)} · mean ${pctText(p.mean)} · Q3 ${pctText(p.p75)} · max ${pctText(p.max)} — mean seq ${vs.seq.mean.toFixed(1)} of ${vs.maxSeq}</title>` +
     ticks +
     `<line x1="${x(p.min).toFixed(1)}" y1="${cy}" x2="${x(p.max).toFixed(1)}" y2="${cy}" class="bwhisker"/>` +
     `<line x1="${x(p.min).toFixed(1)}" y1="${cy - cap}" x2="${x(p.min).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
@@ -968,30 +982,21 @@ function renderDurationComparison(s: ReportData): string {
   ];
   const head = s.durations.map((d) => `<th>${d}d</th>`).join("");
   const view = (d: number, combo: number) => s.views[`${d}:${combo}`];
-  const score = mean(configurations.flatMap(({ combo }) =>
-    s.durations.map((d) => rungBox(view(d, combo)).mean)));
+  // One score per forecast length: the fill each duration averages, over all variable combos.
   const perDuration = s.durations.map((d) => {
-    const base = view(d, s.defaultCombo);
-    const rungs = mean(configurations.map(({ combo }) => rungBox(view(d, combo)).mean));
+    const fill = mean(configurations.map(({ combo }) => fillBox(view(d, combo)).mean));
     return `<div class="score"><div class="score-label">${d}d average</div>` +
-      `<div><strong class="score-value">${rungs.toFixed(2)}</strong> rungs</div>` +
-      `<div class="score-sub">base median: ${esc(base.medianLabel)}</div></div>`;
+      `<div><strong class="score-value">${pctText(fill)}</strong> filled</div></div>`;
   }).join("");
   const rows = configurations.map(({ label, combo }) => `<tr><td class="name">${esc(label)}</td>` +
     s.durations.map((d) => {
       const vs = view(d, combo);
-      const r = rungBox(vs);
-      return `<td><div class="pcell"><span class="pmean">seq ${vs.seq.mean.toFixed(1)}/${vs.maxSeq}</span>` +
-        `${renderRungMiniBox(r, vs.seq.mean, vs.maxSeq)}</div></td>`;
+      return `<td><div class="pcell"><span class="pmean">${pctText(fillBox(vs).mean)}</span>` +
+        `${renderFillMiniBox(vs)}</div></td>`;
     }).join("") + `</tr>`).join("\n");
-  return `<h2>Overall benchmark score</h2>
-  <div class="score-grid"><div class="score"><div class="score-label">Overall average</div>` +
-    `<div><strong class="score-value">${score.toFixed(2)}</strong> rungs</div>` +
-    `<div class="score-sub">1 = whole window at 12h · 4 = at 1h</div></div>${perDuration}</div>
-  <h2>How far up the fill ladder one message gets</h2>
-  <p class="note">Each cell is the fill sequence the production search (<code>fitFillToBudget</code>)
-  reached for that requested duration, drawn as fill progress against the four rungs — the ticks are
-  the sequence numbers at which the <em>whole</em> window is covered at 12h, 6h, 3h and 1h.</p>
+  return `<h2>Fill percentage by forecast length</h2>
+  <div class="score-grid">${perDuration}</div>
+  <h2>Fill percentage by forecast length and variables</h2>
   <table class="period-comparison">
     <tr><th>Variables</th>${head}</tr>
     ${rows}
@@ -1029,7 +1034,7 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
   <div class="score-grid detail-score">` +
     `<div class="score"><div class="score-label">Average fill sequence</div>` +
     `<div><strong class="score-value">${vs.seq.mean.toFixed(1)}</strong> of ${vs.maxSeq}</div>` +
-    `<div class="score-sub">${rungBox(vs).mean.toFixed(2)} rungs</div></div>` +
+    `<div class="score-sub">${pctText(fillBox(vs).mean)} filled (100% = all 1h)</div></div>` +
     `<div class="score"><div class="score-label">Median message</div>` +
     `<div><strong class="score-value">seq ${vs.medianSeq}</strong></div>` +
     `<div class="score-sub">${esc(vs.medianLabel)}</div></div>` +
@@ -1063,6 +1068,7 @@ function renderHtml(s: ReportData): string {
   const groupChecks = s.groups.map((g, i) =>
     `<label><input type="checkbox" class="group" value="${g.id}" data-bit="${1 << i}"${s.defaultCombo & (1 << i) ? " checked" : ""}> ${esc(g.label)}</label>`).join("");
   const notes = [
+    s.short ? `Ignored ${s.short} cached forecast(s) from a shorter-window pull (< ${HORIZON_DAYS}d). They are leftovers from an earlier collection and can be deleted.` : "",
     s.skipped ? `Skipped ${s.skipped} forecast(s) with an incomplete base series.` : "",
     s.uncovered ? `Skipped ${s.uncovered} (forecast, duration) pair(s) the corpus window doesn't cover.` : "",
     s.dropped.length ? `Dropped ${s.dropped.map((d) => `${d}d`).join(", ")} entirely — no forecast in the corpus covers that duration. Re-collect: the cached windows are shorter than the ${HORIZON_DAYS}-day window this report needs.` : "",
@@ -1074,7 +1080,7 @@ function renderHtml(s: ReportData): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Encoding benchmark — ${esc(s.timestamp)}</title>
+<title>Going Blue Encoding Benchmark — ${esc(s.timestamp)}</title>
 <style>
   :root { color-scheme: light dark; }
   body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 2rem; max-width: 900px; }
@@ -1111,10 +1117,10 @@ function renderHtml(s: ReportData): string {
   .blabel { fill: #888; font-size: 10px; font-variant-numeric: tabular-nums; }
   .boxcell { width: 210px; }
   .mbox { display: block; width: 200px; height: 20px; }
-  table.period-comparison { max-width: 900px; }
-  table.period-comparison th:not(:first-child) { min-width: 210px; }
-  .pcell { display: grid; grid-template-columns: 8.5rem 1fr; align-items: center; gap: .4rem; }
-  .pbox { display: block; width: 180px; height: 24px; }
+  table.period-comparison { max-width: 1000px; }
+  table.period-comparison th:not(:first-child) { min-width: 240px; }
+  .pcell { display: grid; grid-template-columns: 3.3rem 1fr; align-items: center; gap: .1rem; }
+  .pbox { display: block; width: 210px; height: 44px; }
   .pmean { font: .78rem ui-monospace, monospace; white-space: nowrap; }
   .score-grid { display: flex; flex-wrap: wrap; gap: .6rem; margin: .2rem 0 .7rem; }
   .score { padding: .7rem 1rem; background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.45); border-radius: 8px; font-variant-numeric: tabular-nums; }
@@ -1124,16 +1130,36 @@ function renderHtml(s: ReportData): string {
   .detail-score { margin: 1rem 0 1.25rem; }
   .mark { stroke: #e6a01e; stroke-width: 1; stroke-dasharray: 3 3; }
   .marklabel { fill: #e6a01e; font-size: 10px; font-variant-numeric: tabular-nums; }
+  .intro { max-width: 640px; margin: 1rem 0 1.75rem; }
+  .intro p { margin: .5rem 0; }
   .note { color: #777; font-size: .82rem; max-width: 640px; margin: .2rem 0 .8rem; }
   .note code { background: rgba(128,128,128,.15); padding: .05rem .3rem; border-radius: 3px; }
   table.stages { max-width: 620px; margin-bottom: .5rem; }
 </style>
 </head>
 <body>
-<h1>Encoding benchmark</h1>
+<h1>Going Blue Encoding Benchmark</h1>
 <div class="meta">
   ${esc(s.timestamp)} · ${s.forecasts} forecasts · ${s.locations} locations · ${esc(s.model)} · max <code>${s.maxChars}</code> chars ·
   request at <code>${s.requestHour}:00</code> local
+</div>
+
+<div class="intro">
+  <p>Going Blue uses an entropy coding scheme where the number of forecast periods in each message
+  depends on the entropy of the weather forecast. Forecasts for stable conditions with little entropy
+  use far less information than those for stormy, variable conditions. This dashboard helps visualize
+  how much data is transmitted at each forecast length.</p>
+
+  <p>The forecast length is fixed and the time resolution is dynamic. Going Blue tries to fit as much
+  data as possible into each message. It fills the entire time duration with the highest resolution it
+  can, then partially fills the message with as much of the next higher resolution as possible. For
+  example, a 10 day forecast might have the first 2 days at 3h resolution and the remaining 8 days at
+  6h resolution. How far the algorithm gets in this process is expressed through a
+  <strong>sequence number</strong>, where the highest possible value represents a forecast where the
+  full duration is at 1h resolution.</p>
+
+  <p>The units of this dashboard are <strong>fill percentage</strong>, which represents the sequence
+  number as a percentage of the maximum possible.</p>
 </div>
 
 ${comparison}
