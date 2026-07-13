@@ -562,10 +562,10 @@ function firstModelKey(modelsMask: number): "HRES" | "GFS" | "ICON" | "IFS" {
 
 // ── Duration-first fill ─────────────────────────────────────────────────────────
 
-// Builds and encodes the layout for one fill-sequence number from already-fetched hourly data,
-// or returns null when the upstream data doesn't cover some period (a data gap — treat the
-// layout as unservable). See layoutFor in the protocol package for the sequence definition.
-export function encodeFillSeq(
+// Builds the message for one fill-sequence number from already-fetched hourly data, or returns
+// null when the upstream data doesn't cover some period (a data gap — treat the layout as
+// unservable). See layoutFor in the protocol package for the sequence definition.
+export function buildFillMessage(
   h: HourlyData,
   times: string[],
   params: ForecastParams,
@@ -574,8 +574,7 @@ export function encodeFillSeq(
   lon: number,
   elevation: number,
   modelKey: string,
-  codec: VersionedCodec,
-): string | null {
+): ForecastMessage | null {
   const layout = layoutFor(params.durationDays, params.startEpochHour, params.utcOffsetHours, seq);
 
   // Hourly samples are keyed by UTC epoch hour; each period's window is just its hour range.
@@ -596,7 +595,7 @@ export function encodeFillSeq(
   const rows = rowsFromWindows(h, times, windows, params.utcOffsetHours);
   const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
 
-  const msg: ForecastMessage = {
+  return {
     version: params.decoderVersion,
     code: params.code,
     days: layout.days,
@@ -613,7 +612,22 @@ export function encodeFillSeq(
     durationDays: params.durationDays,
     periodHours: layout.periodHours,
   };
-  return codec.encode(msg);
+}
+
+// buildFillMessage + encode, for the request path (see fetchForecast).
+export function encodeFillSeq(
+  h: HourlyData,
+  times: string[],
+  params: ForecastParams,
+  seq: number,
+  lat: number,
+  lon: number,
+  elevation: number,
+  modelKey: string,
+  codec: VersionedCodec,
+): string | null {
+  const msg = buildFillMessage(h, times, params, seq, lat, lon, elevation, modelKey);
+  return msg === null ? null : codec.encode(msg);
 }
 
 // Duration-first fill: one upstream fetch covers every candidate layout, then a binary search
@@ -633,6 +647,7 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
 
   const best = fitFillToBudget(
     (seq) => encodeFillSeq(h, times, params, seq, lat, lon, elevation, modelKey, codec),
+    (encoded) => encoded.length,
     maxFillSeq(params.durationDays),
     params.maxChars,
   );
@@ -645,11 +660,16 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
 // when the request lands late in the day, so a fitting result is guaranteed, strict optimality
 // is not). A null encoding (upstream data gap) is treated as not fitting. Returns the seq=1
 // layout even when it exceeds the budget, and null only if even that is unservable.
-export function fitFillToBudget(
-  encodeSeq: (seq: number) => string | null,
+//
+// Generic in what `encodeSeq` yields so callers that need more than the string (the benchmark
+// wants each candidate's bit breakdown) can search over the identical sequence: `charsOf`
+// measures a candidate against the budget.
+export function fitFillToBudget<T>(
+  encodeSeq: (seq: number) => T | null,
+  charsOf: (encoded: T) => number,
   maxSeq: number,
   maxChars: number,
-): string | null {
+): T | null {
   let lo = 1;
   let hi = maxSeq;
   let best = encodeSeq(1);
@@ -657,7 +677,7 @@ export function fitFillToBudget(
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const encoded = encodeSeq(mid);
-    if (encoded !== null && encoded.length <= maxChars) {
+    if (encoded !== null && charsOf(encoded) <= maxChars) {
       best = encoded;
       lo = mid + 1;
     } else {

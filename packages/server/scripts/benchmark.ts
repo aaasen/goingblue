@@ -2,31 +2,38 @@
  * Benchmark the forecast encoding against a corpus of real forecasts.
  *
  * One script, two phases:
- *   1. Collect — pull 10-day hourly GFS forecasts from Open-Meteo's Historical Forecast API (a
+ *   1. Collect — pull 14-day hourly GFS forecasts from Open-Meteo's Historical Forecast API (a
  *      continuous best-estimate archive, queried by start_date/end_date), sampling one window every
  *      ~10 days across the past year for seasonal coverage. Raw responses are cached to disk
- *      unchanged (idempotent/resumable), so re-runs don't re-hit the API.
- *   2. Report — for each cached forecast, run the exact production path (aggregateHourly →
- *      toFullPeriod → the v1 codec, via v1EncodeBreakdown) and binary-search the largest prefix of
- *      periods that fits one message. Report how many periods fit and how the bit budget splits
- *      across the header and each variable column (with the adaptive mode each column chose).
+ *      unchanged (idempotent/resumable), so re-runs don't re-hit the API. The window is 14 days so
+ *      the longest duration we benchmark (10d) is fully covered — see REQUIRED_HOURS.
+ *   2. Report — for each cached forecast, run the exact production path: buildFillMessage (the
+ *      duration-first layout: layoutFor → window aggregation → toFullPeriod) fed to the same
+ *      fitFillToBudget binary search the request path uses, over the identical fill sequence. So
+ *      the report answers the product question — for a requested duration, how far up the
+ *      refinement ladder (12h → 6h → 3h → 1h) does one message get? — and shows how the bit
+ *      budget splits across the header and each variable column (with each column's chosen mode).
  *
  *   node packages/server/scripts/benchmark.ts                     # collect (idempotent) then report
  *   node packages/server/scripts/benchmark.ts --collect-only      # expand the cache, no report
  *   node packages/server/scripts/benchmark.ts --report-only       # report from cache, no collection
  *   node packages/server/scripts/benchmark.ts --dry-run           # preview collection plan, no fetch
- *   node packages/server/scripts/benchmark.ts --resolution 6h     # 1h/3h/6h (default 1h)
+ *   node packages/server/scripts/benchmark.ts --duration 5        # 3/5/7/10 days (default 7)
+ *   node packages/server/scripts/benchmark.ts --request-hour 18   # local hour of the request (default 7)
  *   # other flags: --limit <n>, --max-chars <n>, --location <id>, --verbose, --include-incomplete, --no-open
  *
- * Open-Meteo call weight ≈ max(1, nVars/10) × max(1, weeks/2). A 10-day GFS call (~18 vars) is ~1.8
+ * Open-Meteo call weight ≈ max(1, nVars/10) × max(1, weeks/2). A 14-day GFS call (~18 vars) is ~1.8
  * units; the full-year, all-locations pull is ~9.1k units. Free tier is 10,000 units/day.
  */
 import { mkdir, readdir, readFile, writeFile, rename, access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD, type HourlyData } from "../src/forecast.ts";
-import { VARS_BIT, v1EncodeBreakdown, type ForecastMessage, type Period } from "@weather/protocol";
+import { buildFillMessage, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
+import {
+  VARS_BIT, RESOLUTION_HOURS, FILL_STAGES, slotsFor, maxFillSeq, v1EncodeBreakdown,
+  type ForecastMessage, type V1Breakdown,
+} from "@weather/protocol";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..", "..");
@@ -75,7 +82,13 @@ function modelHourly(m: ModelDef): string[] {
 // measuring how the encoding compresses realistic seasonal weather.)
 const ENDPOINT = "https://historical-forecast-api.open-meteo.com/v1/forecast";
 
-const HORIZON_DAYS = 10;       // window length (days)
+// Window length. A D-day fill covers D + 1 local day slots from local midnight of the request day
+// (slotsFor), and a non-zero UTC offset shifts that span up to a day past the UTC window — so the
+// longest benchmarked duration (10d) needs 11 whole local days plus slack. 14 keeps every duration
+// fully covered with room to spare; a shorter window would make the seq search hit a data gap and
+// silently report *truncated* layouts as if the char budget had caused the truncation.
+const HORIZON_DAYS = 14;       // window length (days)
+const REQUIRED_HOURS = HORIZON_DAYS * 24; // complete cached response; short ones are re-fetched
 const CADENCE_DAYS = 10;       // one window every ~10 days
 const YEARS_BACK = 1;          // sample windows across the past year
 const ANCHOR_LAG_DAYS = 5;     // newest window ends a few days ago so the best-estimate has settled
@@ -233,10 +246,52 @@ const LOCATIONS: Location[] = [
 
 // ── Report config ────────────────────────────────────────────────────────────────
 
-// 12h is omitted: at that resolution a forecast almost always fits every period, so it is not
-// size-constrained and adds compute without insight. (Values are the v1 protocol resolution index.)
-const RESOLUTION_IDX: Record<string, number> = { "6h": 2, "3h": 3, "1h": 4 };
-const RESOLUTION_ORDER = ["1h", "3h", "6h"]; // selector order (fine → coarse)
+// The report pivots on the requested duration (the `d:` request token), because that is what the
+// user actually chooses: duration is an input to the encoder, and resolution is the *output* the
+// fill sequence buys with whatever budget is left.
+const DURATIONS = [3, 5, 7, 10];
+const DEFAULT_DURATION = 7; // the server's default when a request carries no `d:`
+
+// Rung labels by resolution index (RESOLUTION_HOURS). The fill ladder walks 1..4 (12h → 1h).
+const RUNG = Object.fromEntries(
+  Object.entries(RESOLUTION_HOURS).map(([i, h]) => [i, `${h}h`]),
+) as Record<number, string>;
+
+// The fill sequence, in words. Mirrors layoutFor's arithmetic (layout.ts): over S = D + 1 day
+// slots, seq < S is a truncated all-12h forecast, and stage k (seq = (k−1)S + j) refines the
+// first j slots one rung finer — so seq = kS is exactly "the whole window at rung k". Those four
+// multiples of S are the landmarks the report marks on every seq axis.
+function seqLabel(durationDays: number, seq: number): string {
+  const S = slotsFor(durationDays);
+  if (seq < S) return `${seq}/${S} slots @ ${RUNG[1]} (truncated)`;
+  const t = seq - S;
+  const fine = t === 0 ? 1 : Math.ceil(t / S) + 1;
+  const nFine = t === 0 ? S : t - (fine - 2) * S;
+  return nFine === S
+    ? `all ${S} slots @ ${RUNG[fine]}`
+    : `${nFine}/${S} slots @ ${RUNG[fine]}, rest @ ${RUNG[fine - 1]}`;
+}
+
+// Full-fill landmarks: seq = k × S is the whole window at rung k (12h, 6h, 3h, 1h).
+function fullFillMarks(durationDays: number): { seq: number; label: string }[] {
+  const S = slotsFor(durationDays);
+  return Array.from({ length: FILL_STAGES }, (_, k) => ({ seq: (k + 1) * S, label: RUNG[k + 1] }));
+}
+
+// The corpus has no timezone, and production takes the offset from the client's `z:` token — so
+// approximate it from longitude (the nautical convention, one zone per 15°). What matters for the
+// benchmark is that the offset is realistic and non-zero: it puts local midnight (and so every day
+// boundary in the layout) off the UTC grid, exactly as a real request does.
+const utcOffsetFor = (lon: number) => Math.max(-12, Math.min(14, Math.round(lon / 15)));
+
+// Request time for a corpus window: local `hour` on the first local day that starts at or after the
+// window, expressed in UTC epoch hours. Anchoring to a local midnight inside the window keeps the
+// whole fill span inside the cached data; a non-zero hour keeps slot 0 partial (the common case —
+// a request at exactly local midnight is the one case layoutFor over-covers).
+function requestUtcHour(windowStartUtcHour: number, utcOffsetHours: number, hour: number): number {
+  const firstLocalMidnight = Math.ceil((windowStartUtcHour + utcOffsetHours) / 24) * 24;
+  return firstLocalMidnight - utcOffsetHours + hour;
+}
 
 // Protocol variable groups, mirroring the app (BuilderTab.tsx). weathercode is always encoded by the
 // protocol (not in a mask). BASE is always on; each toggleable group maps to protocol var bits.
@@ -270,7 +325,8 @@ interface Args {
   collectOnly: boolean;  // collect (expand the cache) and stop — no report
   reportOnly: boolean;   // skip collection, build the report from cached data
   // report
-  resolution: string;
+  duration: number;      // which duration the report opens on (all of DURATIONS are computed)
+  requestHour: number;   // local hour of day the request is assumed to arrive at
   maxChars: number;
   verbose: boolean;
   includeIncomplete: boolean;
@@ -282,7 +338,8 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   const args: Args = {
     limit: 0, dryRun: false, collectOnly: false, reportOnly: false,
-    resolution: "1h", maxChars: 160, verbose: false, includeIncomplete: false, open: true,
+    duration: DEFAULT_DURATION, requestHour: 7, maxChars: 160, verbose: false,
+    includeIncomplete: false, open: true,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -293,13 +350,17 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--no-open") args.open = false;
     else if (a === "--include-incomplete") args.includeIncomplete = true;
     else if (a === "--limit") args.limit = parseInt(argv[++i], 10) || 0;
-    else if (a === "--resolution") args.resolution = argv[++i];
+    else if (a === "--duration") args.duration = parseInt(argv[++i], 10);
+    else if (a === "--request-hour") args.requestHour = parseInt(argv[++i], 10);
     else if (a === "--max-chars") args.maxChars = parseInt(argv[++i], 10);
     else if (a === "--location") args.location = argv[++i];
     else throw new Error(`Unknown argument: ${a}`);
   }
-  if (!(args.resolution in RESOLUTION_IDX)) {
-    throw new Error(`--resolution must be one of ${Object.keys(RESOLUTION_IDX).join(", ")}`);
+  if (!DURATIONS.includes(args.duration)) {
+    throw new Error(`--duration must be one of ${DURATIONS.join(", ")}`);
+  }
+  if (!(args.requestHour >= 0 && args.requestHour <= 23)) {
+    throw new Error(`--request-hour must be 0..23`);
   }
   if (args.collectOnly && args.reportOnly) throw new Error("--collect-only and --report-only are mutually exclusive");
   return args;
@@ -359,6 +420,18 @@ async function exists(p: string): Promise<boolean> {
   try { await access(p); return true; } catch { return false; }
 }
 
+// A cached record is reusable only if it covers the whole window. HORIZON_DAYS grew (10 → 14) when
+// the report moved to duration-first fill, so records from an earlier pull are short — reuse one and
+// the longest layouts would hit a data gap and be misreported as budget-truncated. Re-fetch instead.
+async function cachedComplete(path: string): Promise<boolean> {
+  try {
+    const rec = JSON.parse(await readFile(path, "utf8")) as CorpusRecord;
+    return (rec.response?.hourly?.time?.length ?? 0) >= REQUIRED_HOURS;
+  } catch {
+    return false; // unreadable or half-written — treat as absent and re-fetch
+  }
+}
+
 interface FetchResult {
   ok: boolean;
   status: number;
@@ -399,7 +472,7 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
   console.log(`  full plan: ${totalCalls} calls ≈ ${totalUnits.toFixed(0)} units (of 10,000/day)`);
   if (args.limit) console.log(`  --limit ${args.limit}: capping this run to ${args.limit} fetches`);
 
-  let fetched = 0, cached = 0, failed = 0, attempts = 0, weightSpent = 0;
+  let fetched = 0, cached = 0, stale = 0, failed = 0, attempts = 0, weightSpent = 0;
   const shapePrinted = new Set<string>(); // one shape summary per model
 
   outer: for (const model of MODELS) {
@@ -408,7 +481,10 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
       for (const startMs of windows) {
         const run = runIso(startMs); // window anchor, 00:00 UTC
         const path = cachePath(model.id, loc, run);
-        if (await exists(path)) { cached++; continue; } // resumable
+        if (await exists(path)) {                          // resumable
+          if (await cachedComplete(path)) { cached++; continue; }
+          stale++; // short window (pre-14d pull) — fall through and re-fetch, overwriting it
+        }
 
         if (args.limit && attempts >= args.limit) break outer;
         attempts++;
@@ -457,26 +533,26 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
     }
   }
 
-  console.log(`  done: fetched=${fetched} cached=${cached} failed=${failed} est_weight_spent=${weightSpent.toFixed(1)} units`);
+  console.log(`  done: fetched=${fetched} cached=${cached} stale=${stale} failed=${failed} est_weight_spent=${weightSpent.toFixed(1)} units`);
 }
 
 // ── Phase 2: report ────────────────────────────────────────────────────────────────
 
-interface Record { meta: { location: { id: string; lat: number; lon: number }; run: string }; response: any }
+interface CorpusRecord { meta: { location: { id: string; lat: number; lon: number }; run: string }; response: any }
 
-async function loadModel(modelId: string, locationFilter?: string): Promise<Record[]> {
+async function loadModel(modelId: string, locationFilter?: string): Promise<CorpusRecord[]> {
   const modelDir = join(CORPUS_DIR, modelId);
   if (!(await exists(modelDir))) return [];
   const locs = (await readdir(modelDir, { withFileTypes: true }))
     .filter((d) => d.isDirectory() && (!locationFilter || d.name === locationFilter))
     .map((d) => d.name);
-  const records: Record[] = [];
+  const records: CorpusRecord[] = [];
   for (const loc of locs) {
     const dir = join(modelDir, loc);
     for (const f of await readdir(dir)) {
       if (!f.endsWith(".json")) continue;
       try {
-        records.push(JSON.parse(await readFile(join(dir, f), "utf8")) as Record);
+        records.push(JSON.parse(await readFile(join(dir, f), "utf8")) as CorpusRecord);
       } catch {
         // A concurrent --collect-only may be mid-write (or a leftover .tmp was renamed under us);
         // skip this file — the next report pass will include it once it's complete.
@@ -492,20 +568,34 @@ function baseComplete(h: HourlyData): boolean {
   return REQUIRED_BASE.every((anyOf) => anyOf.some(hasData));
 }
 
-// Largest prefix of `periods` whose encoded message fits `maxChars`, with its breakdown. Encoded
-// length is monotonic in the period count, so binary-search the cutoff (mirrors the server's
-// fitEncodedToBudget). Always keeps at least one period.
-function fitBreakdown(base: ForecastMessage, maxChars: number) {
-  const at = (n: number) => v1EncodeBreakdown({ ...base, periods: [base.periods[0].slice(0, n)] });
-  let lo = 1, hi = base.periods[0].length;
-  let best = { n: 1, breakdown: at(1) };
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const breakdown = at(mid);
-    if (breakdown.chars <= maxChars) { best = { n: mid, breakdown }; lo = mid + 1; }
-    else hi = mid - 1;
-  }
-  return best;
+// The layout the production search landed on for one (forecast, duration, variable-combo), plus its
+// bit breakdown.
+interface Fit {
+  seq: number;       // seq < slotsFor(D) means the budget forced truncation below the duration
+  periods: number;   // periods in the fitted message
+  breakdown: V1Breakdown;
+}
+
+// The production fit, exactly: fitFillToBudget's binary search over the fill sequence, with each
+// candidate encoded through the real codec. The only difference from the request path is that we
+// keep the breakdown instead of just the string (fitFillToBudget is generic over that).
+function fitFill(
+  msgAt: (seq: number) => ForecastMessage | null,
+  durationDays: number,
+  varsMask: number,
+  maxChars: number,
+): Fit | null {
+  return fitFillToBudget<Fit>(
+    (seq) => {
+      const msg = msgAt(seq);
+      if (msg === null) return null; // upstream gap — unservable, same as in production
+      const withVars: ForecastMessage = { ...msg, vars_mask: varsMask };
+      return { seq, periods: withVars.periods[0].length, breakdown: v1EncodeBreakdown(withVars) };
+    },
+    (fit) => fit.breakdown.chars,
+    maxFillSeq(durationDays),
+    maxChars,
+  );
 }
 
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -513,26 +603,53 @@ function pct(xs: number[], p: number): number {
   const s = [...xs].sort((a, b) => a - b);
   return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
 }
+const box = (xs: number[]): BoxStats => ({
+  min: Math.min(...xs), p25: pct(xs, 25), p50: pct(xs, 50),
+  mean: mean(xs), p75: pct(xs, 75), max: Math.max(...xs),
+});
 
-function buildView(pf: number[], cb: Map<string, number[]>, cm: Map<string, Map<string, number>>): ViewStats {
-  const pMin = Math.min(...pf), pMax = Math.max(...pf);
-  const hcounts = new Map<number, number>();
-  for (const p of pf) hcounts.set(p, (hcounts.get(p) ?? 0) + 1);
-  const histogram: { period: number; count: number }[] = [];
-  for (let p = pMin; p <= pMax; p++) histogram.push({ period: p, count: hcounts.get(p) ?? 0 });
+function buildView(
+  durationDays: number,
+  fits: Fit[],
+  cb: Map<string, number[]>,
+  cm: Map<string, Map<string, number>>,
+): ViewStats {
+  const seqs = fits.map((f) => f.seq);
+  const periods = fits.map((f) => f.periods);
+  const slots = slotsFor(durationDays);
+  const maxSeq = maxFillSeq(durationDays);
+
+  // Histogram over the whole sequence (1..4S), not just the observed range, so the four full-fill
+  // landmarks are always on the axis and every duration's chart reads the same way.
+  const counts = new Map<number, number>();
+  for (const s of seqs) counts.set(s, (counts.get(s) ?? 0) + 1);
+  const histogram = Array.from({ length: maxSeq }, (_, i) => ({ seq: i + 1, count: counts.get(i + 1) ?? 0 }));
+
+  // How often the budget carried the message all the way to a full fill at each rung.
+  const stages = fullFillMarks(durationDays).map(({ seq, label }) => ({
+    seq, label, share: seqs.filter((s) => s >= seq).length / seqs.length,
+  }));
 
   const columns: ColStat[] = [...cb.entries()].map(([name, bitsArr]) => {
-    const bpp = bitsArr.map((b, i) => b / pf[i]);
+    const bpp = bitsArr.map((b, i) => b / periods[i]);
     return {
       name,
       bits: mean(bitsArr),
       bitsPerPeriod: mean(bpp),
-      bppStats: { min: Math.min(...bpp), p25: pct(bpp, 25), p50: pct(bpp, 50), mean: mean(bpp), p75: pct(bpp, 75), max: Math.max(...bpp) },
+      bppStats: box(bpp),
       modes: [...cm.get(name)!.entries()].sort((a, b) => b[1] - a[1]).map(([m, c]) => [m, c / bitsArr.length] as [string, number]),
     };
   });
+
+  const medianSeq = pct(seqs, 50);
   return {
-    periods: { min: pMin, p25: pct(pf, 25), p50: pct(pf, 50), mean: mean(pf), p75: pct(pf, 75), p90: pct(pf, 90), max: pMax },
+    durationDays, slots, maxSeq,
+    seq: box(seqs),
+    periods: box(periods),
+    medianSeq,
+    medianLabel: seqLabel(durationDays, medianSeq),
+    truncatedShare: seqs.filter((s) => s < slots).length / seqs.length,
+    stages,
     histogram,
     bodyBits: columns.reduce((s, c) => s + c.bits, 0),
     columns,
@@ -542,63 +659,67 @@ function buildView(pf: number[], cb: Map<string, number[]>, cm: Map<string, Map<
 async function report(args: Args): Promise<void> {
   // Single model (GFS — it supplies every variable group, so no cross-model fallback is needed).
   const model = MODELS[0];
-  const records = new Map<string, Record>();
+  const records = new Map<string, CorpusRecord>();
   for (const rec of await loadModel(model.id, args.location)) records.set(`${rec.meta.location.id}|${rec.meta.run}`, rec);
   const keys = [...records.keys()].sort();
   if (keys.length === 0) throw new Error("No forecasts found — run collection first");
 
-  // A view = resolution × variable-combo. Every (res, combo) is precomputed.
-  const vkey = (res: string, combo: number) => `${res}:${combo}`;
-  const periodsFit = new Map<string, number[]>();
+  // A view = duration × variable-combo. Every (duration, combo) is precomputed.
+  const vkey = (durationDays: number, combo: number) => `${durationDays}:${combo}`;
+  const fitsFor = new Map<string, Fit[]>();
   const colBits = new Map<string, Map<string, number[]>>();
   const colModes = new Map<string, Map<string, Map<string, number>>>();
-  for (const res of RESOLUTION_ORDER) for (const c of COMBOS) {
-    const vk = vkey(res, c);
-    periodsFit.set(vk, []); colBits.set(vk, new Map()); colModes.set(vk, new Map());
+  for (const d of DURATIONS) for (const c of COMBOS) {
+    const vk = vkey(d, c);
+    fitsFor.set(vk, []); colBits.set(vk, new Map()); colModes.set(vk, new Map());
   }
 
   const forecasts: { location: string }[] = [];
   const allMask = comboMask(COMBOS.length - 1); // every group on
-  let versionBits = 0, headerBits = 0, skipped = 0;
+  let versionBits = 0, headerBits = 0, skipped = 0, uncovered = 0;
 
   for (const key of keys) {
     const rec = records.get(key)!;
-    if (!baseComplete(rec.response.hourly as HourlyData)) { skipped++; continue; }
+    const h = rec.response.hourly as HourlyData;
+    if (!baseComplete(h)) { skipped++; continue; }
     const [locId, run] = key.split("|");
-    const meta = rec.meta.location;
-    const runHour = Math.floor(Date.parse(run + "Z") / 3600000);
+    const { lat, lon } = rec.meta.location;
     const elevation = rec.response.elevation ?? 0;
+    const utcOffsetHours = utcOffsetFor(lon);
+    const startEpochHour = requestUtcHour(
+      Math.floor(Date.parse(run + "Z") / 3600000), utcOffsetHours, args.requestHour);
     forecasts.push({ location: locId });
 
-    for (const res of RESOLUTION_ORDER) {
-      const resolutionIdx = RESOLUTION_IDX[res];
-      const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
-      const startEpochHour = Math.floor(runHour / hoursPerPeriod) * hoursPerPeriod;
-      const start = new Date(startEpochHour * 3600000);
-      const h = rec.response.hourly as HourlyData;
-      const n = Math.min(256, Math.floor(h.time.length / hoursPerPeriod));
-      const rows = aggregateHourly(h, h.time, n, resolutionIdx, startEpochHour);
-      // This sweep measures per-column costs on uniform-resolution slices, not canonical fill
-      // layouts — seq/durationDays/periodHours are placeholders (the header is the same width
-      // for any seq, and the encoder reads only seq + periods).
-      const msgFor = (periods: Period[], mask: number): ForecastMessage => ({
-        version: 1, code: 0, days: Math.ceil(periods.length / (24 / hoursPerPeriod)),
-        models_mask: 1, vars_mask: mask,
-        month: start.getUTCMonth() + 1, day: start.getUTCDate(), hour: start.getUTCHours(),
-        lat: 0, lon: 0, elevation, periods: [periods],
-        seq: 1, durationDays: 1, periodHours: periods.map(() => hoursPerPeriod),
-      });
-      // One Period array with every field populated; vary only vars_mask per combo (columns encode
-      // independently). "GFS" (non-HRES) so toFullPeriod keeps the pressure/freeze columns.
-      const allPeriods = rows.map((r) => toFullPeriod(r, allMask, "GFS"));
+    for (const durationDays of DURATIONS) {
+      // Build layouts with every column populated (varsMask = allMask), then override vars_mask per
+      // combo: columns encode independently, so one aggregation per seq serves all eight combos.
+      // "GFS" (non-HRES) keeps the pressure/freeze columns in toFullPeriod.
+      const params: ForecastParams = {
+        locationIdx: 0, lat, lon, durationDays, utcOffsetHours,
+        modelsMask: 1, varsMask: allMask, maxChars: args.maxChars,
+        decoderVersion: 1, code: 0, startEpochHour, userToken: null,
+      };
+      const memo = new Map<number, ForecastMessage | null>();
+      const msgAt = (seq: number): ForecastMessage | null => {
+        if (!memo.has(seq)) {
+          memo.set(seq, buildFillMessage(h, h.time, params, seq, lat, lon, elevation, model.label));
+        }
+        return memo.get(seq)!;
+      };
+
+      // The corpus window must cover the whole fill span. If it doesn't, the seq search would read
+      // the data gap as "doesn't fit" and report a *truncated* layout as though the char budget had
+      // caused it. Every untruncated seq spans the same days, so checking the all-1h layout is
+      // enough. (With a 14-day window this should never fire; it guards the metric if it ever does.)
+      if (msgAt(maxFillSeq(durationDays)) === null) { uncovered++; continue; }
 
       for (const c of COMBOS) {
-        const { n: fittedN, breakdown } = fitBreakdown(msgFor(allPeriods, comboMask(c)), args.maxChars);
-        const vk = vkey(res, c);
-        periodsFit.get(vk)!.push(fittedN);
-        versionBits = breakdown.versionBits; headerBits = breakdown.headerBits;
+        const fit = fitFill(msgAt, durationDays, comboMask(c), args.maxChars)!; // seq=1 is covered
+        const vk = vkey(durationDays, c);
+        fitsFor.get(vk)!.push(fit);
+        versionBits = fit.breakdown.versionBits; headerBits = fit.breakdown.headerBits;
         const cb = colBits.get(vk)!, cm = colModes.get(vk)!;
-        for (const col of breakdown.columns) {
+        for (const col of fit.breakdown.columns) {
           if (!cb.has(col.name)) { cb.set(col.name, []); cm.set(col.name, new Map()); }
           cb.get(col.name)!.push(col.bits);
           if (col.mode) { const mm = cm.get(col.name)!; mm.set(col.mode, (mm.get(col.mode) ?? 0) + 1); }
@@ -606,28 +727,37 @@ async function report(args: Args): Promise<void> {
         // Column bits are model costs; the rANS stream adds a constant flush/renorm slack per
         // message. Track it as a pseudo-column so the occupancy total reconciles with the chars.
         if (!cb.has("coder")) { cb.set("coder", []); cm.set("coder", new Map()); }
-        cb.get("coder")!.push(breakdown.overheadBits);
+        cb.get("coder")!.push(fit.breakdown.overheadBits);
       }
     }
   }
 
-  // Build per-view stats.
+  // Build per-view stats. A duration the corpus can't cover for *any* forecast has no fits at all —
+  // drop it rather than render a view full of NaNs (it means the window is too short; see
+  // HORIZON_DAYS).
+  const durations = DURATIONS.filter((d) => fitsFor.get(vkey(d, DEFAULT_COMBO))!.length > 0);
+  if (durations.length === 0) throw new Error("No (forecast, duration) pair is covered by the corpus — re-collect with a longer window");
   const views: Record<string, ViewStats> = {};
-  for (const res of RESOLUTION_ORDER) {
+  for (const d of durations) {
     for (const c of COMBOS) {
-      const vk = vkey(res, c);
-      views[vk] = buildView(periodsFit.get(vk)!, colBits.get(vk)!, colModes.get(vk)!);
+      const vk = vkey(d, c);
+      views[vk] = buildView(d, fitsFor.get(vk)!, colBits.get(vk)!, colModes.get(vk)!);
     }
   }
+  const dropped = DURATIONS.filter((d) => !durations.includes(d));
+  const defaultDuration = durations.includes(args.duration) ? args.duration : durations[0];
 
   const stats: ReportData = {
     timestamp: new Date().toISOString(),
-    resolutions: RESOLUTION_ORDER,
-    defaultResolution: args.resolution,
+    durations,
+    dropped,
+    defaultDuration,
+    requestHour: args.requestHour,
     maxChars: args.maxChars,
     forecasts: forecasts.length,
     locations: new Set(forecasts.map((f) => f.location)).size,
     skipped,
+    uncovered,
     versionBits, headerBits,
     model: model.label,
     groups: GROUP_IDS.map((g) => ({ id: g, label: GROUP_LABEL[g] })),
@@ -640,11 +770,13 @@ async function report(args: Args): Promise<void> {
   const outPath = join(BENCHMARKS_DIR, `${stamp}_${args.maxChars}c.html`);
   await writeFile(outPath, renderHtml(stats));
 
-  const dv = views[vkey(args.resolution, stats.defaultCombo)];
+  const dv = views[vkey(defaultDuration, stats.defaultCombo)];
   console.log(`\n== Benchmark ==`);
-  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${model.label}, ${RESOLUTION_ORDER.length} resolutions  |  max-chars=${args.maxChars}`);
+  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${model.label}, durations ${durations.join("/")}d  |  max-chars=${args.maxChars}, request ${args.requestHour}:00 local`);
   if (skipped) console.log(`  skipped ${skipped} forecast(s) with an incomplete base series`);
-  console.log(`  default view (${args.resolution}, base): periods/msg mean ${dv.periods.mean.toFixed(1)} (min ${dv.periods.min}, max ${dv.periods.max})`);
+  if (uncovered) console.log(`  skipped ${uncovered} (forecast, duration) pair(s) the corpus window doesn't cover`);
+  if (dropped.length) console.log(`  dropped ${dropped.join("/")}d entirely — no forecast in the corpus covers them (re-collect: the window must be ≥ ${HORIZON_DAYS}d)`);
+  console.log(`  default view (${args.duration}d, base): seq mean ${dv.seq.mean.toFixed(1)} of ${dv.maxSeq}, median ${dv.medianSeq} = ${dv.medianLabel}`);
   console.log(`  report: ${outPath.replace(REPO_ROOT + "/", "")}`);
 
   if (args.open) openInBrowser(outPath);
@@ -666,40 +798,78 @@ function openInBrowser(path: string): void {
 
 interface BoxStats { min: number; p25: number; p50: number; mean: number; p75: number; max: number }
 interface ColStat { name: string; bits: number; bitsPerPeriod: number; bppStats: BoxStats; modes: [string, number][] }
+// A full-fill landmark: seq = k × S is the whole window at rung `label`, reached by `share` of messages.
+interface StageStat { seq: number; label: string; share: number }
 interface ViewStats {
-  periods: { min: number; p25: number; p50: number; mean: number; p75: number; p90: number; max: number };
-  histogram: { period: number; count: number }[];
+  durationDays: number;
+  slots: number;   // S = D + 1 day slots
+  maxSeq: number;  // 4S — the whole window at 1h, the top of the ladder
+  seq: BoxStats;
+  periods: BoxStats;
+  medianSeq: number;
+  medianLabel: string;    // what the median seq actually is, as a layout
+  truncatedShare: number; // fraction that couldn't even fit the duration at 12h
+  stages: StageStat[];
+  histogram: { seq: number; count: number }[]; // one bin per seq in 1..maxSeq
   bodyBits: number;
   columns: ColStat[];
 }
-// Everything the report embeds. `views` holds one ViewStats per res:combo.
+// Everything the report embeds. `views` holds one ViewStats per duration:combo.
 interface ReportData {
   timestamp: string;
-  resolutions: string[];
-  defaultResolution: string;
+  durations: number[];   // durations the corpus can serve (a view exists for each)
+  dropped: number[];     // requested durations no forecast covers — corpus window too short
+  defaultDuration: number;
+  requestHour: number;
   maxChars: number;
   forecasts: number;
   locations: number;
   skipped: number;
+  uncovered: number;
   versionBits: number;
   headerBits: number;
   model: string; // single model (label), shown in the meta line
   groups: { id: GroupId; label: string }[];
   defaultCombo: number;
-  views: Record<string, ViewStats>;                        // "res:combo" → stats
+  views: Record<string, ViewStats>;                        // "duration:combo" → stats
 }
+
+// Fill progress in rungs: seq / S, so 1.0 = the whole window at 12h, 2.0 = at 6h, 3.0 = 3h, 4.0 = 1h.
+// Normalizing by S is what makes different durations comparable on one axis.
+const rungBox = (vs: ViewStats): BoxStats => {
+  const f = 1 / vs.slots;
+  const s = vs.seq;
+  return { min: s.min * f, p25: s.p25 * f, p50: s.p50 * f, mean: s.mean * f, p75: s.p75 * f, max: s.max * f };
+};
 
 const esc = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
-// A static, self-contained SVG bar histogram of periods-per-message (offline-safe, no JS/CDN).
-function renderHistogram(hist: { period: number; count: number }[]): string {
-  const W = 720, H = 240, m = { t: 14, r: 14, b: 38, l: 46 };
+// Both seq charts share one x-scale: the whole fill sequence, 1..4S. Keeping the full ladder on the
+// axis (rather than just the observed range) is the point of the chart — you read how far along it
+// the mass sits, against the four landmarks where the window is fully filled at 12h/6h/3h/1h.
+const SEQ_CHART = { W: 720, l: 46, r: 14 };
+const seqX = (seq: number, maxSeq: number) =>
+  SEQ_CHART.l + ((seq - 0.5) / maxSeq) * (SEQ_CHART.W - SEQ_CHART.l - SEQ_CHART.r);
+
+// The dashed "full fill at this rung" markers, drawn on both charts.
+function renderMarks(vs: ViewStats, y1: number, y2: number, labelY: number | null): string {
+  return vs.stages.map((st) => {
+    const x = seqX(st.seq, vs.maxSeq).toFixed(1);
+    const line = `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" class="mark"><title>seq ${st.seq} — ${esc(seqLabel(vs.durationDays, st.seq))} (${(100 * st.share).toFixed(0)}% of messages reach it)</title></line>`;
+    const text = labelY === null ? ""
+      : `<text x="${x}" y="${labelY}" class="marklabel" text-anchor="middle">${esc(st.label)}</text>`;
+    return line + text;
+  }).join("");
+}
+
+// A static, self-contained SVG bar histogram of the fitted fill sequence (offline-safe, no JS/CDN).
+function renderHistogram(vs: ViewStats): string {
+  const W = SEQ_CHART.W, H = 260, m = { t: 28, r: SEQ_CHART.r, b: 38, l: SEQ_CHART.l };
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
-  const n = hist.length;
-  const maxCount = Math.max(...hist.map((h) => h.count), 1);
+  const n = vs.maxSeq;
+  const maxCount = Math.max(...vs.histogram.map((h) => h.count), 1);
   const bw = iw / n;
-  const x = (i: number) => m.l + i * bw;
   const y = (c: number) => m.t + ih * (1 - c / maxCount);
 
   // y gridlines/ticks at 0, mid, max
@@ -708,34 +878,34 @@ function renderHistogram(hist: { period: number; count: number }[]): string {
     `<line x1="${m.l}" y1="${y(v).toFixed(1)}" x2="${W - m.r}" y2="${y(v).toFixed(1)}" class="hgrid"/>` +
     `<text x="${m.l - 8}" y="${(y(v) + 3.5).toFixed(1)}" class="htick" text-anchor="end">${v}</text>`).join("");
 
-  const bars = hist.map((h, i) =>
-    `<rect x="${(x(i) + bw * 0.12).toFixed(1)}" y="${y(h.count).toFixed(1)}" width="${(bw * 0.76).toFixed(1)}" ` +
-    `height="${(ih * h.count / maxCount).toFixed(1)}" class="hbar"><title>${h.period} periods: ${h.count} forecasts</title></rect>`).join("");
+  const bars = vs.histogram.map((h) =>
+    `<rect x="${(seqX(h.seq, n) - bw * 0.38).toFixed(1)}" y="${y(h.count).toFixed(1)}" width="${(bw * 0.76).toFixed(1)}" ` +
+    `height="${(ih * h.count / maxCount).toFixed(1)}" class="hbar">` +
+    `<title>seq ${h.seq} — ${esc(seqLabel(vs.durationDays, h.seq))}: ${h.count} forecasts</title></rect>`).join("");
 
-  // Label ~8 evenly spaced x ticks (period values).
+  // Label ~8 evenly spaced x ticks (seq values).
   const step = Math.max(1, Math.round(n / 8));
-  const xAxis = hist.map((h, i) => (i % step === 0 || i === n - 1)
-    ? `<text x="${(x(i) + bw / 2).toFixed(1)}" y="${H - m.b + 16}" class="htick" text-anchor="middle">${h.period}</text>` : "").join("");
+  const xAxis = vs.histogram.map((h, i) => (i % step === 0 || i === n - 1)
+    ? `<text x="${seqX(h.seq, n).toFixed(1)}" y="${H - m.b + 16}" class="htick" text-anchor="middle">${h.seq}</text>` : "").join("");
 
-  return `<svg viewBox="0 0 ${W} ${H}" class="hist" role="img" aria-label="Histogram of periods encoded per message">
-  ${yAxis}${bars}${xAxis}
-  <text x="${m.l + iw / 2}" y="${H - 4}" class="haxis" text-anchor="middle">periods / message</text>
+  return `<svg viewBox="0 0 ${W} ${H}" class="hist" role="img" aria-label="Histogram of the fill sequence number reached per message">
+  ${yAxis}${bars}${renderMarks(vs, m.t, m.t + ih, m.t - 10)}${xAxis}
+  <text x="${m.l + iw / 2}" y="${H - 4}" class="haxis" text-anchor="middle">fill sequence (seq) — dashed: whole window fully filled at that period</text>
   <text x="12" y="${m.t + ih / 2}" class="haxis" text-anchor="middle" transform="rotate(-90 12 ${m.t + ih / 2})">forecasts</text>
 </svg>`;
 }
 
-// Box-and-whisker of periods/message: min–max whiskers, Q1–Q3 box, median line, mean dot, with value
-// labels (median above the box; min/Q1/Q3/max below). Shares the histogram's period x-scale.
-function renderBoxPlot(p: ViewStats["periods"]): string {
-  const W = 720, H = 92, m = { t: 22, r: 14, b: 18, l: 46 };
-  const iw = W - m.l - m.r;
-  const bins = Math.max(1, p.max - p.min + 1);
-  const bw = iw / bins;
-  const x = (v: number) => m.l + (v - p.min) * bw + bw / 2;
+// Box-and-whisker of the fitted seq: min–max whiskers, Q1–Q3 box, median line, mean dot, with value
+// labels (median above the box; min/Q1/Q3/max below). Shares the histogram's seq x-scale and marks.
+function renderBoxPlot(vs: ViewStats): string {
+  const W = SEQ_CHART.W, H = 92, m = { t: 22, r: SEQ_CHART.r, b: 18, l: SEQ_CHART.l };
+  const p = vs.seq;
+  const x = (v: number) => seqX(v, vs.maxSeq);
   const cy = m.t + (H - m.t - m.b) / 2;
   const half = 13, cap = 8, belowY = cy + cap + 15;
   const label = (v: number, xv: number, yv: number) => `<text x="${xv.toFixed(1)}" y="${yv}" class="blabel" text-anchor="middle">${v}</text>`;
-  return `<svg viewBox="0 0 ${W} ${H}" class="box" role="img" aria-label="Box plot of periods per message">
+  return `<svg viewBox="0 0 ${W} ${H}" class="box" role="img" aria-label="Box plot of the fill sequence number per message">
+  ${renderMarks(vs, m.t - 4, H - m.b, null)}
   <line x1="${x(p.min).toFixed(1)}" y1="${cy}" x2="${x(p.max).toFixed(1)}" y2="${cy}" class="bwhisker"/>
   <line x1="${x(p.min).toFixed(1)}" y1="${cy - cap}" x2="${x(p.min).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>
   <line x1="${x(p.max).toFixed(1)}" y1="${cy - cap}" x2="${x(p.max).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>
@@ -770,14 +940,18 @@ function renderMiniBox(s: BoxStats, scaleMax: number): string {
   `</svg>`;
 }
 
-// Compact comparison plot for days/message. Every plot shares the same zero-based scale, making
-// resolutions and optional variable groups directly comparable.
-function renderDaysMiniBox(p: BoxStats, scaleMax: number): string {
+// Compact comparison plot of fill progress in rungs. The scale is fixed at 0..FILL_STAGES with a
+// tick per rung, so every duration and variable combo is read against the same ladder: past the
+// "12h" tick the whole window is covered at 12h, past "1h" the message is fully refined.
+function renderRungMiniBox(p: BoxStats, meanSeq: number, maxSeq: number): string {
   const W = 180, H = 24, pad = 4, iw = W - 2 * pad;
-  const x = (v: number) => pad + (v / scaleMax) * iw;
+  const x = (v: number) => pad + (v / FILL_STAGES) * iw;
   const cy = H / 2, half = 6, cap = 4;
-  return `<svg viewBox="0 0 ${W} ${H}" class="pbox" role="img" aria-label="Days per message: mean ${p.mean.toFixed(1)}">` +
-    `<title>days/message · min ${p.min.toFixed(1)} · Q1 ${p.p25.toFixed(1)} · median ${p.p50.toFixed(1)} · mean ${p.mean.toFixed(1)} · Q3 ${p.p75.toFixed(1)} · max ${p.max.toFixed(1)}</title>` +
+  const ticks = Array.from({ length: FILL_STAGES }, (_, k) =>
+    `<line x1="${x(k + 1).toFixed(1)}" y1="1" x2="${x(k + 1).toFixed(1)}" y2="${H - 1}" class="mark"/>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="pbox" role="img" aria-label="Fill progress: mean ${p.mean.toFixed(2)} rungs">` +
+    `<title>fill progress in rungs (1 = whole window at 12h, 2 = 6h, 3 = 3h, 4 = 1h) · min ${p.min.toFixed(2)} · Q1 ${p.p25.toFixed(2)} · median ${p.p50.toFixed(2)} · mean ${p.mean.toFixed(2)} · Q3 ${p.p75.toFixed(2)} · max ${p.max.toFixed(2)} — mean seq ${meanSeq.toFixed(1)} of ${maxSeq}</title>` +
+    ticks +
     `<line x1="${x(p.min).toFixed(1)}" y1="${cy}" x2="${x(p.max).toFixed(1)}" y2="${cy}" class="bwhisker"/>` +
     `<line x1="${x(p.min).toFixed(1)}" y1="${cy - cap}" x2="${x(p.min).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
     `<line x1="${x(p.max).toFixed(1)}" y1="${cy - cap}" x2="${x(p.max).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
@@ -787,50 +961,47 @@ function renderDaysMiniBox(p: BoxStats, scaleMax: number): string {
   `</svg>`;
 }
 
-function renderPeriodComparison(s: ReportData): string {
+function renderDurationComparison(s: ReportData): string {
   const configurations = [
     { label: "Base", combo: 0 },
     ...s.groups.map((g, i) => ({ label: `+${g.label}`, combo: 1 << i })),
   ];
-  const head = s.resolutions.map((res) => `<th>${esc(res)}</th>`).join("");
-  const daysFor = (res: string, combo: number): BoxStats => {
-    const factor = HOURS_PER_PERIOD[RESOLUTION_IDX[res]] / 24;
-    const p = s.views[`${res}:${combo}`].periods;
-    return { min: p.min * factor, p25: p.p25 * factor, p50: p.p50 * factor,
-      mean: p.mean * factor, p75: p.p75 * factor, max: p.max * factor };
-  };
-  const dayScaleMax = Math.max(...configurations.flatMap(({ combo }) =>
-    s.resolutions.map((res) => daysFor(res, combo).max)), 1);
-  const means = configurations.flatMap(({ combo }) =>
-    s.resolutions.map((res) => s.views[`${res}:${combo}`].periods.mean));
-  const score = mean(means);
-  const averageDays = s.resolutions.map((res) => {
-    const hoursPerPeriod = HOURS_PER_PERIOD[RESOLUTION_IDX[res]];
-    const days = mean(configurations.map(({ combo }) => s.views[`${res}:${combo}`].periods.mean)) * hoursPerPeriod / 24;
-    return `<div class="score"><div class="score-label">${esc(res)} average</div>` +
-      `<div><strong class="score-value">${days.toFixed(1)}</strong> days/message</div></div>`;
+  const head = s.durations.map((d) => `<th>${d}d</th>`).join("");
+  const view = (d: number, combo: number) => s.views[`${d}:${combo}`];
+  const score = mean(configurations.flatMap(({ combo }) =>
+    s.durations.map((d) => rungBox(view(d, combo)).mean)));
+  const perDuration = s.durations.map((d) => {
+    const base = view(d, s.defaultCombo);
+    const rungs = mean(configurations.map(({ combo }) => rungBox(view(d, combo)).mean));
+    return `<div class="score"><div class="score-label">${d}d average</div>` +
+      `<div><strong class="score-value">${rungs.toFixed(2)}</strong> rungs</div>` +
+      `<div class="score-sub">base median: ${esc(base.medianLabel)}</div></div>`;
   }).join("");
   const rows = configurations.map(({ label, combo }) => `<tr><td class="name">${esc(label)}</td>` +
-    s.resolutions.map((res) => {
-      const p = s.views[`${res}:${combo}`].periods;
-      const days = p.mean * HOURS_PER_PERIOD[RESOLUTION_IDX[res]] / 24;
-      return `<td><div class="pcell"><span class="pmean">${days.toFixed(1)} days</span>` +
-        `${renderDaysMiniBox(daysFor(res, combo), dayScaleMax)}</div></td>`;
+    s.durations.map((d) => {
+      const vs = view(d, combo);
+      const r = rungBox(vs);
+      return `<td><div class="pcell"><span class="pmean">seq ${vs.seq.mean.toFixed(1)}/${vs.maxSeq}</span>` +
+        `${renderRungMiniBox(r, vs.seq.mean, vs.maxSeq)}</div></td>`;
     }).join("") + `</tr>`).join("\n");
   return `<h2>Overall benchmark score</h2>
   <div class="score-grid"><div class="score"><div class="score-label">Overall average</div>` +
-    `<div><strong class="score-value">${score.toFixed(1)}</strong> periods/message</div></div>${averageDays}</div>
-  <h2>Days per message</h2>
+    `<div><strong class="score-value">${score.toFixed(2)}</strong> rungs</div>` +
+    `<div class="score-sub">1 = whole window at 12h · 4 = at 1h</div></div>${perDuration}</div>
+  <h2>How far up the fill ladder one message gets</h2>
+  <p class="note">Each cell is the fill sequence the production search (<code>fitFillToBudget</code>)
+  reached for that requested duration, drawn as fill progress against the four rungs — the ticks are
+  the sequence numbers at which the <em>whole</em> window is covered at 12h, 6h, 3h and 1h.</p>
   <table class="period-comparison">
     <tr><th>Variables</th>${head}</tr>
     ${rows}
   </table>`;
 }
 
-// One toggleable view = a resolution × variable-combo: histogram, box plot, period summary, and the
+// One toggleable view = a duration × variable-combo: seq histogram, box plot, fill summary, and the
 // occupancy table (columns sorted by share). All are emitted hidden; the client shows the selected.
 function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: number): string {
-  const [res, combo] = vk.split(":");
+  const [duration, combo] = vk.split(":");
   const occupancyBits = versionBits + headerBits + vs.bodyBits;
   const rows = [
     { name: "version", bits: versionBits, bpp: null as number | null, modes: [] as [string, number][], bppStats: null as BoxStats | null },
@@ -846,15 +1017,35 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
       <td class="boxcell">${r.bppStats ? renderMiniBox(r.bppStats, bppScaleMax) : ""}</td>
       <td class="modes">${modeText(r.modes)}</td>
     </tr>`).join("\n");
-  const p = vs.periods;
-  const days = p.mean * HOURS_PER_PERIOD[RESOLUTION_IDX[res]] / 24;
-  return `<section class="view" data-res="${res}" data-combo="${combo}" hidden>
-  <div class="score-grid detail-score"><div class="score"><div class="score-label">Average periods per message</div>` +
-    `<div><strong class="score-value">${p.mean.toFixed(1)}</strong> periods/message</div></div>` +
-    `<div class="score"><div class="score-label">Average days per message</div>` +
-    `<div><strong class="score-value">${days.toFixed(1)}</strong> days/message</div></div></div>
-  ${renderHistogram(vs.histogram)}
-  ${renderBoxPlot(p)}
+  // What each full-fill landmark means, and how often the budget got there.
+  const stageRows = vs.stages.map((st) => `<tr>
+      <td class="name">${esc(st.label)}</td>
+      <td class="num">${st.seq}</td>
+      <td class="name">${esc(seqLabel(vs.durationDays, st.seq))}</td>
+      <td class="num">${(100 * st.share).toFixed(1)}%</td>
+    </tr>`).join("\n");
+
+  return `<section class="view" data-duration="${duration}" data-combo="${combo}" hidden>
+  <div class="score-grid detail-score">` +
+    `<div class="score"><div class="score-label">Average fill sequence</div>` +
+    `<div><strong class="score-value">${vs.seq.mean.toFixed(1)}</strong> of ${vs.maxSeq}</div>` +
+    `<div class="score-sub">${rungBox(vs).mean.toFixed(2)} rungs</div></div>` +
+    `<div class="score"><div class="score-label">Median message</div>` +
+    `<div><strong class="score-value">seq ${vs.medianSeq}</strong></div>` +
+    `<div class="score-sub">${esc(vs.medianLabel)}</div></div>` +
+    `<div class="score"><div class="score-label">Full duration covered</div>` +
+    `<div><strong class="score-value">${(100 * (1 - vs.truncatedShare)).toFixed(1)}%</strong></div>` +
+    `<div class="score-sub">rest truncate below ${vs.durationDays}d</div></div>` +
+    `<div class="score"><div class="score-label">Average periods per message</div>` +
+    `<div><strong class="score-value">${vs.periods.mean.toFixed(1)}</strong> periods</div>` +
+    `<div class="score-sub">min ${vs.periods.min} · max ${vs.periods.max}</div></div></div>
+  ${renderHistogram(vs)}
+  ${renderBoxPlot(vs)}
+  <h3>Full fill at each period</h3>
+  <table class="stages">
+    <tr><th>period</th><th class="rt">seq</th><th>layout</th><th class="rt">messages reaching it</th></tr>
+    ${stageRows}
+  </table>
   <h3>Mean bit occupancy per column</h3>
   <table>
     <tr><th>column</th><th class="rt">bits</th><th class="rt">bits/period</th><th class="rt">share</th><th>bits/period spread <span class="muted">(0–${bppScaleMax.toFixed(1)})</span></th><th>modes</th></tr>
@@ -866,12 +1057,17 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
 
 function renderHtml(s: ReportData): string {
   const viewFragments = Object.entries(s.views).map(([vk, vs]) => renderView(vk, vs, s.versionBits, s.headerBits)).join("\n");
-  const periodComparison = renderPeriodComparison(s);
-  const resRadios = s.resolutions.map((r) =>
-    `<label><input type="radio" name="res" value="${r}"${r === s.defaultResolution ? " checked" : ""}> ${esc(r)}</label>`).join("");
+  const comparison = renderDurationComparison(s);
+  const durationRadios = s.durations.map((d) =>
+    `<label><input type="radio" name="duration" value="${d}"${d === s.defaultDuration ? " checked" : ""}> ${d}d</label>`).join("");
   const groupChecks = s.groups.map((g, i) =>
     `<label><input type="checkbox" class="group" value="${g.id}" data-bit="${1 << i}"${s.defaultCombo & (1 << i) ? " checked" : ""}> ${esc(g.label)}</label>`).join("");
-  const quality = s.skipped ? `<div class="quality"><p>Skipped ${s.skipped} forecast(s) with an incomplete base series.</p></div>` : "";
+  const notes = [
+    s.skipped ? `Skipped ${s.skipped} forecast(s) with an incomplete base series.` : "",
+    s.uncovered ? `Skipped ${s.uncovered} (forecast, duration) pair(s) the corpus window doesn't cover.` : "",
+    s.dropped.length ? `Dropped ${s.dropped.map((d) => `${d}d`).join(", ")} entirely — no forecast in the corpus covers that duration. Re-collect: the cached windows are shorter than the ${HORIZON_DAYS}-day window this report needs.` : "",
+  ].filter(Boolean);
+  const quality = notes.length ? `<div class="quality">${notes.map((n) => `<p>${esc(n)}</p>`).join("")}</div>` : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -924,20 +1120,27 @@ function renderHtml(s: ReportData): string {
   .score { padding: .7rem 1rem; background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.45); border-radius: 8px; font-variant-numeric: tabular-nums; }
   .score-value { font-size: 1.6rem; color: #3b82f6; }
   .score-label { color: #777; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+  .score-sub { color: #777; font-size: .75rem; margin-top: .15rem; }
   .detail-score { margin: 1rem 0 1.25rem; }
+  .mark { stroke: #e6a01e; stroke-width: 1; stroke-dasharray: 3 3; }
+  .marklabel { fill: #e6a01e; font-size: 10px; font-variant-numeric: tabular-nums; }
+  .note { color: #777; font-size: .82rem; max-width: 640px; margin: .2rem 0 .8rem; }
+  .note code { background: rgba(128,128,128,.15); padding: .05rem .3rem; border-radius: 3px; }
+  table.stages { max-width: 620px; margin-bottom: .5rem; }
 </style>
 </head>
 <body>
 <h1>Encoding benchmark</h1>
 <div class="meta">
-  ${esc(s.timestamp)} · ${s.forecasts} forecasts · ${s.locations} locations · ${esc(s.model)} · max <code>${s.maxChars}</code> chars
+  ${esc(s.timestamp)} · ${s.forecasts} forecasts · ${s.locations} locations · ${esc(s.model)} · max <code>${s.maxChars}</code> chars ·
+  request at <code>${s.requestHour}:00</code> local
 </div>
 
-${periodComparison}
+${comparison}
 
 <h2>Benchmark detail</h2>
 <div class="selectors">
-  <div class="sel"><span class="sel-label">Resolution</span>${resRadios}</div>
+  <div class="sel"><span class="sel-label">Duration</span>${durationRadios}</div>
   <div class="sel"><span class="sel-label">Variables</span>${groupChecks}</div>
 </div>
 ${quality}
@@ -946,18 +1149,18 @@ ${quality}
 
 <script>
 const views = [...document.querySelectorAll(".view")];
-const resRadios = [...document.querySelectorAll('input[name=res]')];
+const durationRadios = [...document.querySelectorAll('input[name=duration]')];
 const groupBoxes = [...document.querySelectorAll('input.group')];
 
-const resolution = () => resRadios.find((r) => r.checked).value;
+const duration = () => durationRadios.find((r) => r.checked).value;
 const combo = () => groupBoxes.reduce((c, b) => c | (b.checked ? +b.dataset.bit : 0), 0);
 
 function update() {
-  const res = resolution(), c = combo();
-  views.forEach((v) => v.hidden = !(v.dataset.res === res && +v.dataset.combo === c));
+  const d = duration(), c = combo();
+  views.forEach((v) => v.hidden = !(v.dataset.duration === d && +v.dataset.combo === c));
 }
 
-[...resRadios, ...groupBoxes].forEach((el) => el.addEventListener("change", update));
+[...durationRadios, ...groupBoxes].forEach((el) => el.addEventListener("change", update));
 update();
 </script>
 </body>

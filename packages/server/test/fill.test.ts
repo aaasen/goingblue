@@ -136,7 +136,7 @@ describe("encodeFillSeq", () => {
 
 describe("fitFillToBudget", () => {
   it("fills a 160-char budget past the all-12h layout and stays within it", () => {
-    const encoded = fitFillToBudget(encodeSeq(params()), maxFillSeq(DURATION_DAYS), 160)!;
+    const encoded = fitFillToBudget(encodeSeq(params()), (e) => e.length, maxFillSeq(DURATION_DAYS), 160)!;
     expect(encoded.length).toBeLessThanOrEqual(160);
     const decoded = decodeMessage(encoded, () => ctx);
     expect(decoded.seq!).toBeGreaterThan(SLOTS); // refined at least one day
@@ -147,7 +147,7 @@ describe("fitFillToBudget", () => {
     const enc = encodeSeq(params());
     let prevSeq = 0;
     for (const budget of [80, 160, 320, 640, 1280]) {
-      const encoded = fitFillToBudget(enc, maxFillSeq(DURATION_DAYS), budget)!;
+      const encoded = fitFillToBudget(enc, (e) => e.length, maxFillSeq(DURATION_DAYS), budget)!;
       const seq = decodeMessage(encoded, () => ctx).seq!;
       expect(seq).toBeGreaterThanOrEqual(prevSeq);
       prevSeq = seq;
@@ -155,12 +155,12 @@ describe("fitFillToBudget", () => {
   });
 
   it("a huge budget reaches the all-1h layout", () => {
-    const encoded = fitFillToBudget(encodeSeq(params()), maxFillSeq(DURATION_DAYS), 100000)!;
+    const encoded = fitFillToBudget(encodeSeq(params()), (e) => e.length, maxFillSeq(DURATION_DAYS), 100000)!;
     expect(decodeMessage(encoded, () => ctx).seq).toBe(maxFillSeq(DURATION_DAYS));
   });
 
   it("truncates to fewer 12h days when even the full duration doesn't fit", () => {
-    const encoded = fitFillToBudget(encodeSeq(params()), maxFillSeq(DURATION_DAYS), 40)!;
+    const encoded = fitFillToBudget(encodeSeq(params()), (e) => e.length, maxFillSeq(DURATION_DAYS), 40)!;
     const decoded = decodeMessage(encoded, () => ctx);
     expect(decoded.seq!).toBeLessThan(SLOTS);
     expect(decoded.days).toBe(decoded.seq);
@@ -168,7 +168,7 @@ describe("fitFillToBudget", () => {
   });
 
   it("returns the seq=1 layout even when it exceeds the budget", () => {
-    const encoded = fitFillToBudget(encodeSeq(params()), maxFillSeq(DURATION_DAYS), 1)!;
+    const encoded = fitFillToBudget(encodeSeq(params()), (e) => e.length, maxFillSeq(DURATION_DAYS), 1)!;
     expect(decodeMessage(encoded, () => ctx).seq).toBe(1);
   });
 });
