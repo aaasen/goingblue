@@ -1194,7 +1194,8 @@ function renderHtml(s: ReportData): string {
   @media (prefers-color-scheme: dark) {
     :root { --r1: #184f95; --r2: #2a78d6; --r3: #6da7ec; --r4: #cde2fb; }
   }
-  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 2rem; max-width: 900px; }
+  /* One centred column; content inside it stays left-aligned and spans the full column width. */
+  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0 auto; padding: 2rem; max-width: var(--chart-w); }
   h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
   h2 { font-size: 1rem; margin: 2rem 0 .6rem; }
   h3 { font-size: .9rem; margin: 1.5rem 0 .4rem; color: #666; }
