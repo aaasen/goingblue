@@ -6,6 +6,7 @@ import {
   V1_VERSION,
   layoutFor,
   maxFillSeq,
+  slotsFor,
   decodeMessage,
   type ForecastMessage,
   type Period,
@@ -16,8 +17,10 @@ import {
 // Every variable (bit 12 is `rain`; bit 13, formerly tmin, is reserved).
 const ALL_VARS = (1 << 13) - 1;
 
-// Request: 2026-07-12 at 13:00 local, UTC-9, 10 days.
+// Request: 2026-07-12 at 13:00 local, UTC-9, 10 days — which covers SLOTS = 11 day slots (the
+// rest of the request day, then 10 whole days).
 const DURATION_DAYS = 10;
+const SLOTS = slotsFor(DURATION_DAYS);
 const UTC_OFFSET = -9;
 const REQ_UTC_HOUR = Date.UTC(2026, 6, 12, 13) / 3600000 - UTC_OFFSET;
 
@@ -86,14 +89,14 @@ function roundTrip(seq: number): { original: ForecastMessage; decoded: ForecastM
 
 describe("mixed-layout round-trip encoding", () => {
   it("recovers the layout from seq alone — header, periodHours, and count", () => {
-    // A mixed layout: seq = D + 3 → days 0-2 at 6h, the rest at 12h.
-    const seq = DURATION_DAYS + 3;
+    // A mixed layout: seq = SLOTS + 3 → slots 0-2 at 6h, the rest at 12h.
+    const seq = SLOTS + 3;
     const { original, decoded } = roundTrip(seq);
     expect(decoded.version).toBe(V1_VERSION);
     expect(decoded.code).toBe(42);
     expect(decoded.seq).toBe(seq);
     expect(decoded.durationDays).toBe(DURATION_DAYS);
-    expect(decoded.days).toBe(DURATION_DAYS);
+    expect(decoded.days).toBe(SLOTS);
     expect(decoded.periodHours).toEqual(original.periodHours);
     expect(decoded.periods[0]).toHaveLength(original.periods[0].length);
     expect(decoded.elevation).toBe(500);
@@ -103,15 +106,15 @@ describe("mixed-layout round-trip encoding", () => {
 
   it("month/day/hour describe the first period's start, not the request time", () => {
     // All-1h layout: the first period is the request hour itself (13:00 local = 22:00 UTC).
-    const all1h = roundTrip(4 * DURATION_DAYS).decoded;
+    const all1h = roundTrip(4 * SLOTS).decoded;
     expect([all1h.month, all1h.day, all1h.hour]).toEqual([7, 12, 22]);
     // All-12h layout: day 0's period starts at local noon (21:00 UTC).
-    const all12h = roundTrip(DURATION_DAYS).decoded;
+    const all12h = roundTrip(SLOTS).decoded;
     expect([all12h.month, all12h.day, all12h.hour]).toEqual([7, 12, 21]);
   });
 
   it("round-trips period values across a mixed layout", () => {
-    const { original, decoded } = roundTrip(2 * DURATION_DAYS + 2);
+    const { original, decoded } = roundTrip(2 * SLOTS + 2);
     original.periods[0].forEach((p, i) => {
       const d = decoded.periods[0][i];
       expect(d.weathercode).toBe(p.weathercode);
@@ -159,7 +162,7 @@ describe("mixed-layout round-trip encoding", () => {
   });
 
   it("breakdown produces the identical encoding and accounts every column", () => {
-    const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, 2 * DURATION_DAYS + 5);
+    const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, 2 * SLOTS + 5);
     const m = msgFor(layout);
     const b = v1EncodeBreakdown(m);
     expect(b.encoded).toBe(v1MessageToString(m));

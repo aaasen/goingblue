@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { layoutFor, maxFillSeq, RESOLUTION_HOURS } from "../src/index.js";
+import { layoutFor, maxFillSeq, slotsFor, RESOLUTION_HOURS } from "../src/index.js";
 
 // A representative request instant: 2026-07-12, at various hours of the (UTC) day.
 const BASE_DAY_UTC_HOUR = Date.UTC(2026, 6, 12) / 3600000;
@@ -21,7 +21,7 @@ describe("layoutFor — invariants over the full sequence", () => {
             const n = l.periodHours.length;
             expect(l.periodStartUtcHour).toHaveLength(n);
             expect(l.dayResolution).toHaveLength(l.days);
-            expect(l.days).toBe(l.truncated ? seq : D);
+            expect(l.days).toBe(l.truncated ? seq : slotsFor(D));
 
             // Periods are contiguous: each starts where the previous ended.
             for (let i = 1; i < n; i++) {
@@ -47,6 +47,10 @@ describe("layoutFor — invariants over the full sequence", () => {
             // The window always ends at local midnight after the last covered day.
             const endLocal = l.periodStartUtcHour[n - 1] + l.periodHours[n - 1] + z;
             expect(endLocal).toBe(day0 + 24 * l.days);
+
+            // The requested duration is a floor on forward coverage, whatever the request hour:
+            // an untruncated layout always reaches at least D × 24h past the request.
+            if (!l.truncated) expect(endLocal - local).toBeGreaterThanOrEqual(24 * D);
 
             // Refinement runs front-to-back: day resolutions never get finer later in the
             // window (larger index = finer).
@@ -78,61 +82,69 @@ describe("layoutFor — invariants over the full sequence", () => {
 
 describe("layoutFor — sequence stages", () => {
   const D = 10;
+  const S = slotsFor(D); // 11 slots: the rest of the request day, then 10 whole days
   const z = -9;
   // Request at 13:00 local (the 13:03 example, aligned down to the hour).
   const reqUtc = BASE_DAY_UTC_HOUR + 13 - z;
 
-  it("seq < D is a truncated pure-12h forecast", () => {
+  it("seq < S is a truncated pure-12h forecast", () => {
     const l = layoutFor(D, reqUtc, z, 4);
     expect(l.truncated).toBe(true);
     expect(l.days).toBe(4);
     expect(l.periodHours).toEqual(Array(7).fill(12));
-    // Day 0 starts with the 12h period containing the request time.
+    // Slot 0 starts with the 12h period containing the request time.
     expect(l.periodStartUtcHour[0] + z).toBe(Math.floor((reqUtc + z) / 24) * 24 + 12);
   });
 
-  it("seq = D covers the full duration at 12h", () => {
-    const l = layoutFor(D, reqUtc, z, D);
+  it("seq = S covers the full duration at 12h", () => {
+    const l = layoutFor(D, reqUtc, z, S);
     expect(l.truncated).toBe(false);
-    expect(l.periodHours).toEqual(Array(2 * D - 1).fill(12));
+    expect(l.days).toBe(S);
+    expect(l.periodHours).toEqual(Array(2 * S - 1).fill(12));
   });
 
-  it("seq = 13 refines the first three days to 6h (the 13:03 example)", () => {
-    const l = layoutFor(D, reqUtc, z, 13);
-    expect(l.dayResolution).toEqual([2, 2, 2, 1, 1, 1, 1, 1, 1, 1]);
-    // At 13:00 local, day 0's 6h grid yields two periods; days 1–2 four each;
-    // then seven days at 12h.
+  it("seq = S + 3 refines the first three slots to 6h (the 13:03 example)", () => {
+    const l = layoutFor(D, reqUtc, z, S + 3);
+    expect(l.dayResolution).toEqual([2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1]);
+    // At 13:00 local, slot 0's 6h grid yields two periods; the next two days four each;
+    // then eight days at 12h.
     expect(l.periodHours).toEqual([
       6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-      12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+      12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
     ]);
     expect(l.periodStartUtcHour[0] + z - Math.floor((reqUtc + z) / 24) * 24).toBe(12);
   });
 
-  it("stage boundaries meet: seq = 2D from below and above is all-6h", () => {
-    const l = layoutFor(D, reqUtc, z, 2 * D);
-    expect(l.dayResolution).toEqual(Array(D).fill(2));
+  it("stage boundaries meet: seq = 2S from below and above is all-6h", () => {
+    const l = layoutFor(D, reqUtc, z, 2 * S);
+    expect(l.dayResolution).toEqual(Array(S).fill(2));
   });
 
-  it("seq = 4D is the whole window at 1h, starting at the request hour", () => {
-    const l = layoutFor(D, reqUtc, z, 4 * D);
-    expect(l.dayResolution).toEqual(Array(D).fill(4));
+  it("seq = 4S is the whole window at 1h, starting at the request hour", () => {
+    const l = layoutFor(D, reqUtc, z, 4 * S);
+    expect(l.dayResolution).toEqual(Array(S).fill(4));
     expect(l.periodHours.every((h) => h === 1)).toBe(true);
     expect(l.periodStartUtcHour[0]).toBe(reqUtc);
-    // 11 hours left of day 0 (13:00–24:00) + 9 full days.
-    expect(l.periodHours).toHaveLength(11 + 9 * 24);
+    // 11 hours left of the request day (13:00–24:00) + the 10 whole days asked for.
+    expect(l.periodHours).toHaveLength(11 + D * 24);
   });
 
-  it("a midnight request has no partial day: truncated layouts have two periods per day", () => {
+  it("a request at exactly local midnight has a whole request day, so it over-covers by one day", () => {
     const midnightUtc = BASE_DAY_UTC_HOUR - z; // 0:00 local
-    for (let seq = 1; seq <= D; seq++) {
+    // Slot 0 is the *remainder* of the request day, which at 0:00 is all of it: D + 1 whole
+    // days. The coverage floor still holds (it is the only hour that exceeds it); the cost is
+    // a day's worth of periods, so the fill just lands a rung coarser.
+    const l = layoutFor(D, midnightUtc, z, 4 * S);
+    expect(l.periodHours).toHaveLength(S * 24);
+    // No partial day anywhere: truncated layouts have exactly two periods per day.
+    for (let seq = 1; seq <= S; seq++) {
       expect(layoutFor(D, midnightUtc, z, seq).periodHours).toHaveLength(2 * seq);
     }
   });
 
   it("rejects out-of-range inputs", () => {
     expect(() => layoutFor(D, reqUtc, z, 0)).toThrow();
-    expect(() => layoutFor(D, reqUtc, z, 4 * D + 1)).toThrow();
+    expect(() => layoutFor(D, reqUtc, z, 4 * S + 1)).toThrow();
     expect(() => layoutFor(0, reqUtc, z, 1)).toThrow();
     expect(() => layoutFor(D, reqUtc, 15, 1)).toThrow();
     expect(() => layoutFor(D, reqUtc, -13, 1)).toThrow();

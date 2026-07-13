@@ -12,6 +12,7 @@ import {
   CARDINALS,
   DEFAULT_VARS_MASK,
   VARS_BIT,
+  slotsFor,
   compandSqrt,
   expandSqrt,
   ACCUM_BITS,
@@ -57,21 +58,30 @@ function popcount(n: number): number {
 }
 
 // The decoder derives the period layout from (context, seq) — see layout.ts — so a test
-// message must be a canonical layout. Two shapes cover every column test, both anchored so the
-// request time equals the FIRST period's start (which lets ctxOf rebuild the request from the
-// message's own month/day/hour):
-//   12-hour: n periods = D = ceil(n/2) days at seq D, requested at hour 24D − 12n, so
-//            day 0's partial tail plus the D−1 full days is exactly n periods.
-//   hourly:  n periods = D = ceil(n/24) days at seq 4D, requested at hour 24D − n, so
-//           day 0's partial tail plus the D−1 full days is exactly n periods.
+// message must be a canonical layout. A duration of D covers D + 1 day slots (the remainder of
+// the request day, then D whole days), so column length is constrained; two shapes cover every
+// column test, both anchored so the request time equals the FIRST period's start (which lets
+// ctxOf rebuild the request from the message's own month/day/hour):
+//   12-hour: any n ≥ 1, as a TRUNCATED layout (seq < slots ⇒ all-12h, `seq` slots covered).
+//            n = ceil(n/2) slots at seq = D = ceil(n/2), requested at hour 24D − 12n ∈ {0, 12},
+//            so the request slot's tail plus the whole days is exactly n periods.
+//   hourly:  n ≥ 25 only — the smallest all-1h layout is D = 1 requested at 23:00 (one hour of
+//            today plus a whole day). n periods = D = ceil(n/24) − 1 days at seq 4(D+1),
+//            requested at hour 24(D+1) − n.
 // The context's UTC offset is 0 throughout, so local time == UTC.
-function uniformLayout(n: number, hourly: boolean): { durationDays: number; seq: number; hourOfDay: number; stepHours: number } {
+function uniformLayout(n: number, hourly: boolean): { durationDays: number; days: number; seq: number; hourOfDay: number; stepHours: number } {
   if (hourly) {
-    const durationDays = Math.ceil(n / 24);
-    return { durationDays, seq: 4 * durationDays, hourOfDay: 24 * durationDays - n, stepHours: 1 };
+    const durationDays = Math.ceil(n / 24) - 1;
+    if (durationDays < 1)
+      throw new Error(`no canonical all-1h layout has ${n} periods (the minimum is 25)`);
+    const days = slotsFor(durationDays);
+    return { durationDays, days, seq: 4 * days, hourOfDay: 24 * days - n, stepHours: 1 };
   }
   const durationDays = Math.ceil(n / 2);
-  return { durationDays, seq: durationDays, hourOfDay: 24 * durationDays - 12 * n, stepHours: 12 };
+  return {
+    durationDays, days: durationDays, seq: durationDays,
+    hourOfDay: 24 * durationDays - 12 * n, stepHours: 12,
+  };
 }
 
 function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean } = {}): ForecastMessage {
@@ -79,11 +89,11 @@ function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean 
   const nModels = popcount(models_mask);
   const periods = overrides.periods ?? Array.from({ length: nModels }, () => Array(3).fill(PERIOD));
   const n = periods[0].length;
-  const { durationDays, seq, hourOfDay, stepHours } = uniformLayout(n, opts.hourly ?? false);
+  const { durationDays, days, seq, hourOfDay, stepHours } = uniformLayout(n, opts.hourly ?? false);
   return {
     version: V1_VERSION,
     code: 0,
-    days: durationDays,
+    days,
     models_mask,
     vars_mask: ALL_VARS,
     month: 5,
@@ -229,32 +239,35 @@ describe("v1 round-trip encoding", () => {
   });
 
   it("handles every resolution stage of the fill sequence", () => {
-    // A 2-day duration requested at midnight: each stage
-    // boundary seq = (stage + 1) × D is the whole window at one resolution.
+    // A 2-day duration requested at midnight covers S = 3 whole slots; each stage boundary
+    // seq = (stage + 1) × S is the whole window at one resolution.
     const D = 2;
+    const S = slotsFor(D);
     const stageHours = [12, 6, 3, 1];
     for (let stage = 0; stage < stageHours.length; stage++) {
-      const seq = (stage + 1) * D;
-      const n = D * (24 / stageHours[stage]);
+      const seq = (stage + 1) * S;
+      const n = S * (24 / stageHours[stage]);
       const decoded = roundTrip(msg({
-        seq, durationDays: D, hour: 0,
+        seq, durationDays: D, days: S, hour: 0,
         periodHours: Array(n).fill(stageHours[stage]),
         periods: [Array(n).fill(PERIOD)],
       }));
       expect(decoded.seq).toBe(seq);
-      expect(decoded.days).toBe(2);
+      expect(decoded.days).toBe(S);
       expect(decoded.periodHours).toEqual(Array(n).fill(stageHours[stage]));
       expect(decoded.periods[0]).toHaveLength(n);
     }
   });
 
   it("round-trips a partial FIRST day (hourly layout anchored mid-day)", () => {
-    // 10 hourly periods → a 1-day duration requested at 14:00: periods run 14:00–24:00.
-    const decoded = roundTrip(msg({ periods: [Array(10).fill(PERIOD)] }, { hourly: true }));
-    expect(decoded.periods[0]).toHaveLength(10);
-    expect(decoded.days).toBe(1);
+    // 34 hourly periods → a 1-day duration requested at 14:00: 14:00–24:00 today, then a
+    // whole day. The requested day count is a floor on coverage, so `days` is D + 1 slots.
+    const decoded = roundTrip(msg({ periods: [Array(34).fill(PERIOD)] }, { hourly: true }));
+    expect(decoded.periods[0]).toHaveLength(34);
+    expect(decoded.durationDays).toBe(1);
+    expect(decoded.days).toBe(2);
     expect(decoded.hour).toBe(14);
-    expect(decoded.periodHours).toEqual(Array(10).fill(1));
+    expect(decoded.periodHours).toEqual(Array(34).fill(1));
   });
 
   it("round-trips each of the four model indices (single model per response)", () => {
@@ -311,7 +324,7 @@ describe("v1 round-trip encoding", () => {
   it("freeze reports no adaptive mode — it's Huffman-coded deltas, not raw/for/sparse/empty columns", () => {
     const vars_mask = 1 << VARS_BIT.freeze;
     const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, freeze_m: 6 * 304.8 }))];
-    const { columns } = v1EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true }));
+    const { columns } = v1EncodeBreakdown(msg({ vars_mask, periods }));
     expect(columns.find((c) => c.name === "freeze")?.mode).toBeNull();
   });
 
@@ -333,7 +346,7 @@ describe("v1 round-trip encoding", () => {
   it.each(CLOUD_LEVELS)("$name reports no adaptive mode — it's Huffman-coded deltas, not raw/for/sparse/empty columns", ({ field, bit, name }) => {
     const vars_mask = 1 << bit;
     const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, [field]: 40 }))];
-    const { columns } = v1EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true }));
+    const { columns } = v1EncodeBreakdown(msg({ vars_mask, periods }));
     expect(columns.find((c) => c.name === name)?.mode).toBeNull();
   });
 
@@ -388,8 +401,10 @@ describe("v1 round-trip encoding", () => {
   // direction is entropy-coded under (resolution, prev, upper-level) context, with calm periods
   // carrying no direction symbol at all.
   const WIND_STEP = 5 * 1.609344;
+  // 12h periods: these columns are shorter than the 25 periods any all-1h layout must have (see
+  // uniformLayout). The 1h wind path is covered separately below.
   const windMsg = (periods: Period[]) =>
-    msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] }, { hourly: true });
+    msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] });
 
   it("round-trips varied surface wind speeds (entropy-coded deltas) and directions", () => {
     const steps = [3, 5, 4, 6, 7, 4, 5, 3, 6, 5];
@@ -420,13 +435,30 @@ describe("v1 round-trip encoding", () => {
     expect(columns.find((c) => c.name === "wind")?.mode).toBeNull();
   });
 
+  it("round-trips surface wind at 1h resolution (the resolution-keyed direction codebook)", () => {
+    // Direction is coded under a (resolution, prev, upper-level) context, so the finest
+    // resolution needs its own round-trip — 25 periods is the shortest all-1h layout.
+    const periods = Array.from({ length: 25 }, (_, i) => ({
+      weathercode: 0,
+      wind_sfc_kph: (4 + (i % 5)) * WIND_STEP,
+      wind_sfc_dir: i % 8,
+    }));
+    const decoded = roundTrip(
+      msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] }, { hourly: true }));
+    expect(decoded.periodHours).toEqual(Array(25).fill(1));
+    decoded.periods[0].forEach((p, i) => {
+      expect(p.wind_sfc_kph).toBeCloseTo((4 + (i % 5)) * WIND_STEP, 3);
+      expect(p.wind_sfc_dir).toBe(i % 8);
+    });
+  });
+
   it("round-trips wind speeds above the old 75 mph cap (5-bit domain, up to 155 mph)", () => {
     const periods = [[
       { ...PERIOD, wind_500_kph: 24 * WIND_STEP },  // 120 mph
       { ...PERIOD, wind_500_kph: 28 * WIND_STEP },  // 140 mph
       { ...PERIOD, wind_500_kph: 31 * WIND_STEP },  // 155 mph (domain max)
     ]];
-    const decoded = roundTrip(msg({ periods }, { hourly: true }));
+    const decoded = roundTrip(msg({ periods }));
     expect(decoded.periods[0][0].wind_500_kph).toBeCloseTo(24 * WIND_STEP, 3);
     expect(decoded.periods[0][1].wind_500_kph).toBeCloseTo(28 * WIND_STEP, 3);
     expect(decoded.periods[0][2].wind_500_kph).toBeCloseTo(31 * WIND_STEP, 3);
@@ -459,7 +491,7 @@ describe("v1 round-trip encoding", () => {
     const steps = [10, 12, 11, 13, 12];
     const dirs = [2, 2, 3, 3, 4];
     const periods = [steps.map((s, i) => ({ weathercode: 0, wind_600_kph: s * WIND_STEP, wind_600_dir: dirs[i] }))];
-    const decoded = roundTrip(msg({ vars_mask, periods }, { hourly: true }));
+    const decoded = roundTrip(msg({ vars_mask, periods }));
     decoded.periods[0].forEach((p, i) => {
       expect(p.wind_600_kph).toBeCloseTo(steps[i] * WIND_STEP, 3);
       expect(p.wind_600_dir).toBe(dirs[i]);
@@ -488,7 +520,7 @@ describe("delta temperature encoding", () => {
   it("round-trips a clustered temperature column exactly", () => {
     const temps = [-5, -4, -3, 0, 2, 5, 3, 1, -2, 4];
     const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
-    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }, { hourly: true }));
+    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }));
     decoded.periods[0].forEach((p, i) => expect(p.temp_c).toBe(temps[i]));
   });
 
@@ -504,7 +536,7 @@ describe("delta temperature encoding", () => {
   it("temp reports no adaptive mode — it's Huffman-coded deltas, not a raw/for/sparse/empty column", () => {
     const vars_mask = 1 << VARS_BIT.temp;
     const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, temp_c: 0 }))];
-    const { columns } = v1EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true }));
+    const { columns } = v1EncodeBreakdown(msg({ vars_mask, periods }));
     expect(columns.find((c) => c.name === "temp")?.mode).toBeNull();
   });
 
@@ -512,7 +544,7 @@ describe("delta temperature encoding", () => {
     // ±31 is the largest delta the escape payload can carry — no clamping yet.
     const temps = [-15, 16, 14, 15, -16, -14];
     const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
-    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }, { hourly: true }));
+    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }));
     decoded.periods[0].forEach((p, i) => expect(p.temp_c).toBe(temps[i]));
   });
 
@@ -525,7 +557,7 @@ describe("delta temperature encoding", () => {
       const start = swing > 0 ? -30 : 30;
       const temps = [start, start + swing, start + swing + 2, start + swing + 1, start + swing + 3];
       const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
-      const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }, { hourly: true }));
+      const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }));
       const out = decoded.periods[0].map((p) => p.temp_c!);
       expect(out[0]).toBe(temps[0]);
       expect(out[1]).toBe(start + Math.min(Math.max(swing, -32), 31)); // clamped
@@ -543,7 +575,7 @@ describe("body decode desync detection", () => {
       { ...PERIOD, wind_700_dir: 5 },
       { ...PERIOD, wind_700_dir: 7 },
     ]];
-    const m = msg({ periods }, { hourly: true });
+    const m = msg({ periods });
     const encoded = v1MessageToString(m);
     // Resolve with a vars_mask missing that final column: the decoder reads every earlier column
     // identically, then stops with the wind-700 bits unread — the shape of codebook or

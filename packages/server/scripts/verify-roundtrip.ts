@@ -33,9 +33,10 @@ await eachForecast((hourly: HourlyData, _runHour: number) => {
   const times = hourly.time;
   const dataStart = Math.floor(Date.parse(`${times[0]}:00Z`) / 3600000);
   const dataEnd = dataStart + times.length; // exclusive
-  // Anchor day 0 at the first covered local midnight so every layout's window has data.
+  // Anchor day 0 at the first covered local midnight so every layout's window has data. A
+  // duration of D covers D + 1 day slots (slotsFor), hence the -1.
   const day0 = Math.ceil(dataStart / 24) * 24;
-  const durationDays = Math.min(10, Math.floor((dataEnd - day0) / 24));
+  const durationDays = Math.min(10, Math.floor((dataEnd - day0) / 24) - 1);
   if (durationDays < 1) return;
 
   for (const hourOfDay of REQUEST_HOURS_OF_DAY) {

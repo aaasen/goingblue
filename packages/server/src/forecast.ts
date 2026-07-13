@@ -7,6 +7,7 @@ import {
   normalizeToken,
   layoutFor,
   maxFillSeq,
+  slotsFor,
   type Period,
   type ForecastMessage,
   type VersionedCodec,
@@ -433,7 +434,8 @@ export interface ForecastParams {
   lat?: number;
   lon?: number;
   // The requested duration in days (`d:`) and the location's fixed UTC offset in whole
-  // hours (`z:`).
+  // hours (`z:`). The duration is days AHEAD: the window is the rest of the request day plus
+  // `durationDays` whole local days (see slotsFor/layoutFor).
   durationDays: number;
   utcOffsetHours: number;
   modelsMask: number;
@@ -623,10 +625,10 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   const modelKey = firstModelKey(params.modelsMask);
 
   // The window runs from local midnight of the request day (≤ 24h in the past for any UTC
-  // offset — hence past_days=1) through durationDays full local days; +2 forecast days cover
-  // the offset shift past the last UTC day boundary.
+  // offset — hence past_days=1) through the rest of that day plus durationDays full local days
+  // (see slotsFor); +2 forecast days cover the offset shift past the last UTC day boundary.
   const [h, times, elevation] = await fetchHourly(
-    modelKey, params.durationDays + 2, lat, lon, "UTC", elev_m, 1,
+    modelKey, slotsFor(params.durationDays) + 2, lat, lon, "UTC", elev_m, 1,
   );
 
   const best = fitFillToBudget(

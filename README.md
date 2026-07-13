@@ -11,7 +11,7 @@ Going Blue has several advantages over existing tools:
 4. Information density. Going Blue's compact encoding scheme allows it to deliver over 100 hourly data points in a single 160-character message. That's a 3 day forecast at 1 hour resolution, a 7 day forecast at 3 hour resolution, or a 10 day forecast at 6 hour resolution.
 
 Going Blue works like this:
-1. Build a forecast request from the mobile app. Choose forecast duration (3–10 days), weather model, and the variables that you need. The server fills the reply with as much time resolution as fits, refining near-term days first.
+1. Build a forecast request from the mobile app. Choose forecast duration (3–10 days ahead — you always get the rest of today plus that many whole days), weather model, and the variables that you need. The server fills the reply with as much time resolution as fits, refining near-term days first.
 2. Send the forecast request to (425) 434-5858 via Garmin inReach, ZOLEO, SMS, or any other satellite messenger.
 3. Copy the forecast response into the mobile app to visualize it.
 
@@ -74,13 +74,16 @@ hour); the server anchors the forecast window to it rather than to "now", so del
 shift which periods come back.
 
 The **period layout isn't on the wire either**. The server fills the response budget by refining
-whole days from the front of the window, one resolution step at a time (24h → 12h → 6h → 3h → 1h),
+whole days from the front of the window, one resolution step at a time (12h → 6h → 3h → 1h),
 along a canonical fill sequence, and the header carries only the resulting sequence number `seq` —
 both sides derive the identical layout (period count + per-period resolution) from
 `layoutFor(duration, request time, UTC offset, seq)` (see `packages/protocol/src/layout.ts`, which
-is therefore wire format). Periods align to **local midnight** (the `z:` offset); day 0 is partial —
-its first period is the one containing the request time, so refining day 0 discards earlier hours of
-today. `seq < duration` is the truncation fallback: that many whole days, all daily.
+is therefore wire format). Periods align to **local midnight** (the `z:` offset). A duration of D
+days covers **D + 1 day slots**: the remainder of the request day, then D whole local days — so D is
+a floor on forward coverage rather than a ceiling (a 3-day request at 13:00 reaches 3 whole days
+past today, not 59 hours), and every whole day reports a complete daily high/low. Slot 0 is
+partial — its first period is the one containing the request time, so refining it discards earlier
+hours of today. `seq < slots` is the truncation fallback: that many whole slots, all daily.
 
 | Field            | Bits | Notes                                              |
 | ---------------- | ---- | -------------------------------------------------- |

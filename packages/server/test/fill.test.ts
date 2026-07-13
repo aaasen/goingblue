@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CODECS, layoutFor, maxFillSeq, decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, type RequestContext } from "@weather/protocol";
+import { CODECS, layoutFor, maxFillSeq, slotsFor, decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, type RequestContext } from "@weather/protocol";
 import { encodeFillSeq, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.js";
 
 // ── Synthetic hourly data ───────────────────────────────────────────────────
@@ -9,6 +9,9 @@ import { encodeFillSeq, fitFillToBudget, type ForecastParams, type HourlyData } 
 
 const UTC_OFFSET = -9;
 const DURATION_DAYS = 10;
+// A D-day request covers D + 1 day slots (the rest of the request day, then D whole days), and
+// the fill ladder steps over slots — so seq milestones are multiples of SLOTS, not DURATION_DAYS.
+const SLOTS = slotsFor(DURATION_DAYS);
 // Request at 13:00 local on 2026-07-12.
 const REQ_UTC_HOUR = Date.UTC(2026, 6, 12, 13) / 3600000 - UTC_OFFSET;
 
@@ -103,7 +106,7 @@ describe("encodeFillSeq", () => {
 
   it("encoded size grows along the sequence (sampled at stage boundaries)", () => {
     const enc = encodeSeq(params());
-    const sizes = [1, DURATION_DAYS, 2 * DURATION_DAYS, 3 * DURATION_DAYS, 4 * DURATION_DAYS]
+    const sizes = [1, SLOTS, 2 * SLOTS, 3 * SLOTS, 4 * SLOTS]
       .map((s) => enc(s)!.length);
     for (let i = 1; i < sizes.length; i++) {
       expect(sizes[i]).toBeGreaterThan(sizes[i - 1]);
@@ -120,7 +123,7 @@ describe("encodeFillSeq", () => {
 
   it("aggregates day 0's 12h period from local noon, including the hour before the request", () => {
     const enc = encodeSeq(params());
-    const decoded = decodeMessage(enc(DURATION_DAYS)!, () => ctx);
+    const decoded = decodeMessage(enc(SLOTS)!, () => ctx);
     // Day 0's first period spans local 12:00–24:00 and is that local day's only window, so the
     // representative sample is the window max — computed over the complete period, including
     // the hour before the 13:00 request.
@@ -136,8 +139,8 @@ describe("fitFillToBudget", () => {
     const encoded = fitFillToBudget(encodeSeq(params()), maxFillSeq(DURATION_DAYS), 160)!;
     expect(encoded.length).toBeLessThanOrEqual(160);
     const decoded = decodeMessage(encoded, () => ctx);
-    expect(decoded.seq!).toBeGreaterThan(DURATION_DAYS); // refined at least one day
-    expect(decoded.days).toBe(DURATION_DAYS);            // full duration covered
+    expect(decoded.seq!).toBeGreaterThan(SLOTS); // refined at least one day
+    expect(decoded.days).toBe(SLOTS);            // full duration covered
   });
 
   it("a larger budget never yields a smaller seq", () => {
@@ -159,7 +162,7 @@ describe("fitFillToBudget", () => {
   it("truncates to fewer 12h days when even the full duration doesn't fit", () => {
     const encoded = fitFillToBudget(encodeSeq(params()), maxFillSeq(DURATION_DAYS), 40)!;
     const decoded = decodeMessage(encoded, () => ctx);
-    expect(decoded.seq!).toBeLessThan(DURATION_DAYS);
+    expect(decoded.seq!).toBeLessThan(SLOTS);
     expect(decoded.days).toBe(decoded.seq);
     expect(decoded.periodHours!.every((ph) => ph === 12)).toBe(true);
   });

@@ -1,10 +1,10 @@
 {
-  "description": "3-day duration-first fill (seq 4: 6h/12h/12h), all variables, Denali 14k camp",
+  "description": "2-day duration-first fill (seq 4: 6h/12h/12h), all variables, Denali 14k camp",
   "request": {
     "month": 6,
     "day": 15,
     "hour": 22,
-    "durationDays": 3,
+    "durationDays": 2,
     "utcOffsetHours": -9
   },
   "encoded": "\"!!&#Yf6yW/hEX'X4auA;;:=6RC6v+Gel-tGC\"I=mUTtF'j'XFSk89/nbzbFW#<(R3BI#/R/7)3",
@@ -145,7 +145,7 @@
       ]
     ],
     "seq": 4,
-    "durationDays": 3,
+    "durationDays": 2,
     "periodHours": [
       6,
       6,

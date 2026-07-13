@@ -10,13 +10,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // (precip, temp, snow, rain, freeze, surface + 500/600/700 hPa winds, total/high/mid/low cloud).
 const vars_mask = (1 << 13) - 1;
 
-// Duration-first fill: a 3-day request at 13:00 local (UTC-9), seq 4 → day 0 at 6h (partial:
-// two periods from 12:00), days 1-2 at 12h — a mixed layout, so the fixture freezes the
-// layout arithmetic (which is wire format, see layout.ts) alongside the byte format. The
+// Duration-first fill: a 2-day request at 13:00 local (UTC-9) covers 3 slots (the rest of the
+// request day, then 2 whole days — see slotsFor). seq 4 = slots + 1 → slot 0 at 6h (partial:
+// two periods from 12:00), the two whole days at 12h — a mixed layout, so the fixture freezes
+// the layout arithmetic (which is wire format, see layout.ts) alongside the byte format. The
 // request datetime, duration, and offset live in `request` so the test can rebuild the
 // context the decoder needs (the year floats: it is not on the wire, and the layout only
 // depends on the hour-of-day).
-const request = { month: 6, day: 15, hour: 22, durationDays: 3, utcOffsetHours: -9 };
+const request = { month: 6, day: 15, hour: 22, durationDays: 2, utcOffsetHours: -9 };
 const startMs = Date.UTC(new Date().getUTCFullYear(), request.month - 1, request.day, request.hour);
 const seq = 4;
 const layout = layoutFor(request.durationDays, startMs / 3600000, request.utcOffsetHours, seq);
@@ -66,7 +67,7 @@ const encoded = v1Codec.encode(input);
 const decoded = v1Codec.decode(encoded, ctx);
 
 const fixture = {
-  description: "3-day duration-first fill (seq 4: 6h/12h/12h), all variables, Denali 14k camp",
+  description: "2-day duration-first fill (seq 4: 6h/12h/12h), all variables, Denali 14k camp",
   request,
   encoded,
   decoded,

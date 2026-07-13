@@ -56,10 +56,10 @@ describe("v1 seq header", () => {
   });
 
   it("round-trips the largest encodable seq (256, the 8-bit field's ceiling)", () => {
-    // A 64-day duration reaches seq 256 (4 × 64 = 256) — far beyond what the server
-    // offers, but the header field must round-trip its full range.
-    expect(maxFillSeq(64)).toBe(256);
-    const m = msgFor(64, 256);
+    // A 63-day duration covers 64 slots and so reaches seq 256 (4 × 64) — far beyond what the
+    // server offers, but the header field must round-trip its full range.
+    expect(maxFillSeq(63)).toBe(256);
+    const m = msgFor(63, 256);
     const decoded = dec(m);
     expect(decoded.seq).toBe(256);
     expect(decoded.periods[0]).toHaveLength(m.periods[0].length);
