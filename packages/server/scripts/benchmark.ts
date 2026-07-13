@@ -652,7 +652,6 @@ function buildView(
     percentiles: PERCENTILES.map((p) => ({ p, seq: pct(seqs, p) })),
     medianSeq,
     medianLabel: seqLabel(durationDays, medianSeq),
-    truncatedShare: seqs.filter((s) => s < slots).length / seqs.length,
     stages,
     histogram,
     bodyBits: columns.reduce((s, c) => s + c.bits, 0),
@@ -820,7 +819,6 @@ interface ViewStats {
   percentiles: { p: number; seq: number }[]; // the seq at each PERCENTILE of the distribution
   medianSeq: number;
   medianLabel: string;    // what the median seq actually is, as a layout
-  truncatedShare: number; // fraction that couldn't even fit the duration at 12h
   stages: StageStat[];
   histogram: { seq: number; count: number }[]; // one bin per seq in 1..maxSeq
   bodyBits: number;
@@ -1073,7 +1071,7 @@ function renderDurationComparison(s: ReportData): string {
   ${renderRungLegend()}
   <div class="striphead"><div></div>${renderStripAxis(maxSlots)}</div>
   <div class="strips">${perDuration}</div>
-  <h2>Fill percentage by forecast length and variables</h2>
+  <h2>Mean fill percentage by forecast duration and variable selection</h2>
   <table class="period-comparison">
     <tr><th>Variables</th>${head}</tr>
     ${rows}
@@ -1106,11 +1104,6 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
     </tr>`).join("\n");
 
   return `<section class="view" data-duration="${duration}" data-combo="${combo}" hidden>
-  <div class="score-grid detail-score">` +
-    `<div class="score"><div class="score-label">Average fill</div>` +
-    `<div><strong class="score-value">${pctText(fillBox(vs).mean)}</strong> filled</div></div>` +
-    `<div class="score"><div class="score-label">Full duration covered</div>` +
-    `<div><strong class="score-value">${(100 * (1 - vs.truncatedShare)).toFixed(1)}%</strong></div></div></div>
   <h3>Fill resolution distribution</h3>
   <div class="strips">${renderPercentileStrips(vs, requestHour)}</div>
   ${renderHistogram(vs)}
@@ -1194,12 +1187,6 @@ function renderHtml(s: ReportData): string {
   .pmean { font: .78rem ui-monospace, monospace; white-space: nowrap; }
   .fillbar { display: block; width: 100%; max-width: 150px; height: 10px; }
   .fbtrack { fill: rgba(128,128,128,.18); }
-  .score-grid { display: flex; flex-wrap: wrap; gap: .6rem; margin: .2rem 0 .7rem; }
-  .score { padding: .7rem 1rem; background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.45); border-radius: 8px; font-variant-numeric: tabular-nums; }
-  .score-value { font-size: 1.6rem; color: #3b82f6; }
-  .score-label { color: #777; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
-  .score-sub { color: #777; font-size: .75rem; margin-top: .15rem; }
-  .detail-score { margin: 1rem 0 1.25rem; }
   .mark { stroke: #e6a01e; stroke-width: 1; stroke-dasharray: 3 3; }
   .marklabel { fill: #e6a01e; font-size: 10px; font-variant-numeric: tabular-nums; }
   .strips { max-width: var(--chart-w); margin: .4rem 0 1.25rem; }
