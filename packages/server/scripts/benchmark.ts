@@ -252,6 +252,10 @@ const LOCATIONS: Location[] = [
 const DURATIONS = [3, 5, 7, 10];
 const DEFAULT_DURATION = 7; // the server's default when a request carries no `d:`
 
+// The messages the detail view draws: the whole spread, from the worst forecasts to encode (p1 —
+// stormy, high-entropy) to the easiest (p99 — stable).
+const PERCENTILES = [1, 10, 25, 50, 75, 90, 99];
+
 // Rung labels by resolution index (RESOLUTION_HOURS). The fill ladder walks 1..4 (12h → 1h).
 const RUNG = Object.fromEntries(
   Object.entries(RESOLUTION_HOURS).map(([i, h]) => [i, `${h}h`]),
@@ -646,6 +650,7 @@ function buildView(
     durationDays, slots, maxSeq,
     seq: box(seqs),
     periods: box(periods),
+    percentiles: PERCENTILES.map((p) => ({ p, seq: pct(seqs, p) })),
     medianSeq,
     medianLabel: seqLabel(durationDays, medianSeq),
     truncatedShare: seqs.filter((s) => s < slots).length / seqs.length,
@@ -813,6 +818,7 @@ interface ViewStats {
   maxSeq: number;  // 4S — the whole window at 1h, the top of the ladder
   seq: BoxStats;
   periods: BoxStats;
+  percentiles: { p: number; seq: number }[]; // the seq at each PERCENTILE of the distribution
   medianSeq: number;
   medianLabel: string;    // what the median seq actually is, as a layout
   truncatedShare: number; // fraction that couldn't even fit the duration at 12h
@@ -854,6 +860,86 @@ const pctText = (fraction: number) => `${(100 * fraction).toFixed(1)}%`;
 
 const esc = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+
+// The layout a seq denotes, slot by slot — the concrete thing a fill percentage stands for. Mirrors
+// layoutFor's arithmetic without needing a real request: each covered day slot gets a resolution
+// rung, and slot 0 starts at the period containing the request hour (so refining it drops the
+// earlier part of today — visible as the leading gap in the strip).
+interface StripSlot {
+  res: number;          // resolution index (1..4), or 0 when the slot isn't covered at all
+  periodHours: number;  // span of one period in this slot
+  startHour: number;    // first period's local hour of day (0 for every slot but the first)
+}
+function stripLayout(durationDays: number, seq: number, requestHour: number): StripSlot[] {
+  const S = slotsFor(durationDays);
+  const truncated = seq < S;
+  const days = truncated ? seq : S;
+  const t = truncated ? 0 : seq - S;
+  const fine = t === 0 ? 1 : Math.ceil(t / S) + 1;
+  const nFine = t === 0 ? days : t - (fine - 2) * S;
+  return Array.from({ length: S }, (_, d) => {
+    if (d >= days) return { res: 0, periodHours: 0, startHour: 0 }; // truncated away
+    const res = d < nFine ? fine : fine - 1;
+    const h = RESOLUTION_HOURS[res];
+    return { res, periodHours: h, startHour: d === 0 ? Math.floor(requestHour / h) * h : 0 };
+  });
+}
+
+// One message, drawn: a rectangle of day slots, each divided into its periods and coloured by
+// resolution. The whole point is to make a fill percentage legible — [1h|3h|3h|3h] is what "75%"
+// actually buys you.
+function renderLayoutStrip(vs: ViewStats, seq: number, requestHour: number): string {
+  const slots = stripLayout(vs.durationDays, seq, requestHour);
+  const W = 720, H = 78, m = { t: 4, r: 14, b: 30, l: 14 };
+  const iw = W - m.l - m.r, barH = H - m.t - m.b - 12;
+  const slotW = iw / slots.length;
+  const gap = 2; // surface gap between period fills
+
+  const dayName = (d: number) => (d === 0 ? "today" : `+${d}d`);
+  const cells = slots.map((slot, d) => {
+    const x0 = m.l + d * slotW;
+    if (slot.res === 0) {
+      return `<rect x="${x0.toFixed(1)}" y="${m.t}" width="${slotW.toFixed(1)}" height="${barH}" class="slot-empty">` +
+        `<title>${dayName(d)} — not covered: the budget truncated the forecast below ${vs.durationDays}d</title></rect>`;
+    }
+    const out: string[] = [];
+    // Slot 0's leading hours precede the request and are never sent.
+    if (slot.startHour > 0) {
+      out.push(`<rect x="${x0.toFixed(1)}" y="${m.t}" width="${(slotW * slot.startHour / 24 - gap).toFixed(1)}" height="${barH}" class="slot-past">` +
+        `<title>before the request (${requestHour}:00 local) — not sent</title></rect>`);
+    }
+    for (let h = slot.startHour; h < 24; h += slot.periodHours) {
+      const x = x0 + slotW * (h / 24);
+      out.push(`<rect x="${x.toFixed(1)}" y="${m.t}" width="${Math.max(1, slotW * slot.periodHours / 24 - gap).toFixed(1)}" ` +
+        `height="${barH}" rx="1.5" class="rung r${slot.res}">` +
+        `<title>${dayName(d)} ${String(h).padStart(2, "0")}:00 — one ${RUNG[slot.res]} period</title></rect>`);
+    }
+    return out.join("");
+  }).join("");
+
+  // Direct labels under each slot (text tokens, not the fill colour — identity is never colour-alone).
+  const labels = slots.map((slot, d) => {
+    const cx = m.l + (d + 0.5) * slotW;
+    const text = slot.res === 0 ? "—" : `${dayName(d)} · ${RUNG[slot.res]}`;
+    return `<text x="${cx.toFixed(1)}" y="${H - m.b + 14}" class="sliplabel" text-anchor="middle">${esc(text)}</text>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${W} ${H}" class="strip" role="img" aria-label="Layout of the median message: ${esc(seqLabel(vs.durationDays, seq))}">
+  ${cells}${labels}
+</svg>`;
+}
+
+// One strip per percentile of the fill distribution, each labelled with its seq, fill and layout —
+// so the spread the box plot summarises can be read as actual messages.
+function renderPercentileStrips(vs: ViewStats, requestHour: number): string {
+  return vs.percentiles.map(({ p, seq }) => `<div class="striprow">
+    <div class="striplabel"><strong>p${p}</strong>
+      <span>seq ${seq}/${vs.maxSeq} · ${pctText(seq / vs.maxSeq)}</span>
+      <span class="muted">${esc(seqLabel(vs.durationDays, seq))}</span>
+    </div>
+    ${renderLayoutStrip(vs, seq, requestHour)}
+  </div>`).join("\n");
+}
 
 // Both seq charts share one x-scale: the whole fill sequence, 1..4S. Keeping the full ladder on the
 // axis (rather than just the observed range) is the point of the chart — you read how far along it
@@ -1005,7 +1091,7 @@ function renderDurationComparison(s: ReportData): string {
 
 // One toggleable view = a duration × variable-combo: seq histogram, box plot, fill summary, and the
 // occupancy table (columns sorted by share). All are emitted hidden; the client shows the selected.
-function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: number): string {
+function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: number, requestHour: number): string {
   const [duration, combo] = vk.split(":");
   const occupancyBits = versionBits + headerBits + vs.bodyBits;
   const rows = [
@@ -1044,6 +1130,11 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
     `<div class="score"><div class="score-label">Average periods per message</div>` +
     `<div><strong class="score-value">${vs.periods.mean.toFixed(1)}</strong> periods</div>` +
     `<div class="score-sub">min ${vs.periods.min} · max ${vs.periods.max}</div></div></div>
+  <h3>Messages across the distribution, drawn</h3>
+  <p class="note">Each block is one forecast period; darker means finer resolution. p1 is a forecast
+  at the hard end of the corpus (stormy, high-entropy — little fits), p99 an easy one (stable
+  conditions compress far smaller, so the budget buys more resolution).</p>
+  <div class="strips">${renderPercentileStrips(vs, requestHour)}</div>
   ${renderHistogram(vs)}
   ${renderBoxPlot(vs)}
   <h3>Full fill at each period</h3>
@@ -1061,7 +1152,7 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
 }
 
 function renderHtml(s: ReportData): string {
-  const viewFragments = Object.entries(s.views).map(([vk, vs]) => renderView(vk, vs, s.versionBits, s.headerBits)).join("\n");
+  const viewFragments = Object.entries(s.views).map(([vk, vs]) => renderView(vk, vs, s.versionBits, s.headerBits, s.requestHour)).join("\n");
   const comparison = renderDurationComparison(s);
   const durationRadios = s.durations.map((d) =>
     `<label><input type="radio" name="duration" value="${d}"${d === s.defaultDuration ? " checked" : ""}> ${d}d</label>`).join("");
@@ -1082,7 +1173,18 @@ function renderHtml(s: ReportData): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Going Blue Encoding Benchmark — ${esc(s.timestamp)}</title>
 <style>
-  :root { color-scheme: light dark; }
+  /* Resolution rungs: one hue, coarse → fine (an ordinal ramp; both modes validated against their
+     own surface, so dark is its own steps rather than a flip of light). */
+  :root {
+    color-scheme: light dark;
+    --r1: #86b6ef;  /* 12h — coarsest */
+    --r2: #3987e5;  /* 6h  */
+    --r3: #1c5cab;  /* 3h  */
+    --r4: #0d366b;  /* 1h  — finest */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --r1: #184f95; --r2: #2a78d6; --r3: #6da7ec; --r4: #cde2fb; }
+  }
   body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 2rem; max-width: 900px; }
   h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
   h2 { font-size: 1rem; margin: 2rem 0 .6rem; }
@@ -1130,6 +1232,20 @@ function renderHtml(s: ReportData): string {
   .detail-score { margin: 1rem 0 1.25rem; }
   .mark { stroke: #e6a01e; stroke-width: 1; stroke-dasharray: 3 3; }
   .marklabel { fill: #e6a01e; font-size: 10px; font-variant-numeric: tabular-nums; }
+  .strips { max-width: 900px; margin: .4rem 0 1.25rem; }
+  .striprow { display: grid; grid-template-columns: 10.5rem 1fr; align-items: center; gap: .7rem;
+    padding: .15rem 0; border-bottom: 1px solid rgba(128,128,128,.14); }
+  .striprow:last-child { border-bottom: none; }
+  .striplabel { display: flex; flex-direction: column; font-size: .74rem; font-variant-numeric: tabular-nums; line-height: 1.35; }
+  .striplabel strong { font-size: .9rem; }
+  .strip { width: 100%; max-width: 720px; height: auto; margin: .1rem 0; }
+  .rung.r1 { fill: var(--r1); }
+  .rung.r2 { fill: var(--r2); }
+  .rung.r3 { fill: var(--r3); }
+  .rung.r4 { fill: var(--r4); }
+  .slot-past { fill: rgba(128,128,128,.12); }
+  .slot-empty { fill: none; stroke: rgba(128,128,128,.4); stroke-width: 1; stroke-dasharray: 3 3; }
+  .sliplabel { fill: #888; font-size: 10px; font-variant-numeric: tabular-nums; }
   .intro { max-width: 640px; margin: 1rem 0 1.75rem; }
   .intro p { margin: .5rem 0; }
   .note { color: #777; font-size: .82rem; max-width: 640px; margin: .2rem 0 .8rem; }
