@@ -893,12 +893,14 @@ function stripLayout(durationDays: number, seq: number, requestHour: number): St
 // One message, drawn: a rectangle of day slots, each divided into its periods and coloured by
 // resolution. The whole point is to make a fill percentage legible — [1h|3h|3h|3h] is what "75%"
 // actually buys you.
-function renderLayoutStrip(vs: ViewStats, seq: number, requestHour: number): string {
+// `scaleSlots` sets the day pitch: pass the widest duration in a stack and every row draws its days
+// at the same width, so a longer forecast is a longer strip rather than a squashed one.
+function renderLayoutStrip(vs: ViewStats, seq: number, requestHour: number, scaleSlots?: number): string {
   const slots = stripLayout(vs.durationDays, seq, requestHour);
   const { W, l, r, periodGap, dayGap } = STRIP;
   const H = 34, m = { t: 1, b: 1 };
   const barH = H - m.t - m.b;
-  const slotW = (W - l - r) / slots.length;
+  const slotW = (W - l - r) / (scaleSlots ?? slots.length);
   const dayW = slotW - dayGap; // the day's fills; the remainder is the gap to the next day
 
   const cells = slots.map((slot, d) => {
@@ -930,9 +932,9 @@ function renderLayoutStrip(vs: ViewStats, seq: number, requestHour: number): str
 }
 
 // The day axis, shared by every strip below it: one label per day slot, aligned to the same grid.
-function renderStripAxis(vs: ViewStats): string {
+function renderStripAxis(slots: number): string {
   const { W, l, r, dayGap } = STRIP;
-  const H = 16, slots = slotsFor(vs.durationDays);
+  const H = 16;
   const slotW = (W - l - r) / slots;
   const labels = Array.from({ length: slots }, (_, d) =>
     `<text x="${(l + d * slotW + (slotW - dayGap) / 2).toFixed(1)}" y="11" class="sliplabel" text-anchor="middle">${esc(dayName(d))}</text>`).join("");
@@ -956,7 +958,7 @@ function renderPercentileStrips(vs: ViewStats, requestHour: number): string {
   // The percentile stack is itself an axis: p1 is the hardest forecast in the corpus to encode and
   // p99 the easiest, so label the two ends rather than leaving the ordering implicit.
   return `${renderRungLegend()}
-  <div class="striphead"><div></div>${renderStripAxis(vs)}</div>
+  <div class="striphead indent"><div></div>${renderStripAxis(slotsFor(vs.durationDays))}</div>
   <div class="stripwrap">
     <div class="entropy-axis">
       <span>stormy</span>
@@ -1094,20 +1096,28 @@ function renderDurationComparison(s: ReportData): string {
   ];
   const head = s.durations.map((d) => `<th>${d}d</th>`).join("");
   const view = (d: number, combo: number) => s.views[`${d}:${combo}`];
-  // One score per forecast length: the fill each duration averages, over all variable combos.
+  // One row per forecast length: the median message it produces, drawn. Every row shares the day
+  // pitch of the longest duration, so a longer forecast reads as a longer strip — and the resolution
+  // it had to give up to get there is the colour shift down the stack.
+  const maxSlots = Math.max(...s.durations.map(slotsFor));
   const perDuration = s.durations.map((d) => {
-    const fill = mean(configurations.map(({ combo }) => fillBox(view(d, combo)).mean));
-    return `<div class="score"><div class="score-label">${d}d average</div>` +
-      `<div><strong class="score-value">${pctText(fill)}</strong> filled</div></div>`;
-  }).join("");
+    const vs = view(d, s.defaultCombo);
+    return `<div class="striprow">
+      <div class="striplabel"><strong>${d}d</strong> · ${pctText(vs.medianSeq / vs.maxSeq)} filled</div>
+      ${renderLayoutStrip(vs, vs.medianSeq, s.requestHour, maxSlots)}
+    </div>`;
+  }).join("\n");
   const rows = configurations.map(({ label, combo }) => `<tr><td class="name">${esc(label)}</td>` +
     s.durations.map((d) => {
       const vs = view(d, combo);
       return `<td><div class="pcell"><span class="pmean">${pctText(fillBox(vs).mean)}</span>` +
         `${renderFillMiniBox(vs)}</div></td>`;
     }).join("") + `</tr>`).join("\n");
-  return `<h2>Fill percentage by forecast length</h2>
-  <div class="score-grid">${perDuration}</div>
+  return `<h2>Median message by forecast duration</h2>
+  <p class="note">The chart shows the resolution of the median message at each forecast duration.</p>
+  ${renderRungLegend()}
+  <div class="striphead"><div></div>${renderStripAxis(maxSlots)}</div>
+  <div class="strips">${perDuration}</div>
   <h2>Fill percentage by forecast length and variables</h2>
   <table class="period-comparison">
     <tr><th>Variables</th>${head}</tr>
@@ -1144,18 +1154,10 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
 
   return `<section class="view" data-duration="${duration}" data-combo="${combo}" hidden>
   <div class="score-grid detail-score">` +
-    `<div class="score"><div class="score-label">Average fill sequence</div>` +
-    `<div><strong class="score-value">${vs.seq.mean.toFixed(1)}</strong> of ${vs.maxSeq}</div>` +
-    `<div class="score-sub">${pctText(fillBox(vs).mean)} filled (100% = all 1h)</div></div>` +
-    `<div class="score"><div class="score-label">Median message</div>` +
-    `<div><strong class="score-value">seq ${vs.medianSeq}</strong></div>` +
-    `<div class="score-sub">${esc(vs.medianLabel)}</div></div>` +
+    `<div class="score"><div class="score-label">Average fill</div>` +
+    `<div><strong class="score-value">${pctText(fillBox(vs).mean)}</strong> filled</div></div>` +
     `<div class="score"><div class="score-label">Full duration covered</div>` +
-    `<div><strong class="score-value">${(100 * (1 - vs.truncatedShare)).toFixed(1)}%</strong></div>` +
-    `<div class="score-sub">rest truncate below ${vs.durationDays}d</div></div>` +
-    `<div class="score"><div class="score-label">Average periods per message</div>` +
-    `<div><strong class="score-value">${vs.periods.mean.toFixed(1)}</strong> periods</div>` +
-    `<div class="score-sub">min ${vs.periods.min} · max ${vs.periods.max}</div></div></div>
+    `<div><strong class="score-value">${(100 * (1 - vs.truncatedShare)).toFixed(1)}%</strong></div></div></div>
   <h3>Fill resolution distribution</h3>
   <div class="strips">${renderPercentileStrips(vs, requestHour)}</div>
   ${renderHistogram(vs)}
@@ -1199,6 +1201,8 @@ function renderHtml(s: ReportData): string {
      own surface, so dark is its own steps rather than a flip of light). */
   :root {
     color-scheme: light dark;
+    /* Every chart spans this width, so they all share the same left and right edges. */
+    --chart-w: 900px;
     --r1: #86b6ef;  /* 12h — coarsest */
     --r2: #3987e5;  /* 6h  */
     --r3: #1c5cab;  /* 3h  */
@@ -1228,12 +1232,12 @@ function renderHtml(s: ReportData): string {
   td.name { font-weight: 500; }
   td.modes { color: #888; font-size: .8rem; }
   tr.total td { font-weight: 600; border-top: 2px solid rgba(128,128,128,.4); border-bottom: none; }
-  .hist { width: 100%; max-width: 720px; height: auto; margin: .5rem 0 .25rem; }
+  .hist { width: 100%; max-width: var(--chart-w); height: auto; margin: .5rem 0 .25rem; }
   .hbar { fill: #3b82f6; }
   .hgrid { stroke: rgba(128,128,128,.25); stroke-width: 1; }
   .htick { fill: #888; font-size: 11px; }
   .haxis { fill: #888; font-size: 11px; }
-  .box { width: 100%; max-width: 720px; height: auto; margin: 0 0 1rem; }
+  .box { width: 100%; max-width: var(--chart-w); height: auto; margin: 0 0 1rem; }
   .bwhisker { stroke: #888; stroke-width: 1.5; }
   .bbox { fill: rgba(59,130,246,.25); stroke: #3b82f6; stroke-width: 1.5; }
   .bmedian { stroke: #3b82f6; stroke-width: 2; }
@@ -1241,7 +1245,7 @@ function renderHtml(s: ReportData): string {
   .blabel { fill: #888; font-size: 10px; font-variant-numeric: tabular-nums; }
   .boxcell { width: 210px; }
   .mbox { display: block; width: 200px; height: 20px; }
-  table.period-comparison { max-width: 1000px; }
+  table.period-comparison { width: 100%; max-width: var(--chart-w); }
   table.period-comparison th:not(:first-child) { min-width: 240px; }
   .pcell { display: grid; grid-template-columns: 3.3rem 1fr; align-items: center; gap: .1rem; }
   .pbox { display: block; width: 210px; height: 44px; }
@@ -1254,11 +1258,11 @@ function renderHtml(s: ReportData): string {
   .detail-score { margin: 1rem 0 1.25rem; }
   .mark { stroke: #e6a01e; stroke-width: 1; stroke-dasharray: 3 3; }
   .marklabel { fill: #e6a01e; font-size: 10px; font-variant-numeric: tabular-nums; }
-  .strips { max-width: 900px; margin: .4rem 0 1.25rem; }
-  .striphead, .striprow { display: grid; grid-template-columns: 8.5rem 1fr; align-items: center; gap: .7rem; }
-  .striphead { padding-left: 2.2rem; } /* clears the entropy axis, so the day labels stay aligned */
+  .strips { max-width: var(--chart-w); margin: .4rem 0 1.25rem; }
+  .striphead, .striprow { display: grid; grid-template-columns: 8.5rem 1fr; align-items: center; gap: .7rem; max-width: var(--chart-w); }
+  .striphead.indent { padding-left: 2.2rem; } /* clears the entropy axis, so the day labels stay aligned */
   .striprow { padding: .18rem 0; }
-  .stripwrap { display: flex; align-items: stretch; gap: .6rem; }
+  .stripwrap { display: flex; align-items: stretch; gap: .6rem; max-width: var(--chart-w); }
   .stripstack { flex: 1; min-width: 0; }
   .entropy-axis { width: 1.6rem; display: flex; flex-direction: column; align-items: center;
     color: #888; font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; }
@@ -1271,7 +1275,7 @@ function renderHtml(s: ReportData): string {
   .entropy-line::after { bottom: -1px; border-top: 6px solid rgba(128,128,128,.55); }
   .striplabel { font-size: .78rem; font-variant-numeric: tabular-nums; white-space: nowrap; color: #888; }
   .striplabel strong { font-size: .9rem; color: inherit; }
-  .strip, .stripaxis { width: 100%; max-width: 720px; height: auto; display: block; }
+  .strip, .stripaxis { width: 100%; height: auto; display: block; }
   .legend { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; margin: .5rem 0 .4rem; font-size: .76rem; color: #888; }
   .legend-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; }
   .key { display: inline-flex; align-items: center; gap: .3rem; }
@@ -1285,7 +1289,7 @@ function renderHtml(s: ReportData): string {
   .slot-past { fill: rgba(128,128,128,.15); }
   .slot-empty { fill: none; stroke: rgba(128,128,128,.4); stroke-width: 1; stroke-dasharray: 3 3; }
   .sliplabel { fill: #888; font-size: 10px; font-variant-numeric: tabular-nums; }
-  .intro { max-width: 640px; margin: 1rem 0 1.75rem; }
+  .intro { max-width: var(--chart-w); margin: 1rem 0 1.75rem; }
   .intro p { margin: .5rem 0; }
   .note { color: #777; font-size: .82rem; max-width: 640px; margin: .2rem 0 .8rem; }
   .note code { background: rgba(128,128,128,.15); padding: .05rem .3rem; border-radius: 3px; }
@@ -1309,12 +1313,12 @@ function renderHtml(s: ReportData): string {
   data as possible into each message. It fills the entire time duration with the highest resolution it
   can, then partially fills the message with as much of the next higher resolution as possible. For
   example, a 10 day forecast might have the first 2 days at 3h resolution and the remaining 8 days at
-  6h resolution. How far the algorithm gets in this process is expressed through a
-  <strong>sequence number</strong>, where the highest possible value represents a forecast where the
-  full duration is at 1h resolution.</p>
+  6h resolution. How far the algorithm gets in this process is expressed through a sequence number,
+  where the highest possible value represents a forecast where the full duration is at 1h
+  resolution.</p>
 
-  <p>The units of this dashboard are <strong>fill percentage</strong>, which represents the sequence
-  number as a percentage of the maximum possible.</p>
+  <p>The units of this dashboard are fill percentage, which represents the sequence number as a
+  percentage of the maximum possible.</p>
 </div>
 
 ${comparison}
