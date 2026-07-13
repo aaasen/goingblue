@@ -38,7 +38,7 @@ describe("layoutFor — invariants over the full sequence", () => {
               const h = l.periodHours[i];
               const startLocal = l.periodStartUtcHour[i] + z;
               // Every period start is aligned to its own resolution within the local day
-              // (24h at 0:00, 12h at 0:00/12:00, …).
+              // (12h at 0:00/12:00, 6h at 0:00/6:00/12:00/18:00, …).
               expect((((startLocal % 24) + 24) % 24) % h).toBe(0);
               // No period crosses local midnight.
               expect(Math.floor(startLocal / 24)).toBe(Math.floor((startLocal + h - 1) / 24));
@@ -82,37 +82,40 @@ describe("layoutFor — sequence stages", () => {
   // Request at 13:00 local (the 13:03 example, aligned down to the hour).
   const reqUtc = BASE_DAY_UTC_HOUR + 13 - z;
 
-  it("seq < D is a truncated pure-24h forecast", () => {
+  it("seq < D is a truncated pure-12h forecast", () => {
     const l = layoutFor(D, reqUtc, z, 4);
     expect(l.truncated).toBe(true);
     expect(l.days).toBe(4);
-    expect(l.periodHours).toEqual([24, 24, 24, 24]);
-    // Day 0's single 24h period starts at local midnight, before the request time.
-    expect(l.periodStartUtcHour[0] + z).toBe(Math.floor((reqUtc + z) / 24) * 24);
+    expect(l.periodHours).toEqual(Array(7).fill(12));
+    // Day 0 starts with the 12h period containing the request time.
+    expect(l.periodStartUtcHour[0] + z).toBe(Math.floor((reqUtc + z) / 24) * 24 + 12);
   });
 
-  it("seq = D covers the full duration at 24h", () => {
+  it("seq = D covers the full duration at 12h", () => {
     const l = layoutFor(D, reqUtc, z, D);
     expect(l.truncated).toBe(false);
-    expect(l.periodHours).toEqual(Array(D).fill(24));
+    expect(l.periodHours).toEqual(Array(2 * D - 1).fill(12));
   });
 
-  it("seq = 13 refines the first three days to 12h (the 13:03 example)", () => {
+  it("seq = 13 refines the first three days to 6h (the 13:03 example)", () => {
     const l = layoutFor(D, reqUtc, z, 13);
-    expect(l.dayResolution).toEqual([1, 1, 1, 0, 0, 0, 0, 0, 0, 0]);
-    // At 13:00 local, day 0's 12h grid yields one period (12:00–24:00); days 1–2 two each;
-    // then seven daily periods.
-    expect(l.periodHours).toEqual([12, 12, 12, 12, 12, 24, 24, 24, 24, 24, 24, 24]);
+    expect(l.dayResolution).toEqual([2, 2, 2, 1, 1, 1, 1, 1, 1, 1]);
+    // At 13:00 local, day 0's 6h grid yields two periods; days 1–2 four each;
+    // then seven days at 12h.
+    expect(l.periodHours).toEqual([
+      6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+      12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    ]);
     expect(l.periodStartUtcHour[0] + z - Math.floor((reqUtc + z) / 24) * 24).toBe(12);
   });
 
-  it("stage boundaries meet: seq = 2D from below and above is all-12h", () => {
+  it("stage boundaries meet: seq = 2D from below and above is all-6h", () => {
     const l = layoutFor(D, reqUtc, z, 2 * D);
-    expect(l.dayResolution).toEqual(Array(D).fill(1));
+    expect(l.dayResolution).toEqual(Array(D).fill(2));
   });
 
-  it("seq = 5D is the whole window at 1h, starting at the request hour", () => {
-    const l = layoutFor(D, reqUtc, z, 5 * D);
+  it("seq = 4D is the whole window at 1h, starting at the request hour", () => {
+    const l = layoutFor(D, reqUtc, z, 4 * D);
     expect(l.dayResolution).toEqual(Array(D).fill(4));
     expect(l.periodHours.every((h) => h === 1)).toBe(true);
     expect(l.periodStartUtcHour[0]).toBe(reqUtc);
@@ -120,16 +123,16 @@ describe("layoutFor — sequence stages", () => {
     expect(l.periodHours).toHaveLength(11 + 9 * 24);
   });
 
-  it("a midnight request has no partial day: period count equals seq through the 24h stage", () => {
+  it("a midnight request has no partial day: truncated layouts have two periods per day", () => {
     const midnightUtc = BASE_DAY_UTC_HOUR - z; // 0:00 local
     for (let seq = 1; seq <= D; seq++) {
-      expect(layoutFor(D, midnightUtc, z, seq).periodHours).toHaveLength(seq);
+      expect(layoutFor(D, midnightUtc, z, seq).periodHours).toHaveLength(2 * seq);
     }
   });
 
   it("rejects out-of-range inputs", () => {
     expect(() => layoutFor(D, reqUtc, z, 0)).toThrow();
-    expect(() => layoutFor(D, reqUtc, z, 5 * D + 1)).toThrow();
+    expect(() => layoutFor(D, reqUtc, z, 4 * D + 1)).toThrow();
     expect(() => layoutFor(0, reqUtc, z, 1)).toThrow();
     expect(() => layoutFor(D, reqUtc, 15, 1)).toThrow();
     expect(() => layoutFor(D, reqUtc, -13, 1)).toThrow();

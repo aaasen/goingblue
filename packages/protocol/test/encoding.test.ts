@@ -61,16 +61,18 @@ function popcount(n: number): number {
 // message must be a canonical layout. Two shapes cover every column test, both anchored so the
 // request time equals the FIRST period's start (which lets ctxOf rebuild the request from the
 // message's own month/day/hour):
-//   daily:  n periods of 24h = an n-day duration at seq n, requested at local midnight.
-//   hourly: n periods of 1h  = D = ceil(n/24) days at seq 5D, requested at hour 24D − n, so
+//   12-hour: n periods = D = ceil(n/2) days at seq D, requested at hour 24D − 12n, so
+//            day 0's partial tail plus the D−1 full days is exactly n periods.
+//   hourly:  n periods = D = ceil(n/24) days at seq 4D, requested at hour 24D − n, so
 //           day 0's partial tail plus the D−1 full days is exactly n periods.
 // The context's UTC offset is 0 throughout, so local time == UTC.
 function uniformLayout(n: number, hourly: boolean): { durationDays: number; seq: number; hourOfDay: number; stepHours: number } {
   if (hourly) {
     const durationDays = Math.ceil(n / 24);
-    return { durationDays, seq: 5 * durationDays, hourOfDay: 24 * durationDays - n, stepHours: 1 };
+    return { durationDays, seq: 4 * durationDays, hourOfDay: 24 * durationDays - n, stepHours: 1 };
   }
-  return { durationDays: n, seq: n, hourOfDay: 0, stepHours: 24 };
+  const durationDays = Math.ceil(n / 2);
+  return { durationDays, seq: durationDays, hourOfDay: 24 * durationDays - 12 * n, stepHours: 12 };
 }
 
 function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean } = {}): ForecastMessage {
@@ -119,19 +121,19 @@ function roundTrip(m: ForecastMessage): ForecastMessage {
 
 describe("v1 round-trip encoding", () => {
   it("preserves header fields", () => {
-    // 3 daily periods → a 3-day duration at seq 3; single model
+    // Three 12h periods → a 2-day duration at seq 2; single model
     const original = msg({ models_mask: 0b001, month: 1, day: 31 });
     const decoded = roundTrip(original);
     expect(decoded.version).toBe(V1_VERSION);
-    expect(decoded.days).toBe(3);
-    expect(decoded.seq).toBe(3);
-    expect(decoded.durationDays).toBe(3);
-    expect(decoded.periodHours).toEqual([24, 24, 24]);
+    expect(decoded.days).toBe(2);
+    expect(decoded.seq).toBe(2);
+    expect(decoded.durationDays).toBe(2);
+    expect(decoded.periodHours).toEqual([12, 12, 12]);
     expect(decoded.models_mask).toBe(0b001);
     expect(decoded.vars_mask).toBe(ALL_VARS);
     expect(decoded.month).toBe(1);
     expect(decoded.day).toBe(31);
-    expect(decoded.hour).toBe(0);
+    expect(decoded.hour).toBe(12);
   });
 
   it("preserves lat/lon within 1km", () => {
@@ -235,11 +237,11 @@ describe("v1 round-trip encoding", () => {
   });
 
   it("handles every resolution stage of the fill sequence", () => {
-    // A 2-day duration requested at midnight (msg() anchors daily layouts there): each stage
+    // A 2-day duration requested at midnight: each stage
     // boundary seq = (stage + 1) × D is the whole window at one resolution.
     const D = 2;
-    const stageHours = [24, 12, 6, 3, 1];
-    for (let stage = 0; stage <= 4; stage++) {
+    const stageHours = [12, 6, 3, 1];
+    for (let stage = 0; stage < stageHours.length; stage++) {
       const seq = (stage + 1) * D;
       const n = D * (24 / stageHours[stage]);
       const decoded = roundTrip(msg({
@@ -269,7 +271,7 @@ describe("v1 round-trip encoding", () => {
       expect(decoded.models_mask).toBe(1 << idx);
       expect(decoded.periods).toHaveLength(1);
       expect(decoded.periods[0]).toHaveLength(5);
-      expect(decoded.days).toBe(5);
+      expect(decoded.days).toBe(3);
     }
   });
 

@@ -233,8 +233,8 @@ const LOCATIONS: Location[] = [
 
 // ── Report config ────────────────────────────────────────────────────────────────
 
-// daily/12h are omitted: at those resolutions a forecast almost always fits every period, so they're
-// not size-constrained and add compute without insight. (Values are the v1 protocol resolution index.)
+// 12h is omitted: at that resolution a forecast almost always fits every period, so it is not
+// size-constrained and adds compute without insight. (Values are the v1 protocol resolution index.)
 const RESOLUTION_IDX: Record<string, number> = { "6h": 2, "3h": 3, "1h": 4 };
 const RESOLUTION_ORDER = ["1h", "3h", "6h"]; // selector order (fine → coarse)
 

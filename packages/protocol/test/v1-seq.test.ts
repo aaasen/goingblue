@@ -48,17 +48,18 @@ describe("v1 seq header", () => {
     expect(v1Codec.encode(msgFor(1, 1)).length).toBeGreaterThanOrEqual(V1_HEADER_CHARS);
   });
 
-  it("round-trips the smallest layout (seq 1: a single 24h period)", () => {
+  it("round-trips the smallest layout (seq 1: two 12h periods)", () => {
     const decoded = dec(msgFor(3, 1));
     expect(decoded.seq).toBe(1);
-    expect(decoded.periods[0]).toHaveLength(1);
-    expect(decoded.periodHours).toEqual([24]);
+    expect(decoded.periods[0]).toHaveLength(2);
+    expect(decoded.periodHours).toEqual([12, 12]);
   });
 
   it("round-trips the largest encodable seq (256, the 8-bit field's ceiling)", () => {
-    // A 52-day duration reaches seq 256 (5 × 52 = 260 ≥ 256) — far beyond what the server
+    // A 64-day duration reaches seq 256 (4 × 64 = 256) — far beyond what the server
     // offers, but the header field must round-trip its full range.
-    const m = msgFor(52, 256);
+    expect(maxFillSeq(64)).toBe(256);
+    const m = msgFor(64, 256);
     const decoded = dec(m);
     expect(decoded.seq).toBe(256);
     expect(decoded.periods[0]).toHaveLength(m.periods[0].length);

@@ -1,5 +1,5 @@
 {
-  "description": "3-day duration-first fill (seq 5: 12h/12h/daily), all variables, Denali 14k camp",
+  "description": "3-day duration-first fill (seq 4: 6h/12h/12h), all variables, Denali 14k camp",
   "request": {
     "month": 6,
     "day": 15,
@@ -7,7 +7,7 @@
     "durationDays": 3,
     "utcOffsetHours": -9
   },
-  "encoded": "\"!!'N&6'x%bbMW;UtF..RRT,X.cOeQO4):x)(Rkui:'A==+Kuv;-JMxe1Ig*",
+  "encoded": "\"!!&#sPYWxWOBF(N#$=*6S1z%-mKmt+GB<Vz7,Jerw_OG;pp00D<Il3pMcWw=s<a\"Y6;3(*Yd<mo-!M2",
   "decoded": {
     "version": 1,
     "code": 0,
@@ -105,16 +105,60 @@
           "wind_600_dir": 4,
           "wind_700_kph": 16.09344,
           "wind_700_dir": 3
+        },
+        {
+          "weathercode": 3,
+          "temp_c": -7,
+          "temp_min_c": -14,
+          "freeze_m": 2743.2000000000003,
+          "cloud_high": 57,
+          "cloud_mid": 29,
+          "cloud_low": 14,
+          "precip": 29,
+          "snow_cm": 0,
+          "rain_mm": 1.3061224489795917,
+          "cloud_total": 71,
+          "wind_sfc_kph": 16.09344,
+          "wind_sfc_dir": 3,
+          "wind_500_kph": 40.2336,
+          "wind_500_dir": 2,
+          "wind_600_kph": 32.18688,
+          "wind_600_dir": 2,
+          "wind_700_kph": 24.14016,
+          "wind_700_dir": 1
+        },
+        {
+          "weathercode": 61,
+          "temp_c": -5,
+          "temp_min_c": -11,
+          "freeze_m": 2438.4,
+          "cloud_high": 86,
+          "cloud_mid": 71,
+          "cloud_low": 43,
+          "precip": 71,
+          "snow_cm": 0.8062484252960442,
+          "rain_mm": 2.3219954648526073,
+          "cloud_total": 100,
+          "wind_sfc_kph": 24.14016,
+          "wind_sfc_dir": 2,
+          "wind_500_kph": 48.28032,
+          "wind_500_dir": 1,
+          "wind_600_kph": 40.2336,
+          "wind_600_dir": 1,
+          "wind_700_kph": 32.18688,
+          "wind_700_dir": 0
         }
       ]
     ],
-    "seq": 5,
+    "seq": 4,
     "durationDays": 3,
     "periodHours": [
+      6,
+      6,
       12,
       12,
       12,
-      24
+      12
     ]
   }
 }

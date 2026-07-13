@@ -20,11 +20,11 @@ function latLonLabel(msg: ForecastMessage): string {
 }
 
 function hoursLabel(h: number): string {
-  return h >= 24 ? 'daily' : `${h}h`;
+  return `${h}h`;
 }
 
 /**
- * The resolution(s) a message carries: uniform ("daily", "3h") or, for a mixed
+ * The resolution(s) a message carries: uniform ("12h", "3h") or, for a mixed
  * layout, the finest–coarsest range ("1h–12h").
  */
 function resolutionLabel(msg: ForecastMessage): string {
@@ -34,7 +34,7 @@ function resolutionLabel(msg: ForecastMessage): string {
   return `${hoursLabel(finest)}–${hoursLabel(coarsest)}`;
 }
 
-/** Span label: days covered plus the resolution(s), e.g. "7d daily" or "10d 6h–daily". */
+/** Span label: days covered plus the resolution(s), e.g. "7d 12h" or "10d 6h–12h". */
 function spanLabel(msg: ForecastMessage): string {
   return `${msg.days}d ${resolutionLabel(msg)}`;
 }

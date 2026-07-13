@@ -103,7 +103,7 @@ describe("encodeFillSeq", () => {
 
   it("encoded size grows along the sequence (sampled at stage boundaries)", () => {
     const enc = encodeSeq(params());
-    const sizes = [1, DURATION_DAYS, 2 * DURATION_DAYS, 3 * DURATION_DAYS, 4 * DURATION_DAYS, 5 * DURATION_DAYS]
+    const sizes = [1, DURATION_DAYS, 2 * DURATION_DAYS, 3 * DURATION_DAYS, 4 * DURATION_DAYS]
       .map((s) => enc(s)!.length);
     for (let i = 1; i < sizes.length; i++) {
       expect(sizes[i]).toBeGreaterThan(sizes[i - 1]);
@@ -118,20 +118,20 @@ describe("encodeFillSeq", () => {
     expect(encoded).toBeNull();
   });
 
-  it("aggregates day 0's daily period over the full local day, including hours before the request", () => {
+  it("aggregates day 0's 12h period from local noon, including the hour before the request", () => {
     const enc = encodeSeq(params());
     const decoded = decodeMessage(enc(DURATION_DAYS)!, () => ctx);
-    // Day 0 spans local 0:00–24:00; the synthetic temp peaks mid-cycle, so the daily max must
-    // exceed the request-hour sample — i.e. the morning was aggregated in.
+    // Day 0's first period spans local 12:00–24:00; the synthetic temp maximum in that window
+    // must include the complete period, including the hour before the 13:00 request.
     const day0Local = Math.floor((REQ_UTC_HOUR + UTC_OFFSET) / 24) * 24;
     const dayTemps = HOURLY.temperature_2m.slice(
-      day0Local - UTC_OFFSET - DATA_START, day0Local - UTC_OFFSET - DATA_START + 24) as number[];
+      day0Local + 12 - UTC_OFFSET - DATA_START, day0Local - UTC_OFFSET - DATA_START + 24) as number[];
     expect(decoded.periods[0][0].temp_c).toBe(Math.round(Math.max(...dayTemps)));
   });
 });
 
 describe("fitFillToBudget", () => {
-  it("fills a 160-char budget past the all-24h layout and stays within it", () => {
+  it("fills a 160-char budget past the all-12h layout and stays within it", () => {
     const encoded = fitFillToBudget(encodeSeq(params()), maxFillSeq(DURATION_DAYS), 160)!;
     expect(encoded.length).toBeLessThanOrEqual(160);
     const decoded = decodeMessage(encoded, () => ctx);
@@ -155,12 +155,12 @@ describe("fitFillToBudget", () => {
     expect(decodeMessage(encoded, () => ctx).seq).toBe(maxFillSeq(DURATION_DAYS));
   });
 
-  it("truncates to fewer 24h days when even the full duration doesn't fit", () => {
+  it("truncates to fewer 12h days when even the full duration doesn't fit", () => {
     const encoded = fitFillToBudget(encodeSeq(params()), maxFillSeq(DURATION_DAYS), 40)!;
     const decoded = decodeMessage(encoded, () => ctx);
     expect(decoded.seq!).toBeLessThan(DURATION_DAYS);
     expect(decoded.days).toBe(decoded.seq);
-    expect(decoded.periodHours!.every((ph) => ph === 24)).toBe(true);
+    expect(decoded.periodHours!.every((ph) => ph === 12)).toBe(true);
   });
 
   it("returns the seq=1 layout even when it exceeds the budget", () => {

@@ -87,8 +87,8 @@ function roundTrip(seq: number): { original: ForecastMessage; decoded: ForecastM
 
 describe("mixed-layout round-trip encoding", () => {
   it("recovers the layout from seq alone — header, periodHours, and count", () => {
-    // A mixed layout: seq = 2D + 3 → days 0-2 at 6h, the rest at 12h.
-    const seq = 2 * DURATION_DAYS + 3;
+    // A mixed layout: seq = D + 3 → days 0-2 at 6h, the rest at 12h.
+    const seq = DURATION_DAYS + 3;
     const { original, decoded } = roundTrip(seq);
     expect(decoded.version).toBe(V1_VERSION);
     expect(decoded.code).toBe(42);
@@ -104,15 +104,15 @@ describe("mixed-layout round-trip encoding", () => {
 
   it("month/day/hour describe the first period's start, not the request time", () => {
     // All-1h layout: the first period is the request hour itself (13:00 local = 22:00 UTC).
-    const all1h = roundTrip(5 * DURATION_DAYS).decoded;
+    const all1h = roundTrip(4 * DURATION_DAYS).decoded;
     expect([all1h.month, all1h.day, all1h.hour]).toEqual([7, 12, 22]);
-    // All-24h layout: day 0's period starts at local midnight (09:00 UTC).
-    const all24h = roundTrip(DURATION_DAYS).decoded;
-    expect([all24h.month, all24h.day, all24h.hour]).toEqual([7, 12, 9]);
+    // All-12h layout: day 0's period starts at local noon (21:00 UTC).
+    const all12h = roundTrip(DURATION_DAYS).decoded;
+    expect([all12h.month, all12h.day, all12h.hour]).toEqual([7, 12, 21]);
   });
 
   it("round-trips period values across a mixed layout", () => {
-    const { original, decoded } = roundTrip(3 * DURATION_DAYS + 2);
+    const { original, decoded } = roundTrip(2 * DURATION_DAYS + 2);
     original.periods[0].forEach((p, i) => {
       const d = decoded.periods[0][i];
       expect(d.weathercode).toBe(p.weathercode);
@@ -137,7 +137,7 @@ describe("mixed-layout round-trip encoding", () => {
   it("truncated layouts decode with days < durationDays", () => {
     const { decoded } = roundTrip(4);
     expect(decoded.days).toBe(4);
-    expect(decoded.periodHours).toEqual([24, 24, 24, 24]);
+    expect(decoded.periodHours).toEqual(Array(7).fill(12));
   });
 
   it("dispatches through the version registry", () => {

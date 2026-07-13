@@ -518,8 +518,8 @@ export function encodeFillSeq(
 
 // Duration-first fill: one upstream fetch covers every candidate layout, then a binary search
 // finds the largest fill-sequence number whose encoding fits the budget (encoded size grows
-// along the sequence — see layout.ts). Always returns at least the seq=1 layout (a single 24h
-// period), even if it exceeds the budget.
+// along the sequence — see layout.ts). Always returns at least the seq=1 layout (one day at 12h),
+// even if it exceeds the budget.
 export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<string> {
   const { lat, lon, elev_m } = resolveLocation(params);
   const modelKey = firstModelKey(params.modelsMask);

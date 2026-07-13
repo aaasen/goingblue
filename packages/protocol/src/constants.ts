@@ -15,7 +15,7 @@ export const ALPHABET =
   "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
 
 // The refinement ladder: resolution index (0..4, coarse → fine) → hours per period.
-// Indices are the fill sequence's stages — see layout.ts.
+// Fill layouts use indices 1..4; index 0 is retained for resolution-keyed codebooks — see layout.ts.
 export const RESOLUTION_HOURS: Record<number, number> = { 0: 24, 1: 12, 2: 6, 3: 3, 4: 1 };
 
 export const MODEL_BIT: Record<string, number> = { HRES: 0, GFS: 1, ICON: 2, IFS: 3 };
