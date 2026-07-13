@@ -62,6 +62,10 @@ const GROUP_IDS: GroupId[] = ["clouds", "highwind", "freeze"];
 const GROUP_LABEL: Record<GroupId, string> = {
   clouds: "Clouds", highwind: "High Altitude Winds", freeze: "Freezing Level",
 };
+// Short forms for the frontier chart, where each curve is labelled on the plot itself.
+const GROUP_SHORT: Record<GroupId, string> = {
+  clouds: "Cloud", highwind: "Wind", freeze: "FL",
+};
 
 // Collected models and which optional groups each supports. We collect GFS only: encoded size barely
 // differs between models, and GFS supplies every group (clouds + high-alt winds + freezing level). The
@@ -770,7 +774,7 @@ async function report(args: Args): Promise<void> {
     uncovered,
     versionBits, headerBits,
     model: model.label,
-    groups: GROUP_IDS.map((g) => ({ id: g, label: GROUP_LABEL[g] })),
+    groups: GROUP_IDS.map((g) => ({ id: g, label: GROUP_LABEL[g], short: GROUP_SHORT[g] })),
     defaultCombo: DEFAULT_COMBO,
     views,
   };
@@ -841,7 +845,7 @@ interface ReportData {
   versionBits: number;
   headerBits: number;
   model: string; // single model (label), shown in the meta line
-  groups: { id: GroupId; label: string }[];
+  groups: { id: GroupId; label: string; short: string }[];
   defaultCombo: number;
   views: Record<string, ViewStats>;                        // "duration:combo" → stats
 }
@@ -1091,6 +1095,122 @@ function renderFillBar(fill: number): string {
   `</svg>`;
 }
 
+// Monotone cubic interpolation (Fritsch–Carlson): a smooth path that cannot overshoot the data, so a
+// curve of shares can never bulge above 100% or below 0 between samples.
+function smoothPath(pts: { x: number; y: number }[]): string {
+  const n = pts.length;
+  if (n < 2) return "";
+  const dx = [], slope = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx.push(pts[i + 1].x - pts[i].x);
+    slope.push((pts[i + 1].y - pts[i].y) / (pts[i + 1].x - pts[i].x));
+  }
+  const m = [slope[0]];
+  for (let i = 1; i < n - 1; i++) {
+    m.push(slope[i - 1] * slope[i] <= 0 ? 0 : (slope[i - 1] + slope[i]) / 2);
+  }
+  m.push(slope[n - 2]);
+  for (let i = 0; i < n - 1; i++) {
+    if (slope[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+    const a = m[i] / slope[i], b = m[i + 1] / slope[i];
+    const h = Math.hypot(a, b);
+    if (h > 3) { m[i] = (3 / h) * a * slope[i]; m[i + 1] = (3 / h) * b * slope[i]; }
+  }
+  let d = `M ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const c1x = pts[i].x + dx[i] / 3, c1y = pts[i].y + (m[i] * dx[i]) / 3;
+    const c2x = pts[i + 1].x - dx[i] / 3, c2y = pts[i + 1].y - (m[i + 1] * dx[i]) / 3;
+    d += ` C ${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${pts[i + 1].x.toFixed(1)},${pts[i + 1].y.toFixed(1)}`;
+  }
+  return d;
+}
+
+// The frontier: for each duration, a solid curve for the base variables and a faint dashed curve per
+// optional variable group, added one at a time (never in combination — that would be 32 lines). This
+// is the regression chart: an encoding improvement pushes every curve right (more resolution for the
+// same 160 characters), and because these are whole distributions you see *where* it lands rather
+// than just a mean. x is fill percentage, which is what makes durations with different sequence
+// lengths comparable on one axis.
+function renderFrontier(s: ReportData): string {
+  const W = 720, H = 300, m = { t: 28, r: 46, b: 42, l: 64 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const x = (fill: number) => m.l + fill * iw;
+  const y = (share: number) => m.t + ih * (1 - share);
+
+  // Share of forecasts reaching at least each fill level, as plot coordinates. `views` is summed, so
+  // one curve can pool several variable selections (each contributes the same forecasts).
+  const reachPoints = (views: ViewStats[]) => {
+    const maxSeq = views[0].maxSeq;
+    const counts = new Array<number>(maxSeq + 1).fill(0);
+    let total = 0;
+    for (const vs of views) {
+      for (const h of vs.histogram) { counts[h.seq] += h.count; total += h.count; }
+    }
+    const pts = [{ x: x(0), y: y(1) }];
+    let reached = total;
+    for (let seq = 1; seq <= maxSeq; seq++) {
+      pts.push({ x: x(seq / maxSeq), y: y(total ? reached / total : 0) });
+      reached -= counts[seq];
+    }
+    return pts;
+  };
+
+  // Direct labels on the plot: the duration on each solid curve, the variable selection on each
+  // component curve. The palette's contrast/CVD warnings make this mandatory, not decorative —
+  // identity never rests on colour alone. Labels sit at different shares so they don't collide.
+  const draw = (
+    views: ViewStats[], cls: string, label: string, share: number,
+  ) => {
+    const pts = reachPoints(views);
+    const at = pts.find((p) => p.y >= y(share)) ?? pts[pts.length - 1];
+    return `<path d="${smoothPath(pts)}" class="frontier ${cls}"/>` +
+      `<text x="${(at.x + 5).toFixed(1)}" y="${(at.y - 5).toFixed(1)}" class="flabel ${cls}">${esc(label)}</text>`;
+  };
+
+  // One group per duration. The solid line pools exactly the selections drawn beneath it — the base
+  // variables plus each optional group on its own — so it reads as the average of its components and
+  // still moves when any single variable's encoding changes. (Pooling all 2^n *combinations* would
+  // weight the heavy ones and pull the solid line away from the curves it sits among.) Components
+  // stay hidden until the duration is hovered, so the chart is four lines at rest. The fat
+  // transparent path over the solid curve is the hit target — a 2px line is too thin to hover.
+  const groups = s.durations.map((d, i) => {
+    const slot = i + 1;
+    const components = [
+      { combo: s.defaultCombo, label: "Base", share: 0.8 },
+      ...s.groups.map((g, gi) => ({
+        combo: 1 << gi, label: g.short, share: [0.65, 0.5, 0.35][gi] ?? 0.5,
+      })),
+    ].map((c, ci) => ({ ...c, dash: ci + 1, vs: s.views[`${d}:${c.combo}`] }))
+      .filter((c) => c.vs);
+    if (components.length === 0) return "";
+
+    const componentSvg = components.map((c) =>
+      draw([c.vs], `c${slot} variant dash${c.dash}`, c.label, c.share)).join("");
+    const meanPts = reachPoints(components.map((c) => c.vs));
+    return `<g class="dseries">${componentSvg}` +
+      `${draw(components.map((c) => c.vs), `c${slot}`, `${d}d`, 0.5)}` +
+      `<path d="${smoothPath(meanPts)}" class="fhit"/></g>`;
+  }).join("");
+
+  const yAxis = [0, 0.25, 0.5, 0.75, 1].map((v) =>
+    `<line x1="${m.l}" y1="${y(v).toFixed(1)}" x2="${W - m.r}" y2="${y(v).toFixed(1)}" class="hgrid"/>` +
+    `<text x="${m.l - 8}" y="${(y(v) + 3.5).toFixed(1)}" class="htick" text-anchor="end">${(100 * v).toFixed(0)}%</text>`).join("");
+
+  const xAxis = Array.from({ length: FILL_STAGES }, (_, k) => {
+    const fill = (k + 1) / FILL_STAGES;
+    const anchor = k + 1 === FILL_STAGES ? "end" : "middle";
+    return `<line x1="${x(fill).toFixed(1)}" y1="${m.t}" x2="${x(fill).toFixed(1)}" y2="${y(0).toFixed(1)}" class="mark"/>` +
+      `<text x="${x(fill).toFixed(1)}" y="${m.t - 10}" class="marklabel" text-anchor="${anchor}">${esc(RUNG[k + 1])}</text>` +
+      `<text x="${x(fill).toFixed(1)}" y="${H - m.b + 16}" class="htick" text-anchor="${anchor}">${pctText(fill)}</text>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${W} ${H}" class="hist frontier-chart" role="img" aria-label="Share of forecasts reaching each fill level, by forecast duration">
+  ${yAxis}${xAxis}${groups}
+  <text x="${m.l + iw / 2}" y="${H - 4}" class="haxis" text-anchor="middle">FILL PERCENTAGE</text>
+  <text x="12" y="${m.t + ih / 2}" class="haxis" text-anchor="middle" transform="rotate(-90 12 ${m.t + ih / 2})">PERCENT OF FORECASTS</text>
+</svg>`;
+}
+
 function renderDurationComparison(s: ReportData): string {
   const configurations = [
     { label: "Base", combo: 0 },
@@ -1123,7 +1243,15 @@ function renderDurationComparison(s: ReportData): string {
   <table class="period-comparison">
     <tr><th>Variables</th>${head}</tr>
     ${rows}
-  </table>`;
+  </table>
+  <h2>Fill frontier</h2>
+  <p class="note">Percent of forecasts reaching each fill resolution, averaged over the base
+  variables and each optional variable added on its own — so the line moves when any variable's
+  encoding changes. An encoding improvement moves the curves to the right. Hover a duration to break
+  it into those component curves.</p>
+  <div class="legend"><span class="legend-label">duration</span>${s.durations.map((d, i) =>
+    `<span class="key"><i class="sw c${i + 1}"></i>${d}d</span>`).join("")}</div>
+  ${renderFrontier(s)}`;
 }
 
 // One toggleable view = a duration × variable-combo: fill summary, the percentile strips, the seq
@@ -1191,8 +1319,12 @@ function renderHtml(s: ReportData): string {
     --r3: #1c5cab;  /* 3h  */
     --r4: #0d366b;  /* 1h  — finest */
   }
+  /* Duration series on the frontier chart: categorical, fixed slot order (the ordering is the
+     CVD-safety mechanism, not cosmetic). Dark mode gets its own steps for the dark surface. */
+  :root { --c1: #2a78d6; --c2: #1baf7a; --c3: #eda100; --c4: #008300; }
   @media (prefers-color-scheme: dark) {
     :root { --r1: #184f95; --r2: #2a78d6; --r3: #6da7ec; --r4: #cde2fb; }
+    :root { --c1: #3987e5; --c2: #199e70; --c3: #c98500; --c4: #008300; }
   }
   /* One centred column; content inside it stays left-aligned and spans the full column width. */
   body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0 auto; padding: 2rem; max-width: var(--chart-w); }
@@ -1218,6 +1350,33 @@ function renderHtml(s: ReportData): string {
   tr.total td { font-weight: 600; border-top: 2px solid rgba(128,128,128,.4); border-bottom: none; }
   .hist { width: 100%; max-width: var(--chart-w); height: auto; margin: .5rem 0 .25rem; }
   .area { stroke: none; }
+  .frontier { fill: none; stroke-width: 2; }
+  .frontier.c1 { stroke: var(--c1); } .frontier.c2 { stroke: var(--c2); }
+  .frontier.c3 { stroke: var(--c3); } .frontier.c4 { stroke: var(--c4); }
+  .frontier.variant { stroke-width: 1.5; stroke-opacity: .5; }
+  .flabel.variant { font-size: 10px; font-weight: 500; }
+  /* One dash pattern per variable selection, so the components are told apart by shape as well as
+     by their label — colour is already spent on the duration. */
+  .frontier.dash1 { stroke-dasharray: 9 3; }
+  .frontier.dash2 { stroke-dasharray: 5 3; }
+  .frontier.dash3 { stroke-dasharray: 2 2; }
+  .frontier.dash4 { stroke-dasharray: 1 3; }
+  /* A duration's component curves stay hidden until that duration is hovered: four lines at rest,
+     one duration's detail at a time. The .fhit path is a fat invisible line over the solid curve —
+     a 2px stroke is far too thin to hover; the hidden components must not steal the pointer. */
+  .fhit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; }
+  .dseries .variant { opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+  .dseries:hover .variant { opacity: 1; }
+  /* Hovering one duration recedes the others — line and name together. Only the solid series is
+     touched: :not(.variant) keeps this from out-specifying the rule that hides components, which
+     would otherwise reveal every duration's component labels at once. */
+  .frontier-chart:hover .dseries:not(:hover) .frontier:not(.variant) { stroke-opacity: .2; }
+  .frontier-chart:hover .dseries:not(:hover) .flabel:not(.variant) { fill: #999; opacity: .5; }
+  .flabel { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .flabel.c1 { fill: var(--c1); } .flabel.c2 { fill: var(--c2); }
+  .flabel.c3 { fill: var(--c3); } .flabel.c4 { fill: var(--c4); }
+  .sw.c1 { background: var(--c1); } .sw.c2 { background: var(--c2); }
+  .sw.c3 { background: var(--c3); } .sw.c4 { background: var(--c4); }
   .bwhisker { stroke: #888; stroke-width: 1.5; }
   .bbox { fill: rgba(59,130,246,.25); stroke: #3b82f6; stroke-width: 1.5; }
   .bmedian { stroke: #3b82f6; stroke-width: 2; }
