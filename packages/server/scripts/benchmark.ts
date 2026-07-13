@@ -640,7 +640,6 @@ function buildView(
       name,
       bits: mean(bitsArr),
       bitsPerPeriod: mean(bpp),
-      bppStats: box(bpp),
       modes: [...cm.get(name)!.entries()].sort((a, b) => b[1] - a[1]).map(([m, c]) => [m, c / bitsArr.length] as [string, number]),
     };
   });
@@ -809,7 +808,7 @@ function openInBrowser(path: string): void {
 // ── HTML report ──────────────────────────────────────────────────────────────────
 
 interface BoxStats { min: number; p25: number; p50: number; mean: number; p75: number; max: number }
-interface ColStat { name: string; bits: number; bitsPerPeriod: number; bppStats: BoxStats; modes: [string, number][] }
+interface ColStat { name: string; bits: number; bitsPerPeriod: number; modes: [string, number][] }
 // A full-fill landmark: seq = k × S is the whole window at rung `label`, reached by `share` of messages.
 interface StageStat { seq: number; label: string; share: number }
 interface ViewStats {
@@ -1019,73 +1018,30 @@ function renderHistogram(vs: ViewStats): string {
 </svg>`;
 }
 
-// Box-and-whisker of the fitted seq: min–max whiskers, Q1–Q3 box, median line, mean dot, with value
-// labels (median above the box; min/Q1/Q3/max below). Shares the histogram's seq x-scale and marks.
-function renderBoxPlot(vs: ViewStats): string {
-  const W = SEQ_CHART.W, H = 92, m = { t: 22, r: SEQ_CHART.r, b: 18, l: SEQ_CHART.l };
-  const p = vs.seq;
-  const x = (v: number) => seqX(v, vs.maxSeq);
-  const cy = m.t + (H - m.t - m.b) / 2;
-  const half = 13, cap = 8, belowY = cy + cap + 15;
-  const label = (v: number, xv: number, yv: number) => `<text x="${xv.toFixed(1)}" y="${yv}" class="blabel" text-anchor="middle">${v}</text>`;
-  return `<svg viewBox="0 0 ${W} ${H}" class="box" role="img" aria-label="Box plot of the fill sequence number per message">
-  ${renderMarks(vs, m.t - 4, H - m.b, null)}
-  <line x1="${x(p.min).toFixed(1)}" y1="${cy}" x2="${x(p.max).toFixed(1)}" y2="${cy}" class="bwhisker"/>
-  <line x1="${x(p.min).toFixed(1)}" y1="${cy - cap}" x2="${x(p.min).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>
-  <line x1="${x(p.max).toFixed(1)}" y1="${cy - cap}" x2="${x(p.max).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>
-  <rect x="${x(p.p25).toFixed(1)}" y="${cy - half}" width="${Math.max(1, x(p.p75) - x(p.p25)).toFixed(1)}" height="${2 * half}" class="bbox"/>
-  <line x1="${x(p.p50).toFixed(1)}" y1="${cy - half}" x2="${x(p.p50).toFixed(1)}" y2="${cy + half}" class="bmedian"/>
-  <circle cx="${x(p.mean).toFixed(1)}" cy="${cy}" r="3.5" class="bmean"><title>mean ${p.mean.toFixed(1)}</title></circle>
-  ${label(p.p50, x(p.p50), cy - half - 6)}
-  ${label(p.min, x(p.min), belowY)}
-  ${label(p.p25, x(p.p25), belowY)}
-  ${label(p.p75, x(p.p75), belowY)}
-  ${label(p.max, x(p.max), belowY)}
-</svg>`;
-}
-
 const modeText = (m: [string, number][]) =>
   m.length ? m.map(([name, f]) => `${esc(name)} ${Math.round(100 * f)}%`).join(" · ") : "—";
 
-// Compact box-and-whisker for a table cell: min–max whiskers, Q1–Q3 box, median line, mean dot, on a
-// shared 0..scaleMax x-axis so columns are directly comparable. Values are in the hover title.
-function renderMiniBox(s: BoxStats, scaleMax: number): string {
-  const W = 200, H = 20, pad = 3, iw = W - 2 * pad;
-  const x = (v: number) => pad + (v / scaleMax) * iw;
-  const cy = H / 2, half = 5.5, cap = 3.5;
-  return `<svg viewBox="0 0 ${W} ${H}" class="mbox">` +
-    `<title>bits/period — min ${s.min.toFixed(2)} · Q1 ${s.p25.toFixed(2)} · median ${s.p50.toFixed(2)} · mean ${s.mean.toFixed(2)} · Q3 ${s.p75.toFixed(2)} · max ${s.max.toFixed(2)}</title>` +
-    `<line x1="${x(s.min).toFixed(1)}" y1="${cy}" x2="${x(s.max).toFixed(1)}" y2="${cy}" class="bwhisker"/>` +
-    `<line x1="${x(s.min).toFixed(1)}" y1="${cy - cap}" x2="${x(s.min).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
-    `<line x1="${x(s.max).toFixed(1)}" y1="${cy - cap}" x2="${x(s.max).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
-    `<rect x="${x(s.p25).toFixed(1)}" y="${cy - half}" width="${Math.max(1, x(s.p75) - x(s.p25)).toFixed(1)}" height="${2 * half}" class="bbox"/>` +
-    `<line x1="${x(s.p50).toFixed(1)}" y1="${cy - half}" x2="${x(s.p50).toFixed(1)}" y2="${cy + half}" class="bmedian"/>` +
-    `<circle cx="${x(s.mean).toFixed(1)}" cy="${cy}" r="2.5" class="bmean"/>` +
-  `</svg>`;
-}
-
-// Compact comparison plot of fill, as a fraction of the sequence. The scale is fixed at 0..100% with
-// a labelled tick per rung, so every duration and variable combo is read against the same ladder:
-// past the "12h" tick the whole window is covered at 12h; 100% is the whole window at 1h.
-function renderFillMiniBox(vs: ViewStats): string {
-  const W = 210, H = 44, pad = 5, iw = W - 2 * pad;
-  const p = fillBox(vs);
-  const x = (v: number) => pad + v * iw;
-  const cy = 15, half = 6, cap = 4, tickTop = 3, tickBottom = 27;
-  const ticks = vs.stages.map((st, k) => {
-    const tx = x((k + 1) / FILL_STAGES).toFixed(1);
-    return `<line x1="${tx}" y1="${tickTop}" x2="${tx}" y2="${tickBottom}" class="mark"/>` +
-      `<text x="${tx}" y="${H - 2}" class="marklabel" text-anchor="${k + 1 === FILL_STAGES ? "end" : "middle"}">${esc(st.label)}</text>`;
+// Mean fill as a bar: a fixed 0–100% track with the value filled in, so a row of cells can be
+// compared at a glance without reading the numbers. The track is always the full scale — a short bar
+// means a small share of a full 1h fill, never a rescaled axis.
+//
+// The fill is segmented by rung, in the same colours the message strips use: each quarter of the bar
+// is one stage of the ladder, so a bar reaching into the third segment has covered the duration at
+// 6h and is partway through refining it to 3h. Colour therefore means the same thing everywhere on
+// the page — darker is finer.
+function renderFillBar(fill: number): string {
+  const W = 150, H = 10, r = 2, gap = 1;
+  const stage = 1 / FILL_STAGES;
+  const segments = Array.from({ length: FILL_STAGES }, (_, k) => {
+    const from = k * stage, to = Math.min(fill, (k + 1) * stage);
+    if (to <= from) return "";
+    const w = W * (to - from) - gap;
+    if (w <= 0) return "";
+    return `<rect x="${(W * from).toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${H}" rx="${r}" class="rung r${k + 1}"/>`;
   }).join("");
-  return `<svg viewBox="0 0 ${W} ${H}" class="pbox" role="img" aria-label="Fill: mean ${pctText(p.mean)} of a full 1h fill">` +
-    `<title>fill (seq as a share of the full 1h sequence) · min ${pctText(p.min)} · Q1 ${pctText(p.p25)} · median ${pctText(p.p50)} · mean ${pctText(p.mean)} · Q3 ${pctText(p.p75)} · max ${pctText(p.max)} — mean seq ${vs.seq.mean.toFixed(1)} of ${vs.maxSeq}</title>` +
-    ticks +
-    `<line x1="${x(p.min).toFixed(1)}" y1="${cy}" x2="${x(p.max).toFixed(1)}" y2="${cy}" class="bwhisker"/>` +
-    `<line x1="${x(p.min).toFixed(1)}" y1="${cy - cap}" x2="${x(p.min).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
-    `<line x1="${x(p.max).toFixed(1)}" y1="${cy - cap}" x2="${x(p.max).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
-    `<rect x="${x(p.p25).toFixed(1)}" y="${cy - half}" width="${Math.max(1, x(p.p75) - x(p.p25)).toFixed(1)}" height="${2 * half}" class="bbox"/>` +
-    `<line x1="${x(p.p50).toFixed(1)}" y1="${cy - half}" x2="${x(p.p50).toFixed(1)}" y2="${cy + half}" class="bmedian"/>` +
-    `<circle cx="${x(p.mean).toFixed(1)}" cy="${cy}" r="2.5" class="bmean"/>` +
+  return `<svg viewBox="0 0 ${W} ${H}" class="fillbar" role="img" aria-label="${pctText(fill)} of a full 1h fill">` +
+    `<title>${pctText(fill)} filled — 25% = the whole duration at 12h, 50% at 6h, 75% at 3h, 100% at 1h</title>` +
+    `<rect x="0" y="0" width="${W}" height="${H}" rx="${r}" class="fbtrack"/>${segments}` +
   `</svg>`;
 }
 
@@ -1109,9 +1065,8 @@ function renderDurationComparison(s: ReportData): string {
   }).join("\n");
   const rows = configurations.map(({ label, combo }) => `<tr><td class="name">${esc(label)}</td>` +
     s.durations.map((d) => {
-      const vs = view(d, combo);
-      return `<td><div class="pcell"><span class="pmean">${pctText(fillBox(vs).mean)}</span>` +
-        `${renderFillMiniBox(vs)}</div></td>`;
+      const fill = fillBox(view(d, combo)).mean;
+      return `<td><div class="pcell"><span class="pmean">${pctText(fill)}</span>${renderFillBar(fill)}</div></td>`;
     }).join("") + `</tr>`).join("\n");
   return `<h2>Median message by forecast duration</h2>
   <p class="note">The chart shows the resolution of the median message at each forecast duration.</p>
@@ -1125,23 +1080,21 @@ function renderDurationComparison(s: ReportData): string {
   </table>`;
 }
 
-// One toggleable view = a duration × variable-combo: seq histogram, box plot, fill summary, and the
-// occupancy table (columns sorted by share). All are emitted hidden; the client shows the selected.
+// One toggleable view = a duration × variable-combo: fill summary, the percentile strips, the seq
+// histogram, and the occupancy table. All are emitted hidden; the client shows the selected one.
 function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: number, requestHour: number): string {
   const [duration, combo] = vk.split(":");
   const occupancyBits = versionBits + headerBits + vs.bodyBits;
   const rows = [
-    { name: "version", bits: versionBits, bpp: null as number | null, modes: [] as [string, number][], bppStats: null as BoxStats | null },
-    { name: "header", bits: headerBits, bpp: null as number | null, modes: [] as [string, number][], bppStats: null as BoxStats | null },
-    ...vs.columns.map((c) => ({ name: c.name, bits: c.bits, bpp: c.bitsPerPeriod as number | null, modes: c.modes, bppStats: c.bppStats as BoxStats | null })),
+    { name: "version", bits: versionBits, bpp: null as number | null, modes: [] as [string, number][] },
+    { name: "header", bits: headerBits, bpp: null as number | null, modes: [] as [string, number][] },
+    ...vs.columns.map((c) => ({ name: c.name, bits: c.bits, bpp: c.bitsPerPeriod as number | null, modes: c.modes })),
   ].sort((a, b) => b.bits - a.bits);
-  const bppScaleMax = Math.max(...vs.columns.map((c) => c.bppStats.max), 1);
   const occHtml = rows.map((r) => `<tr>
       <td class="name">${esc(r.name)}</td>
       <td class="num">${r.bits.toFixed(1)}</td>
       <td class="num">${r.bpp == null ? "—" : r.bpp.toFixed(2)}</td>
       <td class="num">${(100 * r.bits / occupancyBits).toFixed(1)}%</td>
-      <td class="boxcell">${r.bppStats ? renderMiniBox(r.bppStats, bppScaleMax) : ""}</td>
       <td class="modes">${modeText(r.modes)}</td>
     </tr>`).join("\n");
   // What each full-fill landmark means, and how often the budget got there.
@@ -1161,7 +1114,6 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
   <h3>Fill resolution distribution</h3>
   <div class="strips">${renderPercentileStrips(vs, requestHour)}</div>
   ${renderHistogram(vs)}
-  ${renderBoxPlot(vs)}
   <h3>Full fill at each period</h3>
   <table class="stages">
     <tr><th>period</th><th class="rt">seq</th><th>layout</th><th class="rt">messages reaching it</th></tr>
@@ -1169,9 +1121,9 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
   </table>
   <h3>Mean bit occupancy per column</h3>
   <table>
-    <tr><th>column</th><th class="rt">bits</th><th class="rt">bits/period</th><th class="rt">share</th><th>bits/period spread <span class="muted">(0–${bppScaleMax.toFixed(1)})</span></th><th>modes</th></tr>
+    <tr><th>column</th><th class="rt">bits</th><th class="rt">bits/period</th><th class="rt">share</th><th>modes</th></tr>
     ${occHtml}
-    <tr class="total"><td>total</td><td class="num">${occupancyBits.toFixed(1)}</td><td class="num"></td><td class="num">100%</td><td></td><td class="modes">≈ ${Math.round(occupancyBits / 6.409)} chars</td></tr>
+    <tr class="total"><td>total</td><td class="num">${occupancyBits.toFixed(1)}</td><td class="num"></td><td class="num">100%</td><td class="modes">≈ ${Math.round(occupancyBits / 6.409)} chars</td></tr>
   </table>
 </section>`;
 }
@@ -1237,19 +1189,11 @@ function renderHtml(s: ReportData): string {
   .hgrid { stroke: rgba(128,128,128,.25); stroke-width: 1; }
   .htick { fill: #888; font-size: 11px; }
   .haxis { fill: #888; font-size: 11px; }
-  .box { width: 100%; max-width: var(--chart-w); height: auto; margin: 0 0 1rem; }
-  .bwhisker { stroke: #888; stroke-width: 1.5; }
-  .bbox { fill: rgba(59,130,246,.25); stroke: #3b82f6; stroke-width: 1.5; }
-  .bmedian { stroke: #3b82f6; stroke-width: 2; }
-  .bmean { fill: #e6a01e; }
-  .blabel { fill: #888; font-size: 10px; font-variant-numeric: tabular-nums; }
-  .boxcell { width: 210px; }
-  .mbox { display: block; width: 200px; height: 20px; }
   table.period-comparison { width: 100%; max-width: var(--chart-w); }
-  table.period-comparison th:not(:first-child) { min-width: 240px; }
-  .pcell { display: grid; grid-template-columns: 3.3rem 1fr; align-items: center; gap: .1rem; }
-  .pbox { display: block; width: 210px; height: 44px; }
+  .pcell { display: grid; grid-template-columns: 3.3rem 1fr; align-items: center; gap: .4rem; }
   .pmean { font: .78rem ui-monospace, monospace; white-space: nowrap; }
+  .fillbar { display: block; width: 100%; max-width: 150px; height: 10px; }
+  .fbtrack { fill: rgba(128,128,128,.18); }
   .score-grid { display: flex; flex-wrap: wrap; gap: .6rem; margin: .2rem 0 .7rem; }
   .score { padding: .7rem 1rem; background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.45); border-radius: 8px; font-variant-numeric: tabular-nums; }
   .score-value { font-size: 1.6rem; color: #3b82f6; }
