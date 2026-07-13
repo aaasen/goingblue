@@ -870,6 +870,11 @@ interface StripSlot {
   periodHours: number;  // span of one period in this slot
   startHour: number;    // first period's local hour of day (0 for every slot but the first)
 }
+// Geometry shared by the strips and the day axis above them, so days line up across rows. Periods
+// are separated by a hairline gap and days by a wider one — the spacing alone reads as the day
+// boundary, so the strips need no rules drawn over the fills.
+const STRIP = { W: 720, l: 0, r: 0, periodGap: 2, dayGap: 9 };
+const dayName = (d: number) => `${d}d`; // 0d is the request day (partial); 1d, 2d … are whole days
 function stripLayout(durationDays: number, seq: number, requestHour: number): StripSlot[] {
   const S = slotsFor(durationDays);
   const truncated = seq < S;
@@ -890,55 +895,76 @@ function stripLayout(durationDays: number, seq: number, requestHour: number): St
 // actually buys you.
 function renderLayoutStrip(vs: ViewStats, seq: number, requestHour: number): string {
   const slots = stripLayout(vs.durationDays, seq, requestHour);
-  const W = 720, H = 78, m = { t: 4, r: 14, b: 30, l: 14 };
-  const iw = W - m.l - m.r, barH = H - m.t - m.b - 12;
-  const slotW = iw / slots.length;
-  const gap = 2; // surface gap between period fills
+  const { W, l, r, periodGap, dayGap } = STRIP;
+  const H = 34, m = { t: 1, b: 1 };
+  const barH = H - m.t - m.b;
+  const slotW = (W - l - r) / slots.length;
+  const dayW = slotW - dayGap; // the day's fills; the remainder is the gap to the next day
 
-  const dayName = (d: number) => (d === 0 ? "today" : `+${d}d`);
   const cells = slots.map((slot, d) => {
-    const x0 = m.l + d * slotW;
+    const x0 = l + d * slotW;
     if (slot.res === 0) {
-      return `<rect x="${x0.toFixed(1)}" y="${m.t}" width="${slotW.toFixed(1)}" height="${barH}" class="slot-empty">` +
+      return `<rect x="${x0.toFixed(1)}" y="${m.t}" width="${dayW.toFixed(1)}" height="${barH}" class="slot-empty">` +
         `<title>${dayName(d)} — not covered: the budget truncated the forecast below ${vs.durationDays}d</title></rect>`;
     }
     const out: string[] = [];
-    // Slot 0's leading hours precede the request and are never sent.
+    // Slot 0 starts at the period containing the request hour. The earlier part of today carries no
+    // periods; show it as an empty placeholder so today reads as a partial day rather than a short one.
     if (slot.startHour > 0) {
-      out.push(`<rect x="${x0.toFixed(1)}" y="${m.t}" width="${(slotW * slot.startHour / 24 - gap).toFixed(1)}" height="${barH}" class="slot-past">` +
+      out.push(`<rect x="${x0.toFixed(1)}" y="${m.t}" width="${Math.max(1, dayW * slot.startHour / 24 - periodGap).toFixed(1)}" ` +
+        `height="${barH}" rx="1.5" class="slot-past">` +
         `<title>before the request (${requestHour}:00 local) — not sent</title></rect>`);
     }
     for (let h = slot.startHour; h < 24; h += slot.periodHours) {
-      const x = x0 + slotW * (h / 24);
-      out.push(`<rect x="${x.toFixed(1)}" y="${m.t}" width="${Math.max(1, slotW * slot.periodHours / 24 - gap).toFixed(1)}" ` +
+      const x = x0 + dayW * (h / 24);
+      out.push(`<rect x="${x.toFixed(1)}" y="${m.t}" width="${Math.max(1, dayW * slot.periodHours / 24 - periodGap).toFixed(1)}" ` +
         `height="${barH}" rx="1.5" class="rung r${slot.res}">` +
         `<title>${dayName(d)} ${String(h).padStart(2, "0")}:00 — one ${RUNG[slot.res]} period</title></rect>`);
     }
     return out.join("");
   }).join("");
 
-  // Direct labels under each slot (text tokens, not the fill colour — identity is never colour-alone).
-  const labels = slots.map((slot, d) => {
-    const cx = m.l + (d + 0.5) * slotW;
-    const text = slot.res === 0 ? "—" : `${dayName(d)} · ${RUNG[slot.res]}`;
-    return `<text x="${cx.toFixed(1)}" y="${H - m.b + 14}" class="sliplabel" text-anchor="middle">${esc(text)}</text>`;
-  }).join("");
-
-  return `<svg viewBox="0 0 ${W} ${H}" class="strip" role="img" aria-label="Layout of the median message: ${esc(seqLabel(vs.durationDays, seq))}">
-  ${cells}${labels}
+  return `<svg viewBox="0 0 ${W} ${H}" class="strip" role="img" aria-label="One message: ${esc(seqLabel(vs.durationDays, seq))}">
+  ${cells}
 </svg>`;
 }
 
-// One strip per percentile of the fill distribution, each labelled with its seq, fill and layout —
-// so the spread the box plot summarises can be read as actual messages.
+// The day axis, shared by every strip below it: one label per day slot, aligned to the same grid.
+function renderStripAxis(vs: ViewStats): string {
+  const { W, l, r, dayGap } = STRIP;
+  const H = 16, slots = slotsFor(vs.durationDays);
+  const slotW = (W - l - r) / slots;
+  const labels = Array.from({ length: slots }, (_, d) =>
+    `<text x="${(l + d * slotW + (slotW - dayGap) / 2).toFixed(1)}" y="11" class="sliplabel" text-anchor="middle">${esc(dayName(d))}</text>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="stripaxis" role="img" aria-label="Day axis">${labels}</svg>`;
+}
+
+// The rung key, shared by every strip: colour is the only channel carrying resolution in the strips
+// themselves, so the legend is mandatory (and each block still names its rung on hover).
+function renderRungLegend(): string {
+  const keys = Array.from({ length: FILL_STAGES }, (_, i) => i + 1)
+    .map((res) => `<span class="key"><i class="sw r${res}"></i>${esc(RUNG[res])}</span>`).join("");
+  return `<div class="legend"><span class="legend-label">resolution</span>${keys}</div>`;
+}
+
+// One strip per percentile of the fill distribution, labelled with its fill percentage.
 function renderPercentileStrips(vs: ViewStats, requestHour: number): string {
-  return vs.percentiles.map(({ p, seq }) => `<div class="striprow">
-    <div class="striplabel"><strong>p${p}</strong>
-      <span>seq ${seq}/${vs.maxSeq} · ${pctText(seq / vs.maxSeq)}</span>
-      <span class="muted">${esc(seqLabel(vs.durationDays, seq))}</span>
-    </div>
+  const rows = vs.percentiles.map(({ p, seq }) => `<div class="striprow">
+    <div class="striplabel"><strong>p${p}</strong> · ${pctText(seq / vs.maxSeq)} filled</div>
     ${renderLayoutStrip(vs, seq, requestHour)}
   </div>`).join("\n");
+  // The percentile stack is itself an axis: p1 is the hardest forecast in the corpus to encode and
+  // p99 the easiest, so label the two ends rather than leaving the ordering implicit.
+  return `${renderRungLegend()}
+  <div class="striphead"><div></div>${renderStripAxis(vs)}</div>
+  <div class="stripwrap">
+    <div class="entropy-axis">
+      <span>stormy</span>
+      <span class="entropy-line"></span>
+      <span>stable</span>
+    </div>
+    <div class="stripstack">${rows}</div>
+  </div>`;
 }
 
 // Both seq charts share one x-scale: the whole fill sequence, 1..4S. Keeping the full ladder on the
@@ -1130,10 +1156,7 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
     `<div class="score"><div class="score-label">Average periods per message</div>` +
     `<div><strong class="score-value">${vs.periods.mean.toFixed(1)}</strong> periods</div>` +
     `<div class="score-sub">min ${vs.periods.min} · max ${vs.periods.max}</div></div></div>
-  <h3>Messages across the distribution, drawn</h3>
-  <p class="note">Each block is one forecast period; darker means finer resolution. p1 is a forecast
-  at the hard end of the corpus (stormy, high-entropy — little fits), p99 an easy one (stable
-  conditions compress far smaller, so the budget buys more resolution).</p>
+  <h3>Fill resolution distribution</h3>
   <div class="strips">${renderPercentileStrips(vs, requestHour)}</div>
   ${renderHistogram(vs)}
   ${renderBoxPlot(vs)}
@@ -1159,7 +1182,6 @@ function renderHtml(s: ReportData): string {
   const groupChecks = s.groups.map((g, i) =>
     `<label><input type="checkbox" class="group" value="${g.id}" data-bit="${1 << i}"${s.defaultCombo & (1 << i) ? " checked" : ""}> ${esc(g.label)}</label>`).join("");
   const notes = [
-    s.short ? `Ignored ${s.short} cached forecast(s) from a shorter-window pull (< ${HORIZON_DAYS}d). They are leftovers from an earlier collection and can be deleted.` : "",
     s.skipped ? `Skipped ${s.skipped} forecast(s) with an incomplete base series.` : "",
     s.uncovered ? `Skipped ${s.uncovered} (forecast, duration) pair(s) the corpus window doesn't cover.` : "",
     s.dropped.length ? `Dropped ${s.dropped.map((d) => `${d}d`).join(", ")} entirely — no forecast in the corpus covers that duration. Re-collect: the cached windows are shorter than the ${HORIZON_DAYS}-day window this report needs.` : "",
@@ -1233,17 +1255,34 @@ function renderHtml(s: ReportData): string {
   .mark { stroke: #e6a01e; stroke-width: 1; stroke-dasharray: 3 3; }
   .marklabel { fill: #e6a01e; font-size: 10px; font-variant-numeric: tabular-nums; }
   .strips { max-width: 900px; margin: .4rem 0 1.25rem; }
-  .striprow { display: grid; grid-template-columns: 10.5rem 1fr; align-items: center; gap: .7rem;
-    padding: .15rem 0; border-bottom: 1px solid rgba(128,128,128,.14); }
-  .striprow:last-child { border-bottom: none; }
-  .striplabel { display: flex; flex-direction: column; font-size: .74rem; font-variant-numeric: tabular-nums; line-height: 1.35; }
-  .striplabel strong { font-size: .9rem; }
-  .strip { width: 100%; max-width: 720px; height: auto; margin: .1rem 0; }
+  .striphead, .striprow { display: grid; grid-template-columns: 8.5rem 1fr; align-items: center; gap: .7rem; }
+  .striphead { padding-left: 2.2rem; } /* clears the entropy axis, so the day labels stay aligned */
+  .striprow { padding: .18rem 0; }
+  .stripwrap { display: flex; align-items: stretch; gap: .6rem; }
+  .stripstack { flex: 1; min-width: 0; }
+  .entropy-axis { width: 1.6rem; display: flex; flex-direction: column; align-items: center;
+    color: #888; font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; }
+  .entropy-axis span:not(.entropy-line) { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
+  /* The rule spans the stack, arrowheaded at both ends: up toward stormy (p1), down toward stable (p99). */
+  .entropy-line { position: relative; flex: 1; width: 1px; min-height: 1.2rem; margin: .35rem 0; background: rgba(128,128,128,.4); }
+  .entropy-line::before, .entropy-line::after { content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+    border-left: 3.5px solid transparent; border-right: 3.5px solid transparent; }
+  .entropy-line::before { top: -1px; border-bottom: 6px solid rgba(128,128,128,.55); }
+  .entropy-line::after { bottom: -1px; border-top: 6px solid rgba(128,128,128,.55); }
+  .striplabel { font-size: .78rem; font-variant-numeric: tabular-nums; white-space: nowrap; color: #888; }
+  .striplabel strong { font-size: .9rem; color: inherit; }
+  .strip, .stripaxis { width: 100%; max-width: 720px; height: auto; display: block; }
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; margin: .5rem 0 .4rem; font-size: .76rem; color: #888; }
+  .legend-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; }
+  .key { display: inline-flex; align-items: center; gap: .3rem; }
+  .sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px; }
+  .sw.r1 { background: var(--r1); } .sw.r2 { background: var(--r2); }
+  .sw.r3 { background: var(--r3); } .sw.r4 { background: var(--r4); }
   .rung.r1 { fill: var(--r1); }
   .rung.r2 { fill: var(--r2); }
   .rung.r3 { fill: var(--r3); }
   .rung.r4 { fill: var(--r4); }
-  .slot-past { fill: rgba(128,128,128,.12); }
+  .slot-past { fill: rgba(128,128,128,.15); }
   .slot-empty { fill: none; stroke: rgba(128,128,128,.4); stroke-width: 1; stroke-dasharray: 3 3; }
   .sliplabel { fill: #888; font-size: 10px; font-variant-numeric: tabular-nums; }
   .intro { max-width: 640px; margin: 1rem 0 1.75rem; }
