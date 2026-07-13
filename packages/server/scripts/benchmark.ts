@@ -640,6 +640,7 @@ function buildView(
       name,
       bits: mean(bitsArr),
       bitsPerPeriod: mean(bpp),
+      bppStats: box(bpp),
       modes: [...cm.get(name)!.entries()].sort((a, b) => b[1] - a[1]).map(([m, c]) => [m, c / bitsArr.length] as [string, number]),
     };
   });
@@ -807,7 +808,7 @@ function openInBrowser(path: string): void {
 // ── HTML report ──────────────────────────────────────────────────────────────────
 
 interface BoxStats { min: number; p25: number; p50: number; mean: number; p75: number; max: number }
-interface ColStat { name: string; bits: number; bitsPerPeriod: number; modes: [string, number][] }
+interface ColStat { name: string; bits: number; bitsPerPeriod: number; bppStats: BoxStats; modes: [string, number][] }
 // A full-fill landmark: seq = k × S is the whole window at rung `label`, reached by `share` of messages.
 interface StageStat { seq: number; label: string; share: number }
 interface ViewStats {
@@ -966,54 +967,101 @@ function renderPercentileStrips(vs: ViewStats, requestHour: number): string {
   </div>`;
 }
 
-// Both seq charts share one x-scale: the whole fill sequence, 1..4S. Keeping the full ladder on the
-// axis (rather than just the observed range) is the point of the chart — you read how far along it
-// the mass sits, against the four landmarks where the window is fully filled at 12h/6h/3h/1h.
-const SEQ_CHART = { W: 720, l: 46, r: 14 };
-const seqX = (seq: number, maxSeq: number) =>
-  SEQ_CHART.l + ((seq - 0.5) / maxSeq) * (SEQ_CHART.W - SEQ_CHART.l - SEQ_CHART.r);
+// The chart keeps the full fill scale (0–100%) on the axis rather than the observed range: the low
+// end is where the interesting failures live (at 10d with every variable on, some messages don't
+// even reach a full 12h fill), so cropping to the data would hide exactly what you want to see.
+// `l` leaves room for the y tick labels *and* the rotated axis title beside them.
+const SEQ_CHART = { W: 720, l: 64, r: 14 };
 
-// The dashed "full fill at this rung" markers, drawn on both charts.
-function renderMarks(vs: ViewStats, y1: number, y2: number, labelY: number | null): string {
-  return vs.stages.map((st) => {
-    const x = seqX(st.seq, vs.maxSeq).toFixed(1);
-    const line = `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" class="mark"><title>seq ${st.seq} — ${esc(seqLabel(vs.durationDays, st.seq))} (${(100 * st.share).toFixed(1)}% of messages reach it)</title></line>`;
-    const text = labelY === null ? ""
-      : `<text x="${x}" y="${labelY}" class="marklabel" text-anchor="middle">${esc(st.label)}</text>`;
-    return line + text;
+// How far a message gets, as a survival curve: for each fill level, the share of forecasts that
+// reach *at least* that far. Read it directly — pick a fill level on the x-axis, read the percentage
+// of forecasts that achieve it. Monotone by construction, so it can never look noisy, and the four
+// rung landmarks are just points on the curve rather than a separate table.
+//
+// The area is cut into the four ladder stages and filled with the same rung colours as the strips
+// and the fill bars: the darker the band under the curve, the finer the resolution it represents.
+function renderReachArea(vs: ViewStats): string {
+  const W = SEQ_CHART.W, H = 260, m = { t: 28, r: SEQ_CHART.r, b: 42, l: SEQ_CHART.l };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const { maxSeq, slots } = vs;
+  const total = vs.histogram.reduce((sum, h) => sum + h.count, 0) || 1;
+
+  // reach[seq] = share of forecasts whose fitted seq is >= seq (so reach[1] is always 100%).
+  const reach: number[] = new Array(maxSeq + 1).fill(0);
+  for (let seq = maxSeq; seq >= 1; seq--) {
+    reach[seq] = reach[seq + 1] ?? 0;
+    reach[seq] += (vs.histogram[seq - 1]?.count ?? 0) / total;
+  }
+
+  const xEdge = (i: number) => m.l + (i / maxSeq) * iw; // band edges: seq n spans [n-1, n]
+  const y = (share: number) => m.t + ih * (1 - share);
+  const base = y(0);
+
+  // One stepped polygon per ladder stage, so each quarter of the x-axis carries its rung's colour.
+  const areas = Array.from({ length: FILL_STAGES }, (_, k) => {
+    const from = k * slots + 1, to = (k + 1) * slots;
+    const pts: string[] = [`${xEdge(from - 1).toFixed(1)},${base.toFixed(1)}`];
+    for (let seq = from; seq <= to; seq++) {
+      pts.push(`${xEdge(seq - 1).toFixed(1)},${y(reach[seq]).toFixed(1)}`);
+      pts.push(`${xEdge(seq).toFixed(1)},${y(reach[seq]).toFixed(1)}`);
+    }
+    pts.push(`${xEdge(to).toFixed(1)},${base.toFixed(1)}`);
+    return `<polygon points="${pts.join(" ")}" class="rung r${k + 1} area"/>`;
   }).join("");
+
+  // The curve itself, over the whole domain.
+  const line: string[] = [];
+  for (let seq = 1; seq <= maxSeq; seq++) {
+    line.push(`${xEdge(seq - 1).toFixed(1)},${y(reach[seq]).toFixed(1)}`);
+    line.push(`${xEdge(seq).toFixed(1)},${y(reach[seq]).toFixed(1)}`);
+  }
+  const curve = `<polyline points="${line.join(" ")}" class="reachline"/>`;
+
+  // Invisible hit targets: one per seq, so any point on the curve can be read exactly.
+  const hits = Array.from({ length: maxSeq }, (_, i) => i + 1).map((seq) =>
+    `<rect x="${xEdge(seq - 1).toFixed(1)}" y="${m.t}" width="${(iw / maxSeq).toFixed(1)}" height="${ih}" class="hit">` +
+    `<title>${pctText(seq / maxSeq)} filled (seq ${seq} — ${esc(seqLabel(vs.durationDays, seq))})\n` +
+    `${(100 * reach[seq]).toFixed(1)}% of forecasts reach at least this far</title></rect>`).join("");
+
+  // y: share of forecasts, 0–100%.
+  const yAxis = [0, 0.25, 0.5, 0.75, 1].map((v) =>
+    `<line x1="${m.l}" y1="${y(v).toFixed(1)}" x2="${W - m.r}" y2="${y(v).toFixed(1)}" class="hgrid"/>` +
+    `<text x="${m.l - 8}" y="${(y(v) + 3.5).toFixed(1)}" class="htick" text-anchor="end">${(100 * v).toFixed(0)}%</text>`).join("");
+
+  // x: fill percentage, ticked at the rungs (the stage boundaries are exactly 25/50/75/100%). Each
+  // rung is labelled with the share of forecasts that reach it — the four numbers worth reading off
+  // this curve, stated rather than left to the eye.
+  const xAxis = vs.stages.map((st, k) => {
+    const x = xEdge(st.seq);
+    const anchor = k + 1 === FILL_STAGES ? "end" : "middle";
+    return `<line x1="${x.toFixed(1)}" y1="${m.t}" x2="${x.toFixed(1)}" y2="${base.toFixed(1)}" class="mark"/>` +
+      `<text x="${x.toFixed(1)}" y="${m.t - 10}" class="marklabel" text-anchor="${anchor}">` +
+      `${esc(st.label)} · ${(100 * st.share).toFixed(1)}%</text>` +
+      `<text x="${x.toFixed(1)}" y="${H - m.b + 16}" class="htick" text-anchor="${anchor}">${pctText((k + 1) / FILL_STAGES)}</text>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${W} ${H}" class="hist" role="img" aria-label="Share of forecasts reaching each fill level">
+  ${yAxis}${areas}${curve}${xAxis}${hits}
+  <text x="${m.l + iw / 2}" y="${H - 4}" class="haxis" text-anchor="middle">FILL PERCENTAGE</text>
+  <text x="12" y="${m.t + ih / 2}" class="haxis" text-anchor="middle" transform="rotate(-90 12 ${m.t + ih / 2})">PERCENT OF FORECASTS</text>
+</svg>`;
 }
 
-// A static, self-contained SVG bar histogram of the fitted fill sequence (offline-safe, no JS/CDN).
-function renderHistogram(vs: ViewStats): string {
-  const W = SEQ_CHART.W, H = 260, m = { t: 28, r: SEQ_CHART.r, b: 38, l: SEQ_CHART.l };
-  const iw = W - m.l - m.r, ih = H - m.t - m.b;
-  const n = vs.maxSeq;
-  const maxCount = Math.max(...vs.histogram.map((h) => h.count), 1);
-  const bw = iw / n;
-  const y = (c: number) => m.t + ih * (1 - c / maxCount);
-
-  // y gridlines/ticks at 0, mid, max
-  const yvals = [...new Set([0, Math.round(maxCount / 2), maxCount])];
-  const yAxis = yvals.map((v) =>
-    `<line x1="${m.l}" y1="${y(v).toFixed(1)}" x2="${W - m.r}" y2="${y(v).toFixed(1)}" class="hgrid"/>` +
-    `<text x="${m.l - 8}" y="${(y(v) + 3.5).toFixed(1)}" class="htick" text-anchor="end">${v}</text>`).join("");
-
-  const bars = vs.histogram.map((h) =>
-    `<rect x="${(seqX(h.seq, n) - bw * 0.38).toFixed(1)}" y="${y(h.count).toFixed(1)}" width="${(bw * 0.76).toFixed(1)}" ` +
-    `height="${(ih * h.count / maxCount).toFixed(1)}" class="hbar">` +
-    `<title>seq ${h.seq} — ${esc(seqLabel(vs.durationDays, h.seq))}: ${h.count} forecasts</title></rect>`).join("");
-
-  // Label ~8 evenly spaced x ticks (seq values).
-  const step = Math.max(1, Math.round(n / 8));
-  const xAxis = vs.histogram.map((h, i) => (i % step === 0 || i === n - 1)
-    ? `<text x="${seqX(h.seq, n).toFixed(1)}" y="${H - m.b + 16}" class="htick" text-anchor="middle">${h.seq}</text>` : "").join("");
-
-  return `<svg viewBox="0 0 ${W} ${H}" class="hist" role="img" aria-label="Histogram of the fill sequence number reached per message">
-  ${yAxis}${bars}${renderMarks(vs, m.t, m.t + ih, m.t - 10)}${xAxis}
-  <text x="${m.l + iw / 2}" y="${H - 4}" class="haxis" text-anchor="middle">fill sequence (seq) — dashed: whole window fully filled at that period</text>
-  <text x="12" y="${m.t + ih / 2}" class="haxis" text-anchor="middle" transform="rotate(-90 12 ${m.t + ih / 2})">forecasts</text>
-</svg>`;
+// Compact box-and-whisker for a table cell: min–max whiskers, Q1–Q3 box, median line, mean dot, on a
+// shared 0..scaleMax x-axis so columns are directly comparable. Values are in the hover title.
+function renderMiniBox(s: BoxStats, scaleMax: number): string {
+  const W = 200, H = 20, pad = 3, iw = W - 2 * pad;
+  const x = (v: number) => pad + (v / scaleMax) * iw;
+  const cy = H / 2, half = 5.5, cap = 3.5;
+  return `<svg viewBox="0 0 ${W} ${H}" class="mbox">` +
+    `<title>bits/period — min ${s.min.toFixed(2)} · Q1 ${s.p25.toFixed(2)} · median ${s.p50.toFixed(2)} · mean ${s.mean.toFixed(2)} · Q3 ${s.p75.toFixed(2)} · max ${s.max.toFixed(2)}</title>` +
+    `<line x1="${x(s.min).toFixed(1)}" y1="${cy}" x2="${x(s.max).toFixed(1)}" y2="${cy}" class="bwhisker"/>` +
+    `<line x1="${x(s.min).toFixed(1)}" y1="${cy - cap}" x2="${x(s.min).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
+    `<line x1="${x(s.max).toFixed(1)}" y1="${cy - cap}" x2="${x(s.max).toFixed(1)}" y2="${cy + cap}" class="bwhisker"/>` +
+    `<rect x="${x(s.p25).toFixed(1)}" y="${cy - half}" width="${Math.max(1, x(s.p75) - x(s.p25)).toFixed(1)}" height="${2 * half}" class="bbox"/>` +
+    `<line x1="${x(s.p50).toFixed(1)}" y1="${cy - half}" x2="${x(s.p50).toFixed(1)}" y2="${cy + half}" class="bmedian"/>` +
+    `<circle cx="${x(s.mean).toFixed(1)}" cy="${cy}" r="2.5" class="bmean"/>` +
+  `</svg>`;
 }
 
 const modeText = (m: [string, number][]) =>
@@ -1084,39 +1132,29 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
   const [duration, combo] = vk.split(":");
   const occupancyBits = versionBits + headerBits + vs.bodyBits;
   const rows = [
-    { name: "version", bits: versionBits, bpp: null as number | null, modes: [] as [string, number][] },
-    { name: "header", bits: headerBits, bpp: null as number | null, modes: [] as [string, number][] },
-    ...vs.columns.map((c) => ({ name: c.name, bits: c.bits, bpp: c.bitsPerPeriod as number | null, modes: c.modes })),
+    { name: "version", bits: versionBits, bpp: null as number | null, modes: [] as [string, number][], bppStats: null as BoxStats | null },
+    { name: "header", bits: headerBits, bpp: null as number | null, modes: [] as [string, number][], bppStats: null as BoxStats | null },
+    ...vs.columns.map((c) => ({ name: c.name, bits: c.bits, bpp: c.bitsPerPeriod as number | null, modes: c.modes, bppStats: c.bppStats as BoxStats | null })),
   ].sort((a, b) => b.bits - a.bits);
+  const bppScaleMax = Math.max(...vs.columns.map((c) => c.bppStats.max), 1);
   const occHtml = rows.map((r) => `<tr>
       <td class="name">${esc(r.name)}</td>
       <td class="num">${r.bits.toFixed(1)}</td>
       <td class="num">${r.bpp == null ? "—" : r.bpp.toFixed(2)}</td>
       <td class="num">${(100 * r.bits / occupancyBits).toFixed(1)}%</td>
+      <td class="boxcell">${r.bppStats ? renderMiniBox(r.bppStats, bppScaleMax) : ""}</td>
       <td class="modes">${modeText(r.modes)}</td>
     </tr>`).join("\n");
-  // What each full-fill landmark means, and how often the budget got there.
-  const stageRows = vs.stages.map((st) => `<tr>
-      <td class="name">${esc(st.label)}</td>
-      <td class="num">${st.seq}</td>
-      <td class="name">${esc(seqLabel(vs.durationDays, st.seq))}</td>
-      <td class="num">${(100 * st.share).toFixed(1)}%</td>
-    </tr>`).join("\n");
-
   return `<section class="view" data-duration="${duration}" data-combo="${combo}" hidden>
   <h3>Fill resolution distribution</h3>
   <div class="strips">${renderPercentileStrips(vs, requestHour)}</div>
-  ${renderHistogram(vs)}
-  <h3>Full fill at each period</h3>
-  <table class="stages">
-    <tr><th>period</th><th class="rt">seq</th><th>layout</th><th class="rt">messages reaching it</th></tr>
-    ${stageRows}
-  </table>
-  <h3>Mean bit occupancy per column</h3>
+  <h3>Percent of forecasts reaching each fill resolution</h3>
+  ${renderReachArea(vs)}
+  <h3>Mean bit cost per column</h3>
   <table>
-    <tr><th>column</th><th class="rt">bits</th><th class="rt">bits/period</th><th class="rt">share</th><th>modes</th></tr>
+    <tr><th>column</th><th class="rt">bits</th><th class="rt">bits/period</th><th class="rt">share</th><th>bits/period spread <span class="muted">(0–${bppScaleMax.toFixed(1)})</span></th><th>modes</th></tr>
     ${occHtml}
-    <tr class="total"><td>total</td><td class="num">${occupancyBits.toFixed(1)}</td><td class="num"></td><td class="num">100%</td><td class="modes">≈ ${Math.round(occupancyBits / 6.409)} chars</td></tr>
+    <tr class="total"><td>total</td><td class="num">${occupancyBits.toFixed(1)}</td><td class="num"></td><td class="num">100%</td><td></td><td class="modes">≈ ${Math.round(occupancyBits / 6.409)} chars</td></tr>
   </table>
 </section>`;
 }
@@ -1178,10 +1216,19 @@ function renderHtml(s: ReportData): string {
   td.modes { color: #888; font-size: .8rem; }
   tr.total td { font-weight: 600; border-top: 2px solid rgba(128,128,128,.4); border-bottom: none; }
   .hist { width: 100%; max-width: var(--chart-w); height: auto; margin: .5rem 0 .25rem; }
-  .hbar { fill: #3b82f6; }
+  .area { stroke: none; }
+  .bwhisker { stroke: #888; stroke-width: 1.5; }
+  .bbox { fill: rgba(59,130,246,.25); stroke: #3b82f6; stroke-width: 1.5; }
+  .bmedian { stroke: #3b82f6; stroke-width: 2; }
+  .bmean { fill: #e6a01e; }
+  .boxcell { width: 210px; }
+  .mbox { display: block; width: 200px; height: 20px; }
+  .reachline { fill: none; stroke: #555; stroke-width: 1.5; }
+  @media (prefers-color-scheme: dark) { .reachline { stroke: #ddd; } }
+  .hit { fill: transparent; }
   .hgrid { stroke: rgba(128,128,128,.25); stroke-width: 1; }
   .htick { fill: #888; font-size: 11px; }
-  .haxis { fill: #888; font-size: 11px; }
+  .haxis { fill: #888; font-size: 9.5px; letter-spacing: .06em; }
   table.period-comparison { width: 100%; max-width: var(--chart-w); }
   .pcell { display: grid; grid-template-columns: 3.3rem 1fr; align-items: center; gap: .4rem; }
   .pmean { font: .78rem ui-monospace, monospace; white-space: nowrap; }
@@ -1224,7 +1271,6 @@ function renderHtml(s: ReportData): string {
   .intro p { margin: .5rem 0; }
   .note { color: #777; font-size: .82rem; max-width: 640px; margin: .2rem 0 .8rem; }
   .note code { background: rgba(128,128,128,.15); padding: .05rem .3rem; border-radius: 3px; }
-  table.stages { max-width: 620px; margin-bottom: .5rem; }
 </style>
 </head>
 <body>
