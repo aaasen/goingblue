@@ -24,16 +24,15 @@ import {
 const qSnow = (cm: number) => expandSqrt(compandSqrt(cm, SNOW_K, ACCUM_BITS), SNOW_K);
 const qRain = (mm: number) => expandSqrt(compandSqrt(mm, RAIN_K, ACCUM_BITS), RAIN_K);
 
-// Every v1 variable (bit 12 is `rain`, 6-bit liquid precip).
+// Every v1 variable (bit 12 is `rain`, 6-bit liquid precip; bit 13, formerly tmin, is reserved).
 const ALL_VARS =
   (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) |
-  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 12) | (1 << 13);
+  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 12);
 
 const PERIOD: Period = {
   weathercode: 73,
   precip: 75,
   temp_c: 0,
-  temp_min_c: -20,
   snow_cm: 4 * 2.54,       // ~10cm — sqrt-companded, compared via qSnow()
   rain_mm: 6.5,            // sqrt-companded, compared via qRain()
   freeze_m: 6 * 304.8,     // 6000 ft in m — round-trips exactly
@@ -160,7 +159,6 @@ describe("v1 round-trip encoding", () => {
     expect(p.weathercode).toBe(PERIOD.weathercode);
     expect(p.precip).toBe(Math.round(Math.round((PERIOD.precip ?? 0) * 7 / 100) * 100 / 7));
     expect(p.temp_c).toBe(PERIOD.temp_c);
-    expect(p.temp_min_c).toBe(PERIOD.temp_min_c);
     expect(p.snow_cm).toBeCloseTo(qSnow(PERIOD.snow_cm!), 5);
     expect(p.rain_mm).toBeCloseTo(qRain(PERIOD.rain_mm!), 5);
     expect(p.freeze_m).toBeCloseTo(PERIOD.freeze_m!, 5);
@@ -184,7 +182,6 @@ describe("v1 round-trip encoding", () => {
     const p = decoded.periods[0][0];
     expect(p.precip).toBeUndefined();
     expect(p.temp_c).toBeUndefined();
-    expect(p.temp_min_c).toBeUndefined();
     expect(p.snow_cm).toBeUndefined();
     expect(p.rain_mm).toBeUndefined();
     expect(p.freeze_m).toBeUndefined();
@@ -201,19 +198,14 @@ describe("v1 round-trip encoding", () => {
     expect(p.precip).toBe(Math.round(Math.round(75 * 7 / 100) * 100 / 7));
     expect(p.freeze_m).toBeCloseTo(6 * 304.8, 5);
     expect(p.temp_c).toBeUndefined();
-    expect(p.temp_min_c).toBeUndefined();
     expect(p.snow_cm).toBeUndefined();
     expect(p.wind_500_kph).toBeUndefined();
   });
 
-  it("temp and tmin are independent bits", () => {
-    const maxOnly = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp }));
-    expect(maxOnly.periods[0][0].temp_c).toBe(PERIOD.temp_c);
-    expect(maxOnly.periods[0][0].temp_min_c).toBeUndefined();
-
-    const minOnly = roundTrip(msg({ vars_mask: 1 << VARS_BIT.tmin }));
-    expect(minOnly.periods[0][0].temp_min_c).toBe(PERIOD.temp_min_c);
-    expect(minOnly.periods[0][0].temp_c).toBeUndefined();
+  it("temp round-trips on its own bit", () => {
+    const tempOnly = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp }));
+    expect(tempOnly.periods[0][0].temp_c).toBe(PERIOD.temp_c);
+    expect(tempOnly.periods[0][0].precip).toBeUndefined();
   });
 
   it("default vars mask includes expected vars", () => {
@@ -351,9 +343,8 @@ describe("v1 round-trip encoding", () => {
   });
 
   it("preserves negative temp", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, temp_c: -20, temp_min_c: -35 }]] }));
-    expect(decoded.periods[0][0].temp_c).toBe(-20);
-    expect(decoded.periods[0][0].temp_min_c).toBe(-35);
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, temp_c: -35 }]] }));
+    expect(decoded.periods[0][0].temp_c).toBe(-35);
   });
 
   it("throws when decoding a different version's tag", () => {
@@ -393,7 +384,7 @@ describe("v1 round-trip encoding", () => {
     decoded.periods[0].forEach((p) => expect(p.weathercode).toBe(0));
   });
 
-  // Surface wind speed is an anchor + entropy-coded period-over-period delta (like temp/tmin);
+  // Surface wind speed is an anchor + entropy-coded period-over-period delta (like temp);
   // direction is entropy-coded under (resolution, prev, upper-level) context, with calm periods
   // carrying no direction symbol at all.
   const WIND_STEP = 5 * 1.609344;
@@ -510,19 +501,11 @@ describe("delta temperature encoding", () => {
     expect(flatLen).toBeLessThan(spreadLen);
   });
 
-  it("temp and tmin report no adaptive mode — they're Huffman-coded deltas, not raw/for/sparse/empty columns", () => {
-    const vars_mask = (1 << VARS_BIT.temp) | (1 << VARS_BIT.tmin);
-    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, temp_c: 0, temp_min_c: 0 }))];
+  it("temp reports no adaptive mode — it's Huffman-coded deltas, not a raw/for/sparse/empty column", () => {
+    const vars_mask = 1 << VARS_BIT.temp;
+    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, temp_c: 0 }))];
     const { columns } = v1EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true }));
     expect(columns.find((c) => c.name === "temp")?.mode).toBeNull();
-    expect(columns.find((c) => c.name === "tmin")?.mode).toBeNull();
-  });
-
-  it("round-trips a clustered tmin column exactly", () => {
-    const temps = [-8, -6, -5, -2, 0, 3, 1, -1, -4, 2];
-    const periods = [temps.map((t) => ({ ...PERIOD, temp_min_c: t }))];
-    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.tmin, periods }, { hourly: true }));
-    decoded.periods[0].forEach((p, i) => expect(p.temp_min_c).toBe(temps[i]));
   });
 
   it("round-trips a >31°C period-over-period swing at the escape field's edge exactly", () => {

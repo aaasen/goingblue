@@ -70,8 +70,7 @@ afterAll(() => {
 function row(snow_cm: number): Row {
   return {
     time: "2026-05-21T00:00",
-    temp_max_c: -10,
-    temp_min_c: -15,
+    temp_c: -10,
     wind_speed_10m: 5,
     wind_direction_10m: 90,
     precip: 50,
@@ -101,12 +100,16 @@ describe("toFullPeriod — snow", () => {
   });
 });
 
-describe("toFullPeriod — tmin", () => {
-  const maskWithTmin = DEFAULT_VARS_MASK | (1 << VARS_BIT.tmin);
+describe("toFullPeriod — temp", () => {
+  const maskWithTemp = DEFAULT_VARS_MASK | (1 << VARS_BIT.temp);
 
-  it("keeps tmin (even 1h periods carry it, so mixed-resolution columns stay uniform)", () => {
-    const p = toFullPeriod(row(0), maskWithTmin, "HRES");
-    expect(p.temp_min_c).toBe(-15);
+  it("passes the representative temp through when the temp bit is set", () => {
+    const p = toFullPeriod(row(0), maskWithTemp, "HRES");
+    expect(p.temp_c).toBe(-10);
+  });
+
+  it("omits temp when the bit is unset", () => {
+    expect(toFullPeriod(row(0), DEFAULT_VARS_MASK, "HRES").temp_c).toBeUndefined();
   });
 });
 

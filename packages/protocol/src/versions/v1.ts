@@ -29,9 +29,7 @@ const VERSION = V1_VERSION;
 // per-period resolution — isn't on the wire either: the header carries only the fill-sequence
 // number, from which both sides derive the identical layout via layoutFor(). Periods within one
 // message can span different resolutions, which the column codecs already handle (the temp-delta
-// codebooks were derived across resolutions for exactly this reason, see entropy.ts); tmin is
-// kept even for 1h periods (where it equals temp and the delta columns encode the duplication
-// away) so a mixed message has uniform columns.
+// codebooks were derived across resolutions for exactly this reason, see entropy.ts).
 //
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
 // packed header. Packed header layout (22 bits):
@@ -68,12 +66,12 @@ const MODE_BITS = 2;
 export const MODE_NAMES = ["raw", "for", "sparse", "empty"];
 const SUBWIDTH_BITS = 3; // width of the FOR offset-width / sparse magnitude-width field (0..7)
 
-// temp/tmin: 8 bits, 1°C steps, offset -100°C → -100°C to +155°C
+// temp: 8 bits, 1°C steps, offset -100°C → -100°C to +155°C
 // snow/rain: 6 bits each, sqrt-companded (see ACCUM_* below). rain is bit 12, the slot
-// formerly reserved for the removed `vis`.
+// formerly reserved for the removed `vis`; bit 13 (formerly tmin) is reserved.
 // wind: 8 = 5-bit speed + 3-bit direction (raw-width equivalent; both entropy-coded).
-export const VAR_BITS_V1 = [3, 8, 6, 4, 8, 8, 8, 8, 3, 3, 3, 3, 6, 8];
-//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^rain ^tmin
+export const VAR_BITS_V1 = [3, 8, 6, 4, 8, 8, 8, 8, 3, 3, 3, 3, 6];
+//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^rain
 
 const TEMP_OFFSET = 100;
 
@@ -110,16 +108,13 @@ function clampInt(v: number, width: number): number {
   return Math.min(Math.max(v, 0), (1 << width) - 1);
 }
 
-// temp/tmin: entropy-coded period-over-period deltas (see TEMP_DELTA_* in entropy.ts), not plain
-// scalar columns — each model's first period is an anchor at full width, quantized the same way.
-// Both fields share one codebook set: a min-of-window series behaves like a max-of-window one
-// (same offset, same ~1°C-step physical process), so there's no need to derive a second table.
+// temp: entropy-coded period-over-period deltas (see TEMP_DELTA_* in entropy.ts), not a plain
+// scalar column — each model's first period is an anchor at full width, quantized the same way.
 const TEMP_ANCHOR_BITS = VAR_BITS_V1[VARS_BIT.temp];
-const quantTemp = (p: Period, field: "temp_c" | "temp_min_c"): number =>
+const quantTemp = (p: Period, field: "temp_c"): number =>
   clampInt(Math.round((p[field] ?? 0) + TEMP_OFFSET), TEMP_ANCHOR_BITS);
-const TEMP_DELTA_COLUMNS: [bit: number, field: "temp_c" | "temp_min_c", name: string][] = [
+const TEMP_DELTA_COLUMNS: [bit: number, field: "temp_c", name: string][] = [
   [VARS_BIT.temp, "temp_c", "temp"],
-  [VARS_BIT.tmin, "temp_min_c", "tmin"],
 ];
 
 // freeze: entropy-coded period-over-period deltas under a single shared table (see FREEZE_DELTA
@@ -156,7 +151,7 @@ const SCALAR_COLUMNS: ScalarColumn[] = [
   { bit: 0, mode: "adaptive",
     get: (p) => clampInt(Math.round((p.precip ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.precip = Math.round(v * 100 / 7); } },
-  // temp (bit 1) and tmin (bit 13) are handled separately in buildBody/decode below.
+  // temp (bit 1) is handled separately in buildBody/decode below.
   { bit: 2, mode: "adaptive",
     get: (p) => compandSqrt(p.snow_cm ?? 0, SNOW_K, ACCUM_BITS),
     set: (p, v) => { p.snow_cm = expandSqrt(v, SNOW_K); } },
@@ -392,9 +387,9 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
   });
   mark("weathercode", before, -1);
 
-  // temp/tmin: per model, an anchor (first period, full width) followed by entropy-coded
-  // period-over-period deltas — never diffed across a model boundary. Each column picks its own
-  // cheapest-of-16 table (see TEMP_DELTA_* in entropy.ts) from the same shared codebook set.
+  // temp: per model, an anchor (first period, full width) followed by entropy-coded
+  // period-over-period deltas — never diffed across a model boundary. The column picks the
+  // cheapest-of-16 table (see TEMP_DELTA_* in entropy.ts).
   // A delta beyond the escape field's range (|jump| > 32°C between periods — possible at daily
   // resolution) is clamped to TEMP_DELTA_MIN..TEMP_DELTA_MAX, and every later delta is diffed
   // against the decoder's reconstruction, so the error heals on the next period instead of

@@ -18,7 +18,7 @@ import {
   type RequestContext,
 } from "@weather/protocol";
 
-const ALL_VARS = (1 << 14) - 1;
+const ALL_VARS = (1 << 13) - 1;
 const UTC_OFFSET = 0;
 // Request at midnight (whole day 0) and mid-afternoon (partial day 0) to cover both layouts.
 const REQUEST_HOURS_OF_DAY = [0, 13];

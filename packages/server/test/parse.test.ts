@@ -135,9 +135,9 @@ describe("parseRequest", () => {
     expect(parseRequest("").utcOffsetHours).toBe(0);
   });
 
-  it("keeps tmin in the vars mask (mixed messages need uniform columns)", () => {
+  it("ignores removed var tokens (tmin is no longer a variable)", () => {
     const p = parseRequest("d:3 v:temp,tmin");
-    expect(p.varsMask & (1 << VARS_BIT["tmin"])).not.toBe(0);
+    expect(p.varsMask).toBe(1 << VARS_BIT["temp"]);
   });
 
   it("u: extracts a valid account token", () => {

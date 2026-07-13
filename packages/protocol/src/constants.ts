@@ -24,7 +24,7 @@ export const MODEL_NAMES: string[] = ["ECMWF IFS HRES", "GFS", "ICON", "ECMWF IF
 // vars_mask bit indices
 export const VARS_BIT: Record<string, number> = {
   precip: 0,
-  temp: 1,   // max temperature
+  temp: 1,   // representative temperature sample (see Period.temp_c in model.ts)
   snow: 2,
   freeze: 3,
   wind: 4,   // surface (10m) wind
@@ -36,7 +36,8 @@ export const VARS_BIT: Record<string, number> = {
   ccm: 10,   // mid cloud cover
   ccl: 11,   // low cloud cover
   rain: 12,  // liquid precipitation (rain + showers), mm
-  tmin: 13,  // min temperature
+  // bit 13 formerly carried tmin (min temperature), removed when temp became a single
+  // representative sample per period — reserved for the next new variable.
 };
 
 export const WMO_BITS = 5;

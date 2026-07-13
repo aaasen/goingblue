@@ -11,9 +11,12 @@ export interface Period {
   // Probability of precipitation.
   precip?: number;
 
-  // Maximum and minimum air temperature in Celsius.
+  // Air temperature in Celsius: one representative sample of the hourly curve per period —
+  // the daily-extreme value for the period containing the local day's min (or max), the
+  // period's midpoint sample otherwise. Daily min/max are therefore recoverable client-side
+  // as min/max over a local day's periods; which sample the encoder picks is server policy,
+  // not wire format.
   temp_c?: number;
-  temp_min_c?: number;
 
   // Snow accumulation in centimeters.
   snow_cm?: number;

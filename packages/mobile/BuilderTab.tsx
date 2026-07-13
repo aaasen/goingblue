@@ -57,7 +57,7 @@ const DURATIONS = [
 ];
 
 // Variables included in every request; not user-selectable.
-const ALWAYS_VARS = ['precip', 'temp', 'tmin', 'snow', 'rain', 'wind'];
+const ALWAYS_VARS = ['precip', 'temp', 'snow', 'rain', 'wind'];
 
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
 // protocol variables together (e.g. "Clouds" covers high/mid/low cloud cover, not total).

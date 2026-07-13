@@ -252,10 +252,10 @@ function buildRows(periods: Period[], u: Units): Row[] {
   rows.push({ kind: 'clouds', height: ROW_H.CLOUD, label: '' });
 
   const hasSurface =
-    has((p) => p.precip) || has((p) => p.temp_c) || has((p) => p.temp_min_c) ||
+    has((p) => p.precip) || has((p) => p.temp_c) ||
     has((p) => p.snow_cm) || has((p) => p.rain_mm) || has((p) => p.freeze_m) || has((p) => p.wind_sfc_kph);
   if (hasSurface) {
-    if (has((p) => p.temp_c) || has((p) => p.temp_min_c))
+    if (has((p) => p.temp_c))
       rows.push({ kind: 'temp', height: ROW_H.TEMP, label: `Temp ${tU}` });
     if (has((p) => p.freeze_m)) rows.push({ kind: 'freeze', height: ROW_H.DATA, label: `Freezing ${frU}` });
     if (has((p) => p.precip) || has((p) => p.snow_cm) || has((p) => p.rain_mm))
@@ -415,9 +415,9 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
   });
   els.push(<Line key="date-row-rule" p1={vec(NAME_W, 31)} p2={vec(width, 31)} color={C.grid} strokeWidth={1} />);
 
-  // Temperature domain across all periods (max + min).
+  // Temperature domain across all periods.
   const temps: number[] = [];
-  periods.forEach((p) => { if (p.temp_c != null) temps.push(p.temp_c); if (p.temp_min_c != null) temps.push(p.temp_min_c); });
+  periods.forEach((p) => { if (p.temp_c != null) temps.push(p.temp_c); });
   const tMin = temps.length ? Math.min(...temps) - 1 : 0;
   const tMax = temps.length ? Math.max(...temps) + 1 : 1;
 
@@ -429,7 +429,7 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
     tempRowBottom += row.height;
     if (row.kind === 'temp') break;
   }
-  const plottedTemps = periods.map((p) => p.temp_c ?? p.temp_min_c);
+  const plottedTemps = periods.map((p) => p.temp_c);
   if (temps.length && plottedTemps.some((temperature) => temperature != null)) {
     const plotTop = 39;
     const plotBottom = tempRowBottom - 18;

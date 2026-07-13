@@ -7,13 +7,13 @@
     "durationDays": 3,
     "utcOffsetHours": -9
   },
-  "encoded": "\"!!&#sPYWxWOBF(N#$=*6S1z%-mKmt+GB<Vz7,Jerw_OG;pp00D<Il3pMcWw=s<a\"Y6;3(*Yd<mo-!M2",
+  "encoded": "\"!!&#Yf6yW/hEX'X4auA;;:=6RC6v+Gel-tGC\"I=mUTtF'j'XFSk89/nbzbFW#<(R3BI#/R/7)3",
   "decoded": {
     "version": 1,
     "code": 0,
     "days": 3,
     "models_mask": 1,
-    "vars_mask": 16383,
+    "vars_mask": 8191,
     "month": 6,
     "day": 15,
     "hour": 21,
@@ -25,7 +25,6 @@
         {
           "weathercode": 3,
           "temp_c": -8,
-          "temp_min_c": -15,
           "freeze_m": 3048,
           "cloud_high": 57,
           "cloud_mid": 43,
@@ -46,7 +45,6 @@
         {
           "weathercode": 61,
           "temp_c": -4,
-          "temp_min_c": -12,
           "freeze_m": 2438.4,
           "cloud_high": 86,
           "cloud_mid": 71,
@@ -67,7 +65,6 @@
         {
           "weathercode": 2,
           "temp_c": -12,
-          "temp_min_c": -20,
           "freeze_m": 3352.8,
           "cloud_high": 14,
           "cloud_mid": 0,
@@ -88,7 +85,6 @@
         {
           "weathercode": 71,
           "temp_c": -10,
-          "temp_min_c": -17,
           "freeze_m": 2743.2000000000003,
           "cloud_high": 86,
           "cloud_mid": 57,
@@ -109,7 +105,6 @@
         {
           "weathercode": 3,
           "temp_c": -7,
-          "temp_min_c": -14,
           "freeze_m": 2743.2000000000003,
           "cloud_high": 57,
           "cloud_mid": 29,
@@ -130,7 +125,6 @@
         {
           "weathercode": 61,
           "temp_c": -5,
-          "temp_min_c": -11,
           "freeze_m": 2438.4,
           "cloud_high": 86,
           "cloud_mid": 71,

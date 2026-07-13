@@ -133,8 +133,7 @@ export interface HourlyData {
 
 export interface Row {
   time: string;
-  temp_max_c: number | null;
-  temp_min_c: number | null;
+  temp_c: number | null;
   wind_speed_10m: number | null;
   wind_direction_10m: number | null;
   precip: number | null;
@@ -218,6 +217,7 @@ export function aggregateHourly(
   nPeriods: number,
   resolutionIdx: number,
   startEpochHour: number,
+  utcOffsetHours = 0,
 ): Row[] {
   const hoursPerPeriod = HOURS_PER_PERIOD[resolutionIdx];
   const nTotal = nPeriods;
@@ -242,13 +242,115 @@ export function aggregateHourly(
     windowMap.get(key)!.push(i);
   }
 
-  return rowsFromWindows(h, times, windows);
+  return rowsFromWindows(h, times, windows, utcOffsetHours);
+}
+
+// One representative temperature per window: a real sample of the hourly curve, chosen so that
+// min/max over a local day's reported values recover the daily extremes:
+//   - the window containing the local day's min reports that min; likewise the max;
+//   - every other window reports its midpoint sample;
+//   - when both extremes fall in one window (~11% of days at 12h, mostly evening declines),
+//     that window keeps whichever extreme the day's other windows patch worse, and the best
+//     patching window reports its own min/max instead of its midpoint.
+// Extremes are identified at wire precision (1°C), so quantization ties leave room to separate
+// them; the reported values are raw hourly samples. This selection is encoder policy, not wire
+// format — the wire only promises one real sample per period (see Period.temp_c in the protocol).
+export function representativeTemps(
+  temps: (number | null)[] | undefined,
+  times: string[],
+  windows: number[][],
+  utcOffsetHours: number,
+): (number | null)[] {
+  // Default: the window's midpoint sample (nearest non-null hour to the middle).
+  const midSample = (idx: number[]): number | null => {
+    const mid = idx.length >> 1;
+    for (let d = 0; d < idx.length; d++) {
+      for (const j of d === 0 ? [mid] : [mid - d, mid + d]) {
+        const t = j >= 0 && j < idx.length ? temps?.[idx[j]] : null;
+        if (t != null) return t;
+      }
+    }
+    return null;
+  };
+  const out = windows.map(midSample);
+
+  // Group windows by the local day of their first hour (windows never straddle local days —
+  // the layout is local-midnight-justified with this same offset).
+  const byDay = new Map<number, number[]>();
+  windows.forEach((idx, p) => {
+    if (idx.length === 0) return;
+    const utcHour = Math.floor(Date.parse(`${times[idx[0]]}:00Z`) / 3600000);
+    const day = Math.floor((utcHour + utcOffsetHours) / 24);
+    const wins = byDay.get(day);
+    if (wins) wins.push(p); else byDay.set(day, [p]);
+  });
+
+  for (const wins of byDay.values()) {
+    // Per-window raw extremes over non-null hours.
+    const lo = new Map<number, number>();
+    const hi = new Map<number, number>();
+    for (const p of wins) {
+      for (const i of windows[p]) {
+        const t = temps?.[i];
+        if (t == null) continue;
+        if (!lo.has(p) || t < lo.get(p)!) lo.set(p, t);
+        if (!hi.has(p) || t > hi.get(p)!) hi.set(p, t);
+      }
+    }
+    const withData = wins.filter((p) => lo.has(p));
+    if (withData.length === 0) continue;
+
+    const dayMin = Math.min(...withData.map((p) => Math.round(lo.get(p)!)));
+    const dayMax = Math.max(...withData.map((p) => Math.round(hi.get(p)!)));
+    if (dayMin === dayMax) continue; // flat day: every sample already recovers both extremes
+
+    const pMin = withData.filter((p) => Math.round(lo.get(p)!) === dayMin);
+    const pMax = withData.filter((p) => Math.round(hi.get(p)!) === dayMax);
+
+    if (pMin.length > 1 || pMax.length > 1 || pMin[0] !== pMax[0]) {
+      // Separable: report each extreme from a distinct window.
+      const pm = pMin.find((p) => !pMax.includes(p)) ?? pMin[0];
+      const px = pMax.find((p) => p !== pm)!;
+      out[pm] = lo.get(pm)!;
+      out[px] = hi.get(px)!;
+    } else {
+      // Collision: both extremes confined to one window.
+      const pc = pMin[0];
+      const others = withData.filter((p) => p !== pc);
+      if (others.length === 0) {
+        // Single-window (partial) day: keep the max — partial day-0 windows start at the
+        // request period and usually contain the remaining day's high.
+        out[pc] = hi.get(pc)!;
+        continue;
+      }
+      let poMin = others[0], poMax = others[0];
+      for (const p of others) {
+        if (lo.get(p)! < lo.get(poMin)!) poMin = p;
+        if (hi.get(p)! > hi.get(poMax)!) poMax = p;
+      }
+      const errKeepMax = Math.round(lo.get(poMin)!) - dayMin;
+      const errKeepMin = dayMax - Math.round(hi.get(poMax)!);
+      if (errKeepMax <= errKeepMin) {
+        out[pc] = hi.get(pc)!;
+        out[poMin] = lo.get(poMin)!;
+      } else {
+        out[pc] = lo.get(pc)!;
+        out[poMax] = hi.get(poMax)!;
+      }
+    }
+  }
+  return out;
 }
 
 // Aggregate hourly samples into one Row per window (a window is the hourly indices it covers).
 // Shared by the uniform-resolution keying above and the layout-driven windows (v2) below.
-function rowsFromWindows(h: HourlyData, times: string[], windows: number[][]): Row[] {
-  const rows = windows.map((idx) => {
+// `utcOffsetHours` defines the local days the representative temp selection works over; the
+// UTC-keyed aggregation paths (scripts/corpus) pass 0, matching their UTC-aligned windows.
+function rowsFromWindows(
+  h: HourlyData, times: string[], windows: number[][], utcOffsetHours = 0,
+): Row[] {
+  const repTemps = representativeTemps(h.temperature_2m, times, windows, utcOffsetHours);
+  const rows = windows.map((idx, w) => {
     // Null-safe: a series may be entirely absent when aggregating injected data (e.g. an offline
     // corpus that omits precipitation_probability); production always supplies these arrays.
     const pick = (arr: (number | null)[] | undefined): (number | null)[] =>
@@ -267,8 +369,7 @@ function rowsFromWindows(h: HourlyData, times: string[], windows: number[][]): R
 
     return {
       time: times[idx[0]],
-      temp_max_c: maxOf(pick(h.temperature_2m)),
-      temp_min_c: minOf(pick(h.temperature_2m)),
+      temp_c: repTemps[w],
       wind_speed_10m: maxOf(sfcSpd),
       wind_direction_10m: dominantDirDeg(sfcSpd, sfcDir),
       precip: maxOf(pick(h.precipitation_probability)),
@@ -296,14 +397,11 @@ function rowsFromWindows(h: HourlyData, times: string[], windows: number[][]): R
 const PRESSURE_VAR_BITS =
   (1 << VARS_BIT.freeze) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
 
-// tmin is kept even for 1h periods (where it equals temp — the delta columns encode the
-// duplication away) so a mixed-resolution message has uniform columns.
 export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period {
   if (MODEL_NO_PRESSURE.has(modelKey)) varsMask &= ~PRESSURE_VAR_BITS;
   const p: Period = { weathercode: r.weathercode ?? 0 };
   if (varsMask & (1 << VARS_BIT.precip)) p.precip     = r.precip ?? 0;
-  if (varsMask & (1 << VARS_BIT.temp))   p.temp_c     = r.temp_max_c ?? 0;
-  if (varsMask & (1 << VARS_BIT.tmin))   p.temp_min_c = r.temp_min_c ?? 0;
+  if (varsMask & (1 << VARS_BIT.temp))   p.temp_c     = r.temp_c ?? 0;
   if (varsMask & (1 << VARS_BIT.snow))   p.snow_cm    = r.snow_cm ?? 0;
   if (varsMask & (1 << VARS_BIT.rain))   p.rain_mm    = r.rain_mm ?? 0;
   if (varsMask & (1 << VARS_BIT.freeze)) p.freeze_m   = r.freezing_level_m ?? 0;
@@ -493,7 +591,7 @@ export function encodeFillSeq(
   });
   if (windows.some((w) => w.length === 0)) return null;
 
-  const rows = rowsFromWindows(h, times, windows);
+  const rows = rowsFromWindows(h, times, windows, params.utcOffsetHours);
   const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
 
   const msg: ForecastMessage = {

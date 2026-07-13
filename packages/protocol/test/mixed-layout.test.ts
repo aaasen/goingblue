@@ -13,8 +13,8 @@ import {
   type FillLayout,
 } from "../src/index.js";
 
-// Every variable (bit 12 is `rain`, bit 13 `tmin`).
-const ALL_VARS = (1 << 14) - 1;
+// Every variable (bit 12 is `rain`; bit 13, formerly tmin, is reserved).
+const ALL_VARS = (1 << 13) - 1;
 
 // Request: 2026-07-12 at 13:00 local, UTC-9, 10 days.
 const DURATION_DAYS = 10;
@@ -27,7 +27,6 @@ function periodAt(i: number): Period {
     weathercode: [0, 3, 61, 71, 95][i % 5],
     precip: (i * 13) % 101,
     temp_c: -5 + (i % 7),
-    temp_min_c: -9 + (i % 7),
     snow_cm: i % 4 === 0 ? i % 11 : 0,
     rain_mm: i % 3 === 0 ? (i % 5) : 0,
     freeze_m: (2 + (i % 3)) * 304.8,
@@ -117,7 +116,6 @@ describe("mixed-layout round-trip encoding", () => {
       const d = decoded.periods[0][i];
       expect(d.weathercode).toBe(p.weathercode);
       expect(d.temp_c).toBe(p.temp_c);
-      expect(d.temp_min_c).toBe(p.temp_min_c);
       expect(d.freeze_m).toBeCloseTo(p.freeze_m!, 5);
       expect(d.wind_sfc_kph).toBeCloseTo(p.wind_sfc_kph!, 5);
       expect(d.wind_sfc_dir).toBe(p.wind_sfc_dir);
@@ -170,6 +168,5 @@ describe("mixed-layout round-trip encoding", () => {
     const names = b.columns.map((c) => c.name);
     expect(names).toContain("weathercode");
     expect(names).toContain("temp");
-    expect(names).toContain("tmin");
   });
 });

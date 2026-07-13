@@ -49,7 +49,7 @@ function syntheticHourly(startUtcHour: number, nHours: number): { h: HourlyData;
 const DATA_START = Math.floor(REQ_UTC_HOUR / 24) * 24 - 24;
 const { h: HOURLY, times: TIMES } = syntheticHourly(DATA_START, 13 * 24);
 
-const TEST_VARS = DEFAULT_VARS_MASK | (1 << VARS_BIT.temp) | (1 << VARS_BIT.tmin) | (1 << VARS_BIT.wind);
+const TEST_VARS = DEFAULT_VARS_MASK | (1 << VARS_BIT.temp) | (1 << VARS_BIT.wind);
 
 function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
   return {
@@ -121,8 +121,9 @@ describe("encodeFillSeq", () => {
   it("aggregates day 0's 12h period from local noon, including the hour before the request", () => {
     const enc = encodeSeq(params());
     const decoded = decodeMessage(enc(DURATION_DAYS)!, () => ctx);
-    // Day 0's first period spans local 12:00–24:00; the synthetic temp maximum in that window
-    // must include the complete period, including the hour before the 13:00 request.
+    // Day 0's first period spans local 12:00–24:00 and is that local day's only window, so the
+    // representative sample is the window max — computed over the complete period, including
+    // the hour before the 13:00 request.
     const day0Local = Math.floor((REQ_UTC_HOUR + UTC_OFFSET) / 24) * 24;
     const dayTemps = HOURLY.temperature_2m.slice(
       day0Local + 12 - UTC_OFFSET - DATA_START, day0Local - UTC_OFFSET - DATA_START + 24) as number[];

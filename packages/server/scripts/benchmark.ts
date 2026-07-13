@@ -240,7 +240,7 @@ const RESOLUTION_ORDER = ["1h", "3h", "6h"]; // selector order (fine → coarse)
 
 // Protocol variable groups, mirroring the app (BuilderTab.tsx). weathercode is always encoded by the
 // protocol (not in a mask). BASE is always on; each toggleable group maps to protocol var bits.
-const BASE_VARS = ["precip", "temp", "tmin", "snow", "rain", "wind"];
+const BASE_VARS = ["precip", "temp", "snow", "rain", "wind"];
 const GROUP_VARS: Record<GroupId, string[]> = {
   clouds: ["cch", "ccm", "ccl"],
   highwind: ["w500", "w600", "w700"],
