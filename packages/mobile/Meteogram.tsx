@@ -11,11 +11,16 @@ import {
 import type { TimeFormat, Units } from './settings';
 
 // ── Layout constants ───────────────────────────────────────────────────────
-// The row-label column lives inside the canvas and scrolls horizontally with the
-// data (one canvas keeps panning trivial). Units are folded into the labels.
+// The row-label column lives inside the drawing and scrolls horizontally with the
+// data. Units are folded into the labels.
 
 const NAME_W = 96;
 const CELL_W = 60;
+// A Canvas is backed by a CAMetalLayer whose drawable size is measured in physical
+// pixels. A single canvas spanning a long hourly forecast can exceed Metal's maximum
+// texture width on Retina devices and abort the entire process. Keep each drawable
+// narrow and let FlatList virtualize the off-screen tiles.
+const CANVAS_TILE_W = CELL_W * 12;
 
 const ROW_H = {
   DATE: 58,
@@ -380,6 +385,10 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
   const n = periods.length;
   const width = NAME_W + n * CELL_W;
   const totalH = ROW_H.DATE + rows.reduce((s, r) => s + r.height, 0);
+  const tiles = Array.from({ length: Math.ceil(width / CANVAS_TILE_W) }, (_, index) => {
+    const offset = index * CANVAS_TILE_W;
+    return { offset, width: Math.min(CANVAS_TILE_W, width - offset) };
+  });
   const colLeft = (i: number) => NAME_W + i * CELL_W;
   const colCenter = (i: number) => NAME_W + i * CELL_W + CELL_W / 2;
 
@@ -662,18 +671,32 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
 
   return (
     <View style={{ height: totalH }}>
-      <Animated.ScrollView
+      <Animated.FlatList
+        data={tiles}
         horizontal
         bounces={false}
         showsHorizontalScrollIndicator
         scrollEventThrottle={16}
+        keyExtractor={(tile) => String(tile.offset)}
+        initialNumToRender={1}
+        maxToRenderPerBatch={2}
+        windowSize={3}
+        removeClippedSubviews
+        getItemLayout={(_, index) => ({
+          length: CANVAS_TILE_W,
+          offset: CANVAS_TILE_W * index,
+          index,
+        })}
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { x: scrollX } } }],
           { useNativeDriver: true },
         )}
-      >
-        <Canvas style={{ width, height: totalH }}>{els}</Canvas>
-      </Animated.ScrollView>
+        renderItem={({ item: tile }) => (
+          <Canvas style={{ width: tile.width, height: totalH }}>
+            <Group transform={[{ translateX: -tile.offset }]}>{els}</Group>
+          </Canvas>
+        )}
+      />
       <View pointerEvents="none" style={styles.stickyDayRow}>
         {dayGroups.map((group, i) => {
           const label = dayLabel(group.date);
