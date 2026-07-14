@@ -135,3 +135,22 @@ Huffman coding is a huge improvement over the original binary encoding, but it s
 Eventually, I settled on a single model to represent all weather variables. 
 
 Each variable can be represented by a Markov chain with a discrete set of states and transition probabilities. The states either represent the previous value or the previous delta. Previous value is used for variables that have a small range of values, e.g. wind direction, weathercode, rain amount (bucketed). Previous delta is used for variables that have a large range of values and where the previous delta is more predictive than the previous value. For example, temperature is encoded using previous delta. If I want to know how much the temperature will change in the next hour, it's more useful to know that it increased by 1C in the previous hour than it is to know that it is currently 25C. Conversely, if I want to know how much it will snow in the next hour, it's more useful to know that it snowed 2cm in the last hour than it is to know that the snowfall rate increased by 1cm in the last hour.
+
+## Improving Model Context
+
+With all variables unified in the Markov rANS model, context becomes the main lever for improving compression performance.
+
+For example, for temperature we can use the following context:
+ - Forecast resolution
+ - Time of day (8 buckets)
+ - Previous delta (5 buckets)
+
+ I also experimented with using solar elevation instead of time of day but it was not as effective.
+
+
+
+# References
+
+ - Compression by trimming the mantissa of floating point numbers to exclude those that contain "false information"/noise. https://www.nature.com/articles/s43588-021-00156-2
+ - ECMWF Code 4 Earth: https://github.com/ECMWFCode4Earth/Challenges_2026
+ - rANS explanation: https://kedartatwawadi.github.io/post--ANS/
