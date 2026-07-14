@@ -58,11 +58,13 @@ encoding schemes or mode selectors — what varies per variable is only:
   already-decoded same-period values. A column's first symbol, having no predecessor, is coded
   under a per-variable bootstrap table.
 
-Temperature is the one column with any per-message signaling: a 4-bit selector picks the cheapest
-of 16 delta tables (worth ~0.2 bits/period held-out, because temp spans every resolution), and
-deltas beyond ±7 °C escape to a raw 6-bit field. Every other column's tables are fully determined
-by shared context. All context choices are validated held-out (5-fold, split by location) in the
-`packages/server/scripts/derive-*-codebooks.ts` scripts that generate the tables.
+No column carries any per-message signaling: every codebook choice is fully determined by shared
+context. (Temperature was the last holdout — a 4-bit cheapest-of-16 table selector — until a
+held-out conditioning ladder showed the selector was mostly re-discovering resolution, which is
+free; its tables are now keyed by resolution × time-of-day × previous delta instead. Deltas beyond
+±7 °C still escape to a raw 6-bit field.) All context choices are validated held-out (5-fold,
+split by location) — see the `packages/server/scripts/derive-*-codebooks.ts` scripts that generate
+the tables, and `analyze-temp-heldout.ts` for the temperature ladder.
 
 ### Header
 
@@ -108,7 +110,7 @@ encoder wrote, so trailing zero words are simply dropped.
 | Variable             | Model | States (the symbol alphabet)                          | Codebook keyed by                              | Quantization                          |
 | -------------------- | ----- | ------------------------------------------------------ | ---------------------------------------------- | ------------------------------------- |
 | weathercode          | value | 28 WMO codes                                            | previous code                                  | —                                     |
-| temperature          | delta | Δ°C −7…+7, plus an escape symbol + raw 6-bit (−32…+31) | cheapest-of-16 table, 4-bit per-message selector | 1 °C steps, −100…+155 °C; 8-bit anchor |
+| temperature          | delta | Δ°C −7…+7, plus an escape symbol + raw 6-bit (−32…+31) | resolution × time-of-day (8 × 3h local buckets) × previous-delta bucket (≤−2 \| −1 \| 0 \| +1 \| ≥+2) | 1 °C steps, −100…+155 °C; 8-bit anchor |
 | precipitation prob.  | value | eighths 0…7                                             | resolution × previous value                    | 0–100% in eighths                     |
 | snow                 | value | 64 companded steps                                      | resolution × previous-value bucket (0 \| 1–3 \| 4–9 \| 10–20 \| 21+) | sqrt-companded, 0–200 cm |
 | rain                 | value | 64 companded steps                                      | resolution × previous-value bucket (same)      | sqrt-companded, 0–144 mm              |
@@ -300,6 +302,17 @@ pnpm benchmark --request-hour 18   # local hour of the request (default 7)
     isn't comparable to earlier entries.) Mean fill across all duration × variable views
     72.3% → 77.0%; per view +2.6 to +7.3 points (+2.7% to +11.3%), e.g. 7d base 78.2% → 85.1%
     and 10d base 64.4% → 71.7%.
+18. Context-conditioned temperature deltas: the cheapest-of-16 k-means tables + 4-bit
+    per-message selector give way to codebooks keyed by (resolution × time-of-day × previous
+    delta) — all context both sides already have, so temp joins the unified model with zero
+    per-message signaling. A held-out conditioning ladder (analyze-temp-heldout.ts) showed the
+    old selector was mostly re-discovering resolution (res alone: 2.678 b/period vs 2.640 for
+    the full selector); time-of-day (8 × 3h local buckets) captures the diurnal delta sign, and
+    the previous-delta bucket adds the airmass's actual trajectory — a sign-consistent gain in
+    all 5 location-folds. Solar elevation was measured and rejected (≈ time-of-day overall,
+    worse at 12h — not worth pinning a solar formula into wire format). Held-out: 2.648 →
+    2.335 b/period; per resolution 12h 5.367 → 5.065, 6h 4.244 → 3.742, 3h 3.232 → 2.836,
+    1h 1.980 → 1.724.
 
 ## License
 

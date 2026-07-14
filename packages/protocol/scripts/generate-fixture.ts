@@ -38,6 +38,7 @@ const input: ForecastMessage = {
   seq,
   durationDays: request.durationDays,
   periodHours: layout.periodHours,
+  utcOffsetHours: request.utcOffsetHours,
   periods: [[
     { weathercode: 3,  precip: 57, temp_c: -8,  snow_cm: 0, rain_mm: 0,   freeze_m: 3048,   wind_sfc_kph: 16, wind_sfc_dir: 5, wind_500_kph: 48, wind_500_dir: 4, wind_600_kph: 40, wind_600_dir: 3, wind_700_kph: 24, wind_700_dir: 2, cloud_high: 60, cloud_mid: 40, cloud_low: 20 },
     { weathercode: 61, precip: 86, temp_c: -4,  snow_cm: 5, rain_mm: 3.5, freeze_m: 2438.4, wind_sfc_kph: 24, wind_sfc_dir: 5, wind_500_kph: 56, wind_500_dir: 3, wind_600_kph: 48, wind_600_dir: 3, wind_700_kph: 32, wind_700_dir: 3, cloud_high: 90, cloud_mid: 70, cloud_low: 60 },

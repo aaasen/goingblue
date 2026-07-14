@@ -1,142 +1,123 @@
 /**
- * Derive temperature-delta Huffman codebooks by k-means clustering the corpus's per-(forecast ×
- * resolution) hour-to-hour temp_c delta distributions. Samples are pooled across ALL resolutions
- * (1h/3h/6h/12h/24h) — the encoder doesn't know resolution in advance (it's off the wire, and a
- * message can even mix resolutions in a future dynamic-duration scheme), so the codebook selector
- * must earn its keep on the actual delta shape, not a hardcoded resolution. Alphabet: deltas -7..7
- * (15 symbols) map to indices 0..14, plus an ESCAPE symbol (index 15) for |delta|>7, followed by a
- * raw 6-bit signed (bias 32) field. k=TEMP_DELTA_TABLE_COUNT clusters → that many codebooks.
+ * Derive temperature-delta codebooks keyed by (resolution, previous-delta bucket, time-of-day
+ * bucket) — context both sides already have, so none of it costs wire bits. This replaced the
+ * cheapest-of-16 k-means tables + 4-bit per-message selector: the selector was mostly
+ * re-discovering resolution (which is free), and the held-out ladder (5-fold by location, see
+ * analyze-temp-heldout.ts) found
+ *
+ *   shipped ×16 + selector 2.648 b/period
+ *   res only               2.678
+ *   tod8 × res             2.388
+ *   prevΔ × tod8 × res     2.335   ← shipped (prevΔ's ~0.05 was sign-consistent in all 5 folds)
+ *
+ * Alphabet: deltas -7..7 (indices 0..14) + ESCAPE (15) followed by a raw 6-bit signed field.
+ * Contexts: 5 prevΔ buckets (tempDeltaBucket) × 8 uniform 3h time-of-day buckets of the arriving
+ * period's local midpoint (tempTodBucket) per resolution row, plus one pooled bootstrap table
+ * for a column's first delta (no predecessor). Both context functions are imported from the
+ * protocol package so derivation and wire can't drift.
+ *
+ * Training mirrors the wire exactly: local-midnight-aligned uniform windows per resolution (the
+ * alignment layoutFor produces), representativeTemps sampling, 1 °C quantization, clamp-to-±32
+ * deltas diffed against the reconstruction. The 24h row (resolution index 0) is trained too even
+ * though fill layouts never emit 24h periods — it keeps the [res][ctx][sym] shape uniform with
+ * the other resolution-keyed tables.
  *
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
  *   node packages/server/scripts/derive-temp-delta-codebooks.ts
  */
-import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
-import { VARS_BIT } from "@weather/protocol";
-import { eachForecast, huffmanLengths, WEIGHT_SCALE, runStandalone, type DerivedTables } from "./derive-lib.ts";
+import { rowsFromWindows, HOURS_PER_PERIOD } from "../src/forecast.ts";
+import {
+  tempDeltaBucket, tempTodBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_TOD_BUCKETS,
+  TEMP_DELTA_CORE_RADIUS, TEMP_DELTA_MIN, TEMP_DELTA_MAX, TEMP_DELTA_ESCAPE_BITS,
+} from "@weather/protocol";
+import { eachForecast, scaledWeights, runStandalone, type DerivedTables } from "./derive-lib.ts";
 
-const K = 16;                    // codebook count — fills a 4-bit table selector
-const CORE_RADIUS = 7;           // symbols 0..14 = deltas -7..7
-const NSYM = 2 * CORE_RADIUS + 2; // 16: 15 core + 1 escape
-const ESCAPE_SYM = NSYM - 1;     // 15
-const ESCAPE_BITS = 6;           // raw payload width when escape fires (bias 32, range -32..31)
-const RES_IDXS = [0, 1, 2, 3, 4]; // 24h, 12h, 6h, 3h, 1h
-const RAW_BITS = 8;              // cost of the fixed-width fallback (current 8-bit raw field)
+const NSYM = 2 * TEMP_DELTA_CORE_RADIUS + 2; // 16: 15 core + escape
+const ESCAPE_SYM = NSYM - 1;
+const NRES = 5; // 24h/12h/6h/3h/1h — row 0 (24h) is dead in fill layouts but kept for shape
+const NCTX = TEMP_DELTA_PREV_BUCKETS * TEMP_DELTA_TOD_BUCKETS; // 40
 
-function rng(seed: number) {
-  return () => {
-    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function deltaSym(delta: number): number {
-  return Math.abs(delta) <= CORE_RADIUS ? delta + CORE_RADIUS : ESCAPE_SYM;
-}
-
-interface Sample { resIdx: number; hist: number[]; }
-
-// One normalized NSYM-bin delta histogram per (forecast, resolution).
-async function collectSamples(): Promise<Sample[]> {
-  const out: Sample[] = [];
-  await eachForecast((h, startHour) => {
-    for (const resIdx of RES_IDXS) {
-      const n = Math.floor(h.time.length / HOURS_PER_PERIOD[resIdx]);
-      if (n < 3) continue; // need at least 2 deltas for a meaningful sample
-      const periods = aggregateHourly(h, h.time, n, resIdx, startHour).map((r) => toFullPeriod(r, 1 << VARS_BIT.temp, "GFS", resIdx));
-      const hist = new Array(NSYM).fill(0);
-      let count = 0;
-      for (let i = 1; i < periods.length; i++) {
-        const prev = periods[i - 1].temp_c, cur = periods[i].temp_c;
-        if (prev == null || cur == null) continue;
-        hist[deltaSym(Math.round(cur) - Math.round(prev))]++;
-        count++;
-      }
-      if (count > 0) out.push({ resIdx, hist: hist.map((c) => c / count) });
-    }
-  });
-  return out;
-}
-
-const dist2 = (a: number[], b: number[]) => a.reduce((s, x, i) => s + (x - b[i]) ** 2, 0);
-const nearest = (x: number[], cs: number[][]) => {
-  let best = 0, bd = Infinity;
-  for (let c = 0; c < cs.length; c++) { const d = dist2(x, cs[c]); if (d < bd) { bd = d; best = c; } }
-  return best;
-};
-
-function kmeans(data: number[][], k: number, restarts = 10) {
-  const rand = rng(42);
-  let best: { centroids: number[][]; inertia: number } | null = null;
-  for (let r = 0; r < restarts; r++) {
-    const centroids: number[][] = [data[Math.floor(rand() * data.length)].slice()];
-    while (centroids.length < k) {
-      const d2 = data.map((x) => dist2(x, centroids[nearest(x, centroids)]));
-      const sum = d2.reduce((a, b) => a + b, 0) || 1;
-      let t = rand() * sum, i = 0;
-      while (t > d2[i] && i < data.length - 1) t -= d2[i++];
-      centroids.push(data[i].slice());
-    }
-    const assign = new Array(data.length).fill(-1);
-    for (let it = 0; it < 100; it++) {
-      let changed = false;
-      for (let i = 0; i < data.length; i++) { const a = nearest(data[i], centroids); if (a !== assign[i]) { assign[i] = a; changed = true; } }
-      if (!changed) break;
-      const sums = centroids.map(() => new Array(NSYM).fill(0));
-      const counts = new Array(k).fill(0);
-      for (let i = 0; i < data.length; i++) { counts[assign[i]]++; for (let d = 0; d < NSYM; d++) sums[assign[i]][d] += data[i][d]; }
-      for (let c = 0; c < k; c++) if (counts[c] > 0) centroids[c] = sums[c].map((s) => s / counts[c]);
-    }
-    const inertia = data.reduce((s, x) => s + dist2(x, centroids[nearest(x, centroids)]), 0);
-    if (!best || inertia < best.inertia) best = { centroids, inertia };
-  }
-  return best!.centroids;
-}
-
-// Cost of a symbol under a length set — ESCAPE additionally pays its raw payload.
-function symCost(len: number[], sym: number): number {
-  return len[sym] + (sym === ESCAPE_SYM ? ESCAPE_BITS : 0);
-}
+const deltaSym = (d: number) => (Math.abs(d) <= TEMP_DELTA_CORE_RADIUS ? d + TEMP_DELTA_CORE_RADIUS : ESCAPE_SYM);
 
 export async function derive(): Promise<DerivedTables> {
-  const samples = await collectSamples();
-  const data = samples.map((s) => s.hist);
-  console.log(`Samples (forecast × resolution): ${data.length}`);
+  const counts: number[][][] = Array.from({ length: NRES }, () =>
+    Array.from({ length: NCTX }, () => new Array(NSYM).fill(0)));
+  const bootstrap = new Array(NSYM).fill(0);
+  let columns = 0, symbols = 0;
 
-  const centroids = kmeans(data, K);
-  const weights = centroids.map((c) => c.map((v) => Math.max(1, Math.round(v * WEIGHT_SCALE))));
+  await eachForecast((h, _startHour, _loc, pos) => {
+    if (!pos || !h.time?.length || !h.temperature_2m) return;
+    const off = Math.round(pos.lon / 15);
+    const dataStart = Math.floor(Date.parse(`${h.time[0]}:00Z`) / 3600000);
+    const dataEnd = dataStart + h.time.length;
+    for (let res = 0; res < NRES; res++) {
+      const hpp = HOURS_PER_PERIOD[res];
+      const firstUtc = Math.ceil((dataStart + off) / 24) * 24 - off; // first local midnight
+      const n = Math.floor((dataEnd - firstUtc) / hpp);
+      if (n < 3) continue;
+      const windows: number[][] = [];
+      for (let p = 0; p < n; p++) {
+        const w: number[] = [];
+        for (let eh = firstUtc + p * hpp; eh < firstUtc + (p + 1) * hpp; eh++) w.push(eh - dataStart);
+        windows.push(w);
+      }
+      const rows = rowsFromWindows(h, h.time, windows, off);
+      if (rows.some((r) => r.temp_c == null)) continue;
+      const q = rows.map((r) => Math.min(Math.max(Math.round(r.temp_c! + 100), 0), 255));
 
-  const lengths = () => weights.map(huffmanLengths);
-  const uniform = new Array(NSYM).fill(1 / NSYM);
-  const costUnder = (len: number[], hist: number[]) =>
-    hist.reduce((s, p, sym) => s + p * symCost(len, sym), 0);
-  const cheapest = (hist: number[], lens: number[][]) => Math.min(...lens.map((l) => costUnder(l, hist)));
-  if (cheapest(uniform, lengths()) > RAW_BITS + 1e-9) {
-    const flattest = weights
-      .map((w, i) => [i, Math.max(...w) / Math.min(...w)] as const)
-      .sort((a, b) => a[1] - b[1])[0][0];
-    weights[flattest] = new Array(NSYM).fill(1);
+      let recon = q[0];
+      let prevDelta: number | null = null;
+      for (let p = 1; p < n; p++) {
+        const delta = Math.min(Math.max(q[p] - recon, TEMP_DELTA_MIN), TEMP_DELTA_MAX);
+        recon += delta;
+        const sym = deltaSym(delta);
+        if (prevDelta === null) bootstrap[sym]++;
+        else {
+          const tod = tempTodBucket((firstUtc + p * hpp) * 2 + hpp + off * 2);
+          counts[res][tempDeltaBucket(prevDelta) * TEMP_DELTA_TOD_BUCKETS + tod][sym]++;
+        }
+        prevDelta = delta;
+        symbols++;
+      }
+      columns++;
+    }
+  });
+  console.log(`Columns (forecast × resolution): ${columns}, delta symbols: ${symbols}`);
+
+  // Empty contexts (structural at coarse resolutions: a 12h period's midpoint only ever lands in
+  // two tod buckets) fall back to the resolution's pooled marginal.
+  const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
+  const marginal = counts.map((byCtx) => {
+    const m = new Array(NSYM).fill(0);
+    for (const row of byCtx) for (let s = 0; s < NSYM; s++) m[s] += row[s];
+    return m;
+  });
+
+  // Training-set mean bits/period per resolution, for the generation log (held-out numbers are
+  // the ladder's job).
+  for (let res = 0; res < NRES; res++) {
+    let bits = 0, n = 0;
+    for (let ctx = 0; ctx < NCTX; ctx++) {
+      const row = sum(counts[res][ctx]) > 0 ? counts[res][ctx] : marginal[res];
+      const w = scaledWeights(row);
+      const total = sum(w);
+      for (let s = 0; s < NSYM; s++) {
+        if (counts[res][ctx][s] === 0) continue;
+        bits += counts[res][ctx][s] * (-Math.log2(w[s] / total) + (s === ESCAPE_SYM ? TEMP_DELTA_ESCAPE_BITS : 0));
+        n += counts[res][ctx][s];
+      }
+    }
+    const label = ["24h", "12h", "6h", "3h", "1h"][res];
+    console.log(`  ${label}: n=${n} mean=${(bits / Math.max(1, n)).toFixed(3)} b/period (training-set)`);
   }
-  const uniformIdx = weights.findIndex((w) => w.every((v) => v === w[0]));
-  if (uniformIdx > 0) weights.unshift(weights.splice(uniformIdx, 1)[0]);
 
-  const lens = lengths();
-  const meanBits = data.reduce((s, h) => s + cheapest(h, lens), 0) / data.length;
-  console.log(`Mean bits/period (cheapest-of-${K}, escape-aware): ${meanBits.toFixed(3)}  (raw = ${RAW_BITS})`);
-
-  // Report per-resolution breakdown so we can see whether pooling actually serves every resolution.
-  console.log(`Per-resolution mean bits/period (cheapest-of-${K}):`);
-  const RES_LABEL: Record<number, string> = { 0: "24h", 1: "12h", 2: "6h", 3: "3h", 4: "1h" };
-  for (const resIdx of RES_IDXS) {
-    const forRes = samples.filter((s) => s.resIdx === resIdx).map((s) => s.hist);
-    const mean = forRes.reduce((s, h) => s + cheapest(h, lens), 0) / forRes.length;
-    console.log(`  ${RES_LABEL[resIdx]}: n=${forRes.length} mean=${mean.toFixed(3)}`);
-  }
-
-  return { TEMP_DELTA_WEIGHTS: weights };
+  return {
+    TEMP_DELTA_BOOTSTRAP_WEIGHTS: scaledWeights(bootstrap),
+    TEMP_DELTA_WEIGHTS_BY_RES: counts.map((byCtx, res) =>
+      byCtx.map((row) => scaledWeights(sum(row) > 0 ? row : marginal[res]))),
+  };
 }
 
 runStandalone(import.meta.url, derive);

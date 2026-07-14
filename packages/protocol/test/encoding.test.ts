@@ -104,6 +104,7 @@ function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean 
     seq,
     durationDays,
     periodHours: Array(n).fill(stepHours),
+    utcOffsetHours: 0,
     ...overrides,
     periods,
   };
@@ -533,6 +534,22 @@ describe("delta temperature encoding", () => {
       expect(out[1]).toBe(start + Math.min(Math.max(swing, -32), 31)); // clamped
       for (let i = 2; i < temps.length; i++) expect(out[i]).toBe(temps[i]); // healed
     }
+  });
+
+  it("clamp-heals under conditioning: contexts after the clamp derive from the CLAMPED chain", () => {
+    // The delta codebooks are keyed by (resolution, time-of-day, previous decoded delta). An
+    // encoder that chained the raw +40 jump instead of its clamped reconstruction would desync
+    // from the decoder's context. 25 hourly periods cross every 3h time-of-day bucket, with the
+    // clamped jump mid-column so every later delta is coded under post-clamp context.
+    const temps: number[] = [];
+    for (let i = 0; i < 12; i++) temps.push(-30 + i);          // steady +1 °C/h ramp
+    temps.push(temps[11] + 40);                                 // +40 jump → clamped to +31
+    for (let i = 13; i < 25; i++) temps.push(temps[i - 1] - 2); // post-jump decline
+    const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
+    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }, { hourly: true }));
+    const out = decoded.periods[0].map((p) => p.temp_c!);
+    expect(out[12]).toBe(temps[11] + 31); // clamped
+    for (let i = 13; i < 25; i++) expect(out[i]).toBe(temps[i]); // healed, contexts in sync
   });
 });
 

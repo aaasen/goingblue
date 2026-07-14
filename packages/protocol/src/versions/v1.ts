@@ -13,8 +13,8 @@ import {
   precipBook, snowBook, rainBook,
   FREEZE_DELTA,
   CLOUD_HIGH_DELTA, CLOUD_MID_DELTA, CLOUD_LOW_DELTA, type DeltaCodec,
-  encodeTempDelta, decodeTempDelta, chooseTempDeltaTable,
-  TEMP_DELTA_TABLE_BITS, TEMP_DELTA_MIN, TEMP_DELTA_MAX,
+  encodeTempDelta, decodeTempDelta, tempDeltaBook, tempTodBucket,
+  TEMP_DELTA_MIN, TEMP_DELTA_MAX,
   makeBitSink, makeBitSource, type CodeBook,
 } from "../entropy.js";
 
@@ -172,6 +172,21 @@ const HOURS_TO_RES: Record<number, number> = { 24: 0, 12: 1, 6: 2, 3: 3, 1: 4 };
 const resTableIdx = (periodHours: number[]): number[] =>
   periodHours.map((h) => HOURS_TO_RES[h] ?? 0);
 
+// Per-period local time-of-day bucket (see tempTodBucket in entropy.ts), from the first period's
+// UTC start hour (msg.hour — layout-derived on both sides), the contiguous period spans, and the
+// location's UTC offset — all context both sides already have, so it costs no wire bits. Periods
+// are contiguous by construction (see layoutFor), so start times are prefix sums of the spans;
+// half-hours keep the midpoint integral at every resolution.
+const todTableIdx = (firstHour: number, periodHours: number[], utcOffsetHours: number): number[] => {
+  const out: number[] = [];
+  let startHalfHours = (firstHour + utcOffsetHours) * 2;
+  for (const h of periodHours) {
+    out.push(tempTodBucket(startHalfHours + h)); // midpoint = start + h/2
+    startHalfHours += 2 * h;
+  }
+  return out;
+};
+
 // A sequential reader over the entropy-coded body: convenience wrappers for each codec around
 // the shared SymSource (which owns the coder state).
 function reader(bits: number[]) {
@@ -182,7 +197,7 @@ function reader(bits: number[]) {
     sym: (book: CodeBook): number => src.sym(book),
     windSpeedDelta: (book: CodeBook): number => decodeWindSpeedDelta(src, book),
     delta: (codec: DeltaCodec): number => codec.decode(src),
-    tempDelta: (table: number): number => decodeTempDelta(src, table),
+    tempDelta: (book: CodeBook): number => decodeTempDelta(src, book),
     assertDone: (): void => src.assertDone(),
   };
 }
@@ -232,36 +247,29 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
   mark("weathercode", before);
 
   // temp: per model, an anchor (first period, full width) followed by entropy-coded
-  // period-over-period deltas — never diffed across a model boundary. The column picks the
-  // cheapest-of-16 table (see TEMP_DELTA_* in entropy.ts).
-  // A delta beyond the escape field's range (|jump| > 32°C between periods — possible at daily
-  // resolution) is clamped to TEMP_DELTA_MIN..TEMP_DELTA_MAX, and every later delta is diffed
-  // against the decoder's reconstruction, so the error heals on the next period instead of
-  // offsetting the rest of the column.
+  // period-over-period deltas — never diffed across a model boundary. Each delta's codebook is
+  // keyed by (the arriving period's resolution and time-of-day bucket, the previous decoded
+  // delta) — see tempDeltaBook in entropy.ts; the model's first delta uses the bootstrap table.
+  // A delta beyond the escape field's range (|jump| > 32°C between periods) is clamped to
+  // TEMP_DELTA_MIN..TEMP_DELTA_MAX, and every later delta is diffed against the decoder's
+  // reconstruction, so the error heals on the next period instead of offsetting the rest of the
+  // column. CRITICAL: the context chains the CLAMPED delta (what the decoder will decode), never
+  // the raw input difference — otherwise the two sides' contexts diverge after a clamp.
+  const tod = todTableIdx(msg.hour, msg.periodHours, msg.utcOffsetHours);
   for (const [bit, field, name] of TEMP_DELTA_COLUMNS) {
     if (!(msg.vars_mask & (1 << bit))) continue;
     before = em.cost;
-    const anchors: number[] = [];
-    const modelDeltas: number[][] = [];
-    const allDeltas: number[] = [];
     for (let m = 0; m < nModels; m++) {
       let reconstructed = quantTemp(msg.periods[m][0], field);
-      anchors.push(reconstructed);
-      const deltas: number[] = [];
+      em.raw(reconstructed, TEMP_ANCHOR_BITS);
+      let prevDelta: number | null = null;
       for (let p = 1; p < nPeriods; p++) {
         const delta = Math.min(Math.max(
           quantTemp(msg.periods[m][p], field) - reconstructed, TEMP_DELTA_MIN), TEMP_DELTA_MAX);
-        deltas.push(delta);
-        allDeltas.push(delta);
+        encodeTempDelta(em, tempDeltaBook(res[p], tod[p], prevDelta), delta);
         reconstructed += delta;
+        prevDelta = delta;
       }
-      modelDeltas.push(deltas);
-    }
-    const table = chooseTempDeltaTable(allDeltas);
-    em.raw(table, TEMP_DELTA_TABLE_BITS);
-    for (let m = 0; m < nModels; m++) {
-      em.raw(anchors[m], TEMP_ANCHOR_BITS);
-      for (const delta of modelDeltas[m]) encodeTempDelta(em, table, delta);
     }
     mark(name, before);
   }
@@ -443,14 +451,18 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   const requestUtcHour = Math.floor(start / 3600000);
   const layout = layoutFor(durationDays, requestUtcHour, utcOffsetHours, seq);
 
-  // The body has no length field: the rANS stream is self-delimiting given the known structure
-  // (nPeriods, nModels, vars_mask). decodeBodyLE materializes the meaningful low bits; renorm
-  // words past them read as 0 — exactly the trailing zero words encodeBodyLE dropped.
-  const periods = decodeBody(decodeBodyLE(rest.slice(HEADER_CHARS)), vars_mask, layout.periodHours, 1);
-
   // month/day/hour describe the FIRST PERIOD's start (which precedes the request time — the
   // first period is the one containing it), so display code can lay periods out from it.
   const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
+
+  // The body has no length field: the rANS stream is self-delimiting given the known structure
+  // (nPeriods, nModels, vars_mask). decodeBodyLE materializes the meaningful low bits; renorm
+  // words past them read as 0 — exactly the trailing zero words encodeBodyLE dropped. The first
+  // period's UTC start hour and the UTC offset key the temp time-of-day tables — the identical
+  // values the encoder used (msg.hour is layout-derived on both sides).
+  const periods = decodeBody(
+    decodeBodyLE(rest.slice(HEADER_CHARS)), vars_mask, layout.periodHours,
+    firstStart.getUTCHours(), utcOffsetHours, 1);
 
   return {
     version,
@@ -468,6 +480,7 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
     seq,
     durationDays,
     periodHours: layout.periodHours,
+    utcOffsetHours,
   };
 }
 
@@ -475,7 +488,8 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
 // implies (`periodHours` is the derived layout — it keys the wind tables per period). Throws
 // unless the stream is consumed exactly (see SymSource.assertDone).
 function decodeBody(
-  bodyBits: number[], vars_mask: number, periodHours: number[], nModels: number,
+  bodyBits: number[], vars_mask: number, periodHours: number[],
+  firstHour: number, utcOffsetHours: number, nModels: number,
 ): Period[][] {
   const nPeriods = periodHours.length;
   const rd = reader(bodyBits);
@@ -491,15 +505,22 @@ function decodeBody(
     prevWcSym = sym;
   });
 
+  // Temp mirrors buildBody exactly: each delta's codebook keyed by (the arriving period's
+  // resolution and time-of-day bucket, the previously decoded delta) — bootstrap for each
+  // model's first delta.
+  const res = resTableIdx(periodHours);
+  const tod = todTableIdx(firstHour, periodHours, utcOffsetHours);
   for (const [bit, field] of TEMP_DELTA_COLUMNS) {
     if (!(vars_mask & (1 << bit))) continue;
-    const table = rd.int(TEMP_DELTA_TABLE_BITS);
     for (let m = 0; m < nModels; m++) {
       let quant = rd.int(TEMP_ANCHOR_BITS);
       periods[m][0][field] = quant - TEMP_OFFSET;
+      let prevDelta: number | null = null;
       for (let p = 1; p < nPeriods; p++) {
-        quant += rd.tempDelta(table);
+        const delta = rd.tempDelta(tempDeltaBook(res[p], tod[p], prevDelta));
+        quant += delta;
         periods[m][p][field] = quant - TEMP_OFFSET;
+        prevDelta = delta;
       }
     }
   }
@@ -529,7 +550,6 @@ function decodeBody(
 
   // Value columns mirror buildBody exactly: each symbol's table keyed by (the period's
   // resolution, the previously decoded value), bootstrap first, chained across model boundaries.
-  const res = resTableIdx(periodHours);
   for (const col of VALUE_COLUMNS) {
     if (!(vars_mask & (1 << col.bit))) continue;
     let prev: number | null = null;

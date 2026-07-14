@@ -65,6 +65,7 @@ function msgFor(layout: FillLayout, overrides: Partial<ForecastMessage> = {}): F
     seq: layout.seq,
     durationDays: layout.durationDays,
     periodHours: layout.periodHours,
+    utcOffsetHours: UTC_OFFSET,
     ...overrides,
   };
 }

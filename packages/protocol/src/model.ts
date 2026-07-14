@@ -78,6 +78,10 @@ export interface ForecastMessage {
   // Span of each period in hours (periodHours.length === periods[m].length). Periods within
   // one message can span different resolutions.
   periodHours: number[];
+  // The location's fixed UTC offset in whole hours (from the request context; the decoder
+  // recovers it via ContextResolver). Never on the wire, but the encoder needs it too: the
+  // temp-delta codebooks are keyed by each period's local time-of-day (see tempTodBucket).
+  utcOffsetHours: number;
 }
 
 // The request fields the client recovers from its own storage by message code, rather than

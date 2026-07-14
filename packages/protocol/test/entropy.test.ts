@@ -17,11 +17,12 @@ import {
   type SymSink,
   encodeTempDelta,
   decodeTempDelta,
-  chooseTempDeltaTable,
-  TEMP_DELTA_TABLE_COUNT,
+  tempDeltaBook,
+  TEMP_DELTA_TOD_BUCKETS,
   TEMP_DELTA_CORE_RADIUS,
   TEMP_DELTA_MIN,
   TEMP_DELTA_MAX,
+  type CodeBook,
   makeBitSink,
   makeBitSource,
 } from "../src/index.js";
@@ -241,17 +242,36 @@ describe.each(DELTA_CODECS)("$label delta entropy coding", ({ codec, maxDelta, r
   });
 });
 
-function tempBits(deltas: number[], table: number): number {
-  return costOf((sink) => { for (const d of deltas) encodeTempDelta(sink, table, d); });
+// Every distinct temp codebook: the bootstrap plus one (res × tod × prevΔ-bucket) table per
+// combination, reached through the same tempDeltaBook the wire uses. One representative
+// previous delta per bucket: ≤-2 | -1 | 0 | +1 | ≥+2.
+const PREV_BUCKET_REPS = [-5, -1, 0, 1, 5];
+function allTempBooks(): CodeBook[] {
+  const books: CodeBook[] = [tempDeltaBook(0, 0, null)]; // bootstrap (context args ignored)
+  for (let res = 0; res < 5; res++) {
+    for (let tod = 0; tod < TEMP_DELTA_TOD_BUCKETS; tod++) {
+      for (const prev of PREV_BUCKET_REPS) books.push(tempDeltaBook(res, tod, prev));
+    }
+  }
+  return books;
+}
+
+// Cost of a delta sequence with the context threaded the way v1.ts threads it: each delta's
+// book keyed by the previous delta (bootstrap first), at a fixed resolution and time-of-day.
+function tempBits(deltas: number[]): number {
+  return costOf((sink) => {
+    let prev: number | null = null;
+    for (const d of deltas) { encodeTempDelta(sink, tempDeltaBook(4, 0, prev), d); prev = d; }
+  });
 }
 
 describe("temperature delta entropy coding", () => {
   it("round-trips every core delta (-7..7) under every codebook", () => {
-    for (let table = 0; table < TEMP_DELTA_TABLE_COUNT; table++) {
+    for (const book of allTempBooks()) {
       for (let d = -TEMP_DELTA_CORE_RADIUS; d <= TEMP_DELTA_CORE_RADIUS; d++) {
-        const { cost, source } = encoded((sink) => encodeTempDelta(sink, table, d));
+        const { cost, source } = encoded((sink) => encodeTempDelta(sink, book, d));
         expect(cost).toBeGreaterThan(0);
-        expect(decodeTempDelta(source, table)).toBe(d);
+        expect(decodeTempDelta(source, book)).toBe(d);
         source.assertDone(); // consumed exactly the coded symbol, no more
       }
     }
@@ -259,10 +279,10 @@ describe("temperature delta entropy coding", () => {
 
   it("round-trips escape-path deltas (|delta| > 7) via the raw 6-bit payload, including the exact field bounds", () => {
     const jumps = [8, -8, 11, -11, 20, -20, 31, -32, TEMP_DELTA_MAX, TEMP_DELTA_MIN];
-    for (let table = 0; table < TEMP_DELTA_TABLE_COUNT; table++) {
+    for (const book of allTempBooks()) {
       for (const d of jumps) {
-        const { source } = encoded((sink) => encodeTempDelta(sink, table, d));
-        expect(decodeTempDelta(source, table)).toBe(d);
+        const { source } = encoded((sink) => encodeTempDelta(sink, book, d));
+        expect(decodeTempDelta(source, book)).toBe(d);
         source.assertDone();
       }
     }
@@ -273,16 +293,24 @@ describe("temperature delta entropy coding", () => {
     // every later temperature in the chain. The guard makes that impossible to emit;
     // v1.ts clamps before calling (see the healing round-trip test in encoding.test.ts).
     for (const d of [TEMP_DELTA_MAX + 1, TEMP_DELTA_MIN - 1, 40, -40, 100]) {
-      expect(() => encodeTempDelta(makeBitSink(), 0, d)).toThrow(/temp delta/);
+      expect(() => encodeTempDelta(makeBitSink(), tempDeltaBook(0, 0, null), d)).toThrow(/temp delta/);
     }
   });
 
-  it("decodes a concatenated delta sequence unambiguously, mixing core and escape", () => {
+  it("decodes a concatenated context-threaded sequence unambiguously, mixing core and escape", () => {
     const seq = [0, 1, -1, 0, 2, -3, 9, 0, 1, -14, 0, 0];
-    for (let table = 0; table < TEMP_DELTA_TABLE_COUNT; table++) {
-      const { source } = encoded((sink) => { for (const d of seq) encodeTempDelta(sink, table, d); });
+    for (let res = 0; res < 5; res++) {
+      const { source } = encoded((sink) => {
+        let prev: number | null = null;
+        for (const d of seq) { encodeTempDelta(sink, tempDeltaBook(res, 3, prev), d); prev = d; }
+      });
       const out: number[] = [];
-      for (let k = 0; k < seq.length; k++) out.push(decodeTempDelta(source, table));
+      let prev: number | null = null;
+      for (let k = 0; k < seq.length; k++) {
+        const d = decodeTempDelta(source, tempDeltaBook(res, 3, prev));
+        out.push(d);
+        prev = d;
+      }
       expect(out).toEqual(seq);
       source.assertDone();
     }
@@ -291,11 +319,7 @@ describe("temperature delta entropy coding", () => {
   it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 8-bit", () => {
     const flat = Array(64).fill(0);
     const swings = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? 5 : -5));
-    const chosen = chooseTempDeltaTable(flat);
-    for (let t = 0; t < TEMP_DELTA_TABLE_COUNT; t++) {
-      expect(tempBits(flat, chosen)).toBeLessThanOrEqual(tempBits(flat, t));
-    }
-    expect(tempBits(flat, chosen)).toBeLessThan(tempBits(swings, chooseTempDeltaTable(swings)));
-    expect(tempBits(flat, chosen)).toBeLessThan(flat.length * 8); // beats raw 8 bits/value
+    expect(tempBits(flat)).toBeLessThan(tempBits(swings));
+    expect(tempBits(flat)).toBeLessThan(flat.length * 8); // beats raw 8 bits/value
   });
 });

@@ -16,15 +16,20 @@ export const CORPUS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", 
 export type DerivedTables = Record<string, number[] | number[][] | number[][][]>;
 
 // Visits every cached forecast in the corpus (files mid-write by the collector are skipped).
-// `loc` is the corpus location id — the unit held-out splits divide on.
-export async function eachForecast(cb: (hourly: HourlyData, startHour: number, loc: string) => void): Promise<void> {
+// `loc` is the corpus location id — the unit held-out splits divide on. `pos` is the location's
+// lat/lon from the cached metadata, for scripts that need geography (UTC offset, solar position).
+export async function eachForecast(
+  cb: (hourly: HourlyData, startHour: number, loc: string, pos?: { lat: number; lon: number }) => void,
+): Promise<void> {
   for (const loc of await readdir(CORPUS)) {
     const dir = join(CORPUS, loc);
     for (const f of await readdir(dir)) {
       if (!f.endsWith(".json")) continue;
       let rec: any;
       try { rec = JSON.parse(await readFile(join(dir, f), "utf8")); } catch { continue; } // mid-write
-      cb(rec.response.hourly as HourlyData, Math.floor(Date.parse(rec.meta.run + "Z") / 3600000), loc);
+      const { lat, lon } = rec.meta?.location ?? {};
+      cb(rec.response.hourly as HourlyData, Math.floor(Date.parse(rec.meta.run + "Z") / 3600000), loc,
+        typeof lat === "number" && typeof lon === "number" ? { lat, lon } : undefined);
     }
   }
 }

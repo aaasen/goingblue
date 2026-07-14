@@ -347,7 +347,7 @@ export function representativeTemps(
 // Shared by the uniform-resolution keying above and the layout-driven windows (v2) below.
 // `utcOffsetHours` defines the local days the representative temp selection works over; the
 // UTC-keyed aggregation paths (scripts/corpus) pass 0, matching their UTC-aligned windows.
-function rowsFromWindows(
+export function rowsFromWindows(
   h: HourlyData, times: string[], windows: number[][], utcOffsetHours = 0,
 ): Row[] {
   const repTemps = representativeTemps(h.temperature_2m, times, windows, utcOffsetHours);
@@ -610,6 +610,7 @@ export function buildFillMessage(
     seq,
     durationDays: params.durationDays,
     periodHours: layout.periodHours,
+    utcOffsetHours: params.utcOffsetHours,
   };
 }
 

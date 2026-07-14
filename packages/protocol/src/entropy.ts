@@ -6,7 +6,7 @@ import {
   WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL, WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES,
   FREEZE_DELTA_WEIGHTS,
   CLOUD_LOW_DELTA_WEIGHTS, CLOUD_MID_DELTA_WEIGHTS, CLOUD_HIGH_DELTA_WEIGHTS,
-  TEMP_DELTA_WEIGHTS,
+  TEMP_DELTA_BOOTSTRAP_WEIGHTS, TEMP_DELTA_WEIGHTS_BY_RES,
   PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES,
   SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES,
   RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_RES,
@@ -277,16 +277,15 @@ export const rainBook = makeValueCodec(RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_R
 // ── Temperature deltas ──────────────────────────────────────────────────────────
 // Static codebooks for period-over-period temp_c change. Symbols are quantized deltas
 // -7..7 (indices 0..14) plus an ESCAPE symbol (index 15) for rarer bigger jumps, followed by a raw
-// 6-bit signed (bias 32) field covering -32..31°C. Unlike the bounded delta columns above, temp
-// KEEPS its cheapest-of-16 selector: temp is the only delta column whose messages span 1h..24h
-// resolutions, and the delta shape differs enough by resolution that a held-out check (split by
-// location) found the selector worth ~0.20 b/period over a single pooled table (2.776 vs 2.977).
-// Derived by k-means clustering per-(forecast × resolution) delta histograms pooled across
-// 1h/3h/6h/12h/24h — see server/scripts/derive-temp-delta-codebooks.ts — deliberately NOT keyed by
-// resolution: resolution is never on the wire (see v1.ts), and a future dynamic-duration message
-// could mix resolutions within one column, so the codebook has to earn its keep on the actual
-// delta shape alone. The encoder picks the cheapest per column and stores its index in a 4-bit
-// selector.
+// 6-bit signed (bias 32) field covering -32..31°C. Tables are keyed by context both sides already
+// have — the arriving period's resolution and time-of-day bucket (both derived from the layout)
+// and the previous decoded delta's bucket — so temp carries no per-message signaling; this
+// replaced the cheapest-of-16 k-means tables + 4-bit selector, which the held-out ladder showed
+// was mostly re-discovering resolution (see derive-temp-delta-codebooks.ts for the numbers and
+// analyze-temp-heldout.ts for the full ladder). Time-of-day pays because the diurnal cycle drives
+// the delta sign (rising mornings, falling evenings); the previous delta adds the airmass's actual
+// trajectory on top, a sign-consistent ~0.05 b/period across every held-out fold. The bootstrap
+// table covers a column's first delta (no predecessor), pooled across resolutions.
 
 export const TEMP_DELTA_CORE_RADIUS = 7;
 const TEMP_DELTA_ESCAPE_SYM = 2 * TEMP_DELTA_CORE_RADIUS + 1; // 15
@@ -298,29 +297,57 @@ const TEMP_DELTA_ESCAPE_BIAS = 1 << (TEMP_DELTA_ESCAPE_BITS - 1); // 32
 // (see the temp column in v1.ts).
 export const TEMP_DELTA_MIN = -TEMP_DELTA_ESCAPE_BIAS;                      // -32
 export const TEMP_DELTA_MAX = (1 << TEMP_DELTA_ESCAPE_BITS) - 1 - TEMP_DELTA_ESCAPE_BIAS; // 31
-export const TEMP_DELTA_TABLE_COUNT = TEMP_DELTA_WEIGHTS.length; // 16
-export const TEMP_DELTA_TABLE_BITS = 4;
 
-const TEMP_DELTA_TABLES: CodeBook[] = TEMP_DELTA_WEIGHTS.map(buildTable);
+// Context functions for the temp-delta codebooks — WIRE FORMAT (both sides derive the context
+// from decoded state and the layout; drift desyncs silently). Held-out ladder (5-fold by
+// location, see server/scripts/analyze-temp-heldout.ts): (prevΔ bucket × tod8 × res) 2.335
+// b/period vs 2.648 for the old cheapest-of-16 selector.
+
+// Previous decoded delta (post-clamp reconstruction), 5 buckets: ≤-2 | -1 | 0 | +1 | ≥+2.
+export const TEMP_DELTA_PREV_BUCKETS = 5;
+const TEMP_DELTA_PREV_EDGES = [-1, 0, 1, 2];
+export function tempDeltaBucket(prevDelta: number): number {
+  let b = 0;
+  for (const e of TEMP_DELTA_PREV_EDGES) { if (prevDelta < e) break; b++; }
+  return b;
+}
+
+// Time-of-day of the ARRIVING period's midpoint, 8 uniform 3-hour buckets over the local day.
+// Takes local half-hours (period start ×2 + span in hours stays integral for every resolution).
+export const TEMP_DELTA_TOD_BUCKETS = 8;
+export function tempTodBucket(localHalfHours: number): number {
+  return Math.floor((((localHalfHours % 48) + 48) % 48) / 6);
+}
+
+const TEMP_DELTA_BOOTSTRAP = buildTable(TEMP_DELTA_BOOTSTRAP_WEIGHTS);
+const TEMP_DELTA_TABLES_BY_RES = TEMP_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
 
 function tempDeltaSym(delta: number): number {
   return Math.abs(delta) <= TEMP_DELTA_CORE_RADIUS ? delta + TEMP_DELTA_CORE_RADIUS : TEMP_DELTA_ESCAPE_SYM;
 }
 
-// Emits the code for a period-over-period temp change `delta` (°C) under `table`; jumps outside
+// The codebook for one temp delta. `tod` is the arriving period's tempTodBucket; `prevDelta` the
+// previous decoded delta in this column — the post-clamp reconstruction, never the raw input —
+// or null for the column's first delta (bootstrap).
+export function tempDeltaBook(res: number, tod: number, prevDelta: number | null): CodeBook {
+  if (prevDelta === null) return TEMP_DELTA_BOOTSTRAP;
+  return TEMP_DELTA_TABLES_BY_RES[res][tempDeltaBucket(prevDelta) * TEMP_DELTA_TOD_BUCKETS + tod];
+}
+
+// Emits the code for a period-over-period temp change `delta` (°C) under `book`; jumps outside
 // ±7°C fall back to the escape symbol plus a raw 6-bit field. Throws on a delta outside
 // TEMP_DELTA_MIN..TEMP_DELTA_MAX — the caller must clamp (see above).
-export function encodeTempDelta(sink: SymSink, table: number, delta: number): void {
+export function encodeTempDelta(sink: SymSink, book: CodeBook, delta: number): void {
   if (delta < TEMP_DELTA_MIN || delta > TEMP_DELTA_MAX)
     throw new Error(`entropy: temp delta ${delta} outside ${TEMP_DELTA_MIN}..${TEMP_DELTA_MAX}`);
   const sym = tempDeltaSym(delta);
-  sink.sym(TEMP_DELTA_TABLES[table], sym);
+  sink.sym(book, sym);
   if (sym === TEMP_DELTA_ESCAPE_SYM) sink.raw(delta + TEMP_DELTA_ESCAPE_BIAS, TEMP_DELTA_ESCAPE_BITS);
 }
 
-// Reads one coded temp delta (under `table`).
-export function decodeTempDelta(src: SymSource, table: number): number {
-  const sym = src.sym(TEMP_DELTA_TABLES[table]);
+// Reads one coded temp delta (under `book`).
+export function decodeTempDelta(src: SymSource, book: CodeBook): number {
+  const sym = src.sym(book);
   if (sym === TEMP_DELTA_ESCAPE_SYM) return src.raw(TEMP_DELTA_ESCAPE_BITS) - TEMP_DELTA_ESCAPE_BIAS;
   return sym - TEMP_DELTA_CORE_RADIUS;
 }
@@ -358,24 +385,11 @@ export const V1_CODEBOOKS = {
   cloudMidDelta: qf(CLOUD_MID_DELTA_WEIGHTS),
   cloudHighDelta: qf(CLOUD_HIGH_DELTA_WEIGHTS),
   tempDelta: {
-    weights: TEMP_DELTA_WEIGHTS.map(qf),
+    bootstrap: qf(TEMP_DELTA_BOOTSTRAP_WEIGHTS),
+    byRes: TEMP_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
     coreRadius: TEMP_DELTA_CORE_RADIUS,
     escapeBits: TEMP_DELTA_ESCAPE_BITS,
-    tableBits: TEMP_DELTA_TABLE_BITS,
+    prevBucketEdges: TEMP_DELTA_PREV_EDGES,
+    todBuckets: TEMP_DELTA_TOD_BUCKETS,
   },
 } as const;
-
-// Picks the codebook that encodes `deltas` in the fewest total bits (escape payload included).
-export function chooseTempDeltaTable(deltas: number[]): number {
-  let best = 0;
-  let bestBits = Infinity;
-  for (let t = 0; t < TEMP_DELTA_TABLES.length; t++) {
-    let total = 0;
-    for (const d of deltas) {
-      const sym = tempDeltaSym(d);
-      total += symBits(TEMP_DELTA_TABLES[t], sym) + (sym === TEMP_DELTA_ESCAPE_SYM ? TEMP_DELTA_ESCAPE_BITS : 0);
-    }
-    if (total < bestBits) { bestBits = total; best = t; }
-  }
-  return best;
-}

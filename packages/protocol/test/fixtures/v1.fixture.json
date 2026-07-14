@@ -7,7 +7,7 @@
     "durationDays": 2,
     "utcOffsetHours": -9
   },
-  "encoded": "\"!!&#mb9B>6+t43mG;AU7qugdl;1s2(34+B:FZ;x?LNY7AW*a:5f/MW%bzfJDNJaB(2k:8mEOqB",
+  "encoded": "\"!!&#&(TIJvU:z<wxBl:_Sugdl;1s2(34+B:FZ;x?LNY7AW*a:5f/MW%bzfJDNJaB(2k:8mEOqB",
   "decoded": {
     "version": 1,
     "code": 0,
@@ -147,6 +147,7 @@
       12,
       12,
       12
-    ]
+    ],
+    "utcOffsetHours": -9
   }
 }

@@ -15,18 +15,22 @@ const REQ_UTC_HOUR = Date.UTC(2026, 5, 15) / 3600000;
 
 function msgFor(durationDays: number, seq: number): ForecastMessage {
   const layout = layoutFor(durationDays, REQ_UTC_HOUR, 0, seq);
+  // hour must be the layout's first-period start: the encoder keys the temp time-of-day
+  // codebooks off it, and the decoder derives the same value from the layout.
+  const first = new Date(layout.periodStartUtcHour[0] * 3600000);
   return {
     version: 1,
     code: 0,
     days: layout.days,
     models_mask: 0b0001,
     vars_mask: DEFAULT_VARS_MASK,
-    month: 6, day: 15, hour: 0,
+    month: first.getUTCMonth() + 1, day: first.getUTCDate(), hour: first.getUTCHours(),
     lat: 63.063, lon: -151.081, elevation: 4267,
     seq,
     durationDays,
     periodHours: layout.periodHours,
     periods: [layout.periodHours.map(() => ({ ...PERIOD }))],
+    utcOffsetHours: 0,
   };
 }
 
