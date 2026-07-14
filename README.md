@@ -38,25 +38,31 @@ fractional bits — the peaked distributions here (P(Δ=0) ≈ 0.7–0.8) cost w
 (LIFO-encoded, ~20–25 bits of constant flush/renorm overhead), and the decoder's final state
 doubles as an integrity check: desynced reads throw instead of returning plausible garbage.
 
-### Strategies
+### Unified model
 
-- **Fixed (linear)** — the value is mapped to a fixed-width integer with a constant step size and
-  offset. Constant width; used where the range is small and roughly uniform. Passes through the
-  coder's bypass path at exactly its nominal width.
-- **Entropy-coded deltas** — most columns store one full-width anchor per model, then
-  period-over-period deltas under static, corpus-derived frequency tables
-  (`packages/protocol/src/entropy.ts`, weights in `codebooks.gen.ts`). Weathercode and wind
-  direction are order-1 conditional: each symbol's table is keyed by the previously decoded
-  symbol — context both sides already have, so it costs no header bits. Temp deltas pick the
-  cheapest of 16 tables (4-bit selector, ±7 °C core plus a 6-bit escape); wind speed, freezing
-  level, and the three cloud levels each use one shared table.
-- **Frame-of-reference (FOR)** — store one baseline (the column minimum) plus a per-column bit
-  width `W`; each value is its unsigned offset from the baseline in `W` bits. `W` adapts to the
-  actual spread, so tightly-clustered columns shrink and an all-equal column costs zero bits per
-  value. No error accumulation, and it degrades to raw when the spread is large.
-- **Sparse** — for columns that are usually zero. One presence bit per value, with the magnitude
-  stored (in an adaptive width) only for nonzero values. Suits precipitation, which is mostly zero
-  with a skewed tail.
+Every weather variable is encoded under the **same model**: a Markov chain over a small discrete
+alphabet, entropy-coded by rANS under static, corpus-derived frequency tables
+(`packages/protocol/src/entropy.ts`, weights in `codebooks.gen.ts`). There are no per-column
+encoding schemes or mode selectors — what varies per variable is only:
+
+- **What a symbol is.** *Value-based* columns code the quantized value itself; used where the
+  alphabet is small or where an absorbing state dominates ("still dry" is the strongest signal
+  rain/snow carry, and a delta of 0 would conflate it with "steady heavy snowfall").
+  *Delta-based* columns code the period-over-period change, with one full-width raw anchor at the
+  start of the column; used where the domain is wide but the change per period is small
+  (temperature, wind speed, freezing level, cloud cover).
+- **What keys the codebook.** Each symbol's table is chosen by context **both sides already
+  have**, so context costs no wire bits: the previously decoded symbol (or a bucket of it), the
+  period's own resolution (both sides derive the layout, and persistence falls with the
+  aggregation step), and for the 600/700 hPa wind columns the upper pressure level's
+  already-decoded same-period values. A column's first symbol, having no predecessor, is coded
+  under a per-variable bootstrap table.
+
+Temperature is the one column with any per-message signaling: a 4-bit selector picks the cheapest
+of 16 delta tables (worth ~0.2 bits/period held-out, because temp spans every resolution), and
+deltas beyond ±7 °C escape to a raw 6-bit field. Every other column's tables are fully determined
+by shared context. All context choices are validated held-out (5-fold, split by location) in the
+`packages/server/scripts/derive-*-codebooks.ts` scripts that generate the tables.
 
 ### Header
 
@@ -99,17 +105,21 @@ encoder wrote, so trailing zero words are simply dropped.
 
 ### Per-period variables
 
-| Variable               | Strategy | Size (model cost)             | Quantization                          |
-| ---------------------- | -------- | ----------------------------- | ------------------------------------- |
-| weathercode            | order-1 entropy | ~1.7 bits/value (1h mean) | 28 WMO codes, table keyed by previous code |
-| temperature (max/min)  | anchor + entropy deltas | 8-bit anchor + ~2.1 bits/delta; 4-bit table selector | 1 °C steps, −100 °C offset |
-| freezing level         | anchor + entropy deltas | 4-bit anchor + ~1.1 bits/delta | 1000 ft steps (0–15000 ft)  |
-| snow                   | Adaptive | mode + sparse/FOR/empty       | 6-bit sqrt-companded, 0–200 cm        |
-| rain                   | Adaptive | mode + sparse/FOR/empty       | 6-bit sqrt-companded, 0–144 mm        |
-| precipitation prob.    | Adaptive | mode + FOR/sparse/empty (≤3 bits/value) | 0–100% in eighths           |
-| wind — all levels      | see [Wind](#wind) | 5-bit speed anchor + ~1.8–2.5 bits/period (1h mean, speed + dir) | 5 mph speed steps, 0–155 mph, 8-point direction |
-| cloud (high/mid/low)   | anchor + entropy deltas | 3-bit anchor + ~1.6 bits/delta | 0–100% in eighths          |
-| cloud (total)          | Fixed    | 3 bits each                   | 0–100% in eighths                     |
+| Variable             | Model | States (the symbol alphabet)                          | Codebook keyed by                              | Quantization                          |
+| -------------------- | ----- | ------------------------------------------------------ | ---------------------------------------------- | ------------------------------------- |
+| weathercode          | value | 28 WMO codes                                            | previous code                                  | —                                     |
+| temperature          | delta | Δ°C −7…+7, plus an escape symbol + raw 6-bit (−32…+31) | cheapest-of-16 table, 4-bit per-message selector | 1 °C steps, −100…+155 °C; 8-bit anchor |
+| precipitation prob.  | value | eighths 0…7                                             | resolution × previous value                    | 0–100% in eighths                     |
+| snow                 | value | 64 companded steps                                      | resolution × previous-value bucket (0 \| 1–3 \| 4–9 \| 10–20 \| 21+) | sqrt-companded, 0–200 cm |
+| rain                 | value | 64 companded steps                                      | resolution × previous-value bucket (same)      | sqrt-companded, 0–144 mm              |
+| freezing level       | delta | Δ −15…+15                                               | one shared table                               | 1000 ft steps, 0–15000 ft; 4-bit anchor |
+| cloud (high/mid/low) | delta | Δ −7…+7                                                 | one shared table per level                     | 0–100% in eighths; 3-bit anchor       |
+| wind speed           | delta | Δ −31…+31                                               | resolution × level; 600/700 hPa by the upper level's Δ bucket | 5 mph steps, 0–155 mph; 5-bit anchor |
+| wind direction       | value | 8 cardinals                                             | resolution × previous direction (× upper direction for 600/700 hPa); calm periods emit no symbol | 45° points |
+
+Value-based columns chain their previous-symbol context across the whole column; delta-based
+columns never diff across a model boundary (each model gets its own anchor). See
+[Wind](#wind) for the cross-level conditioning and calm gating.
 
 ### Wind
 
@@ -223,7 +233,15 @@ The forecast encoding is tested against real weather from Open-Meteo's [Historic
 
 Benchmarking uses a mix of hand-picked locations and random locations from around the globe. The hand-picked locations are 137 of my Windy favorites which are mostly mountainous locations in Alaska, BC, Cascades, Tetons, Andes, Alps, Norway, and New Zealand.
 
-The HTML report compares days/message with box plots for **1h**, **3h**, and **6h** forecasts using base variables alone and base plus each optional group (Clouds, High Altitude Winds, and Freezing Level). It reports an overall score averaging the corresponding periods/message means. Interactive resolution and variable selectors matching the app control the detailed histogram, box-and-whisker summary, and bit-occupancy table. (`--resolution` sets which detail view the report opens on; all resolutions are always computed.)
+The benchmark mirrors production exactly: for each cached forecast it runs the duration-first fill
+(the same `fitFillToBudget` the server uses) and records the largest fill sequence that fits the
+message budget. The headline metric is **mean fill %** — how far along the refinement ladder the
+budget carries a message, where 25% is the whole duration at 12h and 100% is a full 1h fill — shown
+for every forecast duration (3/5/7/10 days) × variable selection (base, plus each optional group).
+The report also draws the fill frontier, the median message's period layout, and per-view detail
+(fill-resolution distribution strips, the share of forecasts reaching each rung, and a mean
+bit-cost-per-column table). Interactive duration and variable selectors matching the app control
+the detail view (`--duration` sets which one the report opens on; all are always computed).
 
 `pnpm benchmark` runs both phases: it collects the forecast corpus (cached under `data/raw/<model>`, gitignored, idempotent/resumable) and then encodes each forecast through the production path, writing a timestamped HTML report to `data/benchmarks` (kept so runs can be compared side by side).
 
@@ -232,7 +250,8 @@ pnpm benchmark                     # collect (idempotent) then report
 pnpm benchmark --report-only       # skip collection; report from cached data
 pnpm benchmark --collect-only      # expand the cache without reporting (the pull can be long)
 pnpm benchmark --dry-run           # preview the collection plan, no fetch
-pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
+pnpm benchmark --duration 5        # 3/5/7/10 days (default 7)
+pnpm benchmark --request-hour 18   # local hour of the request (default 7)
 # other flags: --limit <n> (cap fetches), --max-chars <n>, --location <id>, --verbose, --include-incomplete, --no-open
 ```
 
@@ -269,6 +288,18 @@ pnpm benchmark --resolution 6h     # 1h/3h/6h (default 1h)
     6h with high-altitude winds 6.8 -> 7.7. Fixes the 3h/6h regression noted in #15. Scheme
     selection was held-out validated (5-fold by location) — see
     packages/server/scripts/analyze-wind-heldout.ts.
+17. rANS unification: precip probability, rain, and snow move from the adaptive best-of
+    (raw / FOR / sparse / empty + 2-bit mode selector) to order-1 rANS over values, keyed by
+    (resolution, previous value) — full 8×8 context for precip probability, 5 previous-value
+    buckets for the companded accumulations. Sparse charged a full bit per dry period; the
+    order-1 tables charge a small fraction of one. Held-out bits/period: precip 2.12 → 1.00,
+    snow 1.30 → 0.74, rain 1.98 → 1.15. Also removes cloud (total) — redundant with weathercode
+    plus per-altitude cloud cover — and deletes the whole per-column scheme-selection machinery:
+    every variable now rides the unified model above. (The benchmark changed alongside #16 to
+    measure the real duration-first fill instead of fixed 1h/3h/6h forecasts, so periods/message
+    isn't comparable to earlier entries.) Mean fill across all duration × variable views
+    72.3% → 77.0%; per view +2.6 to +7.3 points (+2.7% to +11.3%), e.g. 7d base 78.2% → 85.1%
+    and 10d base 64.4% → 71.7%.
 
 ## License
 
