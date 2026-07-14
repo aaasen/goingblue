@@ -62,7 +62,7 @@ const HEADER_CHARS = nCharsForBits(V1_HEADER_BITS); // packed-header chars (excl
 // formerly reserved for the removed `vis`; bit 13 (formerly tmin) is reserved, as is bit 8
 // (formerly cloud_total — redundant with weathercode + per-altitude cloud cover, removed).
 // wind: 8 = 5-bit speed + 3-bit direction (raw-width equivalent; both entropy-coded).
-export const VAR_BITS_V1 = [3, 8, 6, 4, 8, 8, 8, 8, 0, 3, 3, 3, 6];
+export const VAR_BITS_V1 = [3, 8, 6, 5, 8, 8, 8, 8, 0, 3, 3, 3, 6];
 //                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^-- ^cch ^ccm ^ccl ^rain
 
 const TEMP_OFFSET = 100;
@@ -98,8 +98,10 @@ const TEMP_DELTA_COLUMNS: [bit: number, field: "temp_c", name: string][] = [
 
 // freeze: entropy-coded period-over-period deltas under a single shared table (see FREEZE_DELTA
 // in entropy.ts — no per-message selector; freeze-level delta shape doesn't vary enough by
-// location/season to be worth one), not a plain scalar column. 304.8 m (1000 ft) steps,
-// 0..15 (0-15000 ft).
+// location/season to be worth one), not a plain scalar column. 304.8 m (1000 ft) steps, 0..31
+// (0-31000 ft) — tropical and subtropical high country (the Andes, central Mexico) sits above
+// 15000 ft nearly year-round, and the corpus tops out at 21200 ft, so the domain has to reach
+// well past that to stop clipping.
 const FREEZE_STEP_M = 304.8;
 const FREEZE_ANCHOR_BITS = VAR_BITS_V1[VARS_BIT.freeze];
 // The 1e-9 rescues float dust only (14 × 304.8 / 304.8 = 13.999999999999998 → 13 without it, so

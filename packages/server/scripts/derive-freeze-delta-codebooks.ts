@@ -1,8 +1,8 @@
 /**
  * Derive a single freezing-level-delta Huffman codebook from the corpus's pooled hour-to-hour
- * quantized freeze-level delta distribution. The quantized freeze-level step (0..15, 304.8 m /
+ * quantized freeze-level delta distribution. The quantized freeze-level step (0..31, 304.8 m /
  * 1000 ft steps — see the freeze column in v1.ts) is bounded, so like wind speed the full delta
- * range -15..15 (31 symbols) fits directly in the alphabet — no escape/raw-payload fallback needed.
+ * range -31..31 (63 symbols) fits directly in the alphabet — no escape/raw-payload fallback needed.
  *
  * Earlier versions of this script k-means clustered per-forecast delta histograms into 16 tables
  * selected per message (like weathercode/wind direction). That doesn't pay off here: unlike
@@ -22,15 +22,15 @@ import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast
 import { VARS_BIT } from "@weather/protocol";
 import { eachForecast, huffmanLengths, scaledWeights, runStandalone, type DerivedTables } from "./derive-lib.ts";
 
-const STEP_BITS = 4;               // matches the freeze column width in v1.ts (steps 0..15)
+const STEP_BITS = 5;               // matches the freeze column width in v1.ts (steps 0..31)
 const STEP_MAX = (1 << STEP_BITS) - 1;
-const NSYM = 2 * STEP_MAX + 1;     // 31: deltas -15..15, no escape needed (already bounded)
+const NSYM = 2 * STEP_MAX + 1;     // 63: deltas -31..31, no escape needed (already bounded)
 const STEP_M = 304.8;              // 1000 ft, must match v1.ts
 const RES_IDX = 4;                 // 1h — finest, most samples
 const RAW_BITS = STEP_BITS;        // cost of the fixed-width fallback
 
 const quantFreeze = (m: number): number => Math.min(Math.floor(m / STEP_M), STEP_MAX);
-const deltaSym = (delta: number): number => delta + STEP_MAX; // -15..15 -> 0..30
+const deltaSym = (delta: number): number => delta + STEP_MAX; // -31..31 -> 0..62
 
 // Pooled delta counts across the whole corpus.
 async function collectCounts(): Promise<number[]> {

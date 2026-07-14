@@ -114,7 +114,7 @@ encoder wrote, so trailing zero words are simply dropped.
 | precipitation prob.  | value | eighths 0…7                                             | resolution × previous value × same-period weathercode class | 0–100% in eighths        |
 | snow                 | value | 64 companded steps                                      | resolution × previous-value bucket (0 \| 1–3 \| 4–9 \| 10–20 \| 21+) × same-period weathercode class | sqrt-companded, 0–200 cm |
 | rain                 | value | 64 companded steps                                      | resolution × previous-value bucket (same) × same-period weathercode class | sqrt-companded, 0–144 mm |
-| freezing level       | delta | Δ −15…+15                                               | one shared table                               | 1000 ft steps, 0–15000 ft; 4-bit anchor |
+| freezing level       | delta | Δ −31…+31                                               | one shared table                               | 1000 ft steps, 0–31000 ft; 5-bit anchor |
 | cloud (high/mid/low) | delta | Δ −7…+7                                                 | one shared table per level                     | 0–100% in eighths; 3-bit anchor       |
 | wind speed           | delta | Δ −31…+31                                               | resolution × level; 600/700 hPa by the upper level's Δ bucket | 5 mph steps, 0–155 mph; 5-bit anchor |
 | wind direction       | value | 8 cardinals                                             | resolution × previous direction (× upper direction for 600/700 hPa); calm periods emit no symbol | 45° points |
@@ -334,6 +334,16 @@ pnpm benchmark --request-hour 18   # local hour of the request (default 7)
     high-altitude winds 41.8% → 44.2%. Cloud levels (−0.03) and weathercode × resolution (−0.033)
     were scanned and rejected as too small; freeze × temp-delta (−0.131) is deferred until the
     4-bit freezing-level anchor's 15,000 ft cap is widened, since real forecasts clip at it.
+20. Freezing-level domain 4 -> 5 bits (cap 15,000 -> 31,000 ft). The old cap clipped 6.5% of
+    corpus periods: the Andes and central Mexico sit above 15,000 ft nearly year-round, so those
+    locations' freeze column decoded as a flat, permanently-saturated 15,000 ft (pisco 98.9% of
+    periods clipped, belen 98.0%, chalcatongo-de-hidalgo 80.4%) — the variable was silently
+    useless exactly where a freezing level is most interesting. The corpus tops out at 21,200 ft,
+    so 5 bits never clips. Costs one anchor bit per model plus a slightly flatter delta table
+    (1.340 -> 1.384 b/period, the un-clipped locations now carrying real motion instead of a
+    constant): the +Freezing Level view gives up 0.2-0.4 pp of fill (7d 83.8% -> 83.4%, 10d
+    69.8% -> 69.4%), mean fill across all views 80.1% -> 80.0%. Unblocks the freeze × temp-delta
+    conditioning deferred in #19, which should more than pay this back.
 
 ## License
 

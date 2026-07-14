@@ -305,9 +305,15 @@ describe("v1 round-trip encoding", () => {
     expect(decoded.periods[0][0].rain_mm).toBeCloseTo(1, 0);
   });
 
-  it("clamps freeze level to 15,000 ft max (4572 m)", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, freeze_m: 20000 * 0.3048 }]] }));
-    expect(decoded.periods[0][0].freeze_m).toBeCloseTo(15 * 304.8, 5);
+  it("clamps freeze level to 31,000 ft max (9448.8 m)", () => {
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, freeze_m: 40000 * 0.3048 }]] }));
+    expect(decoded.periods[0][0].freeze_m).toBeCloseTo(31 * 304.8, 5);
+  });
+
+  it("carries a tropical freeze level above 15,000 ft without clipping", () => {
+    // The corpus tops out near 21,000 ft (the Andes in summer); nothing there may saturate.
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, freeze_m: 21 * 304.8 }]] }));
+    expect(decoded.periods[0][0].freeze_m).toBeCloseTo(21 * 304.8, 5);
   });
 
   it("encodes a near-constant freeze-level column smaller than a wide-swinging one (Huffman-coded deltas)", () => {

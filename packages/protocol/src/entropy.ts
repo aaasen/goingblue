@@ -231,12 +231,12 @@ export function decodeWindSpeedDelta(src: SymSource, book: CodeBook): number {
 
 // ── Freezing-level deltas ───────────────────────────────────────────────────────
 // Period-over-period freezing-level change, in quantized steps (see the freeze column in v1.ts:
-// 0..15, 304.8 m / 1000 ft steps, so deltas -15..15). Held-out: cheapest-of-16 with a 4-bit
+// 0..31, 304.8 m / 1000 ft steps, so deltas -31..31). Held-out: cheapest-of-16 with a 4-bit
 // selector cost 1.371 b/period vs 1.340 b/period for this single table. Derived from the corpus's
 // pooled delta distribution — see server/scripts/derive-freeze-delta-codebooks.ts.
 
-// must mirror the freeze column width in v1.ts (0..15)
-export const FREEZE_DELTA = makeDeltaCodec(FREEZE_DELTA_WEIGHTS, 15);
+// must mirror the freeze column width in v1.ts (0..31)
+export const FREEZE_DELTA = makeDeltaCodec(FREEZE_DELTA_WEIGHTS, 31);
 
 // ── Cloud cover deltas ──────────────────────────────────────────────────────────
 // Period-over-period cloud-cover change, in quantized steps (see the cloud columns in v1.ts: 0..7,

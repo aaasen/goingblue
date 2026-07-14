@@ -12,7 +12,7 @@ export const CLOUD_MID_DELTA_WEIGHTS: number[] = [13, 9, 9, 12, 15, 19, 38, 772,
 
 export const CLOUD_HIGH_DELTA_WEIGHTS: number[] = [14, 10, 8, 12, 16, 20, 41, 756, 43, 21, 16, 12, 9, 10, 13];
 
-export const FREEZE_DELTA_WEIGHTS: number[] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 5, 88, 812, 83, 5, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+export const FREEZE_DELTA_WEIGHTS: number[] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 5, 92, 804, 86, 5, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
 
 export const PRECIP_BOOTSTRAP_WEIGHTS: number[] = [491, 88, 49, 42, 40, 49, 49, 192];
 
