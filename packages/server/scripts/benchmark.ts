@@ -620,7 +620,6 @@ function buildView(
   durationDays: number,
   fits: Fit[],
   cb: Map<string, number[]>,
-  cm: Map<string, Map<string, number>>,
 ): ViewStats {
   const seqs = fits.map((f) => f.seq);
   const periods = fits.map((f) => f.periods);
@@ -645,7 +644,6 @@ function buildView(
       bits: mean(bitsArr),
       bitsPerPeriod: mean(bpp),
       bppStats: box(bpp),
-      modes: [...cm.get(name)!.entries()].sort((a, b) => b[1] - a[1]).map(([m, c]) => [m, c / bitsArr.length] as [string, number]),
     };
   });
 
@@ -676,10 +674,9 @@ async function report(args: Args): Promise<void> {
   const vkey = (durationDays: number, combo: number) => `${durationDays}:${combo}`;
   const fitsFor = new Map<string, Fit[]>();
   const colBits = new Map<string, Map<string, number[]>>();
-  const colModes = new Map<string, Map<string, Map<string, number>>>();
   for (const d of DURATIONS) for (const c of COMBOS) {
     const vk = vkey(d, c);
-    fitsFor.set(vk, []); colBits.set(vk, new Map()); colModes.set(vk, new Map());
+    fitsFor.set(vk, []); colBits.set(vk, new Map());
   }
 
   const forecasts: { location: string }[] = [];
@@ -731,15 +728,14 @@ async function report(args: Args): Promise<void> {
         const vk = vkey(durationDays, c);
         fitsFor.get(vk)!.push(fit);
         versionBits = fit.breakdown.versionBits; headerBits = fit.breakdown.headerBits;
-        const cb = colBits.get(vk)!, cm = colModes.get(vk)!;
+        const cb = colBits.get(vk)!;
         for (const col of fit.breakdown.columns) {
-          if (!cb.has(col.name)) { cb.set(col.name, []); cm.set(col.name, new Map()); }
+          if (!cb.has(col.name)) cb.set(col.name, []);
           cb.get(col.name)!.push(col.bits);
-          if (col.mode) { const mm = cm.get(col.name)!; mm.set(col.mode, (mm.get(col.mode) ?? 0) + 1); }
         }
         // Column bits are model costs; the rANS stream adds a constant flush/renorm slack per
         // message. Track it as a pseudo-column so the occupancy total reconciles with the chars.
-        if (!cb.has("coder")) { cb.set("coder", []); cm.set("coder", new Map()); }
+        if (!cb.has("coder")) cb.set("coder", []);
         cb.get("coder")!.push(fit.breakdown.overheadBits);
       }
     }
@@ -754,7 +750,7 @@ async function report(args: Args): Promise<void> {
   for (const d of durations) {
     for (const c of COMBOS) {
       const vk = vkey(d, c);
-      views[vk] = buildView(d, fitsFor.get(vk)!, colBits.get(vk)!, colModes.get(vk)!);
+      views[vk] = buildView(d, fitsFor.get(vk)!, colBits.get(vk)!);
     }
   }
   const dropped = DURATIONS.filter((d) => !durations.includes(d));
@@ -812,7 +808,7 @@ function openInBrowser(path: string): void {
 // ── HTML report ──────────────────────────────────────────────────────────────────
 
 interface BoxStats { min: number; p25: number; p50: number; mean: number; p75: number; max: number }
-interface ColStat { name: string; bits: number; bitsPerPeriod: number; bppStats: BoxStats; modes: [string, number][] }
+interface ColStat { name: string; bits: number; bitsPerPeriod: number; bppStats: BoxStats }
 // A full-fill landmark: seq = k × S is the whole window at rung `label`, reached by `share` of messages.
 interface StageStat { seq: number; label: string; share: number }
 interface ViewStats {
@@ -1068,9 +1064,6 @@ function renderMiniBox(s: BoxStats, scaleMax: number): string {
   `</svg>`;
 }
 
-const modeText = (m: [string, number][]) =>
-  m.length ? m.map(([name, f]) => `${esc(name)} ${Math.round(100 * f)}%`).join(" · ") : "—";
-
 // Mean fill as a bar: a fixed 0–100% track with the value filled in, so a row of cells can be
 // compared at a glance without reading the numbers. The track is always the full scale — a short bar
 // means a small share of a full 1h fill, never a rescaled axis.
@@ -1260,9 +1253,9 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
   const [duration, combo] = vk.split(":");
   const occupancyBits = versionBits + headerBits + vs.bodyBits;
   const rows = [
-    { name: "version", bits: versionBits, bpp: null as number | null, modes: [] as [string, number][], bppStats: null as BoxStats | null },
-    { name: "header", bits: headerBits, bpp: null as number | null, modes: [] as [string, number][], bppStats: null as BoxStats | null },
-    ...vs.columns.map((c) => ({ name: c.name, bits: c.bits, bpp: c.bitsPerPeriod as number | null, modes: c.modes, bppStats: c.bppStats as BoxStats | null })),
+    { name: "version", bits: versionBits, bpp: null as number | null, bppStats: null as BoxStats | null },
+    { name: "header", bits: headerBits, bpp: null as number | null, bppStats: null as BoxStats | null },
+    ...vs.columns.map((c) => ({ name: c.name, bits: c.bits, bpp: c.bitsPerPeriod as number | null, bppStats: c.bppStats as BoxStats | null })),
   ].sort((a, b) => b.bits - a.bits);
   const bppScaleMax = Math.max(...vs.columns.map((c) => c.bppStats.max), 1);
   const occHtml = rows.map((r) => `<tr>
@@ -1271,7 +1264,6 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
       <td class="num">${r.bpp == null ? "—" : r.bpp.toFixed(2)}</td>
       <td class="num">${(100 * r.bits / occupancyBits).toFixed(1)}%</td>
       <td class="boxcell">${r.bppStats ? renderMiniBox(r.bppStats, bppScaleMax) : ""}</td>
-      <td class="modes">${modeText(r.modes)}</td>
     </tr>`).join("\n");
   return `<section class="view" data-duration="${duration}" data-combo="${combo}" hidden>
   <h3>Fill resolution distribution</h3>
@@ -1280,9 +1272,9 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
   ${renderReachArea(vs)}
   <h3>Mean bit cost per column</h3>
   <table>
-    <tr><th>column</th><th class="rt">bits</th><th class="rt">bits/period</th><th class="rt">share</th><th>bits/period spread <span class="muted">(0–${bppScaleMax.toFixed(1)})</span></th><th>modes</th></tr>
+    <tr><th>column</th><th class="rt">bits</th><th class="rt">bits/period</th><th class="rt">share</th><th>bits/period spread <span class="muted">(0–${bppScaleMax.toFixed(1)})</span></th></tr>
     ${occHtml}
-    <tr class="total"><td>total</td><td class="num">${occupancyBits.toFixed(1)}</td><td class="num"></td><td class="num">100%</td><td></td><td class="modes">≈ ${Math.round(occupancyBits / 6.409)} chars</td></tr>
+    <tr class="total"><td>total</td><td class="num">${occupancyBits.toFixed(1)}</td><td class="num"></td><td class="num">100%</td><td class="modes">≈ ${Math.round(occupancyBits / 6.409)} chars</td></tr>
   </table>
 </section>`;
 }

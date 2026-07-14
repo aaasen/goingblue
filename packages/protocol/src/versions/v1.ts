@@ -10,11 +10,12 @@ import type { ForecastMessage, VersionedCodec, ContextResolver } from "../model.
 import {
   encodeWeathercode, decodeWeathercode,
   windDirBook, windSpeedBook, encodeWindSpeedDelta, decodeWindSpeedDelta,
+  precipBook, snowBook, rainBook,
   FREEZE_DELTA,
   CLOUD_HIGH_DELTA, CLOUD_MID_DELTA, CLOUD_LOW_DELTA, type DeltaCodec,
   encodeTempDelta, decodeTempDelta, chooseTempDeltaTable,
   TEMP_DELTA_TABLE_BITS, TEMP_DELTA_MIN, TEMP_DELTA_MAX,
-  makeBitSink, makeBitSource, type SymSink, type CodeBook,
+  makeBitSink, makeBitSource, type CodeBook,
 } from "../entropy.js";
 
 export const V1_VERSION = 1;
@@ -56,22 +57,13 @@ export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BI
 const HEADER_BITS = V1_HEADER_BITS;
 const HEADER_CHARS = nCharsForBits(V1_HEADER_BITS); // packed-header chars (excludes version prefix)
 
-// Per-column encoding modes (2-bit selector on adaptive columns). The encoder emits whichever is
-// cheapest for the column.
-const MODE_RAW = 0;
-const MODE_FOR = 1;     // baseline + W-bit offsets
-const MODE_SPARSE = 2;  // presence bit + magnitude only when nonzero
-const MODE_EMPTY = 3;   // every cell is zero — no preamble, no data
-const MODE_BITS = 2;
-export const MODE_NAMES = ["raw", "for", "sparse", "empty"];
-const SUBWIDTH_BITS = 3; // width of the FOR offset-width / sparse magnitude-width field (0..7)
-
 // temp: 8 bits, 1°C steps, offset -100°C → -100°C to +155°C
 // snow/rain: 6 bits each, sqrt-companded (see ACCUM_* below). rain is bit 12, the slot
-// formerly reserved for the removed `vis`; bit 13 (formerly tmin) is reserved.
+// formerly reserved for the removed `vis`; bit 13 (formerly tmin) is reserved, as is bit 8
+// (formerly cloud_total — redundant with weathercode + per-altitude cloud cover, removed).
 // wind: 8 = 5-bit speed + 3-bit direction (raw-width equivalent; both entropy-coded).
-export const VAR_BITS_V1 = [3, 8, 6, 4, 8, 8, 8, 8, 3, 3, 3, 3, 6];
-//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^cc ^cch ^ccm ^ccl ^rain
+export const VAR_BITS_V1 = [3, 8, 6, 4, 8, 8, 8, 8, 0, 3, 3, 3, 6];
+//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^-- ^cch ^ccm ^ccl ^rain
 
 const TEMP_OFFSET = 100;
 
@@ -90,19 +82,6 @@ const KPH_PER_STEP = 5 * 1.609344;
 // built around high-altitude wind.
 const WIND_SPEED_BITS = 5;
 const WIND_SPEED_MAX = (1 << WIND_SPEED_BITS) - 1;
-
-// A scalar column: one non-negative integer per cell, in a fixed quantized domain.
-// "adaptive" columns carry a 2-bit mode selector and pick the cheapest of FOR / SPARSE / EMPTY /
-// raw per message. "for" columns always use frame-of-reference (no mode selector — temperature
-// picks FOR upward of 99% of the time in practice, so the selector and the raw/sparse/empty
-// candidates are pure overhead there). "raw" columns are always fixed-width, no selector.
-// Width is sourced from VAR_BITS_V1 so there is a single source of truth.
-interface ScalarColumn {
-  bit: number;
-  mode: "raw" | "adaptive" | "for";
-  get(p: Period): number;          // quantized integer (clamped to the field width)
-  set(p: Period, v: number): void; // dequantize the integer back onto the period
-}
 
 function clampInt(v: number, width: number): number {
   return Math.min(Math.max(v, 0), (1 << width) - 1);
@@ -128,10 +107,9 @@ const FREEZE_ANCHOR_BITS = VAR_BITS_V1[VARS_BIT.freeze];
 const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0) / FREEZE_STEP_M + 1e-9), FREEZE_ANCHOR_BITS);
 
 // cloud cover (low/mid/high): entropy-coded period-over-period deltas (see CLOUD_*_DELTA in
-// entropy.ts), not plain scalar columns — same anchor+delta shape as freeze, each level under its
-// own single shared table (not pooled across levels) since low/mid/high cloud persistence differs
-// meaningfully by altitude. Total cloud cover (bit cc) stays a plain raw scalar column (see
-// SCALAR_COLUMNS below) — untouched.
+// entropy.ts) — same anchor+delta shape as freeze, each level under its own single shared table
+// (not pooled across levels) since low/mid/high cloud persistence differs meaningfully by
+// altitude.
 const CLOUD_ANCHOR_BITS = VAR_BITS_V1[VARS_BIT.cch]; // 3; ccm/ccl share the same width
 const quantCloud = (p: Period, field: "cloud_high" | "cloud_mid" | "cloud_low"): number =>
   clampInt(Math.round((p[field] ?? 0) * 7 / 100), CLOUD_ANCHOR_BITS);
@@ -145,24 +123,30 @@ const CLOUD_DELTA_COLUMNS: {
   { bit: VARS_BIT.ccl, field: "cloud_low", codec: CLOUD_LOW_DELTA },
 ];
 
-// Scalar columns, in body (column-major) order. Wind is handled separately (two ints per cell).
-const SCALAR_COLUMNS: ScalarColumn[] = [
-  // precip chance: adaptive — sparse/empty when mostly dry (often 0%), FOR when clustered, raw otherwise.
-  { bit: 0, mode: "adaptive",
+// Value columns (precip chance, snow, rain), in body (column-major) order: each cell's quantized
+// value is entropy-coded directly — no anchor, no deltas — under a codebook keyed by (the period's
+// resolution, the previously decoded value), or the variable's bootstrap table for the column's
+// first cell (see precipBook/snowBook/rainBook in entropy.ts). Values, not deltas, because zero
+// is an absorbing regime: "still dry" is the single strongest signal these columns carry, and a
+// delta of 0 would conflate it with "steady heavy snowfall". This replaced the adaptive best-of
+// (raw / FOR / sparse / empty + 2-bit selector) scheme — sparse charged a full bit per dry period
+// where the order-1 tables charge a small fraction of one. temp (bit 1), freeze (bit 3) and
+// cloud_high/mid/low (bits 9/10/11) are handled separately in buildBody/decode below.
+const VALUE_COLUMNS: {
+  bit: number;
+  book(res: number, prev: number | null): CodeBook;
+  get(p: Period): number;          // quantized value symbol
+  set(p: Period, v: number): void; // dequantize the symbol back onto the period
+}[] = [
+  { bit: 0, book: precipBook,
     get: (p) => clampInt(Math.round((p.precip ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.precip = Math.round(v * 100 / 7); } },
-  // temp (bit 1) is handled separately in buildBody/decode below.
-  { bit: 2, mode: "adaptive",
+  { bit: 2, book: snowBook,
     get: (p) => compandSqrt(p.snow_cm ?? 0, SNOW_K, ACCUM_BITS),
     set: (p, v) => { p.snow_cm = expandSqrt(v, SNOW_K); } },
-  { bit: 12, mode: "adaptive",
+  { bit: 12, book: rainBook,
     get: (p) => compandSqrt(p.rain_mm ?? 0, RAIN_K, ACCUM_BITS),
     set: (p, v) => { p.rain_mm = expandSqrt(v, RAIN_K); } },
-  // freeze (bit 3) and cloud_high/mid/low (bits 9/10/11) are handled separately in
-  // buildBody/decode below (entropy-coded deltas).
-  { bit: 8, mode: "raw",
-    get: (p) => clampInt(Math.round((p.cloud_total ?? 0) * 7 / 100), 3),
-    set: (p, v) => { p.cloud_total = Math.round(v * 100 / 7); } },
 ];
 
 // Wind columns (surface + 500/600/700 hPa): speed + direction per cell, both entropy-coded under
@@ -195,7 +179,7 @@ function reader(bits: number[]) {
   return {
     int: (n: number): number => src.raw(n),
     weathercode: (prevSym: number | null): number => decodeWeathercode(src, prevSym),
-    windDir: (book: CodeBook): number => src.sym(book),
+    sym: (book: CodeBook): number => src.sym(book),
     windSpeedDelta: (book: CodeBook): number => decodeWindSpeedDelta(src, book),
     delta: (codec: DeltaCodec): number => codec.decode(src),
     tempDelta: (table: number): number => decodeTempDelta(src, table),
@@ -217,146 +201,6 @@ function eachCell(nPeriods: number, nModels: number, fn: (p: number, m: number) 
   for (let p = 0; p < nPeriods; p++) for (let m = 0; m < nModels; m++) fn(p, m);
 }
 
-// ── Scalar column codecs ───────────────────────────────────────────────────────
-
-// Bits needed to represent the unsigned value `n` (0 → 0 bits).
-function bitWidth(n: number): number {
-  return n <= 0 ? 0 : 32 - Math.clz32(n);
-}
-
-// A chosen per-column encoding: its mode tag, total bit cost, and an emitter for the body.
-// Every payload here is raw (bypass) bits, so `cost` is exact under any coding substrate.
-interface Candidate { mode: number; cost: number; emit: (sink: SymSink) => void; }
-
-function rawCandidate(vals: number[], width: number): Candidate {
-  return {
-    mode: MODE_RAW,
-    cost: vals.length * width,
-    emit: (sink) => { for (const v of vals) sink.raw(v, width); },
-  };
-}
-
-// Frame-of-reference: a baseline (column min) + offset width W, then each value as a W-bit offset.
-function forCandidate(vals: number[], width: number): Candidate {
-  let min = vals[0], max = vals[0];
-  for (const v of vals) { if (v < min) min = v; if (v > max) max = v; }
-  const W = bitWidth(max - min);
-  return {
-    mode: MODE_FOR,
-    cost: width + SUBWIDTH_BITS + vals.length * W,
-    emit: (sink) => {
-      sink.raw(min, width);
-      sink.raw(W, SUBWIDTH_BITS);
-      if (W > 0) for (const v of vals) sink.raw(v - min, W);
-    },
-  };
-}
-
-// Sparse: a presence bit per cell, with the magnitude stored only for nonzero cells. Wins when
-// the column is mostly zero (e.g. snow/rain with no precipitation in most periods).
-function sparseCandidate(vals: number[], maxV: number, nonzero: number): Candidate {
-  const magW = bitWidth(maxV);
-  return {
-    mode: MODE_SPARSE,
-    cost: SUBWIDTH_BITS + vals.length + nonzero * magW,
-    emit: (sink) => {
-      sink.raw(magW, SUBWIDTH_BITS);
-      for (const v of vals) {
-        sink.raw(v > 0 ? 1 : 0, 1);
-        if (v > 0) sink.raw(v, magW);
-      }
-    },
-  };
-}
-
-// Empty: every cell is zero. No preamble, no data — the column is just its 2-bit mode selector.
-const EMPTY_CANDIDATE: Candidate = { mode: MODE_EMPTY, cost: 0, emit: () => {} };
-
-// Encodes a run of non-negative ints (each fitting `width` bits) with the cheapest adaptive mode —
-// a 2-bit MODE_* selector plus the mode's payload. Shared by adaptive scalar columns and wind speed.
-function encodeAdaptive(sink: SymSink, vals: number[], width: number): number {
-  let maxV = 0, nonzero = 0;
-  for (const v of vals) { if (v > 0) { nonzero++; if (v > maxV) maxV = v; } }
-
-  const candidates: Candidate[] = maxV === 0
-    ? [EMPTY_CANDIDATE]
-    : [rawCandidate(vals, width), forCandidate(vals, width), sparseCandidate(vals, maxV, nonzero)];
-  let best = candidates[0];
-  for (const c of candidates) if (c.cost < best.cost) best = c;
-  sink.raw(best.mode, MODE_BITS);
-  best.emit(sink);
-  return best.mode;
-}
-
-// Reads a payload written by forCandidate.emit: baseline + width field, then n W-bit offsets.
-function decodeForPayload(rd: ReturnType<typeof reader>, width: number, n: number): number[] {
-  const baseline = rd.int(width);
-  const W = rd.int(SUBWIDTH_BITS);
-  const out = new Array<number>(n).fill(0);
-  for (let i = 0; i < n; i++) out[i] = baseline + (W > 0 ? rd.int(W) : 0);
-  return out;
-}
-
-// Reads `n` ints written by encodeAdaptive (mode selector + payload), in emit order.
-function decodeAdaptive(rd: ReturnType<typeof reader>, width: number, n: number): number[] {
-  const out = new Array<number>(n).fill(0);
-  const mode = rd.int(MODE_BITS);
-  switch (mode) {
-    case MODE_RAW:
-      for (let i = 0; i < n; i++) out[i] = rd.int(width);
-      break;
-    case MODE_FOR:
-      return decodeForPayload(rd, width, n);
-    case MODE_SPARSE: {
-      const magW = rd.int(SUBWIDTH_BITS);
-      for (let i = 0; i < n; i++) out[i] = rd.int(1) ? rd.int(magW) : 0;
-      break;
-    }
-    case MODE_EMPTY:
-      break;
-    default:
-      throw new Error(`v1: unsupported column mode ${mode}`);
-  }
-  return out;
-}
-
-// Encodes one scalar column into `body`, returning the chosen adaptive mode (MODE_*), or -1 for a
-// column with no mode selector (raw, and forced-FOR columns report MODE_FOR for the breakdown even
-// though they carry no selector bit).
-function encodeScalarColumn(
-  sink: SymSink, col: ScalarColumn, periods: Period[][], nPeriods: number, nModels: number,
-): number {
-  const width = VAR_BITS_V1[col.bit];
-  const vals: number[] = [];
-  eachCell(nPeriods, nModels, (p, m) => vals.push(col.get(periods[m][p])));
-
-  switch (col.mode) {
-    case "raw":
-      for (const v of vals) sink.raw(v, width);
-      return -1;
-    case "for":
-      forCandidate(vals, width).emit(sink);
-      return MODE_FOR;
-    case "adaptive":
-      return encodeAdaptive(sink, vals, width);
-  }
-}
-
-function decodeScalarColumn(
-  rd: ReturnType<typeof reader>, col: ScalarColumn, periods: Period[][],
-  nPeriods: number, nModels: number,
-): void {
-  const width = VAR_BITS_V1[col.bit];
-  if (col.mode === "raw") {
-    eachCell(nPeriods, nModels, (p, m) => col.set(periods[m][p], rd.int(width)));
-    return;
-  }
-  const n = nPeriods * nModels;
-  const vals = col.mode === "for" ? decodeForPayload(rd, width, n) : decodeAdaptive(rd, width, n);
-  let i = 0;
-  eachCell(nPeriods, nModels, (p, m) => col.set(periods[m][p], vals[i++]));
-}
-
 // ── Top-level codec ────────────────────────────────────────────────────────────
 
 // Column-name map (bit → var label from VARS_BIT), for the instrumented breakdown below.
@@ -364,17 +208,17 @@ const BIT_NAME: Record<number, string> = Object.fromEntries(
   Object.entries(VARS_BIT).map(([name, bit]) => [bit, name]),
 );
 
-// Callback receiving each column's contribution as it is emitted: label, bit cost, and the chosen
-// adaptive mode (MODE_*), or -1 for columns with no mode selector (weathercode, wind, non-adaptive).
-type ColumnSink = (name: string, bits: number, mode: number) => void;
+// Callback receiving each column's contribution as it is emitted: label and bit cost.
+type ColumnSink = (name: string, bits: number) => void;
 
 // Build the column-major body (shared by the string encoder and the instrumented breakdown). The
 // optional sink observes per-column bit costs without changing the bytes produced.
 function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } {
   const nModels = msg.periods.length;
   const nPeriods = msg.periods[0].length;
+  const res = resTableIdx(msg.periodHours);
   const em = makeBitSink();
-  const mark = (name: string, before: number, mode: number) => sink?.(name, em.cost - before, mode);
+  const mark = (name: string, before: number) => sink?.(name, em.cost - before);
 
   // Weathercode column (always present, entropy-coded). Each symbol's codebook is keyed by the
   // previously encoded symbol — null (the bootstrap table) for the first symbol of the sequence.
@@ -385,7 +229,7 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
     encodeWeathercode(em, prevWcSym, idx);
     prevWcSym = idx;
   });
-  mark("weathercode", before, -1);
+  mark("weathercode", before);
 
   // temp: per model, an anchor (first period, full width) followed by entropy-coded
   // period-over-period deltas — never diffed across a model boundary. The column picks the
@@ -419,7 +263,7 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
       em.raw(anchors[m], TEMP_ANCHOR_BITS);
       for (const delta of modelDeltas[m]) encodeTempDelta(em, table, delta);
     }
-    mark(name, before, -1);
+    mark(name, before);
   }
 
   // freeze: per model, an anchor (first period, full width) followed by entropy-coded
@@ -433,7 +277,7 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
         FREEZE_DELTA.encode(em, quantFreeze(msg.periods[m][p]) - quantFreeze(msg.periods[m][p - 1]));
       }
     }
-    mark("freeze", before, -1);
+    mark("freeze", before);
   }
 
   // cloud cover (low/mid/high): per model, an anchor (first period, full width) followed by
@@ -448,19 +292,26 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
         col.codec.encode(em, quantCloud(msg.periods[m][p], col.field) - quantCloud(msg.periods[m][p - 1], col.field));
       }
     }
-    mark(BIT_NAME[col.bit], before, -1);
+    mark(BIT_NAME[col.bit], before);
   }
 
-  for (const col of SCALAR_COLUMNS) {
+  // Value columns (precip chance, snow, rain): each cell's quantized value entropy-coded under a
+  // table keyed by (the period's resolution, the previously encoded value) — bootstrap for the
+  // column's first cell. The chain carries across model boundaries, like weathercode.
+  for (const col of VALUE_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
     before = em.cost;
-    const mode = encodeScalarColumn(em, col, msg.periods, nPeriods, nModels);
-    mark(BIT_NAME[col.bit], before, mode);
+    let prev: number | null = null;
+    eachCell(nPeriods, nModels, (p, m) => {
+      const v = col.get(msg.periods[m][p]);
+      em.sym(col.book(res[p], prev), v);
+      prev = v;
+    });
+    mark(BIT_NAME[col.bit], before);
   }
   // Same float-dust epsilon as quantFreeze: a decoded speed (s × step) must re-quantize to s.
   const windSpeed = (c: Period, kph: keyof Period) =>
     Math.min(Math.floor(((c[kph] as number) ?? 0) / KPH_PER_STEP + 1e-9), WIND_SPEED_MAX);
-  const res = resTableIdx(msg.periodHours);
   // Quantized speeds and displayed directions of already-encoded wind columns, keyed by var bit —
   // the cross-level context for the 600/700 hPa columns (their upper column encodes first).
   const spdByBit = new Map<number, number[][]>();
@@ -506,7 +357,7 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
     spdByBit.set(col.bit, spd);
     dispByBit.set(col.bit, disp);
 
-    mark(BIT_NAME[col.bit], before, -1);
+    mark(BIT_NAME[col.bit], before);
   }
 
   return { body: em.bits };
@@ -531,13 +382,12 @@ export function v1MessageToString(msg: ForecastMessage): string {
   return encodeVersion(VERSION) + encode(buildHeader(msg)) + encodeBodyLE(body);
 }
 
-// One column's contribution to a message: its model cost in (fractional) bits and, for adaptive
-// columns, the mode picked.
-export interface ColumnBreakdown { name: string; bits: number; mode: string | null }
+// One column's contribution to a message: its model cost in (fractional) bits.
+export interface ColumnBreakdown { name: string; bits: number }
 
 // Per-column bit accounting for a message, for encoding experiments. Produces the identical string
 // as v1MessageToString (via the same buildBody), plus the bit cost of the version prefix, packed
-// header, weathercode, and every present variable column, with the adaptive mode each column chose.
+// header, weathercode, and every present variable column.
 export interface V1Breakdown {
   encoded: string;
   chars: number;
@@ -550,8 +400,7 @@ export interface V1Breakdown {
 
 export function v1EncodeBreakdown(msg: ForecastMessage): V1Breakdown {
   const columns: ColumnBreakdown[] = [];
-  const { body } = buildBody(msg, (name, bits, mode) =>
-    columns.push({ name, bits, mode: mode < 0 ? null : MODE_NAMES[mode] }));
+  const { body } = buildBody(msg, (name, bits) => columns.push({ name, bits }));
   const encoded = encodeVersion(VERSION) + encode(buildHeader(msg)) + encodeBodyLE(body);
   const modelBits = columns.reduce((s, c) => s + c.bits, 0);
   return {
@@ -678,12 +527,20 @@ function decodeBody(
     }
   }
 
-  for (const col of SCALAR_COLUMNS) {
-    if (vars_mask & (1 << col.bit)) decodeScalarColumn(rd, col, periods, nPeriods, nModels);
+  // Value columns mirror buildBody exactly: each symbol's table keyed by (the period's
+  // resolution, the previously decoded value), bootstrap first, chained across model boundaries.
+  const res = resTableIdx(periodHours);
+  for (const col of VALUE_COLUMNS) {
+    if (!(vars_mask & (1 << col.bit))) continue;
+    let prev: number | null = null;
+    eachCell(nPeriods, nModels, (p, m) => {
+      const v = rd.sym(col.book(res[p], prev));
+      col.set(periods[m][p], v);
+      prev = v;
+    });
   }
   // Wind columns mirror buildBody exactly: speeds first (anchors + deltas), then calm-gated
   // directions, with the upper column's already-decoded values as cross-level context.
-  const res = resTableIdx(periodHours);
   const spdByBit = new Map<number, number[][]>();
   const dispByBit = new Map<number, number[][]>();
   for (const col of WIND_COLUMNS) {
@@ -712,7 +569,7 @@ function decodeBody(
     let prevDir: number | null = null;
     eachCell(nPeriods, nModels, (p, m) => {
       if (spd[m][p] > 0) {
-        const d = rd.windDir(windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null));
+        const d = rd.sym(windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null));
         prevDir = d;
         eff[m] = d;
       }

@@ -15,7 +15,7 @@ import {
 } from "../src/index.js";
 
 // Every variable (bit 12 is `rain`; bit 13, formerly tmin, is reserved).
-const ALL_VARS = (1 << 13) - 1;
+const ALL_VARS = ((1 << 13) - 1) & ~(1 << 8); // bit 8 (formerly cloud_total) is reserved
 
 // Request: 2026-07-12 at 13:00 local, UTC-9, 10 days — which covers SLOTS = 11 day slots (the
 // rest of the request day, then 10 whole days).
@@ -41,7 +41,6 @@ function periodAt(i: number): Period {
     wind_600_dir: (i + 4) % 8,
     wind_700_kph: ((i % 3) + 2) * 5 * 1.609344,
     wind_700_dir: (i + 6) % 8,
-    cloud_total: Math.round(((i * 29) % 8) * 100 / 7),
     cloud_high: Math.round((i % 8) * 100 / 7),
     cloud_mid: Math.round(((i + 3) % 8) * 100 / 7),
     cloud_low: Math.round(((i + 5) % 8) * 100 / 7),

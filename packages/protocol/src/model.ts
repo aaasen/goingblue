@@ -39,7 +39,6 @@ export interface Period {
   wind_700_dir?: number;
 
   // Cloud cover percentages.
-  cloud_total?: number;
   cloud_high?: number;    // 8km+
   cloud_mid?: number;     // 3-8km
   cloud_low?: number;     // <3km

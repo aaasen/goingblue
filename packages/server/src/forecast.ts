@@ -422,7 +422,6 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period
     p.wind_700_kph = r.wind_speed_700hPa ?? 0;
     p.wind_700_dir = degToDirIdx(r.wind_direction_700hPa);
   }
-  if (varsMask & (1 << VARS_BIT.cc))  p.cloud_total = Math.round(r.cloud_cover      ?? 0);
   if (varsMask & (1 << VARS_BIT.cch)) p.cloud_high  = Math.round(r.cloud_cover_high ?? 0);
   if (varsMask & (1 << VARS_BIT.ccm)) p.cloud_mid   = Math.round(r.cloud_cover_mid  ?? 0);
   if (varsMask & (1 << VARS_BIT.ccl)) p.cloud_low   = Math.round(r.cloud_cover_low  ?? 0);

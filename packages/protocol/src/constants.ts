@@ -31,7 +31,8 @@ export const VARS_BIT: Record<string, number> = {
   w500: 5,
   w600: 6,
   w700: 7,
-  cc: 8,     // total cloud cover
+  // bit 8 formerly carried cc (total cloud cover), removed as redundant with the weathercode
+  // plus per-altitude cloud cover — reserved for the next new variable.
   cch: 9,    // high cloud cover
   ccm: 10,   // mid cloud cover
   ccl: 11,   // low cloud cover

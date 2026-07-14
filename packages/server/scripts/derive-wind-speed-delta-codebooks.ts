@@ -24,7 +24,7 @@
  *   node packages/server/scripts/derive-wind-speed-delta-codebooks.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
-import { VARS_BIT, V1_MAX_PERIODS, type Period } from "@weather/protocol";
+import { VARS_BIT, type Period } from "@weather/protocol";
 import { eachForecast, scaledWeights, runStandalone, type DerivedTables } from "./derive-lib.ts";
 
 const NRES = 5;
@@ -53,7 +53,7 @@ export async function derive(): Promise<DerivedTables> {
     for (let resIdx = 0; resIdx < NRES; resIdx++) {
       const hpp = HOURS_PER_PERIOD[resIdx];
       const start = Math.floor(startHour / hpp) * hpp;
-      const n = Math.min(V1_MAX_PERIODS, Math.floor(h.time.length / hpp));
+      const n = Math.floor(h.time.length / hpp);
       if (n < 2) continue;
       const rows = aggregateHourly(h, h.time, n, resIdx, start);
       const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "GFS", resIdx));

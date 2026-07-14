@@ -45,7 +45,6 @@ const PERIOD: Period = {
   wind_600_dir: 3,
   wind_700_kph: 15 * 1.609344,
   wind_700_dir: 2,
-  cloud_total: 80,
   cloud_high: 60,
   cloud_mid: 40,
   cloud_low: 20,
@@ -181,7 +180,6 @@ describe("v1 round-trip encoding", () => {
     expect(p.wind_700_kph).toBeCloseTo(PERIOD.wind_700_kph!, 3);
     expect(p.wind_700_dir).toBe(PERIOD.wind_700_dir);
     // cloud cover is quantized to 3 bits (0–7 steps), decoded back to nearest %
-    expect(p.cloud_total).toBe(Math.round(Math.round((PERIOD.cloud_total ?? 0) * 7 / 100) * 100 / 7));
     expect(p.cloud_high).toBe(Math.round(Math.round((PERIOD.cloud_high   ?? 0) * 7 / 100) * 100 / 7));
     expect(p.cloud_mid).toBe(Math.round(Math.round((PERIOD.cloud_mid     ?? 0) * 7 / 100) * 100 / 7));
     expect(p.cloud_low).toBe(Math.round(Math.round((PERIOD.cloud_low     ?? 0) * 7 / 100) * 100 / 7));
@@ -197,7 +195,6 @@ describe("v1 round-trip encoding", () => {
     expect(p.freeze_m).toBeUndefined();
     expect(p.wind_sfc_kph).toBeUndefined();
     expect(p.wind_500_kph).toBeUndefined();
-    expect(p.cloud_total).toBeUndefined();
     expect(p.cloud_high).toBeUndefined();
   });
 
@@ -321,13 +318,6 @@ describe("v1 round-trip encoding", () => {
     expect(flatLen).toBeLessThan(swingsLen);
   });
 
-  it("freeze reports no adaptive mode — it's Huffman-coded deltas, not raw/for/sparse/empty columns", () => {
-    const vars_mask = 1 << VARS_BIT.freeze;
-    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, freeze_m: 6 * 304.8 }))];
-    const { columns } = v1EncodeBreakdown(msg({ vars_mask, periods }));
-    expect(columns.find((c) => c.name === "freeze")?.mode).toBeNull();
-  });
-
   const CLOUD_LEVELS = [
     { field: "cloud_high" as const, bit: VARS_BIT.cch, name: "cch" },
     { field: "cloud_mid" as const, bit: VARS_BIT.ccm, name: "ccm" },
@@ -341,13 +331,6 @@ describe("v1 round-trip encoding", () => {
     const flatLen = v1MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
     const swingsLen = v1MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(swingsLen);
-  });
-
-  it.each(CLOUD_LEVELS)("$name reports no adaptive mode — it's Huffman-coded deltas, not raw/for/sparse/empty columns", ({ field, bit, name }) => {
-    const vars_mask = 1 << bit;
-    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, [field]: 40 }))];
-    const { columns } = v1EncodeBreakdown(msg({ vars_mask, periods }));
-    expect(columns.find((c) => c.name === name)?.mode).toBeNull();
   });
 
   it("rounds precip to nearest 3-bit step", () => {
@@ -427,12 +410,6 @@ describe("v1 round-trip encoding", () => {
     const flat = Array.from({ length: 64 }, () => ({ weathercode: 0, wind_sfc_kph: 7 * WIND_STEP, wind_sfc_dir: 0 }));
     const swings = Array.from({ length: 64 }, (_, i) => ({ weathercode: 0, wind_sfc_kph: (i % 2 === 0 ? 2 : 13) * WIND_STEP, wind_sfc_dir: 0 }));
     expect(v1MessageToString(windMsg(flat)).length).toBeLessThan(v1MessageToString(windMsg(swings)).length);
-  });
-
-  it("wind speed reports no adaptive mode — it's entropy-coded deltas, not raw/for/sparse/empty columns", () => {
-    const periods = [Array.from({ length: 8 }, () => ({ weathercode: 0, wind_sfc_kph: 5 * WIND_STEP, wind_sfc_dir: 0 }))];
-    const { columns } = v1EncodeBreakdown(windMsg(periods[0]));
-    expect(columns.find((c) => c.name === "wind")?.mode).toBeNull();
   });
 
   it("round-trips surface wind at 1h resolution (the resolution-keyed direction codebook)", () => {
@@ -533,13 +510,6 @@ describe("delta temperature encoding", () => {
     expect(flatLen).toBeLessThan(spreadLen);
   });
 
-  it("temp reports no adaptive mode — it's Huffman-coded deltas, not a raw/for/sparse/empty column", () => {
-    const vars_mask = 1 << VARS_BIT.temp;
-    const periods = [Array.from({ length: 8 }, () => ({ ...PERIOD, temp_c: 0 }))];
-    const { columns } = v1EncodeBreakdown(msg({ vars_mask, periods }));
-    expect(columns.find((c) => c.name === "temp")?.mode).toBeNull();
-  });
-
   it("round-trips a >31°C period-over-period swing at the escape field's edge exactly", () => {
     // ±31 is the largest delta the escape payload can carry — no clamping yet.
     const temps = [-15, 16, 14, 15, -16, -14];
@@ -587,31 +557,32 @@ describe("body decode desync detection", () => {
   });
 });
 
-describe("sparse / empty precipitation encoding", () => {
+describe("order-1 precipitation encoding", () => {
   const vars_mask = 1 << VARS_BIT.snow;
 
-  it("collapses an all-dry snow column (empty mode) and round-trips to zero", () => {
+  it("collapses an all-dry snow column to almost nothing and round-trips to zero", () => {
     const dry = Array.from({ length: 48 }, () => ({ ...PERIOD, snow_cm: 0 }));
     const decoded = roundTrip(msg({ vars_mask, periods: [dry] }, { hourly: true }));
     decoded.periods[0].forEach((p) => expect(p.snow_cm).toBe(0));
-    // The empty column should be smaller than one with snow every period. Compare exact body
-    // bits (not the base-85 encoded char length) since a few bits of savings can land on either
-    // side of a char boundary and not move the visible string length.
+    // A dry run is the order-1 tables' cheapest input (P(0 | prev=0) is near 1), so the all-dry
+    // column must undercut one with snow every period. Compare exact body bits (not the base-85
+    // encoded char length) since a few bits of savings can land on either side of a char
+    // boundary and not move the visible string length.
     const snowy = Array.from({ length: 48 }, () => ({ ...PERIOD, snow_cm: 20 }));
     const dryBits = v1EncodeBreakdown(msg({ vars_mask, periods: [dry] }, { hourly: true })).bodyBits;
     const snowyBits = v1EncodeBreakdown(msg({ vars_mask, periods: [snowy] }, { hourly: true })).bodyBits;
     expect(dryBits).toBeLessThan(snowyBits);
   });
 
-  it("round-trips a mostly-zero snow column exactly (sparse mode)", () => {
+  it("round-trips a mostly-zero snow column exactly", () => {
     const vals = Array.from({ length: 48 }, (_, i) => (i % 12 === 0 ? 10 : 0));
     const periods = [vals.map((s) => ({ ...PERIOD, snow_cm: s }))];
     const decoded = roundTrip(msg({ vars_mask, periods }, { hourly: true }));
     decoded.periods[0].forEach((p, i) => expect(p.snow_cm).toBeCloseTo(qSnow(vals[i]), 5));
-    // Sparse beats a column where every cell is nonzero and widely spread (≈ raw cost).
+    // Mostly-dry beats a column where every cell is nonzero and widely spread.
     const dense = Array.from({ length: 48 }, (_, i) => ({ ...PERIOD, snow_cm: 3 * (i + 1) }));
-    const sparseLen = v1MessageToString(msg({ vars_mask, periods }, { hourly: true })).length;
-    const denseLen = v1MessageToString(msg({ vars_mask, periods: [dense] }, { hourly: true })).length;
-    expect(sparseLen).toBeLessThan(denseLen);
+    const sparseBits = v1EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true })).bodyBits;
+    const denseBits = v1EncodeBreakdown(msg({ vars_mask, periods: [dense] }, { hourly: true })).bodyBits;
+    expect(sparseBits).toBeLessThan(denseBits);
   });
 });

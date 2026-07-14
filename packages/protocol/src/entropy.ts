@@ -7,6 +7,9 @@ import {
   FREEZE_DELTA_WEIGHTS,
   CLOUD_LOW_DELTA_WEIGHTS, CLOUD_MID_DELTA_WEIGHTS, CLOUD_HIGH_DELTA_WEIGHTS,
   TEMP_DELTA_WEIGHTS,
+  PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES,
+  SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES,
+  RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_RES,
 } from "./codebooks.gen.js";
 import {
   buildRansTable, symCostBits, ransEncode, ransReader, quantizeFreqs,
@@ -234,6 +237,43 @@ export const CLOUD_LOW_DELTA = makeDeltaCodec(CLOUD_LOW_DELTA_WEIGHTS, 7);
 export const CLOUD_MID_DELTA = makeDeltaCodec(CLOUD_MID_DELTA_WEIGHTS, 7);
 export const CLOUD_HIGH_DELTA = makeDeltaCodec(CLOUD_HIGH_DELTA_WEIGHTS, 7);
 
+// ── Precip chance and rain/snow accumulations ──────────────────────────────────
+// Order-1 codebooks over the column's quantized VALUES (not deltas — zero is an absorbing
+// regime, and a delta of 0 would conflate "still dry" with "steady heavy snow"), keyed by
+// (the period's resolution, the previously decoded value). This replaced the adaptive
+// best-of (raw / FOR / sparse / empty + 2-bit selector) scheme: sparse charges a full bit per
+// zero period where P(0 | prev=0) makes it a small fraction of one. Held-out 5-fold by location:
+// precip 2.121 → 1.002, snow 1.302 → 0.741, rain 1.983 → 1.153 bits/period — see
+// server/scripts/derive-precip-accum-codebooks.ts.
+//
+// Precip chance (8 symbols) keys on the previous value directly. Rain/snow (64-symbol companded
+// domain) key on a BUCKET of it — the full 64×64 transition matrix has too little corpus signal
+// per cell, and buckets were within ~0.02 b/period of it held-out. The bootstrap table covers a
+// column's first value (no predecessor); it fires once per column, so it is pooled across
+// resolutions.
+
+// Previous-value buckets for the accumulation columns: 0 | 1-3 | 4-9 | 10-20 | 21+.
+// Must match ACCUM_BUCKET_EDGES in derive-precip-accum-codebooks.ts.
+const ACCUM_BUCKET_EDGES = [1, 4, 10, 21];
+function accumBucket(v: number): number {
+  let b = 0;
+  for (const e of ACCUM_BUCKET_EDGES) { if (v < e) break; b++; }
+  return b;
+}
+
+function makeValueCodec(bootstrapWeights: number[], weightsByRes: number[][][], ctxOf: (prev: number) => number) {
+  const bootstrap = buildTable(bootstrapWeights);
+  const tables = weightsByRes.map((rows) => rows.map(buildTable));
+  // The codebook for one value symbol: `prev` is the previously decoded value in the column,
+  // or null for the column's first (bootstrap).
+  return (res: number, prev: number | null): CodeBook =>
+    prev === null ? bootstrap : tables[res][ctxOf(prev)];
+}
+
+export const precipBook = makeValueCodec(PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES, (p) => p);
+export const snowBook = makeValueCodec(SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES, accumBucket);
+export const rainBook = makeValueCodec(RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_RES, accumBucket);
+
 // ── Temperature deltas ──────────────────────────────────────────────────────────
 // Static codebooks for period-over-period temp_c change. Symbols are quantized deltas
 // -7..7 (indices 0..14) plus an ESCAPE symbol (index 15) for rarer bigger jumps, followed by a raw
@@ -310,6 +350,9 @@ export const V1_CODEBOOKS = {
     upperByRes: WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
     maxDelta: WIND_SPEED_DELTA_MAX,
   },
+  precip: { bootstrap: qf(PRECIP_BOOTSTRAP_WEIGHTS), byRes: PRECIP_WEIGHTS_BY_RES.map((rows) => rows.map(qf)) },
+  snow: { bootstrap: qf(SNOW_BOOTSTRAP_WEIGHTS), byRes: SNOW_WEIGHTS_BY_RES.map((rows) => rows.map(qf)), bucketEdges: ACCUM_BUCKET_EDGES },
+  rain: { bootstrap: qf(RAIN_BOOTSTRAP_WEIGHTS), byRes: RAIN_WEIGHTS_BY_RES.map((rows) => rows.map(qf)), bucketEdges: ACCUM_BUCKET_EDGES },
   freezeDelta: qf(FREEZE_DELTA_WEIGHTS),
   cloudLowDelta: qf(CLOUD_LOW_DELTA_WEIGHTS),
   cloudMidDelta: qf(CLOUD_MID_DELTA_WEIGHTS),

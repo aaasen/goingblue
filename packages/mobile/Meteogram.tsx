@@ -58,7 +58,7 @@ const MODEL_COLORS: Record<string, string> = {
 const SNOW_CODES = new Set([56, 57, 66, 67, 71, 73, 75, 77, 85, 86]);
 const RAIN_CODES = new Set([51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99]);
 
-// Coverage (0–100) implied by a weather code, used when cloud_total is absent.
+// Coverage (0–100) implied by a weather code, for the cloud glyph shading.
 function codeCoverage(code: number): number {
   if (code === 0) return 0;
   if (code === 1) return 25;
@@ -240,7 +240,7 @@ function pressureLabel(level: 500 | 600 | 700, u: Units): string {
 
 type RowKind =
   | 'clouds' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc'
-  | 'cloud-total' | 'cloud-high' | 'cloud-mid' | 'cloud-low'
+  | 'cloud-high' | 'cloud-mid' | 'cloud-low'
   | 'wind-500' | 'wind-600' | 'wind-700' | 'section';
 
 interface Row {
@@ -268,11 +268,9 @@ function buildRows(periods: Period[], u: Units): Row[] {
     if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.DATA, label: `Wind ${wU}` });
   }
 
-  const hasCloud = has((p) => p.cloud_total) || has((p) => p.cloud_high) ||
-    has((p) => p.cloud_mid) || has((p) => p.cloud_low);
+  const hasCloud = has((p) => p.cloud_high) || has((p) => p.cloud_mid) || has((p) => p.cloud_low);
   if (hasCloud) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Cloud cover %' });
-    if (has((p) => p.cloud_total)) rows.push({ kind: 'cloud-total', height: ROW_H.DATA, label: 'Total' });
     if (has((p) => p.cloud_high)) rows.push({ kind: 'cloud-high', height: ROW_H.DATA, label: 'High' });
     if (has((p) => p.cloud_mid)) rows.push({ kind: 'cloud-mid', height: ROW_H.DATA, label: 'Mid' });
     if (has((p) => p.cloud_low)) rows.push({ kind: 'cloud-low', height: ROW_H.DATA, label: 'Low' });
@@ -593,7 +591,7 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
     switch (row.kind) {
       case 'clouds':
         periods.forEach((p, i) => {
-          const cov = p.cloud_total ?? codeCoverage(p.weathercode);
+          const cov = codeCoverage(p.weathercode);
           els.push(cloudGlyph(`cl${i}`, colCenter(i), top, row.height, p.weathercode, cov));
         });
         break;
@@ -652,9 +650,8 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
         break;
       }
 
-      case 'cloud-total': case 'cloud-high': case 'cloud-mid': case 'cloud-low': {
-        const key = (row.kind === 'cloud-total' ? 'cloud_total'
-          : row.kind === 'cloud-high' ? 'cloud_high'
+      case 'cloud-high': case 'cloud-mid': case 'cloud-low': {
+        const key = (row.kind === 'cloud-high' ? 'cloud_high'
           : row.kind === 'cloud-mid' ? 'cloud_mid' : 'cloud_low') as keyof Period;
         periods.forEach((p, i) => {
           const pct = p[key] as number | undefined;
