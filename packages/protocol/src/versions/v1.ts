@@ -11,7 +11,7 @@ import {
   encodeWeathercode, decodeWeathercode, WEATHERCODE_CLASS,
   windDirBook, windSpeedBook, encodeWindSpeedDelta, decodeWindSpeedDelta,
   precipBook, snowBook, rainBook,
-  FREEZE_DELTA,
+  freezeDeltaBook, encodeFreezeDelta, decodeFreezeDelta,
   CLOUD_HIGH_DELTA, CLOUD_MID_DELTA, CLOUD_LOW_DELTA, type DeltaCodec,
   encodeTempDelta, decodeTempDelta, tempDeltaBook, tempTodBucket,
   TEMP_DELTA_MIN, TEMP_DELTA_MAX,
@@ -96,9 +96,12 @@ const TEMP_DELTA_COLUMNS: [bit: number, field: "temp_c", name: string][] = [
   [VARS_BIT.temp, "temp_c", "temp"],
 ];
 
-// freeze: entropy-coded period-over-period deltas under a single shared table (see FREEZE_DELTA
-// in entropy.ts — no per-message selector; freeze-level delta shape doesn't vary enough by
-// location/season to be worth one), not a plain scalar column. 304.8 m (1000 ft) steps, 0..31
+// freeze: entropy-coded period-over-period deltas under tables keyed by (the arriving period's
+// resolution, the SAME period's temp delta) — the 0°C isotherm moves with the airmass
+// temperature, and temp decodes first, so its delta is free context; a res-keyed fallback covers
+// messages without temp in vars_mask (see freezeDeltaBook in entropy.ts — no per-message
+// selector; a held-out cheapest-of-16 measured worse than a shared table). Not a plain scalar
+// column. 304.8 m (1000 ft) steps, 0..31
 // (0-31000 ft) — tropical and subtropical high country (the Andes, central Mexico) sits above
 // 15000 ft nearly year-round, and the corpus tops out at 21200 ft, so the domain has to reach
 // well past that to stop clipping.
@@ -202,6 +205,7 @@ function reader(bits: number[]) {
     weathercode: (prevSym: number | null): number => decodeWeathercode(src, prevSym),
     sym: (book: CodeBook): number => src.sym(book),
     windSpeedDelta: (book: CodeBook): number => decodeWindSpeedDelta(src, book),
+    freezeDelta: (book: CodeBook): number => decodeFreezeDelta(src, book),
     delta: (codec: DeltaCodec): number => codec.decode(src),
     tempDelta: (book: CodeBook): number => decodeTempDelta(src, book),
     assertDone: (): void => src.assertDone(),
@@ -267,9 +271,14 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
   // column. CRITICAL: the context chains the CLAMPED delta (what the decoder will decode), never
   // the raw input difference — otherwise the two sides' contexts diverge after a clamp.
   const tod = todTableIdx(msg.hour, msg.periodHours, msg.utcOffsetHours);
+  // The clamped temp deltas ([model][period], p ≥ 1) are kept: they key the freeze column's
+  // codebooks below, and keeping the CLAMPED value (what the decoder reconstructs) rather than
+  // the raw input difference is what keeps the two sides' freeze contexts identical.
+  let tempDeltas: number[][] | null = null;
   for (const [bit, field, name] of TEMP_DELTA_COLUMNS) {
     if (!(msg.vars_mask & (1 << bit))) continue;
     before = em.cost;
+    const deltas: number[][] = msg.periods.map(() => []);
     for (let m = 0; m < nModels; m++) {
       let reconstructed = quantTemp(msg.periods[m][0], field);
       em.raw(reconstructed, TEMP_ANCHOR_BITS);
@@ -280,20 +289,24 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
         encodeTempDelta(em, tempDeltaBook(res[p], tod[p], prevDelta), delta);
         reconstructed += delta;
         prevDelta = delta;
+        deltas[m][p] = delta;
       }
     }
+    if (bit === VARS_BIT.temp) tempDeltas = deltas;
     mark(name, before);
   }
 
   // freeze: per model, an anchor (first period, full width) followed by entropy-coded
-  // period-over-period deltas under a single shared table (see FREEZE_DELTA in entropy.ts —
-  // no per-message selector).
+  // period-over-period deltas, each under a table keyed by (the arriving period's resolution,
+  // the same period's temp delta) — or the res-keyed fallback when temp is absent (see
+  // freezeDeltaBook in entropy.ts).
   if (msg.vars_mask & (1 << VARS_BIT.freeze)) {
     before = em.cost;
     for (let m = 0; m < nModels; m++) {
       em.raw(quantFreeze(msg.periods[m][0]), FREEZE_ANCHOR_BITS);
       for (let p = 1; p < nPeriods; p++) {
-        FREEZE_DELTA.encode(em, quantFreeze(msg.periods[m][p]) - quantFreeze(msg.periods[m][p - 1]));
+        const book = freezeDeltaBook(res[p], tempDeltas ? tempDeltas[m][p] : null);
+        encodeFreezeDelta(em, book, quantFreeze(msg.periods[m][p]) - quantFreeze(msg.periods[m][p - 1]));
       }
     }
     mark("freeze", before);
@@ -525,8 +538,12 @@ function decodeBody(
   // model's first delta.
   const res = resTableIdx(periodHours);
   const tod = todTableIdx(firstHour, periodHours, utcOffsetHours);
+  // The decoded temp deltas ([model][period], p ≥ 1) are kept — they key the freeze column's
+  // codebooks below, mirroring buildBody.
+  let tempDeltas: number[][] | null = null;
   for (const [bit, field] of TEMP_DELTA_COLUMNS) {
     if (!(vars_mask & (1 << bit))) continue;
+    const deltas: number[][] = periods.map(() => []);
     for (let m = 0; m < nModels; m++) {
       let quant = rd.int(TEMP_ANCHOR_BITS);
       periods[m][0][field] = quant - TEMP_OFFSET;
@@ -536,16 +553,20 @@ function decodeBody(
         quant += delta;
         periods[m][p][field] = quant - TEMP_OFFSET;
         prevDelta = delta;
+        deltas[m][p] = delta;
       }
     }
+    if (bit === VARS_BIT.temp) tempDeltas = deltas;
   }
 
+  // Freeze mirrors buildBody exactly: each delta's table keyed by (the arriving period's
+  // resolution, the same period's decoded temp delta), or the res-keyed fallback without temp.
   if (vars_mask & (1 << VARS_BIT.freeze)) {
     for (let m = 0; m < nModels; m++) {
       let quant = rd.int(FREEZE_ANCHOR_BITS);
       periods[m][0].freeze_m = quant * FREEZE_STEP_M;
       for (let p = 1; p < nPeriods; p++) {
-        quant += rd.delta(FREEZE_DELTA);
+        quant += rd.freezeDelta(freezeDeltaBook(res[p], tempDeltas ? tempDeltas[m][p] : null));
         periods[m][p].freeze_m = quant * FREEZE_STEP_M;
       }
     }

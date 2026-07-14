@@ -344,6 +344,16 @@ pnpm benchmark --request-hour 18   # local hour of the request (default 7)
     constant): the +Freezing Level view gives up 0.2-0.4 pp of fill (7d 83.8% -> 83.4%, 10d
     69.8% -> 69.4%), mean fill across all views 80.1% -> 80.0%. Unblocks the freeze × temp-delta
     conditioning deferred in #19, which should more than pay this back.
+21. Freeze × temp-delta conditioning (the deferral from #19, unblocked by #20): the freezing-level
+    delta moves from one pooled table to codebooks keyed by (the arriving period's resolution, the
+    **same period's temp-delta bucket**) — the 0°C isotherm moves with the airmass temperature, and
+    temp decodes first, so its clamped-reconstruction delta is free context (the same trick as the
+    wet columns' weathercode class in #19). A res-keyed fallback set covers messages without temp
+    in vars_mask. Re-scanned post-widening, the gain held and slightly grew: held-out (5-fold by
+    location) 1.445 -> 1.308 b/period (pooled -> res × tempΔ; res alone only reaches 1.393). Only
+    the +Freezing Level view moves: 7d 83.4% -> 84.0%, 10d 69.4% -> 70.5% fill; mean fill across
+    all views 80.05% -> 80.18% — paying back the anchor widening (#20) with change left over, as
+    predicted there.
 
 ## License
 

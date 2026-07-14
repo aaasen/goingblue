@@ -4,7 +4,7 @@ import {
   WEATHERCODE_BOOTSTRAP_WEIGHTS, WEATHERCODE_WEIGHTS,
   WIND_DIR_BOOTSTRAP_WEIGHTS, WIND_DIR_WEIGHTS_BY_RES, WIND_DIR_UPPER_WEIGHTS_BY_RES,
   WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL, WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES,
-  FREEZE_DELTA_WEIGHTS,
+  FREEZE_DELTA_WEIGHTS_BY_RES, FREEZE_DELTA_TEMP_WEIGHTS_BY_RES,
   CLOUD_LOW_DELTA_WEIGHTS, CLOUD_MID_DELTA_WEIGHTS, CLOUD_HIGH_DELTA_WEIGHTS,
   TEMP_DELTA_BOOTSTRAP_WEIGHTS, TEMP_DELTA_WEIGHTS_BY_RES,
   PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES,
@@ -231,12 +231,37 @@ export function decodeWindSpeedDelta(src: SymSource, book: CodeBook): number {
 
 // ── Freezing-level deltas ───────────────────────────────────────────────────────
 // Period-over-period freezing-level change, in quantized steps (see the freeze column in v1.ts:
-// 0..31, 304.8 m / 1000 ft steps, so deltas -31..31). Held-out: cheapest-of-16 with a 4-bit
-// selector cost 1.371 b/period vs 1.340 b/period for this single table. Derived from the corpus's
-// pooled delta distribution — see server/scripts/derive-freeze-delta-codebooks.ts.
+// 0..31, 304.8 m / 1000 ft steps, so deltas -31..31). Tables are keyed by (the arriving period's
+// resolution, the SAME period's temp-delta bucket) — the freezing level is where the 0°C isotherm
+// sits, so it moves with the airmass temperature, and temp decodes first, making its delta free
+// context (the same trick the 600/700 hPa wind columns play on the upper level). The bucket is
+// taken from temp's CLAMPED reconstruction delta — the value the decoder actually sees — via the
+// same tempDeltaBucket temp keys its own tables on. Temp isn't guaranteed in vars_mask, so a
+// res-keyed fallback table set (the tempΔ marginal) covers messages without it. Held-out (5-fold
+// by location, post 5-bit widening): pooled 1.445 → res 1.393 → res × tempΔ 1.308 b/period; a
+// cheapest-of-16 per-message selector had measured WORSE than pooled (1.371 vs 1.340, pre-
+// widening). Derived per (resolution × bucket) — see server/scripts/derive-freeze-delta-codebooks.ts.
 
 // must mirror the freeze column width in v1.ts (0..31)
-export const FREEZE_DELTA = makeDeltaCodec(FREEZE_DELTA_WEIGHTS, 31);
+export const FREEZE_DELTA_MAX = 31;
+const FREEZE_DELTA_TABLES_BY_RES = FREEZE_DELTA_WEIGHTS_BY_RES.map(buildTable);
+const FREEZE_DELTA_TEMP_TABLES = FREEZE_DELTA_TEMP_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
+
+// The codebook for one freeze delta. `tempDelta` is the same period's decoded temp delta (the
+// post-clamp reconstruction, never the raw input), or null when temp is absent from vars_mask.
+export function freezeDeltaBook(res: number, tempDelta: number | null): CodeBook {
+  return tempDelta === null
+    ? FREEZE_DELTA_TABLES_BY_RES[res]
+    : FREEZE_DELTA_TEMP_TABLES[res][tempDeltaBucket(tempDelta)];
+}
+
+export function encodeFreezeDelta(sink: SymSink, book: CodeBook, delta: number): void {
+  sink.sym(book, delta + FREEZE_DELTA_MAX);
+}
+
+export function decodeFreezeDelta(src: SymSource, book: CodeBook): number {
+  return src.sym(book) - FREEZE_DELTA_MAX;
+}
 
 // ── Cloud cover deltas ──────────────────────────────────────────────────────────
 // Period-over-period cloud-cover change, in quantized steps (see the cloud columns in v1.ts: 0..7,
@@ -405,7 +430,11 @@ export const V1_CODEBOOKS = {
   precip: { bootstrap: qf(PRECIP_BOOTSTRAP_WEIGHTS), byRes: PRECIP_WEIGHTS_BY_RES.map((rows) => rows.map(qf)) },
   snow: { bootstrap: qf(SNOW_BOOTSTRAP_WEIGHTS), byRes: SNOW_WEIGHTS_BY_RES.map((rows) => rows.map(qf)), bucketEdges: ACCUM_BUCKET_EDGES },
   rain: { bootstrap: qf(RAIN_BOOTSTRAP_WEIGHTS), byRes: RAIN_WEIGHTS_BY_RES.map((rows) => rows.map(qf)), bucketEdges: ACCUM_BUCKET_EDGES },
-  freezeDelta: qf(FREEZE_DELTA_WEIGHTS),
+  // The freeze tables also key on tempDelta.prevBucketEdges (below) via tempDeltaBucket.
+  freezeDelta: {
+    byRes: FREEZE_DELTA_WEIGHTS_BY_RES.map(qf),
+    tempByRes: FREEZE_DELTA_TEMP_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  },
   cloudLowDelta: qf(CLOUD_LOW_DELTA_WEIGHTS),
   cloudMidDelta: qf(CLOUD_MID_DELTA_WEIGHTS),
   cloudHighDelta: qf(CLOUD_HIGH_DELTA_WEIGHTS),

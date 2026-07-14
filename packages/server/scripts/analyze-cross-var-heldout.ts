@@ -24,9 +24,11 @@
  *     Stacked candidates (rain also on snow ≠ 0, snow also on the precip bucket) were redundant
  *     with the class. See derive-precip-accum-codebooks.ts and WEATHERCODE_CLASS in entropy.ts.
  *   REJECTED: clouds × anything (-0.03), weathercode × res (-0.033) — too small to pay for.
- *   DEFERRED: freeze × tempΔ (-0.131) — the freezing-level anchor is 4 bits (0-15,000 ft) and real
- *     forecasts clip at the cap, which both needs fixing and may be distorting this correlation.
- *     Widen the anchor domain first, then re-scan freeze.
+ *   SHIPPED: freeze × (res × same-period tempΔ bucket). Initially deferred (-0.131 under the old
+ *     4-bit anchor, whose 15,000 ft cap real forecasts clipped at); re-scanned after the anchor
+ *     widened to 5 bits and the gain held: pooled 1.445 → res 1.393 → res × tempΔ 1.308 b/period
+ *     (-0.136, occ min=858). See derive-freeze-delta-codebooks.ts and freezeDeltaBook in
+ *     entropy.ts.
  *
  *   node packages/server/scripts/analyze-cross-var-heldout.ts
  */
@@ -72,7 +74,7 @@ interface Chain {
   snow: number[];     // 0..63 companded value symbols
   rain: number[];
   cch: number[]; ccm: number[]; ccl: number[]; // quantized 0..7 levels (deltas derived)
-  freezeQ: number[];  // quantized 0..15 (deltas derived)
+  freezeQ: number[];  // quantized 0..31 (deltas derived)
   tempDB: number[];   // same-period temp-delta bucket (0..4), p ≥ 1; -1 at p = 0
 }
 
@@ -108,7 +110,7 @@ async function collectChains(): Promise<Chain[]> {
         cch: periods.map((p) => clampInt(Math.round((p.cloud_high ?? 0) * 7 / 100), 3)),
         ccm: periods.map((p) => clampInt(Math.round((p.cloud_mid ?? 0) * 7 / 100), 3)),
         ccl: periods.map((p) => clampInt(Math.round((p.cloud_low ?? 0) * 7 / 100), 3)),
-        freezeQ: periods.map((p) => clampInt(Math.floor((p.freeze_m ?? 0) / 304.8 + 1e-9), 4)),
+        freezeQ: periods.map((p) => clampInt(Math.floor((p.freeze_m ?? 0) / 304.8 + 1e-9), 5)),
         tempDB: [-1],
       };
       // Same-period temp-delta bucket, from the clamped wire chain (temp decodes before freeze).
@@ -228,7 +230,7 @@ const TARGETS: Target[] = [
     ],
   })),
   {
-    name: "freeze", nsym: 31, sym: (c, p) => c.freezeQ[p] - c.freezeQ[p - 1] + 15,
+    name: "freeze", nsym: 63, sym: (c, p) => c.freezeQ[p] - c.freezeQ[p - 1] + 31,
     schemes: [
       { label: "baseline pooled (1)", nctx: 1, ctx: () => 0 },
       { label: "+ res (4)", nctx: NRES, ctx: (c) => R(c) },

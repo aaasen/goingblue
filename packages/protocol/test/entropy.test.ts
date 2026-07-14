@@ -9,7 +9,10 @@ import {
   decodeWindSpeedDelta,
   WIND_SPEED_DELTA_MAX,
   upperDeltaBucket,
-  FREEZE_DELTA,
+  freezeDeltaBook,
+  encodeFreezeDelta,
+  decodeFreezeDelta,
+  FREEZE_DELTA_MAX,
   CLOUD_LOW_DELTA,
   CLOUD_MID_DELTA,
   CLOUD_HIGH_DELTA,
@@ -201,11 +204,59 @@ describe("wind speed delta entropy coding", () => {
   });
 });
 
-// Freezing level and the three cloud levels all use single-table bounded delta codecs from
-// makeDeltaCodec — same shape, different weights/range. Table-driven so all four get the same
-// coverage without quadrupling the test body.
+describe("freezing level delta entropy coding", () => {
+  // Every distinct freeze codebook: per resolution, the res-keyed fallback (temp absent) plus one
+  // table per temp-delta bucket, reached through the same freezeDeltaBook the wire uses. One
+  // representative same-period temp delta per bucket: ≤-2 | -1 | 0 | +1 | ≥+2.
+  const allBooks = () => {
+    const books = [];
+    for (let res = 0; res <= 4; res++) {
+      for (const tempDelta of [null, -5, -1, 0, 1, 5]) books.push(freezeDeltaBook(res, tempDelta));
+    }
+    return books;
+  };
+
+  it(`round-trips every delta (-${FREEZE_DELTA_MAX}..${FREEZE_DELTA_MAX}) under every (resolution, tempΔ-bucket) book`, () => {
+    for (const book of allBooks()) {
+      for (let d = -FREEZE_DELTA_MAX; d <= FREEZE_DELTA_MAX; d++) {
+        const { cost, source } = encoded((sink) => encodeFreezeDelta(sink, book, d));
+        expect(cost).toBeGreaterThan(0);
+        expect(decodeFreezeDelta(source, book)).toBe(d);
+        source.assertDone();
+      }
+    }
+  });
+
+  it("decodes a concatenated delta sequence unambiguously", () => {
+    const seq = [0, 1, -1, 0, 2, -3, 17, 0, 1, -25, 0, 0];
+    const book = freezeDeltaBook(4, 0);
+    const { source } = encoded((sink) => { for (const d of seq) encodeFreezeDelta(sink, book, d); });
+    const out: number[] = [];
+    for (let k = 0; k < seq.length; k++) out.push(decodeFreezeDelta(source, book));
+    expect(out).toEqual(seq);
+    source.assertDone();
+  });
+
+  const bitsFor = (deltas: number[], book = freezeDeltaBook(4, null)) =>
+    costOf((sink) => { for (const d of deltas) encodeFreezeDelta(sink, book, d); });
+
+  it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 5-bit", () => {
+    const flat = Array(64).fill(0);
+    const swings = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? 5 : -5));
+    expect(bitsFor(flat)).toBeLessThan(bitsFor(swings));
+    expect(bitsFor(flat)).toBeLessThan(flat.length * 5); // beats raw 5 bits/value
+  });
+
+  it("a warming period makes a rising freezing level cheaper than the no-temp fallback (cross-variable context)", () => {
+    const rising = Array(64).fill(1);
+    expect(bitsFor(rising, freezeDeltaBook(2, 3))).toBeLessThan(bitsFor(rising, freezeDeltaBook(2, null)));
+  });
+});
+
+// The three cloud levels all use single-table bounded delta codecs from makeDeltaCodec — same
+// shape, different weights. Table-driven so all three get the same coverage without tripling the
+// test body.
 const DELTA_CODECS: { label: string; codec: DeltaCodec; maxDelta: number; rawBits: number }[] = [
-  { label: "freezing level", codec: FREEZE_DELTA, maxDelta: 15, rawBits: 4 },
   { label: "cloud low", codec: CLOUD_LOW_DELTA, maxDelta: 7, rawBits: 3 },
   { label: "cloud mid", codec: CLOUD_MID_DELTA, maxDelta: 7, rawBits: 3 },
   { label: "cloud high", codec: CLOUD_HIGH_DELTA, maxDelta: 7, rawBits: 3 },

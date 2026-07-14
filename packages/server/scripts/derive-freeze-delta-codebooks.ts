@@ -1,63 +1,128 @@
 /**
- * Derive a single freezing-level-delta Huffman codebook from the corpus's pooled hour-to-hour
- * quantized freeze-level delta distribution. The quantized freeze-level step (0..31, 304.8 m /
- * 1000 ft steps — see the freeze column in v1.ts) is bounded, so like wind speed the full delta
- * range -31..31 (63 symbols) fits directly in the alphabet — no escape/raw-payload fallback needed.
+ * Derive freezing-level-delta codebooks keyed by (resolution, SAME-period temp-delta bucket) —
+ * context both sides already have, so none of it costs wire bits: temp decodes before freeze,
+ * and the bucket is taken from the CLAMPED reconstruction delta the decoder actually sees (the
+ * same tempDeltaBucket the temp column keys its own tables on). The freezing level is where the
+ * 0°C isotherm sits, so it moves with the airmass temperature — a warming period pulls it up, a
+ * cooling one down. Held-out (5-fold by location, analyze-cross-var-heldout.ts, post 5-bit
+ * widening): pooled 1.445 → res 1.393 → res × tempΔ 1.308 b/period.
  *
- * Earlier versions of this script k-means clustered per-forecast delta histograms into 16 tables
- * selected per message (like weathercode/wind direction). That doesn't pay off here: unlike
- * weathercode and wind direction, freeze-level deltas don't have genuinely distinct regimes across
- * locations/seasons — they're dominated everywhere by "usually 0, occasionally ±1", so the 16
- * clusters were only picking up local volatility, not real distributional differences. A held-out
- * check confirmed cheapest-of-16 (1.371 b/period, including the 4-bit selector) is actually WORSE
- * than a single shared table (1.340 b/period, no selector) — so this script now just builds the
- * one table.
+ * Temp is not guaranteed in vars_mask, so a res-keyed fallback table set (the tempΔ marginal)
+ * ships alongside — the same present/absent split the 600/700 hPa wind columns use for their
+ * upper-level context.
  *
- * The table lands in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
+ * The quantized freeze-level step (0..31, 304.8 m / 1000 ft steps — see the freeze column in
+ * v1.ts) is bounded, so the full delta range -31..31 (63 symbols) fits directly in the alphabet —
+ * no escape/raw-payload fallback needed. Earlier versions k-means clustered per-forecast
+ * histograms into 16 per-message-selected tables; held-out that LOST to a single shared table
+ * (1.371 vs 1.340 b/period) — freeze deltas have no distinct per-location regimes, but they do
+ * follow the same-period temp delta, which is free.
+ *
+ * Training mirrors the wire exactly: local-midnight-aligned uniform windows per resolution (the
+ * alignment layoutFor produces), the same quantizers as v1.ts, temp deltas clamped and diffed
+ * against the reconstruction. The 24h row (resolution index 0) is trained too even though fill
+ * layouts never emit 24h periods — it keeps the [res][ctx][sym] shape uniform with the other
+ * resolution-keyed tables.
+ *
+ * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
  *   node packages/server/scripts/derive-freeze-delta-codebooks.ts
  */
-import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
-import { VARS_BIT } from "@weather/protocol";
-import { eachForecast, huffmanLengths, scaledWeights, runStandalone, type DerivedTables } from "./derive-lib.ts";
+import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
+import {
+  VARS_BIT, tempDeltaBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_MIN, TEMP_DELTA_MAX,
+} from "@weather/protocol";
+import { eachForecast, scaledWeights, runStandalone, type DerivedTables } from "./derive-lib.ts";
 
 const STEP_BITS = 5;               // matches the freeze column width in v1.ts (steps 0..31)
 const STEP_MAX = (1 << STEP_BITS) - 1;
 const NSYM = 2 * STEP_MAX + 1;     // 63: deltas -31..31, no escape needed (already bounded)
 const STEP_M = 304.8;              // 1000 ft, must match v1.ts
-const RES_IDX = 4;                 // 1h — finest, most samples
-const RAW_BITS = STEP_BITS;        // cost of the fixed-width fallback
+const NRES = 5; // 24h/12h/6h/3h/1h — row 0 (24h) is dead in fill layouts but kept for shape
+const MASK = (1 << VARS_BIT.temp) | (1 << VARS_BIT.freeze);
 
-const quantFreeze = (m: number): number => Math.min(Math.floor(m / STEP_M), STEP_MAX);
+// Same float-dust epsilon as v1.ts quantFreeze — training must quantize exactly like the wire.
+const quantFreeze = (m: number): number => Math.min(Math.floor(m / STEP_M + 1e-9), STEP_MAX);
+const quantTemp = (c: number): number => Math.min(Math.max(Math.round(c + 100), 0), 255);
 const deltaSym = (delta: number): number => delta + STEP_MAX; // -31..31 -> 0..62
 
-// Pooled delta counts across the whole corpus.
-async function collectCounts(): Promise<number[]> {
-  const counts = new Array(NSYM).fill(0);
-  await eachForecast((h, startHour) => {
-    const n = Math.min(128, Math.floor(h.time.length / HOURS_PER_PERIOD[RES_IDX]));
-    const periods = aggregateHourly(h, h.time, n, RES_IDX, startHour).map((r) => toFullPeriod(r, 1 << VARS_BIT.freeze, "GFS", RES_IDX));
-    for (let i = 1; i < periods.length; i++) {
-      const prev = quantFreeze(periods[i - 1].freeze_m ?? 0);
-      const cur = quantFreeze(periods[i].freeze_m ?? 0);
-      counts[deltaSym(cur - prev)]++;
+export async function derive(): Promise<DerivedTables> {
+  // counts[res][tempΔ bucket][sym]; the fallback tables pool the bucket axis per res.
+  const counts: number[][][] = Array.from({ length: NRES }, () =>
+    Array.from({ length: TEMP_DELTA_PREV_BUCKETS }, () => new Array<number>(NSYM).fill(0)));
+  let columns = 0, symbols = 0;
+
+  await eachForecast((h, _startHour, _loc, pos) => {
+    if (!pos || !h.time?.length) return;
+    const off = Math.round(pos.lon / 15);
+    const dataStart = Math.floor(Date.parse(`${h.time[0]}:00Z`) / 3600000);
+    const dataEnd = dataStart + h.time.length;
+    for (let res = 0; res < NRES; res++) {
+      const hpp = HOURS_PER_PERIOD[res];
+      const firstUtc = Math.ceil((dataStart + off) / 24) * 24 - off; // first local midnight
+      const n = Math.floor((dataEnd - firstUtc) / hpp);
+      if (n < 3) continue;
+      const windows: number[][] = [];
+      for (let p = 0; p < n; p++) {
+        const w: number[] = [];
+        for (let eh = firstUtc + p * hpp; eh < firstUtc + (p + 1) * hpp; eh++) w.push(eh - dataStart);
+        windows.push(w);
+      }
+      const periods = rowsFromWindows(h, h.time, windows, off).map((r) => toFullPeriod(r, MASK, "GFS"));
+
+      let tempRecon = quantTemp(periods[0].temp_c ?? 0);
+      let prevFreeze = quantFreeze(periods[0].freeze_m ?? 0);
+      for (let p = 1; p < n; p++) {
+        const tempDelta = Math.min(Math.max(
+          quantTemp(periods[p].temp_c ?? 0) - tempRecon, TEMP_DELTA_MIN), TEMP_DELTA_MAX);
+        tempRecon += tempDelta;
+        const freeze = quantFreeze(periods[p].freeze_m ?? 0);
+        counts[res][tempDeltaBucket(tempDelta)][deltaSym(freeze - prevFreeze)]++;
+        prevFreeze = freeze;
+        symbols++;
+      }
+      columns++;
     }
   });
-  return counts;
-}
+  console.log(`Columns (forecast × resolution): ${columns}, delta symbols: ${symbols}`);
 
-export async function derive(): Promise<DerivedTables> {
-  const counts = await collectCounts();
-  const total = counts.reduce((a, b) => a + b, 0);
-  console.log(`Delta samples: ${total}`);
+  const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
+  // The tempΔ marginal per res — the fallback tables (temp absent from vars_mask), and the
+  // backstop for any empty (res, bucket) context.
+  const marginal = counts.map((byCtx) => {
+    const m = new Array<number>(NSYM).fill(0);
+    for (const row of byCtx) for (let s = 0; s < NSYM; s++) m[s] += row[s];
+    return m;
+  });
 
-  const weights = scaledWeights(counts);
-  const lens = huffmanLengths(weights);
-  const meanBits = counts.reduce((s, c, sym) => s + c * lens[sym], 0) / total;
-  console.log(`Mean bits/period (single table): ${meanBits.toFixed(3)}  (raw = ${RAW_BITS})`);
+  // Training-set mean bits/period per resolution, for the generation log (held-out numbers are
+  // the scan's job — see analyze-cross-var-heldout.ts).
+  for (let res = 0; res < NRES; res++) {
+    const bitsUnder = (row: number[], table: number[]): number => {
+      const w = scaledWeights(table);
+      const total = sum(w);
+      let bits = 0;
+      for (let s = 0; s < NSYM; s++) if (row[s] > 0) bits += row[s] * -Math.log2(w[s] / total);
+      return bits;
+    };
+    let bits = 0, flatBits = 0;
+    for (let ctx = 0; ctx < TEMP_DELTA_PREV_BUCKETS; ctx++) {
+      const row = counts[res][ctx];
+      bits += bitsUnder(row, sum(row) > 0 ? row : marginal[res]);
+      flatBits += bitsUnder(row, marginal[res]);
+    }
+    const n = Math.max(1, sum(marginal[res]));
+    const label = ["24h", "12h", "6h", "3h", "1h"][res];
+    console.log(`  ${label}: n=${sum(marginal[res])} mean=${(bits / n).toFixed(3)} b/period` +
+      ` (res-only fallback ${(flatBits / n).toFixed(3)}, training-set)`);
+  }
 
-  return { FREEZE_DELTA_WEIGHTS: weights };
+  return {
+    FREEZE_DELTA_WEIGHTS_BY_RES: marginal.map(scaledWeights),
+    FREEZE_DELTA_TEMP_WEIGHTS_BY_RES: counts.map((byCtx, res) =>
+      byCtx.map((row) => scaledWeights(sum(row) > 0 ? row : marginal[res]))),
+  };
 }
 
 runStandalone(import.meta.url, derive);
