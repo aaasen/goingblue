@@ -111,9 +111,9 @@ encoder wrote, so trailing zero words are simply dropped.
 | -------------------- | ----- | ------------------------------------------------------ | ---------------------------------------------- | ------------------------------------- |
 | weathercode          | value | 28 WMO codes                                            | previous code                                  | —                                     |
 | temperature          | delta | Δ°C −7…+7, plus an escape symbol + raw 6-bit (−32…+31) | resolution × time-of-day (8 × 3h local buckets) × previous-delta bucket (≤−2 \| −1 \| 0 \| +1 \| ≥+2) | 1 °C steps, −100…+155 °C; 8-bit anchor |
-| precipitation prob.  | value | eighths 0…7                                             | resolution × previous value                    | 0–100% in eighths                     |
-| snow                 | value | 64 companded steps                                      | resolution × previous-value bucket (0 \| 1–3 \| 4–9 \| 10–20 \| 21+) | sqrt-companded, 0–200 cm |
-| rain                 | value | 64 companded steps                                      | resolution × previous-value bucket (same)      | sqrt-companded, 0–144 mm              |
+| precipitation prob.  | value | eighths 0…7                                             | resolution × previous value × same-period weathercode class | 0–100% in eighths        |
+| snow                 | value | 64 companded steps                                      | resolution × previous-value bucket (0 \| 1–3 \| 4–9 \| 10–20 \| 21+) × same-period weathercode class | sqrt-companded, 0–200 cm |
+| rain                 | value | 64 companded steps                                      | resolution × previous-value bucket (same) × same-period weathercode class | sqrt-companded, 0–144 mm |
 | freezing level       | delta | Δ −15…+15                                               | one shared table                               | 1000 ft steps, 0–15000 ft; 4-bit anchor |
 | cloud (high/mid/low) | delta | Δ −7…+7                                                 | one shared table per level                     | 0–100% in eighths; 3-bit anchor       |
 | wind speed           | delta | Δ −31…+31                                               | resolution × level; 600/700 hPa by the upper level's Δ bucket | 5 mph steps, 0–155 mph; 5-bit anchor |
@@ -122,6 +122,12 @@ encoder wrote, so trailing zero words are simply dropped.
 Value-based columns chain their previous-symbol context across the whole column; delta-based
 columns never diff across a model boundary (each model gets its own anchor). See
 [Wind](#wind) for the cross-level conditioning and calm gating.
+
+The **weathercode class** keying the three wet columns is the code collapsed to a 4-state
+precipitation regime — dry (clear/cloud/fog) | rain-ish (drizzle/rain/showers/thunder) | freezing
+(freezing drizzle/rain) | snow-ish (snow/snow showers). Weathercode is the first column decoded and
+is always present, so each wet cell can key on its *own* period's class for free — the same
+already-decoded-context trick the 600/700 hPa wind columns play on the upper pressure level.
 
 ### Wind
 
@@ -313,6 +319,21 @@ pnpm benchmark --request-hour 18   # local hour of the request (default 7)
     worse at 12h — not worth pinning a solar formula into wire format). Held-out: 2.648 →
     2.335 b/period; per resolution 12h 5.367 → 5.065, 6h 4.244 → 3.742, 3h 3.232 → 2.836,
     1h 1.980 → 1.724.
+19. Cross-variable conditioning for the wet columns: precip probability, snow, and rain key their
+    codebooks on the **same period's weathercode class** (dry | rain-ish | freezing | snow-ish) on
+    top of their existing context. Weathercode decodes first and is always present, so the class
+    is free — no per-message signaling, the same trick the 600/700 hPa wind columns play on the
+    upper level. Held-out (5-fold by location, analyze-cross-var-heldout.ts): precip 0.978 →
+    0.876 b/period (32 → 128 contexts), snow 0.708 → 0.445 (20 → 80), rain 1.101 → 0.770 (20 →
+    80). The class captures the shared latent outright — stacking a second cross-variable signal
+    (rain on snow ≠ 0, snow on the precip-chance bucket) measured redundant on top of it. In the
+    7d base view the three columns give up half a bit per period between them (rain 0.83 → 0.56,
+    snow 0.53 → 0.33, precip 0.74 → 0.70). Mean fill across all duration × variable views
+    78.2% → 80.1%; every view gains, and the gains scale with duration as the per-period saving
+    compounds over more periods — 3d base 99.5% → 99.8% but 10d base 73.8% → 77.2% and 10d with
+    high-altitude winds 41.8% → 44.2%. Cloud levels (−0.03) and weathercode × resolution (−0.033)
+    were scanned and rejected as too small; freeze × temp-delta (−0.131) is deferred until the
+    4-bit freezing-level anchor's 15,000 ft cap is widened, since real forecasts clip at it.
 
 ## License
 

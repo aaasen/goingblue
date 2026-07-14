@@ -8,7 +8,7 @@ import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js"
 import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec, ContextResolver } from "../model.js";
 import {
-  encodeWeathercode, decodeWeathercode,
+  encodeWeathercode, decodeWeathercode, WEATHERCODE_CLASS,
   windDirBook, windSpeedBook, encodeWindSpeedDelta, decodeWindSpeedDelta,
   precipBook, snowBook, rainBook,
   FREEZE_DELTA,
@@ -125,16 +125,20 @@ const CLOUD_DELTA_COLUMNS: {
 
 // Value columns (precip chance, snow, rain), in body (column-major) order: each cell's quantized
 // value is entropy-coded directly — no anchor, no deltas — under a codebook keyed by (the period's
-// resolution, the previously decoded value), or the variable's bootstrap table for the column's
-// first cell (see precipBook/snowBook/rainBook in entropy.ts). Values, not deltas, because zero
-// is an absorbing regime: "still dry" is the single strongest signal these columns carry, and a
-// delta of 0 would conflate it with "steady heavy snowfall". This replaced the adaptive best-of
-// (raw / FOR / sparse / empty + 2-bit selector) scheme — sparse charged a full bit per dry period
-// where the order-1 tables charge a small fraction of one. temp (bit 1), freeze (bit 3) and
-// cloud_high/mid/low (bits 9/10/11) are handled separately in buildBody/decode below.
+// resolution, the SAME cell's weathercode class, the previously decoded value), or the variable's
+// bootstrap table for the column's first cell (see precipBook/snowBook/rainBook in entropy.ts).
+// The weathercode column decodes first and is always present, so its class is free context for
+// all three — the same trick the 600/700 hPa wind columns play on the upper pressure level, and
+// worth 0.10-0.33 b/period each (see WEATHERCODE_CLASS in entropy.ts). Values, not deltas,
+// because zero is an absorbing regime: "still dry" is the single strongest signal these columns
+// carry, and a delta of 0 would conflate it with "steady heavy snowfall". This replaced the
+// adaptive best-of (raw / FOR / sparse / empty + 2-bit selector) scheme — sparse charged a full
+// bit per dry period where the order-1 tables charge a small fraction of one. temp (bit 1),
+// freeze (bit 3) and cloud_high/mid/low (bits 9/10/11) are handled separately in
+// buildBody/decode below.
 const VALUE_COLUMNS: {
   bit: number;
-  book(res: number, prev: number | null): CodeBook;
+  book(res: number, wcClass: number, prev: number | null): CodeBook;
   get(p: Period): number;          // quantized value symbol
   set(p: Period, v: number): void; // dequantize the symbol back onto the period
 }[] = [
@@ -237,11 +241,16 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
 
   // Weathercode column (always present, entropy-coded). Each symbol's codebook is keyed by the
   // previously encoded symbol — null (the bootstrap table) for the first symbol of the sequence.
+  // The symbols are kept: their classes key the value columns below, and taking the class from the
+  // ENCODED symbol (not the raw input code, which may not be a known WMO code) is what keeps the
+  // encoder's context identical to the decoder's.
   let before = em.cost;
   let prevWcSym: number | null = null;
+  const wcSym: number[][] = msg.periods.map((rows) => rows.map(() => 0));
   eachCell(nPeriods, nModels, (p, m) => {
     const idx = WMO2IDX[msg.periods[m][p].weathercode] ?? 0;
     encodeWeathercode(em, prevWcSym, idx);
+    wcSym[m][p] = idx;
     prevWcSym = idx;
   });
   mark("weathercode", before);
@@ -304,15 +313,16 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
   }
 
   // Value columns (precip chance, snow, rain): each cell's quantized value entropy-coded under a
-  // table keyed by (the period's resolution, the previously encoded value) — bootstrap for the
-  // column's first cell. The chain carries across model boundaries, like weathercode.
+  // table keyed by (the period's resolution, the cell's own weathercode class, the previously
+  // encoded value) — bootstrap for the column's first cell. The chain carries across model
+  // boundaries, like weathercode.
   for (const col of VALUE_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
     before = em.cost;
     let prev: number | null = null;
     eachCell(nPeriods, nModels, (p, m) => {
       const v = col.get(msg.periods[m][p]);
-      em.sym(col.book(res[p], prev), v);
+      em.sym(col.book(res[p], WEATHERCODE_CLASS[wcSym[m][p]], prev), v);
       prev = v;
     });
     mark(BIT_NAME[col.bit], before);
@@ -497,11 +507,14 @@ function decodeBody(
   const periods: Period[][] = Array.from({ length: nModels }, () =>
     Array.from({ length: nPeriods }, () => ({ weathercode: 0 } as Period)));
 
-  // Weathercode column (entropy-coded, each symbol keyed by the previously decoded symbol).
+  // Weathercode column (entropy-coded, each symbol keyed by the previously decoded symbol). The
+  // symbols are kept — their classes key the value columns below, mirroring buildBody.
   let prevWcSym: number | null = null;
+  const wcSym: number[][] = periods.map((rows) => rows.map(() => 0));
   eachCell(nPeriods, nModels, (p, m) => {
     const sym = rd.weathercode(prevWcSym);
     periods[m][p].weathercode = WMO_CODES[sym] ?? 0;
+    wcSym[m][p] = sym;
     prevWcSym = sym;
   });
 
@@ -549,12 +562,13 @@ function decodeBody(
   }
 
   // Value columns mirror buildBody exactly: each symbol's table keyed by (the period's
-  // resolution, the previously decoded value), bootstrap first, chained across model boundaries.
+  // resolution, the cell's decoded weathercode class, the previously decoded value), bootstrap
+  // first, chained across model boundaries.
   for (const col of VALUE_COLUMNS) {
     if (!(vars_mask & (1 << col.bit))) continue;
     let prev: number | null = null;
     eachCell(nPeriods, nModels, (p, m) => {
-      const v = rd.sym(col.book(res[p], prev));
+      const v = rd.sym(col.book(res[p], WEATHERCODE_CLASS[wcSym[m][p]], prev));
       col.set(periods[m][p], v);
       prev = v;
     });

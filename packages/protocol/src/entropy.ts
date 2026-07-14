@@ -141,6 +141,21 @@ export const encodeWeathercode = WEATHERCODE_CODEC.encode;
 // Reads one coded weathercode keyed by `prevSym` (see encodeWeathercode).
 export const decodeWeathercode = WEATHERCODE_CODEC.decode;
 
+// The weathercode collapsed to a 4-class precipitation regime — WIRE FORMAT: the wet columns
+// (precip/snow/rain) key their codebooks on the SAME period's class, which they may do for free
+// because weathercode decodes first and is always present (the same trick the 600/700 hPa wind
+// columns play on the upper level). Indexed by WMO *symbol index* (0..27, position in WMO_CODES),
+// never by the raw input code: the encoder maps an unrecognized input code to index 0
+// (`WMO2IDX[...] ?? 0`), so a class taken from the raw code would diverge from the one the decoder
+// derives from the symbol it actually read.
+//   0 dry (clear/cloud/fog) · 1 rain-ish (drizzle/rain/showers/thunder) ·
+//   2 freezing (freezing drizzle/rain) · 3 snow-ish (snow/snow showers)
+export const WC_CLASSES = 4;
+export const WEATHERCODE_CLASS: readonly number[] = [
+  //  0  1  2  3 45 48 51 53 55 56 57 61 63 65 66 67 71 73 75 77 80 81 82 85 86 95 96 99  ← WMO code
+  0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 1, 1, 1, 2, 2, 3, 3, 3, 3, 1, 1, 1, 3, 3, 1, 1, 1,
+];
+
 // ── Wind direction ──────────────────────────────────────────────────────────────
 // Static codebooks for the 8-point wind direction (symbols are direction indices 0..7; see
 // CARDINALS), keyed by every piece of context both sides already have — so none of it costs
@@ -240,17 +255,21 @@ export const CLOUD_HIGH_DELTA = makeDeltaCodec(CLOUD_HIGH_DELTA_WEIGHTS, 7);
 // ── Precip chance and rain/snow accumulations ──────────────────────────────────
 // Order-1 codebooks over the column's quantized VALUES (not deltas — zero is an absorbing
 // regime, and a delta of 0 would conflate "still dry" with "steady heavy snow"), keyed by
-// (the period's resolution, the previously decoded value). This replaced the adaptive
-// best-of (raw / FOR / sparse / empty + 2-bit selector) scheme: sparse charges a full bit per
-// zero period where P(0 | prev=0) makes it a small fraction of one. Held-out 5-fold by location:
-// precip 2.121 → 1.002, snow 1.302 → 0.741, rain 1.983 → 1.153 bits/period — see
-// server/scripts/derive-precip-accum-codebooks.ts.
+// (the period's resolution, the SAME period's weathercode class, the previously decoded value).
+// This replaced the adaptive best-of (raw / FOR / sparse / empty + 2-bit selector) scheme: sparse
+// charges a full bit per zero period where P(0 | prev=0) makes it a small fraction of one.
+// Held-out 5-fold by location, bits/period: precip 2.121 → 1.002, snow 1.302 → 0.741,
+// rain 1.983 → 1.153 for (res × prev) — then the same-period weathercode class (see
+// WEATHERCODE_CLASS above; free context, the column decodes first) took precip 0.978 → 0.876,
+// snow 0.708 → 0.445, rain 1.101 → 0.770. It captures the shared latent outright: stacking rain
+// on snow≠0, or snow on the precip-chance bucket, measured redundant on top of it. See
+// server/scripts/derive-precip-accum-codebooks.ts and analyze-cross-var-heldout.ts.
 //
 // Precip chance (8 symbols) keys on the previous value directly. Rain/snow (64-symbol companded
 // domain) key on a BUCKET of it — the full 64×64 transition matrix has too little corpus signal
 // per cell, and buckets were within ~0.02 b/period of it held-out. The bootstrap table covers a
 // column's first value (no predecessor); it fires once per column, so it is pooled across
-// resolutions.
+// resolutions and classes.
 
 // Previous-value buckets for the accumulation columns: 0 | 1-3 | 4-9 | 10-20 | 21+.
 // Must match ACCUM_BUCKET_EDGES in derive-precip-accum-codebooks.ts.
@@ -264,10 +283,12 @@ function accumBucket(v: number): number {
 function makeValueCodec(bootstrapWeights: number[], weightsByRes: number[][][], ctxOf: (prev: number) => number) {
   const bootstrap = buildTable(bootstrapWeights);
   const tables = weightsByRes.map((rows) => rows.map(buildTable));
-  // The codebook for one value symbol: `prev` is the previously decoded value in the column,
-  // or null for the column's first (bootstrap).
-  return (res: number, prev: number | null): CodeBook =>
-    prev === null ? bootstrap : tables[res][ctxOf(prev)];
+  // The codebook for one value symbol: `wcClass` is WEATHERCODE_CLASS of the cell's own decoded
+  // weathercode symbol, `prev` the previously decoded value in the column — or null for the
+  // column's first (bootstrap). Context rows are prev-major (ctxOf(prev) × WC_CLASSES + wcClass),
+  // matching the derive script's emission order.
+  return (res: number, wcClass: number, prev: number | null): CodeBook =>
+    prev === null ? bootstrap : tables[res][ctxOf(prev) * WC_CLASSES + wcClass];
 }
 
 export const precipBook = makeValueCodec(PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES, (p) => p);
@@ -366,7 +387,11 @@ export function decodeTempDelta(src: SymSource, book: CodeBook): number {
 const qf = (w: number[]) => quantizeFreqs(w);
 export const V1_CODEBOOKS = {
   rans: { probBits: RANS_PROB_BITS, stateLow: RANS_L, wordBits: RANS_WORD_BITS },
-  weathercode: { bootstrap: qf(WEATHERCODE_BOOTSTRAP_WEIGHTS), weights: WEATHERCODE_WEIGHTS.map(qf) },
+  weathercode: {
+    bootstrap: qf(WEATHERCODE_BOOTSTRAP_WEIGHTS),
+    weights: WEATHERCODE_WEIGHTS.map(qf),
+    classOf: WEATHERCODE_CLASS, // keys the wet columns' tables — drift desyncs them silently
+  },
   windDir: {
     bootstrap: qf(WIND_DIR_BOOTSTRAP_WEIGHTS),
     byRes: WIND_DIR_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),

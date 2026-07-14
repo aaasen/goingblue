@@ -576,16 +576,20 @@ describe("body decode desync detection", () => {
 
 describe("order-1 precipitation encoding", () => {
   const vars_mask = 1 << VARS_BIT.snow;
+  // The snow codebooks key on the same period's weathercode class, so a period must carry a
+  // weathercode consistent with its snowfall — "snowing hard, zero accumulation" is a
+  // contradiction the tables (rightly) charge for, and it isn't what these tests are about.
+  const snowPeriod = (cm: number): Period => ({ ...PERIOD, weathercode: cm > 0 ? 71 : 0, snow_cm: cm });
 
   it("collapses an all-dry snow column to almost nothing and round-trips to zero", () => {
-    const dry = Array.from({ length: 48 }, () => ({ ...PERIOD, snow_cm: 0 }));
+    const dry = Array.from({ length: 48 }, () => snowPeriod(0));
     const decoded = roundTrip(msg({ vars_mask, periods: [dry] }, { hourly: true }));
     decoded.periods[0].forEach((p) => expect(p.snow_cm).toBe(0));
-    // A dry run is the order-1 tables' cheapest input (P(0 | prev=0) is near 1), so the all-dry
-    // column must undercut one with snow every period. Compare exact body bits (not the base-85
-    // encoded char length) since a few bits of savings can land on either side of a char
+    // A dry run is the order-1 tables' cheapest input (P(0 | prev=0, clear) is near 1), so the
+    // all-dry column must undercut one with snow every period. Compare exact body bits (not the
+    // base-85 encoded char length) since a few bits of savings can land on either side of a char
     // boundary and not move the visible string length.
-    const snowy = Array.from({ length: 48 }, () => ({ ...PERIOD, snow_cm: 20 }));
+    const snowy = Array.from({ length: 48 }, () => snowPeriod(20));
     const dryBits = v1EncodeBreakdown(msg({ vars_mask, periods: [dry] }, { hourly: true })).bodyBits;
     const snowyBits = v1EncodeBreakdown(msg({ vars_mask, periods: [snowy] }, { hourly: true })).bodyBits;
     expect(dryBits).toBeLessThan(snowyBits);
@@ -593,13 +597,26 @@ describe("order-1 precipitation encoding", () => {
 
   it("round-trips a mostly-zero snow column exactly", () => {
     const vals = Array.from({ length: 48 }, (_, i) => (i % 12 === 0 ? 10 : 0));
-    const periods = [vals.map((s) => ({ ...PERIOD, snow_cm: s }))];
+    const periods = [vals.map(snowPeriod)];
     const decoded = roundTrip(msg({ vars_mask, periods }, { hourly: true }));
     decoded.periods[0].forEach((p, i) => expect(p.snow_cm).toBeCloseTo(qSnow(vals[i]), 5));
     // Mostly-dry beats a column where every cell is nonzero and widely spread.
-    const dense = Array.from({ length: 48 }, (_, i) => ({ ...PERIOD, snow_cm: 3 * (i + 1) }));
+    const dense = Array.from({ length: 48 }, (_, i) => snowPeriod(3 * (i + 1)));
     const sparseBits = v1EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true })).bodyBits;
     const denseBits = v1EncodeBreakdown(msg({ vars_mask, periods: [dense] }, { hourly: true })).bodyBits;
     expect(sparseBits).toBeLessThan(denseBits);
+  });
+
+  it("a snowing weathercode makes the same snow column cheaper (cross-variable context)", () => {
+    // The wet columns key their codebooks on the SAME period's weathercode class, which is free
+    // context (weathercode decodes first, always present). Identical snowfall under code 71
+    // (snow) vs code 0 (clear) must cost fewer bits in the SNOW column — the weathercode column's
+    // own cost differs between the two messages, so bodyBits would conflate the two effects.
+    const snowing = Array.from({ length: 48 }, () => ({ ...PERIOD, weathercode: 71, snow_cm: 6 }));
+    const clear = snowing.map((p) => ({ ...p, weathercode: 0 }));
+    const snowBits = (periods: Period[]) =>
+      v1EncodeBreakdown(msg({ vars_mask, periods: [periods] }, { hourly: true }))
+        .columns.find((c) => c.name === "snow")!.bits;
+    expect(snowBits(snowing)).toBeLessThan(snowBits(clear));
   });
 });
