@@ -145,12 +145,15 @@ For example, for temperature we can use the following context:
  - Time of day (8 buckets)
  - Previous delta (5 buckets)
 
- I also experimented with using solar elevation instead of time of day but it was not as effective.
+I also experimented with using solar elevation instead of time of day but it was not as effective.
 
+## Cross-Variable Correlation
 
+Now that everything is on Markov rANS, I think the remaining room to optimize the codec is taking advantage of cross-variable correlation. Currently all variables are independent even though they are representing the same change in the weather. For example, if there is a storm coming in many variables change at the same time: weathercode shifts to rain, precip chance increases, rainfall starts. I think that we can take advantage of these correlations by selecting codebooks based not only on the previous value, but on other variables.
 
 # References
 
  - Compression by trimming the mantissa of floating point numbers to exclude those that contain "false information"/noise. https://www.nature.com/articles/s43588-021-00156-2
  - ECMWF Code 4 Earth: https://github.com/ECMWFCode4Earth/Challenges_2026
  - rANS explanation: https://kedartatwawadi.github.io/post--ANS/
+ - https://www.pascalspoerri.ch/projects/
