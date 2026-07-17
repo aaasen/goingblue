@@ -11,11 +11,10 @@ import { fileURLToPath } from "node:url";
 import { windowIso } from "./lattice.ts";
 
 // Which slice of the corpus a location belongs to. `favorites` = the original Windy-favorites
-// import (ski-skewed — the reason the corpus was expanded); `probe` = hand-picked tropical/arid/
-// ocean points used to size the regime-mismatch problem before the sampler existed. Both are
-// validation-only (split: eval) — codebooks train exclusively on the sampled strata: `koppen`
-// (land, stratified by Köppen–Geiger subtype) and `ocean` (30° latitude bands).
-export type Stratum = "favorites" | "probe" | "koppen" | "ocean";
+// import (ski-skewed — the reason the corpus was expanded), validation-only (split: eval) —
+// codebooks train exclusively on the sampled strata: `koppen` (land, stratified by Köppen–Geiger
+// subtype) and `ocean` (30° latitude bands).
+export type Stratum = "favorites" | "koppen" | "ocean";
 
 export interface Location {
   id: string;
@@ -174,37 +173,6 @@ const FAVORITES: Entry[] = [
   { id: "denali-borough", name: "Denali Borough", lat: 62.974, lon: -151.171 },
 ];
 
-// Hand-picked tropical / arid / ocean probes — regimes the favorites never see. Used by the
-// Phase 2.5 diagnostic (encode with current codebooks, compare bits/period vs favorites) to size
-// the regime-mismatch problem before the full stratified sample is built. Köppen classes are
-// approximate hand labels, not sampler output.
-const PROBES: Entry[] = [
-  // Tropical rainforest / monsoon (Af/Am)
-  { id: "probe-manaus", name: "Manaus, Amazon Basin", lat: -3.1, lon: -60.02, koppen: "Af" },
-  { id: "probe-kisangani", name: "Kisangani, Congo Basin", lat: 0.52, lon: 25.2, koppen: "Af" },
-  { id: "probe-borneo-kinabalu", name: "Mount Kinabalu, Borneo", lat: 6.075, lon: 116.558, koppen: "Af" },
-  { id: "probe-puncak-jaya", name: "Puncak Jaya, New Guinea", lat: -4.078, lon: 137.185, koppen: "Af" },
-  { id: "probe-pokhara", name: "Pokhara, Himalaya monsoon foothills", lat: 28.24, lon: 83.99, koppen: "Cwa" },
-  { id: "probe-costa-rica-chirripo", name: "Cerro Chirripó, Costa Rica", lat: 9.484, lon: -83.489, koppen: "Am" },
-  // Tropical highland / savanna (Aw / highland)
-  { id: "probe-kilimanjaro", name: "Kilimanjaro", lat: -3.076, lon: 37.353, koppen: "Aw" },
-  { id: "probe-mauna-kea", name: "Mauna Kea, Hawaii", lat: 19.821, lon: -155.468, koppen: "Aw" },
-  { id: "probe-piton-des-neiges", name: "Piton des Neiges, Réunion", lat: -21.099, lon: 55.48, koppen: "Aw" },
-  { id: "probe-quito", name: "Quito, equatorial Andes", lat: -0.18, lon: -78.47, koppen: "Cfb" },
-  // Hot / cold deserts and steppe (BWh/BWk/BSk)
-  { id: "probe-hoggar", name: "Assekrem, Hoggar Mountains, Sahara", lat: 23.267, lon: 5.633, koppen: "BWh" },
-  { id: "probe-atacama", name: "San Pedro de Atacama", lat: -22.91, lon: -68.2, koppen: "BWk" },
-  { id: "probe-sossusvlei", name: "Sossusvlei, Namib", lat: -24.73, lon: 15.34, koppen: "BWh" },
-  { id: "probe-jebel-shams", name: "Jebel Shams, Oman", lat: 23.237, lon: 57.264, koppen: "BWh" },
-  { id: "probe-gobi", name: "Gobi Desert, Ömnögovi", lat: 43.5, lon: 104.4, koppen: "BWk" },
-  { id: "probe-alice-springs", name: "Alice Springs, Outback", lat: -23.7, lon: 133.88, koppen: "BWh" },
-  // Ocean (passage corridors, not uniform ocean)
-  { id: "probe-pacific-trades", name: "Equatorial Pacific trades (Marquesas run)", lat: -5, lon: -125, koppen: "ocean" },
-  { id: "probe-atlantic-trades", name: "Atlantic trades (ARC route)", lat: 15, lon: -40, koppen: "ocean" },
-  { id: "probe-north-atlantic", name: "North Atlantic (great-circle crossing)", lat: 45, lon: -40, koppen: "ocean" },
-  { id: "probe-southern-ocean", name: "Southern Ocean (Indian sector)", lat: -48, lon: 90, koppen: "ocean" },
-];
-
 // The committed output of sample-locations.ts: 10k sites stratified by Köppen subtype (√area
 // allocation) + ocean latitude bands, each with 12 committed lattice-window picks. Kept as
 // compact JSON (subtype, 3-dp coords, window indices); everything displayable is derived here.
@@ -236,6 +204,5 @@ const SAMPLED: Location[] = existsSync(SAMPLED_PATH)
 
 export const LOCATIONS: Location[] = [
   ...FAVORITES.map((l): Location => ({ ...l, stratum: "favorites", split: "eval" })),
-  ...PROBES.map((l): Location => ({ ...l, stratum: "probe", split: "eval" })),
   ...SAMPLED,
 ];

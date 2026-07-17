@@ -1,6 +1,6 @@
 /**
  * Stratified global location sampler — generates sampled-locations.json, the committed
- * training half of the corpus registry (locations.ts loads it; favorites/probes are the
+ * training half of the corpus registry (locations.ts loads it; favorites are the
  * validation half).
  *
  * Design (agreed 2026-07-17): 10,000 sites = 8,500 land + 1,500 ocean.
@@ -19,7 +19,7 @@
  *
  * Deterministic: seeded PRNG (--seed to override), so a re-run with the same seed and raster
  * reproduces the file byte-for-byte. Re-running replaces the whole sample (dedupe runs against
- * favorites/probes only, not the previous sample).
+ * favorites only, not the previous sample).
  *
  * Input raster: data/sampler/1991_2020/koppen_geiger_0p1.tif — from koppen_geiger_tif.zip at
  * https://figshare.com/articles/dataset/21789074 (Beck et al. 2023; gloh2o.org/koppen).
@@ -182,7 +182,7 @@ async function main(): Promise<void> {
 
   // ── Draw sites: equal-area cell pick, in-cell jitter, ≥25 km separation ───────
   const index = new SeparationIndex();
-  const existing = LOCATIONS.filter((l) => l.stratum === "favorites" || l.stratum === "probe");
+  const existing = LOCATIONS.filter((l) => l.stratum === "favorites");
   for (const l of existing) index.add(l.lat, l.lon);
 
   const lattice = sampleWindows();

@@ -91,42 +91,40 @@ const uniq = (vars: string[]) => [...new Set(vars)];
 // The sources production will serve (see memory: model menu by center). `id` doubles as the
 // Open-Meteo `models` param. The two ECMWF entries are one logical center — HRES 9 km surface +
 // IFS 0.25° pressure levels — kept as separate source rows and merged only at read time.
-// `probes` marks sources that also collect the probe-stratum locations (the Phase 2.5
-// tropical/arid diagnostic needs only the report source). `sample` marks sources that collect
-// the stratified global sample (koppen/ocean strata) — best_match only: it is what production
-// serves, and 10k sites × the other centers would multiply the pull for no training benefit.
+// `sample` marks sources that collect the stratified global sample (koppen/ocean strata) —
+// best_match only: it is what production serves, and 10k sites × the other centers would
+// multiply the pull for no training benefit.
 interface SourceDef {
   id: string;
   label: string;
   wire: string[];      // backfill set: what the current wire format needs
   candidate: string[]; // pilot set: wire + everything under consideration (capability matrix)
-  probes: boolean;
   sample: boolean;
 }
 const GFS_WIRE = [...BASE_HOURLY, ...CLOUD_HOURLY, ...HIGHWIND_HOURLY, ...FREEZE_HOURLY];
 const SOURCES: SourceDef[] = [
   {
-    id: "gfs_seamless", label: "NCEP GFS Seamless", probes: true, sample: false,
+    id: "gfs_seamless", label: "NCEP GFS Seamless", sample: false,
     wire: GFS_WIRE,
     candidate: uniq([...GFS_WIRE, ...SURFACE_CANDIDATE, ...levelVars([...STD_LEVELS, ...GFS_EXTRA_LEVELS])]),
   },
   {
-    id: "ecmwf_ifs", label: "ECMWF IFS HRES (surface)", probes: false, sample: false,
+    id: "ecmwf_ifs", label: "ECMWF IFS HRES (surface)", sample: false,
     wire: [...BASE_HOURLY, ...CLOUD_HOURLY], // no freeze / pressure vars on the 9 km product
     candidate: uniq([...BASE_HOURLY, ...CLOUD_HOURLY, ...SURFACE_CANDIDATE]),
   },
   {
-    id: "ecmwf_ifs025", label: "ECMWF IFS 0.25° (pressure levels)", probes: false, sample: false,
+    id: "ecmwf_ifs025", label: "ECMWF IFS 0.25° (pressure levels)", sample: false,
     wire: HIGHWIND_HOURLY,
     candidate: uniq([...HIGHWIND_HOURLY, ...levelVars(STD_LEVELS)]),
   },
   {
-    id: "gem_seamless", label: "GEM Seamless", probes: false, sample: false,
+    id: "gem_seamless", label: "GEM Seamless", sample: false,
     wire: GFS_WIRE, // freeze presence unverified — the capability matrix settles it
     candidate: uniq([...GFS_WIRE, ...SURFACE_CANDIDATE, ...levelVars(STD_LEVELS)]),
   },
   {
-    id: "best_match", label: "Best match", probes: false, sample: true,
+    id: "best_match", label: "Best match", sample: true,
     wire: GFS_WIRE,
     candidate: uniq([...GFS_WIRE, ...SURFACE_CANDIDATE, ...levelVars(STD_LEVELS)]),
   },
@@ -357,7 +355,6 @@ function planCollection(db: ReturnType<typeof openDb>, args: Args, locations: Lo
   for (const source of SOURCES) {
     const wanted = args.pilot ? source.candidate : source.wire;
     const locs = locations
-      .filter((l) => l.stratum !== "probe" || source.probes)
       .filter((l) => !sampledStrata.has(l.stratum) || source.sample)
       .filter((l) => !args.pilot || PILOT_LOCATION_IDS.includes(l.id));
     const present = presentVars(db, source.id);

@@ -42,23 +42,29 @@ With the binary format we use only as many bits as necessary for the value:
 
 Using a binary format I got each time period down to about 40 bits. After subtracting the message header (31 bits), there's about 996 bits left for the data which is 24 time periods. A 3x improvement over the abbreviated format!
 
-## Frame of Reference Encoding
+## Improving the Binary Format
+
+The binary format is a large improvement over a human-readable character-based format, but it's still wasting a lot of bits on information that isn't useful. The main issue is that we need to allocate enough bits to each variable to cover its entire range even though we will only use a small part of that range. For example, 7 bits are allocated to temperature to represent a 127°C range even though most forecasts have a range of only 10°C. We allocate 6 bits to snowfall even though most forecasts include no snowfall at all. We allocate 6 bits to rain so that we can report amounts as low as 1mm in a hour and as high as 64mm in a day. This waste of bits can be addressed with a few different techniques.
+
+### Frame of Reference Encoding
 
 With the fixed binary format above, there's a lot of range that we aren't taking advantage of. For example, we allocate 7 bits (128 values) to represent temperature, but the actual range of temperature in a forecast is much smaller. An easy win here is frame of reference encoding, where we encode the minimum value in the header and then encode the delta for each time period. For most forecasts we can shrink the temperature encoding from 7 bits to 4 (15C delta).
 
-## Sparse Encoding
+### Sparse Encoding
 
 Some variables like snowfall and rain are often zero. It's a waste to use 6 bits to represent zero. Instead, we can use a sparse encoding where we encode a single presence bit followed by the value if it is non-zero. This saves 5 bits per period for zeros but adds one bit per period for non-zeros. We can also have a global presence bit in the header to indicate whether the variable is ever non-zero in the forecast period. 
 
 For Going Blue, I used a dynamic encoding strategy. The header contains 2 bits that represent the encoding strategy (empty, sparse, FOR, raw) for the variable. The server chooses whichever strategy is the most efficient for the variable.
 
-## Companding
+### Companding
 
 One of the issues with the rain and snow encoding in a binary format is that it is a linear scale the needs to be fairly precise. On an otherwise clear day, we care about 1mm of rain in an hour. At the day scale, it's possible for rainfall to reach well over a meter. Representing the range 0-1m in 1mm increments would take 1,000 values or 10 bits.
 
 A 1mm difference in rainfall could be a decision point if it is 0->1mm. The same difference doesn't matter at all if it is 70mm->71mm. Instead of using a linear scale, we can use a sqrt scale to represent the data. This gives a range of 0–144 mm.
 
 ## Huffman Coding
+
+
 
 Huffman coding is a lossless compression algorithm that assigns variable-length codes to values based on their frequency. More frequent values are assigned shorter codes and less frequent values are assigned longer codes. This can be much more efficient than fixed-length encoding if the probability distribution is skewed. 
 
@@ -150,6 +156,37 @@ I also experimented with using solar elevation instead of time of day but it was
 ## Cross-Variable Correlation
 
 Now that everything is on Markov rANS, I think the remaining room to optimize the codec is taking advantage of cross-variable correlation. Currently all variables are independent even though they are representing the same change in the weather. For example, if there is a storm coming in many variables change at the same time: weathercode shifts to rain, precip chance increases, rainfall starts. I think that we can take advantage of these correlations by selecting codebooks based not only on the previous value, but on other variables.
+
+## Model Training
+
+The core idea that makes this codec efficient is that the client and server have a shared probabilistic model of weather and only the entropy needs to be sent between the two. A forecast that matches the distribution well can be encoded very efficiently whereas one far outside the normal distribution will take many bits to encode. This means that the shared probability distribution needs to be representative of real-world forecasts.
+
+For my first pass at the corpus, I pulled my Windy favorites since these are locations where I often check the weather. There are 137 of them and they are heavily concentrated in mountainous mid-latitude/polar regions: Cascades, BC, Alaska, NZ, Norway, the Alps. It's a fairly good sample for ski weather but excludes most of earth's climates. I pulled a year of data for the GFS seamless model (HRRR/GFS) through the [Open-Meteo historical weather API](https://open-meteo.com/en/docs/historical-weather-api) so that I would get full seasonal coverage. Open-Meteo also provides a [Single Runs API](https://open-meteo.com/en/docs/single-runs-api) but full model coverage only goes back to April 2026. ECMWF HRES is available going back to 2024 but I found the coverage to be spotty and the HRES model excludes pressure-level variables and freezing level. 
+
+I didn't want the codec to be too biased towards skiing, so I set out to expand the corpus to include a representative sample of earth's weather. To do this, I started by using [Köppen climate classification](https://en.wikipedia.org/wiki/K%C3%B6ppen_climate_classification) which has 5 main groups (tropical, dry, temperate, continental, and polar) that are further broken down into 30 total classifications. There's a huge range in how common each classification is so I decided to weight each climate by the square root of its land area. This strikes a balance between random sampling of all locations (high weight to common climates) and sampling by climate class (high weight to uncommon climates). 
+
+Köppen only includes land. Ocean weather differs substantially, with cooler temperatures, no diurnal swings, and more consistent winds. I divided the ocean area into 30° latitude bands (0°->30°N, 30°N->60°N, etc.) and used the same `sqrt(area)` weighting for them. Since ocean weather is much less variable, I split the sampled points 85% land/15% ocean. This brings the ocean climate in line with other high-level Köppen groups, which account for about 10-20% each.
+
+I randomly sampled 10,000 locations (85% land, 15% ocean) and excluded locations that were within 25km of another point so that two points wouldn't be in the same grid cell of a weather model. The original corpus of Windy favorites is now used as a validation set but isn't used for training. 
+
+
+The Going Blue codec is trained on:
+ - 2 years of historical weather data
+ - 500 locations
+ - 14-day forecasts pulled at 10-day intervals
+ - 4 different weather models (best_match, gfs_seamless, ecmwf_ifs/ecmwf_ifs025, gem_seamless)
+
+
+Forecasts are pulled from the [Open-Meteo historical weather API](https://open-meteo.com/en/docs/historical-weather-api). The total corpus far exceeded the limits of the free tier so I upgraded to the professional plan to pull the corpus.
+
+## Model Choice
+
+Weather models behave very differently and I think it's important to know which one a forecast comes from. For example, the ECMWF models change a lot at the long range. The 10-day forecast seems to go through the full range of forecast possibilities.
+
+Going Blue is powered by [Open Meteo](https://open-meteo.com/) which supports over 30 weather models from weather centers around the world. For Going Blue, the following weather models are supported:
+ - `best_match`: Chooses the highest resolution weather model available at the forecast point. 
+
+One of the reasons I built Going Blue is that I wanted to be able to pull different models, or at least know which model I was looking at. Most weather forecasting apps try to hide this information
 
 # References
 
