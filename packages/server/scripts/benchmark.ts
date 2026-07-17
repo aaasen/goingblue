@@ -43,6 +43,7 @@ import {
   mirrorLocations, modelElevations, openDb, presentVars, upsertLocationMeta, upsertSeries,
   type SeriesRow,
 } from "./corpus-db.ts";
+import { runIso, sampleWindows } from "./lattice.ts";
 import { API_KEY, ApiError, ENDPOINT, fetchWindow } from "./om-fetch.ts";
 import { LOCATIONS, type Location } from "./locations.ts";
 
@@ -91,38 +92,41 @@ const uniq = (vars: string[]) => [...new Set(vars)];
 // Open-Meteo `models` param. The two ECMWF entries are one logical center — HRES 9 km surface +
 // IFS 0.25° pressure levels — kept as separate source rows and merged only at read time.
 // `probes` marks sources that also collect the probe-stratum locations (the Phase 2.5
-// tropical/arid diagnostic needs only the report source).
+// tropical/arid diagnostic needs only the report source). `sample` marks sources that collect
+// the stratified global sample (koppen/ocean strata) — best_match only: it is what production
+// serves, and 10k sites × the other centers would multiply the pull for no training benefit.
 interface SourceDef {
   id: string;
   label: string;
   wire: string[];      // backfill set: what the current wire format needs
   candidate: string[]; // pilot set: wire + everything under consideration (capability matrix)
   probes: boolean;
+  sample: boolean;
 }
 const GFS_WIRE = [...BASE_HOURLY, ...CLOUD_HOURLY, ...HIGHWIND_HOURLY, ...FREEZE_HOURLY];
 const SOURCES: SourceDef[] = [
   {
-    id: "gfs_seamless", label: "NCEP GFS Seamless", probes: true,
+    id: "gfs_seamless", label: "NCEP GFS Seamless", probes: true, sample: false,
     wire: GFS_WIRE,
     candidate: uniq([...GFS_WIRE, ...SURFACE_CANDIDATE, ...levelVars([...STD_LEVELS, ...GFS_EXTRA_LEVELS])]),
   },
   {
-    id: "ecmwf_ifs", label: "ECMWF IFS HRES (surface)", probes: false,
+    id: "ecmwf_ifs", label: "ECMWF IFS HRES (surface)", probes: false, sample: false,
     wire: [...BASE_HOURLY, ...CLOUD_HOURLY], // no freeze / pressure vars on the 9 km product
     candidate: uniq([...BASE_HOURLY, ...CLOUD_HOURLY, ...SURFACE_CANDIDATE]),
   },
   {
-    id: "ecmwf_ifs025", label: "ECMWF IFS 0.25° (pressure levels)", probes: false,
+    id: "ecmwf_ifs025", label: "ECMWF IFS 0.25° (pressure levels)", probes: false, sample: false,
     wire: HIGHWIND_HOURLY,
     candidate: uniq([...HIGHWIND_HOURLY, ...levelVars(STD_LEVELS)]),
   },
   {
-    id: "gem_seamless", label: "GEM Seamless", probes: false,
+    id: "gem_seamless", label: "GEM Seamless", probes: false, sample: false,
     wire: GFS_WIRE, // freeze presence unverified — the capability matrix settles it
     candidate: uniq([...GFS_WIRE, ...SURFACE_CANDIDATE, ...levelVars(STD_LEVELS)]),
   },
   {
-    id: "best_match", label: "Best match", probes: false,
+    id: "best_match", label: "Best match", probes: false, sample: true,
     wire: GFS_WIRE,
     candidate: uniq([...GFS_WIRE, ...SURFACE_CANDIDATE, ...levelVars(STD_LEVELS)]),
   },
@@ -136,9 +140,7 @@ const PILOT_LOCATION_IDS = [
   "kebnekaise-sydtoppen", "summit-pyramid", "south-rim",
 ];
 
-const CADENCE_DAYS = 10;       // one window every ~10 days
-const YEARS_BACK = 2;          // sample windows across the past two years (per-source archive depth varies)
-const ANCHOR_LAG_DAYS = 5;     // newest window ends a few days ago so the best-estimate has settled
+// Window cadence/lattice constants live in lattice.ts (shared with sample-locations.ts).
 
 
 // ── Report config ────────────────────────────────────────────────────────────────
@@ -327,31 +329,6 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ── Phase 1: collect ───────────────────────────────────────────────────────────────
 
-function runIso(ms: number): string {
-  // ISO 8601 without seconds, UTC (e.g. 2025-07-15T00:00) — the window's anchor / start.
-  return new Date(ms).toISOString().slice(0, 16);
-}
-
-// The window start timestamps (00:00 UTC) to sample, newest first. Window starts live on a FIXED
-// 10-day lattice (anchored to the existing corpus's grid) rather than counting back from today —
-// otherwise every collection day would shift the whole grid and the planner would see the entire
-// corpus as missing. New windows only appear when the calendar crosses the next lattice point.
-const GRID_ANCHOR_MS = Date.UTC(2026, 5, 25); // 2026-06-25, the imported corpus's newest window
-function sampleWindows(): number[] {
-  const day = 24 * 3600 * 1000;
-  const now = new Date();
-  // Newest usable window ends ANCHOR_LAG_DAYS ago (so the best-estimate archive has settled)…
-  const latest = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) -
-    (ANCHOR_LAG_DAYS + HORIZON_DAYS - 1) * day;
-  // …snapped DOWN to the lattice.
-  const newest = GRID_ANCHOR_MS +
-    Math.floor((latest - GRID_ANCHOR_MS) / (CADENCE_DAYS * day)) * (CADENCE_DAYS * day);
-  const earliest = newest - YEARS_BACK * 365 * day;
-  const starts: number[] = [];
-  for (let t = newest; t >= earliest; t -= CADENCE_DAYS * day) starts.push(t);
-  return starts;
-}
-
 // Pilot windows: the four samples nearest to mid-season points of the newest year — one window a
 // season, so the capability matrix sees winter and summer data without a full pull.
 function pilotWindows(windows: number[]): number[] {
@@ -376,14 +353,20 @@ function planCollection(db: ReturnType<typeof openDb>, args: Args, locations: Lo
   const windows = sampleWindows();
   const windowIsos = (args.pilot ? pilotWindows(windows) : windows).map(runIso);
   const plan: PlannedCall[] = [];
+  const sampledStrata = new Set<Location["stratum"]>(["koppen", "ocean"]);
   for (const source of SOURCES) {
     const wanted = args.pilot ? source.candidate : source.wire;
     const locs = locations
       .filter((l) => l.stratum !== "probe" || source.probes)
+      .filter((l) => !sampledStrata.has(l.stratum) || source.sample)
       .filter((l) => !args.pilot || PILOT_LOCATION_IDS.includes(l.id));
     const present = presentVars(db, source.id);
     for (const loc of locs) {
-      for (const w of windowIsos) {
+      // Sampled sites commit to a window subset; intersect so they stay on the live lattice.
+      const locWindows = loc.windows
+        ? windowIsos.filter((w) => loc.windows!.includes(w))
+        : windowIsos;
+      for (const w of locWindows) {
         const have = present.get(cellKey(loc.id, w));
         const missing = have ? wanted.filter((v) => !have.has(v)) : wanted;
         if (missing.length) plan.push({ source, loc, windowStart: w, vars: missing });

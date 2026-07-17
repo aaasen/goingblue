@@ -21,6 +21,7 @@
   "devDependencies": {
     "@types/node": "^25.9.1",
     "@types/pg": "^8.11.0",
+    "geotiff": "^3.0.5",
     "typescript": "^5.4.0",
     "vitest": "^1.6.1"
   }

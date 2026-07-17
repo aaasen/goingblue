@@ -16,15 +16,15 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import type { HourlyData } from "../src/forecast.ts";
 import { LOCATIONS, type Location } from "./locations.ts";
+import { HORIZON_DAYS, WINDOW_HOURS } from "./lattice.ts";
+
+export { HORIZON_DAYS, WINDOW_HOURS };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(__dirname, "..", "..", "..");
 export const DB_PATH = join(REPO_ROOT, "data", "corpus.db");
 
-// Window geometry. 14 days keeps every benchmarked duration (≤10d) fully covered including the
-// local-midnight shift — see the layout note in benchmark.ts.
-export const HORIZON_DAYS = 14;
-export const WINDOW_HOURS = HORIZON_DAYS * 24;
+// Window geometry lives in lattice.ts (shared with the sampler) and is re-exported above.
 
 export interface SeriesRow {
   source: string;        // logical source id (= Open-Meteo model param), e.g. gfs_seamless
