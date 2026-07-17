@@ -5,33 +5,32 @@
  * that file. Run standalone (`node scripts/derive-foo.ts`), a script prints its tables and stats
  * without writing anything.
  */
-import { readdir, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { HourlyData } from "../src/forecast.ts";
+import { dbLocations, listCells, loadCell, openDb } from "./corpus-db.ts";
 
-export const CORPUS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "data", "raw", "gfs");
+// The derivation corpus: the report source's cells in the corpus DB (see corpus-db.ts).
+export const DERIVE_SOURCE = "gfs_seamless";
 
 // Tables a derive script contributes, keyed by their codebooks.gen.ts constant name.
 export type DerivedTables = Record<string, number[] | number[][] | number[][][]>;
 
-// Visits every cached forecast in the corpus (files mid-write by the collector are skipped).
+// Visits every forecast in the corpus DB (WAL mode — safe alongside a concurrent collect).
 // `loc` is the corpus location id — the unit held-out splits divide on. `pos` is the location's
-// lat/lon from the cached metadata, for scripts that need geography (UTC offset, solar position).
+// lat/lon from the registry mirror, for scripts that need geography (UTC offset, solar position).
 export async function eachForecast(
   cb: (hourly: HourlyData, startHour: number, loc: string, pos?: { lat: number; lon: number }) => void,
 ): Promise<void> {
-  for (const loc of await readdir(CORPUS)) {
-    const dir = join(CORPUS, loc);
-    for (const f of await readdir(dir)) {
-      if (!f.endsWith(".json")) continue;
-      let rec: any;
-      try { rec = JSON.parse(await readFile(join(dir, f), "utf8")); } catch { continue; } // mid-write
-      const { lat, lon } = rec.meta?.location ?? {};
-      cb(rec.response.hourly as HourlyData, Math.floor(Date.parse(rec.meta.run + "Z") / 3600000), loc,
-        typeof lat === "number" && typeof lon === "number" ? { lat, lon } : undefined);
-    }
+  const db = openDb();
+  const locs = dbLocations(db);
+  for (const { locationId, windowStart } of listCells(db, DERIVE_SOURCE)) {
+    const hourly = loadCell(db, DERIVE_SOURCE, locationId, windowStart);
+    if (!hourly) continue;
+    const pos = locs.get(locationId);
+    cb(hourly, Math.floor(Date.parse(windowStart + "Z") / 3600000), locationId,
+      pos ? { lat: pos.lat, lon: pos.lon } : undefined);
   }
+  db.close();
 }
 
 // Deterministic 5-fold assignment by location id, for held-out (split-by-location) checks.

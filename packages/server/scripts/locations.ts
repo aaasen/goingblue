@@ -1,0 +1,204 @@
+/**
+ * The corpus location registry. Committed source of truth (data/ is gitignored); the corpus
+ * database mirrors it into a `locations` table at collect time so ad-hoc SQL can join on
+ * location_id. The future stratified sampler (Köppen/remoteness/peaks/ocean — see CorpusPlan.md)
+ * only appends rows here; the collector picks new entries up on the next run.
+ */
+
+// Which slice of the corpus a location belongs to. `favorites` = the original Windy-favorites
+// import (ski-skewed — the reason the corpus is being expanded); `probe` = hand-picked
+// tropical/arid/ocean points used to measure how badly the current codebooks fit regimes the
+// favorites never see; the rest are the sampler's strata.
+export type Stratum = "favorites" | "probe" | "koppen" | "peaks" | "ocean";
+
+export interface Location {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  elev_m?: number;   // pin model elevation (curated peaks); omit for generic grid points
+  stratum: Stratum;
+  koppen?: string;   // Köppen–Geiger class, filled by the sampler
+  split?: "train" | "eval"; // held-out split, assigned per location (never per window)
+}
+
+type Entry = Omit<Location, "stratum">;
+
+// Denali is pinned to the summit elevation (the flagship use case, already collected); the rest
+// are imported Windy favorites, id = kebab-case of the title, using Open-Meteo's grid elevation.
+// Spans the North American ranges, the Alps, the Andes (SH winter), and NZ.
+const FAVORITES: Entry[] = [
+  { id: "denali", name: "Denali summit", lat: 63.069, lon: -151.003, elev_m: 6096 },
+  { id: "liberty-bell-mountain", name: "Liberty Bell Mountain", lat: 48.515, lon: -120.658 },
+  { id: "eldorado", name: "Eldorado", lat: 48.537, lon: -121.134 },
+  { id: "aasgard", name: "Aasgard", lat: 47.479, lon: -120.822 },
+  { id: "paradise", name: "Paradise", lat: 46.786, lon: -121.735 },
+  { id: "glacier-peak", name: "Glacier Peak", lat: 48.113, lon: -121.114 },
+  { id: "alta", name: "Alta", lat: 40.59, lon: -111.64 },
+  { id: "snoqualmie-pass", name: "Snoqualmie Pass", lat: 47.42, lon: -121.41 },
+  { id: "panorama-dome", name: "Panorama Dome", lat: 48.855, lon: -121.683 },
+  { id: "crystal", name: "Crystal", lat: 46.926, lon: -121.5 },
+  { id: "mount-glory", name: "Mount Glory, Jackson", lat: 43.508, lon: -110.95 },
+  { id: "chamonix", name: "Chamonix", lat: 45.879, lon: 6.888 },
+  { id: "kitzbuhel", name: "Kitzbühel", lat: 47.418, lon: 12.357 },
+  { id: "rogers-pass", name: "Rogers Pass, Area A", lat: 51.302, lon: -117.52 },
+  { id: "sub-peak", name: "Sub Peak, Area B", lat: 50.963, lon: -118.101 },
+  { id: "cowboy-mountain", name: "Cowboy Mountain, Scenic", lat: 47.744, lon: -121.09 },
+  { id: "jungbrunntobel", name: "Jungbrunntobel, Gemeinde Sankt Anton am Arlberg", lat: 47.133, lon: 10.243 },
+  { id: "pointe-marie-louise", name: "Pointe Marie-Louise, La Grave", lat: 45.001, lon: 6.255 },
+  { id: "seppenalm", name: "Seppenalm, Heiligenblut am Grossglockner", lat: 47.065, lon: 12.858 },
+  { id: "grubegg", name: "Grubegg, Hotting", lat: 47.31, lon: 11.378 },
+  { id: "fraulaskofel", name: "Fraulaskofel, Gemeinde Neustift im Stubaital", lat: 46.983, lon: 11.112 },
+  { id: "gemsstock", name: "Gemsstock, Andermatt", lat: 46.603, lon: 8.612 },
+  { id: "lizumer-grube", name: "Lizumer Grube, Gemeinde Axams", lat: 47.183, lon: 11.282 },
+  { id: "trockener-steg", name: "Trockener Steg, Zermatt", lat: 45.971, lon: 7.724 },
+  { id: "grindelwald-grund", name: "Grindelwald Grund, Grindelwald", lat: 46.623, lon: 8.024 },
+  { id: "le-corridor", name: "Le Corridor, Chamonix-Mont-Blanc", lat: 45.834, lon: 6.864 },
+  { id: "mount-toll", name: "Mount Toll, Ward", lat: 40.089, lon: -105.633 },
+  { id: "narao-peak", name: "Narao Peak, Area A", lat: 51.411, lon: -116.313 },
+  { id: "flattop-mountain", name: "Flattop Mountain, Grand Lake", lat: 40.31, lon: -105.688 },
+  { id: "belen", name: "Belen, Huaraz", lat: -9.53, lon: -77.53 },
+  { id: "chinchey", name: "Chinchey, San Miguel de Aco", lat: -9.382, lon: -77.331 },
+  { id: "cima-andes", name: "Cima Andes, Lo Barnechea", lat: -33.337, lon: -70.264 },
+  { id: "blackcomb-peak", name: "Blackcomb Peak, Whistler Resort Municipality", lat: 50.094, lon: -122.886 },
+  { id: "bald-mountain", name: "Bald Mountain, Ketchum", lat: 43.655, lon: -114.41 },
+  { id: "brewster-rock", name: "Brewster Rock, Banff", lat: 51.075, lon: -115.756 },
+  { id: "mount-columbia", name: "Mount Columbia, Area A", lat: 52.145, lon: -117.441 },
+  { id: "stanley-peak", name: "Stanley Peak, Area G", lat: 51.171, lon: -116.055 },
+  { id: "robson-cirque", name: "Robson Cirque, Area H", lat: 53.108, lon: -119.155 },
+  { id: "mount-andromeda", name: "Mount Andromeda", lat: 52.176, lon: -117.238 },
+  { id: "temple-lake-ridge", name: "Temple Lake Ridge, Lake Louise", lat: 51.36, lon: -116.192 },
+  { id: "mount-adams", name: "Mount Adams", lat: 46.203, lon: -121.492 },
+  { id: "mount-hood", name: "Mount Hood, Government Camp", lat: 45.373, lon: -121.696 },
+  { id: "wolf-peak", name: "Wolf Peak", lat: 48.015, lon: -121.516 },
+  { id: "canoe-peak", name: "Canoe Peak, Skykomish", lat: 47.653, lon: -121.481 },
+  { id: "summit-pyramid", name: "Summit Pyramid, Qutang", lat: 27.988, lon: 86.925 },
+  { id: "ruth-mountain", name: "Ruth Mountain", lat: 48.86, lon: -121.534 },
+  { id: "roman-wall", name: "Roman Wall, Glacier", lat: 48.774, lon: -121.817 },
+  { id: "pisco", name: "Pisco, Caraz", lat: -9.01, lon: -77.633 },
+  { id: "wye-dome", name: "Wye Dome, Jacks Point", lat: -45.054, lon: 168.815 },
+  { id: "mount-cook", name: "Mount Cook", lat: -43.594, lon: 170.142 },
+  { id: "ichupata", name: "Ichupata, Santa Teresa", lat: -13.345, lon: -72.567 },
+  { id: "grand-teton", name: "Grand Teton", lat: 43.742, lon: -110.803 },
+  { id: "mount-moran", name: "Mount Moran", lat: 43.836, lon: -110.776 },
+  { id: "south-peak", name: "South Peak", lat: -43.491, lon: 171.534 },
+  { id: "craigieburn-valley-ski-area", name: "Craigieburn Valley Ski Area", lat: -43.113, lon: 171.699 },
+  { id: "temple-col", name: "Temple Col, Arthur's Pass", lat: -42.911, lon: 171.589 },
+  { id: "mount-cardrona", name: "Mount Cardrona, Arrowtown", lat: -44.863, lon: 168.945 },
+  { id: "mount-ollivier", name: "Mount Ollivier, Aoraki", lat: -43.725, lon: 170.064 },
+  { id: "the-footstool", name: "The Footstool, Aoraki", lat: -43.675, lon: 170.065 },
+  { id: "dobson-peak", name: "Dobson Peak", lat: -43.935, lon: 170.665 },
+  { id: "mount-sutton", name: "Mount Sutton", lat: -44.221, lon: 169.773 },
+  { id: "treble-cone", name: "Treble Cone", lat: -44.634, lon: 168.876 },
+  { id: "westland-district", name: "Westland District", lat: -44.066, lon: 169.449 },
+  { id: "mount-aspiring", name: "Mount Aspiring", lat: -44.386, lon: 168.727 },
+  { id: "queenstown-lakes-district", name: "Queenstown-Lakes District", lat: -44.622, lon: 168.411 },
+  { id: "homestead-peak", name: "Homestead Peak", lat: -44.463, lon: 168.764 },
+  { id: "mount-alta", name: "Mount Alta", lat: -44.502, lon: 168.974 },
+  { id: "tahurangi", name: "Tahurangi, Turoa Village", lat: -39.29, lon: 175.563 },
+  { id: "sandfly-point", name: "Sandfly Point, Fiordland Community", lat: -44.673, lon: 167.921 },
+  { id: "hochstetter-peak", name: "Hochstetter Peak", lat: -43.513, lon: 170.342 },
+  { id: "erewhon-skifield", name: "Erewhon Skifield", lat: -43.505, lon: 170.925 },
+  { id: "queenstown-lakes-district-2", name: "Queenstown-Lakes District", lat: -44.438, lon: 168.624 },
+  { id: "mount-talbot", name: "Mount Talbot, Fiordland Community", lat: -44.75, lon: 167.998 },
+  { id: "the-lizard", name: "The Lizard, North Egmont", lat: -39.296, lon: 174.065 },
+  { id: "9975-ft", name: "9975 ft, Beaver Creek", lat: 43.696, lon: -110.789 },
+  { id: "malad-summit", name: "Malad Summit, Downey", lat: 42.35, lon: -112.224 },
+  { id: "freds-mountain", name: "Freds Mountain, Driggs", lat: 43.791, lon: -110.936 },
+  { id: "cornucopia-peak", name: "Cornucopia Peak, Cornucopia", lat: 45.01, lon: -117.241 },
+  { id: "matanuska-susitna", name: "Matanuska-Susitna", lat: 62.904, lon: -151.205 },
+  { id: "bloody-mountain", name: "Bloody Mountain, Mammoth Lakes", lat: 37.56, lon: -118.906 },
+  { id: "mount-shasta", name: "Mount Shasta", lat: 41.409, lon: -122.193 },
+  { id: "mount-tallac", name: "Mount Tallac, Spring Creek", lat: 38.903, lon: -120.099 },
+  { id: "lynx-peak", name: "Lynx Peak", lat: 61.855, lon: -149.119 },
+  { id: "matanuska-susitna-2", name: "Matanuska-Susitna", lat: 62.715, lon: -151.219 },
+  { id: "east-twin-peak", name: "East Twin Peak, Palmer", lat: 61.443, lon: -149.147 },
+  { id: "villa-catedral", name: "Villa Catedral", lat: -41.199, lon: -71.486 },
+  { id: "el-chalten", name: "El Chaltén", lat: -49.272, lon: -73.042 },
+  { id: "curarrehue", name: "Curarrehue", lat: -39.636, lon: -71.503 },
+  { id: "lago-escondido", name: "Lago Escondido", lat: -54.707, lon: -67.995 },
+  { id: "lom", name: "Lom", lat: 61.635, lon: 8.313 },
+  { id: "luster", name: "Luster", lat: 61.79, lon: 7.207 },
+  { id: "luster-2", name: "Luster", lat: 61.464, lon: 7.875 },
+  { id: "folldal", name: "Folldal", lat: 61.915, lon: 9.853 },
+  { id: "rauma", name: "Rauma", lat: 62.486, lon: 7.719 },
+  { id: "leavenworth", name: "Leavenworth", lat: 47.6, lon: -120.66 },
+  { id: "area-c", name: "Area C", lat: 54.499, lon: -128.964 },
+  { id: "denali-2", name: "Denali", lat: 62.961, lon: -151.4 },
+  { id: "east-wenatchee", name: "East Wenatchee", lat: 47.274, lon: -120.406 },
+  { id: "kittitas", name: "Kittitas", lat: 47.335, lon: -120.58 },
+  { id: "wendy-thompson-memorial-hut-recreation-site", name: "Wendy Thompson Memorial Hut Recreation Site", lat: 50.43, lon: -122.474 },
+  { id: "area-c-2", name: "Area C", lat: 50.63, lon: -122.68 },
+  { id: "lewis-county", name: "Lewis County", lat: 46.605, lon: -121.406 },
+  { id: "chelan", name: "Chelan", lat: 47.987, lon: -120.871 },
+  { id: "yakima", name: "Yakima", lat: 46.795, lon: -121.256 },
+  { id: "winthrop", name: "Winthrop", lat: 48.48, lon: -120.19 },
+  { id: "area-a", name: "Area A", lat: 51.627, lon: -116.502 },
+  { id: "area-a-2", name: "Area A", lat: 51.275, lon: -117.076 },
+  { id: "lyngen", name: "Lyngen", lat: 69.469, lon: 19.879 },
+  { id: "tromso", name: "Tromso", lat: 69.724, lon: 18.436 },
+  { id: "tromso-2", name: "Tromso", lat: 69.414, lon: 19.198 },
+  { id: "balsfjord", name: "Balsfjord", lat: 69.105, lon: 19.784 },
+  { id: "area-f", name: "Area F", lat: 49.852, lon: -123.003 },
+  { id: "matanuska-susitna-3", name: "Matanuska-Susitna", lat: 61.436, lon: -147.752 },
+  { id: "tinn", name: "Tinn", lat: 59.856, lon: 8.648 },
+  { id: "area-j", name: "Area J", lat: 51.376, lon: -125.263 },
+  { id: "matanuska-susitna-4", name: "Matanuska-Susitna", lat: 63.024, lon: -150.462 },
+  { id: "mount-sanford", name: "Mount Sanford", lat: 62.215, lon: -144.128 },
+  { id: "mount-iliamna", name: "Mount Iliamna", lat: 60.032, lon: -153.09 },
+  { id: "yukon", name: "Yukon", lat: 60.295, lon: -140.932 },
+  { id: "kebnekaise-sydtoppen", name: "Kebnekaise sydtoppen", lat: 67.901, lon: 18.516 },
+  { id: "star-peak", name: "Star Peak", lat: 48.252, lon: -120.429 },
+  { id: "south-rim", name: "South Rim, Grand Canyon Village", lat: 36.056, lon: -112.122 },
+  { id: "mount-alyeska", name: "Mount Alyeska, Anchorage", lat: 60.96, lon: -149.061 },
+  { id: "red-tit-col", name: "Red Tit Col, Area B", lat: 49.795, lon: -123.307 },
+  { id: "matanuska-susitna-5", name: "Matanuska-Susitna", lat: 61.581, lon: -152.444 },
+  { id: "denali-3", name: "Denali", lat: 62.991, lon: -152.021 },
+  { id: "gilbert-peak", name: "Gilbert Peak", lat: 46.487, lon: -121.41 },
+  { id: "mystic-pass", name: "Mystic Pass", lat: 62.64118609716908, lon: -152.53349304199222 },
+  { id: "chalcatongo-de-hidalgo", name: "Chalcatongo de Hidalgo", lat: 17.029, lon: -97.569 },
+  { id: "joffre-peak", name: "Joffre Peak, Area B", lat: 50.342, lon: -122.445 },
+  { id: "yak-peak", name: "Yak Peak, Area B", lat: 49.609, lon: -121.106 },
+  { id: "fraser", name: "Fraser", lat: 59.669, lon: -135.112 },
+  { id: "valdez-cordova", name: "Valdez-Cordova", lat: 61.148, lon: -145.723 },
+  { id: "kenai-peninsula", name: "Kenai Peninsula", lat: 60.785, lon: -149.212 },
+  { id: "rock-peak", name: "Rock Peak", lat: 62.908, lon: -150.54 },
+  { id: "matanuska-susitna-borough", name: "Matanuska-Susitna Borough", lat: 62.984, lon: -150.427 },
+  { id: "denali-borough", name: "Denali Borough", lat: 62.974, lon: -151.171 },
+];
+
+// Hand-picked tropical / arid / ocean probes — regimes the favorites never see. Used by the
+// Phase 2.5 diagnostic (encode with current codebooks, compare bits/period vs favorites) to size
+// the regime-mismatch problem before the full stratified sample is built. Köppen classes are
+// approximate hand labels, not sampler output.
+const PROBES: Entry[] = [
+  // Tropical rainforest / monsoon (Af/Am)
+  { id: "probe-manaus", name: "Manaus, Amazon Basin", lat: -3.1, lon: -60.02, koppen: "Af" },
+  { id: "probe-kisangani", name: "Kisangani, Congo Basin", lat: 0.52, lon: 25.2, koppen: "Af" },
+  { id: "probe-borneo-kinabalu", name: "Mount Kinabalu, Borneo", lat: 6.075, lon: 116.558, koppen: "Af" },
+  { id: "probe-puncak-jaya", name: "Puncak Jaya, New Guinea", lat: -4.078, lon: 137.185, koppen: "Af" },
+  { id: "probe-pokhara", name: "Pokhara, Himalaya monsoon foothills", lat: 28.24, lon: 83.99, koppen: "Cwa" },
+  { id: "probe-costa-rica-chirripo", name: "Cerro Chirripó, Costa Rica", lat: 9.484, lon: -83.489, koppen: "Am" },
+  // Tropical highland / savanna (Aw / highland)
+  { id: "probe-kilimanjaro", name: "Kilimanjaro", lat: -3.076, lon: 37.353, koppen: "Aw" },
+  { id: "probe-mauna-kea", name: "Mauna Kea, Hawaii", lat: 19.821, lon: -155.468, koppen: "Aw" },
+  { id: "probe-piton-des-neiges", name: "Piton des Neiges, Réunion", lat: -21.099, lon: 55.48, koppen: "Aw" },
+  { id: "probe-quito", name: "Quito, equatorial Andes", lat: -0.18, lon: -78.47, koppen: "Cfb" },
+  // Hot / cold deserts and steppe (BWh/BWk/BSk)
+  { id: "probe-hoggar", name: "Assekrem, Hoggar Mountains, Sahara", lat: 23.267, lon: 5.633, koppen: "BWh" },
+  { id: "probe-atacama", name: "San Pedro de Atacama", lat: -22.91, lon: -68.2, koppen: "BWk" },
+  { id: "probe-sossusvlei", name: "Sossusvlei, Namib", lat: -24.73, lon: 15.34, koppen: "BWh" },
+  { id: "probe-jebel-shams", name: "Jebel Shams, Oman", lat: 23.237, lon: 57.264, koppen: "BWh" },
+  { id: "probe-gobi", name: "Gobi Desert, Ömnögovi", lat: 43.5, lon: 104.4, koppen: "BWk" },
+  { id: "probe-alice-springs", name: "Alice Springs, Outback", lat: -23.7, lon: 133.88, koppen: "BWh" },
+  // Ocean (passage corridors, not uniform ocean)
+  { id: "probe-pacific-trades", name: "Equatorial Pacific trades (Marquesas run)", lat: -5, lon: -125, koppen: "ocean" },
+  { id: "probe-atlantic-trades", name: "Atlantic trades (ARC route)", lat: 15, lon: -40, koppen: "ocean" },
+  { id: "probe-north-atlantic", name: "North Atlantic (great-circle crossing)", lat: 45, lon: -40, koppen: "ocean" },
+  { id: "probe-southern-ocean", name: "Southern Ocean (Indian sector)", lat: -48, lon: 90, koppen: "ocean" },
+];
+
+export const LOCATIONS: Location[] = [
+  ...FAVORITES.map((l): Location => ({ ...l, stratum: "favorites" })),
+  ...PROBES.map((l): Location => ({ ...l, stratum: "probe" })),
+];
