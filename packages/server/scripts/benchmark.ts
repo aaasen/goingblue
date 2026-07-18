@@ -14,8 +14,8 @@
  *      the report answers the product question — for a requested duration, how far up the
  *      refinement ladder (12h → 6h → 3h → 1h) does one message get? — and shows how the bit
  *      budget splits across the header and each variable column (with each column's chosen mode).
- *      The report reads REPORT_SOURCE (gfs_seamless) only, until the format work catches up with
- *      the other sources.
+ *      The report reads REPORT_SOURCE (best_match — what production serves) and defaults to the
+ *      eval split, so the headline metric is held out from codebook training (--split widens it).
  *
  *   node packages/server/scripts/benchmark.ts                     # collect (idempotent) then report
  *   node packages/server/scripts/benchmark.ts --collect-only      # expand the corpus DB, no report
@@ -129,7 +129,9 @@ const SOURCES: SourceDef[] = [
     candidate: uniq([...GFS_WIRE, ...SURFACE_CANDIDATE, ...levelVars(STD_LEVELS)]),
   },
 ];
-const REPORT_SOURCE = SOURCES[0]; // the report/derive pipeline reads gfs_seamless only, for now
+// The report (and the derive pipeline, via derive-lib DERIVE_SOURCE) reads best_match — the
+// source production serves and the only one collected for the 10k sampled strata.
+const REPORT_SOURCE = SOURCES.find((s) => s.id === "best_match")!;
 
 // Pilot slice (Phase 2 of CorpusPlan.md): a handful of spread-out favorites × four seasonal
 // windows × the full candidate spec, to build the capability matrix before committing budget.
@@ -232,6 +234,7 @@ interface Args {
   dump?: [string, string, string]; // print one (source, location, window) cell
   // report
   duration: number;      // which duration the report opens on (all of DURATIONS are computed)
+  split: "train" | "eval" | "all"; // which held-out split the report covers (--location bypasses)
   requestHour: number;   // local hour of day the request is assumed to arrive at
   maxChars: number;
   verbose: boolean;
@@ -266,6 +269,8 @@ Collect options
 
 Report options
   --duration <d>            duration view the report opens on: ${DURATIONS.join("/")} (default ${DEFAULT_DURATION})
+  --split <s>               which locations the report covers: eval (held out from codebook
+                            training, the default), train, or all; --location bypasses this
   --request-hour <h>        local hour the request is assumed to arrive at, 0-23 (default 7)
   --max-chars <n>           message budget in characters (default 160)
   --include-incomplete      keep forecasts with fully-null base series
@@ -288,7 +293,7 @@ function parseArgs(argv: string[]): Args {
   const args: Args = {
     limit: 0, concurrency: 8, dryRun: false, collectOnly: false, reportOnly: false, pilot: false,
     validate: false,
-    duration: DEFAULT_DURATION, requestHour: 7, maxChars: 160, verbose: false,
+    duration: DEFAULT_DURATION, split: "eval", requestHour: 7, maxChars: 160, verbose: false,
     includeIncomplete: false, open: true,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -306,6 +311,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--limit") args.limit = parseInt(argv[++i], 10) || 0;
     else if (a === "--concurrency") args.concurrency = parseInt(argv[++i], 10);
     else if (a === "--duration") args.duration = parseInt(argv[++i], 10);
+    else if (a === "--split") args.split = argv[++i] as Args["split"];
     else if (a === "--request-hour") args.requestHour = parseInt(argv[++i], 10);
     else if (a === "--max-chars") args.maxChars = parseInt(argv[++i], 10);
     else if (a === "--location") args.location = argv[++i];
@@ -313,6 +319,9 @@ function parseArgs(argv: string[]): Args {
   }
   if (!DURATIONS.includes(args.duration)) {
     throw new Error(`--duration must be one of ${DURATIONS.join(", ")}`);
+  }
+  if (!["train", "eval", "all"].includes(args.split)) {
+    throw new Error(`--split must be train, eval, or all`);
   }
   if (!(args.requestHour >= 0 && args.requestHour <= 23)) {
     throw new Error(`--request-hour must be 0..23`);
@@ -514,20 +523,49 @@ interface ReportCell {
   lat: number;
   lon: number;
   elevation: number; // grid-snap elevation from location_meta (pinned for curated peaks)
+  group: string;     // breakdown row: favorites / Köppen major group / ocean band
 }
 
-function loadReportCells(db: ReturnType<typeof openDb>, locationFilter?: string): ReportCell[] {
+// Breakdown row for a location: favorites stay their own row; sampled land rolls up to the
+// Köppen major group (A tropical … E polar; the subtype rows would be too thin on the 15% eval
+// split); ocean sites to their 30° latitude band (the sampler's stratification — the band isn't
+// stored, so rederive it from lat).
+const bandLabel = (south: number): string => {
+  const edge = (d: number) => `${Math.abs(d)}°${d < 0 ? "S" : d > 0 ? "N" : ""}`;
+  return `ocean ${edge(south)}–${edge(south + 30)}`;
+};
+function groupOf(loc: { stratum: string; koppen: string | null; lat: number }): string {
+  if (loc.stratum === "favorites") return "favorites";
+  if (loc.stratum === "ocean") return bandLabel(Math.min(2, Math.floor(loc.lat / 30)) * 30);
+  return `Köppen ${loc.koppen?.[0] ?? "?"}`;
+}
+// Row order for the breakdown: land groups tropics → polar, ocean bands north → south, favorites
+// last. Unknown groups (shouldn't happen) sort just before favorites.
+const GROUP_ORDER = [
+  ..."ABCDE".split("").map((g) => `Köppen ${g}`),
+  ...[60, 30, 0, -30, -60, -90].map(bandLabel),
+];
+const groupOrder = (g: string): number => {
+  const i = GROUP_ORDER.indexOf(g);
+  return g === "favorites" ? GROUP_ORDER.length + 1 : i === -1 ? GROUP_ORDER.length : i;
+};
+
+function loadReportCells(
+  db: ReturnType<typeof openDb>, split: Args["split"], locationFilter?: string,
+): ReportCell[] {
   const locs = dbLocations(db);
   const elevs = modelElevations(db, REPORT_SOURCE.id);
   const cells: ReportCell[] = [];
   for (const { locationId, windowStart } of listCells(db, REPORT_SOURCE.id, locationFilter)) {
     const loc = locs.get(locationId);
     if (!loc) continue; // a location dropped from the registry — its rows are dead weight, skip
+    if (!locationFilter && split !== "all" && loc.split !== split) continue;
     const hourly = loadCell(db, REPORT_SOURCE.id, locationId, windowStart);
     if (!hourly) continue;
     cells.push({
       locId: locationId, windowStart, hourly,
       lat: loc.lat, lon: loc.lon, elevation: elevs.get(locationId) ?? 0,
+      group: groupOf(loc),
     });
   }
   return cells;
@@ -626,9 +664,9 @@ function buildView(
 }
 
 async function report(args: Args): Promise<void> {
-  // Single source (GFS — it supplies every variable group, so no cross-source fallback is needed).
+  // Single source (best_match supplies every variable group, so no cross-source fallback needed).
   const db = openDb();
-  const cells = loadReportCells(db, args.location);
+  const cells = loadReportCells(db, args.split, args.location);
   db.close();
   if (cells.length === 0) throw new Error("No forecasts found — run collection first (or import the old JSON tree: import-corpus-json.ts)");
 
@@ -644,6 +682,12 @@ async function report(args: Args): Promise<void> {
   const forecasts: { location: string }[] = [];
   const allMask = comboMask(COMBOS.length - 1); // every group on
   let versionBits = 0, headerBits = 0, skipped = 0, short = 0, uncovered = 0;
+
+  // Per-stratum breakdown bookkeeping: the group of each fitted cell, in push order per duration
+  // (fits for every combo of one cell are pushed together, so one list per duration serves all
+  // combos), plus the distinct locations behind each group.
+  const groupsFor = new Map<number, string[]>(DURATIONS.map((d) => [d, []]));
+  const groupLocs = new Map<string, Set<string>>();
 
   for (const cell of cells) {
     const h = cell.hourly;
@@ -678,6 +722,9 @@ async function report(args: Args): Promise<void> {
       // caused it. Every untruncated seq spans the same days, so checking the all-1h layout is
       // enough. (With a 14-day window this should never fire; it guards the metric if it ever does.)
       if (msgAt(maxFillSeq(durationDays)) === null) { uncovered++; continue; }
+      groupsFor.get(durationDays)!.push(cell.group);
+      if (!groupLocs.has(cell.group)) groupLocs.set(cell.group, new Set());
+      groupLocs.get(cell.group)!.add(locId);
 
       for (const c of COMBOS) {
         const fit = fitFill(msgAt, durationDays, comboMask(c), args.maxChars)!; // seq=1 is covered
@@ -712,6 +759,27 @@ async function report(args: Args): Promise<void> {
   const dropped = DURATIONS.filter((d) => !durations.includes(d));
   const defaultDuration = durations.includes(args.duration) ? args.duration : durations[0];
 
+  // Per-stratum breakdown, default combo: mean fill % (the tracked metric — see the report table)
+  // and mean body bits/period per group, per duration.
+  const strata: StratumStat[] = [...groupLocs.keys()]
+    .sort((a, b) => groupOrder(a) - groupOrder(b))
+    .map((group) => ({
+      group,
+      locations: groupLocs.get(group)!.size,
+      perDuration: durations.map((d) => {
+        const fits = fitsFor.get(vkey(d, DEFAULT_COMBO))!;
+        const groups = groupsFor.get(d)!;
+        const mine = fits.filter((_, i) => groups[i] === group);
+        if (mine.length === 0) return { d, n: 0, fillPct: NaN, bpp: NaN };
+        const bodyBits = (f: Fit) => f.breakdown.columns.reduce((s, c) => s + c.bits, 0);
+        return {
+          d, n: mine.length,
+          fillPct: 100 * mean(mine.map((f) => f.seq)) / maxFillSeq(d),
+          bpp: mean(mine.map((f) => bodyBits(f) / f.periods)),
+        };
+      }),
+    }));
+
   const stats: ReportData = {
     timestamp: new Date().toISOString(),
     durations,
@@ -726,6 +794,8 @@ async function report(args: Args): Promise<void> {
     uncovered,
     versionBits, headerBits,
     model: REPORT_SOURCE.label,
+    split: args.location ? `location ${args.location}` : args.split,
+    strata,
     groups: GROUP_IDS.map((g) => ({ id: g, label: GROUP_LABEL[g], short: GROUP_SHORT[g] })),
     defaultCombo: DEFAULT_COMBO,
     views,
@@ -738,12 +808,19 @@ async function report(args: Args): Promise<void> {
 
   const dv = views[vkey(defaultDuration, stats.defaultCombo)];
   console.log(`\n== Benchmark ==`);
-  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${REPORT_SOURCE.label}, durations ${durations.join("/")}d  |  max-chars=${args.maxChars}, request ${args.requestHour}:00 local`);
+  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${REPORT_SOURCE.label} (split: ${stats.split}), durations ${durations.join("/")}d  |  max-chars=${args.maxChars}, request ${args.requestHour}:00 local`);
   if (short) console.log(`  ignored ${short} cached forecast(s) from a shorter-window pull (< ${HORIZON_DAYS}d — leftovers, safe to delete)`);
   if (skipped) console.log(`  skipped ${skipped} forecast(s) with an incomplete base series`);
   if (uncovered) console.log(`  skipped ${uncovered} (forecast, duration) pair(s) the corpus window doesn't cover`);
   if (dropped.length) console.log(`  dropped ${dropped.join("/")}d entirely — no forecast in the corpus covers them (re-collect: the window must be ≥ ${HORIZON_DAYS}d)`);
   console.log(`  default view (${args.duration}d, base): seq mean ${dv.seq.mean.toFixed(1)} of ${dv.maxSeq}, median ${dv.medianSeq} = ${dv.medianLabel}`);
+  if (strata.length > 1) {
+    console.log(`  by stratum (${defaultDuration}d, base):`);
+    for (const s of strata) {
+      const p = s.perDuration.find((x) => x.d === defaultDuration)!;
+      console.log(`    ${s.group.padEnd(16)} ${String(s.locations).padStart(5)} locs  ${String(p.n).padStart(6)} cells  fill ${p.fillPct.toFixed(1).padStart(5)}%  ${p.bpp.toFixed(2)} bits/period`);
+    }
+  }
   console.log(`  report: ${outPath.replace(REPO_ROOT + "/", "")}`);
 
   if (args.open) openInBrowser(outPath);
@@ -781,6 +858,13 @@ interface ViewStats {
   bodyBits: number;
   columns: ColStat[];
 }
+// One breakdown row: a corpus stratum group (Köppen major group / ocean band / favorites), its
+// mean fill % and body bits/period for the base combo at each duration.
+interface StratumStat {
+  group: string;
+  locations: number;
+  perDuration: { d: number; n: number; fillPct: number; bpp: number }[];
+}
 // Everything the report embeds. `views` holds one ViewStats per duration:combo.
 interface ReportData {
   timestamp: string;
@@ -797,6 +881,8 @@ interface ReportData {
   versionBits: number;
   headerBits: number;
   model: string; // single model (label), shown in the meta line
+  split: string; // which held-out split the report covers (or the explicit --location)
+  strata: StratumStat[];
   groups: { id: GroupId; label: string; short: string }[];
   defaultCombo: number;
   views: Record<string, ViewStats>;                        // "duration:combo" → stats
@@ -1203,6 +1289,28 @@ function renderDurationComparison(s: ReportData): string {
   ${renderFrontier(s)}`;
 }
 
+// The per-stratum breakdown: where the format struggles by climate. Only rendered when the run
+// actually spans strata (a --location run has one group — nothing to compare).
+function renderStrata(s: ReportData): string {
+  if (s.strata.length <= 1) return "";
+  const head = s.durations.map((d) => `<th>${d}d</th>`).join("");
+  const rows = s.strata.map((st) =>
+    `<tr><td class="name">${esc(st.group)}</td><td class="num">${st.locations}</td>` +
+    st.perDuration.map((p) => p.n === 0
+      ? `<td class="num">—</td>`
+      : `<td><div class="pcell" title="${p.n} messages · ${p.bpp.toFixed(2)} body bits/period"><span class="pmean">${p.fillPct.toFixed(1)}%</span>${renderFillBar(p.fillPct / 100)}</div></td>`,
+    ).join("") + `</tr>`).join("\n");
+  return `<h2>Mean fill percentage by corpus stratum</h2>
+  <p class="note">Base variables only. Sampled land sites roll up to Köppen major groups (A tropical,
+  B arid, C temperate, D continental, E polar) and ocean sites to 30° latitude bands; favorites are
+  the curated registry, always held out of codebook training. Hover a cell for the message count and
+  body bits/period.</p>
+  <table class="period-comparison">
+    <tr><th>Stratum</th><th class="rt">locations</th>${head}</tr>
+    ${rows}
+  </table>`;
+}
+
 // One toggleable view = a duration × variable-combo: fill summary, the percentile strips, the seq
 // histogram, and the occupancy table. All are emitted hidden; the client shows the selected one.
 function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: number, requestHour: number): string {
@@ -1384,7 +1492,8 @@ function renderHtml(s: ReportData): string {
 <body>
 <h1>Going Blue Encoding Benchmark</h1>
 <div class="meta">
-  ${esc(s.timestamp)} · ${s.forecasts} forecasts · ${s.locations} locations · ${esc(s.model)} · max <code>${s.maxChars}</code> chars ·
+  ${esc(s.timestamp)} · ${s.forecasts} forecasts · ${s.locations} locations · ${esc(s.model)} ·
+  split <code>${esc(s.split)}</code> · max <code>${s.maxChars}</code> chars ·
   request at <code>${s.requestHour}:00</code> local
 </div>
 
@@ -1407,6 +1516,8 @@ function renderHtml(s: ReportData): string {
 </div>
 
 ${comparison}
+
+${renderStrata(s)}
 
 <h2>Benchmark detail</h2>
 <div class="selectors">

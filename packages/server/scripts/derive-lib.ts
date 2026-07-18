@@ -9,28 +9,37 @@ import { fileURLToPath } from "node:url";
 import type { HourlyData } from "../src/forecast.ts";
 import { dbLocations, listCells, loadCell, openDb } from "./corpus-db.ts";
 
-// The derivation corpus: the report source's cells in the corpus DB (see corpus-db.ts).
-export const DERIVE_SOURCE = "gfs_seamless";
+// The derivation corpus: the production source's cells in the corpus DB (see corpus-db.ts).
+// Only `split: "train"` locations are visited — eval sites (including all favorites) are
+// reserved for the benchmark report and never influence a codebook.
+export const DERIVE_SOURCE = "best_match";
 
 // Tables a derive script contributes, keyed by their codebooks.gen.ts constant name.
 export type DerivedTables = Record<string, number[] | number[][] | number[][][]>;
 
-// Visits every forecast in the corpus DB (WAL mode — safe alongside a concurrent collect).
-// `loc` is the corpus location id — the unit held-out splits divide on. `pos` is the location's
-// lat/lon from the registry mirror, for scripts that need geography (UTC offset, solar position).
+// Visits every train-split forecast in the corpus DB (WAL mode — safe alongside a concurrent
+// collect). `loc` is the corpus location id — the unit held-out folds divide on. `pos` is the
+// location's lat/lon from the registry mirror, for scripts that need geography (UTC offset,
+// solar position).
 export async function eachForecast(
   cb: (hourly: HourlyData, startHour: number, loc: string, pos?: { lat: number; lon: number }) => void,
 ): Promise<void> {
   const db = openDb();
   const locs = dbLocations(db);
+  let cells = 0;
+  const seen = new Set<string>();
   for (const { locationId, windowStart } of listCells(db, DERIVE_SOURCE)) {
+    const loc = locs.get(locationId);
+    if (loc?.split !== "train") continue; // eval/favorites/unregistered: never trained on
     const hourly = loadCell(db, DERIVE_SOURCE, locationId, windowStart);
     if (!hourly) continue;
-    const pos = locs.get(locationId);
+    cells++;
+    seen.add(locationId);
     cb(hourly, Math.floor(Date.parse(windowStart + "Z") / 3600000), locationId,
-      pos ? { lat: pos.lat, lon: pos.lon } : undefined);
+      { lat: loc.lat, lon: loc.lon });
   }
   db.close();
+  console.log(`  scanned ${cells} cells over ${seen.size} train locations (${DERIVE_SOURCE})`);
 }
 
 // Deterministic 5-fold assignment by location id, for held-out (split-by-location) checks.
