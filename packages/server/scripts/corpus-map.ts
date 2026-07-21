@@ -76,7 +76,9 @@ function tooltip(l: Location): string {
   const parts: string[] = [];
   if (l.stratum === "favorites") parts.push(l.name);
   const cls =
-    l.stratum === "ocean" ? "Ocean" : `${l.koppen} ${KOPPEN_NAMES[l.koppen ?? ""] ?? ""}`.trim();
+    l.stratum === "ocean" ? "Ocean"
+    : l.stratum === "peaks" ? `Peak probe (${l.elev_m} m)`
+    : `${l.koppen} ${KOPPEN_NAMES[l.koppen ?? ""] ?? ""}`.trim();
   parts.push(l.stratum === "favorites" ? "Favorites" : cls);
   parts.push(
     `${Math.abs(l.lat).toFixed(2)}°${l.lat >= 0 ? "N" : "S"}, ` +

@@ -360,7 +360,7 @@ function planCollection(db: ReturnType<typeof openDb>, args: Args, locations: Lo
   const windows = sampleWindows();
   const windowIsos = (args.pilot ? pilotWindows(windows) : windows).map(runIso);
   const plan: PlannedCall[] = [];
-  const sampledStrata = new Set<Location["stratum"]>(["koppen", "ocean"]);
+  const sampledStrata = new Set<Location["stratum"]>(["koppen", "ocean", "peaks"]);
   for (const source of SOURCES) {
     const wanted = args.pilot ? source.candidate : source.wire;
     const locs = locations
@@ -534,16 +534,21 @@ const bandLabel = (south: number): string => {
   const edge = (d: number) => `${Math.abs(d)}°${d < 0 ? "S" : d > 0 ? "N" : ""}`;
   return `ocean ${edge(south)}–${edge(south + 30)}`;
 };
-function groupOf(loc: { stratum: string; koppen: string | null; lat: number }): string {
+// Peak-probe rows: summit elevation bands wide enough to stay populated on 30-site strata.
+const peakBand = (elevM: number): string =>
+  elevM >= 5500 ? "peaks ≥5.5 km" : elevM >= 3500 ? "peaks 3.5–5.5 km" : "peaks <3.5 km";
+function groupOf(loc: { stratum: string; koppen: string | null; lat: number; elev_m: number | null }): string {
   if (loc.stratum === "favorites") return "favorites";
+  if (loc.stratum === "peaks") return peakBand(loc.elev_m ?? 0);
   if (loc.stratum === "ocean") return bandLabel(Math.min(2, Math.floor(loc.lat / 30)) * 30);
   return `Köppen ${loc.koppen?.[0] ?? "?"}`;
 }
-// Row order for the breakdown: land groups tropics → polar, ocean bands north → south, favorites
-// last. Unknown groups (shouldn't happen) sort just before favorites.
+// Row order for the breakdown: land groups tropics → polar, ocean bands north → south, peak
+// bands low → high, favorites last. Unknown groups (shouldn't happen) sort just before favorites.
 const GROUP_ORDER = [
   ..."ABCDE".split("").map((g) => `Köppen ${g}`),
   ...[60, 30, 0, -30, -60, -90].map(bandLabel),
+  ...[0, 3500, 5500].map(peakBand),
 ];
 const groupOrder = (g: string): number => {
   const i = GROUP_ORDER.indexOf(g);

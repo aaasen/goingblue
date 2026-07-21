@@ -13,8 +13,9 @@ import { windowIso } from "./lattice.ts";
 // Which slice of the corpus a location belongs to. `favorites` = the original Windy-favorites
 // import (ski-skewed — the reason the corpus was expanded), validation-only (split: eval) —
 // codebooks train exclusively on the sampled strata: `koppen` (land, stratified by Köppen–Geiger
-// subtype) and `ocean` (30° latitude bands).
-export type Stratum = "favorites" | "koppen" | "ocean";
+// subtype) and `ocean` (30° latitude bands). `peaks` = the summit-pinned prominent-peak probe
+// (sample-peaks.ts), eval-only like favorites.
+export type Stratum = "favorites" | "koppen" | "ocean" | "peaks";
 
 export interface Location {
   id: string;
@@ -202,7 +203,34 @@ const SAMPLED: Location[] = existsSync(SAMPLED_PATH)
     }))
   : [];
 
+// The committed output of sample-peaks.ts: prominent peaks (Kirmse P600+) stratified by summit
+// elevation band, pinned to summit elevation via elev_m. Eval-only — a probe of the
+// high-altitude regime, never trained on.
+interface PeakSite {
+  id: string;
+  lat: number;
+  lon: number;
+  elev_m: number;
+  prom_m: number;
+  wi: number[]; // lattice window indices (see lattice.ts windowIso)
+}
+
+const PEAKS_PATH = join(dirname(fileURLToPath(import.meta.url)), "peak-locations.json");
+const PEAKS: Location[] = existsSync(PEAKS_PATH)
+  ? (JSON.parse(readFileSync(PEAKS_PATH, "utf8")).sites as PeakSite[]).map((s) => ({
+      id: s.id,
+      name: `Peak ${s.elev_m}m ${fmtCoord(s.lat, s.lon)}`,
+      lat: s.lat,
+      lon: s.lon,
+      elev_m: s.elev_m,
+      stratum: "peaks",
+      split: "eval",
+      windows: s.wi.map(windowIso),
+    }))
+  : [];
+
 export const LOCATIONS: Location[] = [
   ...FAVORITES.map((l): Location => ({ ...l, stratum: "favorites", split: "eval" })),
   ...SAMPLED,
+  ...PEAKS,
 ];
