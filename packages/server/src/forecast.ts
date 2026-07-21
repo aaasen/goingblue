@@ -1,6 +1,7 @@
 import {
   MODEL_BIT,
-  DEFAULT_VARS_MASK,
+  ALWAYS_VARS_MASK,
+  CONFIGURABLE_VAR_GROUPS,
   VARS_BIT,
   CURRENT_VERSION,
   isValidToken,
@@ -512,7 +513,8 @@ export function parseRequest(body: string): ForecastParams {
   let durationDays = DEFAULT_DURATION_DAYS; // forecast duration, override with `d:` (days)
   let utcOffsetHours = 0; // local-midnight offset, override with `z:` (whole hours east of UTC)
   let modelsMask = 1; // Best Match default (bit 0)
-  let varsMask = 0;
+  // Core variables are implicit; `v:` carries only user-configurable additions.
+  let varsMask = ALWAYS_VARS_MASK;
   let maxChars = DEFAULT_MAX_CHARS; // override with a `c:` token in the request
   let decoderVersion = CURRENT_VERSION; // override with a `vN` token in the request
   let userToken: string | null = null; // set from a `u:` token in the request
@@ -559,8 +561,16 @@ export function parseRequest(body: string): ForecastParams {
         }
         if (mask) modelsMask = mask;
       } else if (key === "v") {
-        for (const v of val.split(",")) {
-          if (v in VARS_BIT) varsMask |= 1 << VARS_BIT[v];
+        // Compact group codes need no delimiter (`v:cwf`). Keep accepting comma-separated and
+        // long-form protocol variable names for requests produced by older clients.
+        const requestedVars = /^[cwf]+$/.test(val) ? [...val] : val.split(",");
+        for (const v of requestedVars) {
+          const group = CONFIGURABLE_VAR_GROUPS[
+            v as keyof typeof CONFIGURABLE_VAR_GROUPS
+          ];
+          for (const variable of group ?? [v]) {
+            if (variable in VARS_BIT) varsMask |= 1 << VARS_BIT[variable];
+          }
         }
       } else if (key === "u") {
         // The body was lowercased above; normalizeToken restores canonical casing. Keep a
@@ -577,8 +587,6 @@ export function parseRequest(body: string): ForecastParams {
       decoderVersion = parseInt(word.slice(1));
     }
   }
-
-  if (varsMask === 0) varsMask = DEFAULT_VARS_MASK;
 
   // Default the request time to "now", aligned down to the hour. The client normally supplies
   // `t:` so the forecast window is fixed against delivery delay, but a missing one is safe.

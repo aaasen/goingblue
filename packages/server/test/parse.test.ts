@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
-import { MODEL_BIT, VARS_BIT, DEFAULT_VARS_MASK, generateToken } from "@weather/protocol";
+import { MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken } from "@weather/protocol";
 import { parseRequest } from "../src/forecast.js";
 
 const newToken = () => generateToken((n) => Uint8Array.from(randomBytes(n)));
@@ -11,10 +11,10 @@ const CA   = 1 << MODEL_BIT["CA"];
 const EU   = 1 << MODEL_BIT["EU"];
 
 describe("parseRequest", () => {
-  it("defaults: 7-day duration, UTC grid, Best Match, default vars, location 0", () => {
+  it("defaults: 7-day duration, UTC grid, Best Match, always-on vars, location 0", () => {
     const p = parseRequest("");
     expect(p).toMatchObject({ durationDays: 7, utcOffsetHours: 0, modelsMask: BEST, locationIdx: 0 });
-    expect(p.varsMask).toBe(DEFAULT_VARS_MASK);
+    expect(p.varsMask).toBe(ALWAYS_VARS_MASK);
   });
 
   it("l: named location", () => {
@@ -92,29 +92,59 @@ describe("parseRequest", () => {
     expect(parseRequest("m:bogus").modelsMask).toBe(BEST);
   });
 
-  it("v: single variable", () => {
-    expect(parseRequest("v:precip").varsMask).toBe(1 << VARS_BIT["precip"]);
-    expect(parseRequest("v:wind").varsMask).toBe(1 << VARS_BIT["wind"]);
+  it("v: expands each single-character configurable variable group", () => {
+    expect(parseRequest("v:c").varsMask).toBe(
+      ALWAYS_VARS_MASK |
+      (1 << VARS_BIT["cch"]) |
+      (1 << VARS_BIT["ccm"]) |
+      (1 << VARS_BIT["ccl"]),
+    );
+    expect(parseRequest("v:w").varsMask).toBe(
+      ALWAYS_VARS_MASK |
+      (1 << VARS_BIT["w500"]) |
+      (1 << VARS_BIT["w600"]) |
+      (1 << VARS_BIT["w700"]),
+    );
+    expect(parseRequest("v:f").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["freeze"]));
   });
 
-  it("v: multiple comma-separated variables", () => {
-    const p = parseRequest("v:precip,temp");
-    expect(p.varsMask).toBe((1 << VARS_BIT["precip"]) | (1 << VARS_BIT["temp"]));
+  it("v: combines configurable variable group codes without delimiters", () => {
+    const p = parseRequest("v:cwf");
+    expect(p.varsMask).toBe(
+      ALWAYS_VARS_MASK |
+      (1 << VARS_BIT["cch"]) |
+      (1 << VARS_BIT["ccm"]) |
+      (1 << VARS_BIT["ccl"]) |
+      (1 << VARS_BIT["w500"]) |
+      (1 << VARS_BIT["w600"]) |
+      (1 << VARS_BIT["w700"]) |
+      (1 << VARS_BIT["freeze"]),
+    );
   });
 
-  it("v: falls back to DEFAULT_VARS_MASK when no vars specified", () => {
-    expect(parseRequest("l:14k m:eu").varsMask).toBe(DEFAULT_VARS_MASK);
+  it("v: continues to accept long-form protocol variable names", () => {
+    expect(parseRequest("v:cch,freeze").varsMask).toBe(
+      ALWAYS_VARS_MASK | (1 << VARS_BIT["cch"]) | (1 << VARS_BIT["freeze"]),
+    );
+  });
+
+  it("v: continues to accept comma-separated group codes", () => {
+    expect(parseRequest("v:c,w,f").varsMask).toBe(parseRequest("v:cwf").varsMask);
+  });
+
+  it("includes only the always-on variables when no configurable vars are specified", () => {
+    expect(parseRequest("l:14k m:eu").varsMask).toBe(ALWAYS_VARS_MASK);
   });
 
   it("full message parses all fields", () => {
-    const p = parseRequest("l:14k d:5 z:-9 m:eu v:precip,temp");
+    const p = parseRequest("l:14k d:5 z:-9 m:eu v:f");
     expect(p).toMatchObject({
       locationIdx: 2,
       durationDays: 5,
       utcOffsetHours: -9,
       modelsMask: EU,
     });
-    expect(p.varsMask).toBe((1 << VARS_BIT["precip"]) | (1 << VARS_BIT["temp"]));
+    expect(p.varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["freeze"]));
   });
 
   it("vN token overrides the decoder version, defaulting to the current version", () => {
@@ -142,8 +172,8 @@ describe("parseRequest", () => {
   });
 
   it("ignores removed var tokens (tmin is no longer a variable)", () => {
-    const p = parseRequest("d:3 v:temp,tmin");
-    expect(p.varsMask).toBe(1 << VARS_BIT["temp"]);
+    const p = parseRequest("d:3 v:tmin");
+    expect(p.varsMask).toBe(ALWAYS_VARS_MASK);
   });
 
   it("u: extracts a valid account token", () => {

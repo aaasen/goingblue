@@ -8,7 +8,7 @@ import * as Location from 'expo-location';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
   VARS_BIT, V1_VERSION,
-  DEFAULT_VARS_MASK, MODEL_BIT, type RequestContext,
+  ALWAYS_VARS_MASK, CONFIGURABLE_VAR_GROUPS, MODEL_BIT, type RequestContext,
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import { allocCode } from './cache';
@@ -58,15 +58,12 @@ const DURATIONS = [
   { value: 10, label: '10d' },
 ];
 
-// Variables included in every request; not user-selectable.
-const ALWAYS_VARS = ['precip', 'temp', 'snow', 'rain', 'wind'];
-
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
 // protocol variables together (e.g. "Clouds" covers high/mid/low cloud cover, not total).
 const VAR_GROUPS = [
-  { value: 'clouds', label: 'Clouds', vars: ['cch', 'ccm', 'ccl'] },
-  { value: 'highwind', label: 'High Altitude Winds', vars: ['w500', 'w600', 'w700'] },
-  { value: 'freeze', label: 'Freezing Level', vars: ['freeze'] },
+  { value: 'clouds', code: 'c', label: 'Clouds', vars: CONFIGURABLE_VAR_GROUPS.c },
+  { value: 'highwind', code: 'w', label: 'High Altitude Winds', vars: CONFIGURABLE_VAR_GROUPS.w },
+  { value: 'freeze', code: 'f', label: 'Freezing Level', vars: CONFIGURABLE_VAR_GROUPS.f },
 ];
 
 // Clouds on by default; high altitude winds and freezing level off.
@@ -78,13 +75,13 @@ const DEFAULT_GROUPS = new Set(['clouds']);
 // included, even at the default length. `u:` carries the account token so the server can
 // attribute the request to the user. `k:` is the message code the slim response echoes so the
 // client can recover the request context (see cache.ts).
-function buildMsg(token: string, coords: { lat: number; lon: number } | null, days: number, model: string, vars: string[], maxChars: number, code: number, startEpochHour: number): string {
+function buildMsg(token: string, coords: { lat: number; lon: number } | null, days: number, model: string, variableCodes: string[], maxChars: number, code: number, startEpochHour: number): string {
   const parts: string[] = [`v${V1_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   parts.push(`d:${days}`);
   parts.push(`z:${utcOffsetHours()}`);
   parts.push(`m:${model}`);
-  if (vars.length) parts.push(`v:${vars.join(',')}`);
+  if (variableCodes.length) parts.push(`v:${variableCodes.join('')}`);
   parts.push(`c:${maxChars}`);
   parts.push(`u:${token}`);
   parts.push(`k:${code}`);
@@ -99,7 +96,7 @@ function buildContext(coords: { lat: number; lon: number }, days: number, model:
     durationDays: days,
     utcOffsetHours: utcOffsetHours(),
     model: MODEL_BIT[model.toUpperCase()] ?? 0, // single model index
-    vars_mask: varsMask === 0 ? DEFAULT_VARS_MASK : varsMask, // mirror the server's empty-vars default
+    vars_mask: varsMask,
     lat: coords.lat,
     lon: coords.lon,
     start: startEpochHour * 3600000, // UTC epoch ms
@@ -141,14 +138,18 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const maxChars = DEFAULT_MESSAGES * CHARS_PER_MESSAGE;
 
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
-  // Expand the always-on variables plus any enabled groups, then drop ones the model
-  // can't supply.
-  const selectedVars = new Set(ALWAYS_VARS);
-  for (const g of VAR_GROUPS) {
-    if (groups.has(g.value)) for (const v of g.vars) selectedVars.add(v);
-  }
-  const activeVars = [...selectedVars].filter((v) => !unavail.includes(v));
-  const varsMask = activeVars.reduce((mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)), 0);
+  // Expand the always-on variables plus any enabled groups for the stored request context. Only
+  // configurable variables go in the message because the server adds the always-on set.
+  const activeGroups = VAR_GROUPS
+    .filter((g) => groups.has(g.value))
+    .map((g) => ({ ...g, vars: g.vars.filter((v) => !unavail.includes(v)) }))
+    .filter((g) => g.vars.length > 0);
+  const configurableVars = activeGroups.flatMap((g) => g.vars);
+  const variableCodes = activeGroups.map((g) => g.code);
+  const varsMask = configurableVars.reduce(
+    (mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)),
+    ALWAYS_VARS_MASK,
+  );
   const durationLabel = `${durationDays}d`;
 
   const parsedCustomCoords = parseLatLon(customCoords);
@@ -163,7 +164,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const showMessage = coordsValid || locationMode === 'current';
   // Preview only — the real message code is allocated on copy/fetch (buildContext + allocCode).
   const message = showMessage
-    ? buildMsg(token, coordsValid ? resolvedCoords : null, durationDays, model, activeVars, maxChars, 0, alignedStartEpochHour())
+    ? buildMsg(token, coordsValid ? resolvedCoords : null, durationDays, model, variableCodes, maxChars, 0, alignedStartEpochHour())
     : '';
   // In current-location mode the buttons stay tappable so they can request GPS on demand.
   const copyDisabled = locating || (locationMode === 'custom' && !coordsValid);
@@ -203,7 +204,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return;
     const startHour = alignedStartEpochHour();
     const code = await allocCode(token, buildContext(coords, durationDays, model, varsMask, startHour), `${durationLabel} · ${model.toUpperCase()}`);
-    const msg = buildMsg(token, coords, durationDays, model, activeVars, maxChars, code, startHour);
+    const msg = buildMsg(token, coords, durationDays, model, variableCodes, maxChars, code, startHour);
     await Clipboard.setStringAsync(msg);
   }
 
@@ -232,7 +233,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: buildMsg(token, coords, durationDays, model, activeVars, maxChars, code, startHour),
+        body: buildMsg(token, coords, durationDays, model, variableCodes, maxChars, code, startHour),
       });
       if (!resp.ok) throw new Error(await resp.text());
       onForecastReceived(await resp.text());

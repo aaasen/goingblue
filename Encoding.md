@@ -266,6 +266,20 @@ Doubling the class count kept helping all the way to the free-selector limit, at
 │ 8            │ −2.50%         │ −0.86%           │
 └──────────────┴────────────────┴──────────────────┘
 
+┌──────────────────┬────────────────────────────┬────────────────────────────┐
+│     Stratum      │   b/period before → now    │     fill before → now      │
+├──────────────────┼────────────────────────────┼────────────────────────────┤
+│ Köppen A (worst) │ 9.73 → 9.04                │ 84.6 → 85.9%               │
+├──────────────────┼────────────────────────────┼────────────────────────────┤
+│ Köppen E (best)  │ 5.43 → 5.09                │ 96.1 → 96.6%               │
+├──────────────────┼────────────────────────────┼────────────────────────────┤
+│ tropical oceans  │ 8.58 / 7.96 → 7.84 / 7.17  │ 87.8 / 89.2 → 89.5 / 91.4% │
+├──────────────────┼────────────────────────────┼────────────────────────────┤
+│ favorites        │ 8.09 → 7.73                │ 88.6 → 89.5%               │
+├──────────────────┼────────────────────────────┼────────────────────────────┤
+│ Denali           │ seq mean 29.9 → 30.4 of 32 │                            │
+└──────────────────┴────────────────────────────┴────────────────────────────┘
+
 The classes the EM found are recognizably climatic. K=2 split off a marine regime (biggest wins in the Southern Ocean); K=4 added a tropical-ocean class; at K=8 every stratum improves — tropical oceans by 5.5–6.5%, tropical land 3.7%, my favorites 2.1% — and the global class 0 wins only ~7.5% of real messages. Temperature benefits most from class conditioning (−6.2% at K=8), which makes sense: the diurnal delta distributions differ enormously between, say, a marine layer and a continental interior. The smoothing strength barely matters (α of 50, 200, and 800 land within 0.01% of each other) because each class still trains on ~13k forecasts. I stopped at 8 classes: the gains hadn't hit an elbow, but 8 is where the free header bits run out.
 
 ## Model Choice
