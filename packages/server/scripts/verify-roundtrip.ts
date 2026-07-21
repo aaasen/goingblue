@@ -57,7 +57,7 @@ await eachForecast((hourly: HourlyData, _runHour: number) => {
       for (let seq = 1; seq <= maxFillSeq(durationDays); seq++) {
         messages++;
         try {
-          const encoded = encodeFillSeq(hourly, times, params, seq, 0, 0, 0, "GFS", codec);
+          const encoded = encodeFillSeq(hourly, times, params, seq, 0, 0, 0, "US", codec);
           if (encoded === null) throw new Error("data gap: layout not covered by corpus hours");
           const decoded = v1MessageFromString(encoded, () => ctx); // assertDone throws on desync
           const layout = layoutFor(durationDays, startEpochHour, UTC_OFFSET, seq);

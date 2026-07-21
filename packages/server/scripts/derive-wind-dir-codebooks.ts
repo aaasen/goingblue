@@ -86,7 +86,7 @@ export function counter(): CellCounter {
         const n = Math.floor(h.time.length / hpp);
         if (n < 2) continue;
         const rows = aggregateHourly(h, h.time, n, resIdx, start);
-        const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "GFS", resIdx));
+        const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US", resIdx));
         const sp = SPEED_FIELDS.map((f) => periods.map((p) => qSpeed((p as any)[f])));
         const dr = DIR_FIELDS.map((f) => periods.map((p) => (((p as any)[f] as number) ?? 0) % 8));
         // Displayed dir under calm gating: last encoded dir, 0 before any (mirrors v1.ts).

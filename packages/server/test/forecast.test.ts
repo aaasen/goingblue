@@ -12,7 +12,8 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = join(__dirname, "fixtures/openmeteo_hres_14k.json");
 
-// 14k location, HRES model (ecmwf_ifs, no pressure-level vars)
+// 14k location, European center's surface source (ecmwf_ifs / HRES 9 km — no freeze, no
+// pressure-level vars; the split-source EU path merges pressure levels from ecmwf_ifs025)
 const LAT = 63.063;
 const LON = -151.081;
 const TZ = "America/Anchorage";
@@ -32,8 +33,8 @@ let fixture: Fixture;
 
 beforeAll(async () => {
   if (!existsSync(FIXTURE_PATH)) {
-    // Fetch once from Open-Meteo and cache. Vars must match what fetchHourly
-    // builds for HRES (MODEL_NO_PRESSURE excludes freezing_level_height).
+    // Fetch once from Open-Meteo and cache. Vars must match what fetchHourly builds for the
+    // European surface source (ecmwf_ifs has no freezing_level_height or pressure-level vars).
     const vars = [
       "temperature_2m", "wind_speed_10m", "wind_direction_10m",
       "precipitation_probability", "weather_code", "snowfall",
@@ -94,9 +95,9 @@ function row(snow_cm: number): Row {
 
 describe("toFullPeriod — snow", () => {
   it("passes snow_cm through unchanged", () => {
-    expect(toFullPeriod(row(0.28), DEFAULT_VARS_MASK, "HRES").snow_cm).toBe(0.28);
-    expect(toFullPeriod(row(5.08), DEFAULT_VARS_MASK, "HRES").snow_cm).toBe(5.08);
-    expect(toFullPeriod(row(100), DEFAULT_VARS_MASK, "HRES").snow_cm).toBe(100);
+    expect(toFullPeriod(row(0.28), DEFAULT_VARS_MASK, "EU").snow_cm).toBe(0.28);
+    expect(toFullPeriod(row(5.08), DEFAULT_VARS_MASK, "EU").snow_cm).toBe(5.08);
+    expect(toFullPeriod(row(100), DEFAULT_VARS_MASK, "EU").snow_cm).toBe(100);
   });
 });
 
@@ -104,12 +105,12 @@ describe("toFullPeriod — temp", () => {
   const maskWithTemp = DEFAULT_VARS_MASK | (1 << VARS_BIT.temp);
 
   it("passes the representative temp through when the temp bit is set", () => {
-    const p = toFullPeriod(row(0), maskWithTemp, "HRES");
+    const p = toFullPeriod(row(0), maskWithTemp, "EU");
     expect(p.temp_c).toBe(-10);
   });
 
   it("omits temp when the bit is unset", () => {
-    expect(toFullPeriod(row(0), DEFAULT_VARS_MASK, "HRES").temp_c).toBeUndefined();
+    expect(toFullPeriod(row(0), DEFAULT_VARS_MASK, "EU").temp_c).toBeUndefined();
   });
 });
 
@@ -125,7 +126,7 @@ describe("aggregateRows — 1h resolution", () => {
   let rows: Awaited<ReturnType<typeof aggregateRows>>[0];
 
   beforeAll(async () => {
-    [rows] = await aggregateRows("HRES", N_DAYS * 24, 4, LAT, LON, START_HOUR, ELEV_M);
+    [rows] = await aggregateRows("EU", N_DAYS * 24, 4, LAT, LON, START_HOUR, ELEV_M);
   });
 
   it("produces one row per hour", () => {
@@ -141,7 +142,7 @@ describe("aggregateRows — 1h resolution", () => {
   it("toFullPeriod passes snow_cm through from row", () => {
     const idx = fixture.hourly.snowfall.findIndex((v) => v === 0.28);
     expect(idx).toBeGreaterThanOrEqual(0);
-    const p = toFullPeriod(rows[idx], DEFAULT_VARS_MASK, "HRES");
+    const p = toFullPeriod(rows[idx], DEFAULT_VARS_MASK, "EU");
     expect(p.snow_cm).toBe(0.28);
   });
 });
@@ -149,14 +150,14 @@ describe("aggregateRows — 1h resolution", () => {
 describe("aggregateRows — start anchoring", () => {
   it("starts at the requested hour and returns the full period count", async () => {
     // Anchor at hour 10; hours 00–09 are skipped. 24 hourly periods → fetches 2 days (fixture).
-    const [rows] = await aggregateRows("HRES", 24, 4, LAT, LON, hourFor("2026-05-21T10:00:00Z"), ELEV_M);
+    const [rows] = await aggregateRows("EU", 24, 4, LAT, LON, hourFor("2026-05-21T10:00:00Z"), ELEV_M);
     expect(rows).toHaveLength(24); // the full requested period count
     expect(rows[0].time).toBe("2026-05-21T10:00");
   });
 
   it("anchors a daily forecast to the day containing the (aligned) start", async () => {
     // The client aligns a daily start down to UTC midnight, so day 0 is included.
-    const [rows] = await aggregateRows("HRES", N_DAYS, 0, LAT, LON, START_HOUR, ELEV_M);
+    const [rows] = await aggregateRows("EU", N_DAYS, 0, LAT, LON, START_HOUR, ELEV_M);
     expect(rows).toHaveLength(N_DAYS);
     expect(rows[0].time).toBe("2026-05-21T00:00");
   });
@@ -166,7 +167,7 @@ describe("aggregateRows — daily resolution", () => {
   let rows: Awaited<ReturnType<typeof aggregateRows>>[0];
 
   beforeAll(async () => {
-    [rows] = await aggregateRows("HRES", N_DAYS, 0, LAT, LON, START_HOUR, ELEV_M);
+    [rows] = await aggregateRows("EU", N_DAYS, 0, LAT, LON, START_HOUR, ELEV_M);
   });
 
   it("produces one row per day", () => {
@@ -182,7 +183,7 @@ describe("aggregateRows — daily resolution", () => {
   });
 
   it("toFullPeriod passes daily snow_cm through from row", () => {
-    const p = toFullPeriod(rows[0], DEFAULT_VARS_MASK, "HRES");
+    const p = toFullPeriod(rows[0], DEFAULT_VARS_MASK, "EU");
     expect(p.snow_cm).toBe(rows[0].snow_cm);
   });
 });

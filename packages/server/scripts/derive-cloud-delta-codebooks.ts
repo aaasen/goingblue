@@ -50,7 +50,7 @@ export function counter(): CellCounter {
     countCell(h, startHour, _pos, add) {
       const n = Math.min(128, Math.floor(h.time.length / HOURS_PER_PERIOD[RES_IDX]));
       const periods = aggregateHourly(h, h.time, n, RES_IDX, startHour).map((r) =>
-        toFullPeriod(r, CLOUD_MASK, "GFS", RES_IDX));
+        toFullPeriod(r, CLOUD_MASK, "US", RES_IDX));
       for (const { field } of CLOUD_FIELDS) {
         const base = offsets[field];
         for (let i = 1; i < periods.length; i++) {

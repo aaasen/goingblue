@@ -20,34 +20,34 @@ interface ModelInfo {
 
 const MODELS: ModelInfo[] = [
   {
-    name: 'ECMWF HRES', color: '#2a6bb5', full: 'ECMWF IFS HRES',
+    name: 'Auto', color: '#2a6bb5', full: 'Highest-res model for your location',
+    res: 'up to 2 km', temporal: '1h → 3h → 6h', length: '16 d', updates: 'continuous',
+    vars: [
+      ['precip', true], ['temp', true], ['snow', true], ['freeze', true],
+      ['sfc wind', true], ['500w', true], ['600w', true], ['700w', true], ['cloud', true],
+    ],
+  },
+  {
+    name: 'American', color: '#2a8f5a', full: 'GFS + HRRR seamless (NOAA)',
+    res: '3 → 13 km', temporal: '1h → 3h', length: '16 d', updates: 'hourly',
+    vars: [
+      ['precip', true], ['temp', true], ['snow', true], ['freeze', true],
+      ['sfc wind', true], ['500w', true], ['600w', true], ['700w', true], ['cloud', true],
+    ],
+  },
+  {
+    name: 'Canadian', color: '#c0102a', full: 'GEM + HRDPS seamless (ECCC)',
+    res: '2.5 → 15 km', temporal: '1h → 3h', length: '10 d', updates: '4×/day',
+    vars: [
+      ['precip', true], ['temp', true], ['snow', true], ['freeze', false],
+      ['sfc wind', true], ['500w', true], ['600w', true], ['700w', true], ['cloud', true],
+    ],
+  },
+  {
+    name: 'European', color: '#7040b0', full: 'ECMWF HRES 9 km + IFS 0.25° upper winds',
     res: '9 km', temporal: '1h → 3h → 6h', length: '15 d', updates: '4×/day',
     vars: [
       ['precip', true], ['temp', true], ['snow', true], ['freeze', false],
-      ['sfc wind', true], ['500w', false], ['600w', false], ['700w', false], ['cloud', true],
-    ],
-  },
-  {
-    name: 'ECMWF', color: '#7040b0', full: 'ECMWF IFS 0.25°',
-    res: '25 km', temporal: '3h → 6h', length: '15 d', updates: '4×/day',
-    vars: [
-      ['precip', true], ['temp', true], ['snow', true], ['freeze', true],
-      ['sfc wind', true], ['500w', true], ['600w', true], ['700w', true], ['cloud', true],
-    ],
-  },
-  {
-    name: 'GFS', color: '#2a8f5a', full: 'GFS (NOAA)',
-    res: '25 km', temporal: '1h', length: '16 d', updates: '4×/day',
-    vars: [
-      ['precip', true], ['temp', true], ['snow', true], ['freeze', true],
-      ['sfc wind', true], ['500w', true], ['600w', true], ['700w', true], ['cloud', true],
-    ],
-  },
-  {
-    name: 'ICON', color: '#c06010', full: 'ICON (DWD)',
-    res: '11 km', temporal: '1h', length: '7.5 d', updates: '3×/day',
-    vars: [
-      ['precip', true], ['temp', true], ['snow', true], ['freeze', true],
       ['sfc wind', true], ['500w', true], ['600w', true], ['700w', true], ['cloud', true],
     ],
   },

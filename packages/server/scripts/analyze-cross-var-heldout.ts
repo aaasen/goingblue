@@ -98,7 +98,7 @@ async function collectChains(): Promise<Chain[]> {
         windows.push(w);
       }
       const periods: Period[] = rowsFromWindows(h, h.time, windows, off)
-        .map((r) => toFullPeriod(r, ALL_MASK, "GFS"));
+        .map((r) => toFullPeriod(r, ALL_MASK, "US"));
 
       const c: Chain = {
         fold, res, n,

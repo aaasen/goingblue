@@ -36,11 +36,13 @@ const FORECAST_EMAIL = 'inreach@going.blue';
 const DEFAULT_MESSAGES = 1;
 const FORECAST_URL = `${API_BASE}/forecast`;
 
+// Variables a forecast center can't supply. Only the freezing level varies now — GEM and ECMWF
+// have no freezing-level product (Europe's pressure winds are filled from IFS 0.25°).
 const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
-  hres: ['freeze', 'w500', 'w600', 'w700'],
-  gfs: [],
-  icon: [],
-  ifs: ['freeze'],
+  best: [],
+  us: [],
+  ca: ['freeze'],
+  eu: ['freeze'],
 };
 
 type LocationMode = 'current' | 'custom';
@@ -129,7 +131,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [customCoords, setCustomCoords] = useState('');
   const [durationDays, setDurationDays] = useState(5);
-  const [model, setModel] = useState('hres');
+  const [model, setModel] = useState('best');
   const [groups, setGroups] = useState<Set<string>>(new Set(DEFAULT_GROUPS));
   const [numCopied, setNumCopied] = useState(false);
   const [fetching, setFetching] = useState(false);

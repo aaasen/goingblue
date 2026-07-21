@@ -61,7 +61,7 @@ await eachForecast((hourly: HourlyData, runHour: number, loc: string) => {
     const n = Math.min(256, Math.floor(hourly.time.length / hpp));
     if (n < 2) continue;
     const rows = aggregateHourly(hourly, hourly.time, n, resIdx, start);
-    const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "GFS"));
+    const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US"));
     const sp = LEVELS.map((_, L) => periods.map((p) => qSpeed((p as any)[SPEED_FIELDS[L]])));
     const dr = LEVELS.map((_, L) => periods.map((p) => (((p as any)[DIR_FIELDS[L]] as number) ?? 0) % 8));
     // Displayed dir under calm gating: last encoded dir, 0 before any.

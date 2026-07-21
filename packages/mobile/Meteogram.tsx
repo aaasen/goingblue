@@ -47,10 +47,10 @@ const C = {
 } as const;
 
 const MODEL_COLORS: Record<string, string> = {
-  'ECMWF IFS HRES': '#2a6bb5',
-  GFS: '#2a8f5a',
-  ICON: '#c06010',
-  'ECMWF IFS 0.25': '#7040b0',
+  'Auto': '#2a6bb5',
+  'American (NOAA)': '#2a8f5a',
+  'Canadian (GEM)': '#c0102a',
+  'European (ECMWF)': '#7040b0',
 };
 
 // ── Weather code classification ──────────────────────────────────────────--

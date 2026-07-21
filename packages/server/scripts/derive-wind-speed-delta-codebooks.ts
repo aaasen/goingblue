@@ -73,7 +73,7 @@ export function counter(): CellCounter {
         const n = Math.floor(h.time.length / hpp);
         if (n < 2) continue;
         const rows = aggregateHourly(h, h.time, n, resIdx, start);
-        const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "GFS", resIdx));
+        const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US", resIdx));
         const sp = SPEED_FIELDS.map((f) => periods.map((p) => qSpeed((p as any)[f])));
         for (let L = 0; L < NLEVEL; L++) {
           const U = UPPER_OF[L];

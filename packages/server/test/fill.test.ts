@@ -61,7 +61,7 @@ function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
     lon: -150.989,
     durationDays: DURATION_DAYS,
     utcOffsetHours: UTC_OFFSET,
-    modelsMask: 0b010, // GFS: has pressure-level vars, so nothing is masked off
+    modelsMask: 0b010, // American (US): has freeze + pressure-level vars, so nothing is masked off
     varsMask: TEST_VARS,
     maxChars: 160,
     decoderVersion: 1,
@@ -76,12 +76,12 @@ const codec = CODECS[1];
 
 function encodeSeq(p: ForecastParams) {
   return (seq: number) =>
-    encodeFillSeq(HOURLY, TIMES, p, seq, p.lat!, p.lon!, 500, "GFS", codec);
+    encodeFillSeq(HOURLY, TIMES, p, seq, p.lat!, p.lon!, 500, "US", codec);
 }
 
 // The context a client would store for this request (see BuilderTab), used to decode replies.
 const ctx: RequestContext = {
-  model: 1, // GFS
+  model: 1, // American (US)
   vars_mask: TEST_VARS,
   lat: 63.135,
   lon: -150.989,
@@ -117,7 +117,7 @@ describe("encodeFillSeq", () => {
     // Data ending after 5 days can't serve the full 10-day layout.
     const short = syntheticHourly(DATA_START, 5 * 24);
     const p = params();
-    const encoded = encodeFillSeq(short.h, short.times, p, DURATION_DAYS, p.lat!, p.lon!, 500, "GFS", codec);
+    const encoded = encodeFillSeq(short.h, short.times, p, DURATION_DAYS, p.lat!, p.lon!, 500, "US", codec);
     expect(encoded).toBeNull();
   });
 

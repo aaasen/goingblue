@@ -5,14 +5,15 @@ import { parseRequest } from "../src/forecast.js";
 
 const newToken = () => generateToken((n) => Uint8Array.from(randomBytes(n)));
 
-const HRES = 1 << MODEL_BIT["HRES"];
-const GFS  = 1 << MODEL_BIT["GFS"];
-const IFS  = 1 << MODEL_BIT["IFS"];
+const BEST = 1 << MODEL_BIT["BEST"];
+const US   = 1 << MODEL_BIT["US"];
+const CA   = 1 << MODEL_BIT["CA"];
+const EU   = 1 << MODEL_BIT["EU"];
 
 describe("parseRequest", () => {
-  it("defaults: 7-day duration, UTC grid, HRES, default vars, location 0", () => {
+  it("defaults: 7-day duration, UTC grid, Best Match, default vars, location 0", () => {
     const p = parseRequest("");
-    expect(p).toMatchObject({ durationDays: 7, utcOffsetHours: 0, modelsMask: HRES, locationIdx: 0 });
+    expect(p).toMatchObject({ durationDays: 7, utcOffsetHours: 0, modelsMask: BEST, locationIdx: 0 });
     expect(p.varsMask).toBe(DEFAULT_VARS_MASK);
   });
 
@@ -69,21 +70,26 @@ describe("parseRequest", () => {
     expect(parseRequest("").startEpochHour).toBe(Math.floor(Date.now() / 3600000));
   });
 
-  it("m: single model", () => {
-    expect(parseRequest("m:ifs").modelsMask).toBe(IFS);
-    expect(parseRequest("m:gfs").modelsMask).toBe(GFS);
-    expect(parseRequest("m:hres").modelsMask).toBe(HRES);
-    expect(parseRequest("m:ecmwf").modelsMask).toBe(HRES);
-    expect(parseRequest("m:euro").modelsMask).toBe(IFS);
+  it("m: single center", () => {
+    expect(parseRequest("m:best").modelsMask).toBe(BEST);
+    expect(parseRequest("m:us").modelsMask).toBe(US);
+    expect(parseRequest("m:ca").modelsMask).toBe(CA);
+    expect(parseRequest("m:eu").modelsMask).toBe(EU);
   });
 
-  it("m: multiple comma-separated models", () => {
-    expect(parseRequest("m:hres,ifs").modelsMask).toBe(HRES | IFS);
-    expect(parseRequest("m:hres,gfs,ifs").modelsMask).toBe(HRES | GFS | IFS);
+  it("m: legacy model-name tokens are no longer recognized (mask unchanged)", () => {
+    expect(parseRequest("m:gfs").modelsMask).toBe(BEST);
+    expect(parseRequest("m:ecmwf").modelsMask).toBe(BEST);
+    expect(parseRequest("m:hres").modelsMask).toBe(BEST);
   });
 
-  it("m: unknown model name leaves mask unchanged", () => {
-    expect(parseRequest("m:bogus").modelsMask).toBe(HRES);
+  it("m: multiple comma-separated centers", () => {
+    expect(parseRequest("m:best,eu").modelsMask).toBe(BEST | EU);
+    expect(parseRequest("m:us,ca,eu").modelsMask).toBe(US | CA | EU);
+  });
+
+  it("m: unknown center name leaves mask unchanged", () => {
+    expect(parseRequest("m:bogus").modelsMask).toBe(BEST);
   });
 
   it("v: single variable", () => {
@@ -97,16 +103,16 @@ describe("parseRequest", () => {
   });
 
   it("v: falls back to DEFAULT_VARS_MASK when no vars specified", () => {
-    expect(parseRequest("l:14k m:ifs").varsMask).toBe(DEFAULT_VARS_MASK);
+    expect(parseRequest("l:14k m:eu").varsMask).toBe(DEFAULT_VARS_MASK);
   });
 
   it("full message parses all fields", () => {
-    const p = parseRequest("l:14k d:5 z:-9 m:ifs v:precip,temp");
+    const p = parseRequest("l:14k d:5 z:-9 m:eu v:precip,temp");
     expect(p).toMatchObject({
       locationIdx: 2,
       durationDays: 5,
       utcOffsetHours: -9,
-      modelsMask: IFS,
+      modelsMask: EU,
     });
     expect(p.varsMask).toBe((1 << VARS_BIT["precip"]) | (1 << VARS_BIT["temp"]));
   });

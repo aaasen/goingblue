@@ -13,15 +13,22 @@ import {
   type VersionedCodec,
 } from "@weather/protocol";
 
-const OPENMETEO_MODELS: Record<string, string> = {
-  HRES: "ecmwf_ifs",
-  GFS: "gfs_seamless",
-  ICON: "icon_seamless",
-  IFS: "ecmwf_ifs025",
+// Each forecast center resolves to a pair of Open-Meteo model ids: one for surface variables and
+// one for pressure-level variables (500/600/700 hPa wind + temp). They're the same id except for
+// Europe, where the 9 km HRES (ecmwf_ifs) supplies the surface fields but carries no pressure
+// levels, so those are filled from the 0.25° IFS (ecmwf_ifs025) in a second request. `freeze` is
+// whether the center provides freezing_level_height at all (GEM and both ECMWF models do not).
+interface CenterSources {
+  surface: string;
+  pressure: string;
+  freeze: boolean;
+}
+const CENTERS: Record<string, CenterSources> = {
+  BEST: { surface: "best_match",   pressure: "best_match",   freeze: true },
+  US:   { surface: "gfs_seamless", pressure: "gfs_seamless", freeze: true },
+  CA:   { surface: "gem_seamless", pressure: "gem_seamless", freeze: false },
+  EU:   { surface: "ecmwf_ifs",    pressure: "ecmwf_ifs025", freeze: false },
 };
-
-// ecmwf_ifs (HRES) does not provide freezing_level_height or pressure-level wind/temp
-const MODEL_NO_PRESSURE = new Set(["HRES"]);
 
 interface NamedLocation { lat: number; lon: number; tz: string; elev_m: number }
 
@@ -47,13 +54,12 @@ export const HOURS_PER_PERIOD: Record<number, number> = {
   4: 1,
 };
 
+// User-facing `m:` request-token → center bit. One canonical token per center.
 const MODEL_NAME_TO_BIT: Record<string, number> = {
-  hres: MODEL_BIT["HRES"],
-  ecmwf: MODEL_BIT["HRES"],
-  gfs: MODEL_BIT["GFS"],
-  icon: MODEL_BIT["ICON"],
-  ifs: MODEL_BIT["IFS"],
-  euro: MODEL_BIT["IFS"],
+  best: MODEL_BIT["BEST"],
+  us: MODEL_BIT["US"],
+  ca: MODEL_BIT["CA"],
+  eu: MODEL_BIT["EU"],
 };
 
 const SURFACE_VARS = [
@@ -154,6 +160,51 @@ export interface Row {
   cloud_cover_low: number | null;
 }
 
+async function fetchOpenMeteo(
+  source: string,
+  hourlyVars: string[],
+  nDays: number,
+  lat: number,
+  lon: number,
+  tz: string,
+  elev_m?: number,
+  pastDays = 0,
+): Promise<{ hourly: HourlyData; elevation: number }> {
+  const params = new URLSearchParams({
+    latitude: String(lat),
+    longitude: String(lon),
+    hourly: hourlyVars.join(","),
+    timezone: tz,
+    forecast_days: String(nDays),
+    models: source,
+  });
+  if (elev_m !== undefined) params.set("elevation", String(elev_m));
+  if (pastDays > 0) params.set("past_days", String(pastDays));
+  const url = `https://api.open-meteo.com/v1/forecast?${params}`;
+  console.log("Open-Meteo request:", url);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Open-Meteo ${resp.status}: ${await resp.text()}`);
+  const data = (await resp.json()) as { hourly: HourlyData; elevation: number };
+  return { hourly: data.hourly, elevation: data.elevation ?? 0 };
+}
+
+// Merge pressure-level columns from `pres` onto the surface response `surf`, aligning by the
+// shared hourly time grid. Both requests use identical lat/lon/forecast_days/timezone, so their
+// time arrays should match exactly; we index `pres` by timestamp and fill any unmatched hour
+// with null, in case the pressure source returns a shorter horizon than the surface source.
+function mergeHourly(surf: HourlyData, pres: HourlyData, pressureVars: string[]): HourlyData {
+  const presIdx = new Map<string, number>();
+  pres.time.forEach((t, i) => presIdx.set(t, i));
+  for (const v of pressureVars) {
+    const src = pres[v] as (number | null)[] | undefined;
+    surf[v] = surf.time.map((t) => {
+      const i = presIdx.get(t);
+      return i !== undefined && src ? src[i] ?? null : null;
+    });
+  }
+  return surf;
+}
+
 async function fetchHourly(
   modelKey: string,
   nDays: number,
@@ -163,30 +214,31 @@ async function fetchHourly(
   elev_m?: number,
   pastDays = 0,
 ): Promise<[HourlyData, string[], number]> {
-  const hasPressure = !MODEL_NO_PRESSURE.has(modelKey);
-  const pressureVars = hasPressure
-    ? PRESSURE_VAR_NAMES.flatMap((v) => PRESSURE_LEVELS.map((l) => `${v}_${l}hPa`))
-    : [];
-  const surfaceVars = hasPressure
+  const center = CENTERS[modelKey];
+  const pressureVars = PRESSURE_VAR_NAMES.flatMap((v) =>
+    PRESSURE_LEVELS.map((l) => `${v}_${l}hPa`),
+  );
+  // Drop freezing_level_height from the request for centers that don't provide it (GEM, ECMWF);
+  // toFullPeriod also clears the freeze vars_mask bit so it never reaches the wire.
+  const surfaceVars = center.freeze
     ? SURFACE_VARS
     : SURFACE_VARS.filter((v) => v !== "freezing_level_height");
-  const params = new URLSearchParams({
-    latitude: String(lat),
-    longitude: String(lon),
-    hourly: [...surfaceVars, ...pressureVars].join(","),
 
-    timezone: tz,
-    forecast_days: String(nDays),
-    models: OPENMETEO_MODELS[modelKey],
-  });
-  if (elev_m !== undefined) params.set("elevation", String(elev_m));
-  if (pastDays > 0) params.set("past_days", String(pastDays));
-  const url = `https://api.open-meteo.com/v1/forecast?${params}`;
-  console.log("Open-Meteo request:", url);
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`Open-Meteo ${resp.status}: ${await resp.text()}`);
-  const data = (await resp.json()) as { hourly: HourlyData; elevation: number };
-  return [data.hourly, data.hourly.time, data.elevation ?? 0];
+  if (center.surface === center.pressure) {
+    const { hourly, elevation } = await fetchOpenMeteo(
+      center.surface, [...surfaceVars, ...pressureVars], nDays, lat, lon, tz, elev_m, pastDays,
+    );
+    return [hourly, hourly.time, elevation];
+  }
+
+  // Split sources (Europe): surface fields from the 9 km HRES, pressure levels from IFS 0.25°.
+  // Elevation comes from the surface source (its finer grid is the better terrain match).
+  const [surf, pres] = await Promise.all([
+    fetchOpenMeteo(center.surface, surfaceVars, nDays, lat, lon, tz, elev_m, pastDays),
+    fetchOpenMeteo(center.pressure, pressureVars, nDays, lat, lon, tz, elev_m, pastDays),
+  ]);
+  const merged = mergeHourly(surf.hourly, pres.hourly, pressureVars);
+  return [merged, merged.time, surf.elevation];
 }
 
 
@@ -395,11 +447,9 @@ export function rowsFromWindows(
   return rows;
 }
 
-const PRESSURE_VAR_BITS =
-  (1 << VARS_BIT.freeze) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
-
 export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period {
-  if (MODEL_NO_PRESSURE.has(modelKey)) varsMask &= ~PRESSURE_VAR_BITS;
+  // Centers without a freezing-level product never carry that variable on the wire.
+  if (!CENTERS[modelKey].freeze) varsMask &= ~(1 << VARS_BIT.freeze);
   const p: Period = { weathercode: r.weathercode ?? 0 };
   if (varsMask & (1 << VARS_BIT.precip)) p.precip     = r.precip ?? 0;
   if (varsMask & (1 << VARS_BIT.temp))   p.temp_c     = r.temp_c ?? 0;
@@ -461,7 +511,7 @@ export function parseRequest(body: string): ForecastParams {
   let lon: number | undefined;
   let durationDays = DEFAULT_DURATION_DAYS; // forecast duration, override with `d:` (days)
   let utcOffsetHours = 0; // local-midnight offset, override with `z:` (whole hours east of UTC)
-  let modelsMask = 1; // ECMWF default
+  let modelsMask = 1; // Best Match default (bit 0)
   let varsMask = 0;
   let maxChars = DEFAULT_MAX_CHARS; // override with a `c:` token in the request
   let decoderVersion = CURRENT_VERSION; // override with a `vN` token in the request
@@ -552,11 +602,11 @@ function resolveLocation(params: ForecastParams): { lat: number; lon: number; el
 
 // A response carries exactly one model (the decoder assumes nModels=1), so take the first
 // requested model bit only.
-function firstModelKey(modelsMask: number): "HRES" | "GFS" | "ICON" | "IFS" {
-  const modelKeys = (["HRES", "GFS", "ICON", "IFS"] as const).filter(
+function firstModelKey(modelsMask: number): "BEST" | "US" | "CA" | "EU" {
+  const modelKeys = (["BEST", "US", "CA", "EU"] as const).filter(
     (_, bit) => modelsMask & (1 << bit),
   );
-  return modelKeys[0] ?? "HRES";
+  return modelKeys[0] ?? "BEST";
 }
 
 // ── Duration-first fill ─────────────────────────────────────────────────────────

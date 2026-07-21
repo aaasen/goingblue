@@ -18,8 +18,17 @@ export const ALPHABET =
 // Fill layouts use indices 1..4; index 0 is retained for resolution-keyed codebooks — see layout.ts.
 export const RESOLUTION_HOURS: Record<number, number> = { 0: 24, 1: 12, 2: 6, 3: 3, 4: 1 };
 
-export const MODEL_BIT: Record<string, number> = { HRES: 0, GFS: 1, ICON: 2, IFS: 3 };
-export const MODEL_NAMES: string[] = ["ECMWF IFS HRES", "GFS", "ICON", "ECMWF IFS 0.25"];
+// Model choice is expressed at the forecast-center level, not the individual model. Each center
+// maps to an Open-Meteo _seamless family (or, for Europe, HRES surface + IFS 0.25° pressure
+// levels) so the label stays valid when an upstream model is swapped out. Best Match is the
+// default (bit 0): Open-Meteo picks the highest-resolution model available for the location.
+export const MODEL_BIT: Record<string, number> = { BEST: 0, US: 1, CA: 2, EU: 3 };
+export const MODEL_NAMES: string[] = [
+  "Auto",
+  "American (NOAA)",
+  "Canadian (GEM)",
+  "European (ECMWF)",
+];
 
 // vars_mask bit indices
 export const VARS_BIT: Record<string, number> = {

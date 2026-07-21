@@ -27,7 +27,7 @@ const input: ForecastMessage = {
   version: 1,
   code: 0,
   days: layout.days,
-  models_mask: 0b0001, // HRES only
+  models_mask: 0b0001, // Best Match only (bit 0)
   vars_mask,
   month: firstStart.getUTCMonth() + 1,
   day: firstStart.getUTCDate(),

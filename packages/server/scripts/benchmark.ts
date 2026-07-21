@@ -715,7 +715,7 @@ async function report(args: Args): Promise<void> {
     for (const durationDays of DURATIONS) {
       // Build layouts with every column populated (varsMask = allMask), then override vars_mask per
       // combo: columns encode independently, so one aggregation per seq serves all eight combos.
-      // "GFS" (non-HRES) keeps the pressure/freeze columns in toFullPeriod.
+      // "US" (American center) keeps the pressure/freeze columns in toFullPeriod.
       const params: ForecastParams = {
         locationIdx: 0, lat, lon, durationDays, utcOffsetHours,
         modelsMask: 1, varsMask: allMask, maxChars: args.maxChars,

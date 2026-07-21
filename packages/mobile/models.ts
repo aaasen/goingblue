@@ -1,10 +1,11 @@
 import { MODEL_BIT } from '@weather/protocol';
 
+// `value` uppercases to a MODEL_BIT key (BEST/US/CA/EU); it's also the `m:` request token.
 export const MODELS = [
-  { value: 'hres', label: 'HRES' },
-  { value: 'ifs', label: 'ECMWF' },
-  { value: 'gfs', label: 'GFS' },
-  { value: 'icon', label: 'ICON' },
+  { value: 'best', label: 'Auto' },
+  { value: 'us', label: 'American' },
+  { value: 'ca', label: 'Canadian' },
+  { value: 'eu', label: 'European' },
 ];
 
 export function modelLabelsFromMask(mask: number): string[] {

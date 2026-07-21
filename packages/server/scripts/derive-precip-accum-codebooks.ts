@@ -109,7 +109,7 @@ export function counter(): CellCounter {
         const n = Math.floor(h.time.length / hpp);
         if (n < 2) continue;
         const rows = aggregateHourly(h, h.time, n, resIdx, start);
-        const periods: Period[] = rows.map((r) => toFullPeriod(r, VARS_MASK, "GFS"));
+        const periods: Period[] = rows.map((r) => toFullPeriod(r, VARS_MASK, "US"));
         // Class of the symbol the encoder would emit, not of the raw code — WMO2IDX maps an
         // unknown code to index 0, exactly as v1.ts's weathercode column does.
         const wc = periods.map((p) => WEATHERCODE_CLASS[WMO2IDX[p.weathercode] ?? 0]);
