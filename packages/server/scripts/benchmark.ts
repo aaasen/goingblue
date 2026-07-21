@@ -514,12 +514,12 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
 
 // ── Phase 2: report ────────────────────────────────────────────────────────────────
 
-// One corpus forecast the report encodes: a (location, window) cell of REPORT_SOURCE, reassembled
-// into the HourlyData shape the production path consumes, plus the geography the layout needs.
+// One corpus forecast the report encodes: a (location, window) cell of REPORT_SOURCE plus the
+// geography the layout needs. The hourly series itself is loaded per cell inside the report loop —
+// the full-corpus eval split doesn't fit in memory all at once.
 interface ReportCell {
   locId: string;
   windowStart: string;
-  hourly: HourlyData;
   lat: number;
   lon: number;
   elevation: number; // grid-snap elevation from location_meta (pinned for curated peaks)
@@ -560,10 +560,8 @@ function loadReportCells(
     const loc = locs.get(locationId);
     if (!loc) continue; // a location dropped from the registry — its rows are dead weight, skip
     if (!locationFilter && split !== "all" && loc.split !== split) continue;
-    const hourly = loadCell(db, REPORT_SOURCE.id, locationId, windowStart);
-    if (!hourly) continue;
     cells.push({
-      locId: locationId, windowStart, hourly,
+      locId: locationId, windowStart,
       lat: loc.lat, lon: loc.lon, elevation: elevs.get(locationId) ?? 0,
       group: groupOf(loc),
     });
@@ -583,6 +581,14 @@ interface Fit {
   seq: number;       // seq < slotsFor(D) means the budget forced truncation below the duration
   periods: number;   // periods in the fitted message
   breakdown: V1Breakdown;
+}
+
+// What the report keeps per fit after folding the column bits into the colBits arrays — the full
+// V1Breakdown per (cell × duration × combo) is what blew the heap on the full eval split.
+interface StoredFit {
+  seq: number;
+  periods: number;
+  bodyBits: number; // Σ column bits (excludes coder overhead), for the per-stratum bits/period
 }
 
 // The production fit, exactly: fitFillToBudget's binary search over the fill sequence, with each
@@ -619,7 +625,7 @@ const box = (xs: number[]): BoxStats => ({
 
 function buildView(
   durationDays: number,
-  fits: Fit[],
+  fits: StoredFit[],
   cb: Map<string, number[]>,
 ): ViewStats {
   const seqs = fits.map((f) => f.seq);
@@ -665,14 +671,14 @@ function buildView(
 
 async function report(args: Args): Promise<void> {
   // Single source (best_match supplies every variable group, so no cross-source fallback needed).
+  // The db stays open through the loop — cells are streamed one at a time (see ReportCell).
   const db = openDb();
   const cells = loadReportCells(db, args.split, args.location);
-  db.close();
   if (cells.length === 0) throw new Error("No forecasts found — run collection first (or import the old JSON tree: import-corpus-json.ts)");
 
   // A view = duration × variable-combo. Every (duration, combo) is precomputed.
   const vkey = (durationDays: number, combo: number) => `${durationDays}:${combo}`;
-  const fitsFor = new Map<string, Fit[]>();
+  const fitsFor = new Map<string, StoredFit[]>();
   const colBits = new Map<string, Map<string, number[]>>();
   for (const d of DURATIONS) for (const c of COMBOS) {
     const vk = vkey(d, c);
@@ -690,7 +696,8 @@ async function report(args: Args): Promise<void> {
   const groupLocs = new Map<string, Set<string>>();
 
   for (const cell of cells) {
-    const h = cell.hourly;
+    const h = loadCell(db, REPORT_SOURCE.id, cell.locId, cell.windowStart);
+    if (!h) { skipped++; continue; }
     // The DB's time axis is the fixed window grid (loadCell), so the old short-record case is
     // structurally gone; a cell missing a whole base variable still gets skipped below.
     if (!baseComplete(h)) { skipped++; continue; }
@@ -729,7 +736,10 @@ async function report(args: Args): Promise<void> {
       for (const c of COMBOS) {
         const fit = fitFill(msgAt, durationDays, comboMask(c), args.maxChars)!; // seq=1 is covered
         const vk = vkey(durationDays, c);
-        fitsFor.get(vk)!.push(fit);
+        fitsFor.get(vk)!.push({
+          seq: fit.seq, periods: fit.periods,
+          bodyBits: fit.breakdown.columns.reduce((s, col) => s + col.bits, 0),
+        });
         versionBits = fit.breakdown.versionBits; headerBits = fit.breakdown.headerBits;
         const cb = colBits.get(vk)!;
         for (const col of fit.breakdown.columns) {
@@ -743,6 +753,7 @@ async function report(args: Args): Promise<void> {
       }
     }
   }
+  db.close();
 
   // Build per-view stats. A duration the corpus can't cover for *any* forecast has no fits at all —
   // drop it rather than render a view full of NaNs (it means the window is too short; see
@@ -771,11 +782,10 @@ async function report(args: Args): Promise<void> {
         const groups = groupsFor.get(d)!;
         const mine = fits.filter((_, i) => groups[i] === group);
         if (mine.length === 0) return { d, n: 0, fillPct: NaN, bpp: NaN };
-        const bodyBits = (f: Fit) => f.breakdown.columns.reduce((s, c) => s + c.bits, 0);
         return {
           d, n: mine.length,
           fillPct: 100 * mean(mine.map((f) => f.seq)) / maxFillSeq(d),
-          bpp: mean(mine.map((f) => bodyBits(f) / f.periods)),
+          bpp: mean(mine.map((f) => f.bodyBits / f.periods)),
         };
       }),
     }));
