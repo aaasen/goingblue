@@ -42,8 +42,13 @@ const STEP_M = 304.8;              // 1000 ft, must match v1.ts
 const NRES = 5; // 24h/12h/6h/3h/1h — row 0 (24h) is dead in fill layouts but kept for shape
 const MASK = (1 << VARS_BIT.temp) | (1 << VARS_BIT.freeze);
 
-// Same float-dust epsilon as v1.ts quantFreeze — training must quantize exactly like the wire.
-const quantFreeze = (m: number): number => Math.min(Math.floor(m / STEP_M + 1e-9), STEP_MAX);
+// Same float-dust epsilon AND clamp as v1.ts quantFreeze (clampInt: [0, STEP_MAX]) — training
+// must quantize exactly like the wire. The lower clamp is load-bearing: the corpus holds
+// below-sea-level freezing levels (polar winter) and −100000 missing-data sentinels, and an
+// unclamped negative step lets a delta exceed ±STEP_MAX, indexing past the 63-symbol count
+// array (undefined++ → NaN) — which silently knocked whole context rows back to the marginal.
+const quantFreeze = (m: number): number =>
+  Math.min(Math.max(Math.floor(m / STEP_M + 1e-9), 0), STEP_MAX);
 const quantTemp = (c: number): number => Math.min(Math.max(Math.round(c + 100), 0), 255);
 const deltaSym = (delta: number): number => delta + STEP_MAX; // -31..31 -> 0..62
 
