@@ -21,6 +21,12 @@
  * The bootstrap table (a column's first encoded direction, no predecessor) is shared across
  * resolutions and levels — it fires once per column, so keying it isn't worth the tables.
  *
+ * The [res][prev] transition counts are kept in two ranges — sfc/500 vs 600/700 — because on the
+ * wire a 600/700 symbol is coded under the upper-conditioned table whenever its upper column is
+ * present (always, in corpus counting), so per-cell cost accounting must not charge it under
+ * [res][prev] too. The SHIPPED [res][prev] tables still pool all four levels (their sum), exactly
+ * as before.
+ *
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
@@ -28,7 +34,10 @@
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import { VARS_BIT, type Period } from "@weather/protocol";
-import { eachForecast, scaledWeights, runStandalone, type DerivedTables } from "./derive-lib.ts";
+import {
+  deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone,
+  type CellCounter, type DerivedTables,
+} from "./derive-lib.ts";
 
 const NDIR = 8;
 const NRES = 5; // resolution indices 0..4 (24h/12h/6h/3h/1h)
@@ -43,68 +52,113 @@ const SPEED_MAX = 31;              // must match v1.ts (WIND_SPEED_BITS = 5)
 const qSpeed = (kph: number | undefined) =>
   Math.min(Math.floor(((kph ?? 0) / KPH_PER_STEP) + 1e-9), SPEED_MAX);
 
-export async function derive(): Promise<DerivedTables> {
-  const firstCounts = new Array(NDIR).fill(0);
-  // trans[res][prev][next], all levels pooled; upper[res][prev*8+u][next], w600/w700 only.
-  const trans = Array.from({ length: NRES }, () =>
-    Array.from({ length: NDIR }, () => new Array(NDIR).fill(0)));
-  const upper = Array.from({ length: NRES }, () =>
-    Array.from({ length: NDIR * NDIR }, () => new Array(NDIR).fill(0)));
-  let symbols = 0;
-
-  await eachForecast((h, startHour) => {
-    for (let resIdx = 0; resIdx < NRES; resIdx++) {
-      const hpp = HOURS_PER_PERIOD[resIdx];
-      const start = Math.floor(startHour / hpp) * hpp;
-      const n = Math.floor(h.time.length / hpp);
-      if (n < 2) continue;
-      const rows = aggregateHourly(h, h.time, n, resIdx, start);
-      const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "GFS", resIdx));
-      const sp = SPEED_FIELDS.map((f) => periods.map((p) => qSpeed((p as any)[f])));
-      const dr = DIR_FIELDS.map((f) => periods.map((p) => (((p as any)[f] as number) ?? 0) % 8));
-      // Displayed dir under calm gating: last encoded dir, 0 before any (mirrors v1.ts).
-      const disp = SPEED_FIELDS.map((_, L) => {
-        let eff = 0;
-        return periods.map((_, p) => (sp[L][p] > 0 ? (eff = dr[L][p]) : eff));
-      });
-      for (let L = 0; L < SPEED_FIELDS.length; L++) {
-        const U = UPPER_OF[L];
-        let prev: number | null = null;
-        for (let p = 0; p < n; p++) {
-          if (sp[L][p] === 0) continue; // calm: no symbol on the wire
-          const d = dr[L][p];
-          symbols++;
-          if (prev === null) firstCounts[d]++;
-          else {
-            trans[resIdx][prev][d]++;
-            if (U >= 0) upper[resIdx][prev * NDIR + disp[U][p]][d]++;
-          }
-          prev = d;
-        }
-      }
-    }
-  });
-  console.log(`Encoded (calm-gated) direction symbols across 5 resolutions: ${symbols}`);
-
-  // Thin/unseen contexts fall back to broader priors so every table stays representable:
-  // an empty [res][prev] row borrows the resolution's marginal; an empty [res][prev×u] row
-  // borrows its [res][prev] row.
-  const marginal = trans.map((byPrev) => {
-    const m = new Array(NDIR).fill(0);
-    for (const row of byPrev) for (let i = 0; i < NDIR; i++) m[i] += row[i];
-    return m;
-  });
+export function counter(): CellCounter {
+  const tables = [
+    { name: "windDirBootstrap", dims: [NDIR] },
+    { name: "windDirTransLow", dims: [NRES, NDIR, NDIR] },   // sfc + 500 hPa
+    { name: "windDirTransHigh", dims: [NRES, NDIR, NDIR] },  // 600/700 hPa (upper table on wire)
+    { name: "windDirUpper", dims: [NRES, NDIR * NDIR, NDIR] },
+  ];
+  const { offsets, nSlots } = tableOffsets(tables);
+  const BOOT = offsets.windDirBootstrap, LOW = offsets.windDirTransLow,
+    HIGH = offsets.windDirTransHigh, UPPER = offsets.windDirUpper;
   const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
-  const byRes = trans.map((byPrev, res) =>
-    byPrev.map((row) => scaledWeights(sum(row) > 0 ? row : marginal[res])));
-  const upperByRes = upper.map((byCtx, res) =>
-    byCtx.map((row, ctx) => scaledWeights(sum(row) > 0 ? row : trans[res][Math.floor(ctx / NDIR)])));
+
+  // trans[res][prev][next] pooled over all levels (low + high ranges), plus its per-res marginal.
+  const transRows = (counts: ArrayLike<number>): { rows: number[][]; marginal: number[] }[] =>
+    Array.from({ length: NRES }, (_, res) => {
+      const rows = Array.from({ length: NDIR }, (_, prev) => {
+        const row = rowAt(counts, LOW + (res * NDIR + prev) * NDIR, NDIR);
+        for (let s = 0; s < NDIR; s++) row[s] += counts[HIGH + (res * NDIR + prev) * NDIR + s];
+        return row;
+      });
+      const marginal = new Array<number>(NDIR).fill(0);
+      for (const row of rows) for (let s = 0; s < NDIR; s++) marginal[s] += row[s];
+      return { rows, marginal };
+    });
 
   return {
-    WIND_DIR_BOOTSTRAP_WEIGHTS: scaledWeights(firstCounts),
-    WIND_DIR_WEIGHTS_BY_RES: byRes,
-    WIND_DIR_UPPER_WEIGHTS_BY_RES: upperByRes,
+    tables, nSlots,
+    countCell(h, startHour, _pos, add) {
+      for (let resIdx = 0; resIdx < NRES; resIdx++) {
+        const hpp = HOURS_PER_PERIOD[resIdx];
+        const start = Math.floor(startHour / hpp) * hpp;
+        const n = Math.floor(h.time.length / hpp);
+        if (n < 2) continue;
+        const rows = aggregateHourly(h, h.time, n, resIdx, start);
+        const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "GFS", resIdx));
+        const sp = SPEED_FIELDS.map((f) => periods.map((p) => qSpeed((p as any)[f])));
+        const dr = DIR_FIELDS.map((f) => periods.map((p) => (((p as any)[f] as number) ?? 0) % 8));
+        // Displayed dir under calm gating: last encoded dir, 0 before any (mirrors v1.ts).
+        const disp = SPEED_FIELDS.map((_, L) => {
+          let eff = 0;
+          return periods.map((_, p) => (sp[L][p] > 0 ? (eff = dr[L][p]) : eff));
+        });
+        for (let L = 0; L < SPEED_FIELDS.length; L++) {
+          const U = UPPER_OF[L];
+          const TRANS = U >= 0 ? HIGH : LOW;
+          let prev: number | null = null;
+          for (let p = 0; p < n; p++) {
+            if (sp[L][p] === 0) continue; // calm: no symbol on the wire
+            const d = dr[L][p];
+            if (prev === null) add(BOOT + d);
+            else {
+              add(TRANS + (resIdx * NDIR + prev) * NDIR + d);
+              if (U >= 0) add(UPPER + (resIdx * NDIR * NDIR + prev * NDIR + disp[U][p]) * NDIR + d);
+            }
+            prev = d;
+          }
+        }
+      }
+    },
+    tablesFrom(counts): DerivedTables {
+      // Thin/unseen contexts fall back to broader priors so every table stays representable:
+      // an empty [res][prev] row borrows the resolution's marginal; an empty [res][prev×u] row
+      // borrows its [res][prev] row.
+      const trans = transRows(counts);
+      return {
+        WIND_DIR_BOOTSTRAP_WEIGHTS: scaledWeights(rowAt(counts, BOOT, NDIR)),
+        WIND_DIR_WEIGHTS_BY_RES: trans.map(({ rows, marginal }) =>
+          rows.map((row) => scaledWeights(sum(row) > 0 ? row : marginal))),
+        WIND_DIR_UPPER_WEIGHTS_BY_RES: trans.map(({ rows }, res) =>
+          Array.from({ length: NDIR * NDIR }, (_, ctx) => {
+            const row = rowAt(counts, UPPER + (res * NDIR * NDIR + ctx) * NDIR, NDIR);
+            return scaledWeights(sum(row) > 0 ? row : rows[Math.floor(ctx / NDIR)]);
+          })),
+      };
+    },
+    costBits(counts) {
+      // Wire cost: low-range symbols under the pooled [res][prev] tables, 600/700 symbols under
+      // the upper-conditioned tables — their [res][prev] (high-range) slots stay 0 so a symbol is
+      // never charged twice.
+      const L = new Float64Array(nSlots);
+      const put = (start: number, row: number[]) => {
+        const c = rowCostBits(scaledWeights(row));
+        for (let s = 0; s < NDIR; s++) L[start + s] = c[s];
+      };
+      put(BOOT, rowAt(counts, BOOT, NDIR));
+      transRows(counts).forEach(({ rows, marginal }, res) => {
+        rows.forEach((row, prev) =>
+          put(LOW + (res * NDIR + prev) * NDIR, sum(row) > 0 ? row : marginal));
+        for (let ctx = 0; ctx < NDIR * NDIR; ctx++) {
+          const row = rowAt(counts, UPPER + (res * NDIR * NDIR + ctx) * NDIR, NDIR);
+          put(UPPER + (res * NDIR * NDIR + ctx) * NDIR, sum(row) > 0 ? row : rows[Math.floor(ctx / NDIR)]);
+        }
+      });
+      return L;
+    },
   };
+}
+
+export async function derive(): Promise<DerivedTables> {
+  const c = counter();
+  const counts = await deriveCounts(c);
+  let symbols = 0;
+  const { offsets } = tableOffsets(c.tables);
+  // Every emission lands exactly once in bootstrap/low/high (upper double-counts high symbols).
+  for (let i = offsets.windDirBootstrap; i < offsets.windDirUpper; i++) symbols += counts[i];
+  console.log(`Encoded (calm-gated) direction symbols across 5 resolutions: ${symbols}`);
+  return c.tablesFrom(counts);
 }
 
 runStandalone(import.meta.url, derive);

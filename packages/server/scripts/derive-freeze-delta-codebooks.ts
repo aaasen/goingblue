@@ -33,13 +33,17 @@ import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast
 import {
   VARS_BIT, tempDeltaBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_MIN, TEMP_DELTA_MAX,
 } from "@weather/protocol";
-import { eachForecast, scaledWeights, runStandalone, type DerivedTables } from "./derive-lib.ts";
+import {
+  deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone,
+  type CellCounter, type DerivedTables,
+} from "./derive-lib.ts";
 
 const STEP_BITS = 5;               // matches the freeze column width in v1.ts (steps 0..31)
 const STEP_MAX = (1 << STEP_BITS) - 1;
 const NSYM = 2 * STEP_MAX + 1;     // 63: deltas -31..31, no escape needed (already bounded)
 const STEP_M = 304.8;              // 1000 ft, must match v1.ts
 const NRES = 5; // 24h/12h/6h/3h/1h — row 0 (24h) is dead in fill layouts but kept for shape
+const NBUCKET = TEMP_DELTA_PREV_BUCKETS;
 const MASK = (1 << VARS_BIT.temp) | (1 << VARS_BIT.freeze);
 
 // Same float-dust epsilon AND clamp as v1.ts quantFreeze (clampInt: [0, STEP_MAX]) — training
@@ -52,82 +56,103 @@ const quantFreeze = (m: number): number =>
 const quantTemp = (c: number): number => Math.min(Math.max(Math.round(c + 100), 0), 255);
 const deltaSym = (delta: number): number => delta + STEP_MAX; // -31..31 -> 0..62
 
-export async function derive(): Promise<DerivedTables> {
-  // counts[res][tempΔ bucket][sym]; the fallback tables pool the bucket axis per res.
-  const counts: number[][][] = Array.from({ length: NRES }, () =>
-    Array.from({ length: TEMP_DELTA_PREV_BUCKETS }, () => new Array<number>(NSYM).fill(0)));
-  let columns = 0, symbols = 0;
-
-  await eachForecast((h, _startHour, _loc, pos) => {
-    if (!pos || !h.time?.length) return;
-    const off = Math.round(pos.lon / 15);
-    const dataStart = Math.floor(Date.parse(`${h.time[0]}:00Z`) / 3600000);
-    const dataEnd = dataStart + h.time.length;
-    for (let res = 0; res < NRES; res++) {
-      const hpp = HOURS_PER_PERIOD[res];
-      const firstUtc = Math.ceil((dataStart + off) / 24) * 24 - off; // first local midnight
-      const n = Math.floor((dataEnd - firstUtc) / hpp);
-      if (n < 3) continue;
-      const windows: number[][] = [];
-      for (let p = 0; p < n; p++) {
-        const w: number[] = [];
-        for (let eh = firstUtc + p * hpp; eh < firstUtc + (p + 1) * hpp; eh++) w.push(eh - dataStart);
-        windows.push(w);
-      }
-      const periods = rowsFromWindows(h, h.time, windows, off).map((r) => toFullPeriod(r, MASK, "GFS"));
-
-      let tempRecon = quantTemp(periods[0].temp_c ?? 0);
-      let prevFreeze = quantFreeze(periods[0].freeze_m ?? 0);
-      for (let p = 1; p < n; p++) {
-        const tempDelta = Math.min(Math.max(
-          quantTemp(periods[p].temp_c ?? 0) - tempRecon, TEMP_DELTA_MIN), TEMP_DELTA_MAX);
-        tempRecon += tempDelta;
-        const freeze = quantFreeze(periods[p].freeze_m ?? 0);
-        counts[res][tempDeltaBucket(tempDelta)][deltaSym(freeze - prevFreeze)]++;
-        prevFreeze = freeze;
-        symbols++;
-      }
-      columns++;
-    }
-  });
-  console.log(`Columns (forecast × resolution): ${columns}, delta symbols: ${symbols}`);
-
+export function counter(): CellCounter {
+  const tables = [{ name: "freezeDelta", dims: [NRES, NBUCKET, NSYM] }];
+  const { nSlots } = tableOffsets(tables);
   const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
-  // The tempΔ marginal per res — the fallback tables (temp absent from vars_mask), and the
-  // backstop for any empty (res, bucket) context.
-  const marginal = counts.map((byCtx) => {
-    const m = new Array<number>(NSYM).fill(0);
-    for (const row of byCtx) for (let s = 0; s < NSYM; s++) m[s] += row[s];
-    return m;
-  });
 
-  // Training-set mean bits/period per resolution, for the generation log (held-out numbers are
-  // the scan's job — see analyze-cross-var-heldout.ts).
-  for (let res = 0; res < NRES; res++) {
-    const bitsUnder = (row: number[], table: number[]): number => {
-      const w = scaledWeights(table);
-      const total = sum(w);
-      let bits = 0;
-      for (let s = 0; s < NSYM; s++) if (row[s] > 0) bits += row[s] * -Math.log2(w[s] / total);
-      return bits;
-    };
-    let bits = 0, flatBits = 0;
-    for (let ctx = 0; ctx < TEMP_DELTA_PREV_BUCKETS; ctx++) {
-      const row = counts[res][ctx];
-      bits += bitsUnder(row, sum(row) > 0 ? row : marginal[res]);
-      flatBits += bitsUnder(row, marginal[res]);
-    }
-    const n = Math.max(1, sum(marginal[res]));
-    const label = ["24h", "12h", "6h", "3h", "1h"][res];
-    console.log(`  ${label}: n=${sum(marginal[res])} mean=${(bits / n).toFixed(3)} b/period` +
-      ` (res-only fallback ${(flatBits / n).toFixed(3)}, training-set)`);
-  }
+  // counts[res][tempΔ bucket][sym]; the fallback tables pool the bucket axis per res.
+  const resRows = (counts: ArrayLike<number>): { rows: number[][]; marginal: number[] }[] =>
+    Array.from({ length: NRES }, (_, res) => {
+      const rows = Array.from({ length: NBUCKET }, (_, b) =>
+        rowAt(counts, (res * NBUCKET + b) * NSYM, NSYM));
+      const marginal = new Array<number>(NSYM).fill(0);
+      for (const row of rows) for (let s = 0; s < NSYM; s++) marginal[s] += row[s];
+      return { rows, marginal };
+    });
 
   return {
-    FREEZE_DELTA_WEIGHTS_BY_RES: marginal.map(scaledWeights),
-    FREEZE_DELTA_TEMP_WEIGHTS_BY_RES: counts.map((byCtx, res) =>
-      byCtx.map((row) => scaledWeights(sum(row) > 0 ? row : marginal[res]))),
+    tables, nSlots,
+    countCell(h, _startHour, pos, add) {
+      if (!pos || !h.time?.length) return;
+      const off = Math.round(pos.lon / 15);
+      const dataStart = Math.floor(Date.parse(`${h.time[0]}:00Z`) / 3600000);
+      const dataEnd = dataStart + h.time.length;
+      for (let res = 0; res < NRES; res++) {
+        const hpp = HOURS_PER_PERIOD[res];
+        const firstUtc = Math.ceil((dataStart + off) / 24) * 24 - off; // first local midnight
+        const n = Math.floor((dataEnd - firstUtc) / hpp);
+        if (n < 3) continue;
+        const windows: number[][] = [];
+        for (let p = 0; p < n; p++) {
+          const w: number[] = [];
+          for (let eh = firstUtc + p * hpp; eh < firstUtc + (p + 1) * hpp; eh++) w.push(eh - dataStart);
+          windows.push(w);
+        }
+        const periods = rowsFromWindows(h, h.time, windows, off).map((r) => toFullPeriod(r, MASK, "GFS"));
+
+        let tempRecon = quantTemp(periods[0].temp_c ?? 0);
+        let prevFreeze = quantFreeze(periods[0].freeze_m ?? 0);
+        for (let p = 1; p < n; p++) {
+          const tempDelta = Math.min(Math.max(
+            quantTemp(periods[p].temp_c ?? 0) - tempRecon, TEMP_DELTA_MIN), TEMP_DELTA_MAX);
+          tempRecon += tempDelta;
+          const freeze = quantFreeze(periods[p].freeze_m ?? 0);
+          add((res * NBUCKET + tempDeltaBucket(tempDelta)) * NSYM + deltaSym(freeze - prevFreeze));
+          prevFreeze = freeze;
+        }
+      }
+    },
+    tablesFrom(counts): DerivedTables {
+      const byRes = resRows(counts);
+      return {
+        // The tempΔ marginal per res — the fallback tables (temp absent from vars_mask), and the
+        // backstop for any empty (res, bucket) context.
+        FREEZE_DELTA_WEIGHTS_BY_RES: byRes.map(({ marginal }) => scaledWeights(marginal)),
+        FREEZE_DELTA_TEMP_WEIGHTS_BY_RES: byRes.map(({ rows, marginal }) =>
+          rows.map((row) => scaledWeights(sum(row) > 0 ? row : marginal))),
+      };
+    },
+    costBits(counts) {
+      const L = new Float64Array(nSlots);
+      resRows(counts).forEach(({ rows, marginal }, res) =>
+        rows.forEach((row, b) => {
+          const c = rowCostBits(scaledWeights(sum(row) > 0 ? row : marginal));
+          for (let s = 0; s < NSYM; s++) L[(res * NBUCKET + b) * NSYM + s] = c[s];
+        }));
+      return L;
+    },
   };
+}
+
+export async function derive(): Promise<DerivedTables> {
+  const c = counter();
+  const counts = await deriveCounts(c);
+  // Training-set mean bits/period per resolution, for the generation log (held-out numbers are
+  // the scan's job — see analyze-cross-var-heldout.ts).
+  const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
+  const bitsUnder = (row: number[], table: number[]): number => {
+    const cost = rowCostBits(scaledWeights(table));
+    let bits = 0;
+    for (let s = 0; s < NSYM; s++) if (row[s] > 0) bits += row[s] * cost[s];
+    return bits;
+  };
+  for (let res = 0; res < NRES; res++) {
+    const rows = Array.from({ length: NBUCKET }, (_, b) =>
+      rowAt(counts, (res * NBUCKET + b) * NSYM, NSYM));
+    const marginal = new Array<number>(NSYM).fill(0);
+    for (const row of rows) for (let s = 0; s < NSYM; s++) marginal[s] += row[s];
+    let bits = 0, flatBits = 0;
+    for (const row of rows) {
+      bits += bitsUnder(row, sum(row) > 0 ? row : marginal);
+      flatBits += bitsUnder(row, marginal);
+    }
+    const n = Math.max(1, sum(marginal));
+    const label = ["24h", "12h", "6h", "3h", "1h"][res];
+    console.log(`  ${label}: n=${sum(marginal)} mean=${(bits / n).toFixed(3)} b/period` +
+      ` (res-only fallback ${(flatBits / n).toFixed(3)}, training-set)`);
+  }
+  return c.tablesFrom(counts);
 }
 
 runStandalone(import.meta.url, derive);

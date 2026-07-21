@@ -25,7 +25,10 @@
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import { VARS_BIT, type Period } from "@weather/protocol";
-import { eachForecast, scaledWeights, runStandalone, type DerivedTables } from "./derive-lib.ts";
+import {
+  deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone,
+  type CellCounter, type DerivedTables,
+} from "./derive-lib.ts";
 
 const NRES = 5;
 const NLEVEL = 4;                  // sfc, 500, 600, 700 (WIND_COLUMNS order in v1.ts)
@@ -42,48 +45,90 @@ const qSpeed = (kph: number | undefined) =>
 // must match upperDeltaBucket in entropy.ts
 const dBucket = (d: number) => (d <= -2 ? 0 : d === -1 ? 1 : d === 0 ? 2 : d === 1 ? 3 : 4);
 
-export async function derive(): Promise<DerivedTables> {
-  const byLevel = Array.from({ length: NRES }, () =>
-    Array.from({ length: NLEVEL }, () => new Array(NSYM).fill(0)));
-  const byBucket = Array.from({ length: NRES }, () =>
-    Array.from({ length: NBUCKET }, () => new Array(NSYM).fill(0)));
-  let samples = 0;
+export function counter(): CellCounter {
+  const tables = [
+    { name: "windSpeedDelta", dims: [NRES, NLEVEL, NSYM] },
+    { name: "windSpeedUpperDelta", dims: [NRES, NBUCKET, NSYM] },
+  ];
+  const { offsets, nSlots } = tableOffsets(tables);
+  const LEVEL = offsets.windSpeedDelta, UPPER = offsets.windSpeedUpperDelta;
+  const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
 
-  await eachForecast((h, startHour) => {
-    for (let resIdx = 0; resIdx < NRES; resIdx++) {
-      const hpp = HOURS_PER_PERIOD[resIdx];
-      const start = Math.floor(startHour / hpp) * hpp;
-      const n = Math.floor(h.time.length / hpp);
-      if (n < 2) continue;
-      const rows = aggregateHourly(h, h.time, n, resIdx, start);
-      const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "GFS", resIdx));
-      const sp = SPEED_FIELDS.map((f) => periods.map((p) => qSpeed((p as any)[f])));
-      for (let L = 0; L < NLEVEL; L++) {
-        const U = UPPER_OF[L];
-        for (let p = 1; p < n; p++) {
-          const sym = sp[L][p] - sp[L][p - 1] + SPEED_MAX;
-          byLevel[resIdx][L][sym]++;
-          if (U >= 0) byBucket[resIdx][dBucket(sp[U][p] - sp[U][p - 1])][sym]++;
-          samples++;
+  // byLevel[res][level] rows plus the per-res pooled marginal (the empty-row fallback).
+  const levelRows = (counts: ArrayLike<number>): { rows: number[][]; marginal: number[] }[] =>
+    Array.from({ length: NRES }, (_, res) => {
+      const rows = Array.from({ length: NLEVEL }, (_, l) =>
+        rowAt(counts, LEVEL + (res * NLEVEL + l) * NSYM, NSYM));
+      const marginal = new Array<number>(NSYM).fill(0);
+      for (const row of rows) for (let s = 0; s < NSYM; s++) marginal[s] += row[s];
+      return { rows, marginal };
+    });
+
+  return {
+    tables, nSlots,
+    countCell(h, startHour, _pos, add) {
+      for (let resIdx = 0; resIdx < NRES; resIdx++) {
+        const hpp = HOURS_PER_PERIOD[resIdx];
+        const start = Math.floor(startHour / hpp) * hpp;
+        const n = Math.floor(h.time.length / hpp);
+        if (n < 2) continue;
+        const rows = aggregateHourly(h, h.time, n, resIdx, start);
+        const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "GFS", resIdx));
+        const sp = SPEED_FIELDS.map((f) => periods.map((p) => qSpeed((p as any)[f])));
+        for (let L = 0; L < NLEVEL; L++) {
+          const U = UPPER_OF[L];
+          for (let p = 1; p < n; p++) {
+            const sym = sp[L][p] - sp[L][p - 1] + SPEED_MAX;
+            add(LEVEL + (resIdx * NLEVEL + L) * NSYM + sym);
+            if (U >= 0) add(UPPER + (resIdx * NBUCKET + dBucket(sp[U][p] - sp[U][p - 1])) * NSYM + sym);
+          }
         }
       }
-    }
-  });
-  console.log(`Delta samples across 5 resolutions × 4 levels: ${samples}`);
-
-  // Empty rows (rare tails at coarse resolutions) fall back to the resolution's pooled marginal.
-  const marginal = byLevel.map((levels) => {
-    const m = new Array(NSYM).fill(0);
-    for (const row of levels) for (let i = 0; i < NSYM; i++) m[i] += row[i];
-    return m;
-  });
-  const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
-  return {
-    WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL: byLevel.map((levels, res) =>
-      levels.map((row) => scaledWeights(sum(row) > 0 ? row : marginal[res]))),
-    WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES: byBucket.map((buckets, res) =>
-      buckets.map((row) => scaledWeights(sum(row) > 0 ? row : marginal[res]))),
+    },
+    tablesFrom(counts): DerivedTables {
+      // Empty rows (rare tails at coarse resolutions) fall back to the resolution's pooled marginal.
+      const byRes = levelRows(counts);
+      return {
+        WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL: byRes.map(({ rows, marginal }) =>
+          rows.map((row) => scaledWeights(sum(row) > 0 ? row : marginal))),
+        WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES: byRes.map(({ marginal }, res) =>
+          Array.from({ length: NBUCKET }, (_, b) => {
+            const row = rowAt(counts, UPPER + (res * NBUCKET + b) * NSYM, NSYM);
+            return scaledWeights(sum(row) > 0 ? row : marginal);
+          })),
+      };
+    },
+    costBits(counts) {
+      // Wire cost: sfc/500 symbols under [res][level]; 600/700 symbols under the upper-Δ tables
+      // (their upper column is always present in corpus counting), so their [res][level] slots
+      // stay 0 — a symbol is never charged twice.
+      const L = new Float64Array(nSlots);
+      const put = (start: number, row: number[]) => {
+        const c = rowCostBits(scaledWeights(row));
+        for (let s = 0; s < NSYM; s++) L[start + s] = c[s];
+      };
+      levelRows(counts).forEach(({ rows, marginal }, res) => {
+        rows.forEach((row, l) => {
+          if (UPPER_OF[l] >= 0) return;
+          put(LEVEL + (res * NLEVEL + l) * NSYM, sum(row) > 0 ? row : marginal);
+        });
+        for (let b = 0; b < NBUCKET; b++) {
+          const row = rowAt(counts, UPPER + (res * NBUCKET + b) * NSYM, NSYM);
+          put(UPPER + (res * NBUCKET + b) * NSYM, sum(row) > 0 ? row : marginal);
+        }
+      });
+      return L;
+    },
   };
+}
+
+export async function derive(): Promise<DerivedTables> {
+  const c = counter();
+  const counts = await deriveCounts(c);
+  let samples = 0;
+  for (let i = 0; i < c.tables[0].dims.reduce((a, b) => a * b, 1); i++) samples += counts[i];
+  console.log(`Delta samples across 5 resolutions × 4 levels: ${samples}`);
+  return c.tablesFrom(counts);
 }
 
 runStandalone(import.meta.url, derive);

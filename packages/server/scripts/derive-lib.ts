@@ -17,12 +17,81 @@ export const DERIVE_SOURCE = "best_match";
 // Tables a derive script contributes, keyed by their codebooks.gen.ts constant name.
 export type DerivedTables = Record<string, number[] | number[][] | number[][][]>;
 
+// ── Per-cell counting (shared by derive() and the class-clustering extractor) ────
+//
+// Each derive script factors its corpus counting into a CellCounter: a fixed flat "slot" space
+// enumerating every (table row × symbol) its counted tables have, plus a per-cell counting
+// function. derive() sums every train cell into one flat vector and assembles the shipped
+// tables from it (identical results to the old inline loops); the codebook-class clustering
+// (extract-cell-counts.ts / EM) keeps one sparse vector per cell instead, so table sets can be
+// re-fit to any subset of cells without another corpus scan.
+
+// One counted table: `dims` are its axes, the LAST dim being the symbol alphabet — so the table
+// is a row-major sequence of rows of length dims.at(-1), each row one codebook's counts.
+export interface CountedTable {
+  name: string;
+  dims: number[];
+}
+
+export const tableSlots = (t: CountedTable): number => t.dims.reduce((a, b) => a * b, 1);
+
+// Slot offset of each counted table in the flat vector, in declaration order.
+export function tableOffsets(tables: CountedTable[]): { offsets: Record<string, number>; nSlots: number } {
+  const offsets: Record<string, number> = {};
+  let n = 0;
+  for (const t of tables) { offsets[t.name] = n; n += tableSlots(t); }
+  return { offsets, nSlots: n };
+}
+
+export interface CellCounter {
+  tables: CountedTable[];
+  nSlots: number;
+  // Adds this cell's symbol emissions (wire granularity — one add per symbol the encoder would
+  // emit under these tables) into `add(slot)`.
+  countCell(
+    h: HourlyData, startHour: number, pos: { lat: number; lon: number } | undefined,
+    add: (slot: number) => void,
+  ): void;
+  // Assembles the script's shipped weight tables from an accumulated count vector (applying the
+  // same empty-row fallbacks the old inline derivation did).
+  tablesFrom(counts: ArrayLike<number>): DerivedTables;
+  // Per-slot model cost in bits under the tables tablesFrom would ship from `counts`, including
+  // constant raw payloads (e.g. the temp escape field) — and 0 for slots whose wire cost is
+  // carried by a parallel counted table (see the wind scripts' upper-conditioned tables).
+  costBits(counts: ArrayLike<number>): Float64Array;
+}
+
+// Copies one row out of a flat count vector.
+export function rowAt(counts: ArrayLike<number>, start: number, n: number): number[] {
+  const r = new Array<number>(n);
+  for (let i = 0; i < n; i++) r[i] = counts[start + i];
+  return r;
+}
+
+// Model cost per symbol of the table scaledWeights(row) ships: -log2(w/Σw).
+export function rowCostBits(weights: number[]): number[] {
+  const total = weights.reduce((a, b) => a + b, 0);
+  return weights.map((w) => -Math.log2(w / total));
+}
+
+// Sums every train-split cell's counts into one flat vector — the corpus-wide counts the old
+// inline derive loops produced.
+export async function deriveCounts(counter: CellCounter): Promise<Float64Array> {
+  const counts = new Float64Array(counter.nSlots);
+  await eachForecast((h, startHour, _loc, pos) => {
+    counter.countCell(h, startHour, pos, (slot) => { counts[slot]++; });
+  });
+  return counts;
+}
+
 // Visits every train-split forecast in the corpus DB (WAL mode — safe alongside a concurrent
 // collect). `loc` is the corpus location id — the unit held-out folds divide on. `pos` is the
 // location's lat/lon from the registry mirror, for scripts that need geography (UTC offset,
 // solar position).
 export async function eachForecast(
-  cb: (hourly: HourlyData, startHour: number, loc: string, pos?: { lat: number; lon: number }) => void,
+  cb: (hourly: HourlyData, startHour: number, loc: string, pos?: { lat: number; lon: number },
+       split?: string) => void,
+  split: "train" | "all" = "train",
 ): Promise<void> {
   const db = openDb();
   const locs = dbLocations(db);
@@ -30,16 +99,17 @@ export async function eachForecast(
   const seen = new Set<string>();
   for (const { locationId, windowStart } of listCells(db, DERIVE_SOURCE)) {
     const loc = locs.get(locationId);
-    if (loc?.split !== "train") continue; // eval/favorites/unregistered: never trained on
+    if (!loc) continue;
+    if (split === "train" && loc.split !== "train") continue; // eval/favorites: never trained on
     const hourly = loadCell(db, DERIVE_SOURCE, locationId, windowStart);
     if (!hourly) continue;
     cells++;
     seen.add(locationId);
     cb(hourly, Math.floor(Date.parse(windowStart + "Z") / 3600000), locationId,
-      { lat: loc.lat, lon: loc.lon });
+      { lat: loc.lat, lon: loc.lon }, loc.split ?? undefined);
   }
   db.close();
-  console.log(`  scanned ${cells} cells over ${seen.size} train locations (${DERIVE_SOURCE})`);
+  console.log(`  scanned ${cells} cells over ${seen.size} ${split === "train" ? "train " : ""}locations (${DERIVE_SOURCE})`);
 }
 
 // Deterministic 5-fold assignment by location id, for held-out (split-by-location) checks.
