@@ -82,6 +82,10 @@ export interface ForecastMessage {
   // recovers it via ContextResolver). Never on the wire, but the encoder needs it too: the
   // temp-delta codebooks are keyed by each period's local time-of-day (see tempTodBucket).
   utcOffsetHours: number;
+  // Codebook class the body decoded under (set by decode; informational). The encoder always
+  // re-derives the cheapest class itself — deterministically, so re-encoding a decoded message
+  // reproduces the same string — and ignores this field.
+  codebookClass?: number;
 }
 
 // The request fields the client recovers from its own storage by message code, rather than

@@ -1,4 +1,5 @@
-// All weight tables live in codebooks.gen.ts, written by `pnpm generate` from the cached corpus —
+// All weight tables live in codebooks.gen.ts (the base set — codebook class 0) and
+// codebooks-classes.gen.ts (classes 1..CODEBOOK_CLASSES-1), written by the derive pipeline —
 // never edited by hand. They are wire format; see V1_CODEBOOKS at the bottom of this file.
 import {
   WEATHERCODE_BOOTSTRAP_WEIGHTS, WEATHERCODE_WEIGHTS,
@@ -11,6 +12,7 @@ import {
   SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES,
   RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_RES,
 } from "./codebooks.gen.js";
+import { CLASS_TABLES, CODEBOOK_CLASSES, type ClassTableSet } from "./codebooks-classes.gen.js";
 import {
   buildRansTable, symCostBits, ransEncode, ransReader, quantizeFreqs,
   RANS_PROB_BITS, RANS_L, RANS_WORD_BITS,
@@ -45,7 +47,7 @@ export interface SymSource {
 }
 
 // The model cost of coding `s` under `book`, in fractional bits — for encoder-side candidate
-// selection (e.g. chooseTempDeltaTable) and instrumentation; never on the wire.
+// selection (e.g. the codebook-class try-all-pick-best) and instrumentation; never on the wire.
 export function symBits(book: CodeBook, s: number): number {
   return symCostBits(book, s);
 }
@@ -98,9 +100,7 @@ function makeConditionalCodec(bootstrapWeights: number[], weights: number[][]) {
 
 // Single-table delta codec for a bounded quantized domain 0..maxDelta: the full delta range
 // -maxDelta..maxDelta (2·maxDelta+1 symbols) fits directly in the alphabet — no escape/raw-payload
-// fallback needed. One shared table, no per-message selector: held-out checks (see the derive
-// scripts) found delta shape doesn't vary enough by location/season/level for a cheapest-of-k
-// selector to pay for itself — everywhere is dominated by "usually 0, occasionally ±1".
+// fallback needed.
 export interface DeltaCodec {
   encode(sink: SymSink, delta: number): void;
   decode(src: SymSource): number;
@@ -118,28 +118,9 @@ function makeDeltaCodec(weights: number[], maxDelta: number): DeltaCodec {
   };
 }
 
-// ── Weathercode ─────────────────────────────────────────────────────────────────
-// Static, order-1 codebooks for the weathercode column. Weather persists hour-to-hour far
-// more than it varies by climate/region (a "clear" hour is followed by "clear" 85% of the time
-// regardless of location). Derived from the corpus's prev-symbol -> next-symbol transition counts —
-// see server/scripts/derive-weathercode-codebooks.ts. Symbols are WMO indices (0..27), mapping
-// to WMO_CODES; every table assigns a code to every symbol so any outlier is representable.
-//
-// WEATHERCODE_BOOTSTRAP_WEIGHTS is the distribution of the *first* weathercode of a sequence
-// (no predecessor to key off of); WEATHERCODE_WEIGHTS[prevSym] is the codebook for the symbol
-// that follows `prevSym` (frequency weights, one per WMO index, all > 0 — a prevSym never
-// observed as a predecessor in the corpus falls back to the corpus-wide marginal distribution).
-// WMO index legend: 0 clear · 1-3 cloud · 4-5 fog · 6-8 drizzle · 9-10 freezing drizzle ·
-// 11-13 rain · 14-15 freezing rain · 16-19 snow · 20-22 rain showers · 23-24 snow showers ·
-// 25-27 thunderstorm.
-const WEATHERCODE_CODEC = makeConditionalCodec(WEATHERCODE_BOOTSTRAP_WEIGHTS, WEATHERCODE_WEIGHTS);
-
-// Emits the code for `wmoIdx`, under the table keyed by `prevSym` — the
-// previously decoded symbol, or null for the first symbol of a sequence (no predecessor).
-export const encodeWeathercode = WEATHERCODE_CODEC.encode;
-
-// Reads one coded weathercode keyed by `prevSym` (see encodeWeathercode).
-export const decodeWeathercode = WEATHERCODE_CODEC.decode;
+// ── Wire-format context functions (shared by every codebook class) ──────────────
+// The CONTEXT a symbol's table is keyed by is identical across classes — a class only swaps the
+// frequencies inside each table. So the bucketing functions below are wire format exactly once.
 
 // The weathercode collapsed to a 4-class precipitation regime — WIRE FORMAT: the wet columns
 // (precip/snow/rain) key their codebooks on the SAME period's class, which they may do for free
@@ -156,55 +137,10 @@ export const WEATHERCODE_CLASS: readonly number[] = [
   0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 1, 1, 1, 2, 2, 3, 3, 3, 3, 1, 1, 1, 3, 3, 1, 1, 1,
 ];
 
-// ── Wind direction ──────────────────────────────────────────────────────────────
-// Static codebooks for the 8-point wind direction (symbols are direction indices 0..7; see
-// CARDINALS), keyed by every piece of context both sides already have — so none of it costs
-// wire bits:
-//
-//   - the previously *encoded* direction in the column (order-1; calm periods emit no direction
-//     symbol at all, so the chain carries the last encoded direction across gaps — see v1.ts);
-//   - the message's resolution: direction persistence falls sharply with the aggregation step
-//     (P(next=prev) ≈ 0.85 at 1h vs ≈ 0.55 at 6h), and a single 1h-derived table was measurably
-//     overconfident at coarser resolutions;
-//   - for the 600/700 hPa columns, the *upper* pressure level's same-period displayed direction
-//     (already decoded — column order is 500 → 600 → 700), when that column is in vars_mask.
-//     Adjacent levels share the synoptic flow, so this is the strongest single context: held-out
-//     (5-fold by location) 1.49 → 1.12 b/dir at 6h, 0.71 → 0.64 at 1h.
-//
-// The bootstrap table covers a column's first encoded direction (no predecessor); it fires once
-// per column, so it is shared across resolutions and levels. Derived from the corpus's
-// calm-gated transition counts — see server/scripts/derive-wind-dir-codebooks.ts and the scheme
-// comparison in analyze-wind-heldout.ts.
 const NDIR = 8;
-const WIND_DIR_BOOTSTRAP = buildTable(WIND_DIR_BOOTSTRAP_WEIGHTS);
-const WIND_DIR_TABLES = WIND_DIR_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
-const WIND_DIR_UPPER_TABLES = WIND_DIR_UPPER_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
-
-// The codebook for one direction symbol. `prev` is the last direction encoded in this column
-// (null for the column's first — bootstrap), `upper` the upper level's same-period displayed
-// direction (null when that column is absent or this level has none).
-export function windDirBook(res: number, prev: number | null, upper: number | null): CodeBook {
-  if (prev === null) return WIND_DIR_BOOTSTRAP;
-  return upper === null
-    ? WIND_DIR_TABLES[res][prev]
-    : WIND_DIR_UPPER_TABLES[res][prev * NDIR + upper];
-}
-
-// ── Wind speed deltas ───────────────────────────────────────────────────────────
-// Period-over-period wind-speed change, in quantized steps (see WIND_SPEED_BITS in v1.ts: 0..31,
-// so deltas -31..31). Tables are keyed by (resolution, level) — the old level-pooled, 1h-derived
-// table taxed the surface column hardest (its deltas are far more peaked than the jet levels')
-// and was overconfident at coarse resolutions (held-out 3.01 → 2.49 b/Δ at 6h). For the 600/700
-// hPa columns, when the upper level's column is present its already-decoded same-period delta,
-// bucketed to {≤-2, -1, 0, +1, ≥+2}, replaces the level key and does better still (held-out
-// 2.64 → 2.37 b/Δ at 6h) — adjacent pressure levels move together. Derived from the corpus's
-// per-(resolution × level) delta distributions — see
-// server/scripts/derive-wind-speed-delta-codebooks.ts.
 
 // must mirror WIND_SPEED_BITS in v1.ts (0..31)
 export const WIND_SPEED_DELTA_MAX = 31;
-const WIND_SPEED_TABLES = WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL.map((rows) => rows.map(buildTable));
-const WIND_SPEED_UPPER_TABLES = WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
 
 // Buckets an upper-level same-period speed delta for table selection (must match the derive
 // script): ≤-2, -1, 0, +1, ≥+2.
@@ -212,89 +148,8 @@ export function upperDeltaBucket(d: number): number {
   return d <= -2 ? 0 : d === -1 ? 1 : d === 0 ? 2 : d === 1 ? 3 : 4;
 }
 
-// The codebook for one speed delta. `level` indexes WIND_COLUMNS order (sfc, 500, 600, 700);
-// `upperDelta` is the upper level's same-period delta (null when that column is absent or this
-// level has none).
-export function windSpeedBook(res: number, level: number, upperDelta: number | null): CodeBook {
-  return upperDelta === null
-    ? WIND_SPEED_TABLES[res][level]
-    : WIND_SPEED_UPPER_TABLES[res][upperDeltaBucket(upperDelta)];
-}
-
-export function encodeWindSpeedDelta(sink: SymSink, book: CodeBook, delta: number): void {
-  sink.sym(book, delta + WIND_SPEED_DELTA_MAX);
-}
-
-export function decodeWindSpeedDelta(src: SymSource, book: CodeBook): number {
-  return src.sym(book) - WIND_SPEED_DELTA_MAX;
-}
-
-// ── Freezing-level deltas ───────────────────────────────────────────────────────
-// Period-over-period freezing-level change, in quantized steps (see the freeze column in v1.ts:
-// 0..31, 304.8 m / 1000 ft steps, so deltas -31..31). Tables are keyed by (the arriving period's
-// resolution, the SAME period's temp-delta bucket) — the freezing level is where the 0°C isotherm
-// sits, so it moves with the airmass temperature, and temp decodes first, making its delta free
-// context (the same trick the 600/700 hPa wind columns play on the upper level). The bucket is
-// taken from temp's CLAMPED reconstruction delta — the value the decoder actually sees — via the
-// same tempDeltaBucket temp keys its own tables on. Temp isn't guaranteed in vars_mask, so a
-// res-keyed fallback table set (the tempΔ marginal) covers messages without it. Held-out (5-fold
-// by location, post 5-bit widening): pooled 1.445 → res 1.393 → res × tempΔ 1.308 b/period; a
-// cheapest-of-16 per-message selector had measured WORSE than pooled (1.371 vs 1.340, pre-
-// widening). Derived per (resolution × bucket) — see server/scripts/derive-freeze-delta-codebooks.ts.
-
 // must mirror the freeze column width in v1.ts (0..31)
 export const FREEZE_DELTA_MAX = 31;
-const FREEZE_DELTA_TABLES_BY_RES = FREEZE_DELTA_WEIGHTS_BY_RES.map(buildTable);
-const FREEZE_DELTA_TEMP_TABLES = FREEZE_DELTA_TEMP_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
-
-// The codebook for one freeze delta. `tempDelta` is the same period's decoded temp delta (the
-// post-clamp reconstruction, never the raw input), or null when temp is absent from vars_mask.
-export function freezeDeltaBook(res: number, tempDelta: number | null): CodeBook {
-  return tempDelta === null
-    ? FREEZE_DELTA_TABLES_BY_RES[res]
-    : FREEZE_DELTA_TEMP_TABLES[res][tempDeltaBucket(tempDelta)];
-}
-
-export function encodeFreezeDelta(sink: SymSink, book: CodeBook, delta: number): void {
-  sink.sym(book, delta + FREEZE_DELTA_MAX);
-}
-
-export function decodeFreezeDelta(src: SymSource, book: CodeBook): number {
-  return src.sym(book) - FREEZE_DELTA_MAX;
-}
-
-// ── Cloud cover deltas ──────────────────────────────────────────────────────────
-// Period-over-period cloud-cover change, in quantized steps (see the cloud columns in v1.ts: 0..7,
-// 3-bit, so deltas -7..7). Low/mid/high get separate tables (not pooled) — low clouds are
-// local/convective and change quickly, high clouds are broad cirrus sheets that persist for hours.
-// Held-out (split by location): a cheapest-of-16 k-means selector per level was within 0.01
-// b/period of these single tables (low 1.688 vs 1.696, mid 1.826 vs 1.826, high 1.908 vs 1.915) —
-// not worth 48 tables and three selectors. Derived from the corpus's pooled per-level delta
-// distributions — see server/scripts/derive-cloud-delta-codebooks.ts.
-
-// maxDelta must mirror the cloud column width in v1.ts (0..7)
-export const CLOUD_LOW_DELTA = makeDeltaCodec(CLOUD_LOW_DELTA_WEIGHTS, 7);
-export const CLOUD_MID_DELTA = makeDeltaCodec(CLOUD_MID_DELTA_WEIGHTS, 7);
-export const CLOUD_HIGH_DELTA = makeDeltaCodec(CLOUD_HIGH_DELTA_WEIGHTS, 7);
-
-// ── Precip chance and rain/snow accumulations ──────────────────────────────────
-// Order-1 codebooks over the column's quantized VALUES (not deltas — zero is an absorbing
-// regime, and a delta of 0 would conflate "still dry" with "steady heavy snow"), keyed by
-// (the period's resolution, the SAME period's weathercode class, the previously decoded value).
-// This replaced the adaptive best-of (raw / FOR / sparse / empty + 2-bit selector) scheme: sparse
-// charges a full bit per zero period where P(0 | prev=0) makes it a small fraction of one.
-// Held-out 5-fold by location, bits/period: precip 2.121 → 1.002, snow 1.302 → 0.741,
-// rain 1.983 → 1.153 for (res × prev) — then the same-period weathercode class (see
-// WEATHERCODE_CLASS above; free context, the column decodes first) took precip 0.978 → 0.876,
-// snow 0.708 → 0.445, rain 1.101 → 0.770. It captures the shared latent outright: stacking rain
-// on snow≠0, or snow on the precip-chance bucket, measured redundant on top of it. See
-// server/scripts/derive-precip-accum-codebooks.ts and analyze-cross-var-heldout.ts.
-//
-// Precip chance (8 symbols) keys on the previous value directly. Rain/snow (64-symbol companded
-// domain) key on a BUCKET of it — the full 64×64 transition matrix has too little corpus signal
-// per cell, and buckets were within ~0.02 b/period of it held-out. The bootstrap table covers a
-// column's first value (no predecessor); it fires once per column, so it is pooled across
-// resolutions and classes.
 
 // Previous-value buckets for the accumulation columns: 0 | 1-3 | 4-9 | 10-20 | 21+.
 // Must match ACCUM_BUCKET_EDGES in derive-precip-accum-codebooks.ts.
@@ -304,34 +159,6 @@ function accumBucket(v: number): number {
   for (const e of ACCUM_BUCKET_EDGES) { if (v < e) break; b++; }
   return b;
 }
-
-function makeValueCodec(bootstrapWeights: number[], weightsByRes: number[][][], ctxOf: (prev: number) => number) {
-  const bootstrap = buildTable(bootstrapWeights);
-  const tables = weightsByRes.map((rows) => rows.map(buildTable));
-  // The codebook for one value symbol: `wcClass` is WEATHERCODE_CLASS of the cell's own decoded
-  // weathercode symbol, `prev` the previously decoded value in the column — or null for the
-  // column's first (bootstrap). Context rows are prev-major (ctxOf(prev) × WC_CLASSES + wcClass),
-  // matching the derive script's emission order.
-  return (res: number, wcClass: number, prev: number | null): CodeBook =>
-    prev === null ? bootstrap : tables[res][ctxOf(prev) * WC_CLASSES + wcClass];
-}
-
-export const precipBook = makeValueCodec(PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES, (p) => p);
-export const snowBook = makeValueCodec(SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES, accumBucket);
-export const rainBook = makeValueCodec(RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_RES, accumBucket);
-
-// ── Temperature deltas ──────────────────────────────────────────────────────────
-// Static codebooks for period-over-period temp_c change. Symbols are quantized deltas
-// -7..7 (indices 0..14) plus an ESCAPE symbol (index 15) for rarer bigger jumps, followed by a raw
-// 6-bit signed (bias 32) field covering -32..31°C. Tables are keyed by context both sides already
-// have — the arriving period's resolution and time-of-day bucket (both derived from the layout)
-// and the previous decoded delta's bucket — so temp carries no per-message signaling; this
-// replaced the cheapest-of-16 k-means tables + 4-bit selector, which the held-out ladder showed
-// was mostly re-discovering resolution (see derive-temp-delta-codebooks.ts for the numbers and
-// analyze-temp-heldout.ts for the full ladder). Time-of-day pays because the diurnal cycle drives
-// the delta sign (rising mornings, falling evenings); the previous delta adds the airmass's actual
-// trajectory on top, a sign-consistent ~0.05 b/period across every held-out fold. The bootstrap
-// table covers a column's first delta (no predecessor), pooled across resolutions.
 
 export const TEMP_DELTA_CORE_RADIUS = 7;
 const TEMP_DELTA_ESCAPE_SYM = 2 * TEMP_DELTA_CORE_RADIUS + 1; // 15
@@ -343,11 +170,6 @@ const TEMP_DELTA_ESCAPE_BIAS = 1 << (TEMP_DELTA_ESCAPE_BITS - 1); // 32
 // (see the temp column in v1.ts).
 export const TEMP_DELTA_MIN = -TEMP_DELTA_ESCAPE_BIAS;                      // -32
 export const TEMP_DELTA_MAX = (1 << TEMP_DELTA_ESCAPE_BITS) - 1 - TEMP_DELTA_ESCAPE_BIAS; // 31
-
-// Context functions for the temp-delta codebooks — WIRE FORMAT (both sides derive the context
-// from decoded state and the layout; drift desyncs silently). Held-out ladder (5-fold by
-// location, see server/scripts/analyze-temp-heldout.ts): (prevΔ bucket × tod8 × res) 2.335
-// b/period vs 2.648 for the old cheapest-of-16 selector.
 
 // Previous decoded delta (post-clamp reconstruction), 5 buckets: ≤-2 | -1 | 0 | +1 | ≥+2.
 export const TEMP_DELTA_PREV_BUCKETS = 5;
@@ -365,19 +187,156 @@ export function tempTodBucket(localHalfHours: number): number {
   return Math.floor((((localHalfHours % 48) + 48) % 48) / 6);
 }
 
-const TEMP_DELTA_BOOTSTRAP = buildTable(TEMP_DELTA_BOOTSTRAP_WEIGHTS);
-const TEMP_DELTA_TABLES_BY_RES = TEMP_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
-
 function tempDeltaSym(delta: number): number {
   return Math.abs(delta) <= TEMP_DELTA_CORE_RADIUS ? delta + TEMP_DELTA_CORE_RADIUS : TEMP_DELTA_ESCAPE_SYM;
 }
 
-// The codebook for one temp delta. `tod` is the arriving period's tempTodBucket; `prevDelta` the
-// previous decoded delta in this column — the post-clamp reconstruction, never the raw input —
-// or null for the column's first delta (bootstrap).
-export function tempDeltaBook(res: number, tod: number, prevDelta: number | null): CodeBook {
-  if (prevDelta === null) return TEMP_DELTA_BOOTSTRAP;
-  return TEMP_DELTA_TABLES_BY_RES[res][tempDeltaBucket(prevDelta) * TEMP_DELTA_TOD_BUCKETS + tod];
+// ── Codebook classes ────────────────────────────────────────────────────────────
+// One ClassBooks per codebook class: the complete set of table-lookup functions the v1 body
+// codec keys symbols with. Class 0 is the global (train-corpus-wide) tables in codebooks.gen.ts;
+// classes 1..CODEBOOK_CLASSES-1 (codebooks-classes.gen.ts) were learned by EM in code-length
+// space over the corpus (see server/scripts/derive-class-ladder.ts) — regional/seasonal regimes
+// (marine, tropical, polar...) whose conditional distributions are sharper than the global
+// mixture. The encoder builds the body under every class and keeps the cheapest (held-out
+// -2.5% body bits at K=8); the 3-bit selector rides free in the v1 header. Which class a
+// message used is in-band — the decoder needs nothing external.
+//
+// What a class does NOT change: alphabets, context functions (above), column structure. Only
+// the frequencies inside each table.
+export interface ClassBooks {
+  // Emits/reads the code for a weathercode symbol under the table keyed by `prevSym` — the
+  // previously decoded symbol, or null for the first symbol of a sequence (bootstrap). Weather
+  // persists hour-to-hour far more than it varies by climate/region, hence order-1 tables (see
+  // server/scripts/derive-weathercode-codebooks.ts).
+  encodeWeathercode(sink: SymSink, prevSym: number | null, sym: number): void;
+  decodeWeathercode(src: SymSource, prevSym: number | null): number;
+  // The codebook for one direction symbol. `prev` is the last direction encoded in this column
+  // (null for the column's first — bootstrap), `upper` the upper level's same-period displayed
+  // direction (null when that column is absent or this level has none). See
+  // server/scripts/derive-wind-dir-codebooks.ts for the context ladder.
+  windDirBook(res: number, prev: number | null, upper: number | null): CodeBook;
+  // The codebook for one speed delta. `level` indexes WIND_COLUMNS order (sfc, 500, 600, 700);
+  // `upperDelta` is the upper level's same-period delta (null when that column is absent or this
+  // level has none). See server/scripts/derive-wind-speed-delta-codebooks.ts.
+  windSpeedBook(res: number, level: number, upperDelta: number | null): CodeBook;
+  // The codebook for one freeze delta. `tempDelta` is the same period's decoded temp delta (the
+  // post-clamp reconstruction, never the raw input), or null when temp is absent from vars_mask
+  // — the res-keyed fallback (the tempΔ marginal). The freezing level is where the 0°C isotherm
+  // sits, so it moves with the airmass temperature, and temp decodes first, making its delta
+  // free context. See server/scripts/derive-freeze-delta-codebooks.ts.
+  freezeDeltaBook(res: number, tempDelta: number | null): CodeBook;
+  // Cloud cover deltas (0..7 quantized, deltas -7..7): low/mid/high each under its own single
+  // shared table (not pooled across levels) — low clouds are local/convective, high clouds broad
+  // persistent cirrus. See server/scripts/derive-cloud-delta-codebooks.ts.
+  cloudLowDelta: DeltaCodec;
+  cloudMidDelta: DeltaCodec;
+  cloudHighDelta: DeltaCodec;
+  // Order-1 codebooks over the wet columns' quantized VALUES (not deltas — zero is an absorbing
+  // regime), keyed by (resolution, SAME-period weathercode class, previous decoded value) —
+  // bootstrap for a column's first cell. Rain/snow key on a BUCKET of the previous value (see
+  // accumBucket). See server/scripts/derive-precip-accum-codebooks.ts.
+  precipBook(res: number, wcClass: number, prev: number | null): CodeBook;
+  snowBook(res: number, wcClass: number, prev: number | null): CodeBook;
+  rainBook(res: number, wcClass: number, prev: number | null): CodeBook;
+  // The codebook for one temp delta. `tod` is the arriving period's tempTodBucket; `prevDelta`
+  // the previous decoded delta in this column — the post-clamp reconstruction, never the raw
+  // input — or null for the column's first delta (bootstrap). The diurnal cycle drives the delta
+  // sign; the previous delta adds the airmass's actual trajectory. See
+  // server/scripts/derive-temp-delta-codebooks.ts.
+  tempDeltaBook(res: number, tod: number, prevDelta: number | null): CodeBook;
+}
+
+function buildClassBooks(t: ClassTableSet): ClassBooks {
+  const weathercode = makeConditionalCodec(t.WEATHERCODE_BOOTSTRAP_WEIGHTS, t.WEATHERCODE_WEIGHTS);
+
+  const windDirBootstrap = buildTable(t.WIND_DIR_BOOTSTRAP_WEIGHTS);
+  const windDirTables = t.WIND_DIR_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
+  const windDirUpperTables = t.WIND_DIR_UPPER_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
+
+  const windSpeedTables = t.WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL.map((rows) => rows.map(buildTable));
+  const windSpeedUpperTables = t.WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
+
+  const freezeDeltaTablesByRes = t.FREEZE_DELTA_WEIGHTS_BY_RES.map(buildTable);
+  const freezeDeltaTempTables = t.FREEZE_DELTA_TEMP_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
+
+  const makeValueCodec = (bootstrapWeights: number[], weightsByRes: number[][][], ctxOf: (prev: number) => number) => {
+    const bootstrap = buildTable(bootstrapWeights);
+    const tables = weightsByRes.map((rows) => rows.map(buildTable));
+    // Context rows are prev-major (ctxOf(prev) × WC_CLASSES + wcClass), matching the derive
+    // script's emission order.
+    return (res: number, wcClass: number, prev: number | null): CodeBook =>
+      prev === null ? bootstrap : tables[res][ctxOf(prev) * WC_CLASSES + wcClass];
+  };
+
+  const tempDeltaBootstrap = buildTable(t.TEMP_DELTA_BOOTSTRAP_WEIGHTS);
+  const tempDeltaTablesByRes = t.TEMP_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
+
+  return {
+    encodeWeathercode: weathercode.encode,
+    decodeWeathercode: weathercode.decode,
+    windDirBook(res, prev, upper) {
+      if (prev === null) return windDirBootstrap;
+      return upper === null
+        ? windDirTables[res][prev]
+        : windDirUpperTables[res][prev * NDIR + upper];
+    },
+    windSpeedBook(res, level, upperDelta) {
+      return upperDelta === null
+        ? windSpeedTables[res][level]
+        : windSpeedUpperTables[res][upperDeltaBucket(upperDelta)];
+    },
+    freezeDeltaBook(res, tempDelta) {
+      return tempDelta === null
+        ? freezeDeltaTablesByRes[res]
+        : freezeDeltaTempTables[res][tempDeltaBucket(tempDelta)];
+    },
+    cloudLowDelta: makeDeltaCodec(t.CLOUD_LOW_DELTA_WEIGHTS, 7),
+    cloudMidDelta: makeDeltaCodec(t.CLOUD_MID_DELTA_WEIGHTS, 7),
+    cloudHighDelta: makeDeltaCodec(t.CLOUD_HIGH_DELTA_WEIGHTS, 7),
+    precipBook: makeValueCodec(t.PRECIP_BOOTSTRAP_WEIGHTS, t.PRECIP_WEIGHTS_BY_RES, (p) => p),
+    snowBook: makeValueCodec(t.SNOW_BOOTSTRAP_WEIGHTS, t.SNOW_WEIGHTS_BY_RES, accumBucket),
+    rainBook: makeValueCodec(t.RAIN_BOOTSTRAP_WEIGHTS, t.RAIN_WEIGHTS_BY_RES, accumBucket),
+    tempDeltaBook(res, tod, prevDelta) {
+      if (prevDelta === null) return tempDeltaBootstrap;
+      return tempDeltaTablesByRes[res][tempDeltaBucket(prevDelta) * TEMP_DELTA_TOD_BUCKETS + tod];
+    },
+  };
+}
+
+// The base (class 0) table set — codebooks.gen.ts as one ClassTableSet.
+const BASE_TABLES: ClassTableSet = {
+  CLOUD_LOW_DELTA_WEIGHTS, CLOUD_MID_DELTA_WEIGHTS, CLOUD_HIGH_DELTA_WEIGHTS,
+  FREEZE_DELTA_WEIGHTS_BY_RES, FREEZE_DELTA_TEMP_WEIGHTS_BY_RES,
+  PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES,
+  SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES,
+  RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_RES,
+  TEMP_DELTA_BOOTSTRAP_WEIGHTS, TEMP_DELTA_WEIGHTS_BY_RES,
+  WEATHERCODE_BOOTSTRAP_WEIGHTS, WEATHERCODE_WEIGHTS,
+  WIND_DIR_BOOTSTRAP_WEIGHTS, WIND_DIR_WEIGHTS_BY_RES, WIND_DIR_UPPER_WEIGHTS_BY_RES,
+  WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL, WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES,
+};
+
+export { CODEBOOK_CLASSES };
+export const CLASS_BOOKS: ClassBooks[] = [BASE_TABLES, ...CLASS_TABLES].map(buildClassBooks);
+if (CLASS_BOOKS.length !== CODEBOOK_CLASSES)
+  throw new Error(`entropy: ${CLASS_BOOKS.length} codebook classes built, expected ${CODEBOOK_CLASSES}`);
+
+// ── Class-independent symbol codecs ─────────────────────────────────────────────
+
+export function encodeWindSpeedDelta(sink: SymSink, book: CodeBook, delta: number): void {
+  sink.sym(book, delta + WIND_SPEED_DELTA_MAX);
+}
+
+export function decodeWindSpeedDelta(src: SymSource, book: CodeBook): number {
+  return src.sym(book) - WIND_SPEED_DELTA_MAX;
+}
+
+export function encodeFreezeDelta(sink: SymSink, book: CodeBook, delta: number): void {
+  sink.sym(book, delta + FREEZE_DELTA_MAX);
+}
+
+export function decodeFreezeDelta(src: SymSource, book: CodeBook): number {
+  return src.sym(book) - FREEZE_DELTA_MAX;
 }
 
 // Emits the code for a period-over-period temp change `delta` (°C) under `book`; jumps outside
@@ -398,6 +357,23 @@ export function decodeTempDelta(src: SymSource, book: CodeBook): number {
   return sym - TEMP_DELTA_CORE_RADIUS;
 }
 
+// ── Class-0 aliases ─────────────────────────────────────────────────────────────
+// The base class's books under their historical names, for tests and analysis scripts. The v1
+// codec itself goes through CLASS_BOOKS — never these.
+const BASE = CLASS_BOOKS[0];
+export const encodeWeathercode = BASE.encodeWeathercode;
+export const decodeWeathercode = BASE.decodeWeathercode;
+export const windDirBook = BASE.windDirBook;
+export const windSpeedBook = BASE.windSpeedBook;
+export const freezeDeltaBook = BASE.freezeDeltaBook;
+export const CLOUD_LOW_DELTA = BASE.cloudLowDelta;
+export const CLOUD_MID_DELTA = BASE.cloudMidDelta;
+export const CLOUD_HIGH_DELTA = BASE.cloudHighDelta;
+export const precipBook = BASE.precipBook;
+export const snowBook = BASE.snowBook;
+export const rainBook = BASE.rainBook;
+export const tempDeltaBook = BASE.tempDeltaBook;
+
 // ── Wire-format freeze ──────────────────────────────────────────────────────────
 // Every table above is wire format: re-deriving any of them changes what already-encoded v1
 // messages mean, silently — a decode under drifted tables produces plausible garbage, not an
@@ -408,42 +384,49 @@ export function decodeTempDelta(src: SymSource, book: CodeBook): number {
 // What's pinned is the *quantized* frequencies — the exact tables the coder runs on — not the
 // raw corpus weights, so drift in quantizeFreqs itself trips the same tripwire as a weight
 // change. The delta ranges need no separate entries: each frequency array's length encodes its
-// range (2·maxDelta+1 symbols, +1 escape for temp).
+// range (2·maxDelta+1 symbols, +1 escape for temp). The per-class sets (classes 1..K-1) are
+// pinned right alongside the base set: a drifted class table desyncs any message whose header
+// selected it.
 const qf = (w: number[]) => quantizeFreqs(w);
-export const V1_CODEBOOKS = {
-  rans: { probBits: RANS_PROB_BITS, stateLow: RANS_L, wordBits: RANS_WORD_BITS },
+const bundleOf = (t: ClassTableSet) => ({
   weathercode: {
-    bootstrap: qf(WEATHERCODE_BOOTSTRAP_WEIGHTS),
-    weights: WEATHERCODE_WEIGHTS.map(qf),
-    classOf: WEATHERCODE_CLASS, // keys the wet columns' tables — drift desyncs them silently
+    bootstrap: qf(t.WEATHERCODE_BOOTSTRAP_WEIGHTS),
+    weights: t.WEATHERCODE_WEIGHTS.map(qf),
   },
   windDir: {
-    bootstrap: qf(WIND_DIR_BOOTSTRAP_WEIGHTS),
-    byRes: WIND_DIR_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
-    upperByRes: WIND_DIR_UPPER_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+    bootstrap: qf(t.WIND_DIR_BOOTSTRAP_WEIGHTS),
+    byRes: t.WIND_DIR_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+    upperByRes: t.WIND_DIR_UPPER_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
   },
   windSpeedDelta: {
-    byResLevel: WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL.map((rows) => rows.map(qf)),
-    upperByRes: WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+    byResLevel: t.WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL.map((rows) => rows.map(qf)),
+    upperByRes: t.WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
     maxDelta: WIND_SPEED_DELTA_MAX,
   },
-  precip: { bootstrap: qf(PRECIP_BOOTSTRAP_WEIGHTS), byRes: PRECIP_WEIGHTS_BY_RES.map((rows) => rows.map(qf)) },
-  snow: { bootstrap: qf(SNOW_BOOTSTRAP_WEIGHTS), byRes: SNOW_WEIGHTS_BY_RES.map((rows) => rows.map(qf)), bucketEdges: ACCUM_BUCKET_EDGES },
-  rain: { bootstrap: qf(RAIN_BOOTSTRAP_WEIGHTS), byRes: RAIN_WEIGHTS_BY_RES.map((rows) => rows.map(qf)), bucketEdges: ACCUM_BUCKET_EDGES },
+  precip: { bootstrap: qf(t.PRECIP_BOOTSTRAP_WEIGHTS), byRes: t.PRECIP_WEIGHTS_BY_RES.map((rows) => rows.map(qf)) },
+  snow: { bootstrap: qf(t.SNOW_BOOTSTRAP_WEIGHTS), byRes: t.SNOW_WEIGHTS_BY_RES.map((rows) => rows.map(qf)), bucketEdges: ACCUM_BUCKET_EDGES },
+  rain: { bootstrap: qf(t.RAIN_BOOTSTRAP_WEIGHTS), byRes: t.RAIN_WEIGHTS_BY_RES.map((rows) => rows.map(qf)), bucketEdges: ACCUM_BUCKET_EDGES },
   // The freeze tables also key on tempDelta.prevBucketEdges (below) via tempDeltaBucket.
   freezeDelta: {
-    byRes: FREEZE_DELTA_WEIGHTS_BY_RES.map(qf),
-    tempByRes: FREEZE_DELTA_TEMP_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+    byRes: t.FREEZE_DELTA_WEIGHTS_BY_RES.map(qf),
+    tempByRes: t.FREEZE_DELTA_TEMP_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
   },
-  cloudLowDelta: qf(CLOUD_LOW_DELTA_WEIGHTS),
-  cloudMidDelta: qf(CLOUD_MID_DELTA_WEIGHTS),
-  cloudHighDelta: qf(CLOUD_HIGH_DELTA_WEIGHTS),
+  cloudLowDelta: qf(t.CLOUD_LOW_DELTA_WEIGHTS),
+  cloudMidDelta: qf(t.CLOUD_MID_DELTA_WEIGHTS),
+  cloudHighDelta: qf(t.CLOUD_HIGH_DELTA_WEIGHTS),
   tempDelta: {
-    bootstrap: qf(TEMP_DELTA_BOOTSTRAP_WEIGHTS),
-    byRes: TEMP_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+    bootstrap: qf(t.TEMP_DELTA_BOOTSTRAP_WEIGHTS),
+    byRes: t.TEMP_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
     coreRadius: TEMP_DELTA_CORE_RADIUS,
     escapeBits: TEMP_DELTA_ESCAPE_BITS,
     prevBucketEdges: TEMP_DELTA_PREV_EDGES,
     todBuckets: TEMP_DELTA_TOD_BUCKETS,
   },
+});
+export const V1_CODEBOOKS = {
+  rans: { probBits: RANS_PROB_BITS, stateLow: RANS_L, wordBits: RANS_WORD_BITS },
+  ...bundleOf(BASE_TABLES),
+  weathercodeClassOf: WEATHERCODE_CLASS, // keys the wet columns' tables — drift desyncs them silently
+  // Classes 1..CODEBOOK_CLASSES-1 (class 0 is the base bundle spread above).
+  classes: CLASS_TABLES.map(bundleOf),
 } as const;

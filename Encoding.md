@@ -163,11 +163,77 @@ The core idea that makes this codec efficient is that the client and server have
 
 For my first pass at the corpus, I pulled my Windy favorites since these are locations where I often check the weather. There are 137 of them and they are heavily concentrated in mountainous mid-latitude/polar regions: Cascades, BC, Alaska, NZ, Norway, the Alps. It's a fairly good sample for ski weather but excludes most of earth's climates. I pulled a year of data for the GFS seamless model (HRRR/GFS) through the [Open-Meteo historical weather API](https://open-meteo.com/en/docs/historical-weather-api) so that I would get full seasonal coverage. Open-Meteo also provides a [Single Runs API](https://open-meteo.com/en/docs/single-runs-api) but full model coverage only goes back to April 2026. ECMWF HRES is available going back to 2024 but I found the coverage to be spotty and the HRES model excludes pressure-level variables and freezing level. 
 
+I found that the codebooks trained on my favorites underperformed especially in tropical locations. This makes sense considering that my favorites are heavily biased towards cool climates suitable for skiing and contain no tropical locations. Tropical locations cost an average of 10.74 bits/period which is 35% more than the training set (7.93). De-deriving the codebooks yielded a nice improvement, especially in tropical and ocean regions that weren't represented at all in the training data.
+
+┌───────────────┬───────────────────┬────────────┬───────┐
+│    Stratum    │ Old (ski-trained) │ Re-derived │   Δ   │
+├───────────────┼───────────────────┼────────────┼───────┤
+│ Köppen A      │ 10.74             │ 9.73       │ −1.01 │
+├───────────────┼───────────────────┼────────────┼───────┤
+│ Köppen B      │ 7.09              │ 6.61       │ −0.48 │
+├───────────────┼───────────────────┼────────────┼───────┤
+│ Köppen C      │ 8.22              │ 7.73       │ −0.49 │
+├───────────────┼───────────────────┼────────────┼───────┤
+│ Köppen D      │ 7.03              │ 6.67       │ −0.36 │
+├───────────────┼───────────────────┼────────────┼───────┤
+│ Köppen E      │ 5.69              │ 5.43       │ −0.26 │
+├───────────────┼───────────────────┼────────────┼───────┤
+│ ocean 0°–30°N │ 9.80              │ 8.58       │ −1.22 │
+├───────────────┼───────────────────┼────────────┼───────┤
+│ favorites     │ 7.93              │ 8.09       │ +0.16 │
+└───────────────┴───────────────────┴────────────┴───────┘
+
+┌────────────────────────┬─────────┬─────────┬──────────────┐
+│        Stratum         │ Old b/p │ New b/p │ Fill old→new │
+├────────────────────────┼─────────┼─────────┼──────────────┤
+│ Köppen A (tropical)    │ 10.74   │ 9.73    │ 82.6→84.6%   │
+├────────────────────────┼─────────┼─────────┼──────────────┤
+│ Köppen B (arid)        │ 7.09    │ 6.61    │ 91.6→93.0%   │
+├────────────────────────┼─────────┼─────────┼──────────────┤
+│ Köppen C (temperate)   │ 8.22    │ 7.73    │ 88.6→89.7%   │
+├────────────────────────┼─────────┼─────────┼──────────────┤
+│ Köppen D (continental) │ 7.03    │ 6.67    │ 91.4→92.5%   │
+├────────────────────────┼─────────┼─────────┼──────────────┤
+│ Köppen E (polar)       │ 5.69    │ 5.43    │ 95.4→96.1%   │
+├────────────────────────┼─────────┼─────────┼──────────────┤
+│ ocean 0°–30°N          │ 9.80    │ 8.58    │ 85.4→87.8%   │
+├────────────────────────┼─────────┼─────────┼──────────────┤
+│ ocean 30°S–0°          │ 9.20    │ 7.96    │ 86.3→89.2%   │
+├────────────────────────┼─────────┼─────────┼──────────────┤
+│ favorites              │ 7.93    │ 8.09    │ 88.9→88.6%   │
+└────────────────────────┴─────────┴─────────┴──────────────┘
+
+
 I didn't want the codec to be too biased towards skiing, so I set out to expand the corpus to include a representative sample of earth's weather. To do this, I started by using [Köppen climate classification](https://en.wikipedia.org/wiki/K%C3%B6ppen_climate_classification) which has 5 main groups (tropical, dry, temperate, continental, and polar) that are further broken down into 30 total classifications. There's a huge range in how common each classification is so I decided to weight each climate by the square root of its land area. This strikes a balance between random sampling of all locations (high weight to common climates) and sampling by climate class (high weight to uncommon climates). 
 
 Köppen only includes land. Ocean weather differs substantially, with cooler temperatures, no diurnal swings, and more consistent winds. I divided the ocean area into 30° latitude bands (0°->30°N, 30°N->60°N, etc.) and used the same `sqrt(area)` weighting for them. Since ocean weather is much less variable, I split the sampled points 85% land/15% ocean. This brings the ocean climate in line with other high-level Köppen groups, which account for about 10-20% each.
 
 I randomly sampled 10,000 locations (85% land, 15% ocean) and excluded locations that were within 25km of another point so that two points wouldn't be in the same grid cell of a weather model. The original corpus of Windy favorites is now used as a validation set but isn't used for training. 
+
+I sampled data going back 10 years and included 12 14-day forecasts for each point. I split up the 2 years into 12 blocks 2-months each and randomly selected a point within that time frame. This should give a good range of weather forecasts.
+
+When I looked at the sampling based on Köppen classification, I noticed something interesting. Norway and Sweden were sparsely sampled, but eastern Siberia was one of the most densely sampled regions in the world. This is because most of Scandinavia, Siberia, Canada, Alaska, and high altitude mountain ranges throughout the world share the `Dfc` climate (Continental, no dry season, cold summer). Due to the contrast of the wintertime [Siberian High](https://en.wikipedia.org/wiki/Siberian_High) and the summertime monsoon, parts of NE Siberia/Yakutia are classified as `Dwc`/`Dwd` meaning they have dry winters (driest winter month has less than 1/10 the precipitation of the wettest summer month), and either cold or severely cold winters (coldest month below -30°C/-36.4°F). 
+
+I also experiemented with biasing the locations towards peaks. Mountain weather tends to be colder and windier than the surrounding lowlands. Going Blue users are more likely to be in the mountains so I wanted to make sure that these forecasts encded well. To test this I sampled peaks with over 600m of prominence and grouped them by elevation band. I found that the existing codec worked well for peaks. It actually worked better than for tropical locations and for my favorites set. I decided not to bias the training data towards peaks.
+
+┌─────────────────────────────────┬───────────┬───────┬─────────────┐
+│             Stratum             │ Locations │ Fill  │ bits/period │
+├─────────────────────────────────┼───────────┼───────┼─────────────┤
+│ peaks <3.5 km                   │ 60        │ 91.9% │ 6.90        │
+├─────────────────────────────────┼───────────┼───────┼─────────────┤
+│ peaks 3.5–5.5 km                │ 59        │ 90.6% │ 7.41        │
+├─────────────────────────────────┼───────────┼───────┼─────────────┤
+│ peaks ≥5.5 km                   │ 31        │ 92.3% │ 6.95        │
+├─────────────────────────────────┼───────────┼───────┼─────────────┤
+│ favorites (ski-skewed eval set) │ 137       │ 88.6% │ 8.09        │
+├─────────────────────────────────┼───────────┼───────┼─────────────┤
+│ Köppen A (worst stratum)        │ 216       │ 84.6% │ 9.73        │
+├─────────────────────────────────┼───────────┼───────┼─────────────┤
+│ Köppen E (best)                 │ 150       │ 96.1% │ 5.43        │
+└─────────────────────────────────┴───────────┴───────┴─────────────┘
+
+
+file:///Users/laneaasen/dev/weather/data/corpus-map.svg
 
 
 The Going Blue codec is trained on:
@@ -176,8 +242,31 @@ The Going Blue codec is trained on:
  - 14-day forecasts pulled at 10-day intervals
  - 4 different weather models (best_match, gfs_seamless, ecmwf_ifs/ecmwf_ifs025, gem_seamless)
 
-
 Forecasts are pulled from the [Open-Meteo historical weather API](https://open-meteo.com/en/docs/historical-weather-api). The total corpus far exceeded the limits of the free tier so I upgraded to the professional plan to pull the corpus.
+
+## Climate Clustering
+
+Earlier, I tried using climate to predict weathercode. I ran k-means clustering on the weathercode distributions and then created a separate weathercode for each cluster with the encoder choosing the one that minimized message length. This approach turned out to not work as well as having a separate codebook for each weathercode, since the current weather is a better predictor of future weather than the climate is. 
+
+After expanding the corpus to be more representative of the whole planet's weather, I wondered if it was time to bring back multiple codebooks. There are large differences in the distribution of weather, so I think that having some best-of mechanism will help.
+
+This time the selector is global — one codebook class per message, covering every variable's tables at once — rather than per-variable. The v1 header was 22 bits packed into 4 base-85 characters, which hold 25.6 bits, so a 3-bit class selector rides completely free: up to 8 classes with zero wire cost (a 9th class would cost a whole extra character). Classes are learned by k-means/EM in code-length space: each training forecast (location × window) is summarized as sparse context×symbol counts, the cost of a forecast under a class is just counts · code lengths, and the assignment step is exactly the encoder's try-all-pick-best. Class 0 is pinned to the global tables as a floor, class rows are smoothed toward the global distribution so rare contexts don't fragment, and weak classes are reseeded from the worst-encoded forecasts. The whole ladder runs off precomputed per-forecast counts, so no corpus re-scans.
+
+Doubling the class count kept helping all the way to the free-selector limit, at a remarkably steady ~0.85% per doubling (held-out eval split):
+
+┌──────────────┬────────────────┬──────────────────┐
+│   Codebooks  │ Δ vs global    │ Δ vs previous K  │
+├──────────────┼────────────────┼──────────────────┤
+│ 1 (global)   │ —              │ —                │
+├──────────────┼────────────────┼──────────────────┤
+│ 2            │ −0.84%         │ −0.84%           │
+├──────────────┼────────────────┼──────────────────┤
+│ 4            │ −1.65%         │ −0.82%           │
+├──────────────┼────────────────┼──────────────────┤
+│ 8            │ −2.50%         │ −0.86%           │
+└──────────────┴────────────────┴──────────────────┘
+
+The classes the EM found are recognizably climatic. K=2 split off a marine regime (biggest wins in the Southern Ocean); K=4 added a tropical-ocean class; at K=8 every stratum improves — tropical oceans by 5.5–6.5%, tropical land 3.7%, my favorites 2.1% — and the global class 0 wins only ~7.5% of real messages. Temperature benefits most from class conditioning (−6.2% at K=8), which makes sense: the diurnal delta distributions differ enormously between, say, a marine layer and a continental interior. The smoothing strength barely matters (α of 50, 200, and 800 land within 0.01% of each other) because each class still trains on ~13k forecasts. I stopped at 8 classes: the gains hadn't hit an elbow, but 8 is where the free header bits run out.
 
 ## Model Choice
 

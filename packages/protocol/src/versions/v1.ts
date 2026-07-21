@@ -8,14 +8,12 @@ import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js"
 import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec, ContextResolver } from "../model.js";
 import {
-  encodeWeathercode, decodeWeathercode, WEATHERCODE_CLASS,
-  windDirBook, windSpeedBook, encodeWindSpeedDelta, decodeWindSpeedDelta,
-  precipBook, snowBook, rainBook,
-  freezeDeltaBook, encodeFreezeDelta, decodeFreezeDelta,
-  CLOUD_HIGH_DELTA, CLOUD_MID_DELTA, CLOUD_LOW_DELTA, type DeltaCodec,
-  encodeTempDelta, decodeTempDelta, tempDeltaBook, tempTodBucket,
+  WEATHERCODE_CLASS, CLASS_BOOKS, CODEBOOK_CLASSES, type ClassBooks,
+  encodeWindSpeedDelta, decodeWindSpeedDelta,
+  encodeFreezeDelta, decodeFreezeDelta,
+  encodeTempDelta, decodeTempDelta, tempTodBucket,
   TEMP_DELTA_MIN, TEMP_DELTA_MAX,
-  makeBitSink, makeBitSource, type CodeBook,
+  makeBitSink, makeBitSource, type CodeBook, type DeltaCodec,
 } from "../entropy.js";
 
 export const V1_VERSION = 1;
@@ -33,14 +31,17 @@ const VERSION = V1_VERSION;
 // codebooks were derived across resolutions for exactly this reason, see entropy.ts).
 //
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
-// packed header. Packed header layout (22 bits):
-//   code:7 seq:8 elev:7
+// packed header. Packed header layout (25 bits):
+//   code:7 seq:8 elev:7 class:3
 // seq:8 stores (seq - 1), i.e. 1..256; the largest layout is seq = 5 × durationDays.
+// class:3 is the codebook-class selector: the encoder builds the body under every class's table
+// set and keeps the cheapest (see CLASS_BOOKS in entropy.ts). The 3 bits ride free — 25 bits
+// still fit the same 4 base-85 header chars 22 did (4 × log2(85) ≈ 25.6).
 // The body carries no length field — it is a single rANS stream (see rans.ts), serialized
 // little-endian and self-delimiting: the decoder knows the structure and consumes exactly the
 // symbols the encoder wrote (see encodeBodyLE/decodeBodyLE and SymSource.assertDone).
-// The weathercode column has no codebook selector either: each symbol's codebook is keyed by
-// the previously decoded symbol, which both sides already have (see entropy.ts).
+// The columns have no per-column selectors: within a class, each symbol's codebook is keyed by
+// context both sides already have (see entropy.ts).
 export const V1_SEQ_BITS = 8;
 
 // Message code: client-assigned key the response echoes; see RequestContext / model.ts.
@@ -49,9 +50,12 @@ const CODE_BITS = 7;
 // so metre precision isn't needed.
 const ELEV_BITS = 7;
 const ELEV_STEP_M = 100;
+// Codebook-class selector: 3 bits for up to 8 classes (CODEBOOK_CLASSES may be smaller; the
+// field width is wire format and stays fixed).
+const CLASS_BITS = 3;
 
 export const V1_HEADER_BITS =
-  CODE_BITS + V1_SEQ_BITS + ELEV_BITS; // 22
+  CODE_BITS + V1_SEQ_BITS + ELEV_BITS + CLASS_BITS; // 25
 // Total chars before the body: the shared version prefix plus this version's packed header.
 export const V1_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V1_HEADER_BITS); // 1 + 4 = 5
 const HEADER_BITS = V1_HEADER_BITS;
@@ -121,11 +125,11 @@ const quantCloud = (p: Period, field: "cloud_high" | "cloud_mid" | "cloud_low"):
 const CLOUD_DELTA_COLUMNS: {
   bit: number;
   field: "cloud_high" | "cloud_mid" | "cloud_low";
-  codec: DeltaCodec;
+  codecOf(bk: ClassBooks): DeltaCodec;
 }[] = [
-  { bit: VARS_BIT.cch, field: "cloud_high", codec: CLOUD_HIGH_DELTA },
-  { bit: VARS_BIT.ccm, field: "cloud_mid", codec: CLOUD_MID_DELTA },
-  { bit: VARS_BIT.ccl, field: "cloud_low", codec: CLOUD_LOW_DELTA },
+  { bit: VARS_BIT.cch, field: "cloud_high", codecOf: (bk) => bk.cloudHighDelta },
+  { bit: VARS_BIT.ccm, field: "cloud_mid", codecOf: (bk) => bk.cloudMidDelta },
+  { bit: VARS_BIT.ccl, field: "cloud_low", codecOf: (bk) => bk.cloudLowDelta },
 ];
 
 // Value columns (precip chance, snow, rain), in body (column-major) order: each cell's quantized
@@ -143,17 +147,17 @@ const CLOUD_DELTA_COLUMNS: {
 // buildBody/decode below.
 const VALUE_COLUMNS: {
   bit: number;
-  book(res: number, wcClass: number, prev: number | null): CodeBook;
+  bookOf(bk: ClassBooks): (res: number, wcClass: number, prev: number | null) => CodeBook;
   get(p: Period): number;          // quantized value symbol
   set(p: Period, v: number): void; // dequantize the symbol back onto the period
 }[] = [
-  { bit: 0, book: precipBook,
+  { bit: 0, bookOf: (bk) => bk.precipBook,
     get: (p) => clampInt(Math.round((p.precip ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.precip = Math.round(v * 100 / 7); } },
-  { bit: 2, book: snowBook,
+  { bit: 2, bookOf: (bk) => bk.snowBook,
     get: (p) => compandSqrt(p.snow_cm ?? 0, SNOW_K, ACCUM_BITS),
     set: (p, v) => { p.snow_cm = expandSqrt(v, SNOW_K); } },
-  { bit: 12, book: rainBook,
+  { bit: 12, bookOf: (bk) => bk.rainBook,
     get: (p) => compandSqrt(p.rain_mm ?? 0, RAIN_K, ACCUM_BITS),
     set: (p, v) => { p.rain_mm = expandSqrt(v, RAIN_K); } },
 ];
@@ -197,12 +201,13 @@ const todTableIdx = (firstHour: number, periodHours: number[], utcOffsetHours: n
 };
 
 // A sequential reader over the entropy-coded body: convenience wrappers for each codec around
-// the shared SymSource (which owns the coder state).
-function reader(bits: number[]) {
+// the shared SymSource (which owns the coder state). `books` is the codebook class the header
+// selected — the table set every symbol decodes under.
+function reader(bits: number[], books: ClassBooks) {
   const src = makeBitSource(bits);
   return {
     int: (n: number): number => src.raw(n),
-    weathercode: (prevSym: number | null): number => decodeWeathercode(src, prevSym),
+    weathercode: (prevSym: number | null): number => books.decodeWeathercode(src, prevSym),
     sym: (book: CodeBook): number => src.sym(book),
     windSpeedDelta: (book: CodeBook): number => decodeWindSpeedDelta(src, book),
     freezeDelta: (book: CodeBook): number => decodeFreezeDelta(src, book),
@@ -236,9 +241,12 @@ const BIT_NAME: Record<number, string> = Object.fromEntries(
 // Callback receiving each column's contribution as it is emitted: label and bit cost.
 type ColumnSink = (name: string, bits: number) => void;
 
-// Build the column-major body (shared by the string encoder and the instrumented breakdown). The
-// optional sink observes per-column bit costs without changing the bytes produced.
-function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } {
+// Build the column-major body under one codebook class's table set (shared by the string
+// encoder — which tries every class and keeps the cheapest — and the instrumented breakdown).
+// The optional sink observes per-column bit costs without changing the bytes produced. The
+// returned sink exposes `cost` (exact model bits) without serializing, so the class search
+// only pays for serialization once, on the winner.
+function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): ReturnType<typeof makeBitSink> {
   const nModels = msg.periods.length;
   const nPeriods = msg.periods[0].length;
   const res = resTableIdx(msg.periodHours);
@@ -255,7 +263,7 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
   const wcSym: number[][] = msg.periods.map((rows) => rows.map(() => 0));
   eachCell(nPeriods, nModels, (p, m) => {
     const idx = WMO2IDX[msg.periods[m][p].weathercode] ?? 0;
-    encodeWeathercode(em, prevWcSym, idx);
+    books.encodeWeathercode(em, prevWcSym, idx);
     wcSym[m][p] = idx;
     prevWcSym = idx;
   });
@@ -286,7 +294,7 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
       for (let p = 1; p < nPeriods; p++) {
         const delta = Math.min(Math.max(
           quantTemp(msg.periods[m][p], field) - reconstructed, TEMP_DELTA_MIN), TEMP_DELTA_MAX);
-        encodeTempDelta(em, tempDeltaBook(res[p], tod[p], prevDelta), delta);
+        encodeTempDelta(em, books.tempDeltaBook(res[p], tod[p], prevDelta), delta);
         reconstructed += delta;
         prevDelta = delta;
         deltas[m][p] = delta;
@@ -305,7 +313,7 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
     for (let m = 0; m < nModels; m++) {
       em.raw(quantFreeze(msg.periods[m][0]), FREEZE_ANCHOR_BITS);
       for (let p = 1; p < nPeriods; p++) {
-        const book = freezeDeltaBook(res[p], tempDeltas ? tempDeltas[m][p] : null);
+        const book = books.freezeDeltaBook(res[p], tempDeltas ? tempDeltas[m][p] : null);
         encodeFreezeDelta(em, book, quantFreeze(msg.periods[m][p]) - quantFreeze(msg.periods[m][p - 1]));
       }
     }
@@ -318,10 +326,11 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
   for (const col of CLOUD_DELTA_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
     before = em.cost;
+    const codec = col.codecOf(books);
     for (let m = 0; m < nModels; m++) {
       em.raw(quantCloud(msg.periods[m][0], col.field), CLOUD_ANCHOR_BITS);
       for (let p = 1; p < nPeriods; p++) {
-        col.codec.encode(em, quantCloud(msg.periods[m][p], col.field) - quantCloud(msg.periods[m][p - 1], col.field));
+        codec.encode(em, quantCloud(msg.periods[m][p], col.field) - quantCloud(msg.periods[m][p - 1], col.field));
       }
     }
     mark(BIT_NAME[col.bit], before);
@@ -334,10 +343,11 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
   for (const col of VALUE_COLUMNS) {
     if (!(msg.vars_mask & (1 << col.bit))) continue;
     before = em.cost;
+    const book = col.bookOf(books);
     let prev: number | null = null;
     eachCell(nPeriods, nModels, (p, m) => {
       const v = col.get(msg.periods[m][p]);
-      em.sym(col.book(res[p], WEATHERCODE_CLASS[wcSym[m][p]], prev), v);
+      em.sym(book(res[p], WEATHERCODE_CLASS[wcSym[m][p]], prev), v);
       prev = v;
     });
     mark(BIT_NAME[col.bit], before);
@@ -364,7 +374,7 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
     for (let m = 0; m < nModels; m++) {
       em.raw(spd[m][0], WIND_SPEED_BITS);
       for (let p = 1; p < nPeriods; p++) {
-        const book = windSpeedBook(res[p], col.level, upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null);
+        const book = books.windSpeedBook(res[p], col.level, upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null);
         encodeWindSpeedDelta(em, book, spd[m][p] - spd[m][p - 1]);
       }
     }
@@ -381,7 +391,7 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
     eachCell(nPeriods, nModels, (p, m) => {
       if (spd[m][p] > 0) {
         const d = ((msg.periods[m][p][col.dir] as number) ?? 0) % 8;
-        em.sym(windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null), d);
+        em.sym(books.windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null), d);
         prevDir = d;
         eff[m] = d;
       }
@@ -393,13 +403,14 @@ function buildBody(msg: ForecastMessage, sink?: ColumnSink): { body: number[] } 
     mark(BIT_NAME[col.bit], before);
   }
 
-  return { body: em.bits };
+  return em;
 }
 
 // lat/lon/model/vars/duration/offset and the request datetime are recovered client-side via
 // `code` (RequestContext), and the period layout is derived from `seq` — so all of them are
-// intentionally absent from the header.
-function buildHeader(msg: ForecastMessage): number[] {
+// intentionally absent from the header. `cls` is the codebook class the body was built under —
+// encoder policy (cheapest of CLASS_BOOKS), never taken from the message.
+function buildHeader(msg: ForecastMessage, cls: number): number[] {
   const seq = msg.seq;
   if (!Number.isInteger(seq) || seq < 1 || seq > 1 << V1_SEQ_BITS)
     throw new Error(`v1: message has no valid fill-sequence number (seq=${seq})`);
@@ -407,34 +418,52 @@ function buildHeader(msg: ForecastMessage): number[] {
   putInt(headerBits, msg.code, CODE_BITS);
   putInt(headerBits, seq - 1, V1_SEQ_BITS);
   putInt(headerBits, Math.min(Math.max(Math.round(msg.elevation / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1), ELEV_BITS);
+  putInt(headerBits, cls, CLASS_BITS);
   return headerBits;
 }
 
+// Builds the body under every codebook class and keeps the cheapest — the selector this buys is
+// 3 free header bits, so the only cost is encoder CPU. Deterministic: model cost is exact and
+// ties break to the lowest class, so re-encoding a decoded message reproduces the same string.
+// The optional sink observes the WINNING class's per-column costs (that pass is rebuilt so the
+// search itself stays sink-free).
+function buildBestBody(msg: ForecastMessage, sink?: ColumnSink): { em: ReturnType<typeof makeBitSink>; cls: number } {
+  let best = { em: buildBody(msg, CLASS_BOOKS[0]), cls: 0 };
+  for (let cls = 1; cls < CLASS_BOOKS.length; cls++) {
+    const em = buildBody(msg, CLASS_BOOKS[cls]);
+    if (em.cost < best.em.cost) best = { em, cls };
+  }
+  if (sink) buildBody(msg, CLASS_BOOKS[best.cls], sink);
+  return best;
+}
+
 export function v1MessageToString(msg: ForecastMessage): string {
-  const { body } = buildBody(msg);
-  return encodeVersion(VERSION) + encode(buildHeader(msg)) + encodeBodyLE(body);
+  const { em, cls } = buildBestBody(msg);
+  return encodeVersion(VERSION) + encode(buildHeader(msg, cls)) + encodeBodyLE(em.bits);
 }
 
 // One column's contribution to a message: its model cost in (fractional) bits.
 export interface ColumnBreakdown { name: string; bits: number }
 
 // Per-column bit accounting for a message, for encoding experiments. Produces the identical string
-// as v1MessageToString (via the same buildBody), plus the bit cost of the version prefix, packed
-// header, weathercode, and every present variable column.
+// as v1MessageToString (via the same buildBestBody), plus the bit cost of the version prefix,
+// packed header, weathercode, and every present variable column.
 export interface V1Breakdown {
   encoded: string;
   chars: number;
   versionBits: number;   // self-describing version prefix
-  headerBits: number;    // packed header (code/periods/elev)
+  headerBits: number;    // packed header (code/seq/elev/class)
   bodyBits: number;      // actual serialized body bits (rANS state + renorm words)
   overheadBits: number;  // bodyBits − Σ columns[].bits: the coder's flush/renorm slack
+  codebookClass: number; // the class the try-all-pick-best encoder selected
   columns: ColumnBreakdown[];
 }
 
 export function v1EncodeBreakdown(msg: ForecastMessage): V1Breakdown {
   const columns: ColumnBreakdown[] = [];
-  const { body } = buildBody(msg, (name, bits) => columns.push({ name, bits }));
-  const encoded = encodeVersion(VERSION) + encode(buildHeader(msg)) + encodeBodyLE(body);
+  const { em, cls } = buildBestBody(msg, (name, bits) => columns.push({ name, bits }));
+  const body = em.bits;
+  const encoded = encodeVersion(VERSION) + encode(buildHeader(msg, cls)) + encodeBodyLE(body);
   const modelBits = columns.reduce((s, c) => s + c.bits, 0);
   return {
     encoded,
@@ -443,6 +472,7 @@ export function v1EncodeBreakdown(msg: ForecastMessage): V1Breakdown {
     headerBits: HEADER_BITS,
     bodyBits: body.length,
     overheadBits: body.length - modelBits,
+    codebookClass: cls,
     columns,
   };
 }
@@ -461,6 +491,9 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   const code = hr.int(CODE_BITS);
   const seq = hr.int(V1_SEQ_BITS) + 1;
   const elevation = hr.int(ELEV_BITS) * ELEV_STEP_M;
+  const codebookClass = hr.int(CLASS_BITS);
+  if (codebookClass >= CODEBOOK_CLASSES)
+    throw new Error(`v1: unknown codebook class ${codebookClass} (this build has ${CODEBOOK_CLASSES})`);
 
   // Recover the request-echo fields the slim header omits.
   const ctx = resolve(code);
@@ -486,12 +519,13 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   // period's UTC start hour and the UTC offset key the temp time-of-day tables — the identical
   // values the encoder used (msg.hour is layout-derived on both sides).
   const periods = decodeBody(
-    decodeBodyLE(rest.slice(HEADER_CHARS)), vars_mask, layout.periodHours,
-    firstStart.getUTCHours(), utcOffsetHours, 1);
+    decodeBodyLE(rest.slice(HEADER_CHARS)), CLASS_BOOKS[codebookClass], vars_mask,
+    layout.periodHours, firstStart.getUTCHours(), utcOffsetHours, 1);
 
   return {
     version,
     code,
+    codebookClass,
     days: layout.days,
     models_mask,
     vars_mask,
@@ -513,11 +547,11 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
 // implies (`periodHours` is the derived layout — it keys the wind tables per period). Throws
 // unless the stream is consumed exactly (see SymSource.assertDone).
 function decodeBody(
-  bodyBits: number[], vars_mask: number, periodHours: number[],
+  bodyBits: number[], books: ClassBooks, vars_mask: number, periodHours: number[],
   firstHour: number, utcOffsetHours: number, nModels: number,
 ): Period[][] {
   const nPeriods = periodHours.length;
-  const rd = reader(bodyBits);
+  const rd = reader(bodyBits, books);
 
   const periods: Period[][] = Array.from({ length: nModels }, () =>
     Array.from({ length: nPeriods }, () => ({ weathercode: 0 } as Period)));
@@ -549,7 +583,7 @@ function decodeBody(
       periods[m][0][field] = quant - TEMP_OFFSET;
       let prevDelta: number | null = null;
       for (let p = 1; p < nPeriods; p++) {
-        const delta = rd.tempDelta(tempDeltaBook(res[p], tod[p], prevDelta));
+        const delta = rd.tempDelta(books.tempDeltaBook(res[p], tod[p], prevDelta));
         quant += delta;
         periods[m][p][field] = quant - TEMP_OFFSET;
         prevDelta = delta;
@@ -566,7 +600,7 @@ function decodeBody(
       let quant = rd.int(FREEZE_ANCHOR_BITS);
       periods[m][0].freeze_m = quant * FREEZE_STEP_M;
       for (let p = 1; p < nPeriods; p++) {
-        quant += rd.freezeDelta(freezeDeltaBook(res[p], tempDeltas ? tempDeltas[m][p] : null));
+        quant += rd.freezeDelta(books.freezeDeltaBook(res[p], tempDeltas ? tempDeltas[m][p] : null));
         periods[m][p].freeze_m = quant * FREEZE_STEP_M;
       }
     }
@@ -574,11 +608,12 @@ function decodeBody(
 
   for (const col of CLOUD_DELTA_COLUMNS) {
     if (!(vars_mask & (1 << col.bit))) continue;
+    const codec = col.codecOf(books);
     for (let m = 0; m < nModels; m++) {
       let quant = rd.int(CLOUD_ANCHOR_BITS);
       periods[m][0][col.field] = Math.round((quant * 100) / 7);
       for (let p = 1; p < nPeriods; p++) {
-        quant += rd.delta(col.codec);
+        quant += rd.delta(codec);
         periods[m][p][col.field] = Math.round((quant * 100) / 7);
       }
     }
@@ -589,9 +624,10 @@ function decodeBody(
   // first, chained across model boundaries.
   for (const col of VALUE_COLUMNS) {
     if (!(vars_mask & (1 << col.bit))) continue;
+    const book = col.bookOf(books);
     let prev: number | null = null;
     eachCell(nPeriods, nModels, (p, m) => {
-      const v = rd.sym(col.book(res[p], WEATHERCODE_CLASS[wcSym[m][p]], prev));
+      const v = rd.sym(book(res[p], WEATHERCODE_CLASS[wcSym[m][p]], prev));
       col.set(periods[m][p], v);
       prev = v;
     });
@@ -612,7 +648,7 @@ function decodeBody(
       spd[m][0] = speed;
       (periods[m][0][col.kph] as number) = speed * KPH_PER_STEP;
       for (let p = 1; p < nPeriods; p++) {
-        const book = windSpeedBook(res[p], col.level, upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null);
+        const book = books.windSpeedBook(res[p], col.level, upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null);
         speed += rd.windSpeedDelta(book);
         spd[m][p] = speed;
         (periods[m][p][col.kph] as number) = speed * KPH_PER_STEP;
@@ -626,7 +662,7 @@ function decodeBody(
     let prevDir: number | null = null;
     eachCell(nPeriods, nModels, (p, m) => {
       if (spd[m][p] > 0) {
-        const d = rd.sym(windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null));
+        const d = rd.sym(books.windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null));
         prevDir = d;
         eff[m] = d;
       }

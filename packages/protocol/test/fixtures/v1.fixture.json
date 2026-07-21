@@ -7,10 +7,11 @@
     "durationDays": 2,
     "utcOffsetHours": -9
   },
-  "encoded": "\"!!&#P!)SU%jX1CX63m1'\"w%:Syx5sxtav#$UgrK*Ubf6!,8L_Y5d*r<66>5(GoU9RRXL2",
+  "encoded": "\"!!I6qGJnQxASRi7g(/wPA=CwLZu$z0;oTn\"kK*)+FkCj0K0#9OkrYy4l(&,*2vQG$RKiM",
   "decoded": {
     "version": 1,
     "code": 0,
+    "codebookClass": 5,
     "days": 3,
     "models_mask": 1,
     "vars_mask": 7935,

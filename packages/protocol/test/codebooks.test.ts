@@ -13,7 +13,7 @@ import { V1_CODEBOOKS, V1_VERSION } from "../src/index.js";
 //     below. Never overwrite an existing entry: that would re-freeze the old version's tables
 //     to new values, which is exactly the silent drift this test exists to catch.
 const FROZEN_DIGESTS: Record<number, string> = {
-  1: "ba4306379b5fa9da", // pre-ship; re-recorded freely until v1 has real deployed clients
+  1: "627e12806873f9fe", // pre-ship; re-recorded freely until v1 has real deployed clients
 };
 
 const digest = createHash("sha256").update(JSON.stringify(V1_CODEBOOKS)).digest("hex").slice(0, 16);
