@@ -678,7 +678,10 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
         initialNumToRender={1}
         maxToRenderPerBatch={2}
         windowSize={3}
-        removeClippedSubviews
+        // Never let the ScrollView natively detach canvas tiles: a Skia Canvas repaints only on
+        // React commits, so a reattached tile keeps its released (blank) Metal drawable.
+        // Virtualization via windowSize still unmounts far-off tiles for memory.
+        removeClippedSubviews={false}
         getItemLayout={(_, index) => ({
           length: CANVAS_TILE_W,
           offset: CANVAS_TILE_W * index,
