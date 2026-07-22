@@ -40,8 +40,8 @@ function spanLabel(msg: ForecastMessage): string {
 }
 
 // The priority mode the forecast was requested with (msg.mode: Detail/Auto/Range). "Range"
-// reads as "Long range"; "Auto priority" is qualified so it can't be mistaken for the "Auto"
-// model (both otherwise render as a bare "Auto" in the same label).
+// reads as "Long range"; "Auto priority" is qualified so it reads as the priority mode rather
+// than a model name in the same label.
 const PRIORITY_LABELS = ['Detail', 'Auto priority', 'Long range'];
 function priorityLabel(msg: ForecastMessage): string {
   return PRIORITY_LABELS[msg.mode] ?? 'Auto priority';
@@ -76,9 +76,7 @@ function normalizedForecastData(encoded: string): string {
 function cacheMetaLabel(slot: Slot, token: string, includeDate = false): string {
   try {
     const msg = decodeAny(slot.encoded!, token);
-    const models = modelLabelsFromMask(msg.models_mask)
-      .map((m) => (m === 'Auto' ? 'Auto model' : m))
-      .join(' + ');
+    const models = modelLabelsFromMask(msg.models_mask).join(' + ');
     const requested = includeDate
       ? requestDateTimeLabel(slot.requestedAt)
       : requestTimeLabel(slot.requestedAt);
