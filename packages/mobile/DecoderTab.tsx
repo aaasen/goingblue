@@ -3,13 +3,13 @@ import {
   StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView,
 } from 'react-native';
 import {
-  VARS_BIT, startDatetime, type ForecastMessage,
+  VARS_BIT, startDatetime, MODE_NAMES, DEFAULT_MODE, type ForecastMessage,
 } from '@weather/protocol';
 import { decodeAny, loadStore, attachResponse, loadPastForecasts, type Slot } from './cache';
 import type { TimeFormat, Units } from './settings';
 import LocationMap from './LocationMap';
 import Meteogram from './Meteogram';
-import { modelLabelsFromMask } from './models';
+import { modelLabelsFromMask, modelIconsFromMask } from './models';
 
 // ── Meta labels ────────────────────────────────────────────────────────────
 
@@ -39,12 +39,10 @@ function spanLabel(msg: ForecastMessage): string {
   return `${msg.days}d ${resolutionLabel(msg)}`;
 }
 
-// The priority mode the forecast was requested with (msg.mode: Detail/Auto/Range). "Range"
-// reads as "Long range"; "Auto priority" is qualified so it reads as the priority mode rather
-// than a model name in the same label.
-const PRIORITY_LABELS = ['Detail', 'Auto priority', 'Long range'];
+// The priority mode the forecast was requested with (msg.mode: Detail/Auto/Range),
+// labelled the same way as the Builder tab's priority selector.
 function priorityLabel(msg: ForecastMessage): string {
-  return PRIORITY_LABELS[msg.mode] ?? 'Auto priority';
+  return MODE_NAMES[msg.mode] ?? MODE_NAMES[DEFAULT_MODE];
 }
 
 function metaLabel(msg: ForecastMessage, units: Units): string {
@@ -76,7 +74,7 @@ function normalizedForecastData(encoded: string): string {
 function cacheMetaLabel(slot: Slot, token: string, includeDate = false): string {
   try {
     const msg = decodeAny(slot.encoded!, token);
-    const models = modelLabelsFromMask(msg.models_mask).join(' + ');
+    const models = modelIconsFromMask(msg.models_mask).join(' ');
     const requested = includeDate
       ? requestDateTimeLabel(slot.requestedAt)
       : requestTimeLabel(slot.requestedAt);

@@ -17,3 +17,8 @@ export function modelLabelsFromMask(mask: number): string[] {
     .filter((model) => mask & (1 << MODEL_BIT[model.value.toUpperCase()]))
     .map((model) => model.label);
 }
+
+// Just the leading flag emoji from each matching label (drops the abbreviation).
+export function modelIconsFromMask(mask: number): string[] {
+  return modelLabelsFromMask(mask).map((label) => label.split(' ')[0]);
+}
