@@ -63,13 +63,13 @@ const PRIORITIES = [
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
 // protocol variables together (e.g. "Clouds" covers high/mid/low cloud cover, not total).
 const VAR_GROUPS = [
-  { value: 'clouds', code: 'c', label: 'Clouds', vars: CONFIGURABLE_VAR_GROUPS.c },
+  { value: 'clouds', code: 'c', label: 'Detailed Clouds', vars: CONFIGURABLE_VAR_GROUPS.c },
   { value: 'highwind', code: 'w', label: 'High Altitude Winds', vars: CONFIGURABLE_VAR_GROUPS.w },
   { value: 'freeze', code: 'f', label: 'Freezing Level', vars: CONFIGURABLE_VAR_GROUPS.f },
 ];
 
-// Clouds on by default; high altitude winds and freezing level off.
-const DEFAULT_GROUPS = new Set(['clouds']);
+// No extra variables selected by default.
+const DEFAULT_GROUPS = new Set<string>();
 
 // The request leads with the protocol version and picks a priority mode (`p:`), not a duration
 // or resolution — the server fills the max response length (`c:`, in chars) along the mode's
@@ -300,7 +300,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
         />
       </Section>
 
-      <Section label="Variables">
+      <Section label="Extra Variables">
         <View style={styles.varList}>
           {VAR_GROUPS.map((group, idx) => {
             // A group is unavailable when the model can't supply any of its variables.
