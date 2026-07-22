@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity,
-  ActivityIndicator, Alert, TextInput, Modal,
+  ActivityIndicator, Alert, TextInput, Modal, Linking,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
@@ -60,14 +60,15 @@ const PRIORITIES = [
   { value: MODE_RANGE, token: 'r', label: 'Range' },
 ];
 
-// Model-selector help copy. Each line names the forecast center(s) behind a Model option and,
-// where it's a blend, the short-range/global pair with their resolution and horizon.
+// Model-selector help copy. Each line pairs the option's flag label with the forecast center(s)
+// behind it and, where it's a blend, the short-range/global pair with resolution and horizon.
 const MODEL_INFO = [
-  { name: 'Auto', desc: 'Chooses the highest resolution model for your location from over 30 regional weather models.' },
-  { name: 'US', desc: 'Blend of HRRR (3km, 48hr, continental US) and GFS (13km, 16 day, global).' },
-  { name: 'CA', desc: 'Blend of HRDPS (2.5km, 48hr, Canada) and GEM (15km, 10 day, global).' },
-  { name: 'EU', desc: 'IFS HRES (9km, 15 day, global).' },
+  { name: '🌐 Auto', desc: 'Chooses the highest resolution model for your location from over 30 regional weather models.' },
+  { name: '🇺🇸 US', desc: 'Blend of HRRR (3km, 48hr, continental US) and GFS (13km, 16 day, global).' },
+  { name: '🇨🇦 CA', desc: 'Blend of HRDPS (2.5km, 48hr, Canada) and GEM (15km, 10 day, global).' },
+  { name: '🇪🇺 EU', desc: 'IFS HRES (9km, 15 day, global).' },
 ];
+const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
 // protocol variables together (e.g. "Clouds" covers high/mid/low cloud cover, not total).
@@ -396,6 +397,13 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
             <Text style={styles.modalBold}>{m.name}</Text> — {m.desc}
           </Text>
         ))}
+        <Text style={styles.modalBody}>
+          More at{' '}
+          <Text style={styles.modalLink} onPress={() => Linking.openURL(OPEN_METEO_DOCS)}>
+            Open-Meteo
+          </Text>
+          .
+        </Text>
       </InfoModal>
     </ScrollView>
   );
@@ -450,6 +458,7 @@ const styles = StyleSheet.create({
   modalBody: { fontSize: 15, color: '#3a3a3c', lineHeight: 22 },
   modalItem: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginBottom: 10 },
   modalBold: { fontWeight: '700', color: '#1c1c1e' },
+  modalLink: { color: '#2a6bb5', textDecorationLine: 'underline' },
   modalButton: { marginTop: 18, height: 44, borderRadius: 12, backgroundColor: '#2a6bb5', alignItems: 'center', justifyContent: 'center' },
   modalButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 
