@@ -44,9 +44,10 @@ const VARIANTS = [
 interface GoldenCase {
   name: string;
   request: string;
-  // Open-Meteo responses keyed by request path+query (origin stripped, so replay is
-  // independent of OPEN_METEO_BASE_URL).
-  responses: Record<string, unknown>;
+  // Open-Meteo FlatBuffers responses, base64-encoded, keyed by request path+query (origin
+  // stripped, so replay is independent of OPEN_METEO_BASE_URL). The SDK transport is binary, so
+  // the recorded body is the raw response bytes rather than parsed JSON.
+  responses: Record<string, string>;
   encoded: string;
 }
 
@@ -60,16 +61,18 @@ const startEpochHour = Math.floor(Date.now() / 3600000);
 
 const cases: GoldenCase[] = [];
 const realFetch = globalThis.fetch;
-let recording: Record<string, unknown> = {};
+let recording: Record<string, string> = {};
 
 // Record by interception rather than a separate fetch pass so the pinned responses are, by
-// construction, exactly the bytes the pipeline consumed to produce the pinned output.
-globalThis.fetch = (async (input: string | URL | Request) => {
+// construction, exactly the bytes the pipeline consumed to produce the pinned output. The SDK
+// reads the body as an ArrayBuffer, so we capture the raw bytes (base64) and hand a fresh
+// Response with the same bytes back to the caller.
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = String(input);
-  const resp = await realFetch(input as never);
-  const text = await resp.text();
-  if (resp.ok) recording[keyOf(url)] = JSON.parse(text);
-  return new Response(text, { status: resp.status });
+  const resp = await realFetch(input as never, init as never);
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  if (resp.ok) recording[keyOf(url)] = Buffer.from(bytes).toString("base64");
+  return new Response(bytes, { status: resp.status });
 }) as typeof fetch;
 
 let k = 0;

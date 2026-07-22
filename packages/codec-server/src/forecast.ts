@@ -17,6 +17,10 @@ import {
   type ForecastMessage,
   type VersionedCodec,
 } from "@weather/protocol";
+import { fetchWeatherApi } from "openmeteo";
+import { Variable } from "@openmeteo/sdk/variable.js";
+import type { VariableWithValues } from "@openmeteo/sdk/variable-with-values.js";
+import type { WeatherApiResponse } from "@openmeteo/sdk/weather-api-response.js";
 
 // Each forecast center resolves to a pair of Open-Meteo model ids: one for surface variables and
 // one for pressure-level variables (500/600/700 hPa wind + temp). They're the same id except for
@@ -165,6 +169,58 @@ export interface Row {
   cloud_cover_low: number | null;
 }
 
+// Map an SDK variable — identified by (enum, altitude, pressureLevel) — back to the Open-Meteo
+// request name the rest of the pipeline keys on (`temperature_2m`, `wind_speed_500hPa`). Mirrors
+// the corpus collector's canonicalName (scripts/om-fetch.ts) so both fetch paths agree on names.
+function canonicalName(v: VariableWithValues): string {
+  const base = Variable[v.variable()];
+  if (v.pressureLevel() !== 0) return `${base}_${v.pressureLevel()}hPa`;
+  if (v.altitude() !== 0) return `${base}_${v.altitude()}m`;
+  return base;
+}
+
+// Decode a FlatBuffers response into the same column-per-variable HourlyData the JSON API used to
+// yield. The wire carries a UTC unix grid (start/end/interval) rather than ISO strings, so we
+// reconstruct the naive local-time labels ("YYYY-MM-DDTHH:MM") the aggregator's date/hour slicing
+// expects — production requests timezone=UTC (offset 0); the response's utcOffset covers any other
+// tz a caller passes. Every requested var gets a column: one the model lacks comes back all-null
+// (matching the old JSON path, where downstream reads coalesce missing fields to null).
+function decodeResponse(
+  resp: WeatherApiResponse,
+  hourlyVars: string[],
+): { hourly: HourlyData; elevation: number } {
+  const h = resp.hourly();
+  if (!h) throw new Error("Open-Meteo response has no hourly block");
+  const start = Number(h.time());
+  const end = Number(h.timeEnd());
+  const interval = h.interval();
+  const utcOffset = resp.utcOffsetSeconds();
+  const time: string[] = [];
+  for (let t = start; t < end; t += interval) {
+    time.push(new Date((t + utcOffset) * 1000).toISOString().slice(0, 16));
+  }
+
+  // Key by canonical name rather than trusting index order, so a variable the model drops or
+  // reorders can never silently misalign its neighbours.
+  const byName = new Map<string, VariableWithValues>();
+  for (let i = 0; i < h.variablesLength(); i++) {
+    const v = h.variables(i);
+    if (v) byName.set(canonicalName(v), v);
+  }
+  // Float32 values carry representation noise (0.2800000011920929); round to 2 dp — well beyond
+  // wire quantization — so the live path feeds the encoder the same precision the corpus/benchmark
+  // path does (scripts/om-fetch.ts uses the identical round2), keeping tuning and runtime aligned.
+  const round2 = (x: number) => Math.round(x * 100) / 100;
+  const hourly: Record<string, (number | null)[] | string[]> = { time };
+  for (const name of hourlyVars) {
+    const raw = byName.get(name)?.valuesArray();
+    hourly[name] = raw
+      ? Array.from(raw, (x) => (x == null || Number.isNaN(x) ? null : round2(x)))
+      : time.map(() => null);
+  }
+  return { hourly: hourly as unknown as HourlyData, elevation: resp.elevation() };
+}
+
 async function fetchOpenMeteo(
   source: string,
   hourlyVars: string[],
@@ -175,25 +231,25 @@ async function fetchOpenMeteo(
   elev_m?: number,
   pastDays = 0,
 ): Promise<{ hourly: HourlyData; elevation: number }> {
-  const params = new URLSearchParams({
-    latitude: String(lat),
-    longitude: String(lon),
-    hourly: hourlyVars.join(","),
+  const params: Record<string, unknown> = {
+    latitude: lat,
+    longitude: lon,
+    hourly: hourlyVars,
     timezone: tz,
-    forecast_days: String(nDays),
+    forecast_days: nDays,
     models: source,
-  });
-  if (elev_m !== undefined) params.set("elevation", String(elev_m));
-  if (pastDays > 0) params.set("past_days", String(pastDays));
+  };
+  if (elev_m !== undefined) params.elevation = elev_m;
+  if (pastDays > 0) params.past_days = pastDays;
   // Overridable so golden-corpus tests and verify-container can replay recorded responses
   // from a local fixture server instead of hitting the live API.
   const base = process.env["OPEN_METEO_BASE_URL"] ?? "https://api.open-meteo.com";
-  const url = `${base}/v1/forecast?${params}`;
-  console.log("Open-Meteo request:", url);
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`Open-Meteo ${resp.status}: ${await resp.text()}`);
-  const data = (await resp.json()) as { hourly: HourlyData; elevation: number };
-  return { hourly: data.hourly, elevation: data.elevation ?? 0 };
+  const url = `${base}/v1/forecast`;
+  console.log("Open-Meteo request:", url, params);
+  const results = await fetchWeatherApi(url, params);
+  const resp = results[0];
+  if (!resp) throw new Error("Open-Meteo returned no result");
+  return decodeResponse(resp, hourlyVars);
 }
 
 // Merge pressure-level columns from `pres` onto the surface response `surf`, aligning by the

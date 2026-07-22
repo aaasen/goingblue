@@ -16,25 +16,25 @@ importers:
       '@hono/node-server':
         specifier: ^1.12.0
         version: 1.12.0
+      '@openmeteo/sdk':
+        specifier: ^1.27.2
+        version: 1.27.2
       '@weather/protocol':
         specifier: workspace:*
         version: link:../protocol
       hono:
         specifier: ^4.6.0
         version: 4.6.0
+      openmeteo:
+        specifier: ^1.2.3
+        version: 1.2.3
     devDependencies:
-      '@openmeteo/sdk':
-        specifier: ^1.27.2
-        version: 1.27.2
       '@types/node':
         specifier: ^25.9.1
         version: 25.9.1
       geotiff:
         specifier: ^3.0.5
         version: 3.0.5
-      openmeteo:
-        specifier: ^1.2.3
-        version: 1.2.3
       typescript:
         specifier: ^5.4.0
         version: 5.4.2

@@ -30,14 +30,16 @@ if (!codecUrl) {
 const GOLDEN_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "golden", "goldens.json");
 const goldens = JSON.parse(readFileSync(GOLDEN_PATH, "utf8")) as {
   protocolVersion: number;
-  cases: { name: string; request: string; responses: Record<string, unknown>; encoded: string }[];
+  cases: { name: string; request: string; responses: Record<string, string>; encoded: string }[];
 };
 
 // One merged fixture map: a given path+query always carries the same recorded body (all cases
-// were recorded at one instant), so collisions across cases are identical by construction.
-const fixtures = new Map<string, unknown>();
+// were recorded at one instant), so collisions across cases are identical by construction. Bodies
+// are the raw FlatBuffers response bytes (base64 in the golden file), served verbatim so the
+// container's SDK transport decodes exactly what was recorded.
+const fixtures = new Map<string, Buffer>();
 for (const c of goldens.cases) {
-  for (const [key, body] of Object.entries(c.responses)) fixtures.set(key, body);
+  for (const [key, body] of Object.entries(c.responses)) fixtures.set(key, Buffer.from(body, "base64"));
 }
 
 const misses: string[] = [];
@@ -48,7 +50,7 @@ const server = createServer((req, res) => {
     res.writeHead(404).end("no fixture for this request");
     return;
   }
-  res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(body));
+  res.writeHead(200, { "Content-Type": "application/octet-stream" }).end(body);
 });
 await new Promise<void>((r) => server.listen(parseInt(values.port!), r));
 console.log(`fixture server on :${values.port} (${fixtures.size} recorded responses)`);

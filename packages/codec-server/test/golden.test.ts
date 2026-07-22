@@ -16,7 +16,7 @@ const GOLDEN_PATH = fileURLToPath(new URL("./golden/goldens.json", import.meta.u
 interface GoldenCase {
   name: string;
   request: string;
-  responses: Record<string, unknown>;
+  responses: Record<string, string>; // base64 FlatBuffers bodies, keyed by path+query
   encoded: string;
 }
 
@@ -35,7 +35,7 @@ describe.skipIf(!goldens)("golden corpus (bit-exact encode)", () => {
         const key = String(input).replace(/^https?:\/\/[^/]+/, "");
         const body = c.responses[key];
         if (body === undefined) throw new Error(`golden ${c.name}: unrecorded upstream request ${key}`);
-        return new Response(JSON.stringify(body), { status: 200 });
+        return new Response(Buffer.from(body, "base64"), { status: 200 });
       });
 
       const params = parseRequest(c.request);

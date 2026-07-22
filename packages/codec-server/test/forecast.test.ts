@@ -3,11 +3,59 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { DEFAULT_VARS_MASK, VARS_BIT } from "@weather/protocol";
+import { Variable } from "@openmeteo/sdk/variable.js";
 import {
   aggregateRows,
   toFullPeriod,
   type Row,
 } from "../src/forecast.js";
+
+// The production fetch path now decodes the Open-Meteo SDK (FlatBuffers) rather than JSON, so we
+// mock the SDK and reconstruct a FlatBuffers-shaped WeatherApiResponse from the committed JSON
+// fixture. This keeps the fixture human-readable and pinned (same values, same dates) while
+// exercising the real decodeResponse path. State is populated in beforeAll; fetchWeatherApi only
+// reads it when a test calls aggregateRows.
+const mockState = vi.hoisted(() => ({ fixture: null as any, Variable: null as any }));
+
+vi.mock("openmeteo", () => {
+  // Invert an Open-Meteo request name into the SDK's (enum, altitude, pressureLevel) identity.
+  const nameToTuple = (name: string): { base: string; altitude: number; pressureLevel: number } => {
+    let m = name.match(/^(.*)_(\d+)hPa$/);
+    if (m) return { base: m[1], altitude: 0, pressureLevel: Number(m[2]) };
+    m = name.match(/^(.*)_(\d+)m$/);
+    if (m) return { base: m[1], altitude: Number(m[2]), pressureLevel: 0 };
+    return { base: name, altitude: 0, pressureLevel: 0 };
+  };
+  const fetchWeatherApi = async () => {
+    const { fixture, Variable: V } = mockState;
+    const times: string[] = fixture.hourly.time;
+    const startSec = Date.parse(times[0] + ":00Z") / 1000;
+    const interval = 3600;
+    const vars = Object.keys(fixture.hourly)
+      .filter((k) => k !== "time")
+      .map((name) => {
+        const { base, altitude, pressureLevel } = nameToTuple(name);
+        const values = Float32Array.from(
+          (fixture.hourly[name] as (number | null)[]).map((v) => (v == null ? NaN : v)),
+        );
+        return {
+          variable: () => V[base],
+          altitude: () => altitude,
+          pressureLevel: () => pressureLevel,
+          valuesArray: () => values,
+        };
+      });
+    const hourly = {
+      time: () => BigInt(startSec),
+      timeEnd: () => BigInt(startSec + times.length * interval),
+      interval: () => interval,
+      variablesLength: () => vars.length,
+      variables: (i: number) => vars[i],
+    };
+    return [{ hourly: () => hourly, elevation: () => fixture.elevation, utcOffsetSeconds: () => 0 }];
+  };
+  return { fetchWeatherApi };
+});
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = join(__dirname, "fixtures/openmeteo_hres_14k.json");
@@ -49,6 +97,9 @@ beforeAll(async () => {
       models: "ecmwf_ifs",
       elevation: String(ELEV_M),
     });
+    // The fixture is stored as JSON for readability; regenerate it via the JSON endpoint (the
+    // SDK mock doesn't intercept a raw fetch). Runtime decoding of this data goes through the
+    // mocked SDK below.
     const resp = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
     if (!resp.ok) throw new Error(`fixture fetch failed: ${resp.status}`);
     fixture = await resp.json() as Fixture;
@@ -57,11 +108,10 @@ beforeAll(async () => {
     fixture = JSON.parse(readFileSync(FIXTURE_PATH, "utf-8")) as Fixture;
   }
 
-  vi.spyOn(globalThis, "fetch").mockResolvedValue({
-    ok: true,
-    json: async () => fixture,
-    text: async () => "",
-  } as unknown as Response);
+  // Feed the fixture to the mocked SDK; fetchWeatherApi rebuilds a FlatBuffers-shaped response
+  // from it on every call, so aggregateRows decodes the pinned data through the production path.
+  mockState.fixture = fixture;
+  mockState.Variable = Variable;
 });
 
 afterAll(() => {
