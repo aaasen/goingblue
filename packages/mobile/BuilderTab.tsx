@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity,
-  ActivityIndicator, Alert, TextInput,
+  ActivityIndicator, Alert, TextInput, Modal,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
@@ -136,6 +136,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const [numCopied, setNumCopied] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [priorityInfo, setPriorityInfo] = useState(false);
 
   // The reply always spans a single 160-char message; that sets the response length budget.
   const maxChars = DEFAULT_MESSAGES * CHARS_PER_MESSAGE;
@@ -284,7 +285,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
         )}
       </Section>
 
-      <Section label="Priority">
+      <Section label="Priority" info={() => setPriorityInfo(true)}>
         <SegmentedControl
           values={PRIORITIES.map((m) => m.label)}
           selectedIndex={PRIORITIES.findIndex((m) => m.value === mode)}
@@ -369,14 +370,56 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
           <Text style={styles.smsCopyText}>{numCopied ? 'Copied' : 'Copy'}</Text>
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={priorityInfo}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPriorityInfo(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setPriorityInfo(false)}
+        >
+          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
+            <Text style={styles.modalTitle}>Priority</Text>
+            <Text style={styles.modalBody}>
+              Going Blue packs as much information as it can into each message. Choose{' '}
+              <Text style={styles.modalBold}>Detail</Text> for short-range hourly forecasts. Choose{' '}
+              <Text style={styles.modalBold}>Range</Text> for extended forecasts up to 14 days. Choose{' '}
+              <Text style={styles.modalBold}>Auto</Text> for a blend of the two.
+            </Text>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => setPriorityInfo(false)}
+              accessibilityRole="button"
+            >
+              <Text style={styles.modalButtonText}>Got it</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </ScrollView>
   );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+function Section({ label, info, children }: { label: string; info?: () => void; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>{label}</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionLabel}>{label}</Text>
+        {info && (
+          <TouchableOpacity
+            onPress={info}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel={`About ${label}`}
+          >
+            <Text style={styles.sectionInfo}>ⓘ</Text>
+          </TouchableOpacity>
+        )}
+      </View>
       {children}
     </View>
   );
@@ -386,8 +429,18 @@ const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: '#f2f2f7' },
   content: { padding: 16, paddingBottom: 48 },
 
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', padding: 32 },
+  modalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20, width: '100%', maxWidth: 340 },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: '#1c1c1e', marginBottom: 10 },
+  modalBody: { fontSize: 15, color: '#3a3a3c', lineHeight: 22 },
+  modalBold: { fontWeight: '700', color: '#1c1c1e' },
+  modalButton: { marginTop: 18, height: 44, borderRadius: 12, backgroundColor: '#2a6bb5', alignItems: 'center', justifyContent: 'center' },
+  modalButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+
   section: { marginBottom: 20 },
-  sectionLabel: { fontSize: 12, fontWeight: '600', color: '#6e6e73', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  sectionLabel: { fontSize: 12, fontWeight: '600', color: '#6e6e73', textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionInfo: { fontSize: 14, color: '#2a6bb5', marginLeft: 6 },
 
   varList: { backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
   varRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10 },
