@@ -63,10 +63,10 @@ const PRIORITIES = [
 // Model-selector help copy. Each line pairs the option's flag label with the forecast center(s)
 // behind it and, where it's a blend, the short-range/global pair with resolution and horizon.
 const MODEL_INFO = [
-  { name: '🌐 Auto', desc: 'Chooses the highest resolution model for your location from over 30 regional weather models.' },
-  { name: '🇺🇸 US', desc: 'Blend of HRRR (3km, 48hr, continental US) and GFS (13km, 16 day, global).' },
-  { name: '🇨🇦 CA', desc: 'Blend of HRDPS (2.5km, 48hr, Canada) and GEM (15km, 10 day, global).' },
-  { name: '🇪🇺 EU', desc: 'IFS HRES (9km, 15 day, global).' },
+  { name: '🌐 Auto', desc: 'Chooses the highest resolution model for your location from over 30 regional weather models' },
+  { name: '🇺🇸 US', desc: 'Blend of HRRR (3km, 48hr, continental US) and GFS (13km, 16 day, global)' },
+  { name: '🇨🇦 CA', desc: 'Blend of HRDPS (2.5km, 48hr, Canada) and GEM (15km, 10 day, global)' },
+  { name: '🇪🇺 EU', desc: 'IFS HRES (9km, 15 day, global)' },
 ];
 const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 
