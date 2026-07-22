@@ -151,7 +151,20 @@ that picks a codebook is context both sides already know, so it costs no wire bi
 
 ## Development
 
-To get running locally:
+Everything below is bundled into one tmux session:
+
+```
+pnpm install
+./dev.sh          # Postgres (docker) + codec server + gateway + Expo; re-attaches if running
+./dev.sh kill     # tear it all down (stops the database too; it runs with --rm, so its data is discarded)
+```
+
+The `servers` window holds a `tsc --build --watch` pane plus the two servers under
+`node --watch`, so TypeScript edits compile and restart automatically; the `expo` window runs
+`npx expo start -c`. Ports: gateway :8080, Metro :8081, codec :8082 (moved off its usual 8081
+default, which Metro would collide with), Postgres :5432.
+
+Or manually:
 
 1. Start a local Postgres database through Docker:
 
@@ -159,11 +172,13 @@ To get running locally:
 docker run --rm -d --name goingblue -p 5432:5432 -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=goingblue postgres:18
 ```
 
-2. Start the forecast server:
+2. Start the codec server, then the gateway routed at it (see VERSIONING.md for the split).
+   The codec moves to :8082 because Metro (step 5) wants its default :8081:
 
 ```
 pnpm install
-DB_USER=postgres DB_PASS=dev DB_NAME=goingblue pnpm start
+PORT=8082 pnpm start:codec
+DB_USER=postgres DB_PASS=dev DB_NAME=goingblue CODEC_URL_V1=http://localhost:8082 pnpm start
 ```
 
 3. Build the app
