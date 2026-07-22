@@ -398,7 +398,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
           </Text>
         ))}
         <Text style={styles.modalBody}>
-          More at{' '}
+          For model details, see{' '}
           <Text style={styles.modalLink} onPress={() => Linking.openURL(OPEN_METEO_DOCS)}>
             Open-Meteo
           </Text>
