@@ -136,9 +136,10 @@ interface Props {
   onForecastDataChange: (v: string) => void;
   units: Units;
   timeFormat: TimeFormat;
+  active: boolean;
 }
 
-export default function DecoderTab({ token, forecastData, onForecastDataChange, units, timeFormat }: Props) {
+export default function DecoderTab({ token, forecastData, onForecastDataChange, units, timeFormat, active }: Props) {
   const [decoded, setDecoded] = useState<ForecastMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cache, setCache] = useState<Slot[]>([]);
@@ -311,13 +312,17 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
             )}
           </View>
 
-          {/* Forecast location. Keyed on the coordinate so loading a new forecast recenters the map. */}
+          {/* Forecast location. Keyed on the coordinate so loading a new forecast recenters the map.
+              Only mounted while this tab is visible: a react-native-maps surface left mounted under a
+              `display: none` tab makes the builder tab's map drop its marker, so we unmount it here. */}
           <View style={styles.mapRow}>
-            <LocationMap
-              key={`${decoded.lat},${decoded.lon}`}
-              coord={{ lat: decoded.lat, lon: decoded.lon }}
-              height={160}
-            />
+            {active && (
+              <LocationMap
+                key={`${decoded.lat},${decoded.lon}`}
+                coord={{ lat: decoded.lat, lon: decoded.lon }}
+                height={160}
+              />
+            )}
           </View>
 
           {/* Forecast meteogram */}

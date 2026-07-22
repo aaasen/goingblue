@@ -91,7 +91,7 @@ export default function App() {
         accessibilityElementsHidden={tab !== 'decoder'}
         importantForAccessibility={tab === 'decoder' ? 'auto' : 'no-hide-descendants'}
       >
-        <DecoderTab token={token} forecastData={forecastData} onForecastDataChange={setForecastData} units={units} timeFormat={timeFormat} />
+        <DecoderTab token={token} forecastData={forecastData} onForecastDataChange={setForecastData} units={units} timeFormat={timeFormat} active={tab === 'decoder'} />
       </View>
       <View
         style={[styles.tabContent, tab !== 'settings' && styles.tabHidden]}
