@@ -11,7 +11,7 @@ Going Blue has several advantages over existing tools:
 4. Information density. Going Blue's compact encoding scheme allows it to deliver over 100 hourly data points in a single 160-character message. That's a 3 day forecast at 1 hour resolution, a 7 day forecast at 3 hour resolution, or a 10 day forecast at 6 hour resolution.
 
 Going Blue works like this:
-1. Build a forecast request from the mobile app. Choose forecast duration (3–10 days ahead — you always get the rest of today plus that many whole days), weather model, and the variables that you need. The server fills the reply with as much time resolution as fits, refining near-term days first.
+1. Build a forecast request from the mobile app. Choose a priority — Detail (hourly detail first), Auto (a balance, the default), or Range (the whole 12-day horizon first) — plus the weather model and the variables that you need. The server fills the reply with as much data as fits, in the order your priority asks for.
 2. Send the forecast request to (425) 434-5858 via Garmin inReach, ZOLEO, SMS, or any other satellite messenger.
 3. Copy the forecast response into the mobile app to visualize it.
 
@@ -70,7 +70,7 @@ the tables, and `analyze-temp-heldout.ts` for the temperature ladder.
 
 The response is **slim**: it omits everything the client itself chose, carrying only a 7-bit message
 `code`. The client assigns a code to each request and stores the request under it — lat/lon, the
-single model index, variables, the requested duration (`d:`, days), the location's UTC offset
+single model index, variables, the requested priority mode (`p:`), the location's UTC offset
 (`z:`, whole hours), and the request time (**UTC**) — then the response echoes the code so the
 client recovers those fields from its own storage (see `packages/mobile/cache.ts`). The code is a
 rotating index over 128 slots; reusing a code (as it cycles) evicts the old forecast in that slot.
@@ -81,22 +81,23 @@ The client sends the request time in the request (`t:`, UTC hours since the epoc
 hour); the server anchors the forecast window to it rather than to "now", so delivery delay can't
 shift which periods come back.
 
-The **period layout isn't on the wire either**. The server fills the response budget by refining
-whole days from the front of the window, one resolution step at a time (12h → 6h → 3h → 1h),
-along a canonical fill sequence, and the header carries only the resulting sequence number `seq` —
-both sides derive the identical layout (period count + per-period resolution) from
-`layoutFor(duration, request time, UTC offset, seq)` (see `packages/protocol/src/layout.ts`, which
-is therefore wire format). Periods align to **local midnight** (the `z:` offset). A duration of D
-days covers **D + 1 day slots**: the remainder of the request day, then D whole local days — so D is
-a floor on forward coverage rather than a ceiling (a 3-day request at 13:00 reaches 3 whole days
-past today, not 59 hours), and every whole day reports a complete daily high/low. Slot 0 is
-partial — its first period is the one containing the request time, so refining it discards earlier
-hours of today. `seq < slots` is the truncation fallback: that many whole slots, all daily.
+The **period layout isn't on the wire either**. The server fills the response budget by walking
+the priority mode's refinement path — every step either covers one more day slot at 12h or makes
+one covered slot a rung finer (12h → 6h → 3h → 1h); Detail plays refine-moves first, Range
+extend-moves first, Auto interleaves — and the header carries only the resulting sequence number
+`seq`. Both sides derive the identical layout (period count + per-period resolution) from
+`layoutFor(mode, request time, UTC offset, seq)` (see `packages/protocol/src/layout.ts`; the
+anchor tables and interpolation rule there are wire format). Periods align to **local midnight**
+(the `z:` offset). The horizon covers **13 day slots**: the remainder of the request day, then 12
+whole local days; how many are covered — and how finely — depends on the weather's entropy, not
+on a promised number. Slot 0 is partial — its first period is the one containing the request
+time, so refining it discards earlier hours of today. Every path starts with a truncated all-12h
+ramp, so a starved budget degrades to the same message in every mode.
 
 | Field            | Bits | Notes                                              |
 | ---------------- | ---- | -------------------------------------------------- |
 | version prefix   | 7    | self-describing protocol version (1 char)          |
-| code             | 7    | message code; recovers lat/lon, model, vars, duration, UTC offset, and request time from client storage |
+| code             | 7    | message code; recovers lat/lon, model, vars, priority mode, UTC offset, and request time from client storage |
 | seq              | 8    | fill-sequence number − 1; the period layout is derived from it |
 | elevation        | 7    | 100 m steps, 0–12700 m (coarse sanity check)       |
 
@@ -241,11 +242,11 @@ The forecast encoding is tested against real weather from Open-Meteo's [Historic
 
 Benchmarking uses a mix of hand-picked locations and random locations from around the globe. The hand-picked locations are 137 of my Windy favorites which are mostly mountainous locations in Alaska, BC, Cascades, Tetons, Andes, Alps, Norway, and New Zealand.
 
-The benchmark mirrors production exactly: for each cached forecast it runs the duration-first fill
+The benchmark mirrors production exactly: for each cached forecast it runs the priority-mode fill
 (the same `fitFillToBudget` the server uses) and records the largest fill sequence that fits the
-message budget. The headline metric is **mean fill %** — how far along the refinement ladder the
-budget carries a message, where 25% is the whole duration at 12h and 100% is a full 1h fill — shown
-for every forecast duration (3/5/7/10 days) × variable selection (base, plus each optional group).
+message budget. The headline metric is **mean fill %** — how far along its mode's path the budget
+carries a message, where 100% is the top of the path — shown for every priority mode
+(Detail/Auto/Range) × variable selection (base, plus each optional group).
 The report also draws the fill frontier, the median message's period layout, and per-view detail
 (fill-resolution distribution strips, the share of forecasts reaching each rung, and a mean
 bit-cost-per-column table). Interactive duration and variable selectors matching the app control

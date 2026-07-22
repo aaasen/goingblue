@@ -12,7 +12,8 @@ import {
   CARDINALS,
   DEFAULT_VARS_MASK,
   VARS_BIT,
-  slotsFor,
+  MODE_DETAIL,
+  MODE_RANGE,
   compandSqrt,
   expandSqrt,
   ACCUM_BITS,
@@ -57,30 +58,24 @@ function popcount(n: number): number {
 }
 
 // The decoder derives the period layout from (context, seq) — see layout.ts — so a test
-// message must be a canonical layout. A duration of D covers D + 1 day slots (the remainder of
-// the request day, then D whole days), so column length is constrained; two shapes cover every
-// column test, both anchored so the request time equals the FIRST period's start (which lets
-// ctxOf rebuild the request from the message's own month/day/hour):
-//   12-hour: any n ≥ 1, as a TRUNCATED layout (seq < slots ⇒ all-12h, `seq` slots covered).
-//            n = ceil(n/2) slots at seq = D = ceil(n/2), requested at hour 24D − 12n ∈ {0, 12},
-//            so the request slot's tail plus the whole days is exactly n periods.
-//   hourly:  n ≥ 25 only — the smallest all-1h layout is D = 1 requested at 23:00 (one hour of
-//            today plus a whole day). n periods = D = ceil(n/24) − 1 days at seq 4(D+1),
-//            requested at hour 24(D+1) − n.
+// message must sit on a mode's fill path. Two uniform shapes cover every column test, both
+// anchored so the request time equals the FIRST period's start (which lets ctxOf rebuild the
+// request from the message's own month/day/hour):
+//   12-hour: n ≤ 26, on Range's pure-12h ramp: s = ceil(n/2) slots at seq = s, requested at
+//            hour 24s − 12n ∈ {0, 12}, so the request slot's tail plus the whole days is
+//            exactly n periods.
+//   hourly:  49 ≤ n ≤ 72 only — the sole all-1h layout on any path is Detail seq 12 (1h×3):
+//            n periods requested at hour 72 − n.
 // The context's UTC offset is 0 throughout, so local time == UTC.
-function uniformLayout(n: number, hourly: boolean): { durationDays: number; days: number; seq: number; hourOfDay: number; stepHours: number } {
+function uniformLayout(n: number, hourly: boolean): { mode: number; days: number; seq: number; hourOfDay: number; stepHours: number } {
   if (hourly) {
-    const durationDays = Math.ceil(n / 24) - 1;
-    if (durationDays < 1)
-      throw new Error(`no canonical all-1h layout has ${n} periods (the minimum is 25)`);
-    const days = slotsFor(durationDays);
-    return { durationDays, days, seq: 4 * days, hourOfDay: 24 * days - n, stepHours: 1 };
+    if (n < 49 || n > 72)
+      throw new Error(`no canonical all-1h layout has ${n} periods (Detail 1h×3 spans 49..72)`);
+    return { mode: MODE_DETAIL, days: 3, seq: 12, hourOfDay: 72 - n, stepHours: 1 };
   }
-  const durationDays = Math.ceil(n / 2);
-  return {
-    durationDays, days: durationDays, seq: durationDays,
-    hourOfDay: 24 * durationDays - 12 * n, stepHours: 12,
-  };
+  const s = Math.ceil(n / 2);
+  if (s > 13) throw new Error(`no pure-12h layout has ${n} periods (the ramp tops at 13 slots)`);
+  return { mode: MODE_RANGE, days: s, seq: s, hourOfDay: 24 * s - 12 * n, stepHours: 12 };
 }
 
 function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean } = {}): ForecastMessage {
@@ -88,7 +83,11 @@ function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean 
   const nModels = popcount(models_mask);
   const periods = overrides.periods ?? Array.from({ length: nModels }, () => Array(3).fill(PERIOD));
   const n = periods[0].length;
-  const { durationDays, days, seq, hourOfDay, stepHours } = uniformLayout(n, opts.hourly ?? false);
+  // Overrides that pin their own seq bring the whole layout with them (mode/days/hour/
+  // periodHours) — don't derive one from the period count.
+  const { mode, days, seq, hourOfDay, stepHours } = overrides.seq != null
+    ? { mode: MODE_RANGE, days: 1, seq: overrides.seq, hourOfDay: 0, stepHours: 12 }
+    : uniformLayout(n, opts.hourly ?? false);
   return {
     version: V1_VERSION,
     code: 0,
@@ -102,7 +101,7 @@ function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean 
     lon: -150.989,
     elevation: 500,
     seq,
-    durationDays,
+    mode,
     periodHours: Array(n).fill(stepHours),
     utcOffsetHours: 0,
     ...overrides,
@@ -119,7 +118,7 @@ const ctxOf = (m: ForecastMessage): RequestContext => ({
   lat: m.lat,
   lon: m.lon,
   start: Date.UTC(new Date().getUTCFullYear(), m.month - 1, m.day, m.hour),
-  durationDays: m.durationDays,
+  mode: m.mode,
   utcOffsetHours: 0,
 });
 const noCtx = (): RequestContext | undefined => undefined;
@@ -130,13 +129,13 @@ function roundTrip(m: ForecastMessage): ForecastMessage {
 
 describe("v1 round-trip encoding", () => {
   it("preserves header fields", () => {
-    // Three 12h periods → a 2-day duration at seq 2; single model
+    // Three 12h periods → two slots of Range's ramp at seq 2; single model
     const original = msg({ models_mask: 0b001, month: 1, day: 31 });
     const decoded = roundTrip(original);
     expect(decoded.version).toBe(V1_VERSION);
     expect(decoded.days).toBe(2);
     expect(decoded.seq).toBe(2);
-    expect(decoded.durationDays).toBe(2);
+    expect(decoded.mode).toBe(MODE_RANGE);
     expect(decoded.periodHours).toEqual([12, 12, 12]);
     expect(decoded.models_mask).toBe(0b001);
     expect(decoded.vars_mask).toBe(ALL_VARS);
@@ -236,36 +235,39 @@ describe("v1 round-trip encoding", () => {
     }
   });
 
-  it("handles every resolution stage of the fill sequence", () => {
-    // A 2-day duration requested at midnight covers S = 3 whole slots; each stage boundary
-    // seq = (stage + 1) × S is the whole window at one resolution.
-    const D = 2;
-    const S = slotsFor(D);
-    const stageHours = [12, 6, 3, 1];
-    for (let stage = 0; stage < stageHours.length; stage++) {
-      const seq = (stage + 1) * S;
-      const n = S * (24 / stageHours[stage]);
+  it("handles every uniform resolution the paths reach", () => {
+    // Requested at midnight so slot 0 is a whole day. Range's breadth-first path passes
+    // through the full horizon at 12h/6h/3h (seq 13/26/39 over 13 slots); Detail seq 12 is
+    // the all-1h waypoint (1h×3).
+    const uniform: { mode: number; seq: number; days: number; stepHours: number }[] = [
+      { mode: MODE_RANGE, seq: 13, days: 13, stepHours: 12 },
+      { mode: MODE_RANGE, seq: 26, days: 13, stepHours: 6 },
+      { mode: MODE_RANGE, seq: 39, days: 13, stepHours: 3 },
+      { mode: MODE_DETAIL, seq: 12, days: 3, stepHours: 1 },
+    ];
+    for (const { mode, seq, days, stepHours } of uniform) {
+      const n = days * (24 / stepHours);
       const decoded = roundTrip(msg({
-        seq, durationDays: D, days: S, hour: 0,
-        periodHours: Array(n).fill(stageHours[stage]),
+        mode, seq, days, hour: 0,
+        periodHours: Array(n).fill(stepHours),
         periods: [Array(n).fill(PERIOD)],
       }));
       expect(decoded.seq).toBe(seq);
-      expect(decoded.days).toBe(S);
-      expect(decoded.periodHours).toEqual(Array(n).fill(stageHours[stage]));
+      expect(decoded.days).toBe(days);
+      expect(decoded.periodHours).toEqual(Array(n).fill(stepHours));
       expect(decoded.periods[0]).toHaveLength(n);
     }
   });
 
   it("round-trips a partial FIRST day (hourly layout anchored mid-day)", () => {
-    // 34 hourly periods → a 1-day duration requested at 14:00: 14:00–24:00 today, then a
-    // whole day. The requested day count is a floor on coverage, so `days` is D + 1 slots.
-    const decoded = roundTrip(msg({ periods: [Array(34).fill(PERIOD)] }, { hourly: true }));
-    expect(decoded.periods[0]).toHaveLength(34);
-    expect(decoded.durationDays).toBe(1);
-    expect(decoded.days).toBe(2);
+    // 58 hourly periods → Detail's 1h×3 waypoint requested at 14:00: 14:00–24:00 today, then
+    // two whole days.
+    const decoded = roundTrip(msg({ periods: [Array(58).fill(PERIOD)] }, { hourly: true }));
+    expect(decoded.periods[0]).toHaveLength(58);
+    expect(decoded.mode).toBe(MODE_DETAIL);
+    expect(decoded.days).toBe(3);
     expect(decoded.hour).toBe(14);
-    expect(decoded.periodHours).toEqual(Array(34).fill(1));
+    expect(decoded.periodHours).toEqual(Array(58).fill(1));
   });
 
   it("round-trips each of the four model indices (single model per response)", () => {
@@ -391,10 +393,10 @@ describe("v1 round-trip encoding", () => {
   // direction is entropy-coded under (resolution, prev, upper-level) context, with calm periods
   // carrying no direction symbol at all.
   const WIND_STEP = 5 * 1.609344;
-  // 12h periods: these columns are shorter than the 25 periods any all-1h layout must have (see
+  // 12h periods: these columns are shorter than the 49 periods any all-1h layout must have (see
   // uniformLayout). The 1h wind path is covered separately below.
-  const windMsg = (periods: Period[]) =>
-    msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] });
+  const windMsg = (periods: Period[], opts: { hourly?: boolean } = {}) =>
+    msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] }, opts);
 
   it("round-trips varied surface wind speeds (entropy-coded deltas) and directions", () => {
     const steps = [3, 5, 4, 6, 7, 4, 5, 3, 6, 5];
@@ -416,20 +418,21 @@ describe("v1 round-trip encoding", () => {
   it("encodes a near-constant surface wind speed column smaller than a wide-swinging one", () => {
     const flat = Array.from({ length: 64 }, () => ({ weathercode: 0, wind_sfc_kph: 7 * WIND_STEP, wind_sfc_dir: 0 }));
     const swings = Array.from({ length: 64 }, (_, i) => ({ weathercode: 0, wind_sfc_kph: (i % 2 === 0 ? 2 : 13) * WIND_STEP, wind_sfc_dir: 0 }));
-    expect(v1MessageToString(windMsg(flat)).length).toBeLessThan(v1MessageToString(windMsg(swings)).length);
+    expect(v1MessageToString(windMsg(flat, { hourly: true })).length)
+      .toBeLessThan(v1MessageToString(windMsg(swings, { hourly: true })).length);
   });
 
   it("round-trips surface wind at 1h resolution (the resolution-keyed direction codebook)", () => {
     // Direction is coded under a (resolution, prev, upper-level) context, so the finest
-    // resolution needs its own round-trip — 25 periods is the shortest all-1h layout.
-    const periods = Array.from({ length: 25 }, (_, i) => ({
+    // resolution needs its own round-trip — 49 periods is the shortest all-1h layout.
+    const periods = Array.from({ length: 49 }, (_, i) => ({
       weathercode: 0,
       wind_sfc_kph: (4 + (i % 5)) * WIND_STEP,
       wind_sfc_dir: i % 8,
     }));
     const decoded = roundTrip(
       msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] }, { hourly: true }));
-    expect(decoded.periodHours).toEqual(Array(25).fill(1));
+    expect(decoded.periodHours).toEqual(Array(49).fill(1));
     decoded.periods[0].forEach((p, i) => {
       expect(p.wind_sfc_kph).toBeCloseTo((4 + (i % 5)) * WIND_STEP, 3);
       expect(p.wind_sfc_dir).toBe(i % 8);
@@ -484,11 +487,12 @@ describe("v1 round-trip encoding", () => {
 
   it("an upper level that agrees makes the lower direction column cheaper (cross-level context)", () => {
     // w500+w600 both steady W vs w600 alone steady W: with the upper column present, the joint
-    // message's w600 model cost must undercut the standalone one. A uniform 6h layout: 16 days
-    // at stage 2 (seq = 3D), requested at midnight → 64 periods.
+    // message's w600 model cost must undercut the standalone one. Encode-only (never decoded),
+    // so the 64 × 6h periodHours don't need to sit on a fill path — the encoder reads
+    // periodHours directly.
     const n = 64;
     const sixHourly: Partial<ForecastMessage> = {
-      seq: 48, durationDays: 16, hour: 0, periodHours: Array(n).fill(6),
+      seq: 48, mode: MODE_RANGE, hour: 0, periodHours: Array(n).fill(6),
     };
     const both = msg({ ...sixHourly, vars_mask: (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600),
       periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_500_kph: 20 * WIND_STEP, wind_500_dir: 6, wind_600_kph: 15 * WIND_STEP, wind_600_dir: 6 }))] });
@@ -545,17 +549,17 @@ describe("delta temperature encoding", () => {
   it("clamp-heals under conditioning: contexts after the clamp derive from the CLAMPED chain", () => {
     // The delta codebooks are keyed by (resolution, time-of-day, previous decoded delta). An
     // encoder that chained the raw +40 jump instead of its clamped reconstruction would desync
-    // from the decoder's context. 25 hourly periods cross every 3h time-of-day bucket, with the
+    // from the decoder's context. 49 hourly periods cross every 3h time-of-day bucket, with the
     // clamped jump mid-column so every later delta is coded under post-clamp context.
     const temps: number[] = [];
     for (let i = 0; i < 12; i++) temps.push(-30 + i);          // steady +1 °C/h ramp
     temps.push(temps[11] + 40);                                 // +40 jump → clamped to +31
-    for (let i = 13; i < 25; i++) temps.push(temps[i - 1] - 2); // post-jump decline
+    for (let i = 13; i < 49; i++) temps.push(temps[i - 1] - 1); // post-jump decline
     const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
     const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }, { hourly: true }));
     const out = decoded.periods[0].map((p) => p.temp_c!);
     expect(out[12]).toBe(temps[11] + 31); // clamped
-    for (let i = 13; i < 25; i++) expect(out[i]).toBe(temps[i]); // healed, contexts in sync
+    for (let i = 13; i < 49; i++) expect(out[i]).toBe(temps[i]); // healed, contexts in sync
   });
 });
 
@@ -588,26 +592,26 @@ describe("order-1 precipitation encoding", () => {
   const snowPeriod = (cm: number): Period => ({ ...PERIOD, weathercode: cm > 0 ? 71 : 0, snow_cm: cm });
 
   it("collapses an all-dry snow column to almost nothing and round-trips to zero", () => {
-    const dry = Array.from({ length: 48 }, () => snowPeriod(0));
+    const dry = Array.from({ length: 72 }, () => snowPeriod(0));
     const decoded = roundTrip(msg({ vars_mask, periods: [dry] }, { hourly: true }));
     decoded.periods[0].forEach((p) => expect(p.snow_cm).toBe(0));
     // A dry run is the order-1 tables' cheapest input (P(0 | prev=0, clear) is near 1), so the
     // all-dry column must undercut one with snow every period. Compare exact body bits (not the
     // base-85 encoded char length) since a few bits of savings can land on either side of a char
     // boundary and not move the visible string length.
-    const snowy = Array.from({ length: 48 }, () => snowPeriod(20));
+    const snowy = Array.from({ length: 72 }, () => snowPeriod(20));
     const dryBits = v1EncodeBreakdown(msg({ vars_mask, periods: [dry] }, { hourly: true })).bodyBits;
     const snowyBits = v1EncodeBreakdown(msg({ vars_mask, periods: [snowy] }, { hourly: true })).bodyBits;
     expect(dryBits).toBeLessThan(snowyBits);
   });
 
   it("round-trips a mostly-zero snow column exactly", () => {
-    const vals = Array.from({ length: 48 }, (_, i) => (i % 12 === 0 ? 10 : 0));
+    const vals = Array.from({ length: 72 }, (_, i) => (i % 12 === 0 ? 10 : 0));
     const periods = [vals.map(snowPeriod)];
     const decoded = roundTrip(msg({ vars_mask, periods }, { hourly: true }));
     decoded.periods[0].forEach((p, i) => expect(p.snow_cm).toBeCloseTo(qSnow(vals[i]), 5));
     // Mostly-dry beats a column where every cell is nonzero and widely spread.
-    const dense = Array.from({ length: 48 }, (_, i) => snowPeriod(3 * (i + 1)));
+    const dense = Array.from({ length: 72 }, (_, i) => snowPeriod(3 * (i + 1)));
     const sparseBits = v1EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true })).bodyBits;
     const denseBits = v1EncodeBreakdown(msg({ vars_mask, periods: [dense] }, { hourly: true })).bodyBits;
     expect(sparseBits).toBeLessThan(denseBits);
@@ -618,7 +622,7 @@ describe("order-1 precipitation encoding", () => {
     // context (weathercode decodes first, always present). Identical snowfall under code 71
     // (snow) vs code 0 (clear) must cost fewer bits in the SNOW column — the weathercode column's
     // own cost differs between the two messages, so bodyBits would conflate the two effects.
-    const snowing = Array.from({ length: 48 }, () => ({ ...PERIOD, weathercode: 71, snow_cm: 6 }));
+    const snowing = Array.from({ length: 72 }, () => ({ ...PERIOD, weathercode: 71, snow_cm: 6 }));
     const clear = snowing.map((p) => ({ ...p, weathercode: 0 }));
     const snowBits = (periods: Period[]) =>
       v1EncodeBreakdown(msg({ vars_mask, periods: [periods] }, { hourly: true }))

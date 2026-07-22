@@ -8,7 +8,8 @@ import * as Location from 'expo-location';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
   VARS_BIT, V1_VERSION,
-  ALWAYS_VARS_MASK, CONFIGURABLE_VAR_GROUPS, MODEL_BIT, type RequestContext,
+  ALWAYS_VARS_MASK, CONFIGURABLE_VAR_GROUPS, MODEL_BIT,
+  MODE_DETAIL, MODE_AUTO, MODE_RANGE, type RequestContext,
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import { allocCode } from './cache';
@@ -49,13 +50,14 @@ type LocationMode = 'current' | 'custom';
 const LOCATION_MODES: LocationMode[] = ['current', 'custom'];
 const LOCATION_LABELS = ['Current Location', 'Custom'];
 
-// Forecast durations. The server fills the reply with as much resolution as fits: the whole
-// window is always covered, refined from the front (near-term days get sub-daily periods first).
-const DURATIONS = [
-  { value: 3, label: '3d' },
-  { value: 5, label: '5d' },
-  { value: 7, label: '7d' },
-  { value: 10, label: '10d' },
+// Priority modes. The server fills the reply by walking the mode's refinement path — Detail
+// spends the budget on hourly detail first, Range on covering the whole horizon first, Auto
+// balances the two. A mode is a priority, not a promise: the weather's entropy decides how far
+// the fill gets, so the copy carries no hour/day numbers.
+const PRIORITIES = [
+  { value: MODE_DETAIL, token: 'd', label: 'Detail' },
+  { value: MODE_AUTO, token: 'a', label: 'Auto' },
+  { value: MODE_RANGE, token: 'r', label: 'Range' },
 ];
 
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
@@ -69,16 +71,16 @@ const VAR_GROUPS = [
 // Clouds on by default; high altitude winds and freezing level off.
 const DEFAULT_GROUPS = new Set(['clouds']);
 
-// The request leads with the protocol version and picks a duration (`d:`, days), not a
-// resolution — the server fills the max response length (`c:`, in chars) with as much resolution
-// as fits. `z:` is the local-midnight UTC offset the period grid aligns to. `c:` is always
+// The request leads with the protocol version and picks a priority mode (`p:`), not a duration
+// or resolution — the server fills the max response length (`c:`, in chars) along the mode's
+// path. `z:` is the local-midnight UTC offset the period grid aligns to. `c:` is always
 // included, even at the default length. `u:` carries the account token so the server can
 // attribute the request to the user. `k:` is the message code the slim response echoes so the
 // client can recover the request context (see cache.ts).
-function buildMsg(token: string, coords: { lat: number; lon: number } | null, days: number, model: string, variableCodes: string[], maxChars: number, code: number, startEpochHour: number): string {
+function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], maxChars: number, code: number, startEpochHour: number): string {
   const parts: string[] = [`v${V1_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
-  parts.push(`d:${days}`);
+  parts.push(`p:${PRIORITIES.find((m) => m.value === mode)!.token}`);
   parts.push(`z:${utcOffsetHours()}`);
   parts.push(`m:${model}`);
   if (variableCodes.length) parts.push(`v:${variableCodes.join('')}`);
@@ -91,9 +93,9 @@ function buildMsg(token: string, coords: { lat: number; lon: number } | null, da
 
 // The request context the client stores under the message code, mirroring how the server will
 // parse this request (so the recovered fields exactly match what the response was encoded with).
-function buildContext(coords: { lat: number; lon: number }, days: number, model: string, varsMask: number, startEpochHour: number): RequestContext {
+function buildContext(coords: { lat: number; lon: number }, mode: number, model: string, varsMask: number, startEpochHour: number): RequestContext {
   return {
-    durationDays: days,
+    mode,
     utcOffsetHours: utcOffsetHours(),
     model: MODEL_BIT[model.toUpperCase()] ?? 0, // single model index
     vars_mask: varsMask,
@@ -127,7 +129,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [customCoords, setCustomCoords] = useState('');
-  const [durationDays, setDurationDays] = useState(5);
+  const [mode, setMode] = useState(MODE_AUTO);
   const [model, setModel] = useState('best');
   const [groups, setGroups] = useState<Set<string>>(new Set(DEFAULT_GROUPS));
   const [messageCopied, setMessageCopied] = useState(false);
@@ -151,7 +153,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
     (mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)),
     ALWAYS_VARS_MASK,
   );
-  const durationLabel = `${durationDays}d`;
+  const modeName = PRIORITIES.find((m) => m.value === mode)!.label;
 
   const parsedCustomCoords = parseLatLon(customCoords);
   const customCoordsInvalid = customCoords.trim().length > 0 && parsedCustomCoords == null;
@@ -165,7 +167,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const showMessage = coordsValid || locationMode === 'current';
   // Preview only — the real message code is allocated on copy/fetch (buildContext + allocCode).
   const message = showMessage
-    ? buildMsg(token, coordsValid ? resolvedCoords : null, durationDays, model, variableCodes, maxChars, 0, alignedStartEpochHour())
+    ? buildMsg(token, coordsValid ? resolvedCoords : null, mode, model, variableCodes, maxChars, 0, alignedStartEpochHour())
     : '';
   // In current-location mode the buttons stay tappable so they can request GPS on demand.
   const copyDisabled = locating || (locationMode === 'custom' && !coordsValid);
@@ -204,8 +206,8 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return;
     const startHour = alignedStartEpochHour();
-    const code = await allocCode(token, buildContext(coords, durationDays, model, varsMask, startHour), `${durationLabel} · ${model.toUpperCase()}`);
-    const msg = buildMsg(token, coords, durationDays, model, variableCodes, maxChars, code, startHour);
+    const code = await allocCode(token, buildContext(coords, mode, model, varsMask, startHour), `${modeName} · ${model.toUpperCase()}`);
+    const msg = buildMsg(token, coords, mode, model, variableCodes, maxChars, code, startHour);
     await Clipboard.setStringAsync(msg);
     setMessageCopied(true);
     setTimeout(() => setMessageCopied(false), 2000);
@@ -232,11 +234,11 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
     setFetching(true);
     try {
       const startHour = alignedStartEpochHour();
-      const code = await allocCode(token, buildContext(coords, durationDays, model, varsMask, startHour), `${durationLabel} · ${model.toUpperCase()}`);
+      const code = await allocCode(token, buildContext(coords, mode, model, varsMask, startHour), `${modeName} · ${model.toUpperCase()}`);
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: buildMsg(token, coords, durationDays, model, variableCodes, maxChars, code, startHour),
+        body: buildMsg(token, coords, mode, model, variableCodes, maxChars, code, startHour),
       });
       if (!resp.ok) throw new Error(await resp.text());
       onForecastReceived(await resp.text());
@@ -282,11 +284,11 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
         )}
       </Section>
 
-      <Section label="Duration">
+      <Section label="Priority">
         <SegmentedControl
-          values={DURATIONS.map((d) => d.label)}
-          selectedIndex={DURATIONS.findIndex((d) => d.value === durationDays)}
-          onChange={(e) => setDurationDays(DURATIONS[e.nativeEvent.selectedSegmentIndex].value)}
+          values={PRIORITIES.map((m) => m.label)}
+          selectedIndex={PRIORITIES.findIndex((m) => m.value === mode)}
+          onChange={(e) => setMode(PRIORITIES[e.nativeEvent.selectedSegmentIndex].value)}
         />
       </Section>
 

@@ -1,27 +1,54 @@
 import { describe, it, expect } from "vitest";
-import { layoutFor, maxFillSeq, slotsFor, RESOLUTION_HOURS } from "../src/index.js";
+import {
+  layoutFor, maxFillSeq, RESOLUTION_HOURS, FILL_SLOTS,
+  MODE_DETAIL, MODE_AUTO, MODE_RANGE,
+} from "../src/index.js";
 
 // A representative request instant: 2026-07-12, at various hours of the (UTC) day.
 const BASE_DAY_UTC_HOUR = Date.UTC(2026, 6, 12) / 3600000;
 
-const DURATIONS = [3, 5, 7, 10];
+const MODES = [MODE_DETAIL, MODE_AUTO, MODE_RANGE];
 const OFFSETS = [-9, 0, 5, 13];
 
-describe("layoutFor — invariants over the full sequence", () => {
-  for (const D of DURATIONS) {
+// The compiled path lengths are WIRE FORMAT (an anchor edit that changes them re-numbers every
+// seq). If one of these fails, the protocol version must be bumped, not the number updated.
+it("path lengths are pinned", () => {
+  expect(maxFillSeq(MODE_DETAIL)).toBe(47);
+  expect(maxFillSeq(MODE_AUTO)).toBe(45);
+  expect(maxFillSeq(MODE_RANGE)).toBe(42);
+});
+
+describe("layoutFor — invariants over every mode's full path", () => {
+  for (const mode of MODES) {
     for (const z of OFFSETS) {
       for (const hourOfDay of [0, 5, 13, 23]) {
         const reqUtc = BASE_DAY_UTC_HOUR + hourOfDay - z; // local hour-of-day == hourOfDay
-        it(`D=${D} z=${z} local ${hourOfDay}:00 — every seq is well-formed`, () => {
+        it(`mode=${mode} z=${z} local ${hourOfDay}:00 — every seq is well-formed`, () => {
           const local = reqUtc + z;
           const day0 = Math.floor(local / 24) * 24;
 
-          for (let seq = 1; seq <= maxFillSeq(D); seq++) {
-            const l = layoutFor(D, reqUtc, z, seq);
+          let prevPeriods = 0;
+          let prevProfile: number[] = [];
+          for (let seq = 1; seq <= maxFillSeq(mode); seq++) {
+            const l = layoutFor(mode, reqUtc, z, seq);
             const n = l.periodHours.length;
             expect(l.periodStartUtcHour).toHaveLength(n);
             expect(l.dayResolution).toHaveLength(l.days);
-            expect(l.days).toBe(l.truncated ? seq : slotsFor(D));
+            expect(l.days).toBeLessThanOrEqual(FILL_SLOTS);
+
+            // The binary-search invariant: period count never shrinks along the path. (It can
+            // stay equal when a step refines slot 0 late in the local day — at 23:00 one 12h
+            // period and one 1h period both cover the remainder — the same non-strict caveat
+            // fitFillToBudget has always tolerated.)
+            expect(n).toBeGreaterThanOrEqual(prevPeriods);
+            prevPeriods = n;
+
+            // Each step refines the previous layout: coverage never shrinks, no slot gets coarser.
+            expect(l.dayResolution.length).toBeGreaterThanOrEqual(prevProfile.length);
+            for (let d = 0; d < prevProfile.length; d++) {
+              expect(l.dayResolution[d]).toBeGreaterThanOrEqual(prevProfile[d]);
+            }
+            prevProfile = l.dayResolution;
 
             // Periods are contiguous: each starts where the previous ended.
             for (let i = 1; i < n; i++) {
@@ -48,19 +75,11 @@ describe("layoutFor — invariants over the full sequence", () => {
             const endLocal = l.periodStartUtcHour[n - 1] + l.periodHours[n - 1] + z;
             expect(endLocal).toBe(day0 + 24 * l.days);
 
-            // The requested duration is a floor on forward coverage, whatever the request hour:
-            // an untruncated layout always reaches at least D × 24h past the request.
-            if (!l.truncated) expect(endLocal - local).toBeGreaterThanOrEqual(24 * D);
-
             // Refinement runs front-to-back: day resolutions never get finer later in the
             // window (larger index = finer).
             for (let d = 1; d < l.days; d++) {
               expect(l.dayResolution[d]).toBeLessThanOrEqual(l.dayResolution[d - 1]);
             }
-            // Adjacent stages only: at most two distinct resolutions, one ladder step apart.
-            const distinct = [...new Set(l.dayResolution)];
-            expect(distinct.length).toBeLessThanOrEqual(2);
-            if (distinct.length === 2) expect(distinct[0] - distinct[1]).toBe(1);
 
             // periodHours matches each day's resolution.
             let p = 0;
@@ -80,74 +99,76 @@ describe("layoutFor — invariants over the full sequence", () => {
   }
 });
 
-describe("layoutFor — sequence stages", () => {
-  const D = 10;
-  const S = slotsFor(D); // 11 slots: the rest of the request day, then 10 whole days
+describe("layoutFor — path waypoints", () => {
   const z = -9;
   // Request at 13:00 local (the 13:03 example, aligned down to the hour).
   const reqUtc = BASE_DAY_UTC_HOUR + 13 - z;
 
-  it("seq < S is a truncated pure-12h forecast", () => {
-    const l = layoutFor(D, reqUtc, z, 4);
-    expect(l.truncated).toBe(true);
-    expect(l.days).toBe(4);
-    expect(l.periodHours).toEqual(Array(7).fill(12));
-    // Slot 0 starts with the 12h period containing the request time.
-    expect(l.periodStartUtcHour[0] + z).toBe(Math.floor((reqUtc + z) / 24) * 24 + 12);
+  it("every mode starts with the shared truncated-12h ramp", () => {
+    for (const mode of MODES) {
+      for (let seq = 1; seq <= 3; seq++) {
+        const l = layoutFor(mode, reqUtc, z, seq);
+        expect(l.dayResolution).toEqual(Array(seq).fill(1));
+        // Slot 0 at 13:00 local contributes one 12h period (12:00–24:00).
+        expect(l.periodHours).toEqual(Array(2 * seq - 1).fill(12));
+      }
+    }
   });
 
-  it("seq = S covers the full duration at 12h", () => {
-    const l = layoutFor(D, reqUtc, z, S);
-    expect(l.truncated).toBe(false);
-    expect(l.days).toBe(S);
-    expect(l.periodHours).toEqual(Array(2 * S - 1).fill(12));
+  it("Detail reaches 3 hourly days before coverage exceeds 5 slots", () => {
+    let seenThreeHourly = false;
+    for (let seq = 1; seq <= maxFillSeq(MODE_DETAIL); seq++) {
+      const l = layoutFor(MODE_DETAIL, reqUtc, z, seq);
+      const hourlyDays = l.dayResolution.filter((r) => r === 4).length;
+      if (!seenThreeHourly && hourlyDays >= 3) seenThreeHourly = true;
+      if (!seenThreeHourly) expect(l.days).toBeLessThanOrEqual(5);
+    }
+    expect(seenThreeHourly).toBe(true);
   });
 
-  it("seq = S + 3 refines the first three slots to 6h (the 13:03 example)", () => {
-    const l = layoutFor(D, reqUtc, z, S + 3);
-    expect(l.dayResolution).toEqual([2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1]);
-    // At 13:00 local, slot 0's 6h grid yields two periods; the next two days four each;
-    // then eight days at 12h.
-    expect(l.periodHours).toEqual([
-      6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
-      12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
-    ]);
-    expect(l.periodStartUtcHour[0] + z - Math.floor((reqUtc + z) / 24) * 24).toBe(12);
+  it("Range covers the whole horizon before refining anything", () => {
+    for (let seq = 1; seq <= maxFillSeq(MODE_RANGE); seq++) {
+      const l = layoutFor(MODE_RANGE, reqUtc, z, seq);
+      if (l.days < FILL_SLOTS) expect(l.dayResolution.every((r) => r === 1)).toBe(true);
+    }
+    // seq 13 = full coverage at 12h; the last all-12h layout on the path.
+    expect(layoutFor(MODE_RANGE, reqUtc, z, FILL_SLOTS).dayResolution)
+      .toEqual(Array(FILL_SLOTS).fill(1));
   });
 
-  it("stage boundaries meet: seq = 2S from below and above is all-6h", () => {
-    const l = layoutFor(D, reqUtc, z, 2 * S);
-    expect(l.dayResolution).toEqual(Array(S).fill(2));
+  it("Auto holds coverage at 7 slots through the 3h refinement, then extends to 10", () => {
+    // Anchor waypoints (see ANCHORS in layout.ts): 12h×7 → 6h×5+12h×2 → 3h×5+12h×2 → 3h×5+12h×5.
+    const profiles = Array.from({ length: maxFillSeq(MODE_AUTO) }, (_, i) =>
+      layoutFor(MODE_AUTO, reqUtc, z, i + 1).dayResolution.join(","));
+    expect(profiles).toContain(Array(7).fill(1).join(","));
+    expect(profiles).toContain([3, 3, 3, 3, 3, 1, 1].join(","));
+    expect(profiles).toContain([3, 3, 3, 3, 3, 1, 1, 1, 1, 1].join(","));
   });
 
-  it("seq = 4S is the whole window at 1h, starting at the request hour", () => {
-    const l = layoutFor(D, reqUtc, z, 4 * S);
-    expect(l.dayResolution).toEqual(Array(S).fill(4));
-    expect(l.periodHours.every((h) => h === 1)).toBe(true);
-    expect(l.periodStartUtcHour[0]).toBe(reqUtc);
-    // 11 hours left of the request day (13:00–24:00) + the 10 whole days asked for.
-    expect(l.periodHours).toHaveLength(11 + D * 24);
+  it("mode tops are pinned", () => {
+    const top = (mode: number) =>
+      layoutFor(mode, reqUtc, z, maxFillSeq(mode)).dayResolution;
+    expect(top(MODE_DETAIL)).toEqual([4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3]);
+    expect(top(MODE_AUTO)).toEqual([4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3]);
+    expect(top(MODE_RANGE)).toEqual([4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
   });
 
   it("a request at exactly local midnight has a whole request day, so it over-covers by one day", () => {
     const midnightUtc = BASE_DAY_UTC_HOUR - z; // 0:00 local
-    // Slot 0 is the *remainder* of the request day, which at 0:00 is all of it: D + 1 whole
-    // days. The coverage floor still holds (it is the only hour that exceeds it); the cost is
-    // a day's worth of periods, so the fill just lands a rung coarser.
-    const l = layoutFor(D, midnightUtc, z, 4 * S);
-    expect(l.periodHours).toHaveLength(S * 24);
-    // No partial day anywhere: truncated layouts have exactly two periods per day.
-    for (let seq = 1; seq <= S; seq++) {
-      expect(layoutFor(D, midnightUtc, z, seq).periodHours).toHaveLength(2 * seq);
+    // Slot 0 is the *remainder* of the request day, which at 0:00 is all of it. Truncated
+    // layouts then have exactly two 12h periods per covered day.
+    for (let seq = 1; seq <= 3; seq++) {
+      expect(layoutFor(MODE_RANGE, midnightUtc, z, seq).periodHours).toHaveLength(2 * seq);
     }
   });
 
   it("rejects out-of-range inputs", () => {
-    expect(() => layoutFor(D, reqUtc, z, 0)).toThrow();
-    expect(() => layoutFor(D, reqUtc, z, 4 * S + 1)).toThrow();
-    expect(() => layoutFor(0, reqUtc, z, 1)).toThrow();
-    expect(() => layoutFor(D, reqUtc, 15, 1)).toThrow();
-    expect(() => layoutFor(D, reqUtc, -13, 1)).toThrow();
-    expect(() => layoutFor(D, reqUtc + 0.5, z, 1)).toThrow();
+    expect(() => layoutFor(MODE_DETAIL, reqUtc, z, 0)).toThrow();
+    expect(() => layoutFor(MODE_DETAIL, reqUtc, z, maxFillSeq(MODE_DETAIL) + 1)).toThrow();
+    expect(() => layoutFor(3, reqUtc, z, 1)).toThrow();
+    expect(() => layoutFor(-1, reqUtc, z, 1)).toThrow();
+    expect(() => layoutFor(MODE_DETAIL, reqUtc, 15, 1)).toThrow();
+    expect(() => layoutFor(MODE_DETAIL, reqUtc, -13, 1)).toThrow();
+    expect(() => layoutFor(MODE_DETAIL, reqUtc + 0.5, z, 1)).toThrow();
   });
 });

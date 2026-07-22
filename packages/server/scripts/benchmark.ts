@@ -34,7 +34,8 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { buildFillMessage, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import {
-  VARS_BIT, RESOLUTION_HOURS, FILL_STAGES, slotsFor, maxFillSeq, v1EncodeBreakdown,
+  VARS_BIT, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
+  fillProfile, maxFillSeq, v1EncodeBreakdown,
   type ForecastMessage, type V1Breakdown,
 } from "@weather/protocol";
 
@@ -145,11 +146,12 @@ const PILOT_LOCATION_IDS = [
 
 // ── Report config ────────────────────────────────────────────────────────────────
 
-// The report pivots on the requested duration (the `d:` request token), because that is what the
-// user actually chooses: duration is an input to the encoder, and resolution is the *output* the
-// fill sequence buys with whatever budget is left.
-const DURATIONS = [3, 5, 7, 10];
-const DEFAULT_DURATION = 7; // the server's default when a request carries no `d:`
+// The report pivots on the priority mode (the `p:` request token), because that is what the
+// user actually chooses: the mode orders the fill path, and the layout is the *output* the
+// sequence buys with whatever budget is left.
+const MODES = [0, 1, 2];
+const modeLabel = (m: number) => MODE_NAMES[m];
+const N_RUNGS = 4; // 12h → 1h, the resolution colour ramp
 
 // The messages the detail view draws: the whole spread, from the worst forecasts to encode (p1 —
 // stormy, high-entropy) to the easiest (p99 — stable).
@@ -160,25 +162,27 @@ const RUNG = Object.fromEntries(
   Object.entries(RESOLUTION_HOURS).map(([i, h]) => [i, `${h}h`]),
 ) as Record<number, string>;
 
-// The fill sequence, in words. Mirrors layoutFor's arithmetic (layout.ts): over S = D + 1 day
-// slots, seq < S is a truncated all-12h forecast, and stage k (seq = (k−1)S + j) refines the
-// first j slots one rung finer — so seq = kS is exactly "the whole window at rung k". Those four
-// multiples of S are the landmarks the report marks on every seq axis.
-function seqLabel(durationDays: number, seq: number): string {
-  const S = slotsFor(durationDays);
-  if (seq < S) return `${seq}/${S} slots @ ${RUNG[1]} (truncated)`;
-  const t = seq - S;
-  const fine = t === 0 ? 1 : Math.ceil(t / S) + 1;
-  const nFine = t === 0 ? S : t - (fine - 2) * S;
-  return nFine === S
-    ? `all ${S} slots @ ${RUNG[fine]}`
-    : `${nFine}/${S} slots @ ${RUNG[fine]}, rest @ ${RUNG[fine - 1]}`;
+// The layout a seq denotes, in words: the profile's resolution runs, plus a coverage note when
+// the layout doesn't reach the full horizon yet.
+function seqLabel(mode: number, seq: number): string {
+  const prof = fillProfile(mode, seq);
+  const runs: string[] = [];
+  for (let i = 0; i < prof.length; ) {
+    let j = i;
+    while (j < prof.length && prof[j] === prof[i]) j++;
+    runs.push(`${RUNG[prof[i]]}×${j - i}`);
+    i = j;
+  }
+  const cover = prof.length < FILL_SLOTS ? ` (${prof.length}/${FILL_SLOTS} slots)` : "";
+  return runs.join(" ") + cover;
 }
 
-// Full-fill landmarks: seq = k × S is the whole window at rung k (12h, 6h, 3h, 1h).
-function fullFillMarks(durationDays: number): { seq: number; label: string }[] {
-  const S = slotsFor(durationDays);
-  return Array.from({ length: FILL_STAGES }, (_, k) => ({ seq: (k + 1) * S, label: RUNG[k + 1] }));
+// The landmarks the report marks on every seq axis: the mode's anchor waypoints (layout.ts).
+// The first couple of anchors sit inside the truncated ramp — too close to zero to label.
+function anchorMarks(mode: number): { seq: number; label: string }[] {
+  return FILL_ANCHOR_SEQS[mode]
+    .filter((seq) => seq > 3)
+    .map((seq) => ({ seq, label: seqLabel(mode, seq) }));
 }
 
 // The corpus has no timezone, and production takes the offset from the client's `z:` token — so
@@ -233,7 +237,7 @@ interface Args {
   validate: boolean;     // data-quality report from the DB (no collection, no benchmark report)
   dump?: [string, string, string]; // print one (source, location, window) cell
   // report
-  duration: number;      // which duration the report opens on (all of DURATIONS are computed)
+  mode: number;          // which priority mode the report opens on (all of MODES are computed)
   split: "train" | "eval" | "all"; // which held-out split the report covers (--location bypasses)
   requestHour: number;   // local hour of day the request is assumed to arrive at
   maxChars: number;
@@ -268,7 +272,7 @@ Collect options
   --location <id>           restrict to one registry location (also filters the report)
 
 Report options
-  --duration <d>            duration view the report opens on: ${DURATIONS.join("/")} (default ${DEFAULT_DURATION})
+  --mode <m>                mode view the report opens on: detail/auto/range (default auto)
   --split <s>               which locations the report covers: eval (held out from codebook
                             training, the default), train, or all; --location bypasses this
   --request-hour <h>        local hour the request is assumed to arrive at, 0-23 (default 7)
@@ -293,7 +297,7 @@ function parseArgs(argv: string[]): Args {
   const args: Args = {
     limit: 0, concurrency: 8, dryRun: false, collectOnly: false, reportOnly: false, pilot: false,
     validate: false,
-    duration: DEFAULT_DURATION, split: "eval", requestHour: 7, maxChars: 160, verbose: false,
+    mode: MODE_AUTO, split: "eval", requestHour: 7, maxChars: 160, verbose: false,
     includeIncomplete: false, open: true,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -310,15 +314,15 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--include-incomplete") args.includeIncomplete = true;
     else if (a === "--limit") args.limit = parseInt(argv[++i], 10) || 0;
     else if (a === "--concurrency") args.concurrency = parseInt(argv[++i], 10);
-    else if (a === "--duration") args.duration = parseInt(argv[++i], 10);
+    else if (a === "--mode") args.mode = MODE_NAMES.findIndex((n) => n.toLowerCase() === argv[++i]?.toLowerCase());
     else if (a === "--split") args.split = argv[++i] as Args["split"];
     else if (a === "--request-hour") args.requestHour = parseInt(argv[++i], 10);
     else if (a === "--max-chars") args.maxChars = parseInt(argv[++i], 10);
     else if (a === "--location") args.location = argv[++i];
     else throw new Error(`Unknown argument: ${a} (--help lists the options)`);
   }
-  if (!DURATIONS.includes(args.duration)) {
-    throw new Error(`--duration must be one of ${DURATIONS.join(", ")}`);
+  if (!MODES.includes(args.mode)) {
+    throw new Error(`--mode must be one of ${MODES.map(modeLabel).join(", ").toLowerCase()}`);
   }
   if (!["train", "eval", "all"].includes(args.split)) {
     throw new Error(`--split must be train, eval, or all`);
@@ -580,16 +584,16 @@ function baseComplete(h: HourlyData): boolean {
   return REQUIRED_BASE.every((anyOf) => anyOf.some(hasData));
 }
 
-// The layout the production search landed on for one (forecast, duration, variable-combo), plus its
+// The layout the production search landed on for one (forecast, mode, variable-combo), plus its
 // bit breakdown.
 interface Fit {
-  seq: number;       // seq < slotsFor(D) means the budget forced truncation below the duration
+  seq: number;       // low seqs are the truncated 12h ramp (see layout.ts)
   periods: number;   // periods in the fitted message
   breakdown: V1Breakdown;
 }
 
 // What the report keeps per fit after folding the column bits into the colBits arrays — the full
-// V1Breakdown per (cell × duration × combo) is what blew the heap on the full eval split.
+// V1Breakdown per (cell × mode × combo) is what blew the heap on the full eval split.
 interface StoredFit {
   seq: number;
   periods: number;
@@ -601,7 +605,7 @@ interface StoredFit {
 // keep the breakdown instead of just the string (fitFillToBudget is generic over that).
 function fitFill(
   msgAt: (seq: number) => ForecastMessage | null,
-  durationDays: number,
+  mode: number,
   varsMask: number,
   maxChars: number,
 ): Fit | null {
@@ -613,7 +617,7 @@ function fitFill(
       return { seq, periods: withVars.periods[0].length, breakdown: v1EncodeBreakdown(withVars) };
     },
     (fit) => fit.breakdown.chars,
-    maxFillSeq(durationDays),
+    maxFillSeq(mode),
     maxChars,
   );
 }
@@ -629,23 +633,22 @@ const box = (xs: number[]): BoxStats => ({
 });
 
 function buildView(
-  durationDays: number,
+  mode: number,
   fits: StoredFit[],
   cb: Map<string, number[]>,
 ): ViewStats {
   const seqs = fits.map((f) => f.seq);
   const periods = fits.map((f) => f.periods);
-  const slots = slotsFor(durationDays);
-  const maxSeq = maxFillSeq(durationDays);
+  const maxSeq = maxFillSeq(mode);
 
-  // Histogram over the whole sequence (1..4S), not just the observed range, so the four full-fill
-  // landmarks are always on the axis and every duration's chart reads the same way.
+  // Histogram over the whole sequence, not just the observed range, so the anchor landmarks are
+  // always on the axis and every mode's chart reads the same way.
   const counts = new Map<number, number>();
   for (const s of seqs) counts.set(s, (counts.get(s) ?? 0) + 1);
   const histogram = Array.from({ length: maxSeq }, (_, i) => ({ seq: i + 1, count: counts.get(i + 1) ?? 0 }));
 
-  // How often the budget carried the message all the way to a full fill at each rung.
-  const stages = fullFillMarks(durationDays).map(({ seq, label }) => ({
+  // How often the budget carried the message at least to each anchor waypoint.
+  const stages = anchorMarks(mode).map(({ seq, label }) => ({
     seq, label, share: seqs.filter((s) => s >= seq).length / seqs.length,
   }));
 
@@ -661,12 +664,12 @@ function buildView(
 
   const medianSeq = pct(seqs, 50);
   return {
-    durationDays, slots, maxSeq,
+    mode, slots: FILL_SLOTS, maxSeq,
     seq: box(seqs),
     periods: box(periods),
     percentiles: PERCENTILES.map((p) => ({ p, seq: pct(seqs, p) })),
     medianSeq,
-    medianLabel: seqLabel(durationDays, medianSeq),
+    medianLabel: seqLabel(mode, medianSeq),
     stages,
     histogram,
     bodyBits: columns.reduce((s, c) => s + c.bits, 0),
@@ -681,12 +684,12 @@ async function report(args: Args): Promise<void> {
   const cells = loadReportCells(db, args.split, args.location);
   if (cells.length === 0) throw new Error("No forecasts found — run collection first (or import the old JSON tree: import-corpus-json.ts)");
 
-  // A view = duration × variable-combo. Every (duration, combo) is precomputed.
-  const vkey = (durationDays: number, combo: number) => `${durationDays}:${combo}`;
+  // A view = mode × variable-combo. Every (mode, combo) is precomputed.
+  const vkey = (mode: number, combo: number) => `${mode}:${combo}`;
   const fitsFor = new Map<string, StoredFit[]>();
   const colBits = new Map<string, Map<string, number[]>>();
-  for (const d of DURATIONS) for (const c of COMBOS) {
-    const vk = vkey(d, c);
+  for (const m of MODES) for (const c of COMBOS) {
+    const vk = vkey(m, c);
     fitsFor.set(vk, []); colBits.set(vk, new Map());
   }
 
@@ -694,10 +697,10 @@ async function report(args: Args): Promise<void> {
   const allMask = comboMask(COMBOS.length - 1); // every group on
   let versionBits = 0, headerBits = 0, skipped = 0, short = 0, uncovered = 0;
 
-  // Per-stratum breakdown bookkeeping: the group of each fitted cell, in push order per duration
-  // (fits for every combo of one cell are pushed together, so one list per duration serves all
+  // Per-stratum breakdown bookkeeping: the group of each fitted cell, in push order per mode
+  // (fits for every combo of one cell are pushed together, so one list per mode serves all
   // combos), plus the distinct locations behind each group.
-  const groupsFor = new Map<number, string[]>(DURATIONS.map((d) => [d, []]));
+  const groupsFor = new Map<number, string[]>(MODES.map((m) => [m, []]));
   const groupLocs = new Map<string, Set<string>>();
 
   for (const cell of cells) {
@@ -712,35 +715,37 @@ async function report(args: Args): Promise<void> {
       Math.floor(Date.parse(cell.windowStart + "Z") / 3600000), utcOffsetHours, args.requestHour);
     forecasts.push({ location: locId });
 
-    for (const durationDays of DURATIONS) {
+    for (const mode of MODES) {
       // Build layouts with every column populated (varsMask = allMask), then override vars_mask per
       // combo: columns encode independently, so one aggregation per seq serves all eight combos.
       // "US" (American center) keeps the pressure/freeze columns in toFullPeriod.
       const params: ForecastParams = {
-        locationIdx: 0, lat, lon, durationDays, utcOffsetHours,
+        locationIdx: 0, lat, lon, mode, utcOffsetHours,
         modelsMask: 1, varsMask: allMask, maxChars: args.maxChars,
         decoderVersion: 1, code: 0, startEpochHour, userToken: null,
       };
       const memo = new Map<number, ForecastMessage | null>();
       const msgAt = (seq: number): ForecastMessage | null => {
         if (!memo.has(seq)) {
-          memo.set(seq, buildFillMessage(h, h.time, params, seq, lat, lon, elevation, REPORT_SOURCE.label));
+          // "BEST" is the center key (toFullPeriod indexes CENTERS with it); REPORT_SOURCE.label
+          // is display text and broke the lookup after the center switch (97d4467).
+          memo.set(seq, buildFillMessage(h, h.time, params, seq, lat, lon, elevation, "BEST"));
         }
         return memo.get(seq)!;
       };
 
       // The corpus window must cover the whole fill span. If it doesn't, the seq search would read
-      // the data gap as "doesn't fit" and report a *truncated* layout as though the char budget had
-      // caused it. Every untruncated seq spans the same days, so checking the all-1h layout is
-      // enough. (With a 14-day window this should never fire; it guards the metric if it ever does.)
-      if (msgAt(maxFillSeq(durationDays)) === null) { uncovered++; continue; }
-      groupsFor.get(durationDays)!.push(cell.group);
+      // the data gap as "doesn't fit" and report a short layout as though the char budget had
+      // caused it. Every path top spans the full horizon, so checking it is enough. (With a
+      // 14-day window and the 12-day horizon this should never fire; it guards the metric.)
+      if (msgAt(maxFillSeq(mode)) === null) { uncovered++; continue; }
+      groupsFor.get(mode)!.push(cell.group);
       if (!groupLocs.has(cell.group)) groupLocs.set(cell.group, new Set());
       groupLocs.get(cell.group)!.add(locId);
 
       for (const c of COMBOS) {
-        const fit = fitFill(msgAt, durationDays, comboMask(c), args.maxChars)!; // seq=1 is covered
-        const vk = vkey(durationDays, c);
+        const fit = fitFill(msgAt, mode, comboMask(c), args.maxChars)!; // seq=1 is covered
+        const vk = vkey(mode, c);
         fitsFor.get(vk)!.push({
           seq: fit.seq, periods: fit.periods,
           bodyBits: fit.breakdown.columns.reduce((s, col) => s + col.bits, 0),
@@ -760,36 +765,36 @@ async function report(args: Args): Promise<void> {
   }
   db.close();
 
-  // Build per-view stats. A duration the corpus can't cover for *any* forecast has no fits at all —
+  // Build per-view stats. A mode the corpus can't cover for *any* forecast has no fits at all —
   // drop it rather than render a view full of NaNs (it means the window is too short; see
   // HORIZON_DAYS).
-  const durations = DURATIONS.filter((d) => fitsFor.get(vkey(d, DEFAULT_COMBO))!.length > 0);
-  if (durations.length === 0) throw new Error("No (forecast, duration) pair is covered by the corpus — re-collect with a longer window");
+  const modes = MODES.filter((m) => fitsFor.get(vkey(m, DEFAULT_COMBO))!.length > 0);
+  if (modes.length === 0) throw new Error("No (forecast, mode) pair is covered by the corpus — re-collect with a longer window");
   const views: Record<string, ViewStats> = {};
-  for (const d of durations) {
+  for (const m of modes) {
     for (const c of COMBOS) {
-      const vk = vkey(d, c);
-      views[vk] = buildView(d, fitsFor.get(vk)!, colBits.get(vk)!);
+      const vk = vkey(m, c);
+      views[vk] = buildView(m, fitsFor.get(vk)!, colBits.get(vk)!);
     }
   }
-  const dropped = DURATIONS.filter((d) => !durations.includes(d));
-  const defaultDuration = durations.includes(args.duration) ? args.duration : durations[0];
+  const dropped = MODES.filter((m) => !modes.includes(m));
+  const defaultMode = modes.includes(args.mode) ? args.mode : modes[0];
 
   // Per-stratum breakdown, default combo: mean fill % (the tracked metric — see the report table)
-  // and mean body bits/period per group, per duration.
+  // and mean body bits/period per group, per mode.
   const strata: StratumStat[] = [...groupLocs.keys()]
     .sort((a, b) => groupOrder(a) - groupOrder(b))
     .map((group) => ({
       group,
       locations: groupLocs.get(group)!.size,
-      perDuration: durations.map((d) => {
-        const fits = fitsFor.get(vkey(d, DEFAULT_COMBO))!;
-        const groups = groupsFor.get(d)!;
+      perMode: modes.map((m) => {
+        const fits = fitsFor.get(vkey(m, DEFAULT_COMBO))!;
+        const groups = groupsFor.get(m)!;
         const mine = fits.filter((_, i) => groups[i] === group);
-        if (mine.length === 0) return { d, n: 0, fillPct: NaN, bpp: NaN };
+        if (mine.length === 0) return { m, n: 0, fillPct: NaN, bpp: NaN };
         return {
-          d, n: mine.length,
-          fillPct: 100 * mean(mine.map((f) => f.seq)) / maxFillSeq(d),
+          m, n: mine.length,
+          fillPct: 100 * mean(mine.map((f) => f.seq)) / maxFillSeq(m),
           bpp: mean(mine.map((f) => f.bodyBits / f.periods)),
         };
       }),
@@ -797,9 +802,9 @@ async function report(args: Args): Promise<void> {
 
   const stats: ReportData = {
     timestamp: new Date().toISOString(),
-    durations,
+    modes,
     dropped,
-    defaultDuration,
+    defaultMode,
     requestHour: args.requestHour,
     maxChars: args.maxChars,
     forecasts: forecasts.length,
@@ -821,18 +826,18 @@ async function report(args: Args): Promise<void> {
   const outPath = join(BENCHMARKS_DIR, `${stamp}_${args.maxChars}c.html`);
   await writeFile(outPath, renderHtml(stats));
 
-  const dv = views[vkey(defaultDuration, stats.defaultCombo)];
+  const dv = views[vkey(defaultMode, stats.defaultCombo)];
   console.log(`\n== Benchmark ==`);
-  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${REPORT_SOURCE.label} (split: ${stats.split}), durations ${durations.join("/")}d  |  max-chars=${args.maxChars}, request ${args.requestHour}:00 local`);
+  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${REPORT_SOURCE.label} (split: ${stats.split}), modes ${modes.map(modeLabel).join("/")}  |  max-chars=${args.maxChars}, request ${args.requestHour}:00 local`);
   if (short) console.log(`  ignored ${short} cached forecast(s) from a shorter-window pull (< ${HORIZON_DAYS}d — leftovers, safe to delete)`);
   if (skipped) console.log(`  skipped ${skipped} forecast(s) with an incomplete base series`);
-  if (uncovered) console.log(`  skipped ${uncovered} (forecast, duration) pair(s) the corpus window doesn't cover`);
-  if (dropped.length) console.log(`  dropped ${dropped.join("/")}d entirely — no forecast in the corpus covers them (re-collect: the window must be ≥ ${HORIZON_DAYS}d)`);
-  console.log(`  default view (${args.duration}d, base): seq mean ${dv.seq.mean.toFixed(1)} of ${dv.maxSeq}, median ${dv.medianSeq} = ${dv.medianLabel}`);
+  if (uncovered) console.log(`  skipped ${uncovered} (forecast, mode) pair(s) the corpus window doesn't cover`);
+  if (dropped.length) console.log(`  dropped ${dropped.map(modeLabel).join("/")} entirely — no forecast in the corpus covers them (re-collect: the window must be ≥ ${HORIZON_DAYS}d)`);
+  console.log(`  default view (${modeLabel(defaultMode)}, base): seq mean ${dv.seq.mean.toFixed(1)} of ${dv.maxSeq}, median ${dv.medianSeq} = ${dv.medianLabel}`);
   if (strata.length > 1) {
-    console.log(`  by stratum (${defaultDuration}d, base):`);
+    console.log(`  by stratum (${modeLabel(defaultMode)}, base):`);
     for (const s of strata) {
-      const p = s.perDuration.find((x) => x.d === defaultDuration)!;
+      const p = s.perMode.find((x) => x.m === defaultMode)!;
       console.log(`    ${s.group.padEnd(16)} ${String(s.locations).padStart(5)} locs  ${String(p.n).padStart(6)} cells  fill ${p.fillPct.toFixed(1).padStart(5)}%  ${p.bpp.toFixed(2)} bits/period`);
     }
   }
@@ -857,12 +862,12 @@ function openInBrowser(path: string): void {
 
 interface BoxStats { min: number; p25: number; p50: number; mean: number; p75: number; max: number }
 interface ColStat { name: string; bits: number; bitsPerPeriod: number; bppStats: BoxStats }
-// A full-fill landmark: seq = k × S is the whole window at rung `label`, reached by `share` of messages.
+// An anchor landmark: a named waypoint of the mode's path, reached by `share` of messages.
 interface StageStat { seq: number; label: string; share: number }
 interface ViewStats {
-  durationDays: number;
-  slots: number;   // S = D + 1 day slots
-  maxSeq: number;  // 4S — the whole window at 1h, the top of the ladder
+  mode: number;
+  slots: number;   // FILL_SLOTS day slots
+  maxSeq: number;  // the mode's path top
   seq: BoxStats;
   periods: BoxStats;
   percentiles: { p: number; seq: number }[]; // the seq at each PERCENTILE of the distribution
@@ -874,18 +879,18 @@ interface ViewStats {
   columns: ColStat[];
 }
 // One breakdown row: a corpus stratum group (Köppen major group / ocean band / favorites), its
-// mean fill % and body bits/period for the base combo at each duration.
+// mean fill % and body bits/period for the base combo at each mode.
 interface StratumStat {
   group: string;
   locations: number;
-  perDuration: { d: number; n: number; fillPct: number; bpp: number }[];
+  perMode: { m: number; n: number; fillPct: number; bpp: number }[];
 }
-// Everything the report embeds. `views` holds one ViewStats per duration:combo.
+// Everything the report embeds. `views` holds one ViewStats per mode:combo.
 interface ReportData {
   timestamp: string;
-  durations: number[];   // durations the corpus can serve (a view exists for each)
-  dropped: number[];     // requested durations no forecast covers — corpus window too short
-  defaultDuration: number;
+  modes: number[];       // modes the corpus can serve (a view exists for each)
+  dropped: number[];     // modes no forecast covers — corpus window too short
+  defaultMode: number;
   requestHour: number;
   maxChars: number;
   forecasts: number;
@@ -900,12 +905,12 @@ interface ReportData {
   strata: StratumStat[];
   groups: { id: GroupId; label: string; short: string }[];
   defaultCombo: number;
-  views: Record<string, ViewStats>;                        // "duration:combo" → stats
+  views: Record<string, ViewStats>;                        // "mode:combo" → stats
 }
 
-// Fill as a fraction of the sequence: seq / 4S. 100% is the top of the ladder — the whole window at
-// 1h — and the four rungs land at 25/50/75/100% (the whole window at 12h/6h/3h/1h). Normalizing by
-// the sequence length is what makes different durations comparable on one axis.
+// Fill as a fraction of the sequence: seq / maxSeq. 100% is the top of the mode's path.
+// Normalizing by the path length is what makes modes with different sequence lengths comparable
+// on one axis.
 const fillBox = (vs: ViewStats): BoxStats => {
   const f = 1 / vs.maxSeq;
   const s = vs.seq;
@@ -930,16 +935,11 @@ interface StripSlot {
 // boundary, so the strips need no rules drawn over the fills.
 const STRIP = { W: 720, l: 0, r: 0, periodGap: 2, dayGap: 9 };
 const dayName = (d: number) => `${d}d`; // 0d is the request day (partial); 1d, 2d … are whole days
-function stripLayout(durationDays: number, seq: number, requestHour: number): StripSlot[] {
-  const S = slotsFor(durationDays);
-  const truncated = seq < S;
-  const days = truncated ? seq : S;
-  const t = truncated ? 0 : seq - S;
-  const fine = t === 0 ? 1 : Math.ceil(t / S) + 1;
-  const nFine = t === 0 ? days : t - (fine - 2) * S;
-  return Array.from({ length: S }, (_, d) => {
-    if (d >= days) return { res: 0, periodHours: 0, startHour: 0 }; // truncated away
-    const res = d < nFine ? fine : fine - 1;
+function stripLayout(mode: number, seq: number, requestHour: number): StripSlot[] {
+  const profile = fillProfile(mode, seq);
+  return Array.from({ length: FILL_SLOTS }, (_, d) => {
+    if (d >= profile.length) return { res: 0, periodHours: 0, startHour: 0 }; // not covered yet
+    const res = profile[d];
     const h = RESOLUTION_HOURS[res];
     return { res, periodHours: h, startHour: d === 0 ? Math.floor(requestHour / h) * h : 0 };
   });
@@ -951,7 +951,7 @@ function stripLayout(durationDays: number, seq: number, requestHour: number): St
 // `scaleSlots` sets the day pitch: pass the widest duration in a stack and every row draws its days
 // at the same width, so a longer forecast is a longer strip rather than a squashed one.
 function renderLayoutStrip(vs: ViewStats, seq: number, requestHour: number, scaleSlots?: number): string {
-  const slots = stripLayout(vs.durationDays, seq, requestHour);
+  const slots = stripLayout(vs.mode, seq, requestHour);
   const { W, l, r, periodGap, dayGap } = STRIP;
   const H = 34, m = { t: 1, b: 1 };
   const barH = H - m.t - m.b;
@@ -962,7 +962,7 @@ function renderLayoutStrip(vs: ViewStats, seq: number, requestHour: number, scal
     const x0 = l + d * slotW;
     if (slot.res === 0) {
       return `<rect x="${x0.toFixed(1)}" y="${m.t}" width="${dayW.toFixed(1)}" height="${barH}" class="slot-empty">` +
-        `<title>${dayName(d)} — not covered: the budget truncated the forecast below ${vs.durationDays}d</title></rect>`;
+        `<title>${dayName(d)} — not covered: the budget stopped the path before this day</title></rect>`;
     }
     const out: string[] = [];
     // Slot 0 starts at the period containing the request hour. The earlier part of today carries no
@@ -981,7 +981,7 @@ function renderLayoutStrip(vs: ViewStats, seq: number, requestHour: number, scal
     return out.join("");
   }).join("");
 
-  return `<svg viewBox="0 0 ${W} ${H}" class="strip" role="img" aria-label="One message: ${esc(seqLabel(vs.durationDays, seq))}">
+  return `<svg viewBox="0 0 ${W} ${H}" class="strip" role="img" aria-label="One message: ${esc(seqLabel(vs.mode, seq))}">
   ${cells}
 </svg>`;
 }
@@ -999,7 +999,7 @@ function renderStripAxis(slots: number): string {
 // The rung key, shared by every strip: colour is the only channel carrying resolution in the strips
 // themselves, so the legend is mandatory (and each block still names its rung on hover).
 function renderRungLegend(): string {
-  const keys = Array.from({ length: FILL_STAGES }, (_, i) => i + 1)
+  const keys = Array.from({ length: N_RUNGS }, (_, i) => i + 1)
     .map((res) => `<span class="key"><i class="sw r${res}"></i>${esc(RUNG[res])}</span>`).join("");
   return `<div class="legend"><span class="legend-label">resolution</span>${keys}</div>`;
 }
@@ -1013,7 +1013,7 @@ function renderPercentileStrips(vs: ViewStats, requestHour: number): string {
   // The percentile stack is itself an axis: p1 is the hardest forecast in the corpus to encode and
   // p99 the easiest, so label the two ends rather than leaving the ordering implicit.
   return `${renderRungLegend()}
-  <div class="striphead indent"><div></div>${renderStripAxis(slotsFor(vs.durationDays))}</div>
+  <div class="striphead indent"><div></div>${renderStripAxis(FILL_SLOTS)}</div>
   <div class="stripwrap">
     <div class="entropy-axis">
       <span>stormy</span>
@@ -1040,7 +1040,7 @@ const SEQ_CHART = { W: 720, l: 64, r: 14 };
 function renderReachArea(vs: ViewStats): string {
   const W = SEQ_CHART.W, H = 260, m = { t: 28, r: SEQ_CHART.r, b: 42, l: SEQ_CHART.l };
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
-  const { maxSeq, slots } = vs;
+  const { maxSeq } = vs;
   const total = vs.histogram.reduce((sum, h) => sum + h.count, 0) || 1;
 
   // reach[seq] = share of forecasts whose fitted seq is >= seq (so reach[1] is always 100%).
@@ -1054,17 +1054,25 @@ function renderReachArea(vs: ViewStats): string {
   const y = (share: number) => m.t + ih * (1 - share);
   const base = y(0);
 
-  // One stepped polygon per ladder stage, so each quarter of the x-axis carries its rung's colour.
-  const areas = Array.from({ length: FILL_STAGES }, (_, k) => {
-    const from = k * slots + 1, to = (k + 1) * slots;
+  // One stepped polygon per run of seqs sharing the same finest rung (the front slot of the
+  // profile — profiles are monotone), so the area under the curve carries the resolution colour
+  // the path has reached at that point.
+  const finest = Array.from({ length: maxSeq }, (_, i) => fillProfile(vs.mode, i + 1)[0]);
+  const areaRuns: string[] = [];
+  let runStart = 1;
+  for (let seq = 2; seq <= maxSeq + 1; seq++) {
+    if (seq <= maxSeq && finest[seq - 1] === finest[runStart - 1]) continue;
+    const from = runStart, to = seq - 1;
     const pts: string[] = [`${xEdge(from - 1).toFixed(1)},${base.toFixed(1)}`];
-    for (let seq = from; seq <= to; seq++) {
-      pts.push(`${xEdge(seq - 1).toFixed(1)},${y(reach[seq]).toFixed(1)}`);
-      pts.push(`${xEdge(seq).toFixed(1)},${y(reach[seq]).toFixed(1)}`);
+    for (let q = from; q <= to; q++) {
+      pts.push(`${xEdge(q - 1).toFixed(1)},${y(reach[q]).toFixed(1)}`);
+      pts.push(`${xEdge(q).toFixed(1)},${y(reach[q]).toFixed(1)}`);
     }
     pts.push(`${xEdge(to).toFixed(1)},${base.toFixed(1)}`);
-    return `<polygon points="${pts.join(" ")}" class="rung r${k + 1} area"/>`;
-  }).join("");
+    areaRuns.push(`<polygon points="${pts.join(" ")}" class="rung r${finest[runStart - 1]} area"/>`);
+    runStart = seq;
+  }
+  const areas = areaRuns.join("");
 
   // The curve itself, over the whole domain.
   const line: string[] = [];
@@ -1077,7 +1085,7 @@ function renderReachArea(vs: ViewStats): string {
   // Invisible hit targets: one per seq, so any point on the curve can be read exactly.
   const hits = Array.from({ length: maxSeq }, (_, i) => i + 1).map((seq) =>
     `<rect x="${xEdge(seq - 1).toFixed(1)}" y="${m.t}" width="${(iw / maxSeq).toFixed(1)}" height="${ih}" class="hit">` +
-    `<title>${pctText(seq / maxSeq)} filled (seq ${seq} — ${esc(seqLabel(vs.durationDays, seq))})\n` +
+    `<title>${pctText(seq / maxSeq)} filled (seq ${seq} — ${esc(seqLabel(vs.mode, seq))})\n` +
     `${(100 * reach[seq]).toFixed(1)}% of forecasts reach at least this far</title></rect>`).join("");
 
   // y: share of forecasts, 0–100%.
@@ -1085,16 +1093,16 @@ function renderReachArea(vs: ViewStats): string {
     `<line x1="${m.l}" y1="${y(v).toFixed(1)}" x2="${W - m.r}" y2="${y(v).toFixed(1)}" class="hgrid"/>` +
     `<text x="${m.l - 8}" y="${(y(v) + 3.5).toFixed(1)}" class="htick" text-anchor="end">${(100 * v).toFixed(0)}%</text>`).join("");
 
-  // x: fill percentage, ticked at the rungs (the stage boundaries are exactly 25/50/75/100%). Each
-  // rung is labelled with the share of forecasts that reach it — the four numbers worth reading off
-  // this curve, stated rather than left to the eye.
+  // x: fill percentage, ticked at the mode's anchor waypoints. Each mark carries the share of
+  // forecasts that reach it — the numbers worth reading off this curve, stated rather than left
+  // to the eye; the waypoint's layout is in the hover title.
   const xAxis = vs.stages.map((st, k) => {
     const x = xEdge(st.seq);
-    const anchor = k + 1 === FILL_STAGES ? "end" : "middle";
-    return `<line x1="${x.toFixed(1)}" y1="${m.t}" x2="${x.toFixed(1)}" y2="${base.toFixed(1)}" class="mark"/>` +
+    const anchor = k === vs.stages.length - 1 ? "end" : "middle";
+    return `<line x1="${x.toFixed(1)}" y1="${m.t}" x2="${x.toFixed(1)}" y2="${base.toFixed(1)}" class="mark"><title>${esc(st.label)}</title></line>` +
       `<text x="${x.toFixed(1)}" y="${m.t - 10}" class="marklabel" text-anchor="${anchor}">` +
-      `${esc(st.label)} · ${(100 * st.share).toFixed(1)}%</text>` +
-      `<text x="${x.toFixed(1)}" y="${H - m.b + 16}" class="htick" text-anchor="${anchor}">${pctText((k + 1) / FILL_STAGES)}</text>`;
+      `${(100 * st.share).toFixed(1)}%</text>` +
+      `<text x="${x.toFixed(1)}" y="${H - m.b + 16}" class="htick" text-anchor="${anchor}">${pctText(st.seq / maxSeq)}</text>`;
   }).join("");
 
   return `<svg viewBox="0 0 ${W} ${H}" class="hist" role="img" aria-label="Share of forecasts reaching each fill level">
@@ -1125,23 +1133,14 @@ function renderMiniBox(s: BoxStats, scaleMax: number): string {
 // compared at a glance without reading the numbers. The track is always the full scale — a short bar
 // means a small share of a full 1h fill, never a rescaled axis.
 //
-// The fill is segmented by rung, in the same colours the message strips use: each quarter of the bar
-// is one stage of the ladder, so a bar reaching into the third segment has covered the duration at
-// 6h and is partway through refining it to 3h. Colour therefore means the same thing everywhere on
-// the page — darker is finer.
 function renderFillBar(fill: number): string {
-  const W = 150, H = 10, r = 2, gap = 1;
-  const stage = 1 / FILL_STAGES;
-  const segments = Array.from({ length: FILL_STAGES }, (_, k) => {
-    const from = k * stage, to = Math.min(fill, (k + 1) * stage);
-    if (to <= from) return "";
-    const w = W * (to - from) - gap;
-    if (w <= 0) return "";
-    return `<rect x="${(W * from).toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${H}" rx="${r}" class="rung r${k + 1}"/>`;
-  }).join("");
-  return `<svg viewBox="0 0 ${W} ${H}" class="fillbar" role="img" aria-label="${pctText(fill)} of a full 1h fill">` +
-    `<title>${pctText(fill)} filled — 25% = the whole duration at 12h, 50% at 6h, 75% at 3h, 100% at 1h</title>` +
-    `<rect x="0" y="0" width="${W}" height="${H}" rx="${r}" class="fbtrack"/>${segments}` +
+  const W = 150, H = 10, r = 2;
+  const w = Math.max(0, W * fill - 1);
+  const bar = w > 0
+    ? `<rect x="0" y="0" width="${w.toFixed(1)}" height="${H}" rx="${r}" class="rung r2"/>` : "";
+  return `<svg viewBox="0 0 ${W} ${H}" class="fillbar" role="img" aria-label="${pctText(fill)} of the mode's fill sequence">` +
+    `<title>${pctText(fill)} of the mode's fill sequence (100% = the path top)</title>` +
+    `<rect x="0" y="0" width="${W}" height="${H}" rx="${r}" class="fbtrack"/>${bar}` +
   `</svg>`;
 }
 
@@ -1175,11 +1174,11 @@ function smoothPath(pts: { x: number; y: number }[]): string {
   return d;
 }
 
-// The frontier: for each duration, a solid curve for the base variables and a faint dashed curve per
+// The frontier: for each mode, a solid curve for the base variables and a faint dashed curve per
 // optional variable group, added one at a time (never in combination — that would be 32 lines). This
 // is the regression chart: an encoding improvement pushes every curve right (more resolution for the
 // same 160 characters), and because these are whole distributions you see *where* it lands rather
-// than just a mean. x is fill percentage, which is what makes durations with different sequence
+// than just a mean. x is fill percentage, which is what makes modes with different sequence
 // lengths comparable on one axis.
 function renderFrontier(s: ReportData): string {
   const W = 720, H = 300, m = { t: 28, r: 46, b: 42, l: 64 };
@@ -1205,7 +1204,7 @@ function renderFrontier(s: ReportData): string {
     return pts;
   };
 
-  // Direct labels on the plot: the duration on each solid curve, the variable selection on each
+  // Direct labels on the plot: the mode on each solid curve, the variable selection on each
   // component curve. The palette's contrast/CVD warnings make this mandatory, not decorative —
   // identity never rests on colour alone. Labels sit at different shares so they don't collide.
   const draw = (
@@ -1217,20 +1216,20 @@ function renderFrontier(s: ReportData): string {
       `<text x="${(at.x + 5).toFixed(1)}" y="${(at.y - 5).toFixed(1)}" class="flabel ${cls}">${esc(label)}</text>`;
   };
 
-  // One group per duration. The solid line pools exactly the selections drawn beneath it — the base
+  // One group per mode. The solid line pools exactly the selections drawn beneath it — the base
   // variables plus each optional group on its own — so it reads as the average of its components and
   // still moves when any single variable's encoding changes. (Pooling all 2^n *combinations* would
   // weight the heavy ones and pull the solid line away from the curves it sits among.) Components
-  // stay hidden until the duration is hovered, so the chart is four lines at rest. The fat
+  // stay hidden until the mode is hovered, so the chart is three lines at rest. The fat
   // transparent path over the solid curve is the hit target — a 2px line is too thin to hover.
-  const groups = s.durations.map((d, i) => {
+  const groups = s.modes.map((md, i) => {
     const slot = i + 1;
     const components = [
       { combo: s.defaultCombo, label: "Base", share: 0.8 },
       ...s.groups.map((g, gi) => ({
         combo: 1 << gi, label: g.short, share: [0.65, 0.5, 0.35][gi] ?? 0.5,
       })),
-    ].map((c, ci) => ({ ...c, dash: ci + 1, vs: s.views[`${d}:${c.combo}`] }))
+    ].map((c, ci) => ({ ...c, dash: ci + 1, vs: s.views[`${md}:${c.combo}`] }))
       .filter((c) => c.vs);
     if (components.length === 0) return "";
 
@@ -1238,7 +1237,7 @@ function renderFrontier(s: ReportData): string {
       draw([c.vs], `c${slot} variant dash${c.dash}`, c.label, c.share)).join("");
     const meanPts = reachPoints(components.map((c) => c.vs));
     return `<g class="dseries">${componentSvg}` +
-      `${draw(components.map((c) => c.vs), `c${slot}`, `${d}d`, 0.5)}` +
+      `${draw(components.map((c) => c.vs), `c${slot}`, modeLabel(md), 0.5)}` +
       `<path d="${smoothPath(meanPts)}" class="fhit"/></g>`;
   }).join("");
 
@@ -1246,61 +1245,60 @@ function renderFrontier(s: ReportData): string {
     `<line x1="${m.l}" y1="${y(v).toFixed(1)}" x2="${W - m.r}" y2="${y(v).toFixed(1)}" class="hgrid"/>` +
     `<text x="${m.l - 8}" y="${(y(v) + 3.5).toFixed(1)}" class="htick" text-anchor="end">${(100 * v).toFixed(0)}%</text>`).join("");
 
-  const xAxis = Array.from({ length: FILL_STAGES }, (_, k) => {
-    const fill = (k + 1) / FILL_STAGES;
-    const anchor = k + 1 === FILL_STAGES ? "end" : "middle";
+  // The modes' paths differ in length and shape, so the x-axis carries plain fill-percentage
+  // ticks (per-mode anchor marks live on the detail views' reach charts).
+  const xAxis = [0.25, 0.5, 0.75, 1].map((fill, k, arr) => {
+    const anchor = k === arr.length - 1 ? "end" : "middle";
     return `<line x1="${x(fill).toFixed(1)}" y1="${m.t}" x2="${x(fill).toFixed(1)}" y2="${y(0).toFixed(1)}" class="mark"/>` +
-      `<text x="${x(fill).toFixed(1)}" y="${m.t - 10}" class="marklabel" text-anchor="${anchor}">${esc(RUNG[k + 1])}</text>` +
       `<text x="${x(fill).toFixed(1)}" y="${H - m.b + 16}" class="htick" text-anchor="${anchor}">${pctText(fill)}</text>`;
   }).join("");
 
-  return `<svg viewBox="0 0 ${W} ${H}" class="hist frontier-chart" role="img" aria-label="Share of forecasts reaching each fill level, by forecast duration">
+  return `<svg viewBox="0 0 ${W} ${H}" class="hist frontier-chart" role="img" aria-label="Share of forecasts reaching each fill level, by priority mode">
   ${yAxis}${xAxis}${groups}
   <text x="${m.l + iw / 2}" y="${H - 4}" class="haxis" text-anchor="middle">FILL PERCENTAGE</text>
   <text x="12" y="${m.t + ih / 2}" class="haxis" text-anchor="middle" transform="rotate(-90 12 ${m.t + ih / 2})">PERCENT OF FORECASTS</text>
 </svg>`;
 }
 
-function renderDurationComparison(s: ReportData): string {
+function renderModeComparison(s: ReportData): string {
   const configurations = [
     { label: "Base", combo: 0 },
     ...s.groups.map((g, i) => ({ label: `+${g.label}`, combo: 1 << i })),
   ];
-  const head = s.durations.map((d) => `<th>${d}d</th>`).join("");
-  const view = (d: number, combo: number) => s.views[`${d}:${combo}`];
-  // One row per forecast length: the median message it produces, drawn. Every row shares the day
-  // pitch of the longest duration, so a longer forecast reads as a longer strip — and the resolution
-  // it had to give up to get there is the colour shift down the stack.
-  const maxSlots = Math.max(...s.durations.map(slotsFor));
-  const perDuration = s.durations.map((d) => {
-    const vs = view(d, s.defaultCombo);
+  const head = s.modes.map((m) => `<th>${esc(modeLabel(m))}</th>`).join("");
+  const view = (m: number, combo: number) => s.views[`${m}:${combo}`];
+  // One row per mode: the median message it produces, drawn. Every row shares the same day
+  // pitch, so the modes' different shapes — hourly front vs whole-horizon coverage — read
+  // directly as colour and coverage down the stack.
+  const perMode = s.modes.map((m) => {
+    const vs = view(m, s.defaultCombo);
     return `<div class="striprow">
-      <div class="striplabel"><strong>${d}d</strong> · ${pctText(vs.medianSeq / vs.maxSeq)} filled</div>
-      ${renderLayoutStrip(vs, vs.medianSeq, s.requestHour, maxSlots)}
+      <div class="striplabel"><strong>${esc(modeLabel(m))}</strong> · ${pctText(vs.medianSeq / vs.maxSeq)} filled</div>
+      ${renderLayoutStrip(vs, vs.medianSeq, s.requestHour, FILL_SLOTS)}
     </div>`;
   }).join("\n");
   const rows = configurations.map(({ label, combo }) => `<tr><td class="name">${esc(label)}</td>` +
-    s.durations.map((d) => {
-      const fill = fillBox(view(d, combo)).mean;
+    s.modes.map((m) => {
+      const fill = fillBox(view(m, combo)).mean;
       return `<td><div class="pcell"><span class="pmean">${pctText(fill)}</span>${renderFillBar(fill)}</div></td>`;
     }).join("") + `</tr>`).join("\n");
-  return `<h2>Median message by forecast duration</h2>
-  <p class="note">The chart shows the resolution of the median message at each forecast duration.</p>
+  return `<h2>Median message by priority mode</h2>
+  <p class="note">The chart shows the layout of the median message in each priority mode.</p>
   ${renderRungLegend()}
-  <div class="striphead"><div></div>${renderStripAxis(maxSlots)}</div>
-  <div class="strips">${perDuration}</div>
-  <h2>Mean fill percentage by forecast duration and variable selection</h2>
+  <div class="striphead"><div></div>${renderStripAxis(FILL_SLOTS)}</div>
+  <div class="strips">${perMode}</div>
+  <h2>Mean fill percentage by priority mode and variable selection</h2>
   <table class="period-comparison">
     <tr><th>Variables</th>${head}</tr>
     ${rows}
   </table>
   <h2>Fill frontier</h2>
-  <p class="note">Percent of forecasts reaching each fill resolution, averaged over the base
+  <p class="note">Percent of forecasts reaching each fill level, averaged over the base
   variables and each optional variable added on its own — so the line moves when any variable's
-  encoding changes. An encoding improvement moves the curves to the right. Hover a duration to break
+  encoding changes. An encoding improvement moves the curves to the right. Hover a mode to break
   it into those component curves.</p>
-  <div class="legend"><span class="legend-label">duration</span>${s.durations.map((d, i) =>
-    `<span class="key"><i class="sw c${i + 1}"></i>${d}d</span>`).join("")}</div>
+  <div class="legend"><span class="legend-label">mode</span>${s.modes.map((m, i) =>
+    `<span class="key"><i class="sw c${i + 1}"></i>${esc(modeLabel(m))}</span>`).join("")}</div>
   ${renderFrontier(s)}`;
 }
 
@@ -1308,10 +1306,10 @@ function renderDurationComparison(s: ReportData): string {
 // actually spans strata (a --location run has one group — nothing to compare).
 function renderStrata(s: ReportData): string {
   if (s.strata.length <= 1) return "";
-  const head = s.durations.map((d) => `<th>${d}d</th>`).join("");
+  const head = s.modes.map((m) => `<th>${esc(modeLabel(m))}</th>`).join("");
   const rows = s.strata.map((st) =>
     `<tr><td class="name">${esc(st.group)}</td><td class="num">${st.locations}</td>` +
-    st.perDuration.map((p) => p.n === 0
+    st.perMode.map((p) => p.n === 0
       ? `<td class="num">—</td>`
       : `<td><div class="pcell" title="${p.n} messages · ${p.bpp.toFixed(2)} body bits/period"><span class="pmean">${p.fillPct.toFixed(1)}%</span>${renderFillBar(p.fillPct / 100)}</div></td>`,
     ).join("") + `</tr>`).join("\n");
@@ -1326,10 +1324,10 @@ function renderStrata(s: ReportData): string {
   </table>`;
 }
 
-// One toggleable view = a duration × variable-combo: fill summary, the percentile strips, the seq
+// One toggleable view = a mode × variable-combo: fill summary, the percentile strips, the seq
 // histogram, and the occupancy table. All are emitted hidden; the client shows the selected one.
 function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: number, requestHour: number): string {
-  const [duration, combo] = vk.split(":");
+  const [mode, combo] = vk.split(":");
   const occupancyBits = versionBits + headerBits + vs.bodyBits;
   const rows = [
     { name: "version", bits: versionBits, bpp: null as number | null, bppStats: null as BoxStats | null },
@@ -1344,7 +1342,7 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
       <td class="num">${(100 * r.bits / occupancyBits).toFixed(1)}%</td>
       <td class="boxcell">${r.bppStats ? renderMiniBox(r.bppStats, bppScaleMax) : ""}</td>
     </tr>`).join("\n");
-  return `<section class="view" data-duration="${duration}" data-combo="${combo}" hidden>
+  return `<section class="view" data-mode="${mode}" data-combo="${combo}" hidden>
   <h3>Fill resolution distribution</h3>
   <div class="strips">${renderPercentileStrips(vs, requestHour)}</div>
   <h3>Percent of forecasts reaching each fill resolution</h3>
@@ -1360,15 +1358,15 @@ function renderView(vk: string, vs: ViewStats, versionBits: number, headerBits: 
 
 function renderHtml(s: ReportData): string {
   const viewFragments = Object.entries(s.views).map(([vk, vs]) => renderView(vk, vs, s.versionBits, s.headerBits, s.requestHour)).join("\n");
-  const comparison = renderDurationComparison(s);
-  const durationRadios = s.durations.map((d) =>
-    `<label><input type="radio" name="duration" value="${d}"${d === s.defaultDuration ? " checked" : ""}> ${d}d</label>`).join("");
+  const comparison = renderModeComparison(s);
+  const modeRadios = s.modes.map((m) =>
+    `<label><input type="radio" name="mode" value="${m}"${m === s.defaultMode ? " checked" : ""}> ${esc(modeLabel(m))}</label>`).join("");
   const groupChecks = s.groups.map((g, i) =>
     `<label><input type="checkbox" class="group" value="${g.id}" data-bit="${1 << i}"${s.defaultCombo & (1 << i) ? " checked" : ""}> ${esc(g.label)}</label>`).join("");
   const notes = [
     s.skipped ? `Skipped ${s.skipped} forecast(s) with an incomplete base series.` : "",
-    s.uncovered ? `Skipped ${s.uncovered} (forecast, duration) pair(s) the corpus window doesn't cover.` : "",
-    s.dropped.length ? `Dropped ${s.dropped.map((d) => `${d}d`).join(", ")} entirely — no forecast in the corpus covers that duration. Re-collect: the cached windows are shorter than the ${HORIZON_DAYS}-day window this report needs.` : "",
+    s.uncovered ? `Skipped ${s.uncovered} (forecast, mode) pair(s) the corpus window doesn't cover.` : "",
+    s.dropped.length ? `Dropped ${s.dropped.map(modeLabel).join(", ")} entirely — no forecast in the corpus covers that mode. Re-collect: the cached windows are shorter than the ${HORIZON_DAYS}-day window this report needs.` : "",
   ].filter(Boolean);
   const quality = notes.length ? `<div class="quality">${notes.map((n) => `<p>${esc(n)}</p>`).join("")}</div>` : "";
 
@@ -1518,13 +1516,12 @@ function renderHtml(s: ReportData): string {
   use far less information than those for stormy, variable conditions. This dashboard helps visualize
   how much data is transmitted at each forecast length.</p>
 
-  <p>The forecast length is fixed and the time resolution is dynamic. Going Blue tries to fit as much
-  data as possible into each message. It fills the entire time duration with the highest resolution it
-  can, then partially fills the message with as much of the next higher resolution as possible. For
-  example, a 10 day forecast might have the first 2 days at 3h resolution and the remaining 8 days at
-  6h resolution. How far the algorithm gets in this process is expressed through a sequence number,
-  where the highest possible value represents a forecast where the full duration is at 1h
-  resolution.</p>
+  <p>The user picks a priority mode — Detail, Auto, or Range — and the server fills the message
+  by walking that mode's refinement path: every step either covers one more day at 12h or makes
+  one covered day a rung finer. Detail plays resolution first (hourly detail before coverage),
+  Range plays coverage first (the whole 12-day horizon before any refinement), and Auto
+  balances the two. How far the fill gets along the path is expressed through a sequence number;
+  the highest value is the top of the mode's path.</p>
 
   <p>The units of this dashboard are fill percentage, which represents the sequence number as a
   percentage of the maximum possible.</p>
@@ -1536,7 +1533,7 @@ ${renderStrata(s)}
 
 <h2>Benchmark detail</h2>
 <div class="selectors">
-  <div class="sel"><span class="sel-label">Duration</span>${durationRadios}</div>
+  <div class="sel"><span class="sel-label">Priority</span>${modeRadios}</div>
   <div class="sel"><span class="sel-label">Variables</span>${groupChecks}</div>
 </div>
 ${quality}
@@ -1545,18 +1542,18 @@ ${quality}
 
 <script>
 const views = [...document.querySelectorAll(".view")];
-const durationRadios = [...document.querySelectorAll('input[name=duration]')];
+const modeRadios = [...document.querySelectorAll('input[name=mode]')];
 const groupBoxes = [...document.querySelectorAll('input.group')];
 
-const duration = () => durationRadios.find((r) => r.checked).value;
+const mode = () => modeRadios.find((r) => r.checked).value;
 const combo = () => groupBoxes.reduce((c, b) => c | (b.checked ? +b.dataset.bit : 0), 0);
 
 function update() {
-  const d = duration(), c = combo();
-  views.forEach((v) => v.hidden = !(v.dataset.duration === d && +v.dataset.combo === c));
+  const m = mode(), c = combo();
+  views.forEach((v) => v.hidden = !(v.dataset.mode === m && +v.dataset.combo === c));
 }
 
-[...durationRadios, ...groupBoxes].forEach((el) => el.addEventListener("change", update));
+[...modeRadios, ...groupBoxes].forEach((el) => el.addEventListener("change", update));
 update();
 </script>
 </body>

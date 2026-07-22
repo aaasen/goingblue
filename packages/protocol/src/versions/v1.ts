@@ -22,7 +22,7 @@ const VERSION = V1_VERSION;
 // Duration-first fill: the user requests a duration in days and the server fills the message
 // budget by refining days from the front of the window (see layout.ts).
 //
-// The response is slim: lat/lon/model/vars, the requested duration, the UTC offset, AND the
+// The response is slim: lat/lon/model/vars, the priority mode, the UTC offset, AND the
 // request datetime are NOT on the wire. The client stores the request under `code` and recovers
 // them via a ContextResolver at decode time (see RequestContext). The period layout — count and
 // per-period resolution — isn't on the wire either: the header carries only the fill-sequence
@@ -33,7 +33,7 @@ const VERSION = V1_VERSION;
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
 // packed header. Packed header layout (25 bits):
 //   code:7 seq:8 elev:7 class:3
-// seq:8 stores (seq - 1), i.e. 1..256; the largest layout is seq = 5 × durationDays.
+// seq:8 stores (seq - 1), i.e. 1..256; the largest layout is seq = maxFillSeq(mode).
 // class:3 is the codebook-class selector: the encoder builds the body under every class's table
 // set and keeps the cheapest (see CLASS_BOOKS in entropy.ts). The 3 bits ride free — 25 bits
 // still fit the same 4 base-85 header chars 22 did (4 × log2(85) ≈ 25.6).
@@ -498,16 +498,16 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
   // Recover the request-echo fields the slim header omits.
   const ctx = resolve(code);
   if (!ctx) throw new Error(`Unknown forecast code ${code}: no matching request in the store`);
-  const { model, vars_mask, lat, lon, start, durationDays, utcOffsetHours } = ctx;
-  if (durationDays == null || utcOffsetHours == null)
-    throw new Error(`Forecast code ${code} matches a request without a duration`);
-  if (seq > maxFillSeq(durationDays))
-    throw new Error(`v1: seq ${seq} exceeds the ${durationDays}d fill sequence`);
+  const { model, vars_mask, lat, lon, start, mode, utcOffsetHours } = ctx;
+  if (mode == null || utcOffsetHours == null)
+    throw new Error(`Forecast code ${code} matches a request without a priority mode`);
+  if (seq > maxFillSeq(mode))
+    throw new Error(`v1: seq ${seq} exceeds mode ${mode}'s fill sequence`);
   const models_mask = 1 << model; // a response carries exactly one model
 
   // The period layout is derived, not decoded: both sides compute it from the stored request.
   const requestUtcHour = Math.floor(start / 3600000);
-  const layout = layoutFor(durationDays, requestUtcHour, utcOffsetHours, seq);
+  const layout = layoutFor(mode, requestUtcHour, utcOffsetHours, seq);
 
   // month/day/hour describe the FIRST PERIOD's start (which precedes the request time — the
   // first period is the one containing it), so display code can lay periods out from it.
@@ -537,7 +537,7 @@ export function v1MessageFromString(s: string, resolve: ContextResolver): Foreca
     elevation,
     periods,
     seq,
-    durationDays,
+    mode,
     periodHours: layout.periodHours,
     utcOffsetHours,
   };

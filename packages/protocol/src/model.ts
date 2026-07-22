@@ -54,10 +54,11 @@ export interface Period {
 export interface ForecastMessage {
   version: number;
   // Message code (0..127): a client-assigned key that the response echoes. The client stores the
-  // request (lat/lon/models/vars/duration) under this code; the encoded response omits those
+  // request (lat/lon/models/vars/mode) under this code; the encoded response omits those
   // fields and the decoder recovers them via a ContextResolver. See RequestContext.
   code: number;
-  // Calendar days covered (< durationDays when the budget forced truncation).
+  // Calendar days covered (< FILL_SLOTS early in the fill path, before the mode's extend-moves
+  // have run).
   days: number;
   models_mask: number;
   vars_mask: number;
@@ -73,8 +74,8 @@ export interface ForecastMessage {
   // Fill-sequence number carried in the header; the period layout — count and per-period
   // resolution — is derived from it (see layout.ts).
   seq: number;
-  // Requested forecast duration in days (from the request context).
-  durationDays: number;
+  // Requested priority mode (MODE_DETAIL/MODE_AUTO/MODE_RANGE, from the request context).
+  mode: number;
   // Span of each period in hours (periodHours.length === periods[m].length). Periods within
   // one message can span different resolutions.
   periodHours: number[];
@@ -101,10 +102,10 @@ export interface RequestContext {
   // Request time as UTC epoch milliseconds, aligned to the hour. The client chooses it (so
   // delivery delay can't shift it) and stores it; the slim header omits month/day/hour.
   start: number;
-  // The requested duration in days and the location's fixed UTC offset in whole hours,
-  // captured at request time (the `d:`/`z:` tokens). Both feed layoutFor(), which recovers
+  // The requested priority mode and the location's fixed UTC offset in whole hours,
+  // captured at request time (the `p:`/`z:` tokens). Both feed layoutFor(), which recovers
   // the period layout the slim header omits — see layout.ts.
-  durationDays: number;
+  mode: number;
   utcOffsetHours: number;
 }
 

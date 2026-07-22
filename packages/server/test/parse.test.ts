@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
-import { MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken } from "@weather/protocol";
+import { MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE } from "@weather/protocol";
 import { parseRequest } from "../src/forecast.js";
 
 const newToken = () => generateToken((n) => Uint8Array.from(randomBytes(n)));
@@ -11,9 +11,9 @@ const CA   = 1 << MODEL_BIT["CA"];
 const EU   = 1 << MODEL_BIT["EU"];
 
 describe("parseRequest", () => {
-  it("defaults: 7-day duration, UTC grid, Best Match, always-on vars, location 0", () => {
+  it("defaults: Auto priority, UTC grid, Best Match, always-on vars, location 0", () => {
     const p = parseRequest("");
-    expect(p).toMatchObject({ durationDays: 7, utcOffsetHours: 0, modelsMask: BEST, locationIdx: 0 });
+    expect(p).toMatchObject({ mode: MODE_AUTO, utcOffsetHours: 0, modelsMask: BEST, locationIdx: 0 });
     expect(p.varsMask).toBe(ALWAYS_VARS_MASK);
   });
 
@@ -50,8 +50,8 @@ describe("parseRequest", () => {
   it("c: sets the max response length; the fill trims to it at encode time, not parse time", () => {
     expect(parseRequest("c:320").maxChars).toBe(320);
     // The budget doesn't change what's parsed — only how far the fill refines.
-    expect(parseRequest("c:320 d:7").durationDays).toBe(7);
-    expect(parseRequest("c:80 d:7").durationDays).toBe(7);
+    expect(parseRequest("c:320 p:d").mode).toBe(MODE_DETAIL);
+    expect(parseRequest("c:80 p:d").mode).toBe(MODE_DETAIL);
   });
 
   it("c: clamps the max response length to a minimum of 1", () => {
@@ -137,10 +137,10 @@ describe("parseRequest", () => {
   });
 
   it("full message parses all fields", () => {
-    const p = parseRequest("l:14k d:5 z:-9 m:eu v:f");
+    const p = parseRequest("l:14k p:r z:-9 m:eu v:f");
     expect(p).toMatchObject({
       locationIdx: 2,
-      durationDays: 5,
+      mode: MODE_RANGE,
       utcOffsetHours: -9,
       modelsMask: EU,
     });
@@ -149,17 +149,20 @@ describe("parseRequest", () => {
 
   it("vN token overrides the decoder version, defaulting to the current version", () => {
     expect(parseRequest("").decoderVersion).toBe(1);
-    expect(parseRequest("v1 d:7").decoderVersion).toBe(1);
+    expect(parseRequest("v1 p:a").decoderVersion).toBe(1);
     expect(parseRequest("v3").decoderVersion).toBe(3); // routed to a clear unsupported-version error
   });
 
-  it("d: sets the duration in days, clamped to 1..10, defaulting to 7", () => {
-    expect(parseRequest("d:3").durationDays).toBe(3);
-    expect(parseRequest("d:10").durationDays).toBe(10);
-    expect(parseRequest("d:7d").durationDays).toBe(7); // trailing "d" tolerated
-    expect(parseRequest("d:0").durationDays).toBe(1);
-    expect(parseRequest("d:99").durationDays).toBe(10);
-    expect(parseRequest("").durationDays).toBe(7);
+  it("p: sets the priority mode, defaulting to Auto; unknown values keep Auto", () => {
+    expect(parseRequest("p:d").mode).toBe(MODE_DETAIL);
+    expect(parseRequest("p:a").mode).toBe(MODE_AUTO);
+    expect(parseRequest("p:r").mode).toBe(MODE_RANGE);
+    expect(parseRequest("p:x").mode).toBe(MODE_AUTO);
+    expect(parseRequest("").mode).toBe(MODE_AUTO);
+  });
+
+  it("d: (the removed duration token) is ignored", () => {
+    expect(parseRequest("d:7").mode).toBe(MODE_AUTO);
   });
 
   it("z: sets the UTC offset in whole hours, ignoring out-of-range values", () => {
@@ -172,7 +175,7 @@ describe("parseRequest", () => {
   });
 
   it("ignores removed var tokens (tmin is no longer a variable)", () => {
-    const p = parseRequest("d:3 v:tmin");
+    const p = parseRequest("p:d v:tmin");
     expect(p.varsMask).toBe(ALWAYS_VARS_MASK);
   });
 

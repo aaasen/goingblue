@@ -6,7 +6,10 @@ import {
   V1_VERSION,
   layoutFor,
   maxFillSeq,
-  slotsFor,
+  FILL_SLOTS,
+  MODE_DETAIL,
+  MODE_AUTO,
+  MODE_RANGE,
   decodeMessage,
   type ForecastMessage,
   type Period,
@@ -17,10 +20,9 @@ import {
 // Every variable (bit 12 is `rain`; bit 13, formerly tmin, is reserved).
 const ALL_VARS = ((1 << 13) - 1) & ~(1 << 8); // bit 8 (formerly cloud_total) is reserved
 
-// Request: 2026-07-12 at 13:00 local, UTC-9, 10 days — which covers SLOTS = 11 day slots (the
-// rest of the request day, then 10 whole days).
-const DURATION_DAYS = 10;
-const SLOTS = slotsFor(DURATION_DAYS);
+// Request: 2026-07-12 at 13:00 local, UTC-9. Detail mode unless a test says otherwise — its
+// path has the richest resolution mixes (1h/3h/6h/12h in one message).
+const MODE = MODE_DETAIL;
 const UTC_OFFSET = -9;
 const REQ_UTC_HOUR = Date.UTC(2026, 6, 12, 13) / 3600000 - UTC_OFFSET;
 
@@ -63,40 +65,41 @@ function msgFor(layout: FillLayout, overrides: Partial<ForecastMessage> = {}): F
     elevation: 500,
     periods: [layout.periodHours.map((_, i) => periodAt(i))],
     seq: layout.seq,
-    durationDays: layout.durationDays,
+    mode: layout.mode,
     periodHours: layout.periodHours,
     utcOffsetHours: UTC_OFFSET,
     ...overrides,
   };
 }
 
-const ctx: RequestContext = {
+const ctxFor = (mode: number): RequestContext => ({
   model: 0,
   vars_mask: ALL_VARS,
   lat: 63.135,
   lon: -150.989,
   start: REQ_UTC_HOUR * 3600000,
-  durationDays: DURATION_DAYS,
+  mode,
   utcOffsetHours: UTC_OFFSET,
-};
+});
+const ctx = ctxFor(MODE);
 
-function roundTrip(seq: number): { original: ForecastMessage; decoded: ForecastMessage } {
-  const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, seq);
+function roundTrip(seq: number, mode = MODE): { original: ForecastMessage; decoded: ForecastMessage } {
+  const layout = layoutFor(mode, REQ_UTC_HOUR, UTC_OFFSET, seq);
   const original = msgFor(layout);
-  const decoded = v1MessageFromString(v1MessageToString(original), () => ctx);
+  const decoded = v1MessageFromString(v1MessageToString(original), () => ctxFor(mode));
   return { original, decoded };
 }
 
 describe("mixed-layout round-trip encoding", () => {
   it("recovers the layout from seq alone — header, periodHours, and count", () => {
-    // A mixed layout: seq = SLOTS + 3 → slots 0-2 at 6h, the rest at 12h.
-    const seq = SLOTS + 3;
+    // Detail seq 7 = |1h|6h|12h|: three resolutions in one message.
+    const seq = 7;
     const { original, decoded } = roundTrip(seq);
     expect(decoded.version).toBe(V1_VERSION);
     expect(decoded.code).toBe(42);
     expect(decoded.seq).toBe(seq);
-    expect(decoded.durationDays).toBe(DURATION_DAYS);
-    expect(decoded.days).toBe(SLOTS);
+    expect(decoded.mode).toBe(MODE);
+    expect(decoded.days).toBe(3);
     expect(decoded.periodHours).toEqual(original.periodHours);
     expect(decoded.periods[0]).toHaveLength(original.periods[0].length);
     expect(decoded.elevation).toBe(500);
@@ -105,16 +108,17 @@ describe("mixed-layout round-trip encoding", () => {
   });
 
   it("month/day/hour describe the first period's start, not the request time", () => {
-    // All-1h layout: the first period is the request hour itself (13:00 local = 22:00 UTC).
-    const all1h = roundTrip(4 * SLOTS).decoded;
-    expect([all1h.month, all1h.day, all1h.hour]).toEqual([7, 12, 22]);
+    // Detail seq 12 = 1h×3: the first period is the request hour itself (13:00 local = 22:00 UTC).
+    const hourly = roundTrip(12).decoded;
+    expect([hourly.month, hourly.day, hourly.hour]).toEqual([7, 12, 22]);
     // All-12h layout: day 0's period starts at local noon (21:00 UTC).
-    const all12h = roundTrip(SLOTS).decoded;
+    const all12h = roundTrip(3).decoded;
     expect([all12h.month, all12h.day, all12h.hour]).toEqual([7, 12, 21]);
   });
 
-  it("round-trips period values across a mixed layout", () => {
-    const { original, decoded } = roundTrip(2 * SLOTS + 2);
+  it("round-trips period values across a four-resolution taper", () => {
+    // Detail seq 24 = |1h×3|3h×2|6h×3|: every rung boundary in one column.
+    const { original, decoded } = roundTrip(24);
     original.periods[0].forEach((p, i) => {
       const d = decoded.periods[0][i];
       expect(d.weathercode).toBe(p.weathercode);
@@ -127,42 +131,46 @@ describe("mixed-layout round-trip encoding", () => {
     });
   });
 
-  it("round-trips every seq in the sequence", () => {
-    for (let seq = 1; seq <= maxFillSeq(DURATION_DAYS); seq++) {
-      const { original, decoded } = roundTrip(seq);
-      expect(decoded.periodHours).toEqual(original.periodHours);
-      expect(decoded.periods[0]).toHaveLength(original.periods[0].length);
+  it("round-trips every seq of every mode's path", () => {
+    for (const mode of [MODE_DETAIL, MODE_AUTO, MODE_RANGE]) {
+      for (let seq = 1; seq <= maxFillSeq(mode); seq++) {
+        const { original, decoded } = roundTrip(seq, mode);
+        expect(decoded.periodHours).toEqual(original.periodHours);
+        expect(decoded.periods[0]).toHaveLength(original.periods[0].length);
+      }
     }
   });
 
-  it("truncated layouts decode with days < durationDays", () => {
-    const { decoded } = roundTrip(4);
-    expect(decoded.days).toBe(4);
-    expect(decoded.periodHours).toEqual(Array(7).fill(12));
+  it("early-path layouts decode with partial coverage (days < FILL_SLOTS)", () => {
+    const { decoded } = roundTrip(2);
+    expect(decoded.days).toBe(2);
+    expect(decoded.days).toBeLessThan(FILL_SLOTS);
+    // At 13:00 local, slot 0 contributes one 12h period; day 1 two.
+    expect(decoded.periodHours).toEqual(Array(3).fill(12));
   });
 
   it("dispatches through the version registry", () => {
-    const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, 15);
+    const layout = layoutFor(MODE, REQ_UTC_HOUR, UTC_OFFSET, 15);
     const encoded = v1MessageToString(msgFor(layout));
     const decoded = decodeMessage(encoded, () => ctx);
     expect(decoded.version).toBe(V1_VERSION);
     expect(decoded.seq).toBe(15);
   });
 
-  it("rejects a context without duration fields (e.g. a stale store entry)", () => {
-    const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, 10);
+  it("rejects a context without mode fields (e.g. a stale store entry)", () => {
+    const layout = layoutFor(MODE, REQ_UTC_HOUR, UTC_OFFSET, 10);
     const encoded = v1MessageToString(msgFor(layout));
-    const staleCtx = { ...ctx, durationDays: undefined, utcOffsetHours: undefined } as unknown as RequestContext;
-    expect(() => v1MessageFromString(encoded, () => staleCtx)).toThrow(/duration/);
+    const staleCtx = { ...ctx, mode: undefined, utcOffsetHours: undefined } as unknown as RequestContext;
+    expect(() => v1MessageFromString(encoded, () => staleCtx)).toThrow(/priority mode/);
   });
 
   it("rejects a message without a seq", () => {
-    const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, 10);
+    const layout = layoutFor(MODE, REQ_UTC_HOUR, UTC_OFFSET, 10);
     expect(() => v1MessageToString(msgFor(layout, { seq: undefined }))).toThrow(/seq/);
   });
 
   it("breakdown produces the identical encoding and accounts every column", () => {
-    const layout = layoutFor(DURATION_DAYS, REQ_UTC_HOUR, UTC_OFFSET, 2 * SLOTS + 5);
+    const layout = layoutFor(MODE, REQ_UTC_HOUR, UTC_OFFSET, 29); // the full-coverage taper
     const m = msgFor(layout);
     const b = v1EncodeBreakdown(m);
     expect(b.encoded).toBe(v1MessageToString(m));

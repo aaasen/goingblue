@@ -15,6 +15,7 @@ import { encodeFillSeq, type ForecastParams, type HourlyData } from "../src/fore
 import { eachForecast } from "./derive-lib.ts";
 import {
   v1MessageToString, v1MessageFromString, layoutFor, maxFillSeq, DEFAULT_VARS_MASK, CODECS,
+  MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   type RequestContext,
 } from "@weather/protocol";
 
@@ -33,43 +34,45 @@ await eachForecast((hourly: HourlyData, _runHour: number) => {
   const times = hourly.time;
   const dataStart = Math.floor(Date.parse(`${times[0]}:00Z`) / 3600000);
   const dataEnd = dataStart + times.length; // exclusive
-  // Anchor day 0 at the first covered local midnight so every layout's window has data. A
-  // duration of D covers D + 1 day slots (slotsFor), hence the -1.
+  // Anchor day 0 at the first covered local midnight so every layout's window has data.
   const day0 = Math.ceil(dataStart / 24) * 24;
-  const durationDays = Math.min(10, Math.floor((dataEnd - day0) / 24) - 1);
-  if (durationDays < 1) return;
 
   for (const hourOfDay of REQUEST_HOURS_OF_DAY) {
     const startEpochHour = day0 + hourOfDay;
     for (const mask of [ALL_VARS, DEFAULT_VARS_MASK]) {
-      const params: ForecastParams = {
-        locationIdx: 0, lat: 0, lon: 0,
-        durationDays, utcOffsetHours: UTC_OFFSET,
-        modelsMask: 1 << 1 /* GFS */, varsMask: mask,
-        maxChars: 160, decoderVersion: 1, code: messages % 128,
-        startEpochHour, userToken: null,
-      };
-      const ctx: RequestContext = {
-        model: 1, vars_mask: mask, lat: 0, lon: 0,
-        start: startEpochHour * 3600000, durationDays, utcOffsetHours: UTC_OFFSET,
-      };
+      for (const mode of [MODE_DETAIL, MODE_AUTO, MODE_RANGE]) {
+        const params: ForecastParams = {
+          locationIdx: 0, lat: 0, lon: 0,
+          mode, utcOffsetHours: UTC_OFFSET,
+          modelsMask: 1 << 1 /* GFS */, varsMask: mask,
+          maxChars: 160, decoderVersion: 1, code: messages % 128,
+          startEpochHour, userToken: null,
+        };
+        const ctx: RequestContext = {
+          model: 1, vars_mask: mask, lat: 0, lon: 0,
+          start: startEpochHour * 3600000, mode, utcOffsetHours: UTC_OFFSET,
+        };
 
-      for (let seq = 1; seq <= maxFillSeq(durationDays); seq++) {
-        messages++;
-        try {
-          const encoded = encodeFillSeq(hourly, times, params, seq, 0, 0, 0, "US", codec);
-          if (encoded === null) throw new Error("data gap: layout not covered by corpus hours");
-          const decoded = v1MessageFromString(encoded, () => ctx); // assertDone throws on desync
-          const layout = layoutFor(durationDays, startEpochHour, UTC_OFFSET, seq);
-          if (decoded.periods[0].length !== layout.periodHours.length)
-            throw new Error(`period count ${decoded.periods[0].length} != ${layout.periodHours.length}`);
-          const reencoded = v1MessageToString(decoded);
-          if (reencoded !== encoded)
-            throw new Error(`re-encode drift:\n  ${encoded}\n  ${reencoded}`);
-        } catch (e) {
-          failures++;
-          if (failures <= 10)
-            console.error(`FAIL seq=${seq} hourOfDay=${hourOfDay} mask=${mask.toString(2)}: ${e}`);
+        for (let seq = 1; seq <= maxFillSeq(mode); seq++) {
+          const layout = layoutFor(mode, startEpochHour, UTC_OFFSET, seq);
+          // Skip layouts the cached window can't cover (short corpus records).
+          const last = layout.periodStartUtcHour.length - 1;
+          if (layout.periodStartUtcHour[last] + layout.periodHours[last] > dataEnd) continue;
+          messages++;
+          try {
+            const encoded = encodeFillSeq(hourly, times, params, seq, 0, 0, 0, "US", codec);
+            if (encoded === null) throw new Error("data gap: layout not covered by corpus hours");
+            const decoded = v1MessageFromString(encoded, () => ctx); // assertDone throws on desync
+            if (decoded.periods[0].length !== layout.periodHours.length)
+              throw new Error(`period count ${decoded.periods[0].length} != ${layout.periodHours.length}`);
+            const reencoded = v1MessageToString(decoded);
+            if (reencoded !== encoded)
+              throw new Error(`re-encode drift:\n  ${encoded}\n  ${reencoded}`);
+          } catch (e) {
+            failures++;
+            if (failures <= 10)
+              console.error(`FAIL mode=${mode} seq=${seq} hourOfDay=${hourOfDay} mask=${mask.toString(2)}: ${e}`);
+          }
         }
       }
     }

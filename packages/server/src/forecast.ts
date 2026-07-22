@@ -7,8 +7,13 @@ import {
   isValidToken,
   normalizeToken,
   layoutFor,
+  type FillLayout,
   maxFillSeq,
-  slotsFor,
+  FILL_SLOTS,
+  DEFAULT_MODE,
+  MODE_DETAIL,
+  MODE_AUTO,
+  MODE_RANGE,
   type Period,
   type ForecastMessage,
   type VersionedCodec,
@@ -483,10 +488,11 @@ export interface ForecastParams {
   locationIdx: number;
   lat?: number;
   lon?: number;
-  // The requested duration in days (`d:`) and the location's fixed UTC offset in whole
-  // hours (`z:`). The duration is days AHEAD: the window is the rest of the request day plus
-  // `durationDays` whole local days (see slotsFor/layoutFor).
-  durationDays: number;
+  // The requested priority mode (`p:` — MODE_DETAIL/MODE_AUTO/MODE_RANGE) and the location's
+  // fixed UTC offset in whole hours (`z:`). The mode orders the fill path; the window is
+  // always the rest of the request day plus up to FILL_HORIZON_DAYS whole local days (see
+  // layoutFor).
+  mode: number;
   utcOffsetHours: number;
   modelsMask: number;
   varsMask: number;
@@ -502,15 +508,17 @@ export interface ForecastParams {
 }
 
 const DEFAULT_MAX_CHARS = 160; // default response length cap (Garmin inReach reply limit)
-const DEFAULT_DURATION_DAYS = 7; // default when the request has no `d:` token
-const MAX_DURATION_DAYS = 10;
+// `p:` token values → priority modes; a missing or unknown token means Auto.
+const MODE_TOKENS: Record<string, number> = {
+  d: MODE_DETAIL, a: MODE_AUTO, r: MODE_RANGE,
+};
 
 export function parseRequest(body: string): ForecastParams {
   const words = body.toLowerCase().trim().split(/\s+/);
   let locationIdx = 0;
   let lat: number | undefined;
   let lon: number | undefined;
-  let durationDays = DEFAULT_DURATION_DAYS; // forecast duration, override with `d:` (days)
+  let mode = DEFAULT_MODE; // priority mode, override with `p:` (d/a/r)
   let utcOffsetHours = 0; // local-midnight offset, override with `z:` (whole hours east of UTC)
   let modelsMask = 1; // Best Match default (bit 0)
   // Core variables are implicit; `v:` carries only user-configurable additions.
@@ -543,10 +551,9 @@ export function parseRequest(body: string): ForecastParams {
         } else if (val in LOCATION_NAME_TO_IDX) {
           locationIdx = LOCATION_NAME_TO_IDX[val];
         }
-      } else if (key === "d") {
-        // Duration in days, with or without a trailing "d" (d:7 or d:7d).
-        const n = parseInt(val);
-        if (!isNaN(n)) durationDays = Math.min(Math.max(n, 1), MAX_DURATION_DAYS);
+      } else if (key === "p") {
+        // Priority mode: p:d (Detail), p:a (Auto), p:r (Range). Unknown values keep Auto.
+        if (val in MODE_TOKENS) mode = MODE_TOKENS[val];
       } else if (key === "z") {
         // The location's UTC offset in whole hours; out-of-range values are ignored.
         const n = parseInt(val);
@@ -594,7 +601,7 @@ export function parseRequest(body: string): ForecastParams {
     startEpochHour = Math.floor(Date.now() / 3600000);
   }
 
-  return { locationIdx, lat, lon, durationDays, utcOffsetHours, modelsMask, varsMask, maxChars, decoderVersion, userToken, code, startEpochHour };
+  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, decoderVersion, userToken, code, startEpochHour };
 }
 
 function resolveLocation(params: ForecastParams): { lat: number; lon: number; elev_m?: number } {
@@ -632,8 +639,23 @@ export function buildFillMessage(
   elevation: number,
   modelKey: string,
 ): ForecastMessage | null {
-  const layout = layoutFor(params.durationDays, params.startEpochHour, params.utcOffsetHours, seq);
+  const layout = layoutFor(params.mode, params.startEpochHour, params.utcOffsetHours, seq);
+  return buildLayoutMessage(h, times, params, layout, lat, lon, elevation, modelKey);
+}
 
+// buildFillMessage with the layout supplied directly instead of derived from a seq. The request
+// path never calls this; it exists so offline probes (and future layout schemes) can encode
+// hand-built layouts through the identical aggregation path.
+export function buildLayoutMessage(
+  h: HourlyData,
+  times: string[],
+  params: ForecastParams,
+  layout: FillLayout,
+  lat: number,
+  lon: number,
+  elevation: number,
+  modelKey: string,
+): ForecastMessage | null {
   // Hourly samples are keyed by UTC epoch hour; each period's window is just its hour range.
   const idxByHour = new Map<number, number>();
   for (let i = 0; i < times.length; i++) {
@@ -648,6 +670,14 @@ export function buildFillMessage(
     return idx;
   });
   if (windows.some((w) => w.length === 0)) return null;
+
+  // A period whose hours exist on the time axis but carry no data at all is an upstream
+  // horizon gap — Open-Meteo returns nulls past a model's last forecast day (GEM ends at 10;
+  // the fill horizon is 12). Treat the layout as unservable, exactly like a missing hour:
+  // coverage only grows along the fill path, so the seq search naturally clamps to the data
+  // the model actually has, with zero wire bits. Temperature is the sentinel (always fetched);
+  // scattered single-hour nulls inside an otherwise-populated period still aggregate fine.
+  if (windows.some((w) => w.every((i) => h.temperature_2m[i] == null))) return null;
 
   const rows = rowsFromWindows(h, times, windows, params.utcOffsetHours);
   const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
@@ -665,8 +695,8 @@ export function buildFillMessage(
     lon,
     elevation,
     periods: [rows.map((r) => toFullPeriod(r, params.varsMask, modelKey))],
-    seq,
-    durationDays: params.durationDays,
+    seq: layout.seq,
+    mode: params.mode,
     periodHours: layout.periodHours,
     utcOffsetHours: params.utcOffsetHours,
   };
@@ -697,16 +727,18 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   const modelKey = firstModelKey(params.modelsMask);
 
   // The window runs from local midnight of the request day (≤ 24h in the past for any UTC
-  // offset — hence past_days=1) through the rest of that day plus durationDays full local days
-  // (see slotsFor); +2 forecast days cover the offset shift past the last UTC day boundary.
+  // offset — hence past_days=1) through the rest of that day plus up to FILL_HORIZON_DAYS full
+  // local days (FILL_SLOTS covers both); +2 forecast days cover the offset shift past the last
+  // UTC day boundary. Models whose horizon ends earlier (GEM: 10 days) return nulls for the
+  // tail hours, which buildLayoutMessage treats as unservable — the seq search clamps to them.
   const [h, times, elevation] = await fetchHourly(
-    modelKey, slotsFor(params.durationDays) + 2, lat, lon, "UTC", elev_m, 1,
+    modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1,
   );
 
   const best = fitFillToBudget(
     (seq) => encodeFillSeq(h, times, params, seq, lat, lon, elevation, modelKey, codec),
     (encoded) => encoded.length,
-    maxFillSeq(params.durationDays),
+    maxFillSeq(params.mode),
     params.maxChars,
   );
   if (best === null) throw new Error("upstream data does not cover the requested window");
