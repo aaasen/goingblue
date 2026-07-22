@@ -60,6 +60,15 @@ const PRIORITIES = [
   { value: MODE_RANGE, token: 'r', label: 'Range' },
 ];
 
+// Model-selector help copy. Each line names the forecast center(s) behind a Model option and,
+// where it's a blend, the short-range/global pair with their resolution and horizon.
+const MODEL_INFO = [
+  { name: 'Auto', desc: 'Chooses the highest resolution model for your location from over 30 regional weather models.' },
+  { name: 'US', desc: 'Blend of HRRR (3km, 48hr, continental US) and GFS (13km, 16 day, global).' },
+  { name: 'CA', desc: 'Blend of HRDPS (2.5km, 48hr, Canada) and GEM (15km, 10 day, global).' },
+  { name: 'EU', desc: 'IFS HRES (9km, 15 day, global).' },
+];
+
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
 // protocol variables together (e.g. "Clouds" covers high/mid/low cloud cover, not total).
 const VAR_GROUPS = [
@@ -137,6 +146,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const [fetching, setFetching] = useState(false);
   const [locating, setLocating] = useState(false);
   const [priorityInfo, setPriorityInfo] = useState(false);
+  const [modelInfo, setModelInfo] = useState(false);
 
   // The reply always spans a single 160-char message; that sets the response length budget.
   const maxChars = DEFAULT_MESSAGES * CHARS_PER_MESSAGE;
@@ -293,7 +303,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
         />
       </Section>
 
-      <Section label="Model">
+      <Section label="Model" info={() => setModelInfo(true)}>
         <SegmentedControl
           values={MODELS.map((m) => m.label)}
           selectedIndex={MODELS.findIndex((m) => m.value === model)}
@@ -371,35 +381,22 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
         </TouchableOpacity>
       </View>
 
-      <Modal
-        visible={priorityInfo}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPriorityInfo(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalBackdrop}
-          activeOpacity={1}
-          onPress={() => setPriorityInfo(false)}
-        >
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitle}>Priority</Text>
-            <Text style={styles.modalBody}>
-              Going Blue packs as much information as it can into each message. Choose{' '}
-              <Text style={styles.modalBold}>Detail</Text> for short-range hourly forecasts. Choose{' '}
-              <Text style={styles.modalBold}>Range</Text> for extended forecasts up to 14 days. Choose{' '}
-              <Text style={styles.modalBold}>Auto</Text> for a blend of the two.
-            </Text>
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={() => setPriorityInfo(false)}
-              accessibilityRole="button"
-            >
-              <Text style={styles.modalButtonText}>Got it</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+      <InfoModal visible={priorityInfo} title="Priority" onClose={() => setPriorityInfo(false)}>
+        <Text style={styles.modalBody}>
+          Going Blue packs as much information as it can into each message. Choose{' '}
+          <Text style={styles.modalBold}>Detail</Text> for short-range hourly forecasts. Choose{' '}
+          <Text style={styles.modalBold}>Range</Text> for extended forecasts up to 14 days. Choose{' '}
+          <Text style={styles.modalBold}>Auto</Text> for a blend of the two.
+        </Text>
+      </InfoModal>
+
+      <InfoModal visible={modelInfo} title="Model" onClose={() => setModelInfo(false)}>
+        {MODEL_INFO.map((m) => (
+          <Text key={m.name} style={styles.modalItem}>
+            <Text style={styles.modalBold}>{m.name}</Text> — {m.desc}
+          </Text>
+        ))}
+      </InfoModal>
     </ScrollView>
   );
 }
@@ -425,6 +422,24 @@ function Section({ label, info, children }: { label: string; info?: () => void; 
   );
 }
 
+function InfoModal({ visible, title, onClose, children }: {
+  visible: boolean; title: string; onClose: () => void; children: React.ReactNode;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
+          <Text style={styles.modalTitle}>{title}</Text>
+          {children}
+          <TouchableOpacity style={styles.modalButton} onPress={onClose} accessibilityRole="button">
+            <Text style={styles.modalButtonText}>Got it</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: '#f2f2f7' },
   content: { padding: 16, paddingBottom: 48 },
@@ -433,6 +448,7 @@ const styles = StyleSheet.create({
   modalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20, width: '100%', maxWidth: 340 },
   modalTitle: { fontSize: 18, fontWeight: '700', color: '#1c1c1e', marginBottom: 10 },
   modalBody: { fontSize: 15, color: '#3a3a3c', lineHeight: 22 },
+  modalItem: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginBottom: 10 },
   modalBold: { fontWeight: '700', color: '#1c1c1e' },
   modalButton: { marginTop: 18, height: 44, borderRadius: 12, backgroundColor: '#2a6bb5', alignItems: 'center', justifyContent: 'center' },
   modalButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
