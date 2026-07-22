@@ -70,6 +70,14 @@ const MODEL_INFO = [
 ];
 const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 
+// Help copy for the optional variable groups. Each optional variable costs response length, so
+// the modal closes by noting the trade-off against forecast detail and range.
+const VAR_INFO = [
+  { name: 'Detailed Clouds', desc: 'Low (<3km), medium (3-8km), and high (>8km) cloud cover' },
+  { name: 'High Altitude Winds', desc: 'Winds at 500, 600, and 700 hPa pressure levels' },
+  { name: 'Freezing Level', desc: 'Altitude at which atmospheric temperature drops to 0°C' },
+];
+
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
 // protocol variables together (e.g. "Clouds" covers high/mid/low cloud cover, not total).
 const VAR_GROUPS = [
@@ -148,6 +156,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const [locating, setLocating] = useState(false);
   const [priorityInfo, setPriorityInfo] = useState(false);
   const [modelInfo, setModelInfo] = useState(false);
+  const [varsInfo, setVarsInfo] = useState(false);
 
   // The reply always spans a single 160-char message; that sets the response length budget.
   const maxChars = DEFAULT_MESSAGES * CHARS_PER_MESSAGE;
@@ -312,7 +321,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
         />
       </Section>
 
-      <Section label="Extra Variables">
+      <Section label="Extra Variables" info={() => setVarsInfo(true)}>
         <View style={styles.varList}>
           {VAR_GROUPS.map((group, idx) => {
             // A group is unavailable when the model can't supply any of its variables.
@@ -405,6 +414,19 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
           .
         </Text>
       </InfoModal>
+
+      <InfoModal visible={varsInfo} title="Extra Variables" onClose={() => setVarsInfo(false)}>
+        <Text style={styles.modalBody}>
+          By default, Going Blue forecasts include temperature, precipitation, wind, and basic cloud
+          cover. The following variables are optional:
+        </Text>
+        {VAR_INFO.map((v) => (
+          <Text key={v.name} style={styles.modalItemIndent}>
+            <Text style={styles.modalBold}>{v.name}</Text> — {v.desc}
+          </Text>
+        ))}
+        <Text style={[styles.modalBody, styles.modalNote]}>Each added variable takes away from the detail and range of each forecast.</Text>
+      </InfoModal>
     </ScrollView>
   );
 }
@@ -457,7 +479,9 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: '700', color: '#1c1c1e', marginBottom: 10 },
   modalBody: { fontSize: 15, color: '#3a3a3c', lineHeight: 22 },
   modalItem: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginBottom: 10 },
+  modalItemIndent: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginTop: 10, paddingLeft: 12 },
   modalBold: { fontWeight: '700', color: '#1c1c1e' },
+  modalNote: { marginTop: 14 },
   modalLink: { color: '#2a6bb5', textDecorationLine: 'underline' },
   modalButton: { marginTop: 18, height: 44, borderRadius: 12, backgroundColor: '#2a6bb5', alignItems: 'center', justifyContent: 'center' },
   modalButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
