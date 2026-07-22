@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Animated, View, Text as RNText, StyleSheet } from 'react-native';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Animated, View, Text as RNText, StyleSheet, FlatList, PanResponder, useWindowDimensions } from 'react-native';
 import {
   Canvas, DashPathEffect, Group, Rect, RoundedRect, Circle, Line, Path, Text,
   LinearGradient, Skia, vec, matchFont, type SkFont,
@@ -19,8 +19,9 @@ const CELL_W = 60;
 // A Canvas is backed by a CAMetalLayer whose drawable size is measured in physical
 // pixels. A single canvas spanning a long hourly forecast can exceed Metal's maximum
 // texture width on Retina devices and abort the entire process. Keep each drawable
-// narrow and let FlatList virtualize the off-screen tiles.
-const CANVAS_TILE_W = CELL_W * 12;
+// narrow and let FlatList virtualize the off-screen tiles. Wider tiles mean fewer seams
+// to paint mid-scroll (smoother) while staying well under the texture limit (16×60×3px).
+const CANVAS_TILE_W = CELL_W * 16;
 
 const ROW_H = {
   DATE: 58,
@@ -30,6 +31,17 @@ const ROW_H = {
   SNOW: 50,
   DATA: 42,
 } as const;
+
+// Overview-strip band heights, stacked top to bottom: a per-day header (weekday, summary glyph,
+// daily high) over the mini temperature / precip / wind graphs.
+const STRIP_DAY_H = 12;
+const STRIP_GLYPH_H = 20;
+const STRIP_TVAL_H = 14;
+const STRIP_HEAD_H = STRIP_DAY_H + STRIP_GLYPH_H + STRIP_TVAL_H;
+const STRIP_SIL_H = 28;
+const STRIP_PRECIP_H = 13;
+const STRIP_WIND_H = 6;
+const STRIP_H = STRIP_HEAD_H + STRIP_SIL_H + STRIP_PRECIP_H + STRIP_WIND_H;
 
 // ── Palette ──────────────────────────────────────────────────────────────--
 
@@ -66,6 +78,16 @@ function codeCoverage(code: number): number {
   if (code === 3) return 95;
   if (code === 45 || code === 48) return 90; // fog
   return 85; // anything precipitating is heavily clouded
+}
+
+// Day-summary severity, so a day's overview glyph shows its most eventful sky rather than the
+// first period's. Precipitating and thundery skies outrank fog, which outranks plain cloud cover.
+function codeSeverity(code: number): number {
+  if (code >= 95) return 100;
+  if (SNOW_CODES.has(code)) return 90;
+  if (RAIN_CODES.has(code)) return 80;
+  if (code === 45 || code === 48) return 40;
+  return codeCoverage(code) / 10;
 }
 
 // Arrows point in the direction the wind blows toward.
@@ -230,6 +252,21 @@ function nightSegments(start: number, end: number, lat: number, lon: number): [n
   return segments;
 }
 
+// Contiguous columns that fall on the same local calendar day.
+interface DayGroup { start: number; end: number; date: Date }
+function buildDayGroups(dates: Date[]): DayGroup[] {
+  const groups: DayGroup[] = [];
+  dates.forEach((d, i) => {
+    const previous = groups[groups.length - 1];
+    if (!previous || previous.date.toDateString() !== d.toDateString()) {
+      groups.push({ start: i, end: i + 1, date: d });
+    } else {
+      previous.end = i + 1;
+    }
+  });
+  return groups;
+}
+
 function pressureLabel(level: 500 | 600 | 700, u: Units): string {
   const ft: Record<number, string> = { 500: '18,000', 600: '14,000', 700: '10,000' };
   const m: Record<number, string> = { 500: '5,500', 600: '4,200', 700: '3,000' };
@@ -372,6 +409,206 @@ function cloudGlyph(key: string, cx: number, top: number, h: number, code: numbe
   return <Group key={key}>{els}</Group>;
 }
 
+// ── Overview strip (per-model minimap + scrubber) ────────────────────────--
+
+type Tile = { offset: number; width: number };
+
+// A coarse, screen-width per-day overview: every day is the same width regardless of how many
+// periods it holds. Each day column shows its weekday, a summary weather glyph, and its high over
+// a mini temperature silhouette, the same stacked snow/rain area, and a Beaufort wind ribbon. A
+// viewport window tracks the meteogram's scroll on the native driver, and touching the strip
+// scrubs the meteogram to that position.
+function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, flatListRef, scrollX, fonts }: {
+  periods: Period[]; dates: Date[]; steps: number[]; units: Units; lat: number; lon: number; now: number;
+  width: number; flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value; fonts: Fonts;
+}) {
+  const n = periods.length;
+  const W = width;
+  const dayGroups = buildDayGroups(dates);
+  const numDays = dayGroups.length;
+  const dayW = W / numDays;
+
+  // Uniform per-day columns. Within a day the periods are spread evenly across the column, so
+  // near-term high-resolution days aren't wider than coarse far-term ones — this is an overview.
+  const dayOf = new Int32Array(n);
+  dayGroups.forEach((g, d) => { for (let i = g.start; i < g.end; i++) dayOf[i] = d; });
+  const slot = (i: number) => {
+    const g = dayGroups[dayOf[i]];
+    const w = dayW / (g.end - g.start);
+    const left = dayOf[i] * dayW + (i - g.start) * w;
+    return { left, center: left + w / 2, right: left + w };
+  };
+
+  const graphTop = STRIP_HEAD_H;
+  const els: ReactNode[] = [];
+
+  // Night shading behind the graph bands.
+  dates.forEach((d, i) => {
+    const s = slot(i);
+    const start = d.getTime();
+    const end = start + steps[i] * 3600000;
+    nightSegments(start, end, lat, lon).forEach(([from, to], seg) => {
+      els.push(<Rect key={`snight${i}-${seg}`} x={s.left + from * (s.right - s.left)} y={graphTop}
+        width={(to - from) * (s.right - s.left)} height={STRIP_H - graphTop} color={C.night} />);
+    });
+  });
+
+  // Temperature silhouette.
+  const temps: number[] = [];
+  periods.forEach((p) => { if (p.temp_c != null) temps.push(p.temp_c); });
+  const tMin = temps.length ? Math.min(...temps) - 1 : 0;
+  const tMax = temps.length ? Math.max(...temps) + 1 : 1;
+  const plottedTemps = periods.map((p) => p.temp_c);
+  const silTop = graphTop + 2;
+  const silBottom = graphTop + STRIP_SIL_H;
+  if (temps.length && plottedTemps.some((t) => t != null)) {
+    const yOf = (t: number) => silTop + ((tMax - t) / (tMax - tMin)) * (silBottom - silTop);
+    const first = plottedTemps.find((t): t is number => t != null)!;
+    const last = [...plottedTemps].reverse().find((t): t is number => t != null)!;
+    const points = [
+      { x: 0, y: yOf(first) },
+      ...plottedTemps.flatMap((t, i) => t == null ? [] : [{ x: slot(i).center, y: yOf(t) }]),
+      { x: W, y: yOf(last) },
+    ];
+    const area = Skia.Path.Make();
+    smoothTo(area, points);
+    area.lineTo(W, silBottom);
+    area.lineTo(0, silBottom);
+    area.close();
+    els.push(
+      <Path key="strip-temp" path={area}>
+        <LinearGradient start={vec(0, silTop)} end={vec(0, silBottom)}
+          colors={[tempColor(tMax, 0.55), tempColor((tMax + tMin) / 2, 0.55), tempColor(tMin, 0.55)]}
+          positions={[0, 0.5, 1]} />
+      </Path>,
+    );
+  }
+
+  // Snow + rain stacked liquid-equivalent area (snow cm already equals mm at 10:1).
+  const rainEq = periods.map((p) => p.rain_mm ?? 0);
+  const snowEq = periods.map((p) => p.snow_cm ?? 0);
+  const totalEq = rainEq.map((r, i) => r + snowEq[i]);
+  const maxEq = Math.max(0, ...totalEq);
+  const precipBottom = silBottom + STRIP_PRECIP_H;
+  if (maxEq > 0) {
+    const yOf = (v: number) => precipBottom - (v / maxEq) * (STRIP_PRECIP_H - 2);
+    const boundary = (values: number[]) => [
+      { x: 0, y: yOf(values[0]) },
+      ...values.map((v, i) => ({ x: slot(i).center, y: yOf(v) })),
+      { x: W, y: yOf(values[values.length - 1]) },
+    ];
+    const rainPoints = boundary(rainEq);
+    const totalPoints = boundary(totalEq);
+    const rainArea = Skia.Path.Make();
+    smoothTo(rainArea, rainPoints);
+    rainArea.lineTo(W, precipBottom);
+    rainArea.lineTo(0, precipBottom);
+    rainArea.close();
+    const snowArea = Skia.Path.Make();
+    smoothTo(snowArea, totalPoints);
+    smoothTo(snowArea, rainPoints, true);
+    snowArea.close();
+    els.push(
+      <Group key="strip-precip">
+        <Path path={rainArea} color="#4b8fc8" />
+        <Path path={snowArea} color="#c6e1f5" />
+      </Group>,
+    );
+  }
+
+  // Surface-wind ribbon along the bottom, Beaufort-colored like the main canvas.
+  const windTop = STRIP_H - STRIP_WIND_H;
+  periods.forEach((p, i) => {
+    if (p.wind_sfc_kph == null) return;
+    const s = slot(i);
+    els.push(<Rect key={`swind${i}`} x={s.left} y={windTop} width={s.right - s.left + 0.5}
+      height={STRIP_WIND_H} color={beaufort(p.wind_sfc_kph).bg} />);
+  });
+
+  // Per-day header: weekday, summary glyph, daily high, and a boundary separator.
+  const glyphScale = STRIP_GLYPH_H / 38;
+  dayGroups.forEach((g, d) => {
+    const cx = d * dayW + dayW / 2;
+    if (d > 0) {
+      els.push(<Line key={`sbd${d}`} p1={vec(d * dayW, 0)} p2={vec(d * dayW, STRIP_H)} color={C.grid} strokeWidth={1} />);
+    }
+    let code = periods[g.start].weathercode;
+    let hi: number | undefined;
+    for (let i = g.start; i < g.end; i++) {
+      if (codeSeverity(periods[i].weathercode) > codeSeverity(code)) code = periods[i].weathercode;
+      const t = periods[i].temp_c;
+      if (t != null) hi = hi == null ? t : Math.max(hi, t);
+    }
+    // The glyph is drawn at its natural meteogram size, then scaled into the small header slot.
+    els.push(
+      <Group key={`gly${d}`} transform={[{ translateX: cx }, { translateY: STRIP_DAY_H }, { scale: glyphScale }]}>
+        {cloudGlyph(`glyi${d}`, 0, 0, 38, code, codeCoverage(code))}
+      </Group>,
+    );
+    if (dayW >= 22) {
+      els.push(centerText(`swk${d}`, DAYS[g.date.getDay()].slice(0, 3).toUpperCase(), cx, STRIP_DAY_H / 2, fonts.sub, C.date));
+    }
+    if (hi != null && dayW >= 20) {
+      els.push(centerText(`shi${d}`, fmtTemp(hi, units), cx, STRIP_DAY_H + STRIP_GLYPH_H + STRIP_TVAL_H / 2, fonts.small, C.label));
+    }
+  });
+
+  // Current-time marker across the graph bands.
+  const cur = dates.findIndex((date, i) => now >= date.getTime() && now < date.getTime() + steps[i] * 3600000);
+  if (cur >= 0) {
+    const s = slot(cur);
+    const frac = (now - dates[cur].getTime()) / (steps[cur] * 3600000);
+    const mx = s.left + frac * (s.right - s.left);
+    els.push(<Line key="strip-now" p1={vec(mx, graphTop)} p2={vec(mx, STRIP_H)} color="rgba(255,59,48,0.5)" strokeWidth={1} />);
+  }
+
+  const contentW = NAME_W + n * CELL_W;
+  const maxOffset = Math.max(0, contentW - W);
+  // Fixed window width ≈ the average visible fraction; exact under uniform resolution, close enough
+  // for a coarse indicator when resolutions are mixed.
+  const winW = Math.min(W, (W * W) / (n * CELL_W));
+
+  // Scrub: map the touched day-column position back to a period, then center the viewport on it.
+  const scrub = (xMini: number) => {
+    if (maxOffset <= 0) return;
+    const clampedX = Math.max(0, Math.min(W, xMini));
+    const d = Math.min(numDays - 1, Math.floor(clampedX / dayW));
+    const g = dayGroups[d];
+    const t = g.start + ((clampedX - d * dayW) / dayW) * (g.end - g.start);
+    const offset = Math.max(0, Math.min(maxOffset, NAME_W + t * CELL_W - W / 2));
+    flatListRef.current?.scrollToOffset({ offset, animated: false });
+  };
+  const pan = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: (e) => scrub(e.nativeEvent.locationX),
+    onPanResponderMove: (e) => scrub(e.nativeEvent.locationX),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [numDays, dayW, maxOffset, W]);
+
+  // The main canvas scrolls by equal-width period columns while the strip is uniform per day, so
+  // map the viewport's left edge through the day boundaries — piecewise-linear, on the native
+  // driver — rather than with a single affine factor.
+  const inputRange = dayGroups.map((g) => NAME_W + g.start * CELL_W);
+  const outputRange = dayGroups.map((_, d) => d * dayW);
+  inputRange.push(contentW);
+  outputRange.push(W);
+  const translateX = maxOffset > 0
+    ? scrollX.interpolate({ inputRange, outputRange, extrapolate: 'clamp' })
+    : 0;
+
+  return (
+    <View style={styles.overviewStrip} {...pan.panHandlers}>
+      <View style={{ width: W, height: STRIP_H, overflow: 'hidden' }}>
+        <Canvas style={{ width: W, height: STRIP_H }} pointerEvents="none">{els}</Canvas>
+        <Animated.View pointerEvents="none"
+          style={[styles.overviewWindow, { width: winW, transform: [{ translateX }] }]} />
+      </View>
+    </View>
+  );
+}
+
 // ── Meteogram canvas (one per model) ─────────────────────────────────────--
 
 function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts }: {
@@ -380,6 +617,8 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
   periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; lat: number; lon: number; fonts: Fonts;
 }) {
   const scrollX = useRef(new Animated.Value(0)).current;
+  const flatListRef = useRef<FlatList<Tile>>(null);
+  const screenW = useWindowDimensions().width;
   const n = periods.length;
   const width = NAME_W + n * CELL_W;
   const totalH = ROW_H.DATE + rows.reduce((s, r) => s + r.height, 0);
@@ -406,14 +645,8 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
 
   // 2. Date header. Hours occupy their own row. Each day label sticks to the visible left
   // edge while its columns are being scrolled, then yields to the following day.
-  const dayGroups: { start: number; end: number; date: Date }[] = [];
+  const dayGroups = buildDayGroups(dates);
   dates.forEach((d, i) => {
-    const previous = dayGroups[dayGroups.length - 1];
-    if (!previous || previous.date.toDateString() !== d.toDateString()) {
-      dayGroups.push({ start: i, end: i + 1, date: d });
-    } else {
-      previous.end = i + 1;
-    }
     els.push(centerText(`hour${i}`, hourLabel(d, steps[i], timeFormat), colCenter(i), 44, fonts.hour, C.date));
   });
   dayGroups.slice(1).forEach((group, i) => {
@@ -667,17 +900,23 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
   });
 
   return (
-    <View style={{ height: totalH }}>
+    <View>
+      <OverviewStrip periods={periods} dates={dates} steps={steps} units={units} lat={lat} lon={lon} now={now}
+        width={screenW} flatListRef={flatListRef} scrollX={scrollX} fonts={fonts} />
+      <View style={{ height: totalH }}>
       <Animated.FlatList
+        ref={flatListRef}
         data={tiles}
         horizontal
         bounces={false}
         showsHorizontalScrollIndicator
         scrollEventThrottle={16}
         keyExtractor={(tile) => String(tile.offset)}
-        initialNumToRender={1}
-        maxToRenderPerBatch={2}
-        windowSize={3}
+        // Render more tiles ahead of the viewport so a Skia tile mounts (an expensive full-scene
+        // paint) before it scrolls into view rather than as it appears — reduces scroll hitching.
+        initialNumToRender={2}
+        maxToRenderPerBatch={3}
+        windowSize={5}
         // Never let the ScrollView natively detach canvas tiles: a Skia Canvas repaints only on
         // React commits, so a reattached tile keeps its released (blank) Metal drawable.
         // Virtualization via windowSize still unmounts far-off tiles for memory.
@@ -720,6 +959,7 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
             </Animated.Text>
           );
         })}
+      </View>
       </View>
     </View>
   );
@@ -785,6 +1025,20 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
 
 const styles = StyleSheet.create({
   container: { backgroundColor: '#fff' },
+  overviewStrip: {
+    backgroundColor: C.bg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.grid,
+  },
+  overviewWindow: {
+    position: 'absolute',
+    top: 0,
+    height: STRIP_H,
+    borderWidth: 1.5,
+    borderColor: '#2a6bb5',
+    borderRadius: 6,
+    backgroundColor: 'rgba(42,107,181,0.08)',
+  },
   stickyDayRow: { position: 'absolute', top: 0, left: 0, right: 0, height: 31, overflow: 'hidden' },
   stickyDayText: { position: 'absolute', top: 4, color: C.date, fontSize: 14, fontWeight: '600', lineHeight: 24 },
   modelHeaderBar: { paddingHorizontal: 14, paddingVertical: 7 },
