@@ -5,7 +5,7 @@ import {
 import {
   VARS_BIT, startDatetime, MODE_NAMES, DEFAULT_MODE, type ForecastMessage,
 } from '@weather/protocol';
-import { decodeAny, loadStore, attachResponse, loadPastForecasts, type Slot } from './cache';
+import { decodeAny, loadStore, attachResponse, prunePastForecasts, type Slot } from './cache';
 import type { TimeFormat, Units } from './settings';
 import LocationMap from './LocationMap';
 import Meteogram from './Meteogram';
@@ -153,7 +153,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
   const suppressNextCache = useRef(false);
 
   useEffect(() => {
-    loadPastForecasts(token).then(setCache);
+    prunePastForecasts(token).then(setCache);
   }, [token]);
 
   useEffect(() => {

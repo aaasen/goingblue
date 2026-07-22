@@ -102,9 +102,20 @@ function pastForecasts(store: Store): Slot[] {
   return store.slots.filter((s) => s.encoded).sort((a, b) => b.requestedAt - a.requestedAt);
 }
 
-// Received forecasts to display, most recently requested first.
-export async function loadPastForecasts(token: string): Promise<Slot[]> {
-  return pastForecasts(await loadStore(token));
+// Drop any received forecast that no longer decodes — e.g. one saved by a retired protocol
+// version (support is dropped deliberately, see VERSIONING.md) or corrupted in storage. Past
+// forecasts are a short-lived convenience buffer, so an entry we can't display is dead weight.
+// Slots still awaiting a response (no `encoded` yet) are kept. Returns the surviving forecasts.
+export async function prunePastForecasts(token: string): Promise<Slot[]> {
+  const store = await loadStore(token);
+  const before = store.slots.length;
+  store.slots = store.slots.filter((s) => {
+    if (!s.encoded) return true;
+    try { decodeAny(s.encoded, token); return true; }
+    catch { return false; }
+  });
+  if (store.slots.length !== before) await persist(token, store);
+  return pastForecasts(store);
 }
 
 export async function deleteSlot(token: string, code: number): Promise<Slot[]> {
