@@ -63,8 +63,14 @@ export async function migrate(): Promise<void> {
       id          bigserial primary key,
       token       text references accounts(token),
       created_at  timestamptz not null default now(),
-      chars       int
+      chars       int,
+      version     int
     )
+  `);
+  // Backfill for databases created before the protocol version was recorded. Per-version
+  // request counts are the sunset metric for frozen codec containers (VERSIONING.md).
+  await query(`
+    alter table requests add column if not exists version int
   `);
   await query(`
     create index if not exists requests_token_created_idx on requests (token, created_at)

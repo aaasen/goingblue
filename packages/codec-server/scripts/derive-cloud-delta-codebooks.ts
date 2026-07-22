@@ -16,7 +16,7 @@
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
- *   node packages/server/scripts/derive-cloud-delta-codebooks.ts
+ *   node packages/codec-server/scripts/derive-cloud-delta-codebooks.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import { VARS_BIT } from "@weather/protocol";

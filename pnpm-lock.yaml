@@ -11,6 +11,37 @@ importers:
 
   .: {}
 
+  packages/codec-server:
+    dependencies:
+      '@hono/node-server':
+        specifier: ^1.12.0
+        version: 1.12.0
+      '@weather/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      hono:
+        specifier: ^4.6.0
+        version: 4.6.0
+    devDependencies:
+      '@openmeteo/sdk':
+        specifier: ^1.27.2
+        version: 1.27.2
+      '@types/node':
+        specifier: ^25.9.1
+        version: 25.9.1
+      geotiff:
+        specifier: ^3.0.5
+        version: 3.0.5
+      openmeteo:
+        specifier: ^1.2.3
+        version: 1.2.3
+      typescript:
+        specifier: ^5.4.0
+        version: 5.4.2
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@25.9.1)(lightningcss@1.32.0)(terser@5.48.0)
+
   packages/mobile:
     dependencies:
       '@react-native-async-storage/async-storage':
@@ -86,9 +117,6 @@ importers:
       '@hono/node-server':
         specifier: ^1.12.0
         version: 1.12.0
-      '@openmeteo/sdk':
-        specifier: ^1.27.2
-        version: 1.27.2
       '@weather/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -98,9 +126,6 @@ importers:
       node-html-parser:
         specifier: ^7.1.0
         version: 7.1.0
-      openmeteo:
-        specifier: ^1.2.3
-        version: 1.2.3
       pg:
         specifier: ^8.13.0
         version: 8.13.0
@@ -111,9 +136,6 @@ importers:
       '@types/pg':
         specifier: ^8.11.0
         version: 8.11.0
-      geotiff:
-        specifier: ^3.0.5
-        version: 3.0.5
       typescript:
         specifier: ^5.4.0
         version: 5.4.2

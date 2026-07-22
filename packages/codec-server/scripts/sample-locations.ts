@@ -24,7 +24,7 @@
  * Input raster: data/sampler/1991_2020/koppen_geiger_0p1.tif — from koppen_geiger_tif.zip at
  * https://figshare.com/articles/dataset/21789074 (Beck et al. 2023; gloh2o.org/koppen).
  *
- *   node packages/server/scripts/sample-locations.ts [--seed N]
+ *   node packages/codec-server/scripts/sample-locations.ts [--seed N]
  */
 import { existsSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

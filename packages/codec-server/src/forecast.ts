@@ -3,7 +3,6 @@ import {
   ALWAYS_VARS_MASK,
   CONFIGURABLE_VAR_GROUPS,
   VARS_BIT,
-  CURRENT_VERSION,
   isValidToken,
   normalizeToken,
   layoutFor,
@@ -186,7 +185,10 @@ async function fetchOpenMeteo(
   });
   if (elev_m !== undefined) params.set("elevation", String(elev_m));
   if (pastDays > 0) params.set("past_days", String(pastDays));
-  const url = `https://api.open-meteo.com/v1/forecast?${params}`;
+  // Overridable so golden-corpus tests and verify-container can replay recorded responses
+  // from a local fixture server instead of hitting the live API.
+  const base = process.env["OPEN_METEO_BASE_URL"] ?? "https://api.open-meteo.com";
+  const url = `${base}/v1/forecast?${params}`;
   console.log("Open-Meteo request:", url);
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Open-Meteo ${resp.status}: ${await resp.text()}`);
@@ -497,7 +499,11 @@ export interface ForecastParams {
   modelsMask: number;
   varsMask: number;
   maxChars: number;
-  decoderVersion: number;
+  // Protocol version from the request's `vN` token, or null when the token is absent. A version
+  // is required — there is no default: each deployed codec server serves the version(s) baked
+  // into its image, and defaulting would silently bind old hand-typed requests to whatever
+  // happens to be current (see VERSIONING.md).
+  decoderVersion: number | null;
   // 7-bit message code from a `k:` request word, echoed in the response (default 0).
   code: number;
   // Request time as UTC hours since the epoch (`t:`), aligned to the hour.
@@ -524,7 +530,7 @@ export function parseRequest(body: string): ForecastParams {
   // Core variables are implicit; `v:` carries only user-configurable additions.
   let varsMask = ALWAYS_VARS_MASK;
   let maxChars = DEFAULT_MAX_CHARS; // override with a `c:` token in the request
-  let decoderVersion = CURRENT_VERSION; // override with a `vN` token in the request
+  let decoderVersion: number | null = null; // set from a `vN` token; required, no default
   let userToken: string | null = null; // set from a `u:` token in the request
   let code = 0; // client message code (`k:` token); echoed in the response so the client can
                 // match it to the stored request and recover lat/lon/models/vars/duration
@@ -656,6 +662,10 @@ export function buildLayoutMessage(
   elevation: number,
   modelKey: string,
 ): ForecastMessage | null {
+  // The /encode route resolves the codec (and therefore the version) before building anything,
+  // so a null here means a caller skipped that validation.
+  if (params.decoderVersion === null) throw new Error("decoderVersion is required to build a message");
+
   // Hourly samples are keyed by UTC epoch hour; each period's window is just its hour range.
   const idxByHour = new Map<number, number>();
   for (let i = 0; i < times.length; i++) {

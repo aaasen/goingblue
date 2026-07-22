@@ -30,7 +30,7 @@
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
- *   node packages/server/scripts/derive-wind-dir-codebooks.ts
+ *   node packages/codec-server/scripts/derive-wind-dir-codebooks.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import { VARS_BIT, type Period } from "@weather/protocol";

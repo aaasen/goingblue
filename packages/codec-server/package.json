@@ -1,5 +1,5 @@
 {
-  "name": "@weather/server",
+  "name": "@weather/codec-server",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -12,13 +12,13 @@
   "dependencies": {
     "@hono/node-server": "^1.12.0",
     "@weather/protocol": "workspace:*",
-    "hono": "^4.6.0",
-    "node-html-parser": "^7.1.0",
-    "pg": "^8.13.0"
+    "hono": "^4.6.0"
   },
   "devDependencies": {
+    "@openmeteo/sdk": "^1.27.2",
     "@types/node": "^25.9.1",
-    "@types/pg": "^8.11.0",
+    "geotiff": "^3.0.5",
+    "openmeteo": "^1.2.3",
     "typescript": "^5.4.0",
     "vitest": "^1.6.1"
   }

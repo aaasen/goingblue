@@ -9,9 +9,13 @@ INSTANCE_CONNECTION_NAME="goingblue:us-west1:goingblue"
 DB_USER="postgres"
 DB_NAME="goingblue"
 TWILIO_WEBHOOK_URL="https://going.blue/sms"
+# Protocol version → codec-server service URL (deployed by deploy-codec.sh; see VERSIONING.md).
+# An unmapped version gets the "please update the app" reply, so deploy the codec service for
+# the current version BEFORE the first gateway deploy that expects it.
+CODEC_URL_V1="$(gcloud run services describe goingblue-codec-v1 --project goingblue --region us-west1 --format 'value(status.url)')"
 
 gcloud run deploy goingblue --project goingblue --source . --region us-west1 \
   --allow-unauthenticated --platform managed \
   --add-cloudsql-instances "$INSTANCE_CONNECTION_NAME" \
-  --set-env-vars "INSTANCE_CONNECTION_NAME=$INSTANCE_CONNECTION_NAME,DB_USER=$DB_USER,DB_NAME=$DB_NAME,TWILIO_WEBHOOK_URL=$TWILIO_WEBHOOK_URL" \
+  --set-env-vars "INSTANCE_CONNECTION_NAME=$INSTANCE_CONNECTION_NAME,DB_USER=$DB_USER,DB_NAME=$DB_NAME,TWILIO_WEBHOOK_URL=$TWILIO_WEBHOOK_URL,CODEC_URL_V1=$CODEC_URL_V1" \
   --set-secrets "DB_PASS=DB_PASS:latest,TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest"

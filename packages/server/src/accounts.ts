@@ -34,7 +34,7 @@ export async function accountExists(token: string): Promise<boolean> {
 // (the column has a foreign key); anything else — anonymous or an unregistered token — is
 // recorded with a null token so the row still counts toward overall volume. Phase 1 is
 // observe-only; quotas will later read these rows.
-export async function recordRequest(token: string | null, chars: number): Promise<void> {
+export async function recordRequest(token: string | null, chars: number, version: number | null): Promise<void> {
   const known = token && (await accountExists(token)) ? token : null;
-  await query("insert into requests (token, chars) values ($1, $2)", [known, chars]);
+  await query("insert into requests (token, chars, version) values ($1, $2, $3)", [known, chars, version]);
 }

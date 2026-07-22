@@ -1,0 +1,6 @@
+# Builds the codec-server image (Dockerfile.codec) — used by deploy-codec.sh because
+# `gcloud run deploy --source` and `gcloud builds submit --tag` only know the root Dockerfile.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "Dockerfile.codec", "-t", "${_IMAGE}", "."]
+images: ["${_IMAGE}"]

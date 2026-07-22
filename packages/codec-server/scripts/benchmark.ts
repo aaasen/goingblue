@@ -17,14 +17,14 @@
  *      The report reads REPORT_SOURCE (best_match — what production serves) and defaults to the
  *      eval split, so the headline metric is held out from codebook training (--split widens it).
  *
- *   node packages/server/scripts/benchmark.ts                     # collect (idempotent) then report
- *   node packages/server/scripts/benchmark.ts --collect-only      # expand the corpus DB, no report
- *   node packages/server/scripts/benchmark.ts --report-only       # report from the DB, no collection
- *   node packages/server/scripts/benchmark.ts --dry-run           # preview the fetch plan, no fetch
- *   node packages/server/scripts/benchmark.ts --pilot             # candidate-spec pull, pilot slice only
- *   node packages/server/scripts/benchmark.ts --validate          # data-quality report from the DB
- *   node packages/server/scripts/benchmark.ts --dump <source> <loc> <window>  # inspect one cell
- *   node packages/server/scripts/benchmark.ts --help              # all options
+ *   node packages/codec-server/scripts/benchmark.ts                     # collect (idempotent) then report
+ *   node packages/codec-server/scripts/benchmark.ts --collect-only      # expand the corpus DB, no report
+ *   node packages/codec-server/scripts/benchmark.ts --report-only       # report from the DB, no collection
+ *   node packages/codec-server/scripts/benchmark.ts --dry-run           # preview the fetch plan, no fetch
+ *   node packages/codec-server/scripts/benchmark.ts --pilot             # candidate-spec pull, pilot slice only
+ *   node packages/codec-server/scripts/benchmark.ts --validate          # data-quality report from the DB
+ *   node packages/codec-server/scripts/benchmark.ts --dump <source> <loc> <window>  # inspect one cell
+ *   node packages/codec-server/scripts/benchmark.ts --help              # all options
  *
  * API usage counts toward the plan's monthly call volume; cap a run with --limit.
  * OPEN_METEO_API_KEY switches to the commercial endpoint.
@@ -250,7 +250,7 @@ interface Args {
 
 const USAGE = `benchmark.ts — collect the forecast corpus and benchmark the encoding against it
 
-Usage: node packages/server/scripts/benchmark.ts [options]
+Usage: node packages/codec-server/scripts/benchmark.ts [options]
 
 Default (no options): collect anything missing (wire variable sets, all sources), then build the
 HTML benchmark report from the corpus DB and open it.
@@ -290,7 +290,7 @@ Environment
                             (customer-historical-forecast-api.open-meteo.com). Set it inline:
                               OPEN_METEO_API_KEY=xxx pnpm benchmark --collect-only
                             or export it from your shell profile, or put it in a file and run
-                            node --env-file=.env packages/server/scripts/benchmark.ts
+                            node --env-file=.env packages/codec-server/scripts/benchmark.ts
 `;
 
 function parseArgs(argv: string[]): Args {

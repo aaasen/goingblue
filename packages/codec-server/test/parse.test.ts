@@ -147,8 +147,8 @@ describe("parseRequest", () => {
     expect(p.varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["freeze"]));
   });
 
-  it("vN token overrides the decoder version, defaulting to the current version", () => {
-    expect(parseRequest("").decoderVersion).toBe(1);
+  it("vN token sets the decoder version; a missing token is null (no default)", () => {
+    expect(parseRequest("").decoderVersion).toBeNull();
     expect(parseRequest("v1 p:a").decoderVersion).toBe(1);
     expect(parseRequest("v3").decoderVersion).toBe(3); // routed to a clear unsupported-version error
   });

@@ -9,9 +9,9 @@
  * exchange-rate data that decides where extend-steps sit relative to refine-steps in each mode's
  * final anchor table.
  *
- *   node packages/server/scripts/probe-anchor-paths.ts                 # eval split, 160c
- *   node packages/server/scripts/probe-anchor-paths.ts --limit 100     # quick pass
- *   node packages/server/scripts/probe-anchor-paths.ts --split all --max-chars 160
+ *   node packages/codec-server/scripts/probe-anchor-paths.ts                 # eval split, 160c
+ *   node packages/codec-server/scripts/probe-anchor-paths.ts --limit 100     # quick pass
+ *   node packages/codec-server/scripts/probe-anchor-paths.ts --split all --max-chars 160
  *
  * Output: step tables per mode × combo on stdout, plus a timestamped record in data/benchmarks.
  */

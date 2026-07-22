@@ -7,7 +7,13 @@ import type { ForecastMessage, VersionedCodec, ContextResolver } from "./model.j
 // Introducing a new version: add `versions/vN.ts`, then register it here. Nothing else in
 // the dispatch path changes — `decodeMessage` reads the version tag and routes to the codec
 // registered for it, and any version not present here is rejected with a clear error rather
-// than mis-decoded. Keep older codecs registered so new clients can still read old messages.
+// than mis-decoded.
+//
+// Old versions are NOT kept: when vN+1 ships, `versions/vN.ts`, its codebooks, and its golden
+// fixtures are deleted from main — the frozen `codec-vN` container (built from the codec-vN git
+// tag) keeps serving clients still in the field, and the app treats a saved message it can no
+// longer decode as expired (past forecasts are a short-lived buffer, not long-term storage).
+// See VERSIONING.md for the freeze/sunset runbooks.
 export const CODECS: Record<number, VersionedCodec> = {
   1: v1Codec,
 };

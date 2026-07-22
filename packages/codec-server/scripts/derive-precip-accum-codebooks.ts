@@ -35,7 +35,7 @@
  * emission granularity.) Run standalone to derive and print without writing (build the protocol
  * first — WEATHERCODE_CLASS is imported from it, so derivation and wire can't drift):
  *
- *   node packages/server/scripts/derive-precip-accum-codebooks.ts
+ *   node packages/codec-server/scripts/derive-precip-accum-codebooks.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {

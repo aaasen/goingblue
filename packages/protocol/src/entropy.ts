@@ -195,7 +195,7 @@ function tempDeltaSym(delta: number): number {
 // One ClassBooks per codebook class: the complete set of table-lookup functions the v1 body
 // codec keys symbols with. Class 0 is the global (train-corpus-wide) tables in codebooks.gen.ts;
 // classes 1..CODEBOOK_CLASSES-1 (codebooks-classes.gen.ts) were learned by EM in code-length
-// space over the corpus (see server/scripts/derive-class-ladder.ts) — regional/seasonal regimes
+// space over the corpus (see codec-server/scripts/derive-class-ladder.ts) — regional/seasonal regimes
 // (marine, tropical, polar...) whose conditional distributions are sharper than the global
 // mixture. The encoder builds the body under every class and keeps the cheapest (held-out
 // -2.5% body bits at K=8); the 3-bit selector rides free in the v1 header. Which class a
@@ -207,34 +207,34 @@ export interface ClassBooks {
   // Emits/reads the code for a weathercode symbol under the table keyed by `prevSym` — the
   // previously decoded symbol, or null for the first symbol of a sequence (bootstrap). Weather
   // persists hour-to-hour far more than it varies by climate/region, hence order-1 tables (see
-  // server/scripts/derive-weathercode-codebooks.ts).
+  // codec-server/scripts/derive-weathercode-codebooks.ts).
   encodeWeathercode(sink: SymSink, prevSym: number | null, sym: number): void;
   decodeWeathercode(src: SymSource, prevSym: number | null): number;
   // The codebook for one direction symbol. `prev` is the last direction encoded in this column
   // (null for the column's first — bootstrap), `upper` the upper level's same-period displayed
   // direction (null when that column is absent or this level has none). See
-  // server/scripts/derive-wind-dir-codebooks.ts for the context ladder.
+  // codec-server/scripts/derive-wind-dir-codebooks.ts for the context ladder.
   windDirBook(res: number, prev: number | null, upper: number | null): CodeBook;
   // The codebook for one speed delta. `level` indexes WIND_COLUMNS order (sfc, 500, 600, 700);
   // `upperDelta` is the upper level's same-period delta (null when that column is absent or this
-  // level has none). See server/scripts/derive-wind-speed-delta-codebooks.ts.
+  // level has none). See codec-server/scripts/derive-wind-speed-delta-codebooks.ts.
   windSpeedBook(res: number, level: number, upperDelta: number | null): CodeBook;
   // The codebook for one freeze delta. `tempDelta` is the same period's decoded temp delta (the
   // post-clamp reconstruction, never the raw input), or null when temp is absent from vars_mask
   // — the res-keyed fallback (the tempΔ marginal). The freezing level is where the 0°C isotherm
   // sits, so it moves with the airmass temperature, and temp decodes first, making its delta
-  // free context. See server/scripts/derive-freeze-delta-codebooks.ts.
+  // free context. See codec-server/scripts/derive-freeze-delta-codebooks.ts.
   freezeDeltaBook(res: number, tempDelta: number | null): CodeBook;
   // Cloud cover deltas (0..7 quantized, deltas -7..7): low/mid/high each under its own single
   // shared table (not pooled across levels) — low clouds are local/convective, high clouds broad
-  // persistent cirrus. See server/scripts/derive-cloud-delta-codebooks.ts.
+  // persistent cirrus. See codec-server/scripts/derive-cloud-delta-codebooks.ts.
   cloudLowDelta: DeltaCodec;
   cloudMidDelta: DeltaCodec;
   cloudHighDelta: DeltaCodec;
   // Order-1 codebooks over the wet columns' quantized VALUES (not deltas — zero is an absorbing
   // regime), keyed by (resolution, SAME-period weathercode class, previous decoded value) —
   // bootstrap for a column's first cell. Rain/snow key on a BUCKET of the previous value (see
-  // accumBucket). See server/scripts/derive-precip-accum-codebooks.ts.
+  // accumBucket). See codec-server/scripts/derive-precip-accum-codebooks.ts.
   precipBook(res: number, wcClass: number, prev: number | null): CodeBook;
   snowBook(res: number, wcClass: number, prev: number | null): CodeBook;
   rainBook(res: number, wcClass: number, prev: number | null): CodeBook;
@@ -242,7 +242,7 @@ export interface ClassBooks {
   // the previous decoded delta in this column — the post-clamp reconstruction, never the raw
   // input — or null for the column's first delta (bootstrap). The diurnal cycle drives the delta
   // sign; the previous delta adds the airmass's actual trajectory. See
-  // server/scripts/derive-temp-delta-codebooks.ts.
+  // codec-server/scripts/derive-temp-delta-codebooks.ts.
   tempDeltaBook(res: number, tod: number, prevDelta: number | null): CodeBook;
 }
 

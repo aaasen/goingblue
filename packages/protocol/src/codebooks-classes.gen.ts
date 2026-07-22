@@ -1,5 +1,5 @@
 // GENERATED FILE — do not edit by hand. Written by derive-class-ladder.ts --emit
-// (packages/server/scripts/derive-class-ladder.ts): per-class codebook weight tables, learned by
+// (packages/codec-server/scripts/derive-class-ladder.ts): per-class codebook weight tables, learned by
 // EM in code-length space over the train corpus (alpha=200, held-out eval -2.50% body bits vs the single
 // global table set). Class 0 is the base set in codebooks.gen.ts and is NOT repeated here;
 // classes 1..7 below are selected per message by the encoder's try-all-pick-best and carried

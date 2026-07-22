@@ -1,0 +1,22 @@
+# The codec-server image: one build per shipped protocol version, created from that version's
+# `codec-vN` git tag and deployed as its own Cloud Run service (see VERSIONING.md). It is
+# protocol + codec-server only — no Expo/Metro toolchain — so a frozen version stays cheap to
+# rebuild bit-identically when a base-image CVE or upstream change forces it (verify with
+# packages/codec-server: verify-container against the golden corpus).
+FROM node:22-slim
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/protocol/package.json packages/protocol/
+COPY packages/codec-server/package.json packages/codec-server/
+# Every workspace manifest must exist for the frozen-lockfile check, including packages this
+# image never builds; the --filter flags keep the actual install to protocol + codec-server.
+COPY packages/server/package.json packages/server/
+COPY packages/mobile/package.json packages/mobile/
+RUN pnpm install --frozen-lockfile --filter @weather/protocol --filter @weather/codec-server
+COPY packages/protocol packages/protocol
+COPY packages/codec-server packages/codec-server
+COPY tsconfig.base.json ./
+RUN pnpm --filter @weather/protocol build \
+ && pnpm --filter @weather/codec-server build
+CMD ["node", "packages/codec-server/dist/index.js"]

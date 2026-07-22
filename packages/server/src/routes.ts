@@ -1,9 +1,9 @@
 import type { Context } from "hono";
-import { fetchForecast, parseRequest } from "./forecast.js";
+import { dispatchForecast, extractUserToken, extractVersion, type DispatchResult } from "./dispatch.js";
 import { sendGarminReply } from "./garmin.js";
 import { ping } from "./db.js";
 import { createAccount, accountExists, recordRequest } from "./accounts.js";
-import { CODECS, isValidToken, normalizeToken } from "@weather/protocol";
+import { isValidToken, normalizeToken } from "@weather/protocol";
 import { twiml, validateTwilioSignature } from "./twilio.js";
 
 const REPLY_ADDRESS = "inreach@going.blue";
@@ -20,59 +20,53 @@ const HELP_REPLY =
 // trimmed message, case-insensitively, so a forecast request is never mistaken for a keyword.
 const HELP_KEYWORDS = new Set(["help", "info"]);
 
+// Human-readable replies for requests the gateway cannot route. These go back over SMS or
+// Garmin, so they must be short and tell a person in the field what to do next.
+const REPLY_MISSING_VERSION =
+  'Missing protocol version: include a version word (e.g. "v1") or update the Going Blue app.';
+const replyUnsupported = (v: number) =>
+  `Protocol v${v} is no longer supported. Please update the Going Blue app and resend.`;
+const REPLY_UNAVAILABLE = "Forecast unavailable, please try again.";
+
+function replyFor(result: DispatchResult): string {
+  switch (result.kind) {
+    case "ok": return result.encoded;
+    case "missing_version": return REPLY_MISSING_VERSION;
+    case "unsupported_version": return replyUnsupported(result.version);
+    case "unavailable": return REPLY_UNAVAILABLE;
+  }
+}
+
 // Record a served request without ever failing the response: the forecast is already built
 // by the time we get here, so a DB hiccup must not turn a successful reply into an error.
-async function logRequest(token: string | null, chars: number): Promise<void> {
+async function logRequest(token: string | null, chars: number, version: number | null): Promise<void> {
   try {
-    await recordRequest(token, chars);
+    await recordRequest(token, chars, version);
   } catch (e) {
     console.error("recordRequest failed:", e);
   }
 }
 
-export async function forecast(c: Context) {
-  const body = await c.req.text();
-  const params = parseRequest(body.trim());
-  console.log("forecast request:", params);
-  const codec = CODECS[params.decoderVersion];
-  if (!codec) {
-    const supported = Object.keys(CODECS).map((v) => `v${v}`).join(", ");
-    return c.text(`Unsupported protocol version: v${params.decoderVersion}. Supported: ${supported}`, 400);
+// Dispatch a request body to its version's codec server and record a served forecast. The
+// per-version request counts are the sunset metric: a frozen codec container is retired only
+// once its version has gone quiet (VERSIONING.md).
+async function buildForecast(body: string): Promise<DispatchResult> {
+  const result = await dispatchForecast(body);
+  console.log(`forecast dispatch: v${extractVersion(body)} -> ${result.kind}`);
+  if (result.kind === "ok") {
+    await logRequest(extractUserToken(body), result.encoded.length, extractVersion(body));
   }
-  try {
-    const encoded = await fetchForecast(params, codec);
-    await logRequest(params.userToken, encoded.length);
-    return c.text(encoded, 200);
-  } catch (e) {
-    console.error("fetchForecast failed:", e);
-    return c.text("Forecast unavailable", 503);
-  }
+  return result;
 }
 
-// Parse a request body, fetch its forecast, and record the request. Returns the encoded
-// forecast, or null when the protocol version is unsupported or the upstream fetch fails — the
-// caller decides how to surface that on its own transport (email/Garmin vs. SMS/Twilio).
-async function buildForecast(body: string): Promise<string | null> {
-  const params = parseRequest(body);
-  console.log("forecast request params:", params);
-
-  const codec = CODECS[params.decoderVersion];
-  if (!codec) {
-    console.error(`Unsupported protocol version: v${params.decoderVersion}`);
-    return null;
+export async function forecast(c: Context) {
+  const result = await buildForecast((await c.req.text()).trim());
+  switch (result.kind) {
+    case "ok": return c.text(result.encoded, 200);
+    case "missing_version": return c.text(REPLY_MISSING_VERSION, 400);
+    case "unsupported_version": return c.text(replyFor(result), 400);
+    case "unavailable": return c.text(REPLY_UNAVAILABLE, 503);
   }
-
-  let encoded: string;
-  try {
-    encoded = await fetchForecast(params, codec);
-    console.log(`forecast fetched (len=${encoded.length}): ${encoded}`);
-  } catch (e) {
-    console.error("fetchForecast failed:", e);
-    return null;
-  }
-
-  await logRequest(params.userToken, encoded.length);
-  return encoded;
 }
 
 export async function inbound(c: Context) {
@@ -89,14 +83,15 @@ export async function inbound(c: Context) {
   console.log("reply_url:", replyUrl);
 
   if (replyUrl) {
-    const encoded = await buildForecast(text.replace(replyUrl, "").trim());
-    if (encoded !== null) {
-      try {
-        const success = await sendGarminReply(replyUrl, REPLY_ADDRESS, encoded);
-        console.log("garmin reply sent:", success);
-      } catch (e) {
-        console.error("sendGarminReply failed:", e);
-      }
+    const result = await buildForecast(text.replace(replyUrl, "").trim());
+    // Errors also go back over the Garmin link: the sender is in the field with no other
+    // feedback channel, so a short "update the app" note beats silence.
+    const reply = replyFor(result);
+    try {
+      const success = await sendGarminReply(replyUrl, REPLY_ADDRESS, reply);
+      console.log("garmin reply sent:", success);
+    } catch (e) {
+      console.error("sendGarminReply failed:", e);
     }
   }
 
@@ -136,12 +131,8 @@ export async function sms(c: Context) {
     return c.text(twiml(HELP_REPLY), 200, { "Content-Type": "text/xml" });
   }
 
-  const encoded = await buildForecast(body.trim());
-  // No forecast (unsupported version or upstream failure): reply with a short human-readable note
-  // rather than silence, since unlike Garmin the sender expects a direct SMS back.
-  const reply = encoded ?? "Forecast unavailable, please try again.";
-
-  return c.text(twiml(reply), 200, { "Content-Type": "text/xml" });
+  const result = await buildForecast(body.trim());
+  return c.text(twiml(replyFor(result)), 200, { "Content-Type": "text/xml" });
 }
 
 export async function health(c: Context) {

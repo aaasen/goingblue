@@ -63,7 +63,7 @@ context. (Temperature was the last holdout — a 4-bit cheapest-of-16 table sele
 held-out conditioning ladder showed the selector was mostly re-discovering resolution, which is
 free; its tables are now keyed by resolution × time-of-day × previous delta instead. Deltas beyond
 ±7 °C still escape to a raw 6-bit field.) All context choices are validated held-out (5-fold,
-split by location) — see the `packages/server/scripts/derive-*-codebooks.ts` scripts that generate
+split by location) — see the `packages/codec-server/scripts/derive-*-codebooks.ts` scripts that generate
 the tables, and `analyze-temp-heldout.ts` for the temperature ladder.
 
 ### Header
@@ -296,7 +296,7 @@ pnpm benchmark --request-hour 18   # local hour of the request (default 7)
     (6h). Periods/message (1h base) 101.2 -> 107.9; overall score 54.3 -> 57.1; days/message at
     6h with high-altitude winds 6.8 -> 7.7. Fixes the 3h/6h regression noted in #15. Scheme
     selection was held-out validated (5-fold by location) — see
-    packages/server/scripts/analyze-wind-heldout.ts.
+    packages/codec-server/scripts/analyze-wind-heldout.ts.
 17. rANS unification: precip probability, rain, and snow move from the adaptive best-of
     (raw / FOR / sparse / empty + 2-bit mode selector) to order-1 rANS over values, keyed by
     (resolution, previous value) — full 8×8 context for precip probability, 5 previous-value

@@ -2,7 +2,7 @@
  * Codebook-class ladder: learn K per-message-selectable codebook classes by Lloyd's/EM in
  * code-length space, and measure what each K buys on the held-out eval split.
  *
- *   node packages/server/scripts/derive-class-ladder.ts [--k 2,4,8] [--alpha 200] [--iters 25]
+ *   node packages/codec-server/scripts/derive-class-ladder.ts [--k 2,4,8] [--alpha 200] [--iters 25]
  *
  * Runs on the per-cell sparse counts precomputed by extract-cell-counts.ts (run that first).
  * The unit is one forecast cell (location × window, message-shaped — a location's winter and
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
       `  { // class ${i + 1}\n${names.map((n) => `    ${n}: ${renderVal(set[n], "    ")},`).join("\n")}\n  },`).join("\n");
     const base = ladder.results[0].evalBits, last = ladder.results[ladder.results.length - 1].evalBits;
     const header = `// GENERATED FILE — do not edit by hand. Written by derive-class-ladder.ts --emit
-// (packages/server/scripts/derive-class-ladder.ts): per-class codebook weight tables, learned by
+// (packages/codec-server/scripts/derive-class-ladder.ts): per-class codebook weight tables, learned by
 // EM in code-length space over the train corpus (alpha=${ladder.alpha}, held-out eval ${
       (100 * (last - base) / base).toFixed(2)}% body bits vs the single
 // global table set). Class 0 is the base set in codebooks.gen.ts and is NOT repeated here;

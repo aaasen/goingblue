@@ -11,7 +11,7 @@
  * equirectangular projection is a direct lat/lon mapping, so basemap and dots register
  * exactly. Colors adapt to light/dark via prefers-color-scheme.
  *
- *   node packages/server/scripts/corpus-map.ts [out.svg]   # default: data/corpus-map.svg
+ *   node packages/codec-server/scripts/corpus-map.ts [out.svg]   # default: data/corpus-map.svg
  */
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";

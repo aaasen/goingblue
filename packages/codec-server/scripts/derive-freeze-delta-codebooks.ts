@@ -27,7 +27,7 @@
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
- *   node packages/server/scripts/derive-freeze-delta-codebooks.ts
+ *   node packages/codec-server/scripts/derive-freeze-delta-codebooks.ts
  */
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {

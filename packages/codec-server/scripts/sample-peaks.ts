@@ -22,7 +22,7 @@
  * Input: data/sampler/prominence/all-peaks-sorted-p100.txt — from the zip linked at
  * https://www.andrewkirmse.com/prominence-update-2023
  *
- *   node packages/server/scripts/sample-peaks.ts [--seed N]
+ *   node packages/codec-server/scripts/sample-peaks.ts [--seed N]
  */
 import { createReadStream, existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";

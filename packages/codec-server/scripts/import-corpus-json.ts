@@ -3,7 +3,7 @@
  * the year of GFS already collected survives the storage change and the benchmark continuity
  * gate can compare like for like.
  *
- *   node packages/server/scripts/import-corpus-json.ts [tree]   # default data/raw/gfs
+ *   node packages/codec-server/scripts/import-corpus-json.ts [tree]   # default data/raw/gfs
  *
  * Old records are whole Historical Forecast API responses keyed (location, window); they become
  * one `series` row per hourly variable under source=gfs_seamless. Unit strings are the JSON

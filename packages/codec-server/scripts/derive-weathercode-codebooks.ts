@@ -10,7 +10,7 @@
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
- *   node packages/server/scripts/derive-weathercode-codebooks.ts
+ *   node packages/codec-server/scripts/derive-weathercode-codebooks.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import { WMO2IDX, WMO_CODES } from "@weather/protocol";

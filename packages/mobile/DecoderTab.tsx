@@ -175,7 +175,12 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
         suppressNextCache.current = false;
         setDecoded(null);
         const msg = String(e);
-        if (msg.includes('Version mismatch')) {
+        if (msg.includes('Unsupported protocol version')) {
+          // An old saved forecast from before an app update: past forecasts are a short-lived
+          // convenience buffer, and support for decoding retired protocol versions is dropped
+          // deliberately (VERSIONING.md), so this is expiry, not an error.
+          setError('This forecast was saved by an older version of the app and can no longer be displayed. Request a new forecast.');
+        } else if (msg.includes('Version mismatch')) {
           const match = msg.match(/encoded v(\d+)/);
           const encoded = match ? match[1] : '?';
           setError(`Version mismatch: this message uses protocol v${encoded}, which this app can't decode. Update the app or request a new forecast.`);

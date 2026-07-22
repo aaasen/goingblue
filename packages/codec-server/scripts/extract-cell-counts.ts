@@ -2,7 +2,7 @@
  * Extract per-cell (location × window) sparse symbol counts for every derive script's counted
  * tables, over ALL best_match cells (train AND eval splits), in one corpus scan:
  *
- *   node packages/server/scripts/extract-cell-counts.ts
+ *   node packages/codec-server/scripts/extract-cell-counts.ts
  *
  * This is the precomputation behind codebook-class clustering (see derive-class-ladder.ts): with
  * one sparse count vector per cell, the model cost of any cell under any candidate table set is
