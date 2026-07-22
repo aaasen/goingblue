@@ -9,7 +9,8 @@
  * This is the strongest guard against coder edge cases synthetic tests miss (renormalization
  * boundaries, trailing zero words, escape paths under real weather).
  *
- *   node scripts/verify-roundtrip.ts            # from packages/server
+ *   node scripts/verify-roundtrip.ts             # every ~200th corpus forecast (see --stride)
+ *   node scripts/verify-roundtrip.ts --stride 1  # the whole corpus (hours)
  */
 import { encodeFillSeq, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import { eachForecast } from "./derive-lib.ts";
@@ -25,11 +26,19 @@ const UTC_OFFSET = 0;
 const REQUEST_HOURS_OF_DAY = [0, 13];
 const codec = CODECS[1];
 
+// Every mode × seq × mask × request hour is ~536 messages per forecast, so the full corpus
+// (~100k train cells) is an hours-long run. The default stride samples an even spread that
+// still exercises every layout shape against ~500 real forecasts.
+const strideArg = process.argv.indexOf("--stride");
+const STRIDE = strideArg >= 0 ? Math.max(1, parseInt(process.argv[strideArg + 1], 10)) : 200;
+
 let messages = 0;
 let failures = 0;
 let forecasts = 0;
+let visited = 0;
 
 await eachForecast((hourly: HourlyData, _runHour: number) => {
+  if (visited++ % STRIDE !== 0) return;
   forecasts++;
   const times = hourly.time;
   const dataStart = Math.floor(Date.parse(`${times[0]}:00Z`) / 3600000);
