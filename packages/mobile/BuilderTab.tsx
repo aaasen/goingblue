@@ -130,6 +130,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const [durationDays, setDurationDays] = useState(5);
   const [model, setModel] = useState('best');
   const [groups, setGroups] = useState<Set<string>>(new Set(DEFAULT_GROUPS));
+  const [messageCopied, setMessageCopied] = useState(false);
   const [numCopied, setNumCopied] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -206,6 +207,8 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
     const code = await allocCode(token, buildContext(coords, durationDays, model, varsMask, startHour), `${durationLabel} · ${model.toUpperCase()}`);
     const msg = buildMsg(token, coords, durationDays, model, variableCodes, maxChars, code, startHour);
     await Clipboard.setStringAsync(msg);
+    setMessageCopied(true);
+    setTimeout(() => setMessageCopied(false), 2000);
   }
 
   function toggleGroup(v: string) {
@@ -328,11 +331,22 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
 
       <View style={styles.buttons}>
         <TouchableOpacity
-          style={[styles.btn, styles.btnOutline, copyDisabled && styles.btnDisabled]}
+          style={[
+            styles.btn,
+            styles.btnOutline,
+            messageCopied && styles.btnSuccess,
+            copyDisabled && styles.btnDisabled,
+          ]}
           onPress={handleCopy}
           disabled={copyDisabled}
         >
-          {locating ? <ActivityIndicator color="#2a6bb5" /> : <Text style={styles.btnOutlineText}>Copy Message</Text>}
+          {locating ? (
+            <ActivityIndicator color="#2a6bb5" />
+          ) : (
+            <Text style={[styles.btnOutlineText, messageCopied && styles.btnSuccessText]}>
+              {messageCopied ? '✓ Copied' : 'Copy Message'}
+            </Text>
+          )}
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.btn, styles.btnPrimary, fetchDisabled && styles.btnDisabled]}
@@ -399,9 +413,11 @@ const styles = StyleSheet.create({
   btn: { flex: 1, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   btnPrimary: { backgroundColor: '#2a6bb5' },
   btnOutline: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d1d6' },
+  btnSuccess: { backgroundColor: '#e8f5ec', borderColor: '#2a8f5a' },
   btnDisabled: { backgroundColor: '#aeaeb2' },
   btnPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   btnOutlineText: { color: '#2a6bb5', fontSize: 16, fontWeight: '600' },
+  btnSuccessText: { color: '#2a8f5a' },
 
   smsHint: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: 14 },
   smsRow: {
