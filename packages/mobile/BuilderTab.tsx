@@ -32,8 +32,8 @@ function utcOffsetHours(): number {
   return -Math.round(new Date().getTimezoneOffset() / 60);
 }
 
-const CHARS_PER_MESSAGE = 160; // each Garmin inReach message holds 160 characters
-const FORECAST_EMAIL = 'inreach@going.blue';
+const CHARS_PER_MESSAGE = 160; // one SMS segment holds 160 characters (satellite messengers bill per segment)
+const FORECAST_NUMBER = '(425) 434-5858';
 const DEFAULT_MESSAGES = 1;
 const FORECAST_URL = `${API_BASE}/forecast`;
 
@@ -194,7 +194,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   }
 
   async function copyNumber() {
-    await Clipboard.setStringAsync(FORECAST_EMAIL);
+    await Clipboard.setStringAsync(FORECAST_NUMBER);
     setNumCopied(true);
     setTimeout(() => setNumCopied(false), 2000);
   }
@@ -360,11 +360,11 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
       </View>
 
       <Text style={styles.smsHint}>
-        Copy the message and email it to the address below from your inReach. When you get a reply,
-        paste it into the Decoder tab to view the forecast.
+        Copy the message above and text it to the number below from your phone or satellite messenger. When
+        you get a reply, paste it into the Decoder tab to view the forecast.
       </Text>
       <View style={styles.smsRow}>
-        <Text style={styles.smsNumber} selectable>{FORECAST_EMAIL}</Text>
+        <Text style={styles.smsNumber} selectable>{FORECAST_NUMBER}</Text>
         <TouchableOpacity style={styles.smsCopyBtn} onPress={copyNumber} activeOpacity={0.7}>
           <Text style={styles.smsCopyText}>{numCopied ? 'Copied' : 'Copy'}</Text>
         </TouchableOpacity>
