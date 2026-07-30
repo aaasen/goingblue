@@ -254,11 +254,9 @@ function outlinedDrop(out: Prim[], cx: number, tipY: number, w: number, h: numbe
   out.push({ kind: 'path', d, fill: RAIN });
 }
 
-// Reference snowflake: six rounded spokes, each ending in a three-spike fork
+// Reference snowflake geometry: six rounded spokes, each ending in a three-spike fork
 // (the main tip plus two side spikes angled toward it).
-function flake(out: Prim[], cx: number, cy: number, r: number, separator = '#ffffff') {
-  const lineWidth = Math.max(0.9, r * 0.18);
-  const halo = 0.7;
+function flakeSegments(cx: number, cy: number, r: number) {
   const segments: { x1: number; y1: number; x2: number; y2: number }[] = [];
 
   for (let a = 0; a < 6; a++) {
@@ -280,6 +278,16 @@ function flake(out: Prim[], cx: number, cy: number, r: number, separator = '#fff
     }
   }
 
+  return segments;
+}
+
+const flakeLineWidth = (r: number) => Math.max(0.9, r * 0.18);
+
+function flake(out: Prim[], cx: number, cy: number, r: number, separator = '#ffffff') {
+  const lineWidth = flakeLineWidth(r);
+  const halo = 0.7;
+  const segments = flakeSegments(cx, cy, r);
+
   for (const segment of segments) {
     out.push({
       kind: 'line',
@@ -293,6 +301,24 @@ function flake(out: Prim[], cx: number, cy: number, r: number, separator = '#fff
   for (const segment of segments) {
     out.push({ kind: 'line', ...segment, stroke: FLAKE, width: lineWidth, cap: 'round' });
   }
+}
+
+// A bare precipitation mark — one drop or one flake, no cloud — for bands too short to carry a
+// full glyph. The geometry is the same drop and flake that live inside the full icons, so the two
+// read as one set; what's dropped is the separator halo, since these are drawn on flat ground with
+// nothing behind them to punch out of. `h` is the mark's total height. The color is the caller's
+// to pick rather than the icon set's rain blue: these are used at sizes and densities where full
+// saturation shouts, so the caller usually wants them muted into their ground.
+export function precipMark(kind: 'rain' | 'snow', cx: number, cy: number, h: number, color: string): Prim[] {
+  if (kind === 'snow') {
+    const r = h / 2;
+    return flakeSegments(cx, cy, r).map((segment) => ({
+      kind: 'line' as const, ...segment, stroke: color, width: flakeLineWidth(r), cap: 'round' as const,
+    }));
+  }
+  // Keep the proportions of the large drop in the sleet glyph (half-width 3.5 against height 12.6),
+  // so a shrunk drop still looks like the set's drop rather than a bead or a spike.
+  return [{ kind: 'path', d: dropPath(cx, cy - h / 2, h * (3.5 / 12.6), h), fill: color }];
 }
 
 // A cloud with a surface-matched halo, so it reads as a distinct shape when it overlaps the
