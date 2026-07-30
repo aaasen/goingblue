@@ -121,6 +121,25 @@ export function glyphSpec(code: number): Spec {
   };
 }
 
+// ── Human-readable WMO code names ──────────────────────────────────────────
+
+export const WMO_NAMES: Record<number, string> = {
+  0: 'Clear', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+  45: 'Fog', 48: 'Rime fog',
+  51: 'Light drizzle', 53: 'Drizzle', 55: 'Dense drizzle',
+  56: 'Freezing drizzle', 57: 'Dense freezing drizzle',
+  61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
+  66: 'Freezing rain', 67: 'Heavy freezing rain',
+  71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains',
+  80: 'Light showers', 81: 'Showers', 82: 'Violent showers',
+  85: 'Snow showers', 86: 'Heavy snow showers',
+  95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Thunderstorm with heavy hail',
+};
+
+export function wmoName(code: number): string {
+  return WMO_NAMES[code] ?? `Code ${code}`;
+}
+
 // ── Geometry helpers ───────────────────────────────────────────────────────
 
 const f = (n: number) => Math.round(n * 100) / 100;

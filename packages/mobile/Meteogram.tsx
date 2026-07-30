@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { Animated, View, Text as RNText, StyleSheet, FlatList, PanResponder, useWindowDimensions } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Animated, View, Text as RNText, StyleSheet, FlatList, PanResponder, Pressable, useWindowDimensions } from 'react-native';
 import {
   Canvas, DashPathEffect, Group, Paint, Rect, RoundedRect, Circle, Line, Path, Text,
   LinearGradient, Skia, vec, matchFont, type SkFont,
@@ -9,7 +9,7 @@ import {
   type ForecastMessage, type Period,
 } from '@weather/protocol';
 import type { TimeFormat, Units } from './settings';
-import { weatherGlyph, type MoonPhase, type Prim } from './weatherGlyph';
+import { weatherGlyph, wmoName, type MoonPhase, type Prim } from './weatherGlyph';
 
 // ── Layout constants ───────────────────────────────────────────────────────
 // The row-label column lives inside the drawing and scrolls horizontally with the
@@ -214,6 +214,33 @@ function fmtFreeze(m: number | undefined, u: Units): string {
 function fmtWind(kph: number | undefined, u: Units): string {
   if (kph == null) return '';
   return u === 'imperial' ? `${Math.round(kph / 1.60934)}` : `${Math.round(kph)}`;
+}
+
+// Detail-panel variants: unit-suffixed and never blanked — the panel must show the trace
+// amounts the column labels drop below their display thresholds.
+function fmtRainFull(mm: number, u: Units): string {
+  if (u === 'imperial') {
+    if (mm <= 0) return '0 in';
+    const inches = mm / 25.4;
+    return inches < 0.01 ? '<0.01 in' : `${inches.toFixed(2)} in`;
+  }
+  if (mm <= 0) return '0 mm';
+  return `${mm < 10 ? mm.toFixed(1) : Math.round(mm)} mm`;
+}
+function fmtSnowFull(cm: number, u: Units): string {
+  if (u === 'imperial') {
+    if (cm <= 0) return '0 in';
+    const inches = cm / 2.54;
+    return inches < 0.1 ? '<0.1 in' : `${inches.toFixed(1)} in`;
+  }
+  if (cm <= 0) return '0 cm';
+  return `${cm < 10 ? cm.toFixed(1) : Math.round(cm)} cm`;
+}
+function fmtWindFull(kph: number | undefined, dir: number | undefined, u: Units): string {
+  if (kph == null) return '—';
+  const cardinal = dir != null ? CARDINALS[dir] : undefined;
+  const dirText = cardinal ? ` ${ARROWS[cardinal] ?? ''} ${cardinal}` : '';
+  return `${fmtWind(kph, u)} ${windUnit(u)}${dirText}`;
 }
 
 function tempUnit(u: Units) { return u === 'imperial' ? '°F' : '°C'; }
@@ -473,7 +500,9 @@ type Tile = { offset: number; width: number };
 // summary weather glyph, and its high over a mini temperature silhouette, the same stacked
 // snow/rain area, and a Beaufort wind ribbon. A viewport window tracks the meteogram's scroll on
 // the native driver, and touching the strip scrubs the meteogram to that position.
-function OverviewStrip({ periods, dates, steps, units, now, width, flatListRef, scrollX, fonts }: {
+// Memoized for the same reason as CanvasTile: every prop is identity-stable while a selection
+// changes, and an unchecked re-render rebuilds the strip's elements and repaints its canvas.
+const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units, now, width, flatListRef, scrollX, fonts }: {
   periods: Period[]; dates: Date[]; steps: number[]; units: Units; now: number;
   width: number; flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value; fonts: Fonts;
 }) {
@@ -699,28 +728,21 @@ function OverviewStrip({ periods, dates, steps, units, now, width, flatListRef, 
       </View>
     </View>
   );
-}
+});
 
 // ── Meteogram canvas (one per model) ─────────────────────────────────────--
 
-function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts }: {
-  // `steps` is each period's span in hours — the fill mixes resolutions within one message.
-  // Columns stay equal-width; the span drives labels and shading.
-  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; lat: number; lon: number; fonts: Fonts;
-}) {
-  const scrollX = useRef(new Animated.Value(0)).current;
-  const flatListRef = useRef<FlatList<Tile>>(null);
-  const screenW = useWindowDimensions().width;
+// Full Skia scene for one model. Pure, and called through useMemo: overlay-only state like the
+// selected column must not rebuild the elements, since any rebuild repaints every mounted tile.
+function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts, dayGroups }: {
+  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat;
+  now: number; lat: number; lon: number; fonts: Fonts; dayGroups: DayGroup[];
+}): ReactNode[] {
   const n = periods.length;
   const width = NAME_W + n * CELL_W;
   const totalH = ROW_H.DATE + rows.reduce((s, r) => s + r.height, 0);
-  const tiles = Array.from({ length: Math.ceil(width / CANVAS_TILE_W) }, (_, index) => {
-    const offset = index * CANVAS_TILE_W;
-    return { offset, width: Math.min(CANVAS_TILE_W, width - offset) };
-  });
   const colLeft = (i: number) => NAME_W + i * CELL_W;
   const colCenter = (i: number) => NAME_W + i * CELL_W + CELL_W / 2;
-
   const els: ReactNode[] = [];
   els.push(<Rect key="key-column-bg" x={0} y={0} width={NAME_W} height={totalH} color={C.keyBg} />);
 
@@ -750,7 +772,6 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
 
   // 2. Date header. Hours occupy their own row. Each day label sticks to the visible left
   // edge while its columns are being scrolled, then yields to the following day.
-  const dayGroups = buildDayGroups(dates);
   dates.forEach((d, i) => {
     els.push(centerText(`hour${i}`, hourLabel(d, steps[i], timeFormat), colCenter(i), 44, fonts.hour, C.date));
   });
@@ -1015,6 +1036,71 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
       }
     }
   });
+  return els;
+}
+
+// A single canvas tile. Memoized so a ModelCanvas re-render (selection moving, panel state)
+// repaints no tiles: a Skia Canvas repaints on any React commit that reaches it, and each paint
+// is a full scene pass.
+const CanvasTile = memo(function CanvasTile({ tile, els, totalH, onPress }: {
+  tile: Tile; els: ReactNode[]; totalH: number; onPress: (locationX: number, tileOffset: number) => void;
+}) {
+  return (
+    // Tap → column index. tile.offset is static per tile, so the tap position never needs
+    // the native-driven scrollX; a drag hands the responder to the FlatList and cancels
+    // the press.
+    <Pressable onPress={(e) => onPress(e.nativeEvent.locationX, tile.offset)}>
+      <Canvas style={{ width: tile.width, height: totalH }}>
+        <Group transform={[{ translateX: -tile.offset }]}>{els}</Group>
+      </Canvas>
+    </Pressable>
+  );
+});
+
+function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts, blockIndex, selected, onSelectColumn }: {
+  // `steps` is each period's span in hours — the fill mixes resolutions within one message.
+  // Columns stay equal-width; the span drives labels and shading.
+  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; lat: number; lon: number; fonts: Fonts;
+  blockIndex: number; selected: number | null; onSelectColumn: (block: number, period: number) => void;
+}) {
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const flatListRef = useRef<FlatList<Tile>>(null);
+  const screenW = useWindowDimensions().width;
+  const n = periods.length;
+  const width = NAME_W + n * CELL_W;
+  const totalH = ROW_H.DATE + rows.reduce((s, r) => s + r.height, 0);
+  // Memoized so tile objects keep their identity across re-renders: CanvasTile bails out by
+  // reference equality, and a fresh array would repaint every mounted tile on each selection.
+  const tiles = useMemo(() => Array.from({ length: Math.ceil(width / CANVAS_TILE_W) }, (_, index) => {
+    const offset = index * CANVAS_TILE_W;
+    return { offset, width: Math.min(CANVAS_TILE_W, width - offset) };
+  }), [width]);
+  const colLeft = (i: number) => NAME_W + i * CELL_W;
+
+  const dayGroups = useMemo(() => buildDayGroups(dates), [dates]);
+  const els = useMemo(
+    () => buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts, dayGroups }),
+    [periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts, dayGroups],
+  );
+
+  const onPressTile = useCallback((locationX: number, tileOffset: number) => {
+    const x = tileOffset + locationX;
+    if (x < NAME_W) return; // row-label gutter
+    onSelectColumn(blockIndex, Math.min(periods.length - 1, Math.floor((x - NAME_W) / CELL_W)));
+  }, [onSelectColumn, blockIndex, periods.length]);
+  const renderTile = useCallback(({ item: tile }: { item: Tile }) => (
+    <CanvasTile tile={tile} els={els} totalH={totalH} onPress={onPressTile} />
+  ), [els, totalH, onPressTile]);
+
+  // The highlight rides scrollX on the native driver. The animated graph is built once and the
+  // selected column's edge pushed in with setValue: swapping in a fresh Animated.subtract per
+  // selection re-attaches the native node, which doesn't recompute until the next scroll event —
+  // the box would sit on the old column until the user nudges the list.
+  const selectedLeft = useRef(new Animated.Value(0)).current;
+  const highlightX = useRef(Animated.subtract(selectedLeft, scrollX)).current;
+  useEffect(() => {
+    if (selected != null) selectedLeft.setValue(NAME_W + selected * CELL_W);
+  }, [selected, selectedLeft]);
 
   return (
     <View>
@@ -1047,12 +1133,18 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
           [{ nativeEvent: { contentOffset: { x: scrollX } } }],
           { useNativeDriver: true },
         )}
-        renderItem={({ item: tile }) => (
-          <Canvas style={{ width: tile.width, height: totalH }}>
-            <Group transform={[{ translateX: -tile.offset }]}>{els}</Group>
-          </Canvas>
-        )}
+        renderItem={renderTile}
       />
+      {selected != null && (
+        <View pointerEvents="none" style={styles.highlightClip}>
+          <Animated.View
+            style={[styles.highlightBox, {
+              height: totalH - 31,
+              transform: [{ translateX: highlightX }],
+            }]}
+          />
+        </View>
+      )}
       <View pointerEvents="none" style={styles.stickyDayRow}>
         {dayGroups.map((group, i) => {
           const label = dayLabel(group.date);
@@ -1085,13 +1177,22 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
 // ── Public component ─────────────────────────────────────────────────────--
 
 export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMessage; units: Units; timeFormat: TimeFormat }) {
-  const models = modelsFromMask(msg.models_mask);
+  // Memoized because `blocks` depends on it: a fresh array here would rebuild every block —
+  // and with them every Skia scene — on each render, e.g. whenever the selection moves.
+  const models = useMemo(() => modelsFromMask(msg.models_mask), [msg.models_mask]);
   const [now, setNow] = useState(Date.now());
+  const [selection, setSelection] = useState<{ block: number; period: number } | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60000);
     return () => clearInterval(timer);
   }, []);
+
+  // A new message may have different period counts and models; drop the selection.
+  useEffect(() => setSelection(null), [msg]);
+
+  // Stable across renders so the memoized canvas tiles never see a new press handler.
+  const selectColumn = useCallback((block: number, period: number) => setSelection({ block, period }), []);
 
   const fonts = useMemo<Fonts>(() => ({
     label: matchFont({ fontSize: 12, fontWeight: '500' }),
@@ -1124,6 +1225,10 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
     };
   }), [msg, models, units]);
 
+  const sel = selection != null && selection.period < (blocks[selection.block]?.periods.length ?? 0)
+    ? selection
+    : null;
+
   return (
     <View style={styles.container}>
       {blocks.map((b, bi) => (
@@ -1134,8 +1239,149 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
               <RNText style={styles.modelHeaderText}>{b.name}</RNText>
             </View>
           )}
-          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} steps={b.steps} units={units} timeFormat={timeFormat} now={now} lat={msg.lat} lon={msg.lon} fonts={fonts} />
+          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} steps={b.steps} units={units} timeFormat={timeFormat} now={now} lat={msg.lat} lon={msg.lon} fonts={fonts}
+            blockIndex={bi}
+            selected={sel?.block === bi ? sel.period : null}
+            onSelectColumn={selectColumn} />
           {bi < blocks.length - 1 && <View style={styles.sep} />}
+        </View>
+      ))}
+      {sel != null && (
+        <DetailPanel
+          periods={blocks[sel.block].periods}
+          index={sel.period}
+          dates={blocks[sel.block].dates}
+          steps={blocks[sel.block].steps}
+          modelName={blocks.length > 1 ? blocks[sel.block].name : undefined}
+          modelColor={blocks[sel.block].color}
+          units={units}
+          timeFormat={timeFormat}
+          lat={msg.lat}
+          lon={msg.lon}
+          onClose={() => setSelection(null)}
+        />
+      )}
+    </View>
+  );
+}
+
+// ── Tap detail panel ───────────────────────────────────────────────────────
+
+const LEADER_DOTS = '.'.repeat(160);
+
+// Detail-panel variant of pressureLabel: altitude in parens, e.g. "Wind 500mb (~18,000ft)".
+function upperWindLabel(level: 500 | 600 | 700, u: Units): string {
+  const [mb, altitude] = pressureLabel(level, u).split(' ');
+  return `Wind ${mb} (${altitude})`;
+}
+
+// The glyph appearance a period selects: what to draw, on which ground.
+function glyphVariantAt(periods: Period[], dates: Date[], steps: number[], i: number, lat: number, lon: number) {
+  const midpoint = dates[i].getTime() + steps[i] * 1800000;
+  const night = isNight(midpoint, lat, lon);
+  const phase = night ? moonPhaseAt(midpoint) : 'full' as MoonPhase;
+  return { key: `${periods[i].weathercode}|${night}|${phase}`, code: periods[i].weathercode, night, phase };
+}
+
+function DetailPanel({ periods, index, dates, steps, modelName, modelColor, units, timeFormat, lat, lon, onClose }: {
+  periods: Period[]; index: number; dates: Date[]; steps: number[];
+  modelName?: string; modelColor: string;
+  units: Units; timeFormat: TimeFormat; lat: number; lon: number; onClose: () => void;
+}) {
+  const p = periods[index];
+  const date = dates[index];
+  const step = steps[index];
+  // Row presence mirrors buildRows: a group renders when any period in the model has it, and a
+  // missing value within a present group reads — like the canvas dashes.
+  const has = (fn: (q: Period) => unknown) => periods.some((q) => fn(q) != null);
+
+  // A Skia canvas applies child updates through its own async reconciler, so redrawing one canvas
+  // per selection shows the new glyph a beat after the surrounding text. Instead, mount a canvas
+  // per distinct glyph appearance in this model once, and switch periods by flipping which one is
+  // visible — an ordinary style change that commits with the text.
+  const glyphVariants = useMemo(() => {
+    const seen = new Map<string, { key: string; code: number; night: boolean; phase: MoonPhase }>();
+    periods.forEach((_, i) => {
+      const variant = glyphVariantAt(periods, dates, steps, i, lat, lon);
+      if (!seen.has(variant.key)) seen.set(variant.key, variant);
+    });
+    return [...seen.values()];
+  }, [periods, dates, steps, lat, lon]);
+
+  let cumRain = 0;
+  let cumSnow = 0;
+  for (let i = 0; i <= index; i++) {
+    cumRain += periods[i].rain_mm ?? 0;
+    cumSnow += periods[i].snow_cm ?? 0;
+  }
+
+  const timeText = step >= 24
+    ? `${dayLabel(date)} · all day`
+    : step > 1
+      ? `${dayLabel(date)}, ${hourLabel(date, 1, timeFormat)}–${hourLabel(new Date(date.getTime() + step * 3600000), 1, timeFormat)}`
+      : `${dayLabel(date)}, ${hourLabel(date, 1, timeFormat)}`;
+
+  const activeGlyph = glyphVariantAt(periods, dates, steps, index, lat, lon);
+  const night = activeGlyph.night;
+
+  const rows: [string, string][] = [];
+  if (has((q) => q.temp_c))
+    rows.push(['Temperature', p.temp_c != null ? `${fmtTemp(p.temp_c, units)}${units === 'imperial' ? 'F' : 'C'}` : '—']);
+  if (has((q) => q.precip)) rows.push(['Precip chance', p.precip != null ? `${p.precip}%` : '—']);
+  if (has((q) => q.rain_mm)) {
+    rows.push(['Rain', fmtRainFull(p.rain_mm ?? 0, units)]);
+    rows.push(['Rain accumulation', fmtRainFull(cumRain, units)]);
+  }
+  if (has((q) => q.snow_cm)) {
+    rows.push(['Snow', fmtSnowFull(p.snow_cm ?? 0, units)]);
+    rows.push(['Snow accumulation', fmtSnowFull(cumSnow, units)]);
+  }
+  if (has((q) => q.wind_sfc_kph)) rows.push(['Wind', fmtWindFull(p.wind_sfc_kph, p.wind_sfc_dir, units)]);
+  if (has((q) => q.freeze_m))
+    rows.push(['Freezing level', p.freeze_m != null ? `${fmtFreeze(p.freeze_m, units)} ${freezeUnit(units)}` : '—']);
+  if (has((q) => q.wind_500_kph)) rows.push([upperWindLabel(500, units), fmtWindFull(p.wind_500_kph, p.wind_500_dir, units)]);
+  if (has((q) => q.wind_600_kph)) rows.push([upperWindLabel(600, units), fmtWindFull(p.wind_600_kph, p.wind_600_dir, units)]);
+  if (has((q) => q.wind_700_kph)) rows.push([upperWindLabel(700, units), fmtWindFull(p.wind_700_kph, p.wind_700_dir, units)]);
+  if (has((q) => q.cloud_high)) rows.push(['Cloud high (>8km)', p.cloud_high != null ? `${p.cloud_high}%` : '—']);
+  if (has((q) => q.cloud_mid)) rows.push(['Cloud mid (3–8km)', p.cloud_mid != null ? `${p.cloud_mid}%` : '—']);
+  if (has((q) => q.cloud_low)) rows.push(['Cloud low (<3km)', p.cloud_low != null ? `${p.cloud_low}%` : '—']);
+
+  return (
+    <View style={styles.detailPanel}>
+      <View style={styles.detailHeader}>
+        <RNText style={styles.detailTime}>{timeText}</RNText>
+        <Pressable onPress={onClose} hitSlop={8}>
+          <RNText style={styles.detailClose}>✕</RNText>
+        </Pressable>
+      </View>
+      {modelName != null && (
+        <View style={[styles.detailModelChip, { backgroundColor: modelColor }]}>
+          <RNText style={styles.detailModelText}>{modelName}</RNText>
+        </View>
+      )}
+      <View style={styles.detailSummary}>
+        <View style={[styles.detailGlyphWrap, night && { backgroundColor: C.night }]}>
+          {glyphVariants.map((variant) => (
+            <View key={variant.key} style={[styles.detailGlyphLayer, variant.key !== activeGlyph.key && styles.detailGlyphHidden]}>
+              <Canvas style={{ width: 48, height: 48 }}>
+                {/* Same convention as the clouds row: cloudGlyph centers on top + 58/2, scaled
+                    about the canvas center. */}
+                <Group transform={[{ scale: 0.75 }]} origin={vec(24, 24)}>
+                  {cloudGlyph(`dg-${variant.key}`, 24, -5, 58, variant.code, variant.night, variant.phase)}
+                </Group>
+              </Canvas>
+            </View>
+          ))}
+        </View>
+        <RNText style={styles.detailCodeName}>{wmoName(p.weathercode)}</RNText>
+      </View>
+      {rows.map(([label, value]) => (
+        <View key={label} style={styles.detailRow}>
+          <RNText style={styles.detailLabel}>{label}</RNText>
+          {/* Leader dots: a clipped run of periods stretches to whatever space the label and
+              value leave, tying the pair together across the row. */}
+          <RNText style={styles.detailDots} numberOfLines={1} ellipsizeMode="clip">{LEADER_DOTS}</RNText>
+          <RNText style={styles.detailValue}>{value}</RNText>
         </View>
       ))}
     </View>
@@ -1167,6 +1413,31 @@ const styles = StyleSheet.create({
     width: 1.5,
     backgroundColor: SC.window,
   },
+  highlightClip: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden' },
+  // Starts below the 31px day-label band (same boundary the night shading uses).
+  highlightBox: { position: 'absolute', top: 31, width: CELL_W, borderWidth: 1.5, borderColor: 'rgba(255,59,48,0.5)' },
+  detailPanel: {
+    backgroundColor: '#fff',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#d1d1d6',
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 14,
+  },
+  detailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  detailTime: { fontSize: 15, fontWeight: '600', color: C.label, flexShrink: 1 },
+  detailClose: { fontSize: 17, color: C.sectionText, paddingLeft: 14, paddingVertical: 2 },
+  detailModelChip: { alignSelf: 'flex-start', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginTop: 4 },
+  detailModelText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  detailSummary: { flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 4 },
+  detailGlyphWrap: { width: 48, height: 48, borderRadius: 8, overflow: 'hidden' },
+  detailGlyphLayer: { position: 'absolute', top: 0, left: 0 },
+  detailGlyphHidden: { opacity: 0 },
+  detailCodeName: { fontSize: 14, fontWeight: '600', color: C.label, marginLeft: 10, flexShrink: 1 },
+  detailRow: { flexDirection: 'row', alignItems: 'baseline', paddingVertical: 4 },
+  detailLabel: { fontSize: 13, color: C.sectionText },
+  detailDots: { flex: 1, marginHorizontal: 6, fontSize: 13, letterSpacing: 2, color: C.nil },
+  detailValue: { fontSize: 13, fontWeight: '600', color: C.label },
   stickyDayRow: { position: 'absolute', top: 0, left: 0, right: 0, height: 31, overflow: 'hidden' },
   stickyDayText: { position: 'absolute', top: 4, color: C.date, fontSize: 14, fontWeight: '600', lineHeight: 24 },
   modelHeaderBar: { paddingHorizontal: 14, paddingVertical: 7 },

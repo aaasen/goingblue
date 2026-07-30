@@ -7,20 +7,11 @@
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { weatherGlyph, type MoonPhase, type Prim } from '../weatherGlyph.ts';
+import { weatherGlyph, WMO_NAMES, type MoonPhase, type Prim } from '../weatherGlyph.ts';
 
-const CODES: [number, string][] = [
-  [0, 'Clear'], [1, 'Mainly clear'], [2, 'Partly cloudy'], [3, 'Overcast'],
-  [45, 'Fog'], [48, 'Rime fog'],
-  [51, 'Light drizzle'], [53, 'Drizzle'], [55, 'Dense drizzle'],
-  [56, 'Freezing drizzle'], [57, 'Dense freez. drizzle'],
-  [61, 'Light rain'], [63, 'Rain'], [65, 'Heavy rain'],
-  [66, 'Freezing rain'], [67, 'Heavy freezing rain'],
-  [71, 'Light snow'], [73, 'Snow'], [75, 'Heavy snow'], [77, 'Snow grains'],
-  [80, 'Light showers'], [81, 'Showers'], [82, 'Violent showers'],
-  [85, 'Snow showers'], [86, 'Heavy snow showers'],
-  [95, 'Thunderstorm'], [96, 'Thunder + hail'], [99, 'Thunder + heavy hail'],
-];
+const CODES: [number, string][] = Object.entries(WMO_NAMES)
+  .map(([code, name]): [number, string] => [Number(code), name])
+  .sort((a, b) => a[0] - b[0]);
 
 const CELL = 68;      // icon cell width/height
 const GAP = 10;       // gap between day and night cell
