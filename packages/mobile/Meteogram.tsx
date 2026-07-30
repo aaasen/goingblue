@@ -413,11 +413,11 @@ function cloudGlyph(key: string, cx: number, top: number, h: number, code: numbe
 
 type Tile = { offset: number; width: number };
 
-// A coarse, screen-width per-day overview: every day is the same width regardless of how many
-// periods it holds. Each day column shows its weekday, a summary weather glyph, and its high over
-// a mini temperature silhouette, the same stacked snow/rain area, and a Beaufort wind ribbon. A
-// viewport window tracks the meteogram's scroll on the native driver, and touching the strip
-// scrubs the meteogram to that position.
+// A coarse, screen-width overview whose x-axis is linear in time, so full days come out equal
+// width regardless of how many periods they hold. Each day column shows its weekday, a summary
+// weather glyph, and its high over a mini temperature silhouette, the same stacked snow/rain area,
+// and a Beaufort wind ribbon. A viewport window tracks the meteogram's scroll on the native
+// driver, and touching the strip scrubs the meteogram to that position.
 function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, flatListRef, scrollX, fonts }: {
   periods: Period[]; dates: Date[]; steps: number[]; units: Units; lat: number; lon: number; now: number;
   width: number; flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value; fonts: Fonts;
@@ -425,18 +425,24 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
   const n = periods.length;
   const W = width;
   const dayGroups = buildDayGroups(dates);
-  const numDays = dayGroups.length;
-  const dayW = W / numDays;
 
-  // Uniform per-day columns. Within a day the periods are spread evenly across the column, so
-  // near-term high-resolution days aren't wider than coarse far-term ones — this is an overview.
-  const dayOf = new Int32Array(n);
-  dayGroups.forEach((g, d) => { for (let i = g.start; i < g.end; i++) dayOf[i] = d; });
+  // Time-linear columns: each period's width is proportional to the hours it spans. Full days come
+  // out equal width whatever their resolution — a coarse far-term day is no wider than an hourly
+  // near-term one — so same-resolution periods (and the viewport window over them) render the same
+  // size on every day. The axis is padded back to the first day's local midnight: a forecast that
+  // starts mid-day keeps a full-width first column, with dead space standing in for the hours
+  // before the forecast starts.
+  const cum = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) cum[i + 1] = cum[i] + steps[i];
+  const firstMidnight = new Date(dates[0]);
+  firstMidnight.setHours(0, 0, 0, 0);
+  const padHours = (dates[0].getTime() - firstMidnight.getTime()) / 3600000;
+  const pxPerHour = W / (padHours + cum[n]);
+  const timeX = (h: number) => (padHours + h) * pxPerHour;
   const slot = (i: number) => {
-    const g = dayGroups[dayOf[i]];
-    const w = dayW / (g.end - g.start);
-    const left = dayOf[i] * dayW + (i - g.start) * w;
-    return { left, center: left + w / 2, right: left + w };
+    const left = timeX(cum[i]);
+    const right = timeX(cum[i + 1]);
+    return { left, center: (left + right) / 2, right };
   };
 
   const graphTop = STRIP_HEAD_H;
@@ -466,14 +472,14 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
     const first = plottedTemps.find((t): t is number => t != null)!;
     const last = [...plottedTemps].reverse().find((t): t is number => t != null)!;
     const points = [
-      { x: 0, y: yOf(first) },
+      { x: timeX(0), y: yOf(first) },
       ...plottedTemps.flatMap((t, i) => t == null ? [] : [{ x: slot(i).center, y: yOf(t) }]),
       { x: W, y: yOf(last) },
     ];
     const area = Skia.Path.Make();
     smoothTo(area, points);
     area.lineTo(W, silBottom);
-    area.lineTo(0, silBottom);
+    area.lineTo(timeX(0), silBottom);
     area.close();
     els.push(
       <Path key="strip-temp" path={area}>
@@ -493,7 +499,7 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
   if (maxEq > 0) {
     const yOf = (v: number) => precipBottom - (v / maxEq) * (STRIP_PRECIP_H - 2);
     const boundary = (values: number[]) => [
-      { x: 0, y: yOf(values[0]) },
+      { x: timeX(0), y: yOf(values[0]) },
       ...values.map((v, i) => ({ x: slot(i).center, y: yOf(v) })),
       { x: W, y: yOf(values[values.length - 1]) },
     ];
@@ -502,7 +508,7 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
     const rainArea = Skia.Path.Make();
     smoothTo(rainArea, rainPoints);
     rainArea.lineTo(W, precipBottom);
-    rainArea.lineTo(0, precipBottom);
+    rainArea.lineTo(timeX(0), precipBottom);
     rainArea.close();
     const snowArea = Skia.Path.Make();
     smoothTo(snowArea, totalPoints);
@@ -528,9 +534,12 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
   // Per-day header: weekday, summary glyph, daily high, and a boundary separator.
   const glyphScale = STRIP_GLYPH_H / 38;
   dayGroups.forEach((g, d) => {
-    const cx = d * dayW + dayW / 2;
+    // The first day's column includes the pre-forecast pad, back to x=0 (midnight).
+    const left = d === 0 ? 0 : timeX(cum[g.start]);
+    const dayW = timeX(cum[g.end]) - left;
+    const cx = left + dayW / 2;
     if (d > 0) {
-      els.push(<Line key={`sbd${d}`} p1={vec(d * dayW, 0)} p2={vec(d * dayW, STRIP_H)} color={C.grid} strokeWidth={1} />);
+      els.push(<Line key={`sbd${d}`} p1={vec(left, 0)} p2={vec(left, STRIP_H)} color={C.grid} strokeWidth={1} />);
     }
     let code = periods[g.start].weathercode;
     let hi: number | undefined;
@@ -564,17 +573,16 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
 
   const contentW = NAME_W + n * CELL_W;
   const maxOffset = Math.max(0, contentW - W);
-  // Fixed window width ≈ the average visible fraction; exact under uniform resolution, close enough
-  // for a coarse indicator when resolutions are mixed.
-  const winW = Math.min(W, (W * W) / (n * CELL_W));
 
-  // Scrub: map the touched day-column position back to a period, then center the viewport on it.
+  // Scrub: map the touched time position back to a fractional period index, then center the
+  // viewport on it.
   const scrub = (xMini: number) => {
     if (maxOffset <= 0) return;
     const clampedX = Math.max(0, Math.min(W, xMini));
-    const d = Math.min(numDays - 1, Math.floor(clampedX / dayW));
-    const g = dayGroups[d];
-    const t = g.start + ((clampedX - d * dayW) / dayW) * (g.end - g.start);
+    const hours = Math.max(0, clampedX / pxPerHour - padHours);
+    let i = 0;
+    while (i < n - 1 && cum[i + 1] <= hours) i++;
+    const t = i + (hours - cum[i]) / steps[i];
     const offset = Math.max(0, Math.min(maxOffset, NAME_W + t * CELL_W - W / 2));
     flatListRef.current?.scrollToOffset({ offset, animated: false });
   };
@@ -585,25 +593,64 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
     onPanResponderGrant: (e) => scrub(e.nativeEvent.locationX),
     onPanResponderMove: (e) => scrub(e.nativeEvent.locationX),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [numDays, dayW, maxOffset, W]);
+  }), [steps, maxOffset, W]);
 
-  // The main canvas scrolls by equal-width period columns while the strip is uniform per day, so
-  // map the viewport's left edge through the day boundaries — piecewise-linear, on the native
-  // driver — rather than with a single affine factor.
-  const inputRange = dayGroups.map((g) => NAME_W + g.start * CELL_W);
-  const outputRange = dayGroups.map((_, d) => d * dayW);
-  inputRange.push(contentW);
-  outputRange.push(W);
-  const translateX = maxOffset > 0
-    ? scrollX.interpolate({ inputRange, outputRange, extrapolate: 'clamp' })
-    : 0;
+  // The main canvas scrolls by equal-width period columns while the strip is linear in time, so
+  // map BOTH viewport edges through the resolution boundaries — piecewise-linear, on the native
+  // driver — rather than with a single affine factor. Where the period span changes, the two edges
+  // move at different rates, so the window resizes as it crosses resolution changes, not just
+  // translates.
+  const resBoundaries = [0];
+  for (let i = 1; i < n; i++) if (steps[i] !== steps[i - 1]) resBoundaries.push(i);
+  resBoundaries.push(n);
+  const inputRange = resBoundaries.map((i) => NAME_W + i * CELL_W);
+  const outputRange = resBoundaries.map((i) => timeX(cum[i]));
+  const stripXOf = (contentX: number) => {
+    if (contentX <= inputRange[0]) return outputRange[0];
+    for (let i = 1; i < inputRange.length; i++) {
+      if (contentX <= inputRange[i]) {
+        const t = (contentX - inputRange[i - 1]) / (inputRange[i] - inputRange[i - 1]);
+        return outputRange[i - 1] + t * (outputRange[i] - outputRange[i - 1]);
+      }
+    }
+    return outputRange[outputRange.length - 1];
+  };
+
+  // Knots where either edge changes slope: each resolution boundary as it meets the viewport's left
+  // (offset = boundary) or right (offset = boundary − W) edge. Between consecutive knots both
+  // edges are linear in the scroll offset, so the window's center and width are too. Layout width
+  // can't ride the native driver, so the fill is a full-width view squeezed with scaleX (about its
+  // center: translate to the window center, scale to the window width) and the 1.5px side edges
+  // are separate views translated independently so they stay crisp at any window size.
+  const knots = new Set([0, maxOffset]);
+  for (const x of inputRange) {
+    if (x > 0 && x < maxOffset) knots.add(x);
+    if (x - W > 0 && x - W < maxOffset) knots.add(x - W);
+  }
+  const offsets = [...knots].sort((a, b) => a - b);
+  const lefts = offsets.map((o) => stripXOf(o));
+  const rights = offsets.map((o) => stripXOf(o + W));
+  const interp = (values: number[]) =>
+    scrollX.interpolate({ inputRange: offsets, outputRange: values, extrapolate: 'clamp' });
+  const win = maxOffset > 0
+    ? {
+        fillX: interp(offsets.map((_, i) => (lefts[i] + rights[i]) / 2 - W / 2)),
+        fillScale: interp(offsets.map((_, i) => Math.max(rights[i] - lefts[i], 1) / W)),
+        leftX: interp(lefts),
+        rightX: interp(rights.map((r) => r - 1.5)),
+      }
+    : { fillX: 0, fillScale: 1, leftX: 0, rightX: W - 1.5 };
 
   return (
     <View style={styles.overviewStrip} {...pan.panHandlers}>
       <View style={{ width: W, height: STRIP_H, overflow: 'hidden' }}>
         <Canvas style={{ width: W, height: STRIP_H }} pointerEvents="none">{els}</Canvas>
         <Animated.View pointerEvents="none"
-          style={[styles.overviewWindow, { width: winW, transform: [{ translateX }] }]} />
+          style={[styles.overviewWindowFill, { width: W, transform: [{ translateX: win.fillX }, { scaleX: win.fillScale }] }]} />
+        <Animated.View pointerEvents="none"
+          style={[styles.overviewWindowEdge, { transform: [{ translateX: win.leftX }] }]} />
+        <Animated.View pointerEvents="none"
+          style={[styles.overviewWindowEdge, { transform: [{ translateX: win.rightX }] }]} />
       </View>
     </View>
   );
@@ -1030,14 +1077,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: C.grid,
   },
-  overviewWindow: {
+  overviewWindowFill: {
     position: 'absolute',
     top: 0,
     height: STRIP_H,
-    borderWidth: 1.5,
+    borderTopWidth: 1.5,
+    borderBottomWidth: 1.5,
     borderColor: '#2a6bb5',
-    borderRadius: 6,
     backgroundColor: 'rgba(42,107,181,0.08)',
+  },
+  overviewWindowEdge: {
+    position: 'absolute',
+    top: 0,
+    height: STRIP_H,
+    width: 1.5,
+    backgroundColor: '#2a6bb5',
   },
   stickyDayRow: { position: 'absolute', top: 0, left: 0, right: 0, height: 31, overflow: 'hidden' },
   stickyDayText: { position: 'absolute', top: 4, color: C.date, fontSize: 14, fontWeight: '600', lineHeight: 24 },
