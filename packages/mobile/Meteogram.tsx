@@ -46,7 +46,7 @@ const STRIP_GLYPH_Y = STRIP_DATE_Y + STRIP_DATE_H;
 const STRIP_HEAD_H = STRIP_GLYPH_Y + STRIP_GLYPH_H + STRIP_TVAL_H;
 const STRIP_SIL_H = 28;
 const STRIP_PRECIP_H = 13;
-const STRIP_WIND_H = 6;
+const STRIP_WIND_H = 9;
 // The graph bands below the header — the span the viewport window brackets.
 const STRIP_GRAPH_H = STRIP_SIL_H + STRIP_PRECIP_H + STRIP_WIND_H;
 const STRIP_H = STRIP_HEAD_H + STRIP_GRAPH_H;
@@ -73,7 +73,7 @@ const C = {
 const SC = {
   bg: '#4d4d4d',
   label: '#ffffff',
-  window: '#5aa9f0',
+  window: '#ff3b30',
 } as const;
 
 const MODEL_COLORS: Record<string, string> = {
