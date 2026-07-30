@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Animated, View, Text as RNText, StyleSheet, FlatList, PanResponder, useWindowDimensions } from 'react-native';
 import {
-  Canvas, DashPathEffect, Group, Rect, RoundedRect, Circle, Line, Path, Text,
+  Canvas, DashPathEffect, Group, Paint, Rect, RoundedRect, Circle, Line, Path, Text,
   LinearGradient, Skia, vec, matchFont, type SkFont,
 } from '@shopify/react-native-skia';
 import {
@@ -9,6 +9,7 @@ import {
   type ForecastMessage, type Period,
 } from '@weather/protocol';
 import type { TimeFormat, Units } from './settings';
+import { weatherGlyph, type MoonPhase, type Prim } from './weatherGlyph';
 
 // ── Layout constants ───────────────────────────────────────────────────────
 // The row-label column lives inside the drawing and scrolls horizontally with the
@@ -237,6 +238,19 @@ function isNight(time: number, lat: number, lon: number): boolean {
   return altitude < -0.833 * rad;
 }
 
+// Eight-phase approximation anchored to the 2000-01-06 new moon. This is precise enough for the
+// compact phase glyph while avoiding another astronomy dependency in the mobile bundle.
+function moonPhaseAt(time: number): MoonPhase {
+  const synodicMonthMs = 29.530588853 * 86400000;
+  const knownNewMoon = Date.UTC(2000, 0, 6, 18, 14);
+  const cycle = ((time - knownNewMoon) % synodicMonthMs + synodicMonthMs) % synodicMonthMs;
+  const phases: MoonPhase[] = [
+    'new', 'waxing-crescent', 'first-quarter', 'waxing-gibbous',
+    'full', 'waning-gibbous', 'last-quarter', 'waning-crescent',
+  ];
+  return phases[Math.floor(cycle / synodicMonthMs * 8 + 0.5) % phases.length];
+}
+
 // Night portions of an arbitrary forecast period, as 0–1 fractions. A short scan locates each
 // sunrise/sunset, then binary search places the boundary to within roughly one second.
 function nightSegments(start: number, end: number, lat: number, lon: number): [number, number][] {
@@ -374,61 +388,68 @@ function smoothTo(path: ReturnType<typeof Skia.Path.Make>, pts: { x: number; y: 
   path.lineTo(p[p.length - 1].x, p[p.length - 1].y);
 }
 
-// A puffy cloud + optional sun + precip glyphs, centered in a column cell. On a dark ground the
-// cloud ramp runs the other way — heavier cover gets brighter, not darker — so thick overcast stays
-// the most prominent glyph either way.
-function cloudGlyph(key: string, cx: number, top: number, h: number, code: number, coverage: number, onDark = false): ReactNode {
-  const els: ReactNode[] = [];
-  const cy = top + h / 2;
-  const showSun = coverage < 65;
-  const k = Math.min(1, coverage / 100);
-  const cloudGray = onDark
-    ? rgb([lerp(158, 214, k), lerp(164, 220, k), lerp(174, 230, k)])
-    : rgb([lerp(196, 132, k), lerp(201, 138, k), lerp(209, 148, k)]);
+function glyphColor(color: string, onDark: boolean): string {
+  return onDark && (color === '#ffffff' || color === C.night) ? SC.bg : color;
+}
 
-  if (showSun) {
-    const sx = coverage < 25 ? cx : cx - 11;
-    const sy = cy - 6;
-    const r = 8;
-    for (let a = 0; a < 8; a++) {
-      const ang = (a * Math.PI) / 4;
-      els.push(
-        <Line key={`${key}-ray${a}`} p1={vec(sx + Math.cos(ang) * (r + 2), sy + Math.sin(ang) * (r + 2))}
-          p2={vec(sx + Math.cos(ang) * (r + 5), sy + Math.sin(ang) * (r + 5))} color="#f5b836" strokeWidth={1.6} />,
+function glyphPrimitive(key: string, prim: Prim, onDark: boolean): ReactNode {
+  switch (prim.kind) {
+    case 'circle':
+      return <Circle key={key} cx={prim.cx} cy={prim.cy} r={prim.r} color={glyphColor(prim.fill, onDark)} />;
+    case 'line':
+      return (
+        <Line key={key} p1={vec(prim.x1, prim.y1)} p2={vec(prim.x2, prim.y2)}
+          color={prim.role === 'symbol-separator' ? '#000000' : glyphColor(prim.stroke, onDark)}
+          blendMode={prim.role === 'symbol-separator' ? 'clear' : undefined}
+          strokeWidth={prim.width} strokeCap={prim.cap ?? 'butt'} />
       );
-    }
-    els.push(<Circle key={`${key}-sun`} cx={sx} cy={sy} r={r} color="#f6b93b" />);
-  }
-
-  if (coverage >= 25) {
-    const scale = 0.8 + Math.min(1, coverage / 100) * 0.35;
-    const bx = showSun ? cx + 6 : cx;
-    const by = cy + 4;
-    const w = 17 * scale;
-    els.push(<Circle key={`${key}-c1`} cx={bx - w * 0.55} cy={by} r={7.5 * scale} color={cloudGray} />);
-    els.push(<Circle key={`${key}-c2`} cx={bx + w * 0.55} cy={by - 1} r={6.5 * scale} color={cloudGray} />);
-    els.push(<Circle key={`${key}-c3`} cx={bx} cy={by - 5 * scale} r={9 * scale} color={cloudGray} />);
-    els.push(
-      <RoundedRect key={`${key}-cb`} x={bx - w} y={by} width={w * 2} height={8 * scale} r={4 * scale} color={cloudGray} />,
-    );
-  }
-
-  // Precip glyphs below the cloud.
-  const isSnow = SNOW_CODES.has(code);
-  const isRain = RAIN_CODES.has(code);
-  if (isSnow || isRain) {
-    const py = top + h - 9;
-    for (let i = -1; i <= 1; i++) {
-      const px = cx + i * 7;
-      if (isRain) {
-        els.push(<Line key={`${key}-r${i}`} p1={vec(px + 1.5, py - 3)} p2={vec(px - 1.5, py + 4)} color="#4a90d9" strokeWidth={1.8} />);
-      } else {
-        els.push(<Circle key={`${key}-s${i}`} cx={px} cy={py} r={1.7} color="#7f9bb5" />);
+    case 'rrect':
+      return (
+        <RoundedRect key={key} x={prim.x} y={prim.y} width={prim.w} height={prim.h} r={prim.r}
+          color={glyphColor(prim.fill, onDark)} />
+      );
+    case 'path': {
+      const clearsLayer = prim.role?.endsWith('separator') ?? false;
+      const parts: ReactNode[] = [];
+      if (prim.fill && prim.fill !== 'none') {
+        parts.push(
+          <Path key={`${key}-fill`} path={prim.d}
+            color={clearsLayer ? '#000000' : glyphColor(prim.fill, onDark)}
+            blendMode={clearsLayer ? 'clear' : undefined} />,
+        );
       }
+      if (prim.stroke && prim.stroke !== 'none') {
+        parts.push(
+          <Path key={`${key}-stroke`} path={prim.d} style="stroke"
+            color={clearsLayer ? '#000000' : glyphColor(prim.stroke, onDark)}
+            blendMode={clearsLayer ? 'clear' : undefined} strokeWidth={prim.width ?? 1}
+            strokeCap={prim.cap ?? 'butt'} strokeJoin="round" />,
+        );
+      }
+      return <Group key={key}>{parts}</Group>;
     }
   }
+}
 
-  return <Group key={key}>{els}</Group>;
+// Adapter from the shared renderer-independent icon geometry to the Skia scene graph.
+function cloudGlyph(
+  key: string,
+  cx: number,
+  top: number,
+  h: number,
+  code: number,
+  night = false,
+  moonPhase: MoonPhase = 'full',
+  onDark = false,
+): ReactNode {
+  const prims = weatherGlyph(code, night, cx, top, h, moonPhase);
+  const hasTransparentOutline = prims.some((prim) => 'role' in prim && prim.role?.endsWith('separator'));
+  return (
+    <Group key={key} layer={hasTransparentOutline ? <Paint /> : undefined}
+      clip={hasTransparentOutline ? { x: cx - CELL_W / 2, y: top - 4, width: CELL_W, height: h + 8 } : undefined}>
+      {prims.map((prim, i) => glyphPrimitive(`${key}-${i}`, prim, onDark))}
+    </Group>
+  );
 }
 
 // ── Overview strip (per-model minimap + scrubber) ────────────────────────--
@@ -544,7 +565,7 @@ function OverviewStrip({ periods, dates, steps, units, now, width, flatListRef, 
 
   // Per-day header: weekday, day of month, summary glyph, daily high. The day columns are read from
   // the header text alone — no separators, so nothing cuts across the graphs below.
-  const glyphScale = STRIP_GLYPH_H / 38;
+  const glyphScale = STRIP_GLYPH_H / ROW_H.CLOUD;
   dayGroups.forEach((g, d) => {
     // The first day's column includes the pre-forecast pad, back to x=0 (midnight).
     const left = d === 0 ? 0 : timeX(cum[g.start]);
@@ -560,7 +581,7 @@ function OverviewStrip({ periods, dates, steps, units, now, width, flatListRef, 
     // The glyph is drawn at its natural meteogram size, then scaled into the small header slot.
     els.push(
       <Group key={`gly${d}`} transform={[{ translateX: cx }, { translateY: STRIP_GLYPH_Y }, { scale: glyphScale }]}>
-        {cloudGlyph(`glyi${d}`, 0, 0, 38, code, codeCoverage(code), true)}
+        {cloudGlyph(`glyi${d}`, 0, 0, ROW_H.CLOUD, code, false, 'full', true)}
       </Group>,
     );
     if (dayW >= 22) {
@@ -883,8 +904,17 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
     switch (row.kind) {
       case 'clouds':
         periods.forEach((p, i) => {
-          const cov = codeCoverage(p.weathercode);
-          els.push(cloudGlyph(`cl${i}`, colCenter(i), top, row.height, p.weathercode, cov));
+          const midpoint = dates[i].getTime() + steps[i] * 1800000;
+          const night = isNight(midpoint, lat, lon);
+          els.push(cloudGlyph(
+            `cl${i}`,
+            colCenter(i),
+            top,
+            row.height,
+            p.weathercode,
+            night,
+            moonPhaseAt(midpoint),
+          ));
         });
         break;
 

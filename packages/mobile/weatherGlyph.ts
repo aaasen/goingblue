@@ -8,9 +8,27 @@
 
 export type Prim =
   | { kind: 'circle'; cx: number; cy: number; r: number; fill: string }
-  | { kind: 'line'; x1: number; y1: number; x2: number; y2: number; stroke: string; width: number; cap?: 'round' | 'butt' }
+  | {
+      kind: 'line';
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      stroke: string;
+      width: number;
+      cap?: 'round' | 'butt';
+      role?: 'symbol-separator';
+    }
   | { kind: 'rrect'; x: number; y: number; w: number; h: number; r: number; fill: string }
-  | { kind: 'path'; d: string; fill?: string; stroke?: string; width?: number; cap?: 'round' | 'butt' };
+  | {
+      kind: 'path';
+      d: string;
+      fill?: string;
+      stroke?: string;
+      width?: number;
+      cap?: 'round' | 'butt';
+      role?: 'cloud-separator' | 'symbol-separator';
+    };
 
 // ── Palette ──────────────────────────────────────────────────────────────--
 
@@ -213,7 +231,7 @@ function dropPath(cx: number, tipY: number, w: number, h: number): string {
 
 function outlinedDrop(out: Prim[], cx: number, tipY: number, w: number, h: number, separator: string) {
   const d = dropPath(cx, tipY, w, h);
-  out.push({ kind: 'path', d, fill: separator, stroke: separator, width: 2.2, cap: 'round' });
+  out.push({ kind: 'path', d, fill: separator, stroke: separator, width: 2.2, cap: 'round', role: 'symbol-separator' });
   out.push({ kind: 'path', d, fill: RAIN });
 }
 
@@ -244,7 +262,14 @@ function flake(out: Prim[], cx: number, cy: number, r: number, separator = '#fff
   }
 
   for (const segment of segments) {
-    out.push({ kind: 'line', ...segment, stroke: separator, width: lineWidth + halo * 2, cap: 'round' });
+    out.push({
+      kind: 'line',
+      ...segment,
+      stroke: separator,
+      width: lineWidth + halo * 2,
+      cap: 'round',
+      role: 'symbol-separator',
+    });
   }
   for (const segment of segments) {
     out.push({ kind: 'line', ...segment, stroke: FLAKE, width: lineWidth, cap: 'round' });
@@ -256,7 +281,7 @@ function flake(out: Prim[], cx: number, cy: number, r: number, separator = '#fff
 function cloudWithHalo(out: Prim[], cx: number, by: number, w: number, h: number, fill: string, night: boolean) {
   const d = cloudPath(cx, by, w, h);
   const separator = night ? NIGHT_BACKGROUND : '#ffffff';
-  out.push({ kind: 'path', d, fill: separator, stroke: separator, width: 7, cap: 'round' });
+  out.push({ kind: 'path', d, fill: separator, stroke: separator, width: 7, cap: 'round', role: 'cloud-separator' });
   out.push({ kind: 'path', d, fill, stroke: fill, width: 3, cap: 'round' });
 }
 
@@ -268,7 +293,7 @@ function layeredCloud(out: Prim[], cx: number, by: number, h: number, night: boo
   const front = cloudPath(cx + 14 * scale, by, 122 * scale, h);
   const separator = night ? NIGHT_BACKGROUND : '#ffffff';
   out.push({ kind: 'path', d: rear, fill: CLOUD_BACK });
-  out.push({ kind: 'path', d: front, fill: separator, stroke: separator, width: 3.2, cap: 'round' });
+  out.push({ kind: 'path', d: front, fill: separator, stroke: separator, width: 3.2, cap: 'round', role: 'cloud-separator' });
   out.push({ kind: 'path', d: front, fill: CLOUD_FRONT });
 }
 
@@ -349,7 +374,7 @@ function drawPrecip(out: Prim[], cx: number, cloudBottom: number, s: Spec, night
 function bolt(out: Prim[], cx: number, cy: number, separator: string) {
   const d = `M ${f(cx + 2)} ${f(cy - 2)} L ${f(cx - 4)} ${f(cy + 7)} L ${f(cx - 0.5)} ${f(cy + 7)} `
     + `L ${f(cx - 3)} ${f(cy + 15)} L ${f(cx + 5)} ${f(cy + 4)} L ${f(cx + 1)} ${f(cy + 4)} Z`;
-  out.push({ kind: 'path', d, fill: separator, stroke: separator, width: 2.2, cap: 'round' });
+  out.push({ kind: 'path', d, fill: separator, stroke: separator, width: 2.2, cap: 'round', role: 'symbol-separator' });
   out.push({ kind: 'path', d, fill: BOLT });
 }
 

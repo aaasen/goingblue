@@ -5,5 +5,6 @@
   },
   "references": [
     { "path": "../protocol" }
-  ]
+  ],
+  "exclude": ["scripts"]
 }
