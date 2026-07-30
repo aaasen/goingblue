@@ -64,8 +64,13 @@ const STRIP_HEAD_H = STRIP_GLYPH_Y + STRIP_GLYPH_H + STRIP_TVAL_H;
 const STRIP_SIL_H = 28;
 const STRIP_PRECIP_H = 13;
 const STRIP_WIND_H = 9;
+// The resolution band along the very bottom: one block per period on the strip's time-linear axis.
+const STRIP_RES_H = 7;
+// Gap between adjacent resolution blocks, in px. Small enough that hourly periods — a couple of
+// px wide at strip scale — still leave something to draw.
+const STRIP_RES_GAP = 1;
 // The graph bands below the header — the span the viewport window brackets.
-const STRIP_GRAPH_H = STRIP_SIL_H + STRIP_PRECIP_H + STRIP_WIND_H;
+const STRIP_GRAPH_H = STRIP_SIL_H + STRIP_PRECIP_H + STRIP_WIND_H + STRIP_RES_H;
 const STRIP_H = STRIP_HEAD_H + STRIP_GRAPH_H;
 
 // ── Palette ──────────────────────────────────────────────────────────────--
@@ -92,6 +97,7 @@ const SC = {
   bg: '#4d4d4d',
   label: '#ffffff',
   window: '#ff3b30',
+  rung: 'rgba(255,255,255,0.45)',
 } as const;
 
 const MODEL_COLORS: Record<string, string> = {
@@ -567,7 +573,8 @@ type Tile = { offset: number; width: number };
 // A coarse, screen-width overview whose x-axis is linear in time, so full days come out equal
 // width regardless of how many periods they hold. Each day column shows its weekday and date, a
 // summary weather glyph, and its high over a mini temperature silhouette, the same stacked
-// snow/rain area, and a Beaufort wind ribbon. A viewport window tracks the meteogram's scroll on
+// snow/rain area, a Beaufort wind ribbon, and a band of one block per forecast period showing
+// where the fill's resolution changes. A viewport window tracks the meteogram's scroll on
 // the native driver, and touching the strip scrubs the meteogram to that position.
 // Memoized for the same reason as CanvasTile: every prop is identity-stable while a selection
 // changes, and an unchecked re-render rebuilds the strip's elements and repaints its canvas.
@@ -664,12 +671,27 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
     );
   }
 
-  // Surface-wind ribbon along the bottom, on the same blended scale as the main canvas.
-  const windTop = STRIP_H - STRIP_WIND_H;
+  // Surface-wind ribbon, on the same blended scale as the main canvas.
+  const windTop = STRIP_H - STRIP_RES_H - STRIP_WIND_H;
   valueRuns(n, (i) => periods[i].wind_sfc_kph != null).forEach((run) => {
     els.push(windRibbon(`swind${run[0]}`, run, slot,
       (i) => windColor(periods[i].wind_sfc_kph!), windTop, STRIP_WIND_H));
   });
+
+  // Resolution band along the very bottom: one block per period. On the time-linear axis a block's
+  // width *is* its span, so the fill's shape reads directly — a dense run of slivers is the hourly
+  // near term, a handful of wide blocks the coarse far term, and the seams between them are where
+  // the resolution steps down. One color throughout: the rung's own value is already legible from
+  // the width, and tinting per resolution would compete with the graphs above.
+  const resTop = STRIP_H - STRIP_RES_H;
+  for (let i = 0; i < n; i++) {
+    const s = slot(i);
+    els.push(
+      <RoundedRect key={`sres${i}`} x={s.left} y={resTop + 1}
+        width={Math.max(1, s.right - s.left - STRIP_RES_GAP)} height={STRIP_RES_H - 2} r={1}
+        color={SC.rung} />,
+    );
+  }
 
   // Per-day header: weekday, day of month, summary glyph, daily high. The day columns are read from
   // the header text alone — no separators, so nothing cuts across the graphs below.
