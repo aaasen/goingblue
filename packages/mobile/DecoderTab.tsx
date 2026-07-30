@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import {
   VARS_BIT, startDatetime, MODE_NAMES, DEFAULT_MODE, type ForecastMessage,
 } from '@weather/protocol';
@@ -200,6 +201,15 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
     return () => { cancelled = true; };
   }, [forecastData, token]);
 
+  const pasteFromClipboard = useCallback(async () => {
+    try {
+      const text = await Clipboard.getStringAsync();
+      if (text.trim()) onForecastDataChange(text.trim());
+    } catch {
+      setError('Could not read the clipboard.');
+    }
+  }, [onForecastDataChange]);
+
   const loadPast = useCallback((encoded: string) => {
     suppressNextCache.current = true;
     onForecastDataChange(encoded);
@@ -270,28 +280,39 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
       contentContainerStyle={{ paddingBottom: 48 }}
       keyboardShouldPersistTaps="handled"
     >
-      {/* Input area (scrolls away with the rest of the page rather than staying pinned) */}
-      <Text style={styles.inputPrompt}>Paste the forecast response from your inReach here</Text>
+      {/* Primary action: pull the encoded reply straight off the clipboard. */}
+      <View style={styles.actionArea}>
+        <TouchableOpacity style={styles.pasteBtn} onPress={pasteFromClipboard} accessibilityRole="button">
+          <Text style={styles.pasteBtnText}>Paste Forecast</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Input area (scrolls away with the rest of the page rather than staying pinned).
+          Single-line: the encoded message is one long token, so it scrolls sideways rather
+          than wrapping into a growing block. */}
       <View style={styles.inputArea}>
-        <TextInput
-          style={styles.input}
-          value={forecastData}
-          onChangeText={onForecastDataChange}
-          placeholder="Paste encoded forecast here…"
-          placeholderTextColor="#aeaeb2"
-          autoCapitalize="none"
-          autoCorrect={false}
-          multiline
-        />
-        {forecastData.length > 0 && (
-          <TouchableOpacity
-            style={styles.clearBtn}
-            onPress={() => onForecastDataChange('')}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Text style={styles.clearBtnText}>✕</Text>
-          </TouchableOpacity>
-        )}
+        <View style={styles.inputField}>
+          <TextInput
+            style={styles.input}
+            value={forecastData}
+            onChangeText={onForecastDataChange}
+            placeholder="Paste forecast here"
+            placeholderTextColor="#aeaeb2"
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
+            numberOfLines={1}
+          />
+          {forecastData.length > 0 && (
+            <TouchableOpacity
+              style={styles.clearBtn}
+              onPress={() => onForecastDataChange('')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.clearBtnText}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {error && (
@@ -345,9 +366,6 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
       {!decoded && !error && (
         <View style={styles.emptyState}>
           <Text style={styles.emptyTitle}>No forecast loaded</Text>
-          <Text style={styles.emptyBody}>
-            Fetch a forecast from the Builder tab, or paste an encoded reply received via Garmin inReach.
-          </Text>
         </View>
       )}
 
@@ -359,36 +377,47 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
 // ── Styles ─────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  inputPrompt: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 4,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#6e6e73',
-  },
   inputArea: {
     backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#d1d1d6',
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 14,
+  },
+  inputField: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    minHeight: 54,
+    alignItems: 'center',
+    backgroundColor: '#f2f2f7',
+    borderWidth: 1,
+    borderColor: '#d1d1d6',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 44,
   },
   input: {
     flex: 1,
     fontFamily: 'Courier',
-    fontSize: 13,
+    fontSize: 14,
     color: '#1c1c1e',
-    lineHeight: 20,
-    maxHeight: 120,
+    padding: 0,
   },
+  actionArea: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
+  },
+  pasteBtn: {
+    height: 50,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2a6bb5',
+  },
+  pasteBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   clearBtn: {
     marginLeft: 8,
-    marginTop: 2,
     width: 20,
     height: 20,
     borderRadius: 10,
@@ -411,8 +440,7 @@ const styles = StyleSheet.create({
   variableLabel: { fontSize: 12, color: '#636366' },
 
   emptyState: { alignItems: 'center', justifyContent: 'center', padding: 40 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#3a3a3c', marginBottom: 10, textAlign: 'center' },
-  emptyBody: { fontSize: 14, color: '#8e8e93', lineHeight: 21, textAlign: 'center' },
+  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#3a3a3c', textAlign: 'center' },
 
   pastSection: { marginTop: 8, marginHorizontal: 16 },
   pastHeaderText: { fontSize: 12, fontWeight: '700', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: 0.5, paddingVertical: 12 },
