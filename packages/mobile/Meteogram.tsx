@@ -32,21 +32,28 @@ const ROW_H = {
   DATA: 42,
 } as const;
 
-// Overview-strip band heights, stacked top to bottom: a per-day header (weekday, summary glyph,
-// daily high) over the mini temperature / precip / wind graphs.
-const STRIP_DAY_H = 12;
+// Overview-strip band heights, stacked top to bottom: a per-day header (weekday, day of month,
+// summary glyph, daily high) over the mini temperature / precip / wind graphs.
+// Each header band is taller than its text so the rows breathe; the row tops are derived here so
+// the draw sites don't repeat the arithmetic.
+const STRIP_PAD_T = 8;
+const STRIP_DAY_H = 15;
+const STRIP_DATE_H = 18;
 const STRIP_GLYPH_H = 20;
 const STRIP_TVAL_H = 14;
-const STRIP_HEAD_H = STRIP_DAY_H + STRIP_GLYPH_H + STRIP_TVAL_H;
+const STRIP_DATE_Y = STRIP_PAD_T + STRIP_DAY_H;
+const STRIP_GLYPH_Y = STRIP_DATE_Y + STRIP_DATE_H;
+const STRIP_HEAD_H = STRIP_GLYPH_Y + STRIP_GLYPH_H + STRIP_TVAL_H;
 const STRIP_SIL_H = 28;
 const STRIP_PRECIP_H = 13;
 const STRIP_WIND_H = 6;
-const STRIP_H = STRIP_HEAD_H + STRIP_SIL_H + STRIP_PRECIP_H + STRIP_WIND_H;
+// The graph bands below the header — the span the viewport window brackets.
+const STRIP_GRAPH_H = STRIP_SIL_H + STRIP_PRECIP_H + STRIP_WIND_H;
+const STRIP_H = STRIP_HEAD_H + STRIP_GRAPH_H;
 
 // ── Palette ──────────────────────────────────────────────────────────────--
 
 const C = {
-  bg: '#ffffff',
   night: '#eceef3',
   grid: '#f0f1f4',
   keyBg: '#e5e5ea',
@@ -56,6 +63,17 @@ const C = {
   unit: '#9aa0aa',
   date: '#48484a',
   nil: '#d1d1d6',
+} as const;
+
+// The overview strip runs on a dark ground: at strip scale the graphs are a few pixels tall, and a
+// dark backdrop makes the temperature silhouette, precip area and wind ribbon read as one lit
+// graphic above the light meteogram. Text and clouds lighten to suit. The strip carries neither
+// day/night shading nor day separators — at this scale both fought the silhouette; the main canvas
+// below still shows them.
+const SC = {
+  bg: '#4d4d4d',
+  label: '#ffffff',
+  window: '#5aa9f0',
 } as const;
 
 const MODEL_COLORS: Record<string, string> = {
@@ -331,6 +349,9 @@ function baseline(cy: number, size: number) { return cy + size * 0.35; }
 
 interface Fonts {
   label: SkFont; sub: SkFont; data: SkFont; small: SkFont; bold: SkFont; date: SkFont; hour: SkFont;
+  // The strip's header text is light-weight — at header size a thin face keeps the day columns
+  // legible without competing with the glyphs below them.
+  strip: SkFont; stripSub: SkFont;
 }
 
 function centerText(key: string, text: string, cx: number, cy: number, font: SkFont, color: string): ReactNode {
@@ -353,16 +374,17 @@ function smoothTo(path: ReturnType<typeof Skia.Path.Make>, pts: { x: number; y: 
   path.lineTo(p[p.length - 1].x, p[p.length - 1].y);
 }
 
-// A puffy cloud + optional sun + precip glyphs, centered in a column cell.
-function cloudGlyph(key: string, cx: number, top: number, h: number, code: number, coverage: number): ReactNode {
+// A puffy cloud + optional sun + precip glyphs, centered in a column cell. On a dark ground the
+// cloud ramp runs the other way — heavier cover gets brighter, not darker — so thick overcast stays
+// the most prominent glyph either way.
+function cloudGlyph(key: string, cx: number, top: number, h: number, code: number, coverage: number, onDark = false): ReactNode {
   const els: ReactNode[] = [];
   const cy = top + h / 2;
   const showSun = coverage < 65;
-  const cloudGray = rgb([
-    lerp(196, 132, Math.min(1, coverage / 100)),
-    lerp(201, 138, Math.min(1, coverage / 100)),
-    lerp(209, 148, Math.min(1, coverage / 100)),
-  ]);
+  const k = Math.min(1, coverage / 100);
+  const cloudGray = onDark
+    ? rgb([lerp(158, 214, k), lerp(164, 220, k), lerp(174, 230, k)])
+    : rgb([lerp(196, 132, k), lerp(201, 138, k), lerp(209, 148, k)]);
 
   if (showSun) {
     const sx = coverage < 25 ? cx : cx - 11;
@@ -414,12 +436,12 @@ function cloudGlyph(key: string, cx: number, top: number, h: number, code: numbe
 type Tile = { offset: number; width: number };
 
 // A coarse, screen-width overview whose x-axis is linear in time, so full days come out equal
-// width regardless of how many periods they hold. Each day column shows its weekday, a summary
-// weather glyph, and its high over a mini temperature silhouette, the same stacked snow/rain area,
-// and a Beaufort wind ribbon. A viewport window tracks the meteogram's scroll on the native
-// driver, and touching the strip scrubs the meteogram to that position.
-function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, flatListRef, scrollX, fonts }: {
-  periods: Period[]; dates: Date[]; steps: number[]; units: Units; lat: number; lon: number; now: number;
+// width regardless of how many periods they hold. Each day column shows its weekday and date, a
+// summary weather glyph, and its high over a mini temperature silhouette, the same stacked
+// snow/rain area, and a Beaufort wind ribbon. A viewport window tracks the meteogram's scroll on
+// the native driver, and touching the strip scrubs the meteogram to that position.
+function OverviewStrip({ periods, dates, steps, units, now, width, flatListRef, scrollX, fonts }: {
+  periods: Period[]; dates: Date[]; steps: number[]; units: Units; now: number;
   width: number; flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value; fonts: Fonts;
 }) {
   const n = periods.length;
@@ -448,17 +470,6 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
   const graphTop = STRIP_HEAD_H;
   const els: ReactNode[] = [];
 
-  // Night shading behind the graph bands.
-  dates.forEach((d, i) => {
-    const s = slot(i);
-    const start = d.getTime();
-    const end = start + steps[i] * 3600000;
-    nightSegments(start, end, lat, lon).forEach(([from, to], seg) => {
-      els.push(<Rect key={`snight${i}-${seg}`} x={s.left + from * (s.right - s.left)} y={graphTop}
-        width={(to - from) * (s.right - s.left)} height={STRIP_H - graphTop} color={C.night} />);
-    });
-  });
-
   // Temperature silhouette.
   const temps: number[] = [];
   periods.forEach((p) => { if (p.temp_c != null) temps.push(p.temp_c); });
@@ -484,7 +495,7 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
     els.push(
       <Path key="strip-temp" path={area}>
         <LinearGradient start={vec(0, silTop)} end={vec(0, silBottom)}
-          colors={[tempColor(tMax, 0.55), tempColor((tMax + tMin) / 2, 0.55), tempColor(tMin, 0.55)]}
+          colors={[tempColor(tMax, 0.8), tempColor((tMax + tMin) / 2, 0.8), tempColor(tMin, 0.8)]}
           positions={[0, 0.5, 1]} />
       </Path>,
     );
@@ -531,16 +542,14 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
       height={STRIP_WIND_H} color={beaufort(p.wind_sfc_kph).bg} />);
   });
 
-  // Per-day header: weekday, summary glyph, daily high, and a boundary separator.
+  // Per-day header: weekday, day of month, summary glyph, daily high. The day columns are read from
+  // the header text alone — no separators, so nothing cuts across the graphs below.
   const glyphScale = STRIP_GLYPH_H / 38;
   dayGroups.forEach((g, d) => {
     // The first day's column includes the pre-forecast pad, back to x=0 (midnight).
     const left = d === 0 ? 0 : timeX(cum[g.start]);
     const dayW = timeX(cum[g.end]) - left;
     const cx = left + dayW / 2;
-    if (d > 0) {
-      els.push(<Line key={`sbd${d}`} p1={vec(left, 0)} p2={vec(left, STRIP_H)} color={C.grid} strokeWidth={1} />);
-    }
     let code = periods[g.start].weathercode;
     let hi: number | undefined;
     for (let i = g.start; i < g.end; i++) {
@@ -550,15 +559,18 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
     }
     // The glyph is drawn at its natural meteogram size, then scaled into the small header slot.
     els.push(
-      <Group key={`gly${d}`} transform={[{ translateX: cx }, { translateY: STRIP_DAY_H }, { scale: glyphScale }]}>
-        {cloudGlyph(`glyi${d}`, 0, 0, 38, code, codeCoverage(code))}
+      <Group key={`gly${d}`} transform={[{ translateX: cx }, { translateY: STRIP_GLYPH_Y }, { scale: glyphScale }]}>
+        {cloudGlyph(`glyi${d}`, 0, 0, 38, code, codeCoverage(code), true)}
       </Group>,
     );
     if (dayW >= 22) {
-      els.push(centerText(`swk${d}`, DAYS[g.date.getDay()].slice(0, 3).toUpperCase(), cx, STRIP_DAY_H / 2, fonts.sub, C.date));
+      els.push(centerText(`swk${d}`, DAYS[g.date.getDay()].slice(0, 3).toUpperCase(), cx, STRIP_PAD_T + STRIP_DAY_H / 2, fonts.stripSub, SC.label));
+    }
+    if (dayW >= 14) {
+      els.push(centerText(`sdm${d}`, String(g.date.getDate()), cx, STRIP_DATE_Y + STRIP_DATE_H / 2, fonts.strip, SC.label));
     }
     if (hi != null && dayW >= 20) {
-      els.push(centerText(`shi${d}`, fmtTemp(hi, units), cx, STRIP_DAY_H + STRIP_GLYPH_H + STRIP_TVAL_H / 2, fonts.small, C.label));
+      els.push(centerText(`shi${d}`, fmtTemp(hi, units), cx, STRIP_HEAD_H - STRIP_TVAL_H / 2, fonts.strip, SC.label));
     }
   });
 
@@ -568,7 +580,7 @@ function OverviewStrip({ periods, dates, steps, units, lat, lon, now, width, fla
     const s = slot(cur);
     const frac = (now - dates[cur].getTime()) / (steps[cur] * 3600000);
     const mx = s.left + frac * (s.right - s.left);
-    els.push(<Line key="strip-now" p1={vec(mx, graphTop)} p2={vec(mx, STRIP_H)} color="rgba(255,59,48,0.5)" strokeWidth={1} />);
+    els.push(<Line key="strip-now" p1={vec(mx, graphTop)} p2={vec(mx, STRIP_H)} color="rgba(255,69,58,0.85)" strokeWidth={1} />);
   }
 
   const contentW = NAME_W + n * CELL_W;
@@ -948,7 +960,7 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
 
   return (
     <View>
-      <OverviewStrip periods={periods} dates={dates} steps={steps} units={units} lat={lat} lon={lon} now={now}
+      <OverviewStrip periods={periods} dates={dates} steps={steps} units={units} now={now}
         width={screenW} flatListRef={flatListRef} scrollX={scrollX} fonts={fonts} />
       <View style={{ height: totalH }}>
       <Animated.FlatList
@@ -1031,6 +1043,8 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
     bold: matchFont({ fontSize: 12.5, fontWeight: '700' }),
     date: matchFont({ fontSize: 14, fontWeight: '600' }),
     hour: matchFont({ fontSize: 14, fontWeight: '400' }),
+    strip: matchFont({ fontSize: 11, fontWeight: '300' }),
+    stripSub: matchFont({ fontSize: 9.5, fontWeight: '300' }),
   }), []);
 
   const blocks = useMemo(() => msg.periods.map((periods, mi) => {
@@ -1073,25 +1087,27 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
 const styles = StyleSheet.create({
   container: { backgroundColor: '#fff' },
   overviewStrip: {
-    backgroundColor: C.bg,
+    backgroundColor: SC.bg,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: C.grid,
+    borderBottomColor: '#000',
   },
+  // The viewport window brackets the graph bands only — the per-day header reads as a fixed
+  // calendar above it, so boxing it in moved with the scroll for no reason.
   overviewWindowFill: {
     position: 'absolute',
-    top: 0,
-    height: STRIP_H,
+    top: STRIP_HEAD_H,
+    height: STRIP_GRAPH_H,
     borderTopWidth: 1.5,
     borderBottomWidth: 1.5,
-    borderColor: '#2a6bb5',
-    backgroundColor: 'rgba(42,107,181,0.08)',
+    borderColor: SC.window,
+    backgroundColor: 'rgba(255,255,255,0.10)',
   },
   overviewWindowEdge: {
     position: 'absolute',
-    top: 0,
-    height: STRIP_H,
+    top: STRIP_HEAD_H,
+    height: STRIP_GRAPH_H,
     width: 1.5,
-    backgroundColor: '#2a6bb5',
+    backgroundColor: SC.window,
   },
   stickyDayRow: { position: 'absolute', top: 0, left: 0, right: 0, height: 31, overflow: 'hidden' },
   stickyDayText: { position: 'absolute', top: 4, color: C.date, fontSize: 14, fontWeight: '600', lineHeight: 24 },

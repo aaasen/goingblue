@@ -15,6 +15,9 @@ interface Props {
   onPick?: (c: LatLon) => void;
   height?: number;
   active?: boolean;
+  // Full-bleed: no outer margin and square corners, for a map that runs edge to edge against its
+  // neighbours rather than sitting inside a card.
+  flush?: boolean;
 }
 
 // Wide view of the contiguous US, used as the picker's starting point before any coordinate is set.
@@ -28,7 +31,7 @@ const provider = Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT;
 
 // react-native-maps native map. A `.web.tsx` sibling renders nothing on web, where the map module
 // isn't available — callers fall back to the lat/lon text inputs there.
-export default function LocationMap({ coord, onPick, height, active = true }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true, flush = false }: Props) {
   const mapRef = useRef<MapView>(null);
   const fullscreenMapRef = useRef<MapView>(null);
   const wasActive = useRef(active);
@@ -63,7 +66,7 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
   }
 
   return (
-    <View style={[styles.wrap, height == null ? styles.square : { height }]}>
+    <View style={[styles.wrap, flush && styles.flush, height == null ? styles.square : { height }]}>
       {!fullscreen && (
         <>
           <MapView
@@ -139,6 +142,7 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
 
 const styles = StyleSheet.create({
   wrap: { marginTop: 10, borderRadius: 12, overflow: 'hidden', backgroundColor: '#e5e8ee' },
+  flush: { marginTop: 0, borderRadius: 0 },
   square: { width: '100%', aspectRatio: 1 },
   fullscreenWrap: { flex: 1, backgroundColor: '#e5e8ee' },
   fullscreenButton: {

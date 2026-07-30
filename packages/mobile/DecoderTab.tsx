@@ -326,12 +326,13 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
           {/* Forecast location. Keyed on the coordinate so loading a new forecast recenters the map.
               Only mounted while this tab is visible: a react-native-maps surface left mounted under a
               `display: none` tab makes the builder tab's map drop its marker, so we unmount it here. */}
-          <View style={styles.mapRow}>
+          <View>
             {active && (
               <LocationMap
                 key={`${decoded.lat},${decoded.lon}`}
                 coord={{ lat: decoded.lat, lon: decoded.lon }}
                 height={160}
+                flush
               />
             )}
           </View>
@@ -408,8 +409,6 @@ const styles = StyleSheet.create({
   metaText: { flexShrink: 1, fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
   variableRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   variableLabel: { fontSize: 12, color: '#636366' },
-
-  mapRow: { marginHorizontal: 16, marginBottom: 8 },
 
   emptyState: { alignItems: 'center', justifyContent: 'center', padding: 40 },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: '#3a3a3c', marginBottom: 10, textAlign: 'center' },
