@@ -37,6 +37,7 @@ const ROW_H = {
   TEMP: 52,
   SNOW: 50,
   DATA: 42,
+  DIR: 30,
 } as const;
 
 // Accumulation areas use the codec's sqrt companding on a fixed full-scale (RAIN_MAX_MM of
@@ -76,6 +77,7 @@ const C = {
   unit: '#9aa0aa',
   date: '#48484a',
   nil: '#d1d1d6',
+  dirArrow: '#5b7a9d',
 } as const;
 
 // The overview strip runs on a dark ground: at strip scale the graphs are a few pixels tall, and a
@@ -347,7 +349,7 @@ function pressureLabel(level: 500 | 600 | 700, u: Units): string {
 // ── Row model ──────────────────────────────────────────────────────────────
 
 type RowKind =
-  | 'clouds' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc' | 'wind-gust'
+  | 'clouds' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc' | 'wind-gust' | 'wind-dir'
   | 'cloud-high' | 'cloud-mid' | 'cloud-low'
   | 'wind-500' | 'wind-600' | 'wind-700' | 'section';
 
@@ -376,6 +378,7 @@ function buildRows(periods: Period[], u: Units): Row[] {
       rows.push({ kind: 'accumulation', height: ROW_H.SNOW, label: 'Precip' });
     if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.DATA, label: `Wind ${wU}` });
     if (has((p) => p.wind_gust_kph)) rows.push({ kind: 'wind-gust', height: ROW_H.DATA, label: `Gust ${wU}` });
+    if (has((p) => p.wind_sfc_dir)) rows.push({ kind: 'wind-dir', height: ROW_H.DIR, label: 'Dir' });
   }
 
   const hasCloud = has((p) => p.cloud_high) || has((p) => p.cloud_mid) || has((p) => p.cloud_low);
@@ -1008,17 +1011,48 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
       case 'wind-sfc': case 'wind-gust': case 'wind-500': case 'wind-600': case 'wind-700': {
         const base = row.kind.replace('-', '_'); // wind-sfc → wind_sfc, wind-500 → wind_500
         const speedKey = `${base}_kph` as keyof Period;
-        const dirKey = `${base}_dir` as keyof Period; // absent for gusts (speed-only)
+        const dirKey = `${base}_dir` as keyof Period;
+        // Surface direction lives in its own arrow row below the gust row; gusts have none.
+        const inlineArrow = row.kind !== 'wind-sfc' && row.kind !== 'wind-gust';
         periods.forEach((p, i) => {
           const kph = p[speedKey] as number | undefined;
           const cx = colCenter(i);
           if (kph == null) { els.push(centerText(`w${ri}-${i}`, '—', cx, mid, fonts.data, C.nil)); return; }
           const { bg, fg } = beaufort(kph);
           els.push(<Rect key={`wbg${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W} height={row.height} color={bg} />);
-          const di = p[dirKey] as number | undefined;
+          const di = inlineArrow ? p[dirKey] as number | undefined : undefined;
           const arrow = di != null ? ARROWS[CARDINALS[di] ?? 'N'] ?? '' : '';
           els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, arrow ? mid - 7 : mid, fonts.bold, fg));
           els.push(centerText(`wa${ri}-${i}`, arrow, cx, mid + 9, fonts.data, fg));
+        });
+        break;
+      }
+
+      case 'wind-dir': {
+        // Chunky solid arrow (shaft + triangular head), rotated per direction. Text glyphs are
+        // too thin at this size. Drawn pointing east and rotated to where the wind blows toward:
+        // dir index 0 (N wind) points south = +90° in screen coords.
+        const L = 14, SHAFT = 4.5, HEAD_L = 6.5, HEAD_W = 10.5;
+        const h = L / 2, s = SHAFT / 2, w = HEAD_W / 2;
+        periods.forEach((p, i) => {
+          const di = p.wind_sfc_dir;
+          if (di == null) return;
+          const cx = colCenter(i);
+          const path = Skia.Path.Make();
+          path.moveTo(cx - h, mid - s);
+          path.lineTo(cx + h - HEAD_L, mid - s);
+          path.lineTo(cx + h - HEAD_L, mid - w);
+          path.lineTo(cx + h, mid);
+          path.lineTo(cx + h - HEAD_L, mid + w);
+          path.lineTo(cx + h - HEAD_L, mid + s);
+          path.lineTo(cx - h, mid + s);
+          path.close();
+          const rotate = ((di * 45 + 90) % 360) * (Math.PI / 180);
+          els.push(
+            <Group key={`wd${ri}-${i}`} transform={[{ rotate }]} origin={vec(cx, mid)}>
+              <Path path={path} color={C.dirArrow} />
+            </Group>,
+          );
         });
         break;
       }
