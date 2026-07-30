@@ -126,7 +126,9 @@ const SOURCES: SourceDef[] = [
   },
   {
     id: "best_match", label: "Best match", sample: true,
-    wire: GFS_WIRE,
+    // wind_gusts_10m joined the wire 2026-07-30 (always-on gust column) — best_match only for
+    // now: it is the derive/report source, and the per-center sources add no training benefit.
+    wire: uniq([...GFS_WIRE, "wind_gusts_10m"]),
     candidate: uniq([...GFS_WIRE, ...SURFACE_CANDIDATE, ...levelVars(STD_LEVELS)]),
   },
 ];
