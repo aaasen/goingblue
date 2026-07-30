@@ -5,7 +5,7 @@ import {
   LinearGradient, Skia, vec, matchFont, type SkFont,
 } from '@shopify/react-native-skia';
 import {
-  CARDINALS, modelsFromMask, startDatetime,
+  CARDINALS, RAIN_MAX_MM, modelsFromMask, startDatetime,
   type ForecastMessage, type Period,
 } from '@weather/protocol';
 import type { TimeFormat, Units } from './settings';
@@ -32,6 +32,12 @@ const ROW_H = {
   SNOW: 50,
   DATA: 42,
 } as const;
+
+// Accumulation areas use the codec's sqrt companding on a fixed full-scale (RAIN_MAX_MM of
+// liquid equivalent) instead of normalizing to the forecast's own maximum: a trace 0.5 mm
+// period draws a small-but-visible bump rather than filling the row just because nothing
+// heavier is in the window.
+const accumFrac = (mmEq: number) => Math.min(1, Math.sqrt(Math.max(0, mmEq) / RAIN_MAX_MM));
 
 // Overview-strip band heights, stacked top to bottom: a per-day header (weekday, day of month,
 // summary glyph, daily high) over the mini temperature / precip / wind graphs.
@@ -529,7 +535,7 @@ function OverviewStrip({ periods, dates, steps, units, now, width, flatListRef, 
   const maxEq = Math.max(0, ...totalEq);
   const precipBottom = silBottom + STRIP_PRECIP_H;
   if (maxEq > 0) {
-    const yOf = (v: number) => precipBottom - (v / maxEq) * (STRIP_PRECIP_H - 2);
+    const yOf = (v: number) => precipBottom - accumFrac(v) * (STRIP_PRECIP_H - 2);
     const boundary = (values: number[]) => [
       { x: timeX(0), y: yOf(values[0]) },
       ...values.map((v, i) => ({ x: slot(i).center, y: yOf(v) })),
@@ -815,8 +821,7 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
   const maxEquivalent = Math.max(0, ...totalEquivalent);
   if (accumulationTop != null && accumulationBottom != null && maxEquivalent > 0) {
     const plotTop = accumulationTop + 4;
-    const valueY = (value: number) =>
-      accumulationBottom! - (value / maxEquivalent) * (accumulationBottom! - plotTop);
+    const valueY = (value: number) => accumulationBottom! - accumFrac(value) * (accumulationBottom! - plotTop);
     const boundary = (values: number[]) => [
       { x: colLeft(0), y: valueY(values[0]) },
       ...values.map((value, i) => ({ x: colCenter(i), y: valueY(value) })),
