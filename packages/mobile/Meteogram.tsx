@@ -713,12 +713,25 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
   els.push(<Rect key="key-column-bg" x={0} y={0} width={NAME_W} height={totalH} color={C.keyBg} />);
 
   // 1. Location-aware astronomical night shading. Partial rectangles place sunrise and sunset
-  // within a column rather than rounding them to the forecast period boundary.
+  // within a column rather than rounding them to the forecast period boundary. The shading stops
+  // above the cloud-cover section: those rows read percentage as a gray alpha fill, and a tinted
+  // backdrop would make identical percentages look different by night than by day.
+  const nightBottom = (() => {
+    let y = ROW_H.DATE;
+    let headerTop: number | undefined; // top of the section label immediately above this row
+    for (const row of rows) {
+      if (row.kind === 'cloud-high' || row.kind === 'cloud-mid' || row.kind === 'cloud-low')
+        return headerTop ?? y;
+      headerTop = row.kind === 'section' ? y : undefined;
+      y += row.height;
+    }
+    return totalH;
+  })();
   dates.forEach((d, i) => {
     const start = d.getTime();
     const end = start + steps[i] * 3600000;
     nightSegments(start, end, lat, lon).forEach(([from, to], segment) => {
-      els.push(<Rect key={`night${i}-${segment}`} x={colLeft(i) + from * CELL_W} y={31} width={(to - from) * CELL_W} height={totalH - 31} color={C.night} />);
+      els.push(<Rect key={`night${i}-${segment}`} x={colLeft(i) + from * CELL_W} y={31} width={(to - from) * CELL_W} height={nightBottom - 31} color={C.night} />);
     });
   });
   const headerInsertIndex = els.length;
