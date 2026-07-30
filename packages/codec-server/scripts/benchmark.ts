@@ -34,7 +34,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { buildFillMessage, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import {
-  VARS_BIT, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
+  VARS_BIT, ALWAYS_VARS, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
   fillProfile, maxFillSeq, v1EncodeBreakdown,
   type ForecastMessage, type V1Breakdown,
 } from "@weather/protocol";
@@ -202,7 +202,9 @@ function requestUtcHour(windowStartUtcHour: number, utcOffsetHours: number, hour
 
 // Protocol variable groups, mirroring the app (BuilderTab.tsx). weathercode is always encoded by the
 // protocol (not in a mask). BASE is always on; each toggleable group maps to protocol var bits.
-const BASE_VARS = ["precip", "temp", "snow", "rain", "wind"];
+// NOTE: the corpus has no wind_gusts_10m series yet, so the always-on gust column encodes as all
+// zeros here — the reported cost is a floor until the corpus add-pass lands.
+const BASE_VARS: string[] = [...ALWAYS_VARS];
 const GROUP_VARS: Record<GroupId, string[]> = {
   clouds: ["cch", "ccm", "ccl"],
   highwind: ["w500", "w600", "w700"],

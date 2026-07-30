@@ -75,6 +75,7 @@ const SURFACE_VARS = [
   "temperature_2m",
   "wind_speed_10m",
   "wind_direction_10m",
+  "wind_gusts_10m",
   "precipitation_probability",
   "weather_code",
   "freezing_level_height",
@@ -134,6 +135,7 @@ export interface HourlyData {
   temperature_2m: (number | null)[];
   wind_speed_10m: (number | null)[];
   wind_direction_10m: (number | null)[];
+  wind_gusts_10m: (number | null)[];
   precipitation_probability: (number | null)[];
   weather_code: (number | null)[];
   freezing_level_height: (number | null)[];
@@ -152,6 +154,7 @@ export interface Row {
   temp_c: number | null;
   wind_speed_10m: number | null;
   wind_direction_10m: number | null;
+  wind_gusts_10m: number | null;
   precip: number | null;
   weathercode: number | null;
   freezing_level_m: number | null;
@@ -489,6 +492,7 @@ export function rowsFromWindows(
       temp_c: repTemps[w],
       wind_speed_10m: maxOf(sfcSpd),
       wind_direction_10m: dominantDirDeg(sfcSpd, sfcDir),
+      wind_gusts_10m: maxOf(pick(h.wind_gusts_10m)),
       precip: maxOf(pick(h.precipitation_probability)),
       weathercode: maxOf(pick(h.weather_code)),
       freezing_level_m: maxOf(pickUnk("freezing_level_height")),
@@ -524,6 +528,7 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period
     p.wind_sfc_kph = r.wind_speed_10m ?? 0;
     p.wind_sfc_dir = degToDirIdx(r.wind_direction_10m);
   }
+  if (varsMask & (1 << VARS_BIT.gust)) p.wind_gust_kph = r.wind_gusts_10m ?? 0;
   if (varsMask & (1 << VARS_BIT.w500)) {
     p.wind_500_kph = r.wind_speed_500hPa ?? 0;
     p.wind_500_dir = degToDirIdx(r.wind_direction_500hPa);

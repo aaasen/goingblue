@@ -40,8 +40,7 @@ export const VARS_BIT: Record<string, number> = {
   w500: 5,
   w600: 6,
   w700: 7,
-  // bit 8 formerly carried cc (total cloud cover), removed as redundant with the weathercode
-  // plus per-altitude cloud cover — reserved for the next new variable.
+  gust: 8,   // surface (10m) wind gusts, speed only (bit formerly carried cc, total cloud cover)
   cch: 9,    // high cloud cover
   ccm: 10,   // mid cloud cover
   ccl: 11,   // low cloud cover
@@ -52,7 +51,7 @@ export const VARS_BIT: Record<string, number> = {
 
 // Core forecast variables are implicit in every request. The request's `v:` token only carries
 // user-configurable additions, which keeps the satellite message body as short as possible.
-export const ALWAYS_VARS = ["precip", "temp", "snow", "rain", "wind"] as const;
+export const ALWAYS_VARS = ["precip", "temp", "snow", "rain", "wind", "gust"] as const;
 export const ALWAYS_VARS_MASK = ALWAYS_VARS.reduce(
   (mask, variable) => mask | (1 << VARS_BIT[variable]),
   0,

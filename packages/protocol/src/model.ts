@@ -31,6 +31,8 @@ export interface Period {
   // Surface level as well as 500, 600, 700 hPa pressure levels.
   wind_sfc_kph?: number;
   wind_sfc_dir?: number;
+  // Peak surface (10m) wind gust in kilometers per hour. No direction.
+  wind_gust_kph?: number;
   wind_500_kph?: number;
   wind_500_dir?: number;
   wind_600_kph?: number;

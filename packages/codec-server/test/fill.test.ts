@@ -29,6 +29,7 @@ function syntheticHourly(startUtcHour: number, nHours: number): { h: HourlyData;
     temperature_2m: col((i) => -5 + 8 * Math.sin((i / 24) * 2 * Math.PI) + i * 0.05),
     wind_speed_10m: col((i) => 10 + 6 * Math.sin(i / 5)),
     wind_direction_10m: col((i) => (180 + i * 3) % 360),
+    wind_gusts_10m: col((i) => 18 + 9 * Math.sin(i / 5)),
     precipitation_probability: col((i) => (i % 48 < 24 ? 10 : 60)),
     weather_code: col((i) => (i % 48 < 24 ? 2 : 71)),
     freezing_level_height: col((i) => 2500 + 400 * Math.sin(i / 30)),

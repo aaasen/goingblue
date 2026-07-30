@@ -40,6 +40,7 @@ const PERIOD: Period = {
   freeze_m: 6 * 304.8,     // 6000 ft in m — round-trips exactly
   wind_sfc_kph: 10 * 1.609344,
   wind_sfc_dir: 2,
+  wind_gust_kph: 20 * 1.609344,
   wind_500_kph: 30 * 1.609344,
   wind_500_dir: 4,
   wind_600_kph: 25 * 1.609344,
@@ -173,6 +174,7 @@ describe("v1 round-trip encoding", () => {
     expect(p.freeze_m).toBeCloseTo(PERIOD.freeze_m!, 5);
     expect(p.wind_sfc_kph).toBeCloseTo(PERIOD.wind_sfc_kph!, 3);
     expect(p.wind_sfc_dir).toBe(PERIOD.wind_sfc_dir);
+    expect(p.wind_gust_kph).toBeCloseTo(PERIOD.wind_gust_kph!, 3);
     expect(p.wind_500_kph).toBeCloseTo(PERIOD.wind_500_kph!, 3);
     expect(p.wind_500_dir).toBe(PERIOD.wind_500_dir);
     expect(p.wind_600_kph).toBeCloseTo(PERIOD.wind_600_kph!, 3);
@@ -194,6 +196,7 @@ describe("v1 round-trip encoding", () => {
     expect(p.rain_mm).toBeUndefined();
     expect(p.freeze_m).toBeUndefined();
     expect(p.wind_sfc_kph).toBeUndefined();
+    expect(p.wind_gust_kph).toBeUndefined();
     expect(p.wind_500_kph).toBeUndefined();
     expect(p.cloud_high).toBeUndefined();
   });
@@ -501,6 +504,55 @@ describe("v1 round-trip encoding", () => {
     const w600Bits = (m: ForecastMessage) =>
       v1EncodeBreakdown(m).columns.find((c) => c.name === "w600")!.bits;
     expect(w600Bits(both)).toBeLessThan(w600Bits(alone));
+  });
+
+  // Gusts are a speed-only wind column (no direction stream), conditioned on the surface
+  // column's same-period speed delta when wind is present in vars_mask.
+  it("round-trips gust speeds (speed-only column, no direction symbols)", () => {
+    const gustSteps = [8, 10, 9, 12, 14, 11, 10, 8, 13, 12];
+    const periods = gustSteps.map((g, i) => ({
+      weathercode: 0,
+      wind_sfc_kph: (i % 4) * WIND_STEP, // includes calm periods
+      wind_sfc_dir: i % 8,
+      wind_gust_kph: g * WIND_STEP,
+    }));
+    const decoded = roundTrip(msg({
+      vars_mask: (1 << VARS_BIT.wind) | (1 << VARS_BIT.gust), periods: [periods],
+    }));
+    decoded.periods[0].forEach((p, i) => {
+      expect(p.wind_gust_kph).toBeCloseTo(gustSteps[i] * WIND_STEP, 3);
+      expect(p.wind_sfc_kph).toBeCloseTo((i % 4) * WIND_STEP, 3);
+    });
+  });
+
+  it("round-trips gusts without surface wind present (no cross-column context available)", () => {
+    const gustSteps = [8, 10, 9, 12, 14];
+    const periods = gustSteps.map((g) => ({ weathercode: 0, wind_gust_kph: g * WIND_STEP }));
+    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.gust, periods: [periods] }));
+    decoded.periods[0].forEach((p, i) => {
+      expect(p.wind_gust_kph).toBeCloseTo(gustSteps[i] * WIND_STEP, 3);
+      expect(p.wind_sfc_kph).toBeUndefined();
+    });
+  });
+
+  it("a surface column that moves with the gusts makes the gust column cheaper (cross-column context)", () => {
+    // Mirrors the w500/w600 test above: gusts rising in step with the surface wind, encoded
+    // with vs without the surface column present in the mask. Encode-only (seq-pinned 6h).
+    const n = 12;
+    const sixHourly: Partial<ForecastMessage> = {
+      seq: 48, mode: MODE_RANGE, hour: 0, periodHours: Array(n).fill(6),
+    };
+    const rising = (i: number) => 2 * i; // deltas of +2, matching the surface column's
+    const both = msg({ ...sixHourly, vars_mask: (1 << VARS_BIT.wind) | (1 << VARS_BIT.gust),
+      periods: [Array.from({ length: n }, (_, i) => ({ weathercode: 0,
+        wind_sfc_kph: rising(i) * WIND_STEP, wind_sfc_dir: 6,
+        wind_gust_kph: (rising(i) + 4) * WIND_STEP }))] });
+    const alone = msg({ ...sixHourly, vars_mask: 1 << VARS_BIT.gust,
+      periods: [Array.from({ length: n }, (_, i) => ({ weathercode: 0,
+        wind_gust_kph: (rising(i) + 4) * WIND_STEP }))] });
+    const gustBits = (m: ForecastMessage) =>
+      v1EncodeBreakdown(m).columns.find((c) => c.name === "gust")!.bits;
+    expect(gustBits(both)).toBeLessThan(gustBits(alone));
   });
 });
 

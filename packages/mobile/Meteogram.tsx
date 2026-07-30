@@ -347,7 +347,7 @@ function pressureLabel(level: 500 | 600 | 700, u: Units): string {
 // ── Row model ──────────────────────────────────────────────────────────────
 
 type RowKind =
-  | 'clouds' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc'
+  | 'clouds' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc' | 'wind-gust'
   | 'cloud-high' | 'cloud-mid' | 'cloud-low'
   | 'wind-500' | 'wind-600' | 'wind-700' | 'section';
 
@@ -366,7 +366,8 @@ function buildRows(periods: Period[], u: Units): Row[] {
 
   const hasSurface =
     has((p) => p.precip) || has((p) => p.temp_c) ||
-    has((p) => p.snow_cm) || has((p) => p.rain_mm) || has((p) => p.freeze_m) || has((p) => p.wind_sfc_kph);
+    has((p) => p.snow_cm) || has((p) => p.rain_mm) || has((p) => p.freeze_m) ||
+    has((p) => p.wind_sfc_kph) || has((p) => p.wind_gust_kph);
   if (hasSurface) {
     if (has((p) => p.temp_c))
       rows.push({ kind: 'temp', height: ROW_H.TEMP, label: `Temp ${tU}` });
@@ -374,6 +375,7 @@ function buildRows(periods: Period[], u: Units): Row[] {
     if (has((p) => p.precip) || has((p) => p.snow_cm) || has((p) => p.rain_mm))
       rows.push({ kind: 'accumulation', height: ROW_H.SNOW, label: 'Precip' });
     if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.DATA, label: `Wind ${wU}` });
+    if (has((p) => p.wind_gust_kph)) rows.push({ kind: 'wind-gust', height: ROW_H.DATA, label: `Gust ${wU}` });
   }
 
   const hasCloud = has((p) => p.cloud_high) || has((p) => p.cloud_mid) || has((p) => p.cloud_low);
@@ -1003,10 +1005,10 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
         });
         break;
 
-      case 'wind-sfc': case 'wind-500': case 'wind-600': case 'wind-700': {
+      case 'wind-sfc': case 'wind-gust': case 'wind-500': case 'wind-600': case 'wind-700': {
         const base = row.kind.replace('-', '_'); // wind-sfc → wind_sfc, wind-500 → wind_500
         const speedKey = `${base}_kph` as keyof Period;
-        const dirKey = `${base}_dir` as keyof Period;
+        const dirKey = `${base}_dir` as keyof Period; // absent for gusts (speed-only)
         periods.forEach((p, i) => {
           const kph = p[speedKey] as number | undefined;
           const cx = colCenter(i);
@@ -1015,7 +1017,7 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
           els.push(<Rect key={`wbg${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W} height={row.height} color={bg} />);
           const di = p[dirKey] as number | undefined;
           const arrow = di != null ? ARROWS[CARDINALS[di] ?? 'N'] ?? '' : '';
-          els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, mid - 7, fonts.bold, fg));
+          els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, arrow ? mid - 7 : mid, fonts.bold, fg));
           els.push(centerText(`wa${ri}-${i}`, arrow, cx, mid + 9, fonts.data, fg));
         });
         break;

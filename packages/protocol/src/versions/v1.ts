@@ -63,11 +63,11 @@ const HEADER_CHARS = nCharsForBits(V1_HEADER_BITS); // packed-header chars (excl
 
 // temp: 8 bits, 1°C steps, offset -100°C → -100°C to +155°C
 // snow/rain: 6 bits each, sqrt-companded (see ACCUM_* below). rain is bit 12, the slot
-// formerly reserved for the removed `vis`; bit 13 (formerly tmin) is reserved, as is bit 8
-// (formerly cloud_total — redundant with weathercode + per-altitude cloud cover, removed).
+// formerly reserved for the removed `vis`; bit 13 (formerly tmin) is reserved.
 // wind: 8 = 5-bit speed + 3-bit direction (raw-width equivalent; both entropy-coded).
-export const VAR_BITS_V1 = [3, 8, 6, 5, 8, 8, 8, 8, 0, 3, 3, 3, 6];
-//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^-- ^cch ^ccm ^ccl ^rain
+// gust: 5 = speed only, no direction (bit 8, formerly cloud_total).
+export const VAR_BITS_V1 = [3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6];
+//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^g ^cch ^ccm ^ccl ^rain
 
 const TEMP_OFFSET = 100;
 
@@ -162,18 +162,20 @@ const VALUE_COLUMNS: {
     set: (p, v) => { p.rain_mm = expandSqrt(v, RAIN_K); } },
 ];
 
-// Wind columns (surface + 500/600/700 hPa): speed + direction per cell, both entropy-coded under
-// tables keyed by context both sides already have — each period's resolution, the column's level,
-// and (for 600/700 hPa) the upper pressure level's already-decoded same-period values, since
-// adjacent levels share the synoptic flow (see windSpeedBook/windDirBook in entropy.ts). `level`
-// indexes the speed-table axis; `upperBit` names the column conditioned on, applied only when
-// that column is present in vars_mask (upper columns encode/decode first in this array's order).
-// Calm periods (quantized speed 0) carry no direction symbol at all — see buildBody.
-const WIND_COLUMNS: { bit: number; kph: keyof Period; dir: keyof Period; level: number; upperBit: number }[] = [
+// Wind columns (surface + 500/600/700 hPa + surface gusts): speed + direction per cell, both
+// entropy-coded under tables keyed by context both sides already have — each period's resolution,
+// the column's level, and (for 600/700 hPa and gusts) another column's already-decoded same-period
+// values, since adjacent levels share the synoptic flow and gusts ride the sustained wind (see
+// windSpeedBook/windDirBook in entropy.ts). `level` indexes the speed-table axis; `upperBit` names
+// the column conditioned on, applied only when that column is present in vars_mask (conditioning
+// columns encode/decode first in this array's order). Calm periods (quantized speed 0) carry no
+// direction symbol at all — see buildBody. `dir: null` marks a speed-only column (gusts).
+const WIND_COLUMNS: { bit: number; kph: keyof Period; dir: keyof Period | null; level: number; upperBit: number }[] = [
   { bit: 4, kph: "wind_sfc_kph", dir: "wind_sfc_dir", level: 0, upperBit: -1 },
   { bit: 5, kph: "wind_500_kph", dir: "wind_500_dir", level: 1, upperBit: -1 },
   { bit: 6, kph: "wind_600_kph", dir: "wind_600_dir", level: 2, upperBit: 5 },
   { bit: 7, kph: "wind_700_kph", dir: "wind_700_dir", level: 3, upperBit: 6 },
+  { bit: 8, kph: "wind_gust_kph", dir: null, level: 0, upperBit: 4 },
 ];
 
 // Per-period codebook resolution index (0..4 = 24h..1h) from each period's span. The fill mixes
@@ -384,19 +386,22 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
     // Calm periods (speed step 0) emit no symbol at all — direction there is weather-model
     // dither — and the context chain carries the last encoded direction across the gap. disp[]
     // is the direction a client shows for each period (last encoded, 0 before any); the decoder
-    // reconstructs it identically.
+    // reconstructs it identically. Speed-only columns (gusts) emit no direction symbols.
     const disp: number[][] = msg.periods.map((rows) => rows.map(() => 0));
-    const eff: number[] = new Array(nModels).fill(0);
-    let prevDir: number | null = null;
-    eachCell(nPeriods, nModels, (p, m) => {
-      if (spd[m][p] > 0) {
-        const d = ((msg.periods[m][p][col.dir] as number) ?? 0) % 8;
-        em.sym(books.windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null), d);
-        prevDir = d;
-        eff[m] = d;
-      }
-      disp[m][p] = eff[m];
-    });
+    if (col.dir) {
+      const dir = col.dir;
+      const eff: number[] = new Array(nModels).fill(0);
+      let prevDir: number | null = null;
+      eachCell(nPeriods, nModels, (p, m) => {
+        if (spd[m][p] > 0) {
+          const d = ((msg.periods[m][p][dir] as number) ?? 0) % 8;
+          em.sym(books.windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null), d);
+          prevDir = d;
+          eff[m] = d;
+        }
+        disp[m][p] = eff[m];
+      });
+    }
     spdByBit.set(col.bit, spd);
     dispByBit.set(col.bit, disp);
 
@@ -656,19 +661,23 @@ function decodeBody(
     }
 
     // Calm periods carried no direction symbol; they display the last decoded direction (0
-    // before any), which is also the value the upper-context chain uses.
+    // before any), which is also the value the upper-context chain uses. Speed-only columns
+    // (gusts) carried no direction symbols at all.
     const disp: number[][] = Array.from({ length: nModels }, () => new Array<number>(nPeriods).fill(0));
-    const eff: number[] = new Array(nModels).fill(0);
-    let prevDir: number | null = null;
-    eachCell(nPeriods, nModels, (p, m) => {
-      if (spd[m][p] > 0) {
-        const d = rd.sym(books.windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null));
-        prevDir = d;
-        eff[m] = d;
-      }
-      disp[m][p] = eff[m];
-      (periods[m][p][col.dir] as number) = eff[m];
-    });
+    if (col.dir) {
+      const dir = col.dir;
+      const eff: number[] = new Array(nModels).fill(0);
+      let prevDir: number | null = null;
+      eachCell(nPeriods, nModels, (p, m) => {
+        if (spd[m][p] > 0) {
+          const d = rd.sym(books.windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null));
+          prevDir = d;
+          eff[m] = d;
+        }
+        disp[m][p] = eff[m];
+        (periods[m][p][dir] as number) = eff[m];
+      });
+    }
     spdByBit.set(col.bit, spd);
     dispByBit.set(col.bit, disp);
   }

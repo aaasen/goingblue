@@ -84,7 +84,7 @@ beforeAll(async () => {
     // Fetch once from Open-Meteo and cache. Vars must match what fetchHourly builds for the
     // European surface source (ecmwf_ifs has no freezing_level_height or pressure-level vars).
     const vars = [
-      "temperature_2m", "wind_speed_10m", "wind_direction_10m",
+      "temperature_2m", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m",
       "precipitation_probability", "weather_code", "snowfall",
       "cloud_cover", "cloud_cover_high", "cloud_cover_mid", "cloud_cover_low",
     ];
@@ -124,6 +124,7 @@ function row(snow_cm: number): Row {
     temp_c: -10,
     wind_speed_10m: 5,
     wind_direction_10m: 90,
+    wind_gusts_10m: 12,
     precip: 50,
     weathercode: 73,
     freezing_level_m: null,
@@ -148,6 +149,18 @@ describe("toFullPeriod — snow", () => {
     expect(toFullPeriod(row(0.28), DEFAULT_VARS_MASK, "EU").snow_cm).toBe(0.28);
     expect(toFullPeriod(row(5.08), DEFAULT_VARS_MASK, "EU").snow_cm).toBe(5.08);
     expect(toFullPeriod(row(100), DEFAULT_VARS_MASK, "EU").snow_cm).toBe(100);
+  });
+});
+
+describe("toFullPeriod — gust", () => {
+  it("passes the peak gust through when the gust bit is set", () => {
+    const p = toFullPeriod(row(0), DEFAULT_VARS_MASK | (1 << VARS_BIT.gust), "EU");
+    expect(p.wind_gust_kph).toBe(12);
+  });
+
+  it("omits gust when the bit is unset", () => {
+    expect(toFullPeriod(row(0), DEFAULT_VARS_MASK & ~(1 << VARS_BIT.gust), "EU").wind_gust_kph)
+      .toBeUndefined();
   });
 });
 
