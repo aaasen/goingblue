@@ -16,12 +16,18 @@ import { weatherGlyph, type MoonPhase, type Prim } from './weatherGlyph';
 // data. Units are folded into the labels.
 
 const NAME_W = 96;
-const CELL_W = 60;
+const CELL_W = 38;
+// The weather glyphs have fixed natural geometry, extending up to ±26.5px around their center
+// (widest: partly-cloudy and shower codes). They are shrunk into their column by this factor;
+// keep GLYPH_SCALE ≤ CELL_W / 53 so neighboring columns don't overlap.
+const GLYPH_SCALE = 0.7;
+// Clip bound for a glyph in its own (unscaled) coordinates, covering the widest glyph.
+const GLYPH_NATURAL_W = 56;
 // A Canvas is backed by a CAMetalLayer whose drawable size is measured in physical
 // pixels. A single canvas spanning a long hourly forecast can exceed Metal's maximum
 // texture width on Retina devices and abort the entire process. Keep each drawable
 // narrow and let FlatList virtualize the off-screen tiles. Wider tiles mean fewer seams
-// to paint mid-scroll (smoother) while staying well under the texture limit (16×60×3px).
+// to paint mid-scroll (smoother) while staying well under the texture limit (16×38×3px).
 const CANVAS_TILE_W = CELL_W * 16;
 
 const ROW_H = {
@@ -452,7 +458,7 @@ function cloudGlyph(
   const hasTransparentOutline = prims.some((prim) => 'role' in prim && prim.role?.endsWith('separator'));
   return (
     <Group key={key} layer={hasTransparentOutline ? <Paint /> : undefined}
-      clip={hasTransparentOutline ? { x: cx - CELL_W / 2, y: top - 4, width: CELL_W, height: h + 8 } : undefined}>
+      clip={hasTransparentOutline ? { x: cx - GLYPH_NATURAL_W / 2, y: top - 4, width: GLYPH_NATURAL_W, height: h + 8 } : undefined}>
       {prims.map((prim, i) => glyphPrimitive(`${key}-${i}`, prim, onDark))}
     </Group>
   );
@@ -924,15 +930,19 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
         periods.forEach((p, i) => {
           const midpoint = dates[i].getTime() + steps[i] * 1800000;
           const night = isNight(midpoint, lat, lon);
-          els.push(cloudGlyph(
-            `cl${i}`,
-            colCenter(i),
-            top,
-            row.height,
-            p.weathercode,
-            night,
-            moonPhaseAt(midpoint),
-          ));
+          els.push(
+            <Group key={`clg${i}`} transform={[{ scale: GLYPH_SCALE }]} origin={vec(colCenter(i), mid)}>
+              {cloudGlyph(
+                `cl${i}`,
+                colCenter(i),
+                top,
+                row.height,
+                p.weathercode,
+                night,
+                moonPhaseAt(midpoint),
+              )}
+            </Group>,
+          );
         });
         break;
 
