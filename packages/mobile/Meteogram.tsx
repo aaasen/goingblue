@@ -37,6 +37,9 @@ const ROW_H = {
   TEMP: 52,
   SNOW: 50,
   DATA: 42,
+  // Wind speeds are a single short number on a colored ground, so they need less room than the
+  // other data rows — and there are up to five of them stacked (surface, gust, three upper levels).
+  WIND: 32,
   DIR: 30,
 } as const;
 
@@ -129,25 +132,10 @@ const ARROWS: Record<string, string> = {
   S: '↑', SW: '↗', W: '→', NW: '↘',
 };
 
-// Wind speed ramp, calm → storm. [mph upper bound, bg, fg]
-const BEAUFORT: [number, string, string][] = [
-  [1, '#a7cf95', '#2b3a25'],
-  [4, '#8cc274', '#2b3a25'],
-  [8, '#aacb52', '#2b3a16'],
-  [13, '#cfd049', '#3a3614'],
-  [19, '#edc63f', '#3a2e08'],
-  [25, '#eba23c', '#fff'],
-  [32, '#e37b34', '#fff'],
-  [39, '#d9502d', '#fff'],
-  [47, '#c02b2b', '#fff'],
-  [55, '#9c2566', '#fff'],
-  [64, '#76288e', '#fff'],
-  [73, '#522a9e', '#fff'],
-  [Infinity, '#372a8e', '#fff'],
-];
+type ColorStop = [number, [number, number, number]];
 
 // Temperature → color stops (°C), interpolated for a smooth blue→red scale.
-const TEMP_STOPS: [number, [number, number, number]][] = [
+const TEMP_STOPS: ColorStop[] = [
   [-15, [91, 58, 158]],
   [-5, [58, 95, 191]],
   [3, [42, 134, 200]],
@@ -166,25 +154,101 @@ function rgb([r, g, b]: [number, number, number], alpha = 1): string {
   return alpha < 1 ? `rgba(${r}, ${g}, ${b}, ${alpha})` : `rgb(${r}, ${g}, ${b})`;
 }
 
-function tempColor(c: number, alpha = 1): string {
-  const s = TEMP_STOPS;
-  if (c <= s[0][0]) return rgb(s[0][1], alpha);
-  if (c >= s[s.length - 1][0]) return rgb(s[s.length - 1][1], alpha);
-  for (let i = 0; i < s.length - 1; i++) {
-    const [t0, c0] = s[i];
-    const [t1, c1] = s[i + 1];
-    if (c >= t0 && c <= t1) {
-      const t = (c - t0) / (t1 - t0);
-      return rgb([lerp(c0[0], c1[0], t), lerp(c0[1], c1[1], t), lerp(c0[2], c1[2], t)], alpha);
+// Piecewise-linear interpolation over color stops, clamped past either end.
+function rampRgb(stops: ColorStop[], v: number): [number, number, number] {
+  const last = stops[stops.length - 1];
+  if (!(v > stops[0][0])) return stops[0][1];
+  if (v >= last[0]) return last[1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [v0, c0] = stops[i];
+    const [v1, c1] = stops[i + 1];
+    if (v <= v1) {
+      const t = (v - v0) / (v1 - v0);
+      return [lerp(c0[0], c1[0], t), lerp(c0[1], c1[1], t), lerp(c0[2], c1[2], t)];
     }
   }
-  return '#1c1c1e';
+  return last[1];
 }
 
-function beaufort(kph: number): { bg: string; fg: string } {
+function tempColor(c: number, alpha = 1): string {
+  return rgb(rampRgb(TEMP_STOPS, c), alpha);
+}
+
+function hexRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// Wind speed → color stops (mph), interpolated: a hue sweep from azure through green and amber to
+// hot pink. Fit to a sampled reference ribbon — that ribbon blends in value space, so reading it
+// across the gradient recovers the scale at sub-mph resolution rather than one point per column.
+// Stops up to 41 mph track that sample to ~2/255 mean channel error.
+//
+// Above 41 mph the scale nearly stalls — a second reference reaching 98 mph shows the hue drifting
+// only ~13° further into magenta while brightness eases off. That reference renders the whole scale
+// desaturated (S≈0.77 against 0.97 here) but agrees on hue to within a degree at the join, so the
+// tail is its measured drift replayed at this scale's saturation. Past 98 mph the same slow drift
+// is extrapolated on.
+const WIND_STOPS: ColorStop[] = ([
+  [8, '#07cef6'], [10, '#09d5d7'], [11, '#03e1a0'], [11.5, '#04e960'],
+  [13.5, '#07e915'], [15, '#10e804'], [18.5, '#7ad702'], [21, '#d8bb01'],
+  [22.5, '#f6af02'], [26.5, '#ff890a'], [31.5, '#ff5b29'], [35, '#ff3553'],
+  [41, '#ff0790'],
+  [52, '#fd0794'], [60, '#f90799'], [75, '#f407a4'], [91, '#eb06af'],
+  [98, '#e806b4'], [130, '#d806c6'], [170, '#b305c5'],
+] as [number, string][]).map(([mph, hex]) => [mph, hexRgb(hex)]);
+
+// The ribbon fades out under a light breeze: invisible at WIND_FADE_LO, fully saturated at
+// WIND_FADE_HI. A calm stretch reads as blank rather than as a band of color, so the eye lands on
+// the columns that are actually windy. The value labels do not fade — they stay black throughout.
+const WIND_FADE_LO = 6;
+const WIND_FADE_HI = 10;
+const WIND_INK = '#000000';
+
+function windAlpha(mph: number): number {
+  const t = Math.min(1, Math.max(0, (mph - WIND_FADE_LO) / (WIND_FADE_HI - WIND_FADE_LO)));
+  return Number((t * t * (3 - 2 * t)).toFixed(3)); // smoothstep, so both ends ease
+}
+
+function windColor(kph: number): string {
   const mph = kph / 1.60934;
-  const [, bg, fg] = BEAUFORT.find(([lim]) => mph < lim)!;
-  return { bg, fg };
+  return rgb(rampRgb(WIND_STOPS, mph), windAlpha(mph));
+}
+
+// Runs of consecutive columns that have a value, so gaps stay gaps.
+function valueRuns(n: number, has: (i: number) => boolean): number[][] {
+  const runs: number[][] = [];
+  let run: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (has(i)) run.push(i);
+    else if (run.length) { runs.push(run); run = []; }
+  }
+  if (run.length) runs.push(run);
+  return runs;
+}
+
+type Slot = { left: number; center: number; right: number };
+
+// A run of wind columns painted as one horizontal gradient rather than a rect per column: the
+// color is exact at each column's center, blends between centers, and holds flat out to the
+// run's outer edges. No vertical seams, and the shade under a number still means that number.
+function windRibbon(
+  key: string, run: number[], slotOf: (i: number) => Slot, colorAt: (i: number) => string,
+  top: number, height: number,
+): ReactNode {
+  const x0 = slotOf(run[0]).left;
+  const x1 = slotOf(run[run.length - 1]).right;
+  const span = x1 - x0;
+  const first = colorAt(run[0]);
+  const lastColor = colorAt(run[run.length - 1]);
+  return (
+    <Rect key={key} x={x0} y={top} width={span} height={height}>
+      <LinearGradient
+        start={vec(x0, top)} end={vec(x1, top)}
+        colors={[first, ...run.map(colorAt), lastColor]}
+        positions={[0, ...run.map((i) => (slotOf(i).center - x0) / span), 1]} />
+    </Rect>
+  );
 }
 
 // ── Unit-aware formatting (no suffix; unit lives in the row label) ──────────--
@@ -376,8 +440,8 @@ function buildRows(periods: Period[], u: Units): Row[] {
     if (has((p) => p.freeze_m)) rows.push({ kind: 'freeze', height: ROW_H.DATA, label: `Freezing ${frU}` });
     if (has((p) => p.precip) || has((p) => p.snow_cm) || has((p) => p.rain_mm))
       rows.push({ kind: 'accumulation', height: ROW_H.SNOW, label: 'Precip' });
-    if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.DATA, label: `Wind ${wU}` });
-    if (has((p) => p.wind_gust_kph)) rows.push({ kind: 'wind-gust', height: ROW_H.DATA, label: `Gust ${wU}` });
+    if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.WIND, label: `Wind ${wU}` });
+    if (has((p) => p.wind_gust_kph)) rows.push({ kind: 'wind-gust', height: ROW_H.WIND, label: `Gust ${wU}` });
     if (has((p) => p.wind_sfc_dir)) rows.push({ kind: 'wind-dir', height: ROW_H.DIR, label: 'Dir' });
   }
 
@@ -392,9 +456,9 @@ function buildRows(periods: Period[], u: Units): Row[] {
   const hasUpper = has((p) => p.wind_500_kph) || has((p) => p.wind_600_kph) || has((p) => p.wind_700_kph);
   if (hasUpper) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Upper wind ${wU}` });
-    if (has((p) => p.wind_500_kph)) rows.push({ kind: 'wind-500', height: ROW_H.DATA, label: pressureLabel(500, u) });
-    if (has((p) => p.wind_600_kph)) rows.push({ kind: 'wind-600', height: ROW_H.DATA, label: pressureLabel(600, u) });
-    if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.DATA, label: pressureLabel(700, u) });
+    if (has((p) => p.wind_500_kph)) rows.push({ kind: 'wind-500', height: ROW_H.WIND, label: pressureLabel(500, u) });
+    if (has((p) => p.wind_600_kph)) rows.push({ kind: 'wind-600', height: ROW_H.WIND, label: pressureLabel(600, u) });
+    if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.WIND, label: pressureLabel(700, u) });
   }
 
   return rows;
@@ -600,13 +664,11 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
     );
   }
 
-  // Surface-wind ribbon along the bottom, Beaufort-colored like the main canvas.
+  // Surface-wind ribbon along the bottom, on the same blended scale as the main canvas.
   const windTop = STRIP_H - STRIP_WIND_H;
-  periods.forEach((p, i) => {
-    if (p.wind_sfc_kph == null) return;
-    const s = slot(i);
-    els.push(<Rect key={`swind${i}`} x={s.left} y={windTop} width={s.right - s.left + 0.5}
-      height={STRIP_WIND_H} color={beaufort(p.wind_sfc_kph).bg} />);
+  valueRuns(n, (i) => periods[i].wind_sfc_kph != null).forEach((run) => {
+    els.push(windRibbon(`swind${run[0]}`, run, slot,
+      (i) => windColor(periods[i].wind_sfc_kph!), windTop, STRIP_WIND_H));
   });
 
   // Per-day header: weekday, day of month, summary glyph, daily high. The day columns are read from
@@ -1014,16 +1076,23 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
         const dirKey = `${base}_dir` as keyof Period;
         // Surface direction lives in its own arrow row below the gust row; gusts have none.
         const inlineArrow = row.kind !== 'wind-sfc' && row.kind !== 'wind-gust';
+        const speedAt = (i: number) => periods[i][speedKey] as number | undefined;
+        valueRuns(n, (i) => speedAt(i) != null).forEach((run) => {
+          els.push(windRibbon(
+            `wbg${ri}-${run[0]}`, run,
+            (i) => ({ left: colLeft(i), center: colCenter(i), right: colLeft(i) + CELL_W }),
+            (i) => windColor(speedAt(i)!), top, row.height,
+          ));
+        });
         periods.forEach((p, i) => {
-          const kph = p[speedKey] as number | undefined;
+          const kph = speedAt(i);
           const cx = colCenter(i);
           if (kph == null) { els.push(centerText(`w${ri}-${i}`, '—', cx, mid, fonts.data, C.nil)); return; }
-          const { bg, fg } = beaufort(kph);
-          els.push(<Rect key={`wbg${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W} height={row.height} color={bg} />);
           const di = inlineArrow ? p[dirKey] as number | undefined : undefined;
           const arrow = di != null ? ARROWS[CARDINALS[di] ?? 'N'] ?? '' : '';
-          els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, arrow ? mid - 7 : mid, fonts.bold, fg));
-          els.push(centerText(`wa${ri}-${i}`, arrow, cx, mid + 9, fonts.data, fg));
+          // Rows carrying an inline arrow split the (now shorter) row evenly above and below center.
+          els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, arrow ? mid - 8 : mid, fonts.bold, WIND_INK));
+          els.push(centerText(`wa${ri}-${i}`, arrow, cx, mid + 8, fonts.data, WIND_INK));
         });
         break;
       }
