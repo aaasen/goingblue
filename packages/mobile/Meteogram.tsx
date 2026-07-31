@@ -427,64 +427,144 @@ function hourLabel(d: Date, step: number, timeFormat: TimeFormat): string {
   const { num, suffix } = hourParts(d, step, timeFormat);
   return num + suffix;
 }
+// Wall clock to the minute, for instants that don't land on the column grid — the rise and set
+// times. `d` is zoned, like every other label here.
+function clockLabel(d: Date, timeFormat: TimeFormat): string {
+  const hour = d.getUTCHours();
+  const minute = `${d.getUTCMinutes()}`.padStart(2, '0');
+  if (timeFormat === '24h') return `${`${hour}`.padStart(2, '0')}:${minute}`;
+  return `${hour % 12 || 12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`;
+}
 
-// Solar altitude using the standard low-precision solar-position equations. The apparent
-// sunrise/sunset threshold is -0.833° to account for refraction and the sun's visible radius.
-function isNight(time: number, lat: number, lon: number): boolean {
-  const rad = Math.PI / 180;
-  const days = time / 86400000 + 2440587.5 - 2451545;
-  const meanLongitude = (280.46 + 0.9856474 * days) * rad;
-  const anomaly = (357.528 + 0.9856003 * days) * rad;
-  const eclipticLongitude = meanLongitude + (1.915 * Math.sin(anomaly) + 0.02 * Math.sin(2 * anomaly)) * rad;
-  const obliquity = (23.439 - 0.0000004 * days) * rad;
-  const rightAscension = Math.atan2(Math.cos(obliquity) * Math.sin(eclipticLongitude), Math.cos(eclipticLongitude));
-  const declination = Math.asin(Math.sin(obliquity) * Math.sin(eclipticLongitude));
-  const siderealTime = (280.46061837 + 360.98564736629 * days + lon) * rad;
+const RAD = Math.PI / 180;
+// Apparent horizons, as altitudes of the body's center. The sun's -0.833° accounts for refraction
+// and its visible radius; the moon's +0.125° is the same pair of corrections against its mean
+// horizontal parallax, which lifts the geometric horizon rather than lowering it.
+const SUN_HORIZON = -0.833 * RAD;
+const MOON_HORIZON = 0.125 * RAD;
+
+// Altitude above the horizon of a body at ecliptic longitude/latitude, seen from lat/lon.
+// `days` is the time in days since J2000.
+function horizonAltitude(days: number, lat: number, lon: number, eclipticLongitude: number, eclipticLatitude: number): number {
+  const obliquity = (23.439 - 0.0000004 * days) * RAD;
+  const rightAscension = Math.atan2(
+    Math.sin(eclipticLongitude) * Math.cos(obliquity) - Math.tan(eclipticLatitude) * Math.sin(obliquity),
+    Math.cos(eclipticLongitude),
+  );
+  const declination = Math.asin(
+    Math.sin(eclipticLatitude) * Math.cos(obliquity)
+      + Math.cos(eclipticLatitude) * Math.sin(obliquity) * Math.sin(eclipticLongitude),
+  );
+  const siderealTime = (280.46061837 + 360.98564736629 * days + lon) * RAD;
   const hourAngle = siderealTime - rightAscension;
-  const latitude = lat * rad;
-  const altitude = Math.asin(
+  const latitude = lat * RAD;
+  return Math.asin(
     Math.sin(latitude) * Math.sin(declination)
       + Math.cos(latitude) * Math.cos(declination) * Math.cos(hourAngle),
   );
-  return altitude < -0.833 * rad;
 }
 
-// Eight-phase approximation anchored to the 2000-01-06 new moon. This is precise enough for the
-// compact phase glyph while avoiding another astronomy dependency in the mobile bundle.
-function moonPhaseAt(time: number): MoonPhase {
+function julianDays(time: number): number {
+  return time / 86400000 + 2440587.5 - 2451545;
+}
+
+// Solar altitude using the standard low-precision solar-position equations — good to about a
+// minute of arc, which places sunrise within a few seconds.
+function sunAltitude(time: number, lat: number, lon: number): number {
+  const days = julianDays(time);
+  const meanLongitude = (280.46 + 0.9856474 * days) * RAD;
+  const anomaly = (357.528 + 0.9856003 * days) * RAD;
+  const eclipticLongitude = meanLongitude + (1.915 * Math.sin(anomaly) + 0.02 * Math.sin(2 * anomaly)) * RAD;
+  return horizonAltitude(days, lat, lon, eclipticLongitude, 0);
+}
+
+// Lunar altitude from the leading terms of the lunar theory: mean longitude with the evection-free
+// principal equation of the center, and the principal term of the ecliptic latitude. Good to a few
+// arcminutes, which is a couple of minutes of moonrise — well inside what a forecast panel claims.
+function moonAltitude(time: number, lat: number, lon: number): number {
+  const days = julianDays(time);
+  const meanLongitude = (218.316 + 13.176396 * days) * RAD;
+  const anomaly = (134.963 + 13.064993 * days) * RAD;
+  const argumentOfLatitude = (93.272 + 13.229350 * days) * RAD;
+  const eclipticLongitude = meanLongitude + 6.289 * RAD * Math.sin(anomaly);
+  const eclipticLatitude = 5.128 * RAD * Math.sin(argumentOfLatitude);
+  return horizonAltitude(days, lat, lon, eclipticLongitude, eclipticLatitude);
+}
+
+function isNight(time: number, lat: number, lon: number): boolean {
+  return sunAltitude(time, lat, lon) < SUN_HORIZON;
+}
+
+// Position in the synodic cycle at `time`, as a 0–1 fraction from one new moon to the next,
+// anchored to the 2000-01-06 new moon. This mean cycle runs up to about half a day off a true
+// phase instant — precise enough for a phase name, an illuminated fraction, and the compact glyph,
+// and it avoids another astronomy dependency in the mobile bundle.
+function moonCycleAt(time: number): number {
   const synodicMonthMs = 29.530588853 * 86400000;
   const knownNewMoon = Date.UTC(2000, 0, 6, 18, 14);
-  const cycle = ((time - knownNewMoon) % synodicMonthMs + synodicMonthMs) % synodicMonthMs;
-  const phases: MoonPhase[] = [
-    'new', 'waxing-crescent', 'first-quarter', 'waxing-gibbous',
-    'full', 'waning-gibbous', 'last-quarter', 'waning-crescent',
-  ];
-  return phases[Math.floor(cycle / synodicMonthMs * 8 + 0.5) % phases.length];
+  const elapsed = (((time - knownNewMoon) % synodicMonthMs) + synodicMonthMs) % synodicMonthMs;
+  return elapsed / synodicMonthMs;
 }
 
-// Night portions of an arbitrary forecast period, as 0–1 fractions. A short scan locates each
-// sunrise/sunset, then binary search places the boundary to within roughly one second.
-function nightSegments(start: number, end: number, lat: number, lon: number): [number, number][] {
+// The eight the cycle quantizes to. MoonPhase carries two further legacy aliases that nothing
+// produces, so this narrower union — not MoonPhase — is what a phase name has to be written for.
+const MOON_PHASES = [
+  'new', 'waxing-crescent', 'first-quarter', 'waxing-gibbous',
+  'full', 'waning-gibbous', 'last-quarter', 'waning-crescent',
+] as const satisfies readonly MoonPhase[];
+type CyclePhase = (typeof MOON_PHASES)[number];
+
+function moonPhaseAt(time: number): CyclePhase {
+  return MOON_PHASES[Math.floor(moonCycleAt(time) * 8 + 0.5) % MOON_PHASES.length];
+}
+
+// Times in [start, end] where `above` flips. A short scan brackets each crossing — no body clears
+// and re-crosses the horizon inside half an hour — then binary search places it to within roughly
+// one second.
+function horizonCrossings(start: number, end: number, above: (time: number) => boolean): number[] {
   const crossings: number[] = [];
   const scanStep = 30 * 60000;
   let previousTime = start;
-  let previousNight = isNight(start, lat, lon);
+  let previousAbove = above(start);
   for (let time = Math.min(start + scanStep, end); previousTime < end; time = Math.min(time + scanStep, end)) {
-    const night = isNight(time, lat, lon);
-    if (night !== previousNight) {
+    const nowAbove = above(time);
+    if (nowAbove !== previousAbove) {
       let low = previousTime;
       let high = time;
       for (let i = 0; i < 16; i++) {
         const mid = (low + high) / 2;
-        if (isNight(mid, lat, lon) === previousNight) low = mid;
+        if (above(mid) === previousAbove) low = mid;
         else high = mid;
       }
       crossings.push((low + high) / 2);
     }
     previousTime = time;
-    previousNight = night;
+    previousAbove = nowAbove;
   }
+  return crossings;
+}
 
+// When a body crosses the horizon within a span, and whether it was up at all. `rise` and `set` are
+// null when that crossing doesn't fall inside the span: the sun's polar summer and winter, but also
+// the ordinary lunar month, where the moon's 24h50m day slides one of its two crossings past
+// midnight roughly once a month. `everUp` disambiguates a span with no crossings at all.
+interface RiseSet { rise: number | null; set: number | null; everUp: boolean }
+function riseSet(start: number, end: number, altitude: (time: number) => number, horizon: number): RiseSet {
+  const above = (time: number) => altitude(time) >= horizon;
+  const crossings = horizonCrossings(start, end, above);
+  let rise: number | null = null;
+  let set: number | null = null;
+  for (const time of crossings) {
+    // The crossing sits on the boundary itself, so sample a moment past it to name the direction.
+    if (above(time + 1000)) rise ??= time;
+    else set ??= time;
+  }
+  return { rise, set, everUp: above(start) || crossings.length > 0 };
+}
+
+// Night portions of an arbitrary forecast period, as 0–1 fractions.
+function nightSegments(start: number, end: number, lat: number, lon: number): [number, number][] {
+  const crossings = horizonCrossings(start, end, (time) => isNight(time, lat, lon));
   const boundaries = [start, ...crossings, end];
   const segments: [number, number][] = [];
   for (let i = 0; i < boundaries.length - 1; i++) {
@@ -1669,6 +1749,7 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
           timeFormat={timeFormat}
           lat={msg.lat}
           lon={msg.lon}
+          utcOffsetHours={msg.utcOffsetHours}
           paint={paint}
           onClose={() => setSelection(null)}
         />
@@ -1686,6 +1767,51 @@ function upperWindLabel(level: 500 | 600 | 700): string {
   return `Wind ${pressureLabel(level)}`;
 }
 
+const MOON_PHASE_LABELS: Record<CyclePhase, string> = {
+  'new': 'New moon',
+  'waxing-crescent': 'Waxing crescent',
+  'first-quarter': 'First quarter',
+  'waxing-gibbous': 'Waxing gibbous',
+  'full': 'Full moon',
+  'waning-gibbous': 'Waning gibbous',
+  'last-quarter': 'Last quarter',
+  'waning-crescent': 'Waning crescent',
+};
+
+// Sun and moon over the whole calendar day the selected column falls in — the one span in the panel
+// that isn't the selected period. `dayStart` is the absolute instant of that day's local midnight;
+// the day runs 24h from there, on the fixed offset the whole axis is laid out on.
+function astroRows(
+  dayStart: number, utcOffsetHours: number, lat: number, lon: number, timeFormat: TimeFormat,
+): [string, string][] {
+  const dayEnd = dayStart + 86400000;
+  const sun = riseSet(dayStart, dayEnd, (t) => sunAltitude(t, lat, lon), SUN_HORIZON);
+  const moon = riseSet(dayStart, dayEnd, (t) => moonAltitude(t, lat, lon), MOON_HORIZON);
+
+  // A day with neither crossing describes itself — polar summer and winter for the sun, and the
+  // nights the moon happens to stay up or stay down for. With one of the two, the other simply
+  // fell outside this midnight-to-midnight window and the day has nothing to say about it.
+  const label = (event: number | null, body: RiseSet): string => {
+    if (event != null) return clockLabel(new Date(event + utcOffsetHours * 3600000), timeFormat);
+    if (body.rise != null || body.set != null) return '—';
+    return body.everUp ? 'Up all day' : 'Below horizon';
+  };
+
+  // Named and measured at the day's local noon: a single instant to speak for the day, and the one
+  // furthest from the midnights where the name could tip either way.
+  const noon = dayStart + 12 * 3600000;
+  const illuminated = Math.round((1 - Math.cos(2 * Math.PI * moonCycleAt(noon))) / 2 * 100);
+  const phase = MOON_PHASE_LABELS[moonPhaseAt(noon)];
+
+  return [
+    ['Sunrise', label(sun.rise, sun)],
+    ['Sunset', label(sun.set, sun)],
+    ['Moonrise', label(moon.rise, moon)],
+    ['Moonset', label(moon.set, moon)],
+    ['Moon phase', `${phase}, ${illuminated}% lit`],
+  ];
+}
+
 // The glyph appearance a period selects: what to draw, on which ground.
 function glyphVariantAt(periods: Period[], dates: Date[], steps: number[], i: number, lat: number, lon: number) {
   const midpoint = dates[i].getTime() + steps[i] * 1800000;
@@ -1694,12 +1820,12 @@ function glyphVariantAt(periods: Period[], dates: Date[], steps: number[], i: nu
   return { key: `${periods[i].weathercode}|${night}|${phase}`, code: periods[i].weathercode, night, phase };
 }
 
-function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColor, units, timeFormat, lat, lon, paint, onClose }: {
+function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColor, units, timeFormat, lat, lon, utcOffsetHours, paint, onClose }: {
   // `dates` are absolute — the glyph's day/night ground comes off the sun. `zoned` names the hours
   // on the forecast point's clock, matching the column the tap came from.
   periods: Period[]; index: number; dates: Date[]; zoned: Date[]; steps: number[];
   modelName?: string; modelColor: string;
-  units: Units; timeFormat: TimeFormat; lat: number; lon: number;
+  units: Units; timeFormat: TimeFormat; lat: number; lon: number; utcOffsetHours: number;
   // Epoch that remounts the glyph canvases after this tab was hidden — see Meteogram.
   paint: number;
   onClose: () => void;
@@ -1723,6 +1849,14 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
     });
     return [...seen.values()];
   }, [periods, dates, steps, lat, lon]);
+
+  // Scanning both bodies across a day costs a few hundred trig evaluations, so it is held against
+  // the day rather than the column: stepping along the columns of one day recomputes nothing.
+  const dayStart = zonedMidnight(date) - utcOffsetHours * 3600000;
+  const astro = useMemo(
+    () => astroRows(dayStart, utcOffsetHours, lat, lon, timeFormat),
+    [dayStart, utcOffsetHours, lat, lon, timeFormat],
+  );
 
   let cumRain = 0;
   let cumSnow = 0;
@@ -1790,15 +1924,23 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
         </View>
         <RNText style={styles.detailCodeName}>{wmoName(p.weathercode)}</RNText>
       </View>
-      {rows.map(([label, value]) => (
-        <View key={label} style={styles.detailRow}>
-          <RNText style={styles.detailLabel}>{label}</RNText>
-          {/* Leader dots: a clipped run of periods stretches to whatever space the label and
-              value leave, tying the pair together across the row. */}
-          <RNText style={styles.detailDots} numberOfLines={1} ellipsizeMode="clip">{LEADER_DOTS}</RNText>
-          <RNText style={styles.detailValue}>{value}</RNText>
-        </View>
-      ))}
+      {rows.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)}
+      {/* The astronomy rows answer for the whole day, not the selected period. A rule is enough to
+          set them apart — the panel header already names the day they belong to. */}
+      <View style={styles.detailDivider} />
+      {astro.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)}
+    </View>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <RNText style={styles.detailLabel}>{label}</RNText>
+      {/* Leader dots: a clipped run of periods stretches to whatever space the label and
+          value leave, tying the pair together across the row. */}
+      <RNText style={styles.detailDots} numberOfLines={1} ellipsizeMode="clip">{LEADER_DOTS}</RNText>
+      <RNText style={styles.detailValue}>{value}</RNText>
     </View>
   );
 }
@@ -1850,6 +1992,12 @@ const styles = StyleSheet.create({
   detailGlyphLayer: { position: 'absolute', top: 0, left: 0 },
   detailGlyphHidden: { opacity: 0 },
   detailCodeName: { fontSize: 14, fontWeight: '600', color: C.label, marginLeft: 10, flexShrink: 1 },
+  detailDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#e5e5ea',
+    marginTop: 10,
+    marginBottom: 6,
+  },
   detailRow: { flexDirection: 'row', alignItems: 'baseline', paddingVertical: 4 },
   detailLabel: { fontSize: 13, color: C.sectionText },
   detailDots: { flex: 1, marginHorizontal: 6, fontSize: 13, letterSpacing: 2, color: C.nil },
