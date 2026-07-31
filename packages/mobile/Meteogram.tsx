@@ -1675,11 +1675,11 @@ function DetailPanel({ periods, index, dates, steps, modelName, modelColor, unit
   if (has((q) => q.precip)) rows.push(['Precip chance', p.precip != null ? `${p.precip}%` : '—']);
   if (has((q) => q.rain_mm)) {
     rows.push(['Rain', fmtRainFull(p.rain_mm ?? 0, units)]);
-    rows.push(['Rain accumulation', fmtRainFull(cumRain, units)]);
+    rows.push(['Total rain accumulation', fmtRainFull(cumRain, units)]);
   }
   if (has((q) => q.snow_cm)) {
     rows.push(['Snow', fmtSnowFull(p.snow_cm ?? 0, units)]);
-    rows.push(['Snow accumulation', fmtSnowFull(cumSnow, units)]);
+    rows.push(['Total snow accumulation', fmtSnowFull(cumSnow, units)]);
   }
   if (has((q) => q.wind_sfc_kph)) rows.push(['Wind', fmtWindFull(p.wind_sfc_kph, p.wind_sfc_dir, units)]);
   if (has((q) => q.freeze_m)) rows.push(['Freezing level', fmtFreezeFull(p.freeze_m, units)]);
