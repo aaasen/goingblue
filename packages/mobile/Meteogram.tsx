@@ -92,6 +92,9 @@ const STRIP_H = STRIP_HEAD_H + STRIP_GRAPH_H;
 const C = {
   night: '#eceef3',
   grid: '#f0f1f4',
+  // A step darker than the grid: the day divider crosses shaded cells and fill-encoded rows, where
+  // the grid's near-white disappears.
+  divider: '#d9dade',
   keyBg: '#e5e5ea',
   section: '#eef1f6',
   sectionText: '#8a8f99',
@@ -972,10 +975,6 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
   dates.forEach((d, i) => {
     els.push(centerHour(`hour${i}`, hourParts(d, steps[i], timeFormat), colCenter(i), 44, fonts.hour, fonts.hourSuffix, C.hour));
   });
-  dayGroups.slice(1).forEach((group, i) => {
-    const x = colLeft(group.start);
-    els.push(<Line key={`day-boundary${i}`} p1={vec(x, 0)} p2={vec(x, 31)} color={C.grid} strokeWidth={1} />);
-  });
   els.push(<Line key="date-row-rule" p1={vec(NAME_W, 31)} p2={vec(width, 31)} color={C.grid} strokeWidth={1} />);
 
   // Temperature domain across all periods.
@@ -1269,6 +1268,28 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
         break;
       }
     }
+  });
+
+  // 5. Day dividers: a rule down each local-midnight boundary, from the header to the bottom row.
+  // Drawn after the rows so it reads across the fill-encoded ones — wind ribbons and cloud alpha
+  // would otherwise paint over it. It skips the section bands, which read as continuous label
+  // strips and shouldn't be cut into.
+  const dividerSpans: [number, number][] = [];
+  let spanTop = 0;
+  let spanY = ROW_H.DATE;
+  rows.forEach((row) => {
+    if (row.kind === 'section') {
+      if (spanY > spanTop) dividerSpans.push([spanTop, spanY]);
+      spanTop = spanY + row.height;
+    }
+    spanY += row.height;
+  });
+  if (spanY > spanTop) dividerSpans.push([spanTop, spanY]);
+  dayGroups.slice(1).forEach((group, i) => {
+    const x = colLeft(group.start);
+    dividerSpans.forEach(([from, to], s) => {
+      els.push(<Line key={`day-divider${i}-${s}`} p1={vec(x, from)} p2={vec(x, to)} color={C.divider} strokeWidth={1} />);
+    });
   });
   return els;
 }
