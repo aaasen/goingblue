@@ -61,8 +61,8 @@ const FREEZE_PAD = 4;
 const FREEZE_MIN_SPAN_M = 700;
 const FREEZE_HEADROOM = 1.2;
 
-// Overview-strip band heights, stacked top to bottom: a per-day header (weekday, day of month,
-// summary glyph, daily high) over the mini temperature / precip / wind graphs.
+// Overview-strip band heights, stacked top to bottom: a per-day calendar header (weekday, day of
+// month) over the mini temperature / precip / wind graphs.
 // Each header band is taller than its text so the rows breathe; the row tops are derived here so
 // the draw sites don't repeat the arithmetic.
 const STRIP_PAD_T = 8;
@@ -71,9 +71,15 @@ const STRIP_DATE_H = 18;
 const STRIP_GLYPH_H = 20;
 const STRIP_TVAL_H = 14;
 const STRIP_DATE_Y = STRIP_PAD_T + STRIP_DAY_H;
-const STRIP_GLYPH_Y = STRIP_DATE_Y + STRIP_DATE_H;
-const STRIP_HEAD_H = STRIP_GLYPH_Y + STRIP_GLYPH_H + STRIP_TVAL_H;
-const STRIP_SIL_H = 28;
+const STRIP_HEAD_H = STRIP_DATE_Y + STRIP_DATE_H;
+// The day's summary glyph and high sit *on* the temperature silhouette rather than in a band of
+// their own: they annotate the curve, and stacking them above it spent 34px of a 132px strip on
+// what the graph could carry underneath. The silhouette gets that space instead — near twice the
+// amplitude it had in a band of its own, which is what makes a shape legible at strip scale. The
+// zone is deep enough that the curve still has room to move below the two lines of text.
+const STRIP_GLYPH_Y = STRIP_HEAD_H;
+const STRIP_TVAL_Y = STRIP_GLYPH_Y + STRIP_GLYPH_H;
+const STRIP_TEMP_H = 50;
 const STRIP_PRECIP_H = 13;
 // Height of one precip mark, and the grid the marks sit on: every six hours that carry any
 // precipitation get a mark, whatever resolution the fill used there. The grid is fixed in time
@@ -95,8 +101,9 @@ const STRIP_RES_H = 7;
 // Gap between adjacent resolution blocks, in px. Small enough that hourly periods — a couple of
 // px wide at strip scale — still leave something to draw.
 const STRIP_RES_GAP = 1;
-// The graph bands below the header — the span the viewport window brackets.
-const STRIP_GRAPH_H = STRIP_SIL_H + STRIP_PRECIP_H + STRIP_WIND_H + STRIP_RES_H;
+// The graph bands below the calendar header — the span the viewport window brackets. The
+// temperature zone is one of them now, so the window brackets the glyph and high along with it.
+const STRIP_GRAPH_H = STRIP_TEMP_H + STRIP_PRECIP_H + STRIP_WIND_H + STRIP_RES_H;
 const STRIP_H = STRIP_HEAD_H + STRIP_GRAPH_H;
 
 // ── Palette ──────────────────────────────────────────────────────────────--
@@ -687,10 +694,10 @@ function cloudGlyph(
 type Tile = { offset: number; width: number };
 
 // A coarse, screen-width overview whose x-axis is linear in time, so full days come out equal
-// width regardless of how many periods they hold. Each day column shows its weekday and date, a
-// summary weather glyph, and its high over a mini temperature silhouette, a band of drop and
-// flake marks stamped across the wet stretches, a Beaufort wind ribbon, and a band of one block
-// per forecast period showing where the fill's resolution changes. A viewport window tracks the
+// width regardless of how many periods they hold. Each day column shows its weekday and date over
+// a summary weather glyph and its high, both riding a mini temperature silhouette, then a band of
+// drop and flake marks stamped across the wet stretches, a Beaufort wind ribbon, and a band of one
+// block per forecast period showing where the fill's resolution changes. A viewport window tracks the
 // meteogram's scroll on the native driver, and touching the strip scrubs the meteogram to that
 // position.
 // Memoized for the same reason as CanvasTile: every prop is identity-stable while a selection
@@ -727,14 +734,15 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
   const graphTop = STRIP_HEAD_H;
   const els: ReactNode[] = [];
 
-  // Temperature silhouette.
+  // Temperature silhouette. It runs the full depth of the temperature zone, under the day's summary
+  // glyph and high.
   const temps: number[] = [];
   periods.forEach((p) => { if (p.temp_c != null) temps.push(p.temp_c); });
   const tMin = temps.length ? Math.min(...temps) - 1 : 0;
   const tMax = temps.length ? Math.max(...temps) + 1 : 1;
   const plottedTemps = periods.map((p) => p.temp_c);
   const silTop = graphTop + 2;
-  const silBottom = graphTop + STRIP_SIL_H;
+  const silBottom = graphTop + STRIP_TEMP_H;
   if (temps.length && plottedTemps.some((t) => t != null)) {
     const yOf = (t: number) => silTop + ((tMax - t) / (tMax - tMin)) * (silBottom - silTop);
     const first = plottedTemps.find((t): t is number => t != null)!;
@@ -751,8 +759,11 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
     area.close();
     els.push(
       <Path key="strip-temp" path={area}>
+        {/* The fill also eases off toward the top of the zone, where the white glyph and high are.
+            The warm end of the scale is its lightest, and at full strength white text on it fell to
+            ~2.7:1 — under the fade it holds ~5:1 while the curve's own shape still reads. */}
         <LinearGradient start={vec(0, silTop)} end={vec(0, silBottom)}
-          colors={[tempColor(tMax, 0.8), tempColor((tMax + tMin) / 2, 0.8), tempColor(tMin, 0.8)]}
+          colors={[tempColor(tMax, 0.5), tempColor((tMax + tMin) / 2, 0.68), tempColor(tMin, 0.85)]}
           positions={[0, 0.5, 1]} />
       </Path>,
     );
@@ -830,8 +841,19 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
     );
   }
 
-  // Per-day header: weekday, day of month, summary glyph, daily high. The day columns are read from
-  // the header text alone — no separators, so nothing cuts across the graphs below.
+  // Current-time marker across the graph bands, drawn before the per-day summaries so it passes
+  // behind the glyph and high rather than slicing through them.
+  const cur = dates.findIndex((date, i) => now >= date.getTime() && now < date.getTime() + steps[i] * 3600000);
+  if (cur >= 0) {
+    const s = slot(cur);
+    const frac = (now - dates[cur].getTime()) / (steps[cur] * 3600000);
+    const mx = s.left + frac * (s.right - s.left);
+    els.push(<Line key="strip-now" p1={vec(mx, graphTop)} p2={vec(mx, STRIP_H)} color="rgba(255,69,58,0.85)" strokeWidth={1} />);
+  }
+
+  // Per-day header: weekday and day of month in the calendar band, summary glyph and daily high
+  // over the temperature silhouette. The day columns are read from the header text alone — no
+  // separators, so nothing cuts across the graphs below.
   //
   // The header runs on its own axis: every day gets an equal slice of the width, whatever hours it
   // actually holds, and always draws its summary in full. On the graphs' time-linear axis a partial
@@ -860,18 +882,9 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
     els.push(centerText(`swk${d}`, DAYS[g.date.getDay()].slice(0, 3).toUpperCase(), cx, STRIP_PAD_T + STRIP_DAY_H / 2, fonts.stripSub, SC.label));
     els.push(centerText(`sdm${d}`, String(g.date.getDate()), cx, STRIP_DATE_Y + STRIP_DATE_H / 2, fonts.strip, SC.label));
     if (hi != null) {
-      els.push(centerText(`shi${d}`, fmtTemp(hi, units), cx, STRIP_HEAD_H - STRIP_TVAL_H / 2, fonts.strip, SC.label));
+      els.push(centerText(`shi${d}`, fmtTemp(hi, units), cx, STRIP_TVAL_Y + STRIP_TVAL_H / 2, fonts.strip, SC.label));
     }
   });
-
-  // Current-time marker across the graph bands.
-  const cur = dates.findIndex((date, i) => now >= date.getTime() && now < date.getTime() + steps[i] * 3600000);
-  if (cur >= 0) {
-    const s = slot(cur);
-    const frac = (now - dates[cur].getTime()) / (steps[cur] * 3600000);
-    const mx = s.left + frac * (s.right - s.left);
-    els.push(<Line key="strip-now" p1={vec(mx, graphTop)} p2={vec(mx, STRIP_H)} color="rgba(255,69,58,0.85)" strokeWidth={1} />);
-  }
 
   const contentW = NAME_W + n * CELL_W;
   const maxOffset = Math.max(0, contentW - W);
@@ -1739,8 +1752,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#000',
   },
-  // The viewport window brackets the graph bands only — the per-day header reads as a fixed
-  // calendar above it, so boxing it in moved with the scroll for no reason.
+  // The viewport window brackets the graph bands only — the weekday/date rows read as a fixed
+  // calendar above it, so boxing them in moved with the scroll for no reason. The summary glyph and
+  // high do fall inside it, since they sit on the temperature graph rather than above it.
   overviewWindowFill: {
     position: 'absolute',
     top: STRIP_HEAD_H,
