@@ -619,16 +619,18 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
   // Time-linear columns: each period's width is proportional to the hours it spans. Full days come
   // out equal width whatever their resolution — a coarse far-term day is no wider than an hourly
   // near-term one — so same-resolution periods (and the viewport window over them) render the same
-  // size on every day. The axis is padded back to the first day's local midnight: a forecast that
-  // starts mid-day keeps a full-width first column, with dead space standing in for the hours
-  // before the forecast starts.
+  // size on every day. The axis starts at the first period, not at that day's midnight, so the
+  // graphs use the full width; the cost is that a forecast starting mid-day gets a short first day
+  // column, narrower than the ones after it.
   const cum = new Float64Array(n + 1);
   for (let i = 0; i < n; i++) cum[i + 1] = cum[i] + steps[i];
+  const pxPerHour = W / cum[n];
+  const timeX = (h: number) => h * pxPerHour;
+  // Hours from the first day's local midnight to the start of the forecast. Not part of the axis —
+  // only the precip grid needs it, to keep its segments on wall-clock boundaries.
   const firstMidnight = new Date(dates[0]);
   firstMidnight.setHours(0, 0, 0, 0);
-  const padHours = (dates[0].getTime() - firstMidnight.getTime()) / 3600000;
-  const pxPerHour = W / (padHours + cum[n]);
-  const timeX = (h: number) => (padHours + h) * pxPerHour;
+  const originHours = (dates[0].getTime() - firstMidnight.getTime()) / 3600000;
   const slot = (i: number) => {
     const left = timeX(cum[i]);
     const right = timeX(cum[i + 1]);
@@ -676,20 +678,21 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
   // far-term period covers as much time as twelve hourly near-term ones — it draws two drops to
   // their one apiece.
   const markCy = silBottom + STRIP_PRECIP_H / 2;
-  // Hours here are measured from the first day's local midnight, the same origin the axis is padded
-  // back to, so segment boundaries land on 00:00 / 06:00 / 12:00 rather than on the request hour.
-  const startHour = padHours;
-  const endHour = padHours + cum[n];
+  // Hours here are measured from the first day's local midnight rather than from the axis origin,
+  // so segment boundaries land on 00:00 / 06:00 / 12:00 rather than on the request hour. Positions
+  // convert back through timeX, which counts from the first period.
+  const startHour = originHours;
+  const endHour = originHours + cum[n];
   let firstInSegment = 0;
   for (let k = Math.floor(startHour / STRIP_SEGMENT_H); k * STRIP_SEGMENT_H < endHour; k++) {
     const from = Math.max(k * STRIP_SEGMENT_H, startHour);
     const to = Math.min((k + 1) * STRIP_SEGMENT_H, endHour);
     if (to <= from) continue;
     // Periods are in time order, so the scan start only ever moves forward.
-    while (firstInSegment < n && padHours + cum[firstInSegment + 1] <= from) firstInSegment++;
+    while (firstInSegment < n && originHours + cum[firstInSegment + 1] <= from) firstInSegment++;
     let rain = false;
     let snow = false;
-    for (let i = firstInSegment; i < n && padHours + cum[i] < to; i++) {
+    for (let i = firstInSegment; i < n && originHours + cum[i] < to; i++) {
       rain ||= (periods[i].rain_mm ?? 0) > 0;
       snow ||= (periods[i].snow_cm ?? 0) > 0;
     }
@@ -697,12 +700,12 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
     // A segment carrying both gets the mixed mark rather than two marks side by side, which at
     // strip scale is a few pixels of mush.
     const kind = rain && snow ? 'mix' : rain ? 'rain' : 'snow';
-    const cx = (from + to) / 2 * pxPerHour;
+    const cx = timeX((from + to) / 2 - originHours);
     els.push(...precipMark(kind, cx, markCy, STRIP_MARK_H, STRIP_MARK_COLORS)
       .map((prim, pi) => glyphPrimitive(`sprecip${k}-${pi}`, prim, true)));
   }
 
-  // Wind ribbon, on the same blended scale as the main canvas, over a white pill. Gusts rather than
+  // Wind ribbon, on the same blended scale as the main canvas, over a white panel. Gusts rather than
   // the sustained surface wind: the strip is scanned for "which days do I care about", and the gust
   // is what decides that — a 20 mph day gusting to 45 has to look different from a steady 20. The
   // whole ribbon falls back to surface wind when the message carries no gust column at all, rather
@@ -710,24 +713,20 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
   const windTop = STRIP_H - STRIP_RES_H - STRIP_WIND_H;
   const hasGust = periods.some((p) => p.wind_gust_kph != null);
   const stripWind = (i: number) => hasGust ? periods[i].wind_gust_kph : periods[i].wind_sfc_kph;
-  // The pill starts where the data does, not at x=0: the axis is padded back to the first day's
-  // local midnight, and on a forecast that starts mid-day that pad is dead space. A white band
-  // running through it would promise wind readings that aren't there.
-  const windLeft = timeX(0);
-  const windPill = Skia.RRectXY(
-    Skia.XYWHRect(windLeft, windTop, W - windLeft, STRIP_WIND_H), STRIP_WIND_R, STRIP_WIND_R);
+  const windPanel = Skia.RRectXY(
+    Skia.XYWHRect(0, windTop, W, STRIP_WIND_H), STRIP_WIND_R, STRIP_WIND_R);
   els.push(
-    <RoundedRect key="swind-bg" x={windLeft} y={windTop} width={W - windLeft} height={STRIP_WIND_H}
+    <RoundedRect key="swind-bg" x={0} y={windTop} width={W} height={STRIP_WIND_H}
       r={STRIP_WIND_R} color={SC.windBg} />,
   );
-  // Clipped to the pill so a run reaching either end follows the rounded cap instead of squaring
-  // the corner off.
+  // Clipped to the panel so a run reaching either end follows the eased corner instead of squaring
+  // it off.
   const windEls: ReactNode[] = [];
   valueRuns(n, (i) => stripWind(i) != null).forEach((run) => {
     windEls.push(windRibbon(`swind${run[0]}`, run, slot,
       (i) => windColor(stripWind(i)!), windTop, STRIP_WIND_H));
   });
-  els.push(<Group key="swind" clip={windPill}>{windEls}</Group>);
+  els.push(<Group key="swind" clip={windPanel}>{windEls}</Group>);
 
   // Resolution band along the very bottom: one block per period. On the time-linear axis a block's
   // width *is* its span, so the fill's shape reads directly — a dense run of slivers is the hourly
@@ -746,12 +745,18 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
 
   // Per-day header: weekday, day of month, summary glyph, daily high. The day columns are read from
   // the header text alone — no separators, so nothing cuts across the graphs below.
+  //
+  // The header runs on its own axis: every day gets an equal slice of the width, whatever hours it
+  // actually holds, and always draws its summary in full. On the graphs' time-linear axis a partial
+  // first or last day is narrower than the rest, which is right for the data but would leave the
+  // summary — a glyph and three lines of text, all of fixed size — with nowhere to go on exactly
+  // the day the user is most likely to be reading. The two axes agree on the order of the days and
+  // roughly on where each one sits; they do not agree edge to edge, and a partial day's header sits
+  // wider than its own graph data.
+  const headDayW = W / dayGroups.length;
   const glyphScale = STRIP_GLYPH_H / ROW_H.CLOUD;
   dayGroups.forEach((g, d) => {
-    // The first day's column includes the pre-forecast pad, back to x=0 (midnight).
-    const left = d === 0 ? 0 : timeX(cum[g.start]);
-    const dayW = timeX(cum[g.end]) - left;
-    const cx = left + dayW / 2;
+    const cx = (d + 0.5) * headDayW;
     let code = periods[g.start].weathercode;
     let hi: number | undefined;
     for (let i = g.start; i < g.end; i++) {
@@ -765,13 +770,9 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
         {cloudGlyph(`glyi${d}`, 0, 0, ROW_H.CLOUD, code, false, 'full', true)}
       </Group>,
     );
-    if (dayW >= 22) {
-      els.push(centerText(`swk${d}`, DAYS[g.date.getDay()].slice(0, 3).toUpperCase(), cx, STRIP_PAD_T + STRIP_DAY_H / 2, fonts.stripSub, SC.label));
-    }
-    if (dayW >= 14) {
-      els.push(centerText(`sdm${d}`, String(g.date.getDate()), cx, STRIP_DATE_Y + STRIP_DATE_H / 2, fonts.strip, SC.label));
-    }
-    if (hi != null && dayW >= 20) {
+    els.push(centerText(`swk${d}`, DAYS[g.date.getDay()].slice(0, 3).toUpperCase(), cx, STRIP_PAD_T + STRIP_DAY_H / 2, fonts.stripSub, SC.label));
+    els.push(centerText(`sdm${d}`, String(g.date.getDate()), cx, STRIP_DATE_Y + STRIP_DATE_H / 2, fonts.strip, SC.label));
+    if (hi != null) {
       els.push(centerText(`shi${d}`, fmtTemp(hi, units), cx, STRIP_HEAD_H - STRIP_TVAL_H / 2, fonts.strip, SC.label));
     }
   });
@@ -793,7 +794,7 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
   const scrub = (xMini: number) => {
     if (maxOffset <= 0) return;
     const clampedX = Math.max(0, Math.min(W, xMini));
-    const hours = Math.max(0, clampedX / pxPerHour - padHours);
+    const hours = clampedX / pxPerHour;
     let i = 0;
     while (i < n - 1 && cum[i + 1] <= hours) i++;
     const t = i + (hours - cum[i]) / steps[i];
