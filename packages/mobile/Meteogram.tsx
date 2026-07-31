@@ -37,6 +37,9 @@ const ROW_H = {
   TEMP: 52,
   SNOW: 50,
   DATA: 42,
+  // The freezing level is a graph rather than a bare number, so it needs room for the isotherm to
+  // move in under its band of column labels.
+  FREEZE: 66,
   // Wind speeds are a single short number on a colored ground, so they need less room than the
   // other data rows — and there are up to five of them stacked (surface, gust, three upper levels).
   WIND: 32,
@@ -48,6 +51,15 @@ const ROW_H = {
 // period draws a small-but-visible bump rather than filling the row just because nothing
 // heavier is in the window.
 const accumFrac = (mmEq: number) => Math.min(1, Math.sqrt(Math.max(0, mmEq) / RAIN_MAX_MM));
+
+// The freezing-level row plots the 0°C isotherm over the full row height, with its per-column
+// altitudes centered on the row — the curve passes behind them. Like the temperature area, the plot
+// is normalized to this forecast's own range — but floored at a minimum span, since a level that
+// holds within a couple of hundred metres should read as flat rather than as amplified noise, and
+// with headroom so the curve doesn't ride either edge of the row.
+const FREEZE_PAD = 4;
+const FREEZE_MIN_SPAN_M = 700;
+const FREEZE_HEADROOM = 1.2;
 
 // Overview-strip band heights, stacked top to bottom: a per-day header (weekday, day of month,
 // summary glyph, daily high) over the mini temperature / precip / wind graphs.
@@ -104,6 +116,13 @@ const C = {
   hour: '#8e8e93',
   nil: '#d1d1d6',
   dirArrow: '#5b7a9d',
+  // The two sides of the 0°C isotherm: sub-freezing air above the level, above-freezing air below
+  // it. Both washes are faint — the row still carries its altitude labels, and the day dividers and
+  // column highlight cross it — so they read as a tint on white rather than as a filled chart.
+  freezeCold: 'rgba(74, 144, 214, 0.16)',
+  freezeWarm: 'rgba(214, 82, 62, 0.14)',
+  // The isotherm itself, dark enough to hold its shape against both washes.
+  freezeLine: '#7e8896',
 } as const;
 
 // The overview strip runs on a dark ground: at strip scale the graphs are a few pixels tall, and a
@@ -523,7 +542,7 @@ function buildRows(periods: Period[], u: Units): Row[] {
   // its unit in the header, so the single row below it needs no label of its own.
   if (has((p) => p.freeze_m)) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Freezing level (${frU})` });
-    rows.push({ kind: 'freeze', height: ROW_H.DATA, label: '' });
+    rows.push({ kind: 'freeze', height: ROW_H.FREEZE, label: '' });
   }
 
   const hasCloud = has((p) => p.cloud_high) || has((p) => p.cloud_mid) || has((p) => p.cloud_low);
@@ -961,7 +980,7 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
   // a tinted backdrop would make identical speeds or percentages look different by night than by
   // day. Everything above reads as text or glyphs and is unharmed by the tint.
   const TINTABLE_STOP = new Set<RowKind>([
-    'wind-sfc', 'wind-gust', 'wind-dir', 'cloud-high', 'cloud-mid', 'cloud-low',
+    'wind-sfc', 'wind-gust', 'wind-dir', 'freeze', 'cloud-high', 'cloud-mid', 'cloud-low',
     'wind-500', 'wind-600', 'wind-700',
   ]);
   const nightBottom = (() => {
@@ -1137,6 +1156,21 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
     );
   }
 
+  // Freezing-level domain, shared by the isotherm curve and the two washes either side of it. The
+  // bottom is pinned to ground level once the level comes near it, so a freezing level at the
+  // surface reads as one with no above-freezing air under it rather than as one floating a row's
+  // worth of red above the ground.
+  const freezeValues = periods.map((p) => p.freeze_m);
+  const freezePresent = freezeValues.filter((m): m is number => m != null);
+  let freezeBase = 0;
+  let freezeSpan = FREEZE_MIN_SPAN_M;
+  if (freezePresent.length) {
+    const lo = Math.min(...freezePresent);
+    const hi = Math.max(...freezePresent);
+    freezeSpan = Math.max((hi - lo) * FREEZE_HEADROOM, FREEZE_MIN_SPAN_M);
+    freezeBase = Math.max(0, (lo + hi) / 2 - freezeSpan / 2);
+  }
+
   // 4. Rows.
   let y = ROW_H.DATE;
   rows.forEach((row, ri) => {
@@ -1205,12 +1239,55 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
         });
         break;
 
-      case 'freeze':
+      case 'freeze': {
+        // The 0°C isotherm as a curve with the sky either side of it washed in: cold above the
+        // level, warm below. The washes run to the row's own edges rather than to the padded plot
+        // band — the padding only keeps the curve off the edges, and filling only as far as it
+        // would draw a white stripe along the top and bottom of the row.
+        const bottom = top + row.height;
+        const plotTop = top + FREEZE_PAD;
+        // Where the domain is pinned to ground, the row's bottom edge *is* the ground, so the pad
+        // comes off: a freezing level at the surface should leave no warm air under it at all.
+        const plotBottom = bottom - (freezeBase > 0 ? FREEZE_PAD : 0);
+        const freezeY = (m: number) =>
+          plotBottom - ((m - freezeBase) / freezeSpan) * (plotBottom - plotTop);
+        valueRuns(n, (i) => freezeValues[i] != null).forEach((run) => {
+          const x0 = colLeft(run[0]);
+          const x1 = colLeft(run[run.length - 1]) + CELL_W;
+          // The curve holds flat out to the run's outer edges, so a run reads as covering its
+          // columns edge to edge rather than tapering in from their centers.
+          const points = [
+            { x: x0, y: freezeY(freezeValues[run[0]]!) },
+            ...run.map((i) => ({ x: colCenter(i), y: freezeY(freezeValues[i]!) })),
+            { x: x1, y: freezeY(freezeValues[run[run.length - 1]]!) },
+          ];
+          const cold = Skia.Path.Make();
+          smoothTo(cold, points);
+          cold.lineTo(x1, top);
+          cold.lineTo(x0, top);
+          cold.close();
+          const warm = Skia.Path.Make();
+          smoothTo(warm, points);
+          warm.lineTo(x1, bottom);
+          warm.lineTo(x0, bottom);
+          warm.close();
+          const isotherm = Skia.Path.Make();
+          smoothTo(isotherm, points);
+          els.push(
+            <Group key={`fzg${ri}-${run[0]}`}>
+              <Path path={cold} color={C.freezeCold} />
+              <Path path={warm} color={C.freezeWarm} />
+              <Path path={isotherm} style="stroke" strokeWidth={1.25} color={C.freezeLine} />
+            </Group>,
+          );
+        });
         periods.forEach((p, i) => {
           const txt = fmtFreeze(p.freeze_m, units);
-          els.push(centerText(`fz${i}`, txt || '—', colCenter(i), mid, fonts.data, txt ? '#1c1c1e' : C.nil));
+          els.push(centerText(`fz${i}`, txt || '—', colCenter(i), mid, fonts.data,
+            txt ? '#1c1c1e' : C.nil));
         });
         break;
+      }
 
       case 'wind-sfc': case 'wind-gust': case 'wind-500': case 'wind-600': case 'wind-700': {
         const base = row.kind.replace('-', '_'); // wind-sfc → wind_sfc, wind-500 → wind_500
