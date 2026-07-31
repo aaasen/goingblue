@@ -98,6 +98,7 @@ const C = {
   label: '#2c2c2e',
   unit: '#9aa0aa',
   date: '#48484a',
+  hour: '#8e8e93',
   nil: '#d1d1d6',
   dirArrow: '#5b7a9d',
 } as const;
@@ -360,11 +361,16 @@ function windUnit(u: Units) { return u === 'imperial' ? 'mph' : 'kph'; }
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 function dayLabel(d: Date): string { return `${DAYS[d.getDay()]} ${d.getDate()}`; }
-function hourLabel(d: Date, step: number, timeFormat: TimeFormat): string {
-  if (step >= 24) return '';
+// The hour splits into the number and its meridiem so the two can be drawn at different sizes.
+function hourParts(d: Date, step: number, timeFormat: TimeFormat): { num: string; suffix: string } {
+  if (step >= 24) return { num: '', suffix: '' };
   const hour = d.getHours();
-  if (timeFormat === '24h') return `${hour}`;
-  return `${hour % 12 || 12}${hour < 12 ? 'am' : 'pm'}`;
+  if (timeFormat === '24h') return { num: `${hour}`, suffix: '' };
+  return { num: `${hour % 12 || 12}`, suffix: hour < 12 ? 'AM' : 'PM' };
+}
+function hourLabel(d: Date, step: number, timeFormat: TimeFormat): string {
+  const { num, suffix } = hourParts(d, step, timeFormat);
+  return num + suffix;
 }
 
 // Solar altitude using the standard low-precision solar-position equations. The apparent
@@ -519,7 +525,8 @@ function buildRows(periods: Period[], u: Units): Row[] {
 function baseline(cy: number, size: number) { return cy + size * 0.35; }
 
 interface Fonts {
-  label: SkFont; sub: SkFont; data: SkFont; small: SkFont; bold: SkFont; date: SkFont; hour: SkFont;
+  label: SkFont; sub: SkFont; data: SkFont; small: SkFont; bold: SkFont; date: SkFont;
+  hour: SkFont; hourSuffix: SkFont;
   // The strip's header text is light-weight — at header size a thin face keeps the day columns
   // legible without competing with the glyphs below them.
   strip: SkFont; stripSub: SkFont;
@@ -529,6 +536,27 @@ function centerText(key: string, text: string, cx: number, cy: number, font: SkF
   if (!text) return null;
   const w = font.getTextWidth(text);
   return <Text key={key} x={cx - w / 2} y={baseline(cy, font.getSize())} text={text} font={font} color={color} />;
+}
+
+// Hour label: the number carries the reading and the meridiem only disambiguates it, so AM/PM rides
+// a couple of sizes down. Both sit on the number's baseline, and the pair centers as one run.
+function centerHour(
+  key: string, parts: { num: string; suffix: string }, cx: number, cy: number,
+  font: SkFont, suffixFont: SkFont, color: string,
+): ReactNode {
+  if (!parts.num) return null;
+  const numW = font.getTextWidth(parts.num);
+  const w = numW + (parts.suffix ? suffixFont.getTextWidth(parts.suffix) : 0);
+  const x = cx - w / 2;
+  const y = baseline(cy, font.getSize());
+  return (
+    <Group key={key}>
+      <Text x={x} y={y} text={parts.num} font={font} color={color} />
+      {parts.suffix
+        ? <Text x={x + numW} y={y} text={parts.suffix} font={suffixFont} color={color} />
+        : null}
+    </Group>
+  );
 }
 
 // Smooth polyline (quadratic through segment midpoints) appended to an existing path.
@@ -932,7 +960,7 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
   // 2. Date header. Hours occupy their own row. Each day label sticks to the visible left
   // edge while its columns are being scrolled, then yields to the following day.
   dates.forEach((d, i) => {
-    els.push(centerText(`hour${i}`, hourLabel(d, steps[i], timeFormat), colCenter(i), 44, fonts.hour, C.date));
+    els.push(centerHour(`hour${i}`, hourParts(d, steps[i], timeFormat), colCenter(i), 44, fonts.hour, fonts.hourSuffix, C.hour));
   });
   dayGroups.slice(1).forEach((group, i) => {
     const x = colLeft(group.start);
@@ -1397,7 +1425,8 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
     small: matchFont({ fontSize: 10.5, fontWeight: '600' }),
     bold: matchFont({ fontSize: 12.5, fontWeight: '700' }),
     date: matchFont({ fontSize: 14, fontWeight: '600' }),
-    hour: matchFont({ fontSize: 14, fontWeight: '400' }),
+    hour: matchFont({ fontSize: 12, fontWeight: '400' }),
+    hourSuffix: matchFont({ fontSize: 9.5, fontWeight: '400' }),
     strip: matchFont({ fontSize: 11, fontWeight: '300' }),
     stripSub: matchFont({ fontSize: 9.5, fontWeight: '300' }),
   }), []);
