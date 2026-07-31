@@ -365,6 +365,19 @@ function windUnit(u: Units) { return u === 'imperial' ? 'mph' : 'kph'; }
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 function dayLabel(d: Date): string { return `${DAYS[d.getDay()]} ${d.getDate()}`; }
 
+// The detail panel names the day in full — it has a line to itself there, and the bare date the
+// header column is reduced to reads as a number without a month beside it.
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+function ordinal(n: number): string {
+  const teen = n % 100;
+  if (teen >= 11 && teen <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+}
+function fullDateLabel(d: Date): string {
+  return `${DAYS[d.getDay()]} ${MONTHS[d.getMonth()]} ${ordinal(d.getDate())}`;
+}
+
 // A day's header has only that day's columns to sit in, and the first and last days of a forecast
 // are usually partial — a day that starts at 10pm gets two hourly columns, 76px, where "Wednesday
 // 24" needs around 90. So the label steps down through shorter forms until one fits: the weekday
@@ -1571,10 +1584,10 @@ function DetailPanel({ periods, index, dates, steps, modelName, modelColor, unit
   }
 
   const timeText = step >= 24
-    ? `${dayLabel(date)} · all day`
+    ? `${fullDateLabel(date)} · all day`
     : step > 1
-      ? `${dayLabel(date)}, ${hourLabel(date, 1, timeFormat)}–${hourLabel(new Date(date.getTime() + step * 3600000), 1, timeFormat)}`
-      : `${dayLabel(date)}, ${hourLabel(date, 1, timeFormat)}`;
+      ? `${fullDateLabel(date)}, ${hourLabel(date, 1, timeFormat)}–${hourLabel(new Date(date.getTime() + step * 3600000), 1, timeFormat)}`
+      : `${fullDateLabel(date)}, ${hourLabel(date, 1, timeFormat)}`;
 
   const activeGlyph = glyphVariantAt(periods, dates, steps, index, lat, lon);
   const night = activeGlyph.night;
