@@ -71,7 +71,13 @@ const STRIP_PRECIP_H = 13;
 // leaves them just touching there, and comfortably apart on a short one.
 const STRIP_MARK_H = 8;
 const STRIP_SEGMENT_H = 6;
+// The wind band sits on a white panel of its own rather than on the strip's dark ground: the ribbon
+// fades to transparent under a light breeze, and on the dark ground a calm stretch was
+// indistinguishable from a stretch with no wind data at all. On white a calm stretch reads as
+// deliberately empty. Its corners are eased rather than fully rounded — a half-height radius made a
+// pill, which at 9px tall pinched the ribbon's first and last columns to a sliver.
 const STRIP_WIND_H = 9;
+const STRIP_WIND_R = 2;
 // The resolution band along the very bottom: one block per period on the strip's time-linear axis.
 const STRIP_RES_H = 7;
 // Gap between adjacent resolution blocks, in px. Small enough that hourly periods — a couple of
@@ -115,6 +121,7 @@ const SC = {
   // where the drop is a solid fill, so it takes the lighter of the two to carry the same weight.
   precipRain: '#a6a6a6',
   precipSnow: '#c6c6c6',
+  windBg: '#ffffff',
 } as const;
 
 // Bundled for precipMark, whose mixed mark needs both at once — plus the ground it strokes against
@@ -695,12 +702,32 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
       .map((prim, pi) => glyphPrimitive(`sprecip${k}-${pi}`, prim, true)));
   }
 
-  // Surface-wind ribbon, on the same blended scale as the main canvas.
+  // Wind ribbon, on the same blended scale as the main canvas, over a white pill. Gusts rather than
+  // the sustained surface wind: the strip is scanned for "which days do I care about", and the gust
+  // is what decides that — a 20 mph day gusting to 45 has to look different from a steady 20. The
+  // whole ribbon falls back to surface wind when the message carries no gust column at all, rather
+  // than switching per period, so one band never mixes the two scales.
   const windTop = STRIP_H - STRIP_RES_H - STRIP_WIND_H;
-  valueRuns(n, (i) => periods[i].wind_sfc_kph != null).forEach((run) => {
-    els.push(windRibbon(`swind${run[0]}`, run, slot,
-      (i) => windColor(periods[i].wind_sfc_kph!), windTop, STRIP_WIND_H));
+  const hasGust = periods.some((p) => p.wind_gust_kph != null);
+  const stripWind = (i: number) => hasGust ? periods[i].wind_gust_kph : periods[i].wind_sfc_kph;
+  // The pill starts where the data does, not at x=0: the axis is padded back to the first day's
+  // local midnight, and on a forecast that starts mid-day that pad is dead space. A white band
+  // running through it would promise wind readings that aren't there.
+  const windLeft = timeX(0);
+  const windPill = Skia.RRectXY(
+    Skia.XYWHRect(windLeft, windTop, W - windLeft, STRIP_WIND_H), STRIP_WIND_R, STRIP_WIND_R);
+  els.push(
+    <RoundedRect key="swind-bg" x={windLeft} y={windTop} width={W - windLeft} height={STRIP_WIND_H}
+      r={STRIP_WIND_R} color={SC.windBg} />,
+  );
+  // Clipped to the pill so a run reaching either end follows the rounded cap instead of squaring
+  // the corner off.
+  const windEls: ReactNode[] = [];
+  valueRuns(n, (i) => stripWind(i) != null).forEach((run) => {
+    windEls.push(windRibbon(`swind${run[0]}`, run, slot,
+      (i) => windColor(stripWind(i)!), windTop, STRIP_WIND_H));
   });
+  els.push(<Group key="swind" clip={windPill}>{windEls}</Group>);
 
   // Resolution band along the very bottom: one block per period. On the time-linear axis a block's
   // width *is* its span, so the fill's shape reads directly — a dense run of slivers is the hourly
