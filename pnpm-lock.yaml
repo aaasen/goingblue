@@ -92,6 +92,9 @@ importers:
       react-native-web:
         specifier: ^0.21.2
         version: 0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      tz-lookup:
+        specifier: ^6.1.25
+        version: 6.1.25
     devDependencies:
       '@babel/core':
         specifier: 7.29.7
@@ -2856,6 +2859,9 @@ packages:
     resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
     engines: {node: '>=14.17'}
     hasBin: true
+
+  tz-lookup@6.1.25:
+    resolution: {integrity: sha512-fFewT9o1uDzsW1QnUU1ValqaihFnwiUiiHr1S79/fxOzKXYYvX+EHeRnpvQJ9B3Qg67wPXT6QF2Esc4pFOrvLg==}
 
   ua-parser-js@1.0.41:
     resolution: {integrity: sha512-LbBDqdIC5s8iROCUjMbW1f5dJQTEFB1+KO9ogbvlb3nm9n4YHa5p4KTvFPWvh2Hs8gZMBuiB1/8+pdfe/tDPug==}
@@ -6184,6 +6190,8 @@ snapshots:
   typescript@5.4.2: {}
 
   typescript@6.0.3: {}
+
+  tz-lookup@6.1.25: {}
 
   ua-parser-js@1.0.41: {}
 

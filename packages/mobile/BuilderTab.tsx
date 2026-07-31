@@ -12,6 +12,7 @@ import {
   MODE_DETAIL, MODE_AUTO, MODE_RANGE, type RequestContext,
 } from '@weather/protocol';
 import { API_BASE } from './account';
+import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import { allocCode } from './cache';
 import LocationMap from './LocationMap';
 import { MODELS } from './models';
@@ -23,13 +24,13 @@ function alignedStartEpochHour(): number {
   return Math.floor(Date.now() / 3600000);
 }
 
-// The UTC offset the forecast's local-midnight period grid aligns to (`z:`), in whole hours.
-// This is the DEVICE's offset — right whenever the user is at (or near) the forecast location,
-// which is the satellite-messaging use case. A custom location in a different timezone gets the
-// device's grid; the protocol carries the offset, so a per-location lookup can improve this
-// later without a format change.
-function utcOffsetHours(): number {
-  return -Math.round(new Date().getTimezoneOffset() / 60);
+// The UTC offset the forecast's local-midnight period grid aligns to (`z:`), in whole hours —
+// the FORECAST POINT's offset, looked up from its coordinates (see timezone.ts), so a location in
+// another timezone gets its own midnight rather than the reader's. Derived rather than passed
+// around: buildMsg and buildContext must agree exactly on the value, and a pure function of the
+// same coordinates and instant can't drift between them.
+function requestOffsetHours(coords: { lat: number; lon: number } | null, startEpochHour: number): number {
+  return coords ? offsetHoursAt(coords.lat, coords.lon, startEpochHour * 3600000) : deviceOffsetHours();
 }
 
 const CHARS_PER_MESSAGE = 160; // one SMS segment holds 160 characters (satellite messengers bill per segment)
@@ -99,7 +100,7 @@ function buildMsg(token: string, coords: { lat: number; lon: number } | null, mo
   const parts: string[] = [`v${V1_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   parts.push(`p:${PRIORITIES.find((m) => m.value === mode)!.token}`);
-  parts.push(`z:${utcOffsetHours()}`);
+  parts.push(`z:${requestOffsetHours(coords, startEpochHour)}`);
   parts.push(`m:${model}`);
   if (variableCodes.length) parts.push(`v:${variableCodes.join('')}`);
   parts.push(`c:${maxChars}`);
@@ -114,7 +115,7 @@ function buildMsg(token: string, coords: { lat: number; lon: number } | null, mo
 function buildContext(coords: { lat: number; lon: number }, mode: number, model: string, varsMask: number, startEpochHour: number): RequestContext {
   return {
     mode,
-    utcOffsetHours: utcOffsetHours(),
+    utcOffsetHours: requestOffsetHours(coords, startEpochHour),
     model: MODEL_BIT[model.toUpperCase()] ?? 0, // single model index
     vars_mask: varsMask,
     lat: coords.lat,

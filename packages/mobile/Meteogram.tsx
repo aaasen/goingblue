@@ -388,8 +388,11 @@ function tempUnit(u: Units) { return u === 'imperial' ? '°F' : '°C'; }
 function freezeUnit(u: Units) { return u === 'imperial' ? 'ft' : 'm'; }
 function windUnit(u: Units) { return u === 'imperial' ? 'mph' : 'kph'; }
 
+// Every label below reads a ZONED date: a Date displaced by the forecast point's UTC offset, so
+// that its UTC fields spell out the wall clock at the forecast point rather than at the device (see
+// `zonedDates`). They are only ever labels — the instants themselves stay absolute, in `dates`.
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-function dayLabel(d: Date): string { return `${DAYS[d.getDay()]} ${d.getDate()}`; }
+function dayLabel(d: Date): string { return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()}`; }
 
 // The detail panel names the day in full — it has a line to itself there, and the bare date the
 // header column is reduced to reads as a number without a month beside it.
@@ -401,7 +404,7 @@ function ordinal(n: number): string {
   return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
 }
 function fullDateLabel(d: Date): string {
-  return `${DAYS[d.getDay()]} ${MONTHS[d.getMonth()]} ${ordinal(d.getDate())}`;
+  return `${DAYS[d.getUTCDay()]} ${MONTHS[d.getUTCMonth()]} ${ordinal(d.getUTCDate())}`;
 }
 
 // A day's header has only that day's columns to sit in, and the first and last days of a forecast
@@ -410,13 +413,13 @@ function fullDateLabel(d: Date): string {
 // abbreviates, then drops out entirely. The date is what identifies the column either way, and the
 // weekday of a partial day is readable from the full day beside it.
 function fitDayLabel(d: Date, available: number, font: SkFont): string {
-  const forms = [dayLabel(d), `${DAYS[d.getDay()].slice(0, 3)} ${d.getDate()}`, `${d.getDate()}`];
+  const forms = [dayLabel(d), `${DAYS[d.getUTCDay()].slice(0, 3)} ${d.getUTCDate()}`, `${d.getUTCDate()}`];
   return forms.find((f) => font.getTextWidth(f) <= available) ?? forms[forms.length - 1];
 }
 // The hour splits into the number and its meridiem so the two can be drawn at different sizes.
 function hourParts(d: Date, step: number, timeFormat: TimeFormat): { num: string; suffix: string } {
   if (step >= 24) return { num: '', suffix: '' };
-  const hour = d.getHours();
+  const hour = d.getUTCHours();
   if (timeFormat === '24h') return { num: `${hour}`, suffix: '' };
   return { num: `${hour % 12 || 12}`, suffix: hour < 12 ? 'AM' : 'PM' };
 }
@@ -492,13 +495,32 @@ function nightSegments(start: number, end: number, lat: number, lon: number): [n
   return segments;
 }
 
-// Contiguous columns that fall on the same local calendar day.
+// Each period's start displaced by the forecast point's UTC offset, so that reading the result
+// with getUTC* getters yields the wall clock a person standing at that point would keep. The
+// forecast's own grid is built on those hours — the periods align to the location's midnight (see
+// layout.ts) — so this is the axis the columns were laid out on, not a presentation choice.
+// Absolute instants stay in `dates`: solar position, the now marker, and period midpoints are all
+// answered in real time, not wall-clock time.
+function zonedDates(dates: Date[], utcOffsetHours: number): Date[] {
+  return dates.map((d) => new Date(d.getTime() + utcOffsetHours * 3600000));
+}
+// Identity of the zoned wall-clock day a column belongs to. Compared, never ordered or shown.
+function zonedDayKey(d: Date): string {
+  return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+}
+// Midnight of a zoned date's own day, in the same displaced frame.
+function zonedMidnight(d: Date): number {
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+// Contiguous columns that fall on the same calendar day at the forecast point. `dates` here is
+// zoned, not absolute.
 interface DayGroup { start: number; end: number; date: Date }
 function buildDayGroups(dates: Date[]): DayGroup[] {
   const groups: DayGroup[] = [];
   dates.forEach((d, i) => {
     const previous = groups[groups.length - 1];
-    if (!previous || previous.date.toDateString() !== d.toDateString()) {
+    if (!previous || zonedDayKey(previous.date) !== zonedDayKey(d)) {
       groups.push({ start: i, end: i + 1, date: d });
     } else {
       previous.end = i + 1;
@@ -702,15 +724,17 @@ type Tile = { offset: number; width: number };
 // position.
 // Memoized for the same reason as CanvasTile: every prop is identity-stable while a selection
 // changes, and an unchecked re-render rebuilds the strip's elements and repaints its canvas.
-const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units, now, width, flatListRef, scrollX, fonts, paint }: {
-  periods: Period[]; dates: Date[]; steps: number[]; units: Units; now: number;
+const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps, units, now, width, flatListRef, scrollX, fonts, paint }: {
+  // `dates` are absolute instants; `zoned` is the same series on the forecast point's wall clock,
+  // for the day columns and their labels.
+  periods: Period[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; now: number;
   width: number; flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value; fonts: Fonts;
   // Epoch that remounts the canvas after this tab was hidden — see Meteogram.
   paint: number;
 }) {
   const n = periods.length;
   const W = width;
-  const dayGroups = buildDayGroups(dates);
+  const dayGroups = buildDayGroups(zoned);
 
   // Time-linear columns: each period's width is proportional to the hours it spans. Full days come
   // out equal width whatever their resolution — a coarse far-term day is no wider than an hourly
@@ -722,11 +746,10 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
   for (let i = 0; i < n; i++) cum[i + 1] = cum[i] + steps[i];
   const pxPerHour = W / cum[n];
   const timeX = (h: number) => h * pxPerHour;
-  // Hours from the first day's local midnight to the start of the forecast. Not part of the axis —
-  // only the precip grid needs it, to keep its segments on wall-clock boundaries.
-  const firstMidnight = new Date(dates[0]);
-  firstMidnight.setHours(0, 0, 0, 0);
-  const originHours = (dates[0].getTime() - firstMidnight.getTime()) / 3600000;
+  // Hours from the first day's midnight at the forecast point to the start of the forecast. Not
+  // part of the axis — only the precip grid needs it, to keep its segments on wall-clock
+  // boundaries.
+  const originHours = (zoned[0].getTime() - zonedMidnight(zoned[0])) / 3600000;
   const slot = (i: number) => {
     const left = timeX(cum[i]);
     const right = timeX(cum[i + 1]);
@@ -881,8 +904,8 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
         {cloudGlyph(`glyi${d}`, 0, 0, ROW_H.CLOUD, code, false, 'full', true)}
       </Group>,
     );
-    els.push(centerText(`swk${d}`, DAYS[g.date.getDay()].slice(0, 3).toUpperCase(), cx, STRIP_PAD_T + STRIP_DAY_H / 2, fonts.stripSub, SC.label));
-    els.push(centerText(`sdm${d}`, String(g.date.getDate()), cx, STRIP_DATE_Y + STRIP_DATE_H / 2, fonts.strip, SC.label));
+    els.push(centerText(`swk${d}`, DAYS[g.date.getUTCDay()].slice(0, 3).toUpperCase(), cx, STRIP_PAD_T + STRIP_DAY_H / 2, fonts.stripSub, SC.label));
+    els.push(centerText(`sdm${d}`, String(g.date.getUTCDate()), cx, STRIP_DATE_Y + STRIP_DATE_H / 2, fonts.strip, SC.label));
     if (hi != null) {
       els.push(centerText(`shi${d}`, fmtTemp(hi, units), cx, STRIP_TVAL_Y + STRIP_TVAL_H / 2, fonts.strip, SC.label));
     }
@@ -977,8 +1000,10 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
 
 // Full Skia scene for one model. Pure, and called through useMemo: overlay-only state like the
 // selected column must not rebuild the elements, since any rebuild repaints every mounted tile.
-function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts, dayGroups }: {
-  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat;
+function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups }: {
+  // `dates` are absolute instants — what the sun and the now marker answer to. `zoned` is the same
+  // series on the forecast point's wall clock, which is what the hour and day labels read.
+  periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat;
   now: number; lat: number; lon: number; fonts: Fonts; dayGroups: DayGroup[];
 }): ReactNode[] {
   const n = periods.length;
@@ -1019,7 +1044,7 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
 
   // 2. Date header. Hours occupy their own row. Each day label sticks to the visible left
   // edge while its columns are being scrolled, then yields to the following day.
-  dates.forEach((d, i) => {
+  zoned.forEach((d, i) => {
     els.push(centerHour(`hour${i}`, hourParts(d, steps[i], timeFormat), colCenter(i), 44, fonts.hour, fonts.hourSuffix, C.hour));
   });
   els.push(<Line key="date-row-rule" p1={vec(NAME_W, 31)} p2={vec(width, 31)} color={C.grid} strokeWidth={1} />);
@@ -1418,10 +1443,10 @@ const CanvasTile = memo(function CanvasTile({ tile, els, totalH, paint, onPress 
   );
 });
 
-function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts, blockIndex, selected, onSelectColumn, paint }: {
+function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, blockIndex, selected, onSelectColumn, paint }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
-  periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; lat: number; lon: number; fonts: Fonts;
+  periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; lat: number; lon: number; fonts: Fonts;
   blockIndex: number; selected: number | null; onSelectColumn: (block: number, period: number) => void;
   // Epoch that remounts every canvas after this tab was hidden — see Meteogram.
   paint: number;
@@ -1440,10 +1465,10 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
   }), [width]);
   const colLeft = (i: number) => NAME_W + i * CELL_W;
 
-  const dayGroups = useMemo(() => buildDayGroups(dates), [dates]);
+  const dayGroups = useMemo(() => buildDayGroups(zoned), [zoned]);
   const els = useMemo(
-    () => buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts, dayGroups }),
-    [periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts, dayGroups],
+    () => buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups }),
+    [periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups],
   );
 
   const onPressTile = useCallback((locationX: number, tileOffset: number) => {
@@ -1467,7 +1492,7 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
 
   return (
     <View>
-      <OverviewStrip periods={periods} dates={dates} steps={steps} units={units} now={now}
+      <OverviewStrip periods={periods} dates={dates} zoned={zoned} steps={steps} units={units} now={now}
         width={screenW} flatListRef={flatListRef} scrollX={scrollX} fonts={fonts} paint={paint} />
       <View style={{ height: totalH }}>
       <Animated.FlatList
@@ -1601,6 +1626,11 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
       name: models[mi] ?? `Model ${mi + 1}`,
       color: MODEL_COLORS[models[mi]] ?? '#666',
       rows: buildRows(periods, units),
+      // The wall clock everything is labelled on belongs to the forecast point, not to wherever
+      // the reader is: a Tokyo forecast read from Seattle names Tokyo's hours and breaks its days
+      // at Tokyo's midnight. The offset rides along on the message, so a forecast pulled up later
+      // — or in another timezone — still reads on the clock it was laid out for.
+      zoned: zonedDates(dates, msg.utcOffsetHours),
       periods, dates, steps,
     };
   }), [msg, models, units]);
@@ -1619,7 +1649,7 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
               <RNText style={styles.modelHeaderText}>{b.name}</RNText>
             </View>
           )}
-          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} steps={b.steps} units={units} timeFormat={timeFormat} now={now} lat={msg.lat} lon={msg.lon} fonts={fonts}
+          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} zoned={b.zoned} steps={b.steps} units={units} timeFormat={timeFormat} now={now} lat={msg.lat} lon={msg.lon} fonts={fonts}
             blockIndex={bi}
             selected={sel?.block === bi ? sel.period : null}
             onSelectColumn={selectColumn} paint={paint} />
@@ -1631,6 +1661,7 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
           periods={blocks[sel.block].periods}
           index={sel.period}
           dates={blocks[sel.block].dates}
+          zoned={blocks[sel.block].zoned}
           steps={blocks[sel.block].steps}
           modelName={blocks.length > 1 ? blocks[sel.block].name : undefined}
           modelColor={blocks[sel.block].color}
@@ -1663,8 +1694,10 @@ function glyphVariantAt(periods: Period[], dates: Date[], steps: number[], i: nu
   return { key: `${periods[i].weathercode}|${night}|${phase}`, code: periods[i].weathercode, night, phase };
 }
 
-function DetailPanel({ periods, index, dates, steps, modelName, modelColor, units, timeFormat, lat, lon, paint, onClose }: {
-  periods: Period[]; index: number; dates: Date[]; steps: number[];
+function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColor, units, timeFormat, lat, lon, paint, onClose }: {
+  // `dates` are absolute — the glyph's day/night ground comes off the sun. `zoned` names the hours
+  // on the forecast point's clock, matching the column the tap came from.
+  periods: Period[]; index: number; dates: Date[]; zoned: Date[]; steps: number[];
   modelName?: string; modelColor: string;
   units: Units; timeFormat: TimeFormat; lat: number; lon: number;
   // Epoch that remounts the glyph canvases after this tab was hidden — see Meteogram.
@@ -1672,7 +1705,7 @@ function DetailPanel({ periods, index, dates, steps, modelName, modelColor, unit
   onClose: () => void;
 }) {
   const p = periods[index];
-  const date = dates[index];
+  const date = zoned[index]; // labels only
   const step = steps[index];
   // Row presence mirrors buildRows: a group renders when any period in the model has it, and a
   // missing value within a present group reads — like the canvas dashes.
