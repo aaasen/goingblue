@@ -449,10 +449,8 @@ function buildDayGroups(dates: Date[]): DayGroup[] {
   return groups;
 }
 
-function pressureLabel(level: 500 | 600 | 700, u: Units): string {
-  const ft: Record<number, string> = { 500: '18,000', 600: '14,000', 700: '10,000' };
-  const m: Record<number, string> = { 500: '5,500', 600: '4,200', 700: '3,000' };
-  return u === 'imperial' ? `${level}mb ~${ft[level]}ft` : `${level}mb ~${m[level]}m`;
+function pressureLabel(level: 500 | 600 | 700): string {
+  return `${level} hPa`;
 }
 
 // ── Row model ──────────────────────────────────────────────────────────────
@@ -492,13 +490,13 @@ function buildRows(periods: Period[], u: Units): Row[] {
   // Freezing level is an altitude, not a surface reading — it heads the upper-air sections with
   // its unit in the header, so the single row below it needs no label of its own.
   if (has((p) => p.freeze_m)) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Freezing level ${frU}` });
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Freezing level (${frU})` });
     rows.push({ kind: 'freeze', height: ROW_H.DATA, label: '' });
   }
 
   const hasCloud = has((p) => p.cloud_high) || has((p) => p.cloud_mid) || has((p) => p.cloud_low);
   if (hasCloud) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Cloud cover %' });
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Cloud cover' });
     if (has((p) => p.cloud_high)) rows.push({ kind: 'cloud-high', height: ROW_H.DATA, label: 'High' });
     if (has((p) => p.cloud_mid)) rows.push({ kind: 'cloud-mid', height: ROW_H.DATA, label: 'Mid' });
     if (has((p) => p.cloud_low)) rows.push({ kind: 'cloud-low', height: ROW_H.DATA, label: 'Low' });
@@ -506,10 +504,10 @@ function buildRows(periods: Period[], u: Units): Row[] {
 
   const hasUpper = has((p) => p.wind_500_kph) || has((p) => p.wind_600_kph) || has((p) => p.wind_700_kph);
   if (hasUpper) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Upper wind ${wU}` });
-    if (has((p) => p.wind_500_kph)) rows.push({ kind: 'wind-500', height: ROW_H.WIND, label: pressureLabel(500, u) });
-    if (has((p) => p.wind_600_kph)) rows.push({ kind: 'wind-600', height: ROW_H.WIND, label: pressureLabel(600, u) });
-    if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.WIND, label: pressureLabel(700, u) });
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Pressure level winds (${wU})` });
+    if (has((p) => p.wind_500_kph)) rows.push({ kind: 'wind-500', height: ROW_H.WIND, label: pressureLabel(500) });
+    if (has((p) => p.wind_600_kph)) rows.push({ kind: 'wind-600', height: ROW_H.WIND, label: pressureLabel(600) });
+    if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.WIND, label: pressureLabel(700) });
   }
 
   return rows;
@@ -1229,7 +1227,6 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
           if (pct == null) { els.push(centerText(`cc${ri}-${i}`, '—', cx, mid, fonts.data, C.nil)); return; }
           els.push(<Rect key={`ccbg${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W} height={row.height}
             color={`rgba(130,130,130,${(pct / 100).toFixed(2)})`} />);
-          els.push(centerText(`ccv${ri}-${i}`, `${pct}`, cx, mid, fonts.data, '#48484a'));
         });
         break;
       }
@@ -1468,10 +1465,9 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
 
 const LEADER_DOTS = '.'.repeat(160);
 
-// Detail-panel variant of pressureLabel: altitude in parens, e.g. "Wind 500mb (~18,000ft)".
-function upperWindLabel(level: 500 | 600 | 700, u: Units): string {
-  const [mb, altitude] = pressureLabel(level, u).split(' ');
-  return `Wind ${mb} (${altitude})`;
+// Detail-panel variant of pressureLabel, e.g. "Wind 500 hPa".
+function upperWindLabel(level: 500 | 600 | 700): string {
+  return `Wind ${pressureLabel(level)}`;
 }
 
 // The glyph appearance a period selects: what to draw, on which ground.
@@ -1537,9 +1533,9 @@ function DetailPanel({ periods, index, dates, steps, modelName, modelColor, unit
   }
   if (has((q) => q.wind_sfc_kph)) rows.push(['Wind', fmtWindFull(p.wind_sfc_kph, p.wind_sfc_dir, units)]);
   if (has((q) => q.freeze_m)) rows.push(['Freezing level', fmtFreezeFull(p.freeze_m, units)]);
-  if (has((q) => q.wind_500_kph)) rows.push([upperWindLabel(500, units), fmtWindFull(p.wind_500_kph, p.wind_500_dir, units)]);
-  if (has((q) => q.wind_600_kph)) rows.push([upperWindLabel(600, units), fmtWindFull(p.wind_600_kph, p.wind_600_dir, units)]);
-  if (has((q) => q.wind_700_kph)) rows.push([upperWindLabel(700, units), fmtWindFull(p.wind_700_kph, p.wind_700_dir, units)]);
+  if (has((q) => q.wind_500_kph)) rows.push([upperWindLabel(500), fmtWindFull(p.wind_500_kph, p.wind_500_dir, units)]);
+  if (has((q) => q.wind_600_kph)) rows.push([upperWindLabel(600), fmtWindFull(p.wind_600_kph, p.wind_600_dir, units)]);
+  if (has((q) => q.wind_700_kph)) rows.push([upperWindLabel(700), fmtWindFull(p.wind_700_kph, p.wind_700_dir, units)]);
   if (has((q) => q.cloud_high)) rows.push(['Cloud high (>8km)', p.cloud_high != null ? `${p.cloud_high}%` : '—']);
   if (has((q) => q.cloud_mid)) rows.push(['Cloud mid (3–8km)', p.cloud_mid != null ? `${p.cloud_mid}%` : '—']);
   if (has((q) => q.cloud_low)) rows.push(['Cloud low (<3km)', p.cloud_low != null ? `${p.cloud_low}%` : '—']);
