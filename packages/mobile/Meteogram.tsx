@@ -702,9 +702,11 @@ type Tile = { offset: number; width: number };
 // position.
 // Memoized for the same reason as CanvasTile: every prop is identity-stable while a selection
 // changes, and an unchecked re-render rebuilds the strip's elements and repaints its canvas.
-const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units, now, width, flatListRef, scrollX, fonts }: {
+const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units, now, width, flatListRef, scrollX, fonts, paint }: {
   periods: Period[]; dates: Date[]; steps: number[]; units: Units; now: number;
   width: number; flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value; fonts: Fonts;
+  // Epoch that remounts the canvas after this tab was hidden — see Meteogram.
+  paint: number;
 }) {
   const n = periods.length;
   const W = width;
@@ -959,7 +961,7 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
   return (
     <View style={styles.overviewStrip} {...pan.panHandlers}>
       <View style={{ width: W, height: STRIP_H, overflow: 'hidden' }}>
-        <Canvas style={{ width: W, height: STRIP_H }} pointerEvents="none">{els}</Canvas>
+        <Canvas key={paint} style={{ width: W, height: STRIP_H }} pointerEvents="none">{els}</Canvas>
         <Animated.View pointerEvents="none"
           style={[styles.overviewWindowFill, { width: W, transform: [{ translateX: win.fillX }, { scaleX: win.fillScale }] }]} />
         <Animated.View pointerEvents="none"
@@ -1400,26 +1402,29 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
 // A single canvas tile. Memoized so a ModelCanvas re-render (selection moving, panel state)
 // repaints no tiles: a Skia Canvas repaints on any React commit that reaches it, and each paint
 // is a full scene pass.
-const CanvasTile = memo(function CanvasTile({ tile, els, totalH, onPress }: {
-  tile: Tile; els: ReactNode[]; totalH: number; onPress: (locationX: number, tileOffset: number) => void;
+const CanvasTile = memo(function CanvasTile({ tile, els, totalH, paint, onPress }: {
+  tile: Tile; els: ReactNode[]; totalH: number; paint: number;
+  onPress: (locationX: number, tileOffset: number) => void;
 }) {
   return (
     // Tap → column index. tile.offset is static per tile, so the tap position never needs
     // the native-driven scrollX; a drag hands the responder to the FlatList and cancels
     // the press.
     <Pressable onPress={(e) => onPress(e.nativeEvent.locationX, tile.offset)}>
-      <Canvas style={{ width: tile.width, height: totalH }}>
+      <Canvas key={paint} style={{ width: tile.width, height: totalH }}>
         <Group transform={[{ translateX: -tile.offset }]}>{els}</Group>
       </Canvas>
     </Pressable>
   );
 });
 
-function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts, blockIndex, selected, onSelectColumn }: {
+function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat, lon, fonts, blockIndex, selected, onSelectColumn, paint }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
   periods: Period[]; rows: Row[]; dates: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; lat: number; lon: number; fonts: Fonts;
   blockIndex: number; selected: number | null; onSelectColumn: (block: number, period: number) => void;
+  // Epoch that remounts every canvas after this tab was hidden — see Meteogram.
+  paint: number;
 }) {
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<Tile>>(null);
@@ -1447,8 +1452,8 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
     onSelectColumn(blockIndex, Math.min(periods.length - 1, Math.floor((x - NAME_W) / CELL_W)));
   }, [onSelectColumn, blockIndex, periods.length]);
   const renderTile = useCallback(({ item: tile }: { item: Tile }) => (
-    <CanvasTile tile={tile} els={els} totalH={totalH} onPress={onPressTile} />
-  ), [els, totalH, onPressTile]);
+    <CanvasTile tile={tile} els={els} totalH={totalH} paint={paint} onPress={onPressTile} />
+  ), [els, totalH, paint, onPressTile]);
 
   // The highlight rides scrollX on the native driver. The animated graph is built once and the
   // selected column's edge pushed in with setValue: swapping in a fresh Animated.subtract per
@@ -1463,7 +1468,7 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
   return (
     <View>
       <OverviewStrip periods={periods} dates={dates} steps={steps} units={units} now={now}
-        width={screenW} flatListRef={flatListRef} scrollX={scrollX} fonts={fonts} />
+        width={screenW} flatListRef={flatListRef} scrollX={scrollX} fonts={fonts} paint={paint} />
       <View style={{ height: totalH }}>
       <Animated.FlatList
         ref={flatListRef}
@@ -1473,6 +1478,8 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
         showsHorizontalScrollIndicator
         scrollEventThrottle={16}
         keyExtractor={(tile) => String(tile.offset)}
+        // The paint epoch lives outside `data`, so tell the list its cells are stale when it moves.
+        extraData={paint}
         // Render more tiles ahead of the viewport so a Skia tile mounts (an expensive full-scene
         // paint) before it scrolls into view rather than as it appears — reduces scroll hitching.
         initialNumToRender={2}
@@ -1534,7 +1541,9 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
 
 // ── Public component ─────────────────────────────────────────────────────--
 
-export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMessage; units: Units; timeFormat: TimeFormat }) {
+export default function Meteogram({ msg, units, timeFormat, active }: {
+  msg: ForecastMessage; units: Units; timeFormat: TimeFormat; active: boolean;
+}) {
   // Memoized because `blocks` depends on it: a fresh array here would rebuild every block —
   // and with them every Skia scene — on each render, e.g. whenever the selection moves.
   const models = useMemo(() => modelsFromMask(msg.models_mask), [msg.models_mask]);
@@ -1548,6 +1557,18 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
 
   // A new message may have different period counts and models; drop the selection.
   useEffect(() => setSelection(null), [msg]);
+
+  // A Skia canvas draws into a drawable its layer only vends while the view is on screen, and hiding
+  // this tab (`display: none`) zeroes the layout underneath it — the drawables go with it, and
+  // nothing repaints them on the way back, so the meteogram returns blank. Bump a paint epoch on each
+  // hide→show; the canvases are keyed on it, so they come back as fresh surfaces. Only the canvases
+  // remount: the list around them keeps its scroll position, and the selection survives too.
+  const [paint, setPaint] = useState(0);
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && !wasActive.current) setPaint((epoch) => epoch + 1);
+    wasActive.current = active;
+  }, [active]);
 
   // Stable across renders so the memoized canvas tiles never see a new press handler.
   const selectColumn = useCallback((block: number, period: number) => setSelection({ block, period }), []);
@@ -1601,7 +1622,7 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
           <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} steps={b.steps} units={units} timeFormat={timeFormat} now={now} lat={msg.lat} lon={msg.lon} fonts={fonts}
             blockIndex={bi}
             selected={sel?.block === bi ? sel.period : null}
-            onSelectColumn={selectColumn} />
+            onSelectColumn={selectColumn} paint={paint} />
           {bi < blocks.length - 1 && <View style={styles.sep} />}
         </View>
       ))}
@@ -1617,6 +1638,7 @@ export default function Meteogram({ msg, units, timeFormat }: { msg: ForecastMes
           timeFormat={timeFormat}
           lat={msg.lat}
           lon={msg.lon}
+          paint={paint}
           onClose={() => setSelection(null)}
         />
       )}
@@ -1641,10 +1663,13 @@ function glyphVariantAt(periods: Period[], dates: Date[], steps: number[], i: nu
   return { key: `${periods[i].weathercode}|${night}|${phase}`, code: periods[i].weathercode, night, phase };
 }
 
-function DetailPanel({ periods, index, dates, steps, modelName, modelColor, units, timeFormat, lat, lon, onClose }: {
+function DetailPanel({ periods, index, dates, steps, modelName, modelColor, units, timeFormat, lat, lon, paint, onClose }: {
   periods: Period[]; index: number; dates: Date[]; steps: number[];
   modelName?: string; modelColor: string;
-  units: Units; timeFormat: TimeFormat; lat: number; lon: number; onClose: () => void;
+  units: Units; timeFormat: TimeFormat; lat: number; lon: number;
+  // Epoch that remounts the glyph canvases after this tab was hidden — see Meteogram.
+  paint: number;
+  onClose: () => void;
 }) {
   const p = periods[index];
   const date = dates[index];
@@ -1720,7 +1745,7 @@ function DetailPanel({ periods, index, dates, steps, modelName, modelColor, unit
         <View style={[styles.detailGlyphWrap, night && { backgroundColor: C.night }]}>
           {glyphVariants.map((variant) => (
             <View key={variant.key} style={[styles.detailGlyphLayer, variant.key !== activeGlyph.key && styles.detailGlyphHidden]}>
-              <Canvas style={{ width: 48, height: 48 }}>
+              <Canvas key={paint} style={{ width: 48, height: 48 }}>
                 {/* Same convention as the clouds row: cloudGlyph centers on top + 58/2, scaled
                     about the canvas center. */}
                 <Group transform={[{ scale: 0.75 }]} origin={vec(24, 24)}>

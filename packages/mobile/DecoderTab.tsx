@@ -359,7 +359,9 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
           </View>
 
           {/* Forecast meteogram */}
-          <Meteogram msg={decoded} units={units} timeFormat={timeFormat} />
+          {/* `active` is not for hiding anything — the meteogram's canvases lose their drawables
+              while this tab is hidden, so they need to know when to come back. */}
+          <Meteogram msg={decoded} units={units} timeFormat={timeFormat} active={active} />
         </>
       )}
 
