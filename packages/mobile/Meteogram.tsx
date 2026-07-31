@@ -361,6 +361,16 @@ function windUnit(u: Units) { return u === 'imperial' ? 'mph' : 'kph'; }
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 function dayLabel(d: Date): string { return `${DAYS[d.getDay()]} ${d.getDate()}`; }
+
+// A day's header has only that day's columns to sit in, and the first and last days of a forecast
+// are usually partial — a day that starts at 10pm gets two hourly columns, 76px, where "Wednesday
+// 24" needs around 90. So the label steps down through shorter forms until one fits: the weekday
+// abbreviates, then drops out entirely. The date is what identifies the column either way, and the
+// weekday of a partial day is readable from the full day beside it.
+function fitDayLabel(d: Date, available: number, font: SkFont): string {
+  const forms = [dayLabel(d), `${DAYS[d.getDay()].slice(0, 3)} ${d.getDate()}`, `${d.getDate()}`];
+  return forms.find((f) => font.getTextWidth(f) <= available) ?? forms[forms.length - 1];
+}
 // The hour splits into the number and its meridiem so the two can be drawn at different sizes.
 function hourParts(d: Date, step: number, timeFormat: TimeFormat): { num: string; suffix: string } {
   if (step >= 24) return { num: '', suffix: '' };
@@ -1371,10 +1381,10 @@ function ModelCanvas({ periods, rows, dates, steps, units, timeFormat, now, lat,
       )}
       <View pointerEvents="none" style={styles.stickyDayRow}>
         {dayGroups.map((group, i) => {
-          const label = dayLabel(group.date);
-          const textWidth = fonts.date.getTextWidth(label);
           const start = colLeft(group.start);
           const end = colLeft(group.end);
+          const label = fitDayLabel(group.date, end - start - 20, fonts.date);
+          const textWidth = fonts.date.getTextWidth(label);
           const stickyEnd = end - textWidth - 20;
           const translateX = stickyEnd > start
             ? scrollX.interpolate({
