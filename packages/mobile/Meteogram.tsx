@@ -307,9 +307,14 @@ function fmtRain(mm: number, u: Units): string {
   if (mm < 0.5) return '';
   return `${mm < 10 ? mm.toFixed(1) : Math.round(mm)}MM`;
 }
+// Column labels are abbreviated to thousands ("14k", "13.5k") — a grouped "14,000" outgrows the
+// cell. Metric already fits at 100 m granularity.
 function fmtFreeze(m: number | undefined, u: Units): string {
   if (m == null) return '';
-  if (u === 'imperial') return `${(Math.round((m * 3.28084) / 500) * 500).toLocaleString()}`;
+  if (u === 'imperial') {
+    const ft = Math.round((m * 3.28084) / 500) * 500;
+    return ft < 1000 ? `${ft}` : `${(ft / 1000).toFixed(ft % 1000 === 0 ? 0 : 1)}k`;
+  }
   return `${Math.round(m / 100) * 100}`;
 }
 function fmtWind(kph: number | undefined, u: Units): string {
@@ -336,6 +341,11 @@ function fmtSnowFull(cm: number, u: Units): string {
   }
   if (cm <= 0) return '0 cm';
   return `${cm < 10 ? cm.toFixed(1) : Math.round(cm)} cm`;
+}
+function fmtFreezeFull(m: number | undefined, u: Units): string {
+  if (m == null) return '—';
+  const v = u === 'imperial' ? Math.round((m * 3.28084) / 500) * 500 : Math.round(m / 100) * 100;
+  return `${v.toLocaleString()} ${freezeUnit(u)}`;
 }
 function fmtWindFull(kph: number | undefined, dir: number | undefined, u: Units): string {
   if (kph == null) return '—';
@@ -467,17 +477,23 @@ function buildRows(periods: Period[], u: Units): Row[] {
 
   const hasSurface =
     has((p) => p.precip) || has((p) => p.temp_c) ||
-    has((p) => p.snow_cm) || has((p) => p.rain_mm) || has((p) => p.freeze_m) ||
+    has((p) => p.snow_cm) || has((p) => p.rain_mm) ||
     has((p) => p.wind_sfc_kph) || has((p) => p.wind_gust_kph);
   if (hasSurface) {
     if (has((p) => p.temp_c))
       rows.push({ kind: 'temp', height: ROW_H.TEMP, label: `Temp ${tU}` });
-    if (has((p) => p.freeze_m)) rows.push({ kind: 'freeze', height: ROW_H.DATA, label: `Freezing ${frU}` });
     if (has((p) => p.precip) || has((p) => p.snow_cm) || has((p) => p.rain_mm))
       rows.push({ kind: 'accumulation', height: ROW_H.SNOW, label: 'Precip' });
     if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.WIND, label: `Wind ${wU}` });
     if (has((p) => p.wind_gust_kph)) rows.push({ kind: 'wind-gust', height: ROW_H.WIND, label: `Gust ${wU}` });
     if (has((p) => p.wind_sfc_dir)) rows.push({ kind: 'wind-dir', height: ROW_H.DIR, label: 'Dir' });
+  }
+
+  // Freezing level is an altitude, not a surface reading — it heads the upper-air sections with
+  // its unit in the header, so the single row below it needs no label of its own.
+  if (has((p) => p.freeze_m)) {
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Freezing level ${frU}` });
+    rows.push({ kind: 'freeze', height: ROW_H.DATA, label: '' });
   }
 
   const hasCloud = has((p) => p.cloud_high) || has((p) => p.cloud_mid) || has((p) => p.cloud_low);
@@ -889,14 +905,18 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
 
   // 1. Location-aware astronomical night shading. Partial rectangles place sunrise and sunset
   // within a column rather than rounding them to the forecast period boundary. The shading stops
-  // above the cloud-cover section: those rows read percentage as a gray alpha fill, and a tinted
-  // backdrop would make identical percentages look different by night than by day.
+  // at the first row that encodes its value as a fill — wind ribbons and cloud-cover alpha — since
+  // a tinted backdrop would make identical speeds or percentages look different by night than by
+  // day. Everything above reads as text or glyphs and is unharmed by the tint.
+  const TINTABLE_STOP = new Set<RowKind>([
+    'wind-sfc', 'wind-gust', 'wind-dir', 'cloud-high', 'cloud-mid', 'cloud-low',
+    'wind-500', 'wind-600', 'wind-700',
+  ]);
   const nightBottom = (() => {
     let y = ROW_H.DATE;
     let headerTop: number | undefined; // top of the section label immediately above this row
     for (const row of rows) {
-      if (row.kind === 'cloud-high' || row.kind === 'cloud-mid' || row.kind === 'cloud-low')
-        return headerTop ?? y;
+      if (TINTABLE_STOP.has(row.kind)) return headerTop ?? y;
       headerTop = row.kind === 'section' ? y : undefined;
       y += row.height;
     }
@@ -1037,8 +1057,8 @@ function buildScene({ periods, rows, dates, steps, units, timeFormat, now, lat, 
   }
 
   // Current time, positioned proportionally within its period. Run it through the date/time
-  // header and visual weather rows down to freezing level, excluding wind and lower sections.
-  const markerRows = new Set<RowKind>(['clouds', 'temp', 'accumulation', 'freeze']);
+  // header and visual weather rows down to precip, excluding wind and the sections below it.
+  const markerRows = new Set<RowKind>(['clouds', 'temp', 'accumulation']);
   let markerTop: number | undefined;
   let markerBottom: number | undefined;
   let markerY = ROW_H.DATE;
@@ -1516,8 +1536,7 @@ function DetailPanel({ periods, index, dates, steps, modelName, modelColor, unit
     rows.push(['Snow accumulation', fmtSnowFull(cumSnow, units)]);
   }
   if (has((q) => q.wind_sfc_kph)) rows.push(['Wind', fmtWindFull(p.wind_sfc_kph, p.wind_sfc_dir, units)]);
-  if (has((q) => q.freeze_m))
-    rows.push(['Freezing level', p.freeze_m != null ? `${fmtFreeze(p.freeze_m, units)} ${freezeUnit(units)}` : '—']);
+  if (has((q) => q.freeze_m)) rows.push(['Freezing level', fmtFreezeFull(p.freeze_m, units)]);
   if (has((q) => q.wind_500_kph)) rows.push([upperWindLabel(500, units), fmtWindFull(p.wind_500_kph, p.wind_500_dir, units)]);
   if (has((q) => q.wind_600_kph)) rows.push([upperWindLabel(600, units), fmtWindFull(p.wind_600_kph, p.wind_600_dir, units)]);
   if (has((q) => q.wind_700_kph)) rows.push([upperWindLabel(700, units), fmtWindFull(p.wind_700_kph, p.wind_700_dir, units)]);
