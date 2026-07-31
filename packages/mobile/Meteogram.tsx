@@ -63,16 +63,14 @@ const STRIP_GLYPH_Y = STRIP_DATE_Y + STRIP_DATE_H;
 const STRIP_HEAD_H = STRIP_GLYPH_Y + STRIP_GLYPH_H + STRIP_TVAL_H;
 const STRIP_SIL_H = 28;
 const STRIP_PRECIP_H = 13;
-// Height of one precip mark, and the grid the marks sit on: every three hours that carry any
+// Height of one precip mark, and the grid the marks sit on: every six hours that carry any
 // precipitation get a mark, whatever resolution the fill used there. The grid is fixed in time
 // rather than in periods, so how many marks an event draws is how many hours it lasts — a 12h
-// period of rain spans four segments and draws four drops. On a long forecast the segments are
-// only a few pixels wide and the marks overlap into a drift, which is the intended read.
-// 8px, not the 9 the sparse case would prefer: on a 12-day forecast a 3h segment is only ~4px
-// wide, and a taller drop merges with its neighbors into one sawtooth bar instead of a countable
-// row of marks.
+// period of rain spans two segments and draws two drops. Six hours rather than three because at
+// three the segments fall to ~4px on a 12-day forecast and the marks pile into each other; six
+// leaves them just touching there, and comfortably apart on a short one.
 const STRIP_MARK_H = 8;
-const STRIP_SEGMENT_H = 3;
+const STRIP_SEGMENT_H = 6;
 const STRIP_WIND_H = 9;
 // The resolution band along the very bottom: one block per period on the strip's time-linear axis.
 const STRIP_RES_H = 7;
@@ -118,6 +116,11 @@ const SC = {
   precipRain: '#a6a6a6',
   precipSnow: '#c6c6c6',
 } as const;
+
+// Bundled for precipMark, whose mixed mark needs both at once — plus the ground it strokes against
+// to hold the two halves of the split apart. The precip band sits on flat `bg`, below the
+// temperature silhouette and above the wind ribbon, so nothing else shows through there.
+const STRIP_MARK_COLORS = { rain: SC.precipRain, snow: SC.precipSnow, ground: SC.bg };
 
 const MODEL_COLORS: Record<string, string> = {
   'Auto': '#2a6bb5',
@@ -661,13 +664,13 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
 
   // Precipitation marks. An area graph is illegible in a 13px band — a heavy day and a trace one
   // differ by a couple of pixels — so the band is stamped with drops and flakes instead, on a fixed
-  // three-hour grid: every segment holding any precipitation gets a mark. Working in wall-clock
-  // hours rather than in periods keeps the marks honest across a mixed-resolution fill, where one
-  // 12h far-term period covers as much time as twelve hourly near-term ones — it draws four drops
-  // to their one apiece.
+  // six-hour grid: every segment holding any precipitation gets a mark. Working in wall-clock hours
+  // rather than in periods keeps the marks honest across a mixed-resolution fill, where one 12h
+  // far-term period covers as much time as twelve hourly near-term ones — it draws two drops to
+  // their one apiece.
   const markCy = silBottom + STRIP_PRECIP_H / 2;
   // Hours here are measured from the first day's local midnight, the same origin the axis is padded
-  // back to, so segment boundaries land on 00:00 / 03:00 / 06:00 rather than on the request hour.
+  // back to, so segment boundaries land on 00:00 / 06:00 / 12:00 rather than on the request hour.
   const startHour = padHours;
   const endHour = padHours + cum[n];
   let firstInSegment = 0;
@@ -684,11 +687,11 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, units
       snow ||= (periods[i].snow_cm ?? 0) > 0;
     }
     if (!rain && !snow) continue;
-    // Rain wins a segment that carries both. Two marks in one segment is a few pixels of mush at
-    // strip scale, and of the two the rain is what changes the day.
-    const kind = rain ? 'rain' : 'snow';
+    // A segment carrying both gets the mixed mark rather than two marks side by side, which at
+    // strip scale is a few pixels of mush.
+    const kind = rain && snow ? 'mix' : rain ? 'rain' : 'snow';
     const cx = (from + to) / 2 * pxPerHour;
-    els.push(...precipMark(kind, cx, markCy, STRIP_MARK_H, rain ? SC.precipRain : SC.precipSnow)
+    els.push(...precipMark(kind, cx, markCy, STRIP_MARK_H, STRIP_MARK_COLORS)
       .map((prim, pi) => glyphPrimitive(`sprecip${k}-${pi}`, prim, true)));
   }
 

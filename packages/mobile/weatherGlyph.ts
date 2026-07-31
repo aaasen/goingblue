@@ -254,18 +254,19 @@ function outlinedDrop(out: Prim[], cx: number, tipY: number, w: number, h: numbe
   out.push({ kind: 'path', d, fill: RAIN });
 }
 
-// Reference snowflake geometry: six rounded spokes, each ending in a three-spike fork
-// (the main tip plus two side spikes angled toward it).
-function flakeSegments(cx: number, cy: number, r: number) {
-  const segments: { x1: number; y1: number; x2: number; y2: number }[] = [];
+type Seg = { x1: number; y1: number; x2: number; y2: number };
 
-  for (let a = 0; a < 6; a++) {
+// Reference snowflake geometry: six rounded spokes, each ending in a three-spike fork (the main
+// tip plus two side spikes angled toward it). Grouped by spoke, since the mixed precip mark leaves
+// two of them out to clear room for its drop. Spoke a points at −90° + a·60°, so a=0 is straight
+// up and the indices run clockwise from there.
+function flakeSpokes(cx: number, cy: number, r: number): Seg[][] {
+  return Array.from({ length: 6 }, (_, a) => {
     const ang = -Math.PI / 2 + (a * Math.PI) / 3;
     const ux = Math.cos(ang), uy = Math.sin(ang);
-    const tx = cx + ux * r, ty = cy + uy * r;
     const branchX = cx + ux * r * 0.62;
     const branchY = cy + uy * r * 0.62;
-    segments.push({ x1: cx, y1: cy, x2: tx, y2: ty });
+    const segments: Seg[] = [{ x1: cx, y1: cy, x2: cx + ux * r, y2: cy + uy * r }];
 
     for (const turn of [-1, 1]) {
       const branchAng = ang + turn * Math.PI / 3;
@@ -276,10 +277,11 @@ function flakeSegments(cx: number, cy: number, r: number) {
         y2: branchY + Math.sin(branchAng) * r * 0.36,
       });
     }
-  }
-
-  return segments;
+    return segments;
+  });
 }
+
+const flakeSegments = (cx: number, cy: number, r: number): Seg[] => flakeSpokes(cx, cy, r).flat();
 
 const flakeLineWidth = (r: number) => Math.max(0.9, r * 0.18);
 
@@ -303,22 +305,59 @@ function flake(out: Prim[], cx: number, cy: number, r: number, separator = '#fff
   }
 }
 
-// A bare precipitation mark — one drop or one flake, no cloud — for bands too short to carry a
-// full glyph. The geometry is the same drop and flake that live inside the full icons, so the two
-// read as one set; what's dropped is the separator halo, since these are drawn on flat ground with
-// nothing behind them to punch out of. `h` is the mark's total height. The color is the caller's
-// to pick rather than the icon set's rain blue: these are used at sizes and densities where full
-// saturation shouts, so the caller usually wants them muted into their ground.
-export function precipMark(kind: 'rain' | 'snow', cx: number, cy: number, h: number, color: string): Prim[] {
-  if (kind === 'snow') {
-    const r = h / 2;
-    return flakeSegments(cx, cy, r).map((segment) => ({
-      kind: 'line' as const, ...segment, stroke: color, width: flakeLineWidth(r), cap: 'round' as const,
-    }));
-  }
-  // Keep the proportions of the large drop in the sleet glyph (half-width 3.5 against height 12.6),
-  // so a shrunk drop still looks like the set's drop rather than a bead or a spike.
-  return [{ kind: 'path', d: dropPath(cx, cy - h / 2, h * (3.5 / 12.6), h), fill: color }];
+export type PrecipMarkKind = 'rain' | 'snow' | 'mix';
+
+// Proportions of a drop in the icon set: half-width 3.5 against height 12.6. Shrinking a drop on
+// this ratio keeps it looking like the set's drop rather than a bead or a spike.
+const DROP_ASPECT = 3.5 / 12.6;
+// A mixed mark keeps both symbols at full size: the flake gives up its right, bottom-right and
+// bottom spokes, and the drop takes the wedge they vacate. Sharing one footprint this way beats
+// shrinking both to stand side by side — each stays as large as a lone mark — and the three
+// surviving arms still carry the flake's six-fold geometry.
+const MIX_CUT_SPOKES = new Set([1, 2, 3]); // −30° (right), +30° (bottom right), +90° (bottom)
+const MIX_DROP_H = 0.70;   // of h
+// Offset of the drop's center from the flake's, out along the vacated wedge's 30° bisector. The
+// surviving arms all point up or left, so nothing reaches into the drop's quarter.
+const MIX_DROP_DX = 0.26;  // of h, right of center
+const MIX_DROP_DY = 0.15;  // of h, below center
+// The drop carries a ground-colored outline so that where it does meet an arm the two stay
+// separate rather than merging into one blob.
+const MIX_SEAM = 0.10;     // of h
+
+const flakePrims = (cx: number, cy: number, r: number, color: string): Prim[] =>
+  flakeSegments(cx, cy, r).map((segment) => ({
+    kind: 'line' as const, ...segment, stroke: color, width: flakeLineWidth(r), cap: 'round' as const,
+  }));
+
+const dropPathAt = (cx: number, cy: number, h: number): string =>
+  dropPath(cx, cy - h / 2, h * DROP_ASPECT, h);
+
+// A bare precipitation mark — a drop, a flake, or both — with no cloud behind it, for bands too
+// short to carry a full glyph. The geometry is the same drop and flake that live inside the full
+// icons, so the two read as one set; what's dropped is the separator halo, since these are drawn
+// on flat ground with nothing behind them to punch out of. `h` is the mark's total height. Colors
+// are the caller's to pick rather than the icon set's rain blue and flake blue: these are used at
+// sizes and densities where full saturation shouts, so the caller usually wants them muted into
+// their ground. `ground` is that background — the mixed mark strokes it around its drop to hold
+// the drop off the flake's arms, so it has to match what the mark is drawn on.
+export function precipMark(
+  kind: PrecipMarkKind, cx: number, cy: number, h: number,
+  colors: { rain: string; snow: string; ground: string },
+): Prim[] {
+  if (kind === 'snow') return flakePrims(cx, cy, h / 2, colors.snow);
+  if (kind === 'rain') return [{ kind: 'path', d: dropPathAt(cx, cy, h), fill: colors.rain }];
+
+  const r = h / 2;
+  const lineWidth = flakeLineWidth(r);
+  const d = dropPathAt(cx + h * MIX_DROP_DX, cy + h * MIX_DROP_DY, h * MIX_DROP_H);
+  return [
+    ...flakeSpokes(cx, cy, r)
+      .filter((_, spoke) => !MIX_CUT_SPOKES.has(spoke))
+      .flat()
+      .map((seg): Prim => ({ kind: 'line', ...seg, stroke: colors.snow, width: lineWidth, cap: 'round' })),
+    { kind: 'path', d, fill: colors.ground, stroke: colors.ground, width: h * MIX_SEAM, cap: 'round' },
+    { kind: 'path', d, fill: colors.rain },
+  ];
 }
 
 // A cloud with a surface-matched halo, so it reads as a distinct shape when it overlaps the
