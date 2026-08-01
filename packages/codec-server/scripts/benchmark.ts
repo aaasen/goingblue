@@ -53,14 +53,15 @@ const BENCHMARKS_DIR = join(REPO_ROOT, "data", "benchmarks"); // timestamped HTM
 // ── Collection config ────────────────────────────────────────────────────────────
 
 // Protocol variable groups mirroring the app's selector (BuilderTab.tsx); the report's toggles.
-type GroupId = "clouds" | "highwind" | "freeze";
-const GROUP_IDS: GroupId[] = ["clouds", "highwind", "freeze"];
+type GroupId = "clouds" | "highwind" | "freeze" | "precip";
+const GROUP_IDS: GroupId[] = ["clouds", "highwind", "freeze", "precip"];
 const GROUP_LABEL: Record<GroupId, string> = {
   clouds: "Clouds", highwind: "High Altitude Winds", freeze: "Freezing Level",
+  precip: "Precip Chance",
 };
 // Short forms for the frontier chart, where each curve is labelled on the plot itself.
 const GROUP_SHORT: Record<GroupId, string> = {
-  clouds: "Cloud", highwind: "Wind", freeze: "FL",
+  clouds: "Cloud", highwind: "Wind", freeze: "FL", precip: "Precip",
 };
 
 // Open-Meteo hourly series behind the current wire format. The Historical Forecast API provides
@@ -209,11 +210,12 @@ const GROUP_VARS: Record<GroupId, string[]> = {
   clouds: ["cch", "ccm", "ccl"],
   highwind: ["w500", "w600", "w700"],
   freeze: ["freeze"],
+  precip: ["precip"],
 };
 const maskOf = (vars: string[]) => vars.reduce((m, v) => m | (1 << VARS_BIT[v]), 0);
 const BASE_MASK = maskOf(BASE_VARS);
 
-// All 8 variable-group combinations (bit i = GROUP_IDS[i]); combo 0b001 = Clouds only is the default.
+// All variable-group combinations (bit i = GROUP_IDS[i]).
 const COMBOS = [...Array(1 << GROUP_IDS.length).keys()];
 const comboGroups = (c: number): GroupId[] => GROUP_IDS.filter((_, i) => c & (1 << i));
 const comboMask = (c: number) => BASE_MASK | maskOf(comboGroups(c).flatMap((g) => GROUP_VARS[g]));
@@ -722,7 +724,7 @@ async function report(args: Args): Promise<void> {
 
     for (const mode of MODES) {
       // Build layouts with every column populated (varsMask = allMask), then override vars_mask per
-      // combo: columns encode independently, so one aggregation per seq serves all eight combos.
+      // combo: columns encode independently, so one aggregation per seq serves every combo.
       // "US" (American center) keeps the pressure/freeze columns in toFullPeriod.
       const params: ForecastParams = {
         locationIdx: 0, lat, lon, mode, utcOffsetHours,

@@ -6,7 +6,7 @@ I built Going Blue before a Denali ski expedition because I wasn't satisfied wit
 
 Going Blue has several advantages over existing tools:
 1. Choice of weather models. Going Blue uses forecasts from [Open-Meteo](https://open-meteo.com/), which supports over 30 different weather models from ECMWF, NOAA, and other weather services. You can choose whichever model you prefer and compare the forecasts across different models.
-2. Choice of weather variables. Going Blue forecasts always include temperature, wind, and precipitation. They optionally include detailed cloud cover, high altitude winds, and freezing level.
+2. Choice of weather variables. Going Blue forecasts always include temperature, wind, and precipitation. They optionally include precipitation chance, detailed cloud cover, high altitude winds, and freezing level.
 3. Meteogram visualization. Unlike other forecasts that operate over SMS that use abbreviated weather codes, Going Blue provides a rich visual representation of the forecast. 
 4. Information density. Going Blue's compact encoding scheme allows it to deliver over 100 hourly data points in a single 160-character message. That's a 3 day forecast at 1 hour resolution, a 7 day forecast at 3 hour resolution, or a 10 day forecast at 6 hour resolution.
 

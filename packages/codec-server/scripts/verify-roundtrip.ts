@@ -15,7 +15,8 @@
 import { encodeFillSeq, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import { eachForecast } from "./derive-lib.ts";
 import {
-  v1MessageToString, v1MessageFromString, layoutFor, maxFillSeq, DEFAULT_VARS_MASK, CODECS,
+  v1MessageToString, v1MessageFromString, layoutFor, maxFillSeq, DEFAULT_VARS_MASK,
+  ALWAYS_VARS_MASK, CODECS,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   type RequestContext,
 } from "@weather/protocol";
@@ -26,7 +27,7 @@ const UTC_OFFSET = 0;
 const REQUEST_HOURS_OF_DAY = [0, 13];
 const codec = CODECS[1];
 
-// Every mode × seq × mask × request hour is ~536 messages per forecast, so the full corpus
+// Every mode × seq × mask × request hour is ~800 messages per forecast, so the full corpus
 // (~100k train cells) is an hours-long run. The default stride samples an even spread that
 // still exercises every layout shape against ~500 real forecasts.
 const strideArg = process.argv.indexOf("--stride");
@@ -48,7 +49,9 @@ await eachForecast((hourly: HourlyData, _runHour: number) => {
 
   for (const hourOfDay of REQUEST_HOURS_OF_DAY) {
     const startEpochHour = day0 + hourOfDay;
-    for (const mask of [ALL_VARS, DEFAULT_VARS_MASK]) {
+    // ALWAYS_VARS_MASK is what a bare request (no `v:` token) encodes with — the lean base set
+    // including gust, with precip left out.
+    for (const mask of [ALL_VARS, DEFAULT_VARS_MASK, ALWAYS_VARS_MASK]) {
       for (const mode of [MODE_DETAIL, MODE_AUTO, MODE_RANGE]) {
         const params: ForecastParams = {
           locationIdx: 0, lat: 0, lon: 0,

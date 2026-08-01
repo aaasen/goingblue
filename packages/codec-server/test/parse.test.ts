@@ -106,12 +106,19 @@ describe("parseRequest", () => {
       (1 << VARS_BIT["w700"]),
     );
     expect(parseRequest("v:f").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["freeze"]));
+    expect(parseRequest("v:p").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["precip"]));
+  });
+
+  it("precip is opt-in, not part of the always-on set", () => {
+    expect(ALWAYS_VARS_MASK & (1 << VARS_BIT["precip"])).toBe(0);
+    expect(parseRequest("l:14k").varsMask & (1 << VARS_BIT["precip"])).toBe(0);
   });
 
   it("v: combines configurable variable group codes without delimiters", () => {
-    const p = parseRequest("v:cwf");
+    const p = parseRequest("v:pcwf");
     expect(p.varsMask).toBe(
       ALWAYS_VARS_MASK |
+      (1 << VARS_BIT["precip"]) |
       (1 << VARS_BIT["cch"]) |
       (1 << VARS_BIT["ccm"]) |
       (1 << VARS_BIT["ccl"]) |

@@ -635,9 +635,9 @@ export function parseRequest(body: string): ForecastParams {
         }
         if (mask) modelsMask = mask;
       } else if (key === "v") {
-        // Compact group codes need no delimiter (`v:cwf`). Keep accepting comma-separated and
+        // Compact group codes need no delimiter (`v:pcwf`). Keep accepting comma-separated and
         // long-form protocol variable names for requests produced by older clients.
-        const requestedVars = /^[cwf]+$/.test(val) ? [...val] : val.split(",");
+        const requestedVars = /^[pcwf]+$/.test(val) ? [...val] : val.split(",");
         for (const v of requestedVars) {
           const group = CONFIGURABLE_VAR_GROUPS[
             v as keyof typeof CONFIGURABLE_VAR_GROUPS

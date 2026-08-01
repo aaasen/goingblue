@@ -51,7 +51,7 @@ export const VARS_BIT: Record<string, number> = {
 
 // Core forecast variables are implicit in every request. The request's `v:` token only carries
 // user-configurable additions, which keeps the satellite message body as short as possible.
-export const ALWAYS_VARS = ["precip", "temp", "snow", "rain", "wind", "gust"] as const;
+export const ALWAYS_VARS = ["temp", "snow", "rain", "wind", "gust"] as const;
 export const ALWAYS_VARS_MASK = ALWAYS_VARS.reduce(
   (mask, variable) => mask | (1 << VARS_BIT[variable]),
   0,
@@ -59,6 +59,7 @@ export const ALWAYS_VARS_MASK = ALWAYS_VARS.reduce(
 
 // Single-character request codes for the user-configurable variable groups.
 export const CONFIGURABLE_VAR_GROUPS = {
+  p: ["precip"],
   c: ["cch", "ccm", "ccl"],
   w: ["w500", "w600", "w700"],
   f: ["freeze"],

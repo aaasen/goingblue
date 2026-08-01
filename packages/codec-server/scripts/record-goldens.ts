@@ -36,7 +36,7 @@ const SITES = [
 // also exercises the GEM horizon clamp (nulls past day 10 → seq search clamps).
 const VARIANTS = [
   { name: "auto-best", tokens: "p:a m:best c:160" },
-  { name: "detail-us-cwf", tokens: "p:d m:us c:160 v:cwf" },
+  { name: "detail-us-pcwf", tokens: "p:d m:us c:160 v:pcwf" },
   { name: "range-eu-320", tokens: "p:r m:eu c:320" },
   { name: "auto-ca-80-c", tokens: "p:a m:ca c:80 v:c" },
 ];
