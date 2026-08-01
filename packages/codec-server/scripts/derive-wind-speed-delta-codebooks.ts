@@ -2,9 +2,15 @@
  * Derive wind-speed-delta codebooks keyed by (resolution, level), plus upper-Δ-conditioned
  * tables for the 600/700 hPa columns.
  *
- * The quantized speed domain is 0..31 (5 mph steps → 155 mph cap; the old 0..15 domain clamped
- * 6% of 1h and 8.6% of 6h 500 hPa values at 75 mph). Deltas -31..31 (63 symbols) fit directly
+ * The quantized speed domain is the extended Beaufort scale, forces 0..17, for EVERY wind
+ * column (see quantWind in derive-lib.ts / v1.ts — chosen 2026-07-31 over linear and other
+ * companded scales, analyze-wind-scale-heldout.ts). Deltas -17..17 (35 symbols) fit directly
  * in the alphabet — no escape needed.
+ *
+ * The surface column is conditioned on the gust column's same-period delta on the wire (gust
+ * decodes first — see derive-gust-delta-codebooks.ts, which owns those tables and charges
+ * sfc's wire cost); the [res][level 0] tables emitted here are sfc's FALLBACK for messages
+ * without gust in vars_mask, so their costBits stay 0 like 600/700's.
  *
  * Schemes compared held-out (5-fold, split by location, rANS cost — see analyze-wind-heldout.ts):
  *
@@ -26,22 +32,24 @@
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import { VARS_BIT, type Period } from "@weather/protocol";
 import {
-  deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone,
+  deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone, quantWind,
   type CellCounter, type DerivedTables,
 } from "./derive-lib.ts";
 
 const NRES = 5;
-const NLEVEL = 4;                  // sfc, 500, 600, 700 (WIND_COLUMNS order in v1.ts)
+const NLEVEL = 4;                  // sfc, 500, 600, 700
 const NBUCKET = 5;                 // upper Δ buckets: ≤-2, -1, 0, +1, ≥+2
-const SPEED_MAX = 31;              // must match WIND_SPEED_BITS = 5 in v1.ts
-const NSYM = 2 * SPEED_MAX + 1;    // 63: deltas -31..31
-const KPH_PER_STEP = 5 * 1.609344; // must match v1.ts
+const SPEED_MAX = 17;              // extended Beaufort force domain, must match v1.ts
+const NSYM = 2 * SPEED_MAX + 1;    // 35: deltas -17..17
 const WIND_MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
 const SPEED_FIELDS = ["wind_sfc_kph", "wind_500_kph", "wind_600_kph", "wind_700_kph"] as const;
-const UPPER_OF = [-1, -1, 1, 2];   // must match v1.ts
+const UPPER_OF = [-1, -1, 1, 2];   // 600 | 500Δ, 700 | 600Δ — must match v1.ts
+// [res][level] wire cost: only 500 encodes there in corpus conditions — sfc is charged under
+// the gust script's conditioned tables (gust always present in counting), 600/700 under the
+// upper-Δ tables. A symbol is never charged twice.
+const CHARGED = [false, true, false, false];
 
-const qSpeed = (kph: number | undefined) =>
-  Math.min(Math.floor(((kph ?? 0) / KPH_PER_STEP) + 1e-9), SPEED_MAX);
+const qSpeed = (kph: number | undefined, _level: number) => quantWind(kph);
 // must match upperDeltaBucket in entropy.ts
 const dBucket = (d: number) => (d <= -2 ? 0 : d === -1 ? 1 : d === 0 ? 2 : d === 1 ? 3 : 4);
 
@@ -74,7 +82,7 @@ export function counter(): CellCounter {
         if (n < 2) continue;
         const rows = aggregateHourly(h, h.time, n, resIdx, start);
         const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US", resIdx));
-        const sp = SPEED_FIELDS.map((f) => periods.map((p) => qSpeed((p as any)[f])));
+        const sp = SPEED_FIELDS.map((f, L) => periods.map((p) => qSpeed((p as any)[f], L)));
         for (let L = 0; L < NLEVEL; L++) {
           const U = UPPER_OF[L];
           for (let p = 1; p < n; p++) {
@@ -99,9 +107,7 @@ export function counter(): CellCounter {
       };
     },
     costBits(counts) {
-      // Wire cost: sfc/500 symbols under [res][level]; 600/700 symbols under the upper-Δ tables
-      // (their upper column is always present in corpus counting), so their [res][level] slots
-      // stay 0 — a symbol is never charged twice.
+      // See CHARGED above — only 500's [res][level] slots carry wire cost here.
       const L = new Float64Array(nSlots);
       const put = (start: number, row: number[]) => {
         const c = rowCostBits(scaledWeights(row));
@@ -109,7 +115,7 @@ export function counter(): CellCounter {
       };
       levelRows(counts).forEach(({ rows, marginal }, res) => {
         rows.forEach((row, l) => {
-          if (UPPER_OF[l] >= 0) return;
+          if (!CHARGED[l]) return;
           put(LEVEL + (res * NLEVEL + l) * NSYM, sum(row) > 0 ? row : marginal);
         });
         for (let b = 0; b < NBUCKET; b++) {

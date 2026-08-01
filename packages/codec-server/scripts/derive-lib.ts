@@ -14,6 +14,25 @@ import { dbLocations, listCells, loadCell, openDb } from "./corpus-db.ts";
 // reserved for the benchmark report and never influence a codebook.
 export const DERIVE_SOURCE = "best_match";
 
+// ── Wind quantization (must match v1.ts) ────────────────────────────────────────
+// Every wind speed column quantizes to the extended Beaufort scale (forces 0..17): band lower
+// bounds in km/h — the standard 13 forces plus the force 13..17 extension so hurricane-force
+// gusts and jet winds don't clip (corpus maxima: gust 225, 500 hPa 293 kph). Chosen 2026-07-31:
+// held-out sfc+gust 2.638 b/period vs 3.595 under linear 5 kph (analyze-wind-scale-heldout.ts);
+// the scale spends resolution where wind differences are perceptible, which is also where the
+// probability mass moves.
+export const BEAUFORT_KPH_LOWER = [0, 1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118, 134, 150, 167, 184, 202];
+export const BEAUFORT_MAX = BEAUFORT_KPH_LOWER.length - 1; // 17
+// Direction symbols are calm-gated at force ≤ 1 (< 6 kph) — the closest match to the old
+// sub-one-step gate (< 5 kph), where direction is weather-model dither.
+export const CALM_MAX_FORCE = 1;
+export function quantWind(kph: number | undefined): number {
+  const v = kph ?? 0;
+  let f = 0;
+  while (f < BEAUFORT_MAX && v >= BEAUFORT_KPH_LOWER[f + 1]) f++;
+  return f;
+}
+
 // Tables a derive script contributes, keyed by their codebooks.gen.ts constant name.
 export type DerivedTables = Record<string, number[] | number[][] | number[][][]>;
 

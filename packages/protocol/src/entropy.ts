@@ -6,6 +6,7 @@ import {
   WIND_DIR_BOOTSTRAP_WEIGHTS, WIND_DIR_WEIGHTS_BY_RES, WIND_DIR_UPPER_WEIGHTS_BY_RES,
   WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL, WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES,
   FREEZE_DELTA_WEIGHTS_BY_RES, FREEZE_DELTA_TEMP_WEIGHTS_BY_RES,
+  GUST_DELTA_WEIGHTS_BY_RES, SFC_DELTA_GUST_WEIGHTS_BY_RES,
   CLOUD_LOW_DELTA_WEIGHTS, CLOUD_MID_DELTA_WEIGHTS, CLOUD_HIGH_DELTA_WEIGHTS,
   TEMP_DELTA_BOOTSTRAP_WEIGHTS, TEMP_DELTA_WEIGHTS_BY_RES,
   PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES,
@@ -139,8 +140,35 @@ export const WEATHERCODE_CLASS: readonly number[] = [
 
 const NDIR = 8;
 
-// must mirror WIND_SPEED_BITS in v1.ts (0..31)
-export const WIND_SPEED_DELTA_MAX = 31;
+// ── Wind speed scale ────────────────────────────────────────────────────────────
+// Every wind speed column (surface, gust, 500/600/700 hPa) quantizes to the EXTENDED BEAUFORT
+// scale: forces 0..17, band lower bounds in km/h below — the standard 13 forces plus the
+// force 13..17 extension so hurricane-force gusts and jet winds don't clip (corpus maxima:
+// gust 225, 500 hPa 293 kph; force 17 is ≥202). Chosen 2026-07-31 over linear and sqrt/lin-log
+// companded scales (held-out sfc+gust 2.638 vs 3.595 b/period under linear 5 kph — see
+// analyze-wind-scale-heldout.ts): Beaufort bands track perceptible wind differences, which is
+// also where the delta probability mass moves. Decoded values are band midpoints (kph); the
+// bounds are wire format and pinned in V1_CODEBOOKS below.
+export const BEAUFORT_KPH_LOWER: readonly number[] =
+  [0, 1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118, 134, 150, 167, 184, 202];
+export const BEAUFORT_MAX = BEAUFORT_KPH_LOWER.length - 1; // 17
+export function quantWind(kph: number): number {
+  let f = 0;
+  while (f < BEAUFORT_MAX && kph >= BEAUFORT_KPH_LOWER[f + 1]) f++;
+  return f;
+}
+// Band midpoint for decode; force 0 is calm (0), force 17's open band reads as ~211 kph.
+export function beaufortMidKph(force: number): number {
+  if (force <= 0) return 0;
+  if (force >= BEAUFORT_MAX) return 211;
+  return (BEAUFORT_KPH_LOWER[force] + BEAUFORT_KPH_LOWER[force + 1]) / 2;
+}
+// Direction symbols are calm-gated at force ≤ 1 (< 6 kph, ≈ the old sub-one-step gate) —
+// direction down there is weather-model dither.
+export const CALM_MAX_FORCE = 1;
+
+// Wind speed deltas: -17..17 over the force domain (35 symbols), shared by every wind column.
+export const WIND_SPEED_DELTA_MAX = BEAUFORT_MAX;
 
 // Buckets an upper-level same-period speed delta for table selection (must match the derive
 // script): ≤-2, -1, 0, +1, ≥+2.
@@ -219,6 +247,14 @@ export interface ClassBooks {
   // `upperDelta` is the upper level's same-period delta (null when that column is absent or this
   // level has none). See codec-server/scripts/derive-wind-speed-delta-codebooks.ts.
   windSpeedBook(res: number, level: number, upperDelta: number | null): CodeBook;
+  // The codebook for one gust delta. Gust decodes FIRST among the wind columns (no context of
+  // its own) — chosen so the surface column can lean on it, and can one day become optional
+  // without touching gust. See codec-server/scripts/derive-gust-delta-codebooks.ts.
+  gustDeltaBook(res: number): CodeBook;
+  // The codebook for one SURFACE wind speed delta. `gustDelta` is the gust column's same-period
+  // decoded delta (free context — gusts and sustained wind move together), or null when gust is
+  // absent from vars_mask, which falls back to the unconditioned [res][level 0] wind table.
+  sfcSpeedBook(res: number, gustDelta: number | null): CodeBook;
   // The codebook for one freeze delta. `tempDelta` is the same period's decoded temp delta (the
   // post-clamp reconstruction, never the raw input), or null when temp is absent from vars_mask
   // — the res-keyed fallback (the tempΔ marginal). The freezing level is where the 0°C isotherm
@@ -259,6 +295,9 @@ function buildClassBooks(t: ClassTableSet): ClassBooks {
   const freezeDeltaTablesByRes = t.FREEZE_DELTA_WEIGHTS_BY_RES.map(buildTable);
   const freezeDeltaTempTables = t.FREEZE_DELTA_TEMP_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
 
+  const gustDeltaTablesByRes = t.GUST_DELTA_WEIGHTS_BY_RES.map(buildTable);
+  const sfcDeltaGustTables = t.SFC_DELTA_GUST_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
+
   const makeValueCodec = (bootstrapWeights: number[], weightsByRes: number[][][], ctxOf: (prev: number) => number) => {
     const bootstrap = buildTable(bootstrapWeights);
     const tables = weightsByRes.map((rows) => rows.map(buildTable));
@@ -285,6 +324,14 @@ function buildClassBooks(t: ClassTableSet): ClassBooks {
         ? windSpeedTables[res][level]
         : windSpeedUpperTables[res][upperDeltaBucket(upperDelta)];
     },
+    gustDeltaBook(res) {
+      return gustDeltaTablesByRes[res];
+    },
+    sfcSpeedBook(res, gustDelta) {
+      return gustDelta === null
+        ? windSpeedTables[res][0]
+        : sfcDeltaGustTables[res][upperDeltaBucket(gustDelta)];
+    },
     freezeDeltaBook(res, tempDelta) {
       return tempDelta === null
         ? freezeDeltaTablesByRes[res]
@@ -307,6 +354,7 @@ function buildClassBooks(t: ClassTableSet): ClassBooks {
 const BASE_TABLES: ClassTableSet = {
   CLOUD_LOW_DELTA_WEIGHTS, CLOUD_MID_DELTA_WEIGHTS, CLOUD_HIGH_DELTA_WEIGHTS,
   FREEZE_DELTA_WEIGHTS_BY_RES, FREEZE_DELTA_TEMP_WEIGHTS_BY_RES,
+  GUST_DELTA_WEIGHTS_BY_RES, SFC_DELTA_GUST_WEIGHTS_BY_RES,
   PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES,
   SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES,
   RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_RES,
@@ -365,6 +413,8 @@ export const encodeWeathercode = BASE.encodeWeathercode;
 export const decodeWeathercode = BASE.decodeWeathercode;
 export const windDirBook = BASE.windDirBook;
 export const windSpeedBook = BASE.windSpeedBook;
+export const gustDeltaBook = BASE.gustDeltaBook;
+export const sfcSpeedBook = BASE.sfcSpeedBook;
 export const freezeDeltaBook = BASE.freezeDeltaBook;
 export const CLOUD_LOW_DELTA = BASE.cloudLowDelta;
 export const CLOUD_MID_DELTA = BASE.cloudMidDelta;
@@ -411,6 +461,10 @@ const bundleOf = (t: ClassTableSet) => ({
     byRes: t.FREEZE_DELTA_WEIGHTS_BY_RES.map(qf),
     tempByRes: t.FREEZE_DELTA_TEMP_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
   },
+  // Gust decodes first (res-keyed); the surface column keys on gust's same-period delta via
+  // upperDeltaBucket, falling back to windSpeedDelta[res][0] when gust is absent.
+  gustDelta: { byRes: t.GUST_DELTA_WEIGHTS_BY_RES.map(qf) },
+  sfcDeltaGust: { byRes: t.SFC_DELTA_GUST_WEIGHTS_BY_RES.map((rows) => rows.map(qf)) },
   cloudLowDelta: qf(t.CLOUD_LOW_DELTA_WEIGHTS),
   cloudMidDelta: qf(t.CLOUD_MID_DELTA_WEIGHTS),
   cloudHighDelta: qf(t.CLOUD_HIGH_DELTA_WEIGHTS),
@@ -427,6 +481,7 @@ export const V1_CODEBOOKS = {
   rans: { probBits: RANS_PROB_BITS, stateLow: RANS_L, wordBits: RANS_WORD_BITS },
   ...bundleOf(BASE_TABLES),
   weathercodeClassOf: WEATHERCODE_CLASS, // keys the wet columns' tables — drift desyncs them silently
+  beaufortKphLower: BEAUFORT_KPH_LOWER,  // wind quantization geometry — drift re-means every speed symbol
   // Classes 1..CODEBOOK_CLASSES-1 (class 0 is the base bundle spread above).
   classes: CLASS_TABLES.map(bundleOf),
 } as const;

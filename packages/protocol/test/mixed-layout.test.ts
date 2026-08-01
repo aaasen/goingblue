@@ -15,10 +15,12 @@ import {
   type Period,
   type RequestContext,
   type FillLayout,
+  beaufortMidKph,
 } from "../src/index.js";
 
-// Every variable (bit 12 is `rain`; bit 13, formerly tmin, is reserved).
-const ALL_VARS = ((1 << 13) - 1) & ~(1 << 8); // bit 8 (formerly cloud_total) is reserved
+// Every variable (bit 8 is `gust`; bit 12 is `rain`; bit 13, formerly tmin, is reserved).
+// periodAt sets no gust value, so the always-on gust column encodes as calm — harmless here.
+const ALL_VARS = (1 << 13) - 1;
 
 // Request: 2026-07-12 at 13:00 local, UTC-9. Detail mode unless a test says otherwise — its
 // path has the richest resolution mixes (1h/3h/6h/12h in one message).
@@ -35,13 +37,15 @@ function periodAt(i: number): Period {
     snow_cm: i % 4 === 0 ? i % 11 : 0,
     rain_mm: i % 3 === 0 ? (i % 5) : 0,
     freeze_m: (2 + (i % 3)) * 304.8,
-    wind_sfc_kph: ((i % 6) + 1) * 5 * 1.609344,
+    // Wind speeds are Beaufort band midpoints (they round-trip exactly); surface forces stay
+    // above the calm gate (force ≤ 1) so directions round-trip too.
+    wind_sfc_kph: beaufortMidKph((i % 6) + 2),
     wind_sfc_dir: i % 8,
-    wind_500_kph: ((i % 4) + 4) * 5 * 1.609344,
+    wind_500_kph: beaufortMidKph((i % 4) + 4),
     wind_500_dir: (i + 2) % 8,
-    wind_600_kph: ((i % 5) + 3) * 5 * 1.609344,
+    wind_600_kph: beaufortMidKph((i % 5) + 3),
     wind_600_dir: (i + 4) % 8,
-    wind_700_kph: ((i % 3) + 2) * 5 * 1.609344,
+    wind_700_kph: beaufortMidKph((i % 3) + 2),
     wind_700_dir: (i + 6) % 8,
     cloud_high: Math.round((i % 8) * 100 / 7),
     cloud_mid: Math.round(((i + 3) % 8) * 100 / 7),

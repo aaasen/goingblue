@@ -36,6 +36,7 @@ import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast
 import { VARS_BIT, type Period } from "@weather/protocol";
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone,
+  quantWind, CALM_MAX_FORCE,
   type CellCounter, type DerivedTables,
 } from "./derive-lib.ts";
 
@@ -46,11 +47,10 @@ const SPEED_FIELDS = ["wind_sfc_kph", "wind_500_kph", "wind_600_kph", "wind_700_
 const DIR_FIELDS = ["wind_sfc_dir", "wind_500_dir", "wind_600_dir", "wind_700_dir"] as const;
 // level -> the level it conditions on when present (already decoded), or -1 (see v1.ts)
 const UPPER_OF = [-1, -1, 1, 2];
-const KPH_PER_STEP = 5 * 1.609344; // must match v1.ts
-const SPEED_MAX = 31;              // must match v1.ts (WIND_SPEED_BITS = 5)
-
-const qSpeed = (kph: number | undefined) =>
-  Math.min(Math.floor(((kph ?? 0) / KPH_PER_STEP) + 1e-9), SPEED_MAX);
+// Speeds only feed the calm gate here (force ≤ CALM_MAX_FORCE ⇒ no direction symbol), but the
+// gate must mirror the wire's own quantization (extended Beaufort, quantWind) or the trained
+// tables see a different symbol stream.
+const qSpeed = (kph: number | undefined, _level: number) => quantWind(kph);
 
 export function counter(): CellCounter {
   const tables = [
@@ -87,19 +87,19 @@ export function counter(): CellCounter {
         if (n < 2) continue;
         const rows = aggregateHourly(h, h.time, n, resIdx, start);
         const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US", resIdx));
-        const sp = SPEED_FIELDS.map((f) => periods.map((p) => qSpeed((p as any)[f])));
+        const sp = SPEED_FIELDS.map((f, L) => periods.map((p) => qSpeed((p as any)[f], L)));
         const dr = DIR_FIELDS.map((f) => periods.map((p) => (((p as any)[f] as number) ?? 0) % 8));
         // Displayed dir under calm gating: last encoded dir, 0 before any (mirrors v1.ts).
         const disp = SPEED_FIELDS.map((_, L) => {
           let eff = 0;
-          return periods.map((_, p) => (sp[L][p] > 0 ? (eff = dr[L][p]) : eff));
+          return periods.map((_, p) => (sp[L][p] > CALM_MAX_FORCE ? (eff = dr[L][p]) : eff));
         });
         for (let L = 0; L < SPEED_FIELDS.length; L++) {
           const U = UPPER_OF[L];
           const TRANS = U >= 0 ? HIGH : LOW;
           let prev: number | null = null;
           for (let p = 0; p < n; p++) {
-            if (sp[L][p] === 0) continue; // calm: no symbol on the wire
+            if (sp[L][p] <= CALM_MAX_FORCE) continue; // calm (< 6 kph): no symbol on the wire
             const d = dr[L][p];
             if (prev === null) add(BOOT + d);
             else {

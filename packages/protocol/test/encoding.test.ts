@@ -19,7 +19,12 @@ import {
   ACCUM_BITS,
   SNOW_K,
   RAIN_K,
+  beaufortMidKph,
 } from "../src/index.js";
+
+// Wind speeds quantize to extended Beaufort forces; tests express speeds as forces and expect
+// the decoded band midpoint. A midpoint input round-trips exactly.
+const bmid = beaufortMidKph;
 
 // Reproduce what the codec stores for a sqrt-companded accumulation, so round-trip
 // expectations track the quantization exactly rather than the raw input.
@@ -38,14 +43,14 @@ const PERIOD: Period = {
   snow_cm: 4 * 2.54,       // ~10cm — sqrt-companded, compared via qSnow()
   rain_mm: 6.5,            // sqrt-companded, compared via qRain()
   freeze_m: 6 * 304.8,     // 6000 ft in m — round-trips exactly
-  wind_sfc_kph: 10 * 1.609344,
+  wind_sfc_kph: 16,        // force 3 midpoint — all wind speeds round-trip as band midpoints
   wind_sfc_dir: 2,
-  wind_gust_kph: 20 * 1.609344,
-  wind_500_kph: 30 * 1.609344,
+  wind_gust_kph: 34,       // force 5
+  wind_500_kph: 44.5,      // force 6
   wind_500_dir: 4,
-  wind_600_kph: 25 * 1.609344,
+  wind_600_kph: 34,        // force 5
   wind_600_dir: 3,
-  wind_700_kph: 15 * 1.609344,
+  wind_700_kph: 24.5,      // force 4
   wind_700_dir: 2,
   cloud_high: 60,
   cloud_mid: 40,
@@ -283,9 +288,9 @@ describe("v1 round-trip encoding", () => {
     }
   });
 
-  it("clamps wind speed to 5 mph steps", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, wind_700_kph: 27 * 1.609344 }]] }));
-    expect(decoded.periods[0][0].wind_700_kph).toBeCloseTo(25 * 1.609344, 3);
+  it("quantizes wind speed to Beaufort band midpoints", () => {
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, wind_700_kph: 43.4 }]] }));
+    expect(decoded.periods[0][0].wind_700_kph).toBeCloseTo(bmid(6), 3); // 39-49 kph band
   });
 
   it("clamps snow to 200 cm max", () => {
@@ -395,19 +400,19 @@ describe("v1 round-trip encoding", () => {
   // Surface wind speed is an anchor + entropy-coded period-over-period delta (like temp);
   // direction is entropy-coded under (resolution, prev, upper-level) context, with calm periods
   // carrying no direction symbol at all.
-  const WIND_STEP = 5 * 1.609344;
+  // Speeds below are given as bmid(force) — exact band midpoints, which round-trip unchanged.
   // 12h periods: these columns are shorter than the 49 periods any all-1h layout must have (see
   // uniformLayout). The 1h wind path is covered separately below.
   const windMsg = (periods: Period[], opts: { hourly?: boolean } = {}) =>
     msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] }, opts);
 
   it("round-trips varied surface wind speeds (entropy-coded deltas) and directions", () => {
-    const steps = [3, 5, 4, 6, 7, 4, 5, 3, 6, 5];
+    const forces = [3, 5, 4, 6, 7, 4, 5, 3, 6, 5];
     const dirs = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1];
-    const periods = steps.map((s, i) => ({ weathercode: 0, wind_sfc_kph: s * WIND_STEP, wind_sfc_dir: dirs[i] }));
+    const periods = forces.map((f, i) => ({ weathercode: 0, wind_sfc_kph: bmid(f), wind_sfc_dir: dirs[i] }));
     const decoded = roundTrip(windMsg(periods));
     decoded.periods[0].forEach((p, i) => {
-      expect(p.wind_sfc_kph).toBeCloseTo(steps[i] * WIND_STEP, 3);
+      expect(p.wind_sfc_kph).toBeCloseTo(bmid(forces[i]), 3);
       expect(p.wind_sfc_dir).toBe(dirs[i]);
     });
   });
@@ -419,8 +424,8 @@ describe("v1 round-trip encoding", () => {
   });
 
   it("encodes a near-constant surface wind speed column smaller than a wide-swinging one", () => {
-    const flat = Array.from({ length: 64 }, () => ({ weathercode: 0, wind_sfc_kph: 7 * WIND_STEP, wind_sfc_dir: 0 }));
-    const swings = Array.from({ length: 64 }, (_, i) => ({ weathercode: 0, wind_sfc_kph: (i % 2 === 0 ? 2 : 13) * WIND_STEP, wind_sfc_dir: 0 }));
+    const flat = Array.from({ length: 64 }, () => ({ weathercode: 0, wind_sfc_kph: bmid(7), wind_sfc_dir: 0 }));
+    const swings = Array.from({ length: 64 }, (_, i) => ({ weathercode: 0, wind_sfc_kph: bmid(i % 2 === 0 ? 2 : 13), wind_sfc_dir: 0 }));
     expect(v1MessageToString(windMsg(flat, { hourly: true })).length)
       .toBeLessThan(v1MessageToString(windMsg(swings, { hourly: true })).length);
   });
@@ -430,60 +435,60 @@ describe("v1 round-trip encoding", () => {
     // resolution needs its own round-trip — 49 periods is the shortest all-1h layout.
     const periods = Array.from({ length: 49 }, (_, i) => ({
       weathercode: 0,
-      wind_sfc_kph: (4 + (i % 5)) * WIND_STEP,
+      wind_sfc_kph: bmid(4 + (i % 5)),
       wind_sfc_dir: i % 8,
     }));
     const decoded = roundTrip(
       msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] }, { hourly: true }));
     expect(decoded.periodHours).toEqual(Array(49).fill(1));
     decoded.periods[0].forEach((p, i) => {
-      expect(p.wind_sfc_kph).toBeCloseTo((4 + (i % 5)) * WIND_STEP, 3);
+      expect(p.wind_sfc_kph).toBeCloseTo(bmid(4 + (i % 5)), 3);
       expect(p.wind_sfc_dir).toBe(i % 8);
     });
   });
 
-  it("round-trips wind speeds above the old 75 mph cap (5-bit domain, up to 155 mph)", () => {
+  it("round-trips hurricane-force jet winds (extended Beaufort, forces 13..17)", () => {
     const periods = [[
-      { ...PERIOD, wind_500_kph: 24 * WIND_STEP },  // 120 mph
-      { ...PERIOD, wind_500_kph: 28 * WIND_STEP },  // 140 mph
-      { ...PERIOD, wind_500_kph: 31 * WIND_STEP },  // 155 mph (domain max)
+      { ...PERIOD, wind_500_kph: bmid(13) },
+      { ...PERIOD, wind_500_kph: bmid(15) },
+      { ...PERIOD, wind_500_kph: bmid(17) }, // open-ended top band (≥202 kph)
     ]];
     const decoded = roundTrip(msg({ periods }));
-    expect(decoded.periods[0][0].wind_500_kph).toBeCloseTo(24 * WIND_STEP, 3);
-    expect(decoded.periods[0][1].wind_500_kph).toBeCloseTo(28 * WIND_STEP, 3);
-    expect(decoded.periods[0][2].wind_500_kph).toBeCloseTo(31 * WIND_STEP, 3);
+    expect(decoded.periods[0][0].wind_500_kph).toBeCloseTo(bmid(13), 3);
+    expect(decoded.periods[0][1].wind_500_kph).toBeCloseTo(bmid(15), 3);
+    expect(decoded.periods[0][2].wind_500_kph).toBeCloseTo(bmid(17), 3);
   });
 
-  it("clamps wind speed at 155 mph", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, wind_700_kph: 40 * WIND_STEP }]] }));
-    expect(decoded.periods[0][0].wind_700_kph).toBeCloseTo(31 * WIND_STEP, 3);
+  it("clamps wind speed into the top Beaufort band", () => {
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, wind_700_kph: 400 }]] }));
+    expect(decoded.periods[0][0].wind_700_kph).toBeCloseTo(bmid(17), 3);
   });
 
   it("calm periods carry no direction bits: direction values during calm can't change the encoding", () => {
     const dirsA = [3, 0, 0, 0, 5];
     const dirsB = [3, 7, 1, 4, 5]; // differs only where the wind is calm
-    const speeds = [4, 0, 0, 0, 6];
+    const forces = [4, 1, 0, 1, 6]; // force ≤ 1 (< 6 kph) is calm for direction purposes
     const build = (dirs: number[]) =>
-      windMsg(speeds.map((s, i) => ({ weathercode: 0, wind_sfc_kph: s * WIND_STEP, wind_sfc_dir: dirs[i] })));
+      windMsg(forces.map((f, i) => ({ weathercode: 0, wind_sfc_kph: bmid(f), wind_sfc_dir: dirs[i] })));
     expect(v1MessageToString(build(dirsA))).toBe(v1MessageToString(build(dirsB)));
   });
 
   it("calm periods display the last decoded direction (0 before any)", () => {
-    const speeds = [0, 4, 0, 0, 6, 0];
+    const forces = [1, 4, 0, 0, 6, 1]; // forces 0 and 1 are both calm
     const dirs = [7, 3, 7, 7, 5, 7]; // calm-period values are noise the encoder must ignore
-    const decoded = roundTrip(windMsg(speeds.map((s, i) => ({ weathercode: 0, wind_sfc_kph: s * WIND_STEP, wind_sfc_dir: dirs[i] }))));
+    const decoded = roundTrip(windMsg(forces.map((f, i) => ({ weathercode: 0, wind_sfc_kph: bmid(f), wind_sfc_dir: dirs[i] }))));
     expect(decoded.periods[0].map((p) => p.wind_sfc_dir)).toEqual([0, 3, 3, 3, 5, 5]);
-    expect(decoded.periods[0].map((p) => p.wind_sfc_kph! / WIND_STEP)).toEqual(speeds);
+    expect(decoded.periods[0].map((p) => p.wind_sfc_kph)).toEqual(forces.map(bmid));
   });
 
   it("round-trips w600 without w500 present (no upper-level context available)", () => {
     const vars_mask = 1 << VARS_BIT.w600;
-    const steps = [10, 12, 11, 13, 12];
+    const forces = [10, 12, 11, 13, 12];
     const dirs = [2, 2, 3, 3, 4];
-    const periods = [steps.map((s, i) => ({ weathercode: 0, wind_600_kph: s * WIND_STEP, wind_600_dir: dirs[i] }))];
+    const periods = [forces.map((f, i) => ({ weathercode: 0, wind_600_kph: bmid(f), wind_600_dir: dirs[i] }))];
     const decoded = roundTrip(msg({ vars_mask, periods }));
     decoded.periods[0].forEach((p, i) => {
-      expect(p.wind_600_kph).toBeCloseTo(steps[i] * WIND_STEP, 3);
+      expect(p.wind_600_kph).toBeCloseTo(bmid(forces[i]), 3);
       expect(p.wind_600_dir).toBe(dirs[i]);
     });
   });
@@ -498,61 +503,83 @@ describe("v1 round-trip encoding", () => {
       seq: 48, mode: MODE_RANGE, hour: 0, periodHours: Array(n).fill(6),
     };
     const both = msg({ ...sixHourly, vars_mask: (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600),
-      periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_500_kph: 20 * WIND_STEP, wind_500_dir: 6, wind_600_kph: 15 * WIND_STEP, wind_600_dir: 6 }))] });
+      periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_500_kph: bmid(8), wind_500_dir: 6, wind_600_kph: bmid(6), wind_600_dir: 6 }))] });
     const alone = msg({ ...sixHourly, vars_mask: 1 << VARS_BIT.w600,
-      periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_600_kph: 15 * WIND_STEP, wind_600_dir: 6 }))] });
+      periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_600_kph: bmid(6), wind_600_dir: 6 }))] });
     const w600Bits = (m: ForecastMessage) =>
       v1EncodeBreakdown(m).columns.find((c) => c.name === "w600")!.bits;
     expect(w600Bits(both)).toBeLessThan(w600Bits(alone));
   });
 
-  // Gusts are a speed-only wind column (no direction stream), conditioned on the surface
-  // column's same-period speed delta when wind is present in vars_mask.
+  // Gusts are a speed-only wind column (no direction stream). Gust decodes FIRST and lends its
+  // same-period delta to the surface column when both are in vars_mask.
   it("round-trips gust speeds (speed-only column, no direction symbols)", () => {
-    const gustSteps = [8, 10, 9, 12, 14, 11, 10, 8, 13, 12];
-    const periods = gustSteps.map((g, i) => ({
+    const gustForces = [8, 10, 9, 12, 14, 11, 10, 8, 13, 12];
+    const periods = gustForces.map((g, i) => ({
       weathercode: 0,
-      wind_sfc_kph: (i % 4) * WIND_STEP, // includes calm periods
+      wind_sfc_kph: bmid(i % 4), // includes calm periods
       wind_sfc_dir: i % 8,
-      wind_gust_kph: g * WIND_STEP,
+      wind_gust_kph: bmid(g),
     }));
     const decoded = roundTrip(msg({
       vars_mask: (1 << VARS_BIT.wind) | (1 << VARS_BIT.gust), periods: [periods],
     }));
     decoded.periods[0].forEach((p, i) => {
-      expect(p.wind_gust_kph).toBeCloseTo(gustSteps[i] * WIND_STEP, 3);
-      expect(p.wind_sfc_kph).toBeCloseTo((i % 4) * WIND_STEP, 3);
+      expect(p.wind_gust_kph).toBeCloseTo(bmid(gustForces[i]), 3);
+      expect(p.wind_sfc_kph).toBeCloseTo(bmid(i % 4), 3);
     });
   });
 
-  it("round-trips gusts without surface wind present (no cross-column context available)", () => {
-    const gustSteps = [8, 10, 9, 12, 14];
-    const periods = gustSteps.map((g) => ({ weathercode: 0, wind_gust_kph: g * WIND_STEP }));
+  it("round-trips surface wind without gust present (res-keyed fallback books)", () => {
+    const forces = [3, 5, 4, 6, 5];
+    const dirs = [2, 2, 3, 3, 4];
+    const periods = forces.map((f, i) => ({ weathercode: 0, wind_sfc_kph: bmid(f), wind_sfc_dir: dirs[i] }));
+    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] }));
+    decoded.periods[0].forEach((p, i) => {
+      expect(p.wind_sfc_kph).toBeCloseTo(bmid(forces[i]), 3);
+      expect(p.wind_gust_kph).toBeUndefined();
+    });
+  });
+
+  it("round-trips gusts alone (surface wind absent from the mask)", () => {
+    const gustForces = [8, 10, 9, 12, 14];
+    const periods = gustForces.map((g) => ({ weathercode: 0, wind_gust_kph: bmid(g) }));
     const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.gust, periods: [periods] }));
     decoded.periods[0].forEach((p, i) => {
-      expect(p.wind_gust_kph).toBeCloseTo(gustSteps[i] * WIND_STEP, 3);
+      expect(p.wind_gust_kph).toBeCloseTo(bmid(gustForces[i]), 3);
       expect(p.wind_sfc_kph).toBeUndefined();
     });
   });
 
-  it("a surface column that moves with the gusts makes the gust column cheaper (cross-column context)", () => {
-    // Mirrors the w500/w600 test above: gusts rising in step with the surface wind, encoded
-    // with vs without the surface column present in the mask. Encode-only (seq-pinned 6h).
+  it("a gust column that moves with the surface wind makes the surface column cheaper (cross-column context)", () => {
+    // Mirrors the w500/w600 test above: surface rising in step with the gusts, encoded with vs
+    // without the gust column present in the mask. Encode-only (seq-pinned 6h).
     const n = 12;
     const sixHourly: Partial<ForecastMessage> = {
       seq: 48, mode: MODE_RANGE, hour: 0, periodHours: Array(n).fill(6),
     };
-    const rising = (i: number) => 2 * i; // deltas of +2, matching the surface column's
+    const rising = (i: number) => i; // force deltas of +1, matching the gust column's
     const both = msg({ ...sixHourly, vars_mask: (1 << VARS_BIT.wind) | (1 << VARS_BIT.gust),
       periods: [Array.from({ length: n }, (_, i) => ({ weathercode: 0,
-        wind_sfc_kph: rising(i) * WIND_STEP, wind_sfc_dir: 6,
-        wind_gust_kph: (rising(i) + 4) * WIND_STEP }))] });
-    const alone = msg({ ...sixHourly, vars_mask: 1 << VARS_BIT.gust,
+        wind_sfc_kph: bmid(rising(i) + 2), wind_sfc_dir: 6,
+        wind_gust_kph: bmid(rising(i) + 4) }))] });
+    const alone = msg({ ...sixHourly, vars_mask: 1 << VARS_BIT.wind,
       periods: [Array.from({ length: n }, (_, i) => ({ weathercode: 0,
-        wind_gust_kph: (rising(i) + 4) * WIND_STEP }))] });
-    const gustBits = (m: ForecastMessage) =>
-      v1EncodeBreakdown(m).columns.find((c) => c.name === "gust")!.bits;
-    expect(gustBits(both)).toBeLessThan(gustBits(alone));
+        wind_sfc_kph: bmid(rising(i) + 2), wind_sfc_dir: 6 }))] });
+    const windBits = (m: ForecastMessage) =>
+      v1EncodeBreakdown(m).columns.find((c) => c.name === "wind")!.bits;
+    expect(windBits(both)).toBeLessThan(windBits(alone));
+  });
+
+  it("round-trips hurricane-force storm gusts (extended Beaufort top bands)", () => {
+    // Corpus gust max is 225 kph (force 17's open band); values above clamp into force 17.
+    const gustForces = [12, 14, 16, 17];
+    const periods = gustForces.map((g) => ({ weathercode: 0, wind_gust_kph: bmid(g) }));
+    periods.push({ weathercode: 0, wind_gust_kph: 400 }); // clamps into the top band
+    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.gust, periods: [periods] }));
+    gustForces.forEach((g, i) =>
+      expect(decoded.periods[0][i].wind_gust_kph).toBeCloseTo(bmid(g), 3));
+    expect(decoded.periods[0][4].wind_gust_kph).toBeCloseTo(bmid(17), 3);
   });
 });
 

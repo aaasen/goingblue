@@ -9,7 +9,7 @@ import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec, ContextResolver } from "../model.js";
 import {
   WEATHERCODE_CLASS, CLASS_BOOKS, CODEBOOK_CLASSES, type ClassBooks,
-  encodeWindSpeedDelta, decodeWindSpeedDelta,
+  encodeWindSpeedDelta, decodeWindSpeedDelta, quantWind, beaufortMidKph, CALM_MAX_FORCE,
   encodeFreezeDelta, decodeFreezeDelta,
   encodeTempDelta, decodeTempDelta, tempTodBucket,
   TEMP_DELTA_MIN, TEMP_DELTA_MAX,
@@ -64,7 +64,8 @@ const HEADER_CHARS = nCharsForBits(V1_HEADER_BITS); // packed-header chars (excl
 // temp: 8 bits, 1°C steps, offset -100°C → -100°C to +155°C
 // snow/rain: 6 bits each, sqrt-companded (see ACCUM_* below). rain is bit 12, the slot
 // formerly reserved for the removed `vis`; bit 13 (formerly tmin) is reserved.
-// wind: 8 = 5-bit speed + 3-bit direction (raw-width equivalent; both entropy-coded).
+// wind: 8 = 5-bit speed (extended Beaufort force 0..17) + 3-bit direction (raw-width
+// equivalent; both entropy-coded).
 // gust: 5 = speed only, no direction (bit 8, formerly cloud_total).
 export const VAR_BITS_V1 = [3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6];
 //                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^g ^cch ^ccm ^ccl ^rain
@@ -80,12 +81,11 @@ export const SNOW_MAX_CM = 200;
 export const RAIN_MAX_MM = 144;
 export const SNOW_K = ACCUM_MAX / Math.sqrt(SNOW_MAX_CM); // ≈ 4.4548
 export const RAIN_K = ACCUM_MAX / Math.sqrt(RAIN_MAX_MM); // = 5.25
-const KPH_PER_STEP = 5 * 1.609344;
-// Speed steps 0..31 (5 mph each → 155 mph cap). The old 4-bit domain saturated at 75 mph, which
-// real 500 hPa winds exceed in 6-8.6% of corpus periods — the wrong place to clamp for a tool
-// built around high-altitude wind.
-const WIND_SPEED_BITS = 5;
-const WIND_SPEED_MAX = (1 << WIND_SPEED_BITS) - 1;
+// Every wind speed column quantizes to the extended Beaufort scale (forces 0..17, 5-bit
+// anchors) — quantWind/beaufortMidKph in entropy.ts, where the band bounds are wire format and
+// digest-pinned. Decoded speeds are band midpoints (kph); the app may display the force
+// directly. Direction symbols are calm-gated at force ≤ CALM_MAX_FORCE (< 6 kph).
+const WIND_FORCE_BITS = 5;
 
 function clampInt(v: number, width: number): number {
   return Math.min(Math.max(v, 0), (1 << width) - 1);
@@ -162,20 +162,28 @@ const VALUE_COLUMNS: {
     set: (p, v) => { p.rain_mm = expandSqrt(v, RAIN_K); } },
 ];
 
-// Wind columns (surface + 500/600/700 hPa + surface gusts): speed + direction per cell, both
-// entropy-coded under tables keyed by context both sides already have — each period's resolution,
-// the column's level, and (for 600/700 hPa and gusts) another column's already-decoded same-period
-// values, since adjacent levels share the synoptic flow and gusts ride the sustained wind (see
-// windSpeedBook/windDirBook in entropy.ts). `level` indexes the speed-table axis; `upperBit` names
-// the column conditioned on, applied only when that column is present in vars_mask (conditioning
-// columns encode/decode first in this array's order). Calm periods (quantized speed 0) carry no
-// direction symbol at all — see buildBody. `dir: null` marks a speed-only column (gusts).
-const WIND_COLUMNS: { bit: number; kph: keyof Period; dir: keyof Period | null; level: number; upperBit: number }[] = [
-  { bit: 4, kph: "wind_sfc_kph", dir: "wind_sfc_dir", level: 0, upperBit: -1 },
+// Wind columns (surface gusts + surface + 500/600/700 hPa): speed + direction per cell, both
+// entropy-coded under tables keyed by context both sides already have — each period's
+// resolution, the column's level, and another column's already-decoded same-period values (see
+// gustDeltaBook/sfcSpeedBook/windSpeedBook/windDirBook in entropy.ts). `upperBit` names the
+// column conditioned on, applied only when that column is present in vars_mask (conditioning
+// columns encode/decode first in this array's order). GUST LEADS: it carries the peak-wind
+// story and conditions the surface column — not the reverse — so surface wind can one day
+// leave the always-on set without touching gust (direction of conditioning is bit-neutral;
+// the option value decided it, 2026-07-31). 600/700 hPa condition on the level above, since
+// adjacent pressure levels share the synoptic flow. Calm periods (force ≤ CALM_MAX_FORCE)
+// carry no direction symbol at all — see buildBody. `dir: null` marks a speed-only column
+// (gusts). All speeds share the extended-Beaufort quantization (see WIND_FORCE_BITS above);
+// `level` indexes the unconditioned windSpeedDelta table axis (level 0 = the surface fallback
+// when gust is absent).
+const WIND_COLUMNS: {
+  bit: number; kph: keyof Period; dir: keyof Period | null; level: number; upperBit: number;
+}[] = [
+  { bit: 8, kph: "wind_gust_kph", dir: null, level: 0, upperBit: -1 },
+  { bit: 4, kph: "wind_sfc_kph", dir: "wind_sfc_dir", level: 0, upperBit: 8 },
   { bit: 5, kph: "wind_500_kph", dir: "wind_500_dir", level: 1, upperBit: -1 },
   { bit: 6, kph: "wind_600_kph", dir: "wind_600_dir", level: 2, upperBit: 5 },
   { bit: 7, kph: "wind_700_kph", dir: "wind_700_dir", level: 3, upperBit: 6 },
-  { bit: 8, kph: "wind_gust_kph", dir: null, level: 0, upperBit: 4 },
 ];
 
 // Per-period codebook resolution index (0..4 = 24h..1h) from each period's span. The fill mixes
@@ -354,11 +362,12 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
     });
     mark(BIT_NAME[col.bit], before);
   }
-  // Same float-dust epsilon as quantFreeze: a decoded speed (s × step) must re-quantize to s.
-  const windSpeed = (c: Period, kph: keyof Period) =>
-    Math.min(Math.floor(((c[kph] as number) ?? 0) / KPH_PER_STEP + 1e-9), WIND_SPEED_MAX);
-  // Quantized speeds and displayed directions of already-encoded wind columns, keyed by var bit —
-  // the cross-level context for the 600/700 hPa columns (their upper column encodes first).
+  // Both sides quantize identically: a decoded band midpoint re-quantizes to its force.
+  const windSpeed = (c: Period, col: (typeof WIND_COLUMNS)[number]) =>
+    quantWind((c[col.kph] as number) ?? 0);
+  // Quantized speeds and displayed directions of already-encoded wind columns, keyed by var
+  // bit — the cross-column context for the surface (← gust) and 600/700 hPa (← level above)
+  // columns; conditioning columns encode first.
   const spdByBit = new Map<number, number[][]>();
   const dispByBit = new Map<number, number[][]>();
   for (const col of WIND_COLUMNS) {
@@ -367,35 +376,43 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
     const upper = col.upperBit >= 0 && (msg.vars_mask & (1 << col.upperBit))
       ? { spd: spdByBit.get(col.upperBit)!, disp: dispByBit.get(col.upperBit)! }
       : null;
-    const spd: number[][] = msg.periods.map((rows) => rows.map((c) => windSpeed(c, col.kph)));
+    // Direction context only exists when the conditioning column HAS a direction stream —
+    // gust doesn't, so the surface column's dir tables stay unconditioned.
+    const upperDir = upper && WIND_COLUMNS.find((c) => c.bit === col.upperBit)?.dir ? upper.disp : null;
+    const spd: number[][] = msg.periods.map((rows) => rows.map((c) => windSpeed(c, col)));
 
-    // Speed: per model, a raw anchor then entropy-coded period-over-period deltas, the table
-    // keyed by (the period's resolution, level) — or by the upper level's same-period delta when
-    // that column is present (see windSpeedBook in entropy.ts). Never diffed across a model
-    // boundary.
+    // Speed: per model, a raw force anchor then entropy-coded period-over-period deltas —
+    // gust under its res-keyed tables, surface keyed by gust's same-period delta (falling back
+    // to the level-0 table when gust is absent), 500/600/700 keyed by (res, level) or the level
+    // above's same-period delta (see gustDeltaBook/sfcSpeedBook/windSpeedBook in entropy.ts).
+    // Never diffed across a model boundary.
     for (let m = 0; m < nModels; m++) {
-      em.raw(spd[m][0], WIND_SPEED_BITS);
+      em.raw(spd[m][0], WIND_FORCE_BITS);
       for (let p = 1; p < nPeriods; p++) {
-        const book = books.windSpeedBook(res[p], col.level, upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null);
+        const upperDelta = upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null;
+        const book = col.bit === VARS_BIT.gust ? books.gustDeltaBook(res[p])
+          : col.bit === VARS_BIT.wind ? books.sfcSpeedBook(res[p], upperDelta)
+          : books.windSpeedBook(res[p], col.level, upperDelta);
         encodeWindSpeedDelta(em, book, spd[m][p] - spd[m][p - 1]);
       }
     }
 
     // Direction: entropy-coded under a table keyed by (the period's resolution, previously
     // encoded direction, and the upper level's same-period displayed direction when present).
-    // Calm periods (speed step 0) emit no symbol at all — direction there is weather-model
-    // dither — and the context chain carries the last encoded direction across the gap. disp[]
-    // is the direction a client shows for each period (last encoded, 0 before any); the decoder
-    // reconstructs it identically. Speed-only columns (gusts) emit no direction symbols.
+    // Calm periods (force ≤ CALM_MAX_FORCE, < 6 kph) emit no symbol at all — direction there
+    // is weather-model dither — and the context chain carries the last encoded direction across
+    // the gap. disp[] is the direction a client shows for each period (last encoded, 0 before
+    // any); the decoder reconstructs it identically. Speed-only columns (gusts) emit no
+    // direction symbols.
     const disp: number[][] = msg.periods.map((rows) => rows.map(() => 0));
     if (col.dir) {
       const dir = col.dir;
       const eff: number[] = new Array(nModels).fill(0);
       let prevDir: number | null = null;
       eachCell(nPeriods, nModels, (p, m) => {
-        if (spd[m][p] > 0) {
+        if (spd[m][p] > CALM_MAX_FORCE) {
           const d = ((msg.periods[m][p][dir] as number) ?? 0) % 8;
-          em.sym(books.windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null), d);
+          em.sym(books.windDirBook(res[p], prevDir, upperDir ? upperDir[m][p] : null), d);
           prevDir = d;
           eff[m] = d;
         }
@@ -647,30 +664,34 @@ function decodeBody(
       ? { spd: spdByBit.get(col.upperBit)!, disp: dispByBit.get(col.upperBit)! }
       : null;
 
+    const upperDir = upper && WIND_COLUMNS.find((c) => c.bit === col.upperBit)?.dir ? upper.disp : null;
     const spd: number[][] = Array.from({ length: nModels }, () => new Array<number>(nPeriods).fill(0));
     for (let m = 0; m < nModels; m++) {
-      let speed = rd.int(WIND_SPEED_BITS);
+      let speed = rd.int(WIND_FORCE_BITS);
       spd[m][0] = speed;
-      (periods[m][0][col.kph] as number) = speed * KPH_PER_STEP;
+      (periods[m][0][col.kph] as number) = beaufortMidKph(speed);
       for (let p = 1; p < nPeriods; p++) {
-        const book = books.windSpeedBook(res[p], col.level, upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null);
+        const upperDelta = upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null;
+        const book = col.bit === VARS_BIT.gust ? books.gustDeltaBook(res[p])
+          : col.bit === VARS_BIT.wind ? books.sfcSpeedBook(res[p], upperDelta)
+          : books.windSpeedBook(res[p], col.level, upperDelta);
         speed += rd.windSpeedDelta(book);
         spd[m][p] = speed;
-        (periods[m][p][col.kph] as number) = speed * KPH_PER_STEP;
+        (periods[m][p][col.kph] as number) = beaufortMidKph(speed);
       }
     }
 
-    // Calm periods carried no direction symbol; they display the last decoded direction (0
-    // before any), which is also the value the upper-context chain uses. Speed-only columns
-    // (gusts) carried no direction symbols at all.
+    // Calm periods (force ≤ CALM_MAX_FORCE) carried no direction symbol; they display the last
+    // decoded direction (0 before any), which is also the value the upper-context chain uses.
+    // Speed-only columns (gusts) carried no direction symbols at all.
     const disp: number[][] = Array.from({ length: nModels }, () => new Array<number>(nPeriods).fill(0));
     if (col.dir) {
       const dir = col.dir;
       const eff: number[] = new Array(nModels).fill(0);
       let prevDir: number | null = null;
       eachCell(nPeriods, nModels, (p, m) => {
-        if (spd[m][p] > 0) {
-          const d = rd.sym(books.windDirBook(res[p], prevDir, upper ? upper.disp[m][p] : null));
+        if (spd[m][p] > CALM_MAX_FORCE) {
+          const d = rd.sym(books.windDirBook(res[p], prevDir, upperDir ? upperDir[m][p] : null));
           prevDir = d;
           eff[m] = d;
         }

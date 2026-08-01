@@ -33,6 +33,7 @@ export const CELL_COUNTS_META = join(REPO_ROOT, "data", "cell-counts.meta.json")
 export const COUNTER_SCRIPTS = [
   "derive-cloud-delta-codebooks",
   "derive-freeze-delta-codebooks",
+  "derive-gust-delta-codebooks",
   "derive-precip-accum-codebooks",
   "derive-temp-delta-codebooks",
   "derive-weathercode-codebooks",

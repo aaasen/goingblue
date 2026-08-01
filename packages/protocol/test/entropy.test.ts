@@ -175,7 +175,7 @@ describe("wind speed delta entropy coding", () => {
   });
 
   it("decodes a concatenated delta sequence unambiguously", () => {
-    const seq = [0, 1, -1, 0, 2, -3, 17, 0, 1, -25, 0, 0];
+    const seq = [0, 1, -1, 0, 2, -3, 17, 0, 1, -17, 0, 0];
     const book = windSpeedBook(4, 1, null);
     const { source } = encoded((sink) => { for (const d of seq) encodeWindSpeedDelta(sink, book, d); });
     const out: number[] = [];
