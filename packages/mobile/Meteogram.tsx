@@ -42,7 +42,9 @@ const ROW_H = {
   FREEZE: 66,
   // Wind speeds are a single short number on a colored ground, so they need less room than the
   // other data rows — and there are up to five of them stacked (surface, gust, three upper levels).
-  WIND: 32,
+  WIND: 26,
+  // Upper-level rows stack an inline direction arrow under the speed, so they get extra padding.
+  WIND_UPPER: 30,
   DIR: 30,
 } as const;
 
@@ -665,9 +667,9 @@ function buildRows(periods: Period[], u: Units): Row[] {
   const hasUpper = has((p) => p.wind_500_kph) || has((p) => p.wind_600_kph) || has((p) => p.wind_700_kph);
   if (hasUpper) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Pressure level winds (${wU})` });
-    if (has((p) => p.wind_500_kph)) rows.push({ kind: 'wind-500', height: ROW_H.WIND, label: pressureLabel(500) });
-    if (has((p) => p.wind_600_kph)) rows.push({ kind: 'wind-600', height: ROW_H.WIND, label: pressureLabel(600) });
-    if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.WIND, label: pressureLabel(700) });
+    if (has((p) => p.wind_500_kph)) rows.push({ kind: 'wind-500', height: ROW_H.WIND_UPPER, label: pressureLabel(500) });
+    if (has((p) => p.wind_600_kph)) rows.push({ kind: 'wind-600', height: ROW_H.WIND_UPPER, label: pressureLabel(600) });
+    if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.WIND_UPPER, label: pressureLabel(700) });
   }
 
   return rows;
@@ -679,11 +681,14 @@ function buildRows(periods: Period[], u: Units): Row[] {
 function baseline(cy: number, size: number) { return cy + size * 0.35; }
 
 interface Fonts {
-  label: SkFont; sub: SkFont; data: SkFont; small: SkFont; bold: SkFont; date: SkFont;
+  label: SkFont; sub: SkFont; data: SkFont; small: SkFont; date: SkFont;
   hour: SkFont; hourSuffix: SkFont;
   // The strip's header text is light-weight — at header size a thin face keeps the day columns
   // legible without competing with the glyphs below them.
   strip: SkFont; stripSub: SkFont;
+  // Wind speeds sit on the ribbon's colored ground; a small light face keeps the numbers from
+  // shouting over it in a short row.
+  wind: SkFont;
 }
 
 function centerText(key: string, text: string, cx: number, cy: number, font: SkFont, color: string): ReactNode {
@@ -1334,7 +1339,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         periods.forEach((p, i) => {
           const cx = colCenter(i);
           if (p.temp_c != null) {
-            els.push(centerText(`th${i}`, fmtTemp(p.temp_c, units), cx, top + 14, fonts.bold, '#1c1c1e'));
+            els.push(centerText(`th${i}`, fmtTemp(p.temp_c, units), cx, top + 14, fonts.data, '#1c1c1e'));
           }
         });
         break;
@@ -1426,12 +1431,12 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         periods.forEach((p, i) => {
           const kph = speedAt(i);
           const cx = colCenter(i);
-          if (kph == null) { els.push(centerText(`w${ri}-${i}`, '—', cx, mid, fonts.data, C.nil)); return; }
+          if (kph == null) { els.push(centerText(`w${ri}-${i}`, '—', cx, mid, fonts.wind, C.nil)); return; }
           const di = inlineArrow ? p[dirKey] as number | undefined : undefined;
           const arrow = di != null ? ARROWS[CARDINALS[di] ?? 'N'] ?? '' : '';
           // Rows carrying an inline arrow split the (now shorter) row evenly above and below center.
-          els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, arrow ? mid - 8 : mid, fonts.bold, WIND_INK));
-          els.push(centerText(`wa${ri}-${i}`, arrow, cx, mid + 8, fonts.data, WIND_INK));
+          els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, arrow ? mid - 6 : mid, fonts.wind, WIND_INK));
+          els.push(centerText(`wa${ri}-${i}`, arrow, cx, mid + 6, fonts.data, WIND_INK));
         });
         break;
       }
@@ -1683,12 +1688,12 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
     sub: matchFont({ fontSize: 10.5, fontWeight: '700' }),
     data: matchFont({ fontSize: 13 }),
     small: matchFont({ fontSize: 10.5, fontWeight: '600' }),
-    bold: matchFont({ fontSize: 12.5, fontWeight: '700' }),
     date: matchFont({ fontSize: 14, fontWeight: '600' }),
     hour: matchFont({ fontSize: 12, fontWeight: '400' }),
     hourSuffix: matchFont({ fontSize: 9.5, fontWeight: '400' }),
     strip: matchFont({ fontSize: 11, fontWeight: '300' }),
     stripSub: matchFont({ fontSize: 9.5, fontWeight: '300' }),
+    wind: matchFont({ fontSize: 11.5, fontWeight: '400' }),
   }), []);
 
   const blocks = useMemo(() => msg.periods.map((periods, mi) => {
