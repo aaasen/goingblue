@@ -282,6 +282,24 @@ Doubling the class count kept helping all the way to the free-selector limit, at
 
 The classes the EM found are recognizably climatic. K=2 split off a marine regime (biggest wins in the Southern Ocean); K=4 added a tropical-ocean class; at K=8 every stratum improves — tropical oceans by 5.5–6.5%, tropical land 3.7%, my favorites 2.1% — and the global class 0 wins only ~7.5% of real messages. Temperature benefits most from class conditioning (−6.2% at K=8), which makes sense: the diurnal delta distributions differ enormously between, say, a marine layer and a continental interior. The smoothing strength barely matters (α of 50, 200, and 800 land within 0.01% of each other) because each class still trains on ~13k forecasts. I stopped at 8 classes: the gains hadn't hit an elbow, but 8 is where the free header bits run out.
 
+Tropical takes the most bits to encode, polar takes the least
+
+  Köppen A           216 locs    2559 cells  fill  50.9%  14.62 bits/period
+  Köppen B           292 locs    3457 cells  fill  61.4%  11.08 bits/period
+  Köppen C           242 locs    2874 cells  fill  55.8%  12.61 bits/period
+  Köppen D           376 locs    4458 cells  fill  60.5%  11.18 bits/period
+  Köppen E           150 locs    1774 cells  fill  73.5%  8.68 bits/period
+  ocean 60°N–90°N     21 locs     248 cells  fill  70.7%  8.94 bits/period
+  ocean 30°N–60°N     35 locs     417 cells  fill  62.9%  10.86 bits/period
+  ocean 0°–30°N       48 locs     569 cells  fill  62.6%  10.96 bits/period
+  ocean 30°S–0°       50 locs     594 cells  fill  64.3%  10.36 bits/period
+  ocean 60°S–30°S     48 locs     572 cells  fill  58.8%  11.71 bits/period
+  ocean 90°S–60°S     24 locs     285 cells  fill  58.8%  11.64 bits/period
+  peaks <3.5 km       60 locs     710 cells  fill  60.8%  11.30 bits/period
+  peaks 3.5–5.5 km    59 locs     696 cells  fill  56.3%  12.60 bits/period
+  peaks ≥5.5 km       31 locs     367 cells  fill  59.4%  11.85 bits/period
+  favorites          137 locs   10138 cells  fill  55.4%  12.78 bits/period
+
 ## Model Choice
 
 Weather models behave very differently and I think it's important to know which one a forecast comes from. For example, the ECMWF models change a lot at the long range. The 10-day forecast seems to go through the full range of forecast possibilities.
@@ -290,6 +308,10 @@ Going Blue is powered by [Open Meteo](https://open-meteo.com/) which supports ov
  - `best_match`: Chooses the highest resolution weather model available at the forecast point. 
 
 One of the reasons I built Going Blue is that I wanted to be able to pull different models, or at least know which model I was looking at. Most weather forecasting apps try to hide this information
+
+## Beaufort Scale for Wind
+
+https://en.wikipedia.org/wiki/Beaufort_scale
 
 # References
 
