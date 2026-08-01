@@ -204,8 +204,6 @@ function requestUtcHour(windowStartUtcHour: number, utcOffsetHours: number, hour
 
 // Protocol variable groups, mirroring the app (BuilderTab.tsx). weathercode is always encoded by the
 // protocol (not in a mask). BASE is always on; each toggleable group maps to protocol var bits.
-// NOTE: the corpus has no wind_gusts_10m series yet, so the always-on gust column encodes as all
-// zeros here — the reported cost is a floor until the corpus add-pass lands.
 const BASE_VARS: string[] = [...ALWAYS_VARS];
 const GROUP_VARS: Record<GroupId, string[]> = {
   clouds: ["cch", "ccm", "ccl"],
@@ -225,6 +223,9 @@ const DEFAULT_COMBO = 0; // base variables only (no optional groups)
 // zero column). rain counts as present if rain OR showers has data.
 const REQUIRED_BASE: string[][] = [
   ["temperature_2m"], ["weather_code"], ["snowfall"], ["rain", "showers"], ["wind_speed_10m"],
+  // gust joined the wire after the main backfill; ~1.6k stale cells (windows since rolled off the
+  // live lattice) never got the add-pass and would encode gust as a silent zero column.
+  ["wind_gusts_10m"],
 ];
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────
