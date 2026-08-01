@@ -77,17 +77,33 @@ const FREEZE_HOURLY = ["freezing_level_height"];
 
 // Candidate-spec additions (see CorpusPlan.md): future-display surface variables, plus clouds and
 // winds on the standard pressure levels (925/850/700/500/300 exist across centers; 1000 is nearly
-// free and serves the ocean stratum; 600/400 are GFS-only extras — Denali 14k camp and the summit
-// bracket). The pilot pull fetches these to build the per-source capability matrix; the backfill
+// free and serves the ocean stratum; 600/400 — Denali 14k camp and the summit bracket — probed
+// 2026-07-31: best_match serves both globally on the forecast AND historical-forecast APIs, so
+// they ride the sample pull; per-center availability (ecmwf_ifs025, gem) still unverified.
+// The pilot pull fetches these to build the per-source capability matrix; the backfill
 // pulls wire sets only, and later additions are batched add-passes over the DB (~1 unit/cell).
 const SURFACE_CANDIDATE = [
   "relative_humidity_2m", "dew_point_2m", "snow_depth", "pressure_msl", "visibility", "cape",
   "wind_gusts_10m",
+  // 2026-07-31 expansion, all probed ok on the historical-forecast API under best_match:
+  // feels-like pair (wet bulb is Stull — sea-level fit, biased at altitude; surface_pressure
+  // enables a correct psychrometric recompute), UV, CIN/LI around cape, the solar block
+  // (also inputs to apparent_temperature), and the models' own totals so component
+  // reconstruction (rain+showers+snowfall, low/mid/high overlap) can be validated.
+  "apparent_temperature", "wet_bulb_temperature_2m", "uv_index", "uv_index_clear_sky",
+  "surface_pressure", "lifted_index", "convective_inhibition",
+  "shortwave_radiation", "direct_radiation", "diffuse_radiation", "sunshine_duration",
+  "precipitation", "cloud_cover",
 ];
 const STD_LEVELS = [1000, 925, 850, 700, 500, 300];
 const GFS_EXTRA_LEVELS = [600, 400];
 const levelVars = (levels: number[]) =>
-  levels.flatMap((l) => [`cloud_cover_${l}hPa`, `wind_speed_${l}hPa`, `wind_direction_${l}hPa`]);
+  levels.flatMap((l) => [
+    `cloud_cover_${l}hPa`, `wind_speed_${l}hPa`, `wind_direction_${l}hPa`,
+    // Thermo fields complete the sounding: temp at camp altitudes, derived freezing level,
+    // and geopotential height to place each level at a real elevation.
+    `temperature_${l}hPa`, `relative_humidity_${l}hPa`, `geopotential_height_${l}hPa`,
+  ]);
 const uniq = (vars: string[]) => [...new Set(vars)];
 
 // The sources production will serve (see memory: model menu by center). `id` doubles as the
@@ -101,9 +117,13 @@ interface SourceDef {
   label: string;
   wire: string[];      // backfill set: what the current wire format needs
   candidate: string[]; // pilot set: wire + everything under consideration (capability matrix)
+  collect?: string[];  // full-pull set for the non-pilot collect; defaults to wire
   sample: boolean;
 }
 const GFS_WIRE = [...BASE_HOURLY, ...CLOUD_HOURLY, ...HIGHWIND_HOURLY, ...FREEZE_HOURLY];
+// Everything best_match can serve: wire + surface candidates + all 8 levels × 6 fields.
+const BEST_MATCH_FULL = uniq([...GFS_WIRE, "wind_gusts_10m", ...SURFACE_CANDIDATE,
+  ...levelVars([...STD_LEVELS, ...GFS_EXTRA_LEVELS])]);
 const SOURCES: SourceDef[] = [
   {
     id: "gfs_seamless", label: "NCEP GFS Seamless", sample: false,
@@ -130,7 +150,10 @@ const SOURCES: SourceDef[] = [
     // wind_gusts_10m joined the wire 2026-07-30 (always-on gust column) — best_match only for
     // now: it is the derive/report source, and the per-center sources add no training benefit.
     wire: uniq([...GFS_WIRE, "wind_gusts_10m"]),
-    candidate: uniq([...GFS_WIRE, ...SURFACE_CANDIDATE, ...levelVars(STD_LEVELS)]),
+    candidate: BEST_MATCH_FULL,
+    // 2026-07-31 expansion pull: while commercial access lasts, the sample source collects the
+    // full candidate set corpus-wide — planCollection makes this one add-pass call per cell.
+    collect: BEST_MATCH_FULL,
   },
 ];
 // The report (and the derive pipeline, via derive-lib DERIVE_SOURCE) reads best_match — the
@@ -373,7 +396,7 @@ function planCollection(db: ReturnType<typeof openDb>, args: Args, locations: Lo
   const plan: PlannedCall[] = [];
   const sampledStrata = new Set<Location["stratum"]>(["koppen", "ocean", "peaks"]);
   for (const source of SOURCES) {
-    const wanted = args.pilot ? source.candidate : source.wire;
+    const wanted = args.pilot ? source.candidate : (source.collect ?? source.wire);
     const locs = locations
       .filter((l) => !sampledStrata.has(l.stratum) || source.sample)
       .filter((l) => !args.pilot || PILOT_LOCATION_IDS.includes(l.id));
@@ -420,7 +443,7 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
   console.log(`  endpoint: ${ENDPOINT}${API_KEY ? " (commercial key)" : ""}`);
   for (const source of SOURCES) {
     const calls = plan.filter((c) => c.source === source);
-    const wanted = args.pilot ? source.candidate : source.wire;
+    const wanted = args.pilot ? source.candidate : (source.collect ?? source.wire);
     console.log(`  ${source.id.padEnd(14)} ${String(calls.length).padStart(5)} calls (${wanted.length} vars wanted)`);
   }
   console.log(`  plan total: ${plan.length} calls`);
