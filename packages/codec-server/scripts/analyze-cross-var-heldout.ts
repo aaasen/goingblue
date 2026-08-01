@@ -37,6 +37,7 @@ import {
   WMO2IDX, VARS_BIT, compandSqrt, SNOW_K, RAIN_K, ACCUM_BITS,
   WEATHERCODE_CLASS, WC_CLASSES,
   tempDeltaBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_MIN, TEMP_DELTA_MAX,
+  upperDeltaBucket,
   type Period,
 } from "@weather/protocol";
 import { eachForecast, foldOf, N_FOLDS, scaledWeights } from "./derive-lib.ts";
@@ -61,21 +62,39 @@ const N_WC_CLASS = WC_CLASSES;
 const precipBucket = (sym: number) => (sym === 0 ? 0 : sym <= 4 ? 1 : 2);
 const N_PRECIP_B = 3;
 
-const ALL_MASK = ((1 << 13) - 1) & ~(1 << 8);
+// Wind quantizers. OLD = the pre-2026-07-31 wire (5 mph steps, 5-bit, every wind column); NEW =
+// the approved refinement (surface 5 kph/5-bit, gust 5 kph/6-bit; upper levels stay OLD). Same
+// float-dust epsilon as v1.ts windSpeed. Speed domains are bounded, so deltas need no clamp and
+// q[p] − q[p−1] is exactly the delta the decoder reconstructs — no recon chain required.
+const OLD_STEP = 5 * 1.609344;
+const qw = (step: number, max: number) => (kph: number | undefined) =>
+  Math.min(Math.floor((kph ?? 0) / step + 1e-9), max);
+const qOld = qw(OLD_STEP, 31), qSfc = qw(5, 31), qGust = qw(5, 63);
+const N_SFC_B = 5; // upperDeltaBucket domain: ≤-2, -1, 0, +1, ≥+2
+
+const ALL_MASK = (1 << 13) - 1; // bit 8 = gust (always-on since 2026-07-30)
 
 // One uniform-resolution column: per-period quantized symbols/features, aligned by period index.
+// Everything is typed arrays: the full-corpus scan holds ~400k chains × ~20 fields in RAM, and
+// plain number[] blew the V8 heap once the gust fields joined.
 interface Chain {
   fold: number;
   res: number;
   n: number;
-  wcSym: number[];    // WMO index 0..27 (order-1 target + wcClass source)
-  wcClass: number[];
-  precip: number[];   // 0..7 value symbols
-  snow: number[];     // 0..63 companded value symbols
-  rain: number[];
-  cch: number[]; ccm: number[]; ccl: number[]; // quantized 0..7 levels (deltas derived)
-  freezeQ: number[];  // quantized 0..31 (deltas derived)
-  tempDB: number[];   // same-period temp-delta bucket (0..4), p ≥ 1; -1 at p = 0
+  wcSym: Uint8Array;  // WMO index 0..27 (order-1 target + wcClass source)
+  wcClass: Uint8Array;
+  precip: Uint8Array; // 0..7 value symbols
+  snow: Uint8Array;   // 0..63 companded value symbols
+  rain: Uint8Array;
+  cch: Uint8Array; ccm: Uint8Array; ccl: Uint8Array; // quantized 0..7 levels (deltas derived)
+  freezeQ: Uint8Array; // quantized 0..31 (deltas derived)
+  tempDB: Int8Array;  // same-period temp-delta bucket (0..4), p ≥ 1; -1 at p = 0
+  hasGust: boolean;   // stale cells (windows off the live lattice) missed the gust add-pass
+  gustQ: Uint8Array;  // gust at the NEW quantization: 5 kph steps, 6-bit domain 0..63
+  gustQ8: Uint8Array; // gust at the old 5 mph / 5-bit quantization (step-size reference row)
+  sfcDB: Int8Array;   // same-period surface Δ bucket at 5 kph steps; -1 at p = 0
+  sfcDB8: Int8Array;  // same at 5 mph steps (borrowed-books row keys on what ships today)
+  w5Q8: Uint8Array; w6Q8: Uint8Array; w7Q8: Uint8Array; // upper speeds, 5 mph (borrowed training)
 }
 
 async function collectChains(): Promise<Chain[]> {
@@ -102,16 +121,26 @@ async function collectChains(): Promise<Chain[]> {
 
       const c: Chain = {
         fold, res, n,
-        wcSym: periods.map((p) => WMO2IDX[p.weathercode] ?? 0),
-        wcClass: periods.map((p) => WEATHERCODE_CLASS[WMO2IDX[p.weathercode] ?? 0]),
-        precip: periods.map((p) => clampInt(Math.round((p.precip ?? 0) * 7 / 100), 3)),
-        snow: periods.map((p) => compandSqrt(p.snow_cm ?? 0, SNOW_K, ACCUM_BITS)),
-        rain: periods.map((p) => compandSqrt(p.rain_mm ?? 0, RAIN_K, ACCUM_BITS)),
-        cch: periods.map((p) => clampInt(Math.round((p.cloud_high ?? 0) * 7 / 100), 3)),
-        ccm: periods.map((p) => clampInt(Math.round((p.cloud_mid ?? 0) * 7 / 100), 3)),
-        ccl: periods.map((p) => clampInt(Math.round((p.cloud_low ?? 0) * 7 / 100), 3)),
-        freezeQ: periods.map((p) => clampInt(Math.floor((p.freeze_m ?? 0) / 304.8 + 1e-9), 5)),
-        tempDB: [-1],
+        wcSym: Uint8Array.from(periods, (p) => WMO2IDX[p.weathercode] ?? 0),
+        wcClass: Uint8Array.from(periods, (p) => WEATHERCODE_CLASS[WMO2IDX[p.weathercode] ?? 0]),
+        precip: Uint8Array.from(periods, (p) => clampInt(Math.round((p.precip ?? 0) * 7 / 100), 3)),
+        snow: Uint8Array.from(periods, (p) => compandSqrt(p.snow_cm ?? 0, SNOW_K, ACCUM_BITS)),
+        rain: Uint8Array.from(periods, (p) => compandSqrt(p.rain_mm ?? 0, RAIN_K, ACCUM_BITS)),
+        cch: Uint8Array.from(periods, (p) => clampInt(Math.round((p.cloud_high ?? 0) * 7 / 100), 3)),
+        ccm: Uint8Array.from(periods, (p) => clampInt(Math.round((p.cloud_mid ?? 0) * 7 / 100), 3)),
+        ccl: Uint8Array.from(periods, (p) => clampInt(Math.round((p.cloud_low ?? 0) * 7 / 100), 3)),
+        freezeQ: Uint8Array.from(periods, (p) => clampInt(Math.floor((p.freeze_m ?? 0) / 304.8 + 1e-9), 5)),
+        tempDB: new Int8Array(n).fill(-1),
+        hasGust: h.wind_gusts_10m?.some((v: number | null) => v != null) ?? false,
+        gustQ: Uint8Array.from(periods, (p) => qGust(p.wind_gust_kph)),
+        gustQ8: Uint8Array.from(periods, (p) => qOld(p.wind_gust_kph)),
+        sfcDB: Int8Array.from(periods, (p, i) => i === 0 ? -1
+          : upperDeltaBucket(qSfc(p.wind_sfc_kph) - qSfc(periods[i - 1].wind_sfc_kph))),
+        sfcDB8: Int8Array.from(periods, (p, i) => i === 0 ? -1
+          : upperDeltaBucket(qOld(p.wind_sfc_kph) - qOld(periods[i - 1].wind_sfc_kph))),
+        w5Q8: Uint8Array.from(periods, (p) => qOld(p.wind_500_kph)),
+        w6Q8: Uint8Array.from(periods, (p) => qOld(p.wind_600_kph)),
+        w7Q8: Uint8Array.from(periods, (p) => qOld(p.wind_700_kph)),
       };
       // Same-period temp-delta bucket, from the clamped wire chain (temp decodes before freeze).
       let recon = clampInt(Math.round((periods[0].temp_c ?? 0) + 100), 8);
@@ -119,7 +148,7 @@ async function collectChains(): Promise<Chain[]> {
         const q = clampInt(Math.round((periods[p].temp_c ?? 0) + 100), 8);
         const delta = Math.min(Math.max(q - recon, TEMP_DELTA_MIN), TEMP_DELTA_MAX);
         recon += delta;
-        c.tempDB.push(tempDeltaBucket(delta));
+        c.tempDB[p] = tempDeltaBucket(delta);
       }
       chains.push(c);
     }
@@ -177,7 +206,10 @@ const chains = await collectChains();
 console.log(`Columns (forecast × resolution): ${chains.length}`);
 
 interface Scheme { label: string; nctx: number; ctx: (c: Chain, p: number) => number }
-interface Target { name: string; nsym: number; sym: (c: Chain, p: number) => number; schemes: Scheme[] }
+interface Target {
+  name: string; nsym: number; sym: (c: Chain, p: number) => number; schemes: Scheme[];
+  only?: (c: Chain) => boolean; // e.g. gust: skip stale cells the add-pass never reached
+}
 
 const R = (c: Chain) => resPos[c.res];
 
@@ -238,13 +270,39 @@ const TARGETS: Target[] = [
       { label: "+ res × tempΔB (20)", nctx: NRES * TEMP_DELTA_PREV_BUCKETS, ctx: (c, p) => R(c) * TEMP_DELTA_PREV_BUCKETS + c.tempDB[p] },
     ],
   },
+  // STALE (2026-07-31): the gust targets below measured the linear 5 kph / 6-bit quantization
+  // and sfc→gust conditioning. Superseded the same day by extended Beaufort + reversed
+  // conditioning — see analyze-wind-scale-heldout.ts for the decision scan.
+  // Gust at the NEW quantization (5 kph steps, 6-bit domain, 127-symbol delta alphabet). The
+  // context ladder for its own trained books; the borrowed-books status quo prints separately
+  // below (it trains on a different symbol stream, so evalScheme's folding doesn't apply).
+  {
+    name: "gust 5kph/6b", nsym: 127, sym: (c, p) => c.gustQ[p] - c.gustQ[p - 1] + 63,
+    only: (c) => c.hasGust,
+    schemes: [
+      { label: "pooled (1)", nctx: 1, ctx: () => 0 },
+      { label: "+ res (4)", nctx: NRES, ctx: (c) => R(c) },
+      { label: "+ sfcΔB (5)", nctx: N_SFC_B, ctx: (c, p) => c.sfcDB[p] },
+      { label: "+ res × sfcΔB (20)", nctx: NRES * N_SFC_B, ctx: (c, p) => R(c) * N_SFC_B + c.sfcDB[p] },
+    ],
+  },
+  // Step-size reference: the same winning context at the OLD 5 mph quantization — the gap
+  // between this row and the one above is the pure cost of the finer steps.
+  {
+    name: "gust 5mph/5b", nsym: 63, sym: (c, p) => c.gustQ8[p] - c.gustQ8[p - 1] + 31,
+    only: (c) => c.hasGust,
+    schemes: [
+      { label: "res × sfcΔB (20)", nctx: NRES * N_SFC_B, ctx: (c, p) => R(c) * N_SFC_B + c.sfcDB8[p] },
+    ],
+  },
 ];
 
 console.log(`\nHeld-out bits/period (5-fold by location; transitions only, bootstraps excluded)`);
 for (const t of TARGETS) {
+  const tChains = t.only ? chains.filter(t.only) : chains;
   let baseline: number | null = null;
   for (const s of t.schemes) {
-    const { bpp, occMin, occMed } = evalScheme(chains, t.nsym, s.nctx, t.sym, s.ctx);
+    const { bpp, occMin, occMed } = evalScheme(tChains, t.nsym, s.nctx, t.sym, s.ctx);
     baseline ??= bpp;
     const delta = bpp - baseline;
     console.log(
@@ -253,4 +311,33 @@ for (const t of TARGETS) {
       `   occ min=${occMin} med=${occMed}`);
   }
   console.log("");
+}
+
+// ── Borrowed-books status quo ────────────────────────────────────────────────────
+// What ships today: gust deltas (5 mph quantization) coded under the windSpeedUpperDelta tables,
+// which are trained on the 600/700 hPa columns' deltas keyed by THEIR upper level's same-period
+// Δ bucket — while gust keys on the surface Δ bucket. Train and test are different symbol
+// streams, so there is no leakage and no folding: train on all upper transitions, cost all gust
+// transitions. Compare against the "gust 5mph/5b" held-out row above (same alphabet).
+{
+  const NSYM = 63, nctx = NRES * N_SFC_B;
+  const train = Array.from({ length: nctx }, () => zeros(NSYM));
+  const test = Array.from({ length: nctx }, () => zeros(NSYM));
+  for (const c of chains) {
+    for (let p = 1; p < c.n; p++) {
+      // w600 keyed by ΔB(w500), w700 keyed by ΔB(w600) — the pairs the shipped tables train on.
+      for (const [lo, up] of [[c.w6Q8, c.w5Q8], [c.w7Q8, c.w6Q8]] as const) {
+        train[R(c) * N_SFC_B + upperDeltaBucket(up[p] - up[p - 1])][lo[p] - lo[p - 1] + 31]++;
+      }
+      if (c.hasGust) test[R(c) * N_SFC_B + c.sfcDB8[p]][c.gustQ8[p] - c.gustQ8[p - 1] + 31]++;
+    }
+  }
+  let bits = 0, n = 0;
+  const pooled = zeros(NSYM);
+  for (const row of train) for (let s = 0; s < NSYM; s++) pooled[s] += row[s];
+  for (let ctx = 0; ctx < nctx; ctx++) {
+    bits += heldOutBits(train[ctx], test[ctx], pooled);
+    n += sum(test[ctx]);
+  }
+  console.log(`gust 5mph/5b under SHIPPED-style borrowed upper tables (res × sfcΔB): ${(bits / n).toFixed(3)} b/period (n=${n})`);
 }

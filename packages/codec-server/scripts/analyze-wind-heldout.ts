@@ -21,8 +21,11 @@ import { eachForecast, foldOf, N_FOLDS, scaledWeights } from "./derive-lib.ts";
 import { quantizeFreqs, RANS_PROB_BITS, VARS_BIT, type Period } from "@weather/protocol";
 
 const WIND_MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
-const KPH_PER_STEP = 5 * 1.609344;
-const SPEED_MAX = 31;                    // new domain: 0..31 steps (155 mph)
+// STALE (2026-07-31): this scan predates the extended-Beaufort wire (quantWind in v1.ts) and
+// still quantizes linearly — its recorded conclusions stand, but re-derive the chains against
+// quantWind before trusting fresh numbers. See analyze-wind-scale-heldout.ts for the scale scan.
+const STEP_OF = [5, 5 * 1.609344, 5 * 1.609344, 5 * 1.609344];
+const SPEED_MAX = 31;                    // 0..31 steps per level
 const NSPD = 2 * SPEED_MAX + 1;          // deltas -31..31
 const NDIR = 8;
 const RES_INDICES = [0, 1, 2, 3, 4];
@@ -32,8 +35,8 @@ const DIR_FIELDS = ["wind_sfc_dir", "wind_500_dir", "wind_600_dir", "wind_700_di
 // level -> index of the level it may condition on (already decoded), or -1
 const UPPER_OF = [-1, -1, 1, 2];
 
-const qSpeed = (kph: number | undefined) =>
-  Math.min(Math.floor(((kph ?? 0) / KPH_PER_STEP) + 1e-9), SPEED_MAX);
+const qSpeed = (kph: number | undefined, level: number) =>
+  Math.min(Math.floor(((kph ?? 0) / STEP_OF[level]) + 1e-9), SPEED_MAX);
 const dBucket = (d: number) => (d <= -2 ? 0 : d === -1 ? 1 : d === 0 ? 2 : d === 1 ? 3 : 4);
 const circDist = (a: number, b: number) => Math.min((a - b + 8) % 8, (b - a + 8) % 8);
 
@@ -62,7 +65,7 @@ await eachForecast((hourly: HourlyData, runHour: number, loc: string) => {
     if (n < 2) continue;
     const rows = aggregateHourly(hourly, hourly.time, n, resIdx, start);
     const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US"));
-    const sp = LEVELS.map((_, L) => periods.map((p) => qSpeed((p as any)[SPEED_FIELDS[L]])));
+    const sp = LEVELS.map((_, L) => periods.map((p) => qSpeed((p as any)[SPEED_FIELDS[L]], L)));
     const dr = LEVELS.map((_, L) => periods.map((p) => (((p as any)[DIR_FIELDS[L]] as number) ?? 0) % 8));
     // Displayed dir under calm gating: last encoded dir, 0 before any.
     const disp = LEVELS.map((_, L) => {
