@@ -123,6 +123,9 @@ importers:
       '@weather/protocol':
         specifier: workspace:*
         version: link:../protocol
+      base32768:
+        specifier: ^5.0.1
+        version: 5.0.1
       hono:
         specifier: ^4.6.0
         version: 4.6.0
@@ -1285,6 +1288,9 @@ packages:
   balanced-match@4.0.4:
     resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
     engines: {node: 18 || 20 || >=22}
+
+  base32768@5.0.1:
+    resolution: {integrity: sha512-m9WHBAnD1c9OrODuDsB+68na3E+ePIGaVgNocwKe39wyOwT0tJzBuVlGw0osyr3XNI6Q1kgm5inTW70rTEo9kQ==}
 
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
@@ -4199,7 +4205,9 @@ snapshots:
       metro-runtime: 0.84.4
     transitivePeerDependencies:
       - '@babel/core'
+      - bufferutil
       - supports-color
+      - utf-8-validate
 
   '@react-native/normalize-colors@0.74.89': {}
 
@@ -4522,6 +4530,8 @@ snapshots:
       - supports-color
 
   balanced-match@4.0.4: {}
+
+  base32768@5.0.1: {}
 
   base64-js@1.5.1: {}
 

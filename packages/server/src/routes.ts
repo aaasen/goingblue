@@ -5,6 +5,7 @@ import { ping } from "./db.js";
 import { createAccount, accountExists, recordRequest } from "./accounts.js";
 import { isValidToken, normalizeToken } from "@weather/protocol";
 import { twiml, validateTwilioSignature } from "./twilio.js";
+import { probeReply } from "./probes.js";
 
 const REPLY_ADDRESS = "inreach@going.blue";
 
@@ -129,6 +130,14 @@ export async function sms(c: Context) {
 
   if (HELP_KEYWORDS.has(body.trim().toLowerCase())) {
     return c.text(twiml(HELP_REPLY), 200, { "Content-Type": "text/xml" });
+  }
+
+  // Character-set field probes ("probe N") — see probes.ts. Handled before forecast dispatch
+  // and never recorded as a served request.
+  const probe = probeReply(body);
+  if (probe !== null) {
+    console.log("probe reply:", probe);
+    return c.text(twiml(probe), 200, { "Content-Type": "text/xml" });
   }
 
   const result = await buildForecast(body.trim());
