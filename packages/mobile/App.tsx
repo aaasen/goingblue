@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ActivityIndicator } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 import BuilderTab from './BuilderTab';
 import DecoderTab from './DecoderTab';
 import SettingsTab from './SettingsTab';
@@ -11,6 +12,13 @@ import { loadTimeFormat, loadUnits, saveTimeFormat, saveUnits, type TimeFormat, 
 
 type Tab = 'builder' | 'decoder' | 'settings';
 
+// Hold the launch image until the first screen can be drawn as it will finally look. It otherwise
+// hides the moment React mounts — which is before the stored token and preferences have come back
+// from AsyncStorage, so the app would show a spinner and then redraw once they arrived. Called at
+// module scope to beat that first mount; a rejection here only means the splash is already gone,
+// which the rest of the launch handles either way.
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('builder');
   const [forecastData, setForecastData] = useState('');
@@ -19,10 +27,27 @@ export default function App() {
   const [units, setUnitsState] = useState<Units>('metric');
   const [timeFormat, setTimeFormatState] = useState<TimeFormat>('24h');
 
+  // Settled together rather than one at a time: the token decides which screen comes up, and the
+  // preferences decide how it reads. Applying them as they land would draw the first screen in
+  // metric/24h and correct it a moment later, in full view now that the splash waits for this.
   useEffect(() => {
-    loadToken().then(setToken);
-    loadUnits().then(setUnitsState);
-    loadTimeFormat().then(setTimeFormatState);
+    Promise.all([loadToken(), loadUnits(), loadTimeFormat()])
+      .then(([t, u, f]) => {
+        setUnitsState(u);
+        setTimeFormatState(f);
+        setToken(t);
+      })
+      // All three swallow their own storage errors, so this should be unreachable — but the
+      // splash now waits on this promise, and a rejection would leave it up for good with no way
+      // out but reinstalling. Falling through to setup keeps a broken launch recoverable.
+      .catch(() => setToken(null));
+  }, []);
+
+  // Drop the launch image once the first screen has been laid out, not when the state arrives —
+  // hiding it a frame early exposes an empty root view. Only the loaded branches below attach
+  // this, so reaching it means there is something to show.
+  const onLayoutRoot = useCallback(() => {
+    SplashScreen.hideAsync().catch(() => {});
   }, []);
 
   // Persist unit changes so the choice survives across sessions.
@@ -57,19 +82,13 @@ export default function App() {
     setToken(null);
   }
 
-  if (token === undefined) {
-    return (
-      <View style={styles.root}>
-        <StatusBar style="dark" />
-        <SafeAreaView style={styles.topInset} />
-        <View style={styles.loading}><ActivityIndicator color="#2a6bb5" /></View>
-      </View>
-    );
-  }
+  // Still reading storage. Render nothing and let the splash stand in — it stays up until one of
+  // the branches below lays out.
+  if (token === undefined) return null;
 
   if (token === null) {
     return (
-      <View style={styles.root}>
+      <View style={styles.root} onLayout={onLayoutRoot}>
         <StatusBar style="dark" />
         <SafeAreaView style={styles.topInset} />
         <SetupScreen
@@ -84,7 +103,7 @@ export default function App() {
   }
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} onLayout={onLayoutRoot}>
       <StatusBar style="dark" />
       {/* The safe area wraps only the header, so it picks up the top (and, in
           landscape, side) inset while the tab content below runs all the way to
@@ -135,7 +154,6 @@ const styles = StyleSheet.create({
   // Empty safe area: lays out to exactly the top inset, nothing more.
   topInset: { backgroundColor: '#f2f2f7' },
   header: { backgroundColor: '#f2f2f7' },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   tabBar: {
     flexDirection: 'row',
     backgroundColor: '#fff',
