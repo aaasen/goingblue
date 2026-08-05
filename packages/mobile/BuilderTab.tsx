@@ -52,14 +52,14 @@ const OFFLINE_MESSAGE = 'Not connected to the internet, use SMS or satellite ins
 
 // Every way current location can fail ends at the same fallback: pick the spot yourself. Current
 // location is a convenience — nothing in the app needs it — so these say what went wrong and then
-// point at Custom rather than treating a refusal as a dead end.
-const LOCATION_FALLBACK = 'Switch to Custom and pick a spot on the map instead.';
+// point at the map rather than treating a refusal as a dead end.
+const LOCATION_FALLBACK = 'Pick a forecast location on the map instead.';
 const LOCATION_DENIED = `Location access was denied. ${LOCATION_FALLBACK}`;
 // Separate from the above because the OS stops showing its permission prompt after a hard denial,
 // so tapping again does nothing and Settings is the only way back to current location.
 const LOCATION_BLOCKED =
-  'Location access is off for Going Blue. Turn it on in Settings, or switch to Custom and pick ' +
-  'a spot on the map.';
+  'Location access is off for Going Blue. Turn it on in Settings, or pick a forecast location ' +
+  'on the map.';
 const LOCATION_FAILED = `Couldn’t get your current location. ${LOCATION_FALLBACK}`;
 
 // Variables a forecast center can't supply. Only the freezing level varies now — GEM and ECMWF
