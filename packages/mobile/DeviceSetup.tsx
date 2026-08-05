@@ -31,7 +31,7 @@ export default function DeviceSetup() {
       <Device name="Garmin Earthmate" open={open === 'Garmin Earthmate'} onToggle={toggle}>
         <EarthmateSteps />
       </Device>
-      <Device name="SMS" open={open === 'SMS'} onToggle={toggle}>
+      <Device name="SMS/Text Message" open={open === 'SMS/Text Message'} onToggle={toggle}>
         <SmsSteps />
       </Device>
     </>

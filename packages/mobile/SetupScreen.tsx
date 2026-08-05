@@ -52,8 +52,7 @@ export default function SetupScreen({ onReady, units, onUnitsChange, timeFormat,
       </Step>
       <Step n={2} title="Send the request to Going Blue">
         <Text style={styles.gsPara}>
-          Send the request via internet, SMS, Garmin inReach, ZOLEO, or any other satellite
-          messenger.
+          Send the request via internet, text message, or satellite messenger.
         </Text>
       </Step>
       <Step n={3} title="View the forecast">
