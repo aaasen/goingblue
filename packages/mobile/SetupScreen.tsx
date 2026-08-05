@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  StyleSheet, Text, View, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Linking,
+  StyleSheet, Text, View, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Linking, Image,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { createAccount } from './account';
@@ -50,10 +50,9 @@ export default function SetupScreen({ onReady, units, onUnitsChange, timeFormat,
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+      <Image source={require('./assets/icon.png')} style={styles.icon} />
       <Text style={styles.brand}>Going Blue</Text>
-      <Text style={styles.tagline}>
-        Going Blue is a weather app built for text message and satellite.
-      </Text>
+      <Text style={styles.tagline}>Weather forecasts over satellite and SMS</Text>
 
       {/* Getting started */}
       <Text style={styles.gsHeading}>Getting started</Text>
@@ -158,8 +157,10 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: '#f2f2f7' },
   content: { padding: 24, paddingTop: 48, paddingBottom: 72 },
-  brand: { fontSize: 30, fontWeight: '700', color: '#2a6bb5', marginBottom: 8 },
-  tagline: { fontSize: 15, color: '#3a3a3c', lineHeight: 21, marginBottom: 24 },
+  // Rounded like the home-screen icon it is. 96pt from a 1024px source, so it stays crisp at 3x.
+  icon: { width: 96, height: 96, borderRadius: 22, alignSelf: 'center', marginBottom: 14 },
+  brand: { fontSize: 30, fontWeight: '700', color: '#2a6bb5', marginBottom: 8, textAlign: 'center' },
+  tagline: { fontSize: 15, color: '#3a3a3c', lineHeight: 21, marginBottom: 24, textAlign: 'center' },
   label: { fontSize: 12, fontWeight: '600', color: '#6e6e73', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 24, marginBottom: 8 },
   legalLinks: { fontSize: 13, color: '#6e6e73', marginTop: 20, textAlign: 'center' },
   link: { color: '#2a6bb5', fontWeight: '500' },
