@@ -13,7 +13,7 @@ import { log } from "./log.js";
 // disclosures carriers expect in a HELP response. Kept short to fit a single SMS segment.
 const HELP_REPLY =
   "Going Blue: weather forecasts by text, sent only in reply to a request you send. " +
-  "Msg&data rates may apply. Reply STOP to opt out. Help: laneaasen@gmail.com";
+  "Msg&data rates may apply. Reply STOP to opt out. Help: help@going.blue";
 
 // Inbound bodies that should get the HELP response rather than a forecast. Matched as the whole
 // trimmed message, case-insensitively, so a forecast request is never mistaken for a keyword.

@@ -2,7 +2,7 @@ import type { Context } from "hono";
 
 const BRAND = "Going Blue";
 const LAST_UPDATED = "June 16, 2026";
-const CONTACT_EMAIL = "laneaasen@gmail.com";
+const CONTACT_EMAIL = "help@going.blue";
 const FORECAST_NUMBER = "+14254345858";
 
 const PAGE = (title: string, body: string, showUpdated = true) => `<!doctype html>
@@ -28,8 +28,7 @@ const PAGE = (title: string, body: string, showUpdated = true) => `<!doctype htm
 ${showUpdated ? `<p class=updated>Last updated: ${LAST_UPDATED}</p>` : ""}
 ${body}
 <footer>
-  ${BRAND} is operated as a sole proprietorship by Lane Aasen.
-  Questions? Contact <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.<br>
+  ${BRAND} is operated as a sole proprietorship by Lane Aasen.<br>
   <a href="/">Home</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a>
 </footer>
 </body>
