@@ -35,6 +35,9 @@ function requestOffsetHours(coords: { lat: number; lon: number } | null, startEp
 
 const CHARS_PER_MESSAGE = 160; // one SMS segment holds 160 characters (satellite messengers bill per segment)
 const FORECAST_NUMBER = '(425) 434-5858';
+// Hosted vCard for the forecast number. Opening it hands off to the system's add-contact flow,
+// so the app needs no Contacts permission of its own.
+const CONTACT_VCF_URL = 'https://going.blue/contact.vcf';
 const DEFAULT_MESSAGES = 1;
 const FORECAST_URL = `${API_BASE}/forecast`;
 
@@ -391,9 +394,24 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
       </Text>
       <View style={styles.smsRow}>
         <Text style={styles.smsNumber} selectable>{FORECAST_NUMBER}</Text>
-        <TouchableOpacity style={styles.smsCopyBtn} onPress={copyNumber} activeOpacity={0.7}>
-          <Text style={styles.smsCopyText}>{numCopied ? 'Copied' : 'Copy'}</Text>
-        </TouchableOpacity>
+        <View style={styles.smsActions}>
+          <TouchableOpacity
+            style={styles.smsCopyBtn}
+            onPress={() => Linking.openURL(CONTACT_VCF_URL)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.smsCopyText}>Save contact</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.smsCopyBtn, numCopied && styles.smsCopySuccess]}
+            onPress={copyNumber}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.smsCopyText, numCopied && styles.smsCopySuccessText]}>
+              {numCopied ? '✓ Copied' : 'Copy'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <InfoModal visible={priorityInfo} title="Priority" onClose={() => setPriorityInfo(false)}>
@@ -535,6 +553,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginTop: 10,
   },
   smsNumber: { fontSize: 16, fontWeight: '600', color: '#1c1c1e', fontFamily: 'Courier' },
-  smsCopyBtn: { backgroundColor: '#eef3fa', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 7 },
+  smsActions: { flexDirection: 'row', gap: 8 },
+  smsCopyBtn: { backgroundColor: '#eef3fa', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 7 },
   smsCopyText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },
+  smsCopySuccess: { backgroundColor: '#e8f5ec' },
+  smsCopySuccessText: { color: '#2a8f5a' },
 });

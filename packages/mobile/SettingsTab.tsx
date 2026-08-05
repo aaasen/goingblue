@@ -2,10 +2,6 @@ import { StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity, Alert } 
 import UnitsToggle from './UnitsToggle';
 import type { TimeFormat, Units } from './settings';
 
-// Hosted vCard carrying the forecast number. Opening it hands off to the system's add-contact
-// flow, so the app needs no Contacts permission.
-const CONTACT_VCF_URL = 'https://going.blue/contact.vcf';
-
 // ── Reference data (mirrors the web decoder's "Model details" section) ───────
 
 interface ModelInfo {
@@ -124,22 +120,6 @@ export default function SettingsTab({ onReset, units, onUnitsChange, timeFormat,
         </View>
       </View>
 
-      {/* Contact card */}
-      <Text style={[styles.heading, { marginTop: 28 }]}>Contact</Text>
-      <View style={styles.card}>
-        <Text style={styles.contactNote}>
-          Save Going Blue to your contacts to address a request from Earthmate or Messages
-          without typing the number out.
-        </Text>
-        <TouchableOpacity
-          style={styles.contactBtn}
-          onPress={() => Linking.openURL(CONTACT_VCF_URL)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.contactBtnText}>Save to Contacts</Text>
-        </TouchableOpacity>
-      </View>
-
       {/* Model details */}
       <Text style={[styles.heading, { marginTop: 28 }]}>Model details</Text>
       {MODELS.map((m) => (
@@ -217,10 +197,6 @@ const styles = StyleSheet.create({
   toggleBtnActive: { backgroundColor: '#fff' },
   toggleText: { fontSize: 13, color: '#6e6e73', fontWeight: '500' },
   toggleTextActive: { color: '#1c1c1e' },
-  contactNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginBottom: 12 },
-  contactBtn: { backgroundColor: '#eef3fa', borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
-  contactBtnText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },
-
   // Full-width destructive action, sitting on its own below the reference sections.
   resetBtn: { backgroundColor: '#fff', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
   resetBtnText: { color: '#cc2222', fontSize: 15, fontWeight: '600' },
