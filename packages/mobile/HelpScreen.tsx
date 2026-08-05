@@ -23,12 +23,6 @@ export default function HelpScreen({ visible, onClose }: Props) {
         </View>
 
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-          <Text style={styles.intro}>
-            Going Blue answers a short text message with a forecast packed into a single 160-character
-            reply — enough for about a hundred hourly data points. Build the request on the{' '}
-            <Text style={styles.bold}>Builder</Text> tab, then send it from whichever device you carry.
-          </Text>
-
           <GettingStarted />
         </ScrollView>
       </SafeAreaView>
@@ -38,15 +32,15 @@ export default function HelpScreen({ visible, onClose }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f2f2f7' },
+  // A page sheet rounds its own top corners, and the title sat far enough into that curve to be
+  // cut by it. Clear the radius before drawing anything.
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12,
+    paddingHorizontal: 16, paddingTop: 24, paddingBottom: 12,
   },
   title: { flex: 1, fontSize: 20, fontWeight: '700', color: '#1c1c1e' },
   done: { fontSize: 16, fontWeight: '600', color: '#2a6bb5', paddingLeft: 12 },
 
   scroll: { flex: 1 },
   content: { paddingHorizontal: 16, paddingBottom: 40 },
-  intro: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginBottom: 16 },
-  bold: { fontWeight: '700', color: '#1c1c1e' },
 });
