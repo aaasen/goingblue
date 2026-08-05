@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity,
-  ActivityIndicator, Alert, TextInput, Modal, Linking,
+  ActivityIndicator, Alert, TextInput, Modal, Linking, Platform,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
   VARS_BIT, V1_VERSION,
@@ -15,6 +16,7 @@ import { API_BASE } from './account';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import { allocCode } from './cache';
 import LocationMap from './LocationMap';
+import HelpScreen from './HelpScreen';
 import { MODELS } from './models';
 
 // The request time, in UTC hours since the epoch, aligned down to the hour. Sent in the request
@@ -35,9 +37,8 @@ function requestOffsetHours(coords: { lat: number; lon: number } | null, startEp
 
 const CHARS_PER_MESSAGE = 160; // one SMS segment holds 160 characters (satellite messengers bill per segment)
 const FORECAST_NUMBER = '(425) 434-5858';
-// Hosted vCard for the forecast number. Opening it hands off to the system's add-contact flow,
-// so the app needs no Contacts permission of its own.
-const CONTACT_VCF_URL = 'https://going.blue/contact.vcf';
+// Same number in E.164, for the sms: URL — the display form's punctuation isn't a valid recipient.
+const FORECAST_NUMBER_E164 = '+14254345858';
 const DEFAULT_MESSAGES = 1;
 const FORECAST_URL = `${API_BASE}/forecast`;
 
@@ -131,6 +132,14 @@ function buildContext(coords: { lat: number; lon: number }, mode: number, model:
   };
 }
 
+// Hand-off URL for the system SMS composer, addressed to the forecast number with the request
+// prefilled. iOS separates the body with `&`, Android with `?`. Neither platform lets an app put
+// an SMS on the wire on its own — the composer opens and the user taps send.
+function smsUrl(body: string): string {
+  const separator = Platform.OS === 'ios' ? '&' : '?';
+  return `sms:${FORECAST_NUMBER_E164}${separator}body=${encodeURIComponent(body)}`;
+}
+
 // Parse a single "lat, lon" string into coordinates. Accepts comma- or whitespace-separated pairs,
 // optionally wrapped in parentheses (e.g. "(-44.9412396, -99.8386085)"). Returns null unless it's
 // exactly two numbers.
@@ -159,12 +168,12 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const [model, setModel] = useState('best');
   const [groups, setGroups] = useState<Set<string>>(new Set(DEFAULT_GROUPS));
   const [messageCopied, setMessageCopied] = useState(false);
-  const [numCopied, setNumCopied] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [locating, setLocating] = useState(false);
   const [priorityInfo, setPriorityInfo] = useState(false);
   const [modelInfo, setModelInfo] = useState(false);
   const [varsInfo, setVarsInfo] = useState(false);
+  const [help, setHelp] = useState(false);
 
   // The reply always spans a single 160-char message; that sets the response length budget.
   const maxChars = DEFAULT_MESSAGES * CHARS_PER_MESSAGE;
@@ -191,13 +200,6 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
     : parsedCustomCoords;
   const coordsValid = resolvedCoords != null
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
-  // In current-location mode we always show a preview (coords are omitted until GPS resolves);
-  // in custom mode we only show a message once valid coords are entered.
-  const showMessage = coordsValid || locationMode === 'current';
-  // Preview only — the real message code is allocated on copy/fetch (buildContext + allocCode).
-  const message = showMessage
-    ? buildMsg(token, coordsValid ? resolvedCoords : null, mode, model, variableCodes, maxChars, 0, alignedStartEpochHour())
-    : '';
   // In current-location mode the buttons stay tappable so they can request GPS on demand.
   const copyDisabled = locating || (locationMode === 'custom' && !coordsValid);
   const fetchDisabled = copyDisabled || fetching;
@@ -222,24 +224,38 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
     }
   }
 
-  async function copyNumber() {
-    await Clipboard.setStringAsync(FORECAST_NUMBER);
-    setNumCopied(true);
-    setTimeout(() => setNumCopied(false), 2000);
-  }
-
-  async function handleCopy() {
+  // Resolve the location (asking for GPS on demand in current-location mode), allocate the message
+  // code the reply will echo, and build the request it belongs to. Null when there's no usable
+  // location. Every send path goes through here so each outgoing request gets its own code.
+  async function prepareMessage(): Promise<string | null> {
     let coords = resolvedCoords;
     if (locationMode === 'current' && !coordsValid) {
       coords = await requestCurrentLocation();
     }
-    if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return;
+    if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return null;
     const startHour = alignedStartEpochHour();
     const code = await allocCode(token, buildContext(coords, mode, model, varsMask, startHour), `${modeName} · ${model.toUpperCase()}`);
-    const msg = buildMsg(token, coords, mode, model, variableCodes, maxChars, code, startHour);
+    return buildMsg(token, coords, mode, model, variableCodes, maxChars, code, startHour);
+  }
+
+  async function handleCopy() {
+    const msg = await prepareMessage();
+    if (msg == null) return;
     await Clipboard.setStringAsync(msg);
     setMessageCopied(true);
     setTimeout(() => setMessageCopied(false), 2000);
+  }
+
+  // Hands the request to the phone's Messages app, addressed and prefilled. Only useful on a phone
+  // with cell service — over a satellite messenger the message is copied across instead.
+  async function handleSendSms() {
+    const msg = await prepareMessage();
+    if (msg == null) return;
+    try {
+      await Linking.openURL(smsUrl(msg));
+    } catch {
+      Alert.alert('Could not open Messages', `Copy the message and text it to ${FORECAST_NUMBER} instead.`);
+    }
   }
 
   function toggleGroup(v: string) {
@@ -252,22 +268,17 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   }
 
   async function handleFetch() {
-    let coords = resolvedCoords;
-    if (locationMode === 'current' && !coordsValid) {
-      coords = await requestCurrentLocation();
-    }
-    if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) {
+    const msg = await prepareMessage();
+    if (msg == null) {
       Alert.alert('No location', 'Please set a valid location before fetching.');
       return;
     }
     setFetching(true);
     try {
-      const startHour = alignedStartEpochHour();
-      const code = await allocCode(token, buildContext(coords, mode, model, varsMask, startHour), `${modeName} · ${model.toUpperCase()}`);
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: buildMsg(token, coords, mode, model, variableCodes, maxChars, code, startHour),
+        body: msg,
       });
       if (!resp.ok) throw new Error(await resp.text());
       onForecastReceived(await resp.text());
@@ -350,69 +361,45 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
         </View>
       </Section>
 
-      <Section label="Message">
-        <View style={styles.msgBox}>
-          {message ? (
-            <Text style={styles.msgText} selectable>{message}</Text>
-          ) : (
-            <Text style={styles.msgPlaceholder}>Enter lat/lon above</Text>
-          )}
-        </View>
-      </Section>
-
+      {/* The three ways out of the builder, in the order they're reached for: copy the message to
+          paste into a satellite messenger, hand it to Messages, or skip the wire entirely. */}
       <View style={styles.buttons}>
-        <TouchableOpacity
-          style={[
-            styles.btn,
-            styles.btnOutline,
-            messageCopied && styles.btnSuccess,
-            copyDisabled && styles.btnDisabled,
-          ]}
+        <ActionButton
+          icon={messageCopied ? 'check' : 'satellite-variant'}
+          label={messageCopied ? 'Copied' : 'Copy Message (inReach/ZOLEO)'}
           onPress={handleCopy}
           disabled={copyDisabled}
-        >
-          {locating ? (
-            <ActivityIndicator color="#2a6bb5" />
-          ) : (
-            <Text style={[styles.btnOutlineText, messageCopied && styles.btnSuccessText]}>
-              {messageCopied ? '✓ Copied' : 'Copy Message'}
-            </Text>
-          )}
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.btn, styles.btnPrimary, fetchDisabled && styles.btnDisabled]}
+          busy={locating}
+          variant={messageCopied ? 'success' : 'outline'}
+        />
+        <ActionButton
+          icon="message-text"
+          label="Send SMS"
+          onPress={handleSendSms}
+          disabled={copyDisabled}
+          busy={locating}
+          variant="outline"
+        />
+        <ActionButton
+          icon="wifi"
+          label="Get Forecast"
           onPress={handleFetch}
           disabled={fetchDisabled}
-        >
-          {fetching ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Fetch Forecast</Text>}
-        </TouchableOpacity>
+          busy={fetching}
+          variant="primary"
+        />
       </View>
 
-      <Text style={styles.smsHint}>
-        Copy the message above and text it to the number below from your phone or satellite messenger. When
-        you get a reply, paste it into the Decoder tab to view the forecast.
-      </Text>
-      <View style={styles.smsRow}>
-        <Text style={styles.smsNumber} selectable>{FORECAST_NUMBER}</Text>
-        <View style={styles.smsActions}>
-          <TouchableOpacity
-            style={styles.smsCopyBtn}
-            onPress={() => Linking.openURL(CONTACT_VCF_URL)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.smsCopyText}>Save contact</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.smsCopyBtn, numCopied && styles.smsCopySuccess]}
-            onPress={copyNumber}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.smsCopyText, numCopied && styles.smsCopySuccessText]}>
-              {numCopied ? '✓ Copied' : 'Copy'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      <TouchableOpacity
+        style={styles.helpLink}
+        onPress={() => setHelp(true)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+      >
+        <Text style={styles.helpLinkText}>How do I get a forecast?</Text>
+      </TouchableOpacity>
+
+      <HelpScreen visible={help} onClose={() => setHelp(false)} />
 
       <InfoModal visible={priorityInfo} title="Priority" onClose={() => setPriorityInfo(false)}>
         <Text style={styles.modalBody}>
@@ -475,6 +462,41 @@ function Section({ label, info, children }: { label: string; info?: () => void; 
   );
 }
 
+// A full-width action button: icon and label, replaced by a spinner while the action resolves.
+// The variants differ only in fill, so one tint drives the icon and the label together — and a
+// disabled button is filled grey, which needs the light tint whatever its variant.
+function ActionButton({ icon, label, onPress, disabled, busy, variant }: {
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+  label: string;
+  onPress: () => void;
+  disabled: boolean;
+  busy: boolean;
+  variant: 'primary' | 'outline' | 'success';
+}) {
+  const fill = { primary: styles.btnPrimary, outline: styles.btnOutline, success: styles.btnSuccess }[variant];
+  const tint = disabled || variant === 'primary' ? '#fff' : variant === 'success' ? '#2a8f5a' : '#2a6bb5';
+  return (
+    <TouchableOpacity
+      style={[styles.btn, fill, disabled && styles.btnDisabled]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      {busy ? (
+        <ActivityIndicator color={tint} />
+      ) : (
+        <>
+          <MaterialCommunityIcons name={icon} size={19} color={tint} style={styles.btnIcon} />
+          {/* One line always: the row is a fixed 50pt, so a label that wrapped would be clipped
+              rather than grow the button. */}
+          <Text style={[styles.btnText, { color: tint }]} numberOfLines={1}>{label}</Text>
+        </>
+      )}
+    </TouchableOpacity>
+  );
+}
+
 function InfoModal({ visible, title, onClose, children }: {
   visible: boolean; title: string; onClose: () => void; children: React.ReactNode;
 }) {
@@ -533,29 +555,16 @@ const styles = StyleSheet.create({
   coordInputInvalid: { color: '#cc2222' },
   mapHint: { fontSize: 12, color: '#8e8e93', marginTop: 10 },
 
-  msgBox: { backgroundColor: '#fff', borderRadius: 12, padding: 14 },
-  msgText: { fontFamily: 'Courier', fontSize: 14, color: '#1c1c1e', lineHeight: 22 },
-  msgPlaceholder: { fontFamily: 'Courier', fontSize: 14, color: '#aeaeb2', lineHeight: 22 },
-
-  buttons: { flexDirection: 'row', gap: 12, marginTop: 4 },
-  btn: { flex: 1, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  // Stacked full-width actions, so each one's icon and label sit on a single centered row.
+  buttons: { gap: 10, marginTop: 4 },
+  btn: { flexDirection: 'row', height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   btnPrimary: { backgroundColor: '#2a6bb5' },
   btnOutline: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d1d6' },
-  btnSuccess: { backgroundColor: '#e8f5ec', borderColor: '#2a8f5a' },
-  btnDisabled: { backgroundColor: '#aeaeb2' },
-  btnPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  btnOutlineText: { color: '#2a6bb5', fontSize: 16, fontWeight: '600' },
-  btnSuccessText: { color: '#2a8f5a' },
+  btnSuccess: { backgroundColor: '#e8f5ec', borderWidth: 1, borderColor: '#2a8f5a' },
+  btnDisabled: { backgroundColor: '#aeaeb2', borderColor: '#aeaeb2' },
+  btnIcon: { marginRight: 8 },
+  btnText: { fontSize: 16, fontWeight: '600' },
 
-  smsHint: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: 14 },
-  smsRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginTop: 10,
-  },
-  smsNumber: { fontSize: 16, fontWeight: '600', color: '#1c1c1e', fontFamily: 'Courier' },
-  smsActions: { flexDirection: 'row', gap: 8 },
-  smsCopyBtn: { backgroundColor: '#eef3fa', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 7 },
-  smsCopyText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },
-  smsCopySuccess: { backgroundColor: '#e8f5ec' },
-  smsCopySuccessText: { color: '#2a8f5a' },
+  helpLink: { alignSelf: 'center', marginTop: 18, paddingVertical: 6, paddingHorizontal: 12 },
+  helpLinkText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },
 });
