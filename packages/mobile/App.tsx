@@ -6,6 +6,7 @@ import DecoderTab from './DecoderTab';
 import SettingsTab from './SettingsTab';
 import SetupScreen from './SetupScreen';
 import { loadToken, clearToken } from './account';
+import { clearStore } from './cache';
 import { loadTimeFormat, loadUnits, saveTimeFormat, saveUnits, type TimeFormat, type Units } from './settings';
 
 type Tab = 'builder' | 'decoder' | 'settings';
@@ -40,7 +41,10 @@ export default function App() {
     setTab('decoder');
   }
 
+  // Reset drops this device's local state: the saved forecasts for the current account, then the
+  // token itself. Setup mints a fresh account on the way back in.
   async function handleReset() {
+    if (typeof token === 'string') await clearStore(token);
     await clearToken();
     setForecastData('');
     setTab('builder');

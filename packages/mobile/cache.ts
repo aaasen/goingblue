@@ -118,6 +118,14 @@ export async function prunePastForecasts(token: string): Promise<Slot[]> {
   return pastForecasts(store);
 }
 
+// Drop an account's whole store. Called on reset: the token is discarded there, so without this
+// the store would sit in AsyncStorage forever under a key nothing can reach again.
+export async function clearStore(token: string): Promise<void> {
+  memos.delete(token);
+  contextMaps.delete(token);
+  try { await AsyncStorage.removeItem(storeKey(token)); } catch { /* ignore */ }
+}
+
 export async function deleteSlot(token: string, code: number): Promise<Slot[]> {
   const store = await loadStore(token);
   store.slots = store.slots.filter((s) => s.code !== code);
