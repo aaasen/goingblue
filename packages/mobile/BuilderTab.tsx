@@ -58,7 +58,7 @@ const LOCATION_DENIED = `Location access was denied. ${LOCATION_FALLBACK}`;
 // Separate from the above because the OS stops showing its permission prompt after a hard denial,
 // so tapping again does nothing and Settings is the only way back to current location.
 const LOCATION_BLOCKED =
-  'Location access is off for Going Blue. Turn it on in Settings, or pick a forecast location ' +
+  'Location access is off for Going Blue. Turn it on in Settings or pick a forecast location ' +
   'on the map.';
 const LOCATION_FAILED = `Couldn’t get your current location. ${LOCATION_FALLBACK}`;
 
