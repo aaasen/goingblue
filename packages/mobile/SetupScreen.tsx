@@ -59,9 +59,6 @@ export default function SetupScreen({ onReady, units, onUnitsChange, timeFormat,
       <Text style={styles.gsHeading}>Getting started</Text>
 
       <Step n={1} title="Add Going Blue as a contact">
-        <Text style={styles.gsPara}>
-          Save the contact card, or copy the number and add it yourself.
-        </Text>
         <TouchableOpacity
           style={styles.contactBtn}
           onPress={() => Linking.openURL(CONTACT_VCF_URL)}
@@ -175,8 +172,8 @@ const styles = StyleSheet.create({
   legalLinks: { fontSize: 13, color: '#6e6e73', marginBottom: 24 },
   link: { color: '#2a6bb5', fontWeight: '500' },
 
-  contactBtn: { backgroundColor: '#eef3fa', borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
-  contactBtnText: { color: '#2a6bb5', fontSize: 15, fontWeight: '600' },
+  contactBtn: { backgroundColor: '#2a6bb5', borderRadius: 10, paddingVertical: 11, alignItems: 'center', marginTop: 2 },
+  contactBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
   numberRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: '#fff', borderRadius: 10, paddingLeft: 14, paddingRight: 8,
