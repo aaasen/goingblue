@@ -50,6 +50,20 @@ const FETCH_TIMEOUT_MS = 15000;
 // way, and both times the answer is to take one of the other two routes.
 const OFFLINE_MESSAGE = 'Not connected to the internet, use SMS or satellite instead.';
 
+// Every way current location can fail ends at the same fallback: pick the spot yourself. Current
+// location is a convenience — nothing in the app needs it — so these say what went wrong and then
+// point at Custom rather than treating a refusal as a dead end. Kept next to each other so the
+// alert and the inline notice can't drift apart.
+const LOCATION_FALLBACK = 'Switch to Custom and pick a spot on the map instead.';
+const LOCATION_DENIED = `Location access was denied. ${LOCATION_FALLBACK}`;
+// Separate from the above because the OS stops showing its permission prompt after a hard denial:
+// tapping again does nothing, so Settings is the only way back and saying "denied" alone would
+// leave the user tapping a button that can no longer ask.
+const LOCATION_BLOCKED =
+  'Location access is off for Going Blue and the system won’t ask again. Turn it on in ' +
+  'Settings, or switch to Custom and pick a spot on the map.';
+const LOCATION_FAILED = `Couldn’t get your current location. ${LOCATION_FALLBACK}`;
+
 // Variables a forecast center can't supply. Only the freezing level varies now — GEM and ECMWF
 // have no freezing-level product (Europe's pressure winds are filled from IFS 0.25°).
 const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
@@ -178,6 +192,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const [messageCopied, setMessageCopied] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
   const [priorityInfo, setPriorityInfo] = useState(false);
   const [modelInfo, setModelInfo] = useState(false);
   const [varsInfo, setVarsInfo] = useState(false);
@@ -217,20 +232,39 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const copyDisabled = locating || (locationMode === 'custom' && !coordsValid);
   const fetchDisabled = copyDisabled || fetching || offline;
 
+  // The stale-error clear lives here rather than in the segmented control's handler so the
+  // in-notice shortcut gets it too.
+  function selectLocationMode(next: LocationMode) {
+    setLocationMode(next);
+    setLocationError(null);
+  }
+
+  // Say it twice: an alert, because the tap that got here may have come from a button at the
+  // bottom of the form with the Location section scrolled off screen, and a notice that stays in
+  // that section afterwards — an alert is gone the moment it's dismissed, and what it asks the
+  // user to do next happens back up in Location.
+  function failLocation(message: string) {
+    setLocationError(message);
+    Alert.alert('Location unavailable', message);
+  }
+
   async function requestCurrentLocation(): Promise<{ lat: number; lon: number } | null> {
     setLocating(true);
+    setLocationError(null);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission denied', 'Location access is required to use current location.');
+        failLocation(canAskAgain ? LOCATION_DENIED : LOCATION_BLOCKED);
         return null;
       }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       setGpsCoords(coords);
       return coords;
-    } catch (e) {
-      Alert.alert('Error', 'Could not get location: ' + String(e));
+    } catch {
+      // No fix rather than no permission: indoors, airplane mode, a cold start that timed out.
+      // The underlying error text names none of that usefully, so don't put it in front of anyone.
+      failLocation(LOCATION_FAILED);
       return null;
     } finally {
       setLocating(false);
@@ -317,8 +351,18 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
         <SegmentedControl
           values={LOCATION_LABELS}
           selectedIndex={LOCATION_MODES.indexOf(locationMode)}
-          onChange={(e) => setLocationMode(LOCATION_MODES[e.nativeEvent.selectedSegmentIndex])}
+          onChange={(e) => selectLocationMode(LOCATION_MODES[e.nativeEvent.selectedSegmentIndex])}
         />
+        {/* Only in current-location mode: switching to Custom is the way out of this, so the
+            notice goes away the moment the user takes it. */}
+        {locationMode === 'current' && locationError && (
+          <View style={styles.locationError}>
+            <Text style={styles.locationErrorText}>{locationError}</Text>
+            <TouchableOpacity onPress={() => selectLocationMode('custom')} activeOpacity={0.7}>
+              <Text style={styles.locationErrorAction}>Set a custom location</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {locationMode === 'custom' && (
           <>
             <View style={[styles.customCoords, customCoordsInvalid && styles.customCoordsInvalid]}>
@@ -580,6 +624,15 @@ const styles = StyleSheet.create({
   coordInput: { flex: 1, fontSize: 15, color: '#1c1c1e' },
   coordInputInvalid: { color: '#cc2222' },
   mapHint: { fontSize: 12, color: '#8e8e93', marginTop: 10 },
+
+  // Sits where the custom-location controls would be, so the eye lands on it after the segmented
+  // control rather than having to hunt for why nothing happened.
+  locationError: {
+    marginTop: 10, padding: 12, borderRadius: 12,
+    backgroundColor: '#fdf0ef', borderWidth: 1, borderColor: '#f0c8c4',
+  },
+  locationErrorText: { fontSize: 13, color: '#a3231b', lineHeight: 18 },
+  locationErrorAction: { fontSize: 13, fontWeight: '600', color: '#cc2222', marginTop: 8 },
 
   // Stacked full-width actions, so each one's icon and label sit on a single centered row.
   buttons: { gap: 10, marginTop: 4 },
