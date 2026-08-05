@@ -277,7 +277,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: '#f2f2f7' }}
-      contentContainerStyle={{ paddingBottom: 48 }}
+      contentContainerStyle={{ paddingBottom: 72 }}
       keyboardShouldPersistTaps="handled"
     >
       {/* Primary action: pull the encoded reply straight off the clipboard. */}

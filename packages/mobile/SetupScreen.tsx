@@ -122,7 +122,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: '#f2f2f7' },
-  content: { padding: 24, paddingTop: 48 },
+  content: { padding: 24, paddingTop: 48, paddingBottom: 72 },
   brand: { fontSize: 30, fontWeight: '700', color: '#2a6bb5', marginBottom: 20 },
   label: { fontSize: 12, fontWeight: '600', color: '#6e6e73', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 24, marginBottom: 8 },
   consentNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: 24, marginBottom: 16 },

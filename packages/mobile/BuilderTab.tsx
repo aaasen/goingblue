@@ -475,7 +475,8 @@ function InfoModal({ visible, title, onClose, children }: {
 
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: '#f2f2f7' },
-  content: { padding: 16, paddingBottom: 48 },
+  // Bottom pad covers the home-indicator inset the scroll view now extends under.
+  content: { padding: 16, paddingBottom: 72 },
 
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', padding: 32 },
   modalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20, width: '100%', maxWidth: 340 },

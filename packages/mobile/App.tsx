@@ -49,17 +49,19 @@ export default function App() {
 
   if (token === undefined) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <View style={styles.root}>
         <StatusBar style="dark" />
+        <SafeAreaView style={styles.topInset} />
         <View style={styles.loading}><ActivityIndicator color="#2a6bb5" /></View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (token === null) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <View style={styles.root}>
         <StatusBar style="dark" />
+        <SafeAreaView style={styles.topInset} />
         <SetupScreen
           onReady={setToken}
           units={units}
@@ -67,18 +69,24 @@ export default function App() {
           timeFormat={timeFormat}
           onTimeFormatChange={setTimeFormat}
         />
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <View style={styles.root}>
       <StatusBar style="dark" />
-      <View style={styles.tabBar}>
-        <TabBtn label="Builder" active={tab === 'builder'} onPress={() => setTab('builder')} />
-        <TabBtn label="Decoder" active={tab === 'decoder'} onPress={() => setTab('decoder')} />
-        <TabBtn label="Settings" active={tab === 'settings'} onPress={() => setTab('settings')} />
-      </View>
+      {/* The safe area wraps only the header, so it picks up the top (and, in
+          landscape, side) inset while the tab content below runs all the way to
+          the physical bottom edge. Each tab pads its own scroll content so the
+          last row still clears the home indicator. */}
+      <SafeAreaView style={styles.header}>
+        <View style={styles.tabBar}>
+          <TabBtn label="Builder" active={tab === 'builder'} onPress={() => setTab('builder')} />
+          <TabBtn label="Decoder" active={tab === 'decoder'} onPress={() => setTab('decoder')} />
+          <TabBtn label="Settings" active={tab === 'settings'} onPress={() => setTab('settings')} />
+        </View>
+      </SafeAreaView>
       <View
         style={[styles.tabContent, tab !== 'builder' && styles.tabHidden]}
         accessibilityElementsHidden={tab !== 'builder'}
@@ -100,7 +108,7 @@ export default function App() {
       >
         <SettingsTab token={token} onReset={handleReset} units={units} onUnitsChange={setUnits} timeFormat={timeFormat} onTimeFormatChange={setTimeFormat} />
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -113,7 +121,10 @@ function TabBtn({ label, active, onPress }: { label: string; active: boolean; on
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f2f2f7' },
+  root: { flex: 1, backgroundColor: '#f2f2f7' },
+  // Empty safe area: lays out to exactly the top inset, nothing more.
+  topInset: { backgroundColor: '#f2f2f7' },
+  header: { backgroundColor: '#f2f2f7' },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   tabBar: {
     flexDirection: 'row',

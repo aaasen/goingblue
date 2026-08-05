@@ -210,7 +210,8 @@ function Spec({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: '#f2f2f7' },
-  content: { padding: 16, paddingBottom: 48 },
+  // Bottom pad covers the home-indicator inset the scroll view now extends under.
+  content: { padding: 16, paddingBottom: 72 },
 
   heading: { fontSize: 13, fontWeight: '700', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
   link: { color: '#2a6bb5', textDecorationLine: 'underline' },
