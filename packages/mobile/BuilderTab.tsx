@@ -274,6 +274,11 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   // Resolve the location (asking for GPS on demand in current-location mode), allocate the message
   // code the reply will echo, and build the request it belongs to. Null when there's no usable
   // location. Every send path goes through here so each outgoing request gets its own code.
+  //
+  // Callers just stop on null and say nothing: the only branch that can produce one is a failed
+  // requestCurrentLocation, which has already raised its own alert and notice. The other route to
+  // null — custom mode with unparseable coordinates — greys out all three buttons, so it never
+  // gets this far.
   async function prepareMessage(): Promise<string | null> {
     let coords = resolvedCoords;
     if (locationMode === 'current' && !coordsValid) {
@@ -316,10 +321,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
 
   async function handleFetch() {
     const msg = await prepareMessage();
-    if (msg == null) {
-      Alert.alert('No location', 'Please set a valid location before fetching.');
-      return;
-    }
+    if (msg == null) return;
     setFetching(true);
     // An abort we raised ourselves is indistinguishable from any other in the catch, so the timer
     // records that it fired. AbortController rather than AbortSignal.timeout, which React Native's
