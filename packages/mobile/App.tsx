@@ -5,7 +5,7 @@ import BuilderTab from './BuilderTab';
 import DecoderTab from './DecoderTab';
 import SettingsTab from './SettingsTab';
 import SetupScreen from './SetupScreen';
-import { loadToken, clearToken } from './account';
+import { loadToken, clearToken, deleteAccount } from './account';
 import { clearStore } from './cache';
 import { loadTimeFormat, loadUnits, saveTimeFormat, saveUnits, type TimeFormat, type Units } from './settings';
 
@@ -41,10 +41,16 @@ export default function App() {
     setTab('decoder');
   }
 
-  // Reset drops this device's local state: the saved forecasts for the current account, then the
-  // token itself. Setup mints a fresh account on the way back in.
-  async function handleReset() {
-    if (typeof token === 'string') await clearStore(token);
+  // Erase the account server-side, then drop this device's local state: the saved forecasts for
+  // that account, then the token itself. Setup mints a fresh account on the way back in.
+  //
+  // The server call goes first and its failure propagates to the caller, which reports it.
+  // Clearing the token after a failed delete would strand a live account with nothing left that
+  // could ever delete it — the token is the only handle on it.
+  async function handleDeleteAccount() {
+    if (typeof token !== 'string') return;
+    await deleteAccount(token);
+    await clearStore(token);
     await clearToken();
     setForecastData('');
     setTab('builder');
@@ -110,7 +116,7 @@ export default function App() {
         accessibilityElementsHidden={tab !== 'settings'}
         importantForAccessibility={tab === 'settings' ? 'auto' : 'no-hide-descendants'}
       >
-        <SettingsTab onReset={handleReset} units={units} onUnitsChange={setUnits} timeFormat={timeFormat} onTimeFormatChange={setTimeFormat} />
+        <SettingsTab onDeleteAccount={handleDeleteAccount} units={units} onUnitsChange={setUnits} timeFormat={timeFormat} onTimeFormatChange={setTimeFormat} />
       </View>
     </View>
   );

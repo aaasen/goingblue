@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { generateToken } from "@weather/protocol";
-import { query } from "./db.js";
+import { getPool, query } from "./db.js";
 
 // CSPRNG for token minting, supplied to the shared generator (which is platform-neutral and
 // takes its randomness as a parameter).
@@ -28,6 +28,32 @@ export async function createAccount(): Promise<string> {
 export async function accountExists(token: string): Promise<boolean> {
   const r = await query("select 1 from accounts where token = $1", [token]);
   return (r.rowCount ?? 0) > 0;
+}
+
+// Erase an account. The token is the only thing we store about a user, so dropping the row is a
+// complete deletion. The `requests` rows survive with a null token: they hold no location and no
+// message content — only a timestamp, a character count and a protocol version — and the
+// per-version counts are the sunset metric for frozen codec containers (VERSIONING.md). Nulling
+// the column severs every link back to the user while leaving that metric intact. Both statements
+// run in one transaction so a failure can't leave requests pointing at a deleted account (the
+// foreign key would reject that anyway) or orphan the rows from an account that still exists.
+//
+// Returns false when the token names no account, so a repeat delete reports honestly instead of
+// claiming a fresh success.
+export async function deleteAccount(token: string): Promise<boolean> {
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    await client.query("update requests set token = null where token = $1", [token]);
+    const r = await client.query("delete from accounts where token = $1", [token]);
+    await client.query("commit");
+    return (r.rowCount ?? 0) > 0;
+  } catch (e) {
+    await client.query("rollback").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // Record one forecast request. A token is stored only when it references a real account

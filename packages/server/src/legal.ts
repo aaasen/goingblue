@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 
 const BRAND = "Going Blue";
-const LAST_UPDATED = "June 16, 2026";
+const LAST_UPDATED = "August 5, 2026";
 const CONTACT_EMAIL = "help@going.blue";
 const FORECAST_NUMBER = "+14254345858";
 
@@ -105,9 +105,39 @@ for full details. Questions? Contact <a href="mailto:${CONTACT_EMAIL}">${CONTACT
 `;
 
 const PRIVACY_BODY = `
-<p>This Privacy Policy describes how Lane Aasen ("we," "us"), operating the
-${BRAND} SMS forecast service (the "Service") as a sole proprietorship,
-handles information when you request weather forecasts by text message.</p>
+<p>This Privacy Policy describes how Lane Aasen ("we," "us"), operating ${BRAND} as a sole
+proprietorship, handles information when you request weather forecasts. It covers both the
+SMS forecast service and the ${BRAND} mobile app (together, the "Service").</p>
+
+<h2>The short version</h2>
+<p>The only information you send us is <strong>the location you want a forecast for</strong>,
+along with the forecast options you picked. We ask for nothing else: no name, no email address,
+no account password. There is no analytics, advertising, or tracking of any kind in the app,
+and we do not track you across apps or websites.</p>
+
+<h2>The app</h2>
+<p>The ${BRAND} app builds forecast requests and decodes the replies. It is the app's job to do
+as much as possible on your device, and it does:</p>
+<ul>
+  <li><strong>Location</strong> — if you grant location permission, the app reads your device's
+  current position to fill in the coordinates for a request. Granting permission is optional; you
+  can instead pick any location on the map. Either way, the coordinates you choose are sent to us
+  (and on to our weather data provider) for the sole purpose of retrieving that forecast. The app
+  does not record where you have been, and it does not read your location in the background.</li>
+  <li><strong>Stored on your device only</strong> — your account token, the forecasts you have
+  decoded, and your unit and time-format preferences are kept on the device and are not uploaded
+  to us. Deleting the app deletes them.</li>
+  <li><strong>Decoding</strong> — forecast replies are decoded entirely on your device. A forecast
+  you paste into the app is not sent anywhere.</li>
+</ul>
+
+<h2>Your account</h2>
+<p>The app creates an account for you automatically. That account is a randomly generated token
+and nothing else — it is not tied to your name, email address, phone number, or device
+identifiers, and we use it only to count requests for usage limits. You can erase it at any time
+from <strong>Settings &rarr; Delete account</strong> in the app, which deletes it from our servers
+along with every link between it and any request it made. That deletion is immediate and
+permanent.</p>
 
 <h2>SMS text messaging</h2>
 <p>${BRAND} sends SMS/text-message forecasts only in reply to a request you send first.
@@ -121,12 +151,16 @@ including marketing.</strong></p>
 <h2>Information we collect</h2>
 <p>The Service only processes information that you send us when you request a forecast:</p>
 <ul>
-  <li><strong>Your messaging address or phone number</strong> — the satellite-messenger
-  or mobile address that sends the request, used solely to deliver the forecast back to you.</li>
   <li><strong>Location coordinates</strong> — the latitude and longitude you include in a
   request, used to retrieve the forecast for that location.</li>
-  <li><strong>Request parameters and message content</strong> — the forecast options you
-  specify (e.g. resolution, weather variables, protocol version).</li>
+  <li><strong>Request parameters</strong> — the forecast options you specify (e.g. resolution,
+  weather variables, protocol version).</li>
+  <li><strong>Your account token</strong> — the anonymous token described above, when the
+  request carries one, used to count requests against usage limits.</li>
+  <li><strong>Your messaging address or phone number</strong> — <em>only</em> when you request a
+  forecast by text message, in which case the satellite-messenger or mobile address that sent the
+  request is used solely to deliver the forecast back to you. Requests the app sends over the
+  internet carry no phone number or messaging address.</li>
 </ul>
 
 <h2>How we use it</h2>
@@ -152,13 +186,27 @@ Service:</p>
 
 <h2>Data retention</h2>
 <p>We retain request and message data only as long as needed to operate and troubleshoot
-the Service. Operational logs are kept for a limited period and then deleted.</p>
+the Service. Operational logs are kept for a limited period and then deleted. Deleting your
+account removes the account record and unlinks it from any record of the requests it made.</p>
 
-<h2>Opting out</h2>
-<p>Because the Service only replies to messages you send, the most direct way to stop
-receiving messages is to stop sending requests. You may also reply <strong>STOP</strong>
-at any time to opt out, or reply <strong>HELP</strong> for assistance. See our
-<a href="/terms">Terms &amp; Conditions</a> for details.</p>
+<h2>Your choices</h2>
+<ul>
+  <li><strong>Location permission</strong> — you can decline it, or revoke it later in your
+  device's settings, and still use the app by choosing locations on the map.</li>
+  <li><strong>Delete your account</strong> — <strong>Settings &rarr; Delete account</strong> in
+  the app erases it from our servers.</li>
+  <li><strong>Delete the app</strong> — this removes everything stored on your device, including
+  your saved forecasts. Delete your account first if you also want it erased from our
+  servers.</li>
+  <li><strong>Stop text messages</strong> — because the Service only replies to messages you
+  send, the most direct way to stop receiving messages is to stop sending requests. You may also
+  reply <strong>STOP</strong> at any time to opt out, or <strong>HELP</strong> for assistance.
+  See our <a href="/terms">Terms &amp; Conditions</a> for details.</li>
+</ul>
+
+<h2>Children</h2>
+<p>The Service is not directed to children under 13, and we do not knowingly collect personal
+information from them.</p>
 
 <h2>Changes to this policy</h2>
 <p>We may update this policy from time to time. The "Last updated" date above reflects the
@@ -169,16 +217,28 @@ most recent revision.</p>
 `;
 
 const TERMS_BODY = `
-<p>These Terms &amp; Conditions govern your use of the ${BRAND} SMS forecast
-service (the "Service"), operated as a sole proprietorship by Lane Aasen. By texting the
-Service to request a forecast, you agree to these terms.</p>
+<p>These Terms &amp; Conditions govern your use of ${BRAND} (the "Service") — both the SMS
+forecast service and the ${BRAND} mobile app — operated as a sole proprietorship by Lane Aasen.
+By using the app or texting the Service to request a forecast, you agree to these terms.</p>
 
 <h2>The Service</h2>
-<p>The Service provides weather forecasts on request via text message, designed for use with
-satellite messenger devices (such as Garmin inReach) and mobile phones. You send a message
-containing a location and forecast options; the Service replies with a forecast. Forecast
-responses may be sent in a compact encoded format that is decoded and displayed by the
-companion app, allowing a full forecast to fit within the size limits of satellite messaging.</p>
+<p>The Service provides weather forecasts on request, designed for use with satellite messenger
+devices (such as Garmin inReach) and mobile phones. You send a location and forecast options; the
+Service replies with a forecast. Requests can be sent as a text message or, where you have an
+internet connection, directly from the app. Forecast responses may be sent in a compact encoded
+format that the app decodes and displays, allowing a full forecast to fit within the size limits
+of satellite messaging.</p>
+
+<h2>Accounts</h2>
+<p>The app creates an anonymous account token for you, which identifies your requests for the
+purpose of usage limits. Keep it to yourself: anyone holding your token can make requests counted
+against you. You may delete your account at any time from within the app. We may limit request
+volume, or suspend or terminate access, where necessary to keep the Service running for
+everyone.</p>
+
+<h2>Acceptable use</h2>
+<p>Do not use the Service to break the law, and do not attempt to disrupt, overload, or gain
+unauthorized access to it or to any system it depends on.</p>
 
 <h2>Consent and message frequency</h2>
 <p>All messages from the Service are sent in direct response to a request you initiate.

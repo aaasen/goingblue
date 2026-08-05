@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { dispatchForecast, extractUserToken, extractVersion, type DispatchResult } from "./dispatch.js";
 import { ping } from "./db.js";
-import { createAccount, accountExists, recordRequest } from "./accounts.js";
+import { createAccount, accountExists, deleteAccount, recordRequest } from "./accounts.js";
 import { isValidToken, normalizeToken } from "@weather/protocol";
 import { twiml, validateTwilioSignature } from "./twilio.js";
 import { probeReply } from "./probes.js";
@@ -150,5 +150,27 @@ export async function verifyAccountRoute(c: Context) {
   } catch (e) {
     log.error("account.verify_failed", { err: e });
     return c.text("Verification unavailable", 503);
+  }
+}
+
+// POST /account/delete { token } — erase the caller's account. An app that creates accounts has
+// to offer deletion from inside it (App Store Review Guideline 5.1.1(v)), and since the token is
+// the only identifier we hold, deleting the row leaves us nothing about the user.
+//
+// A malformed or unknown token reports { deleted: false } rather than an error: the caller's goal
+// is "this account no longer exists," which is already true, and 200 lets the app finish clearing
+// its local state. A DB error is a 503 so the app keeps the token and can retry — silently
+// dropping it locally would strand a live account with no way to reach it.
+export async function deleteAccountRoute(c: Context) {
+  const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+  const raw = typeof body?.token === "string" ? body.token : "";
+  if (!isValidToken(raw)) return c.json({ deleted: false });
+  try {
+    const deleted = await deleteAccount(normalizeToken(raw));
+    log.info("account.delete", { deleted });
+    return c.json({ deleted });
+  } catch (e) {
+    log.error("account.delete_failed", { err: e });
+    return c.text("Deletion unavailable", 503);
   }
 }

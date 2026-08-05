@@ -33,10 +33,24 @@ export async function saveToken(token: string): Promise<void> {
   await AsyncStorage.setItem(TOKEN_KEY, normalizeToken(token));
 }
 
-// Forget the stored token, sending the app back to the setup flow. The account still exists
-// server-side; this only clears the local reference.
+// Forget the stored token, sending the app back to the setup flow. This only clears the local
+// reference — see deleteAccount for erasing the account itself.
 export async function clearToken(): Promise<void> {
   await AsyncStorage.removeItem(TOKEN_KEY);
+}
+
+// Erase the account server-side. Throws if the server can't be reached or answers with an error,
+// which the caller must surface rather than swallow: dropping the local token after a failed
+// delete would leave a live account with no way left to reach it. An unknown token is not a
+// failure — the server reports deleted:false and we treat the account as gone, which is the
+// state the caller wanted.
+export async function deleteAccount(token: string): Promise<void> {
+  const resp = await fetch(`${API_BASE}/account/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: normalizeToken(token) }),
+  });
+  if (!resp.ok) throw new Error(`Account deletion failed (${resp.status})`);
 }
 
 // Mint a new account on the server and persist the returned token. The account token only

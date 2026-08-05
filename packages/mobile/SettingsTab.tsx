@@ -1,6 +1,10 @@
-import { StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity, Alert } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity, Alert } from 'react-native';
 import UnitsToggle from './UnitsToggle';
 import type { TimeFormat, Units } from './settings';
+
+const TERMS_URL = 'https://going.blue/terms';
+const PRIVACY_URL = 'https://going.blue/privacy';
 
 // ── Reference data (mirrors the web decoder's "Model details" section) ───────
 
@@ -77,20 +81,40 @@ const VARIABLES: VarInfo[] = [
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function SettingsTab({ onReset, units, onUnitsChange, timeFormat, onTimeFormatChange }: {
-  onReset: () => void;
+export default function SettingsTab({ onDeleteAccount, units, onUnitsChange, timeFormat, onTimeFormatChange }: {
+  onDeleteAccount: () => Promise<void>;
   units: Units;
   onUnitsChange: (u: Units) => void;
   timeFormat: TimeFormat;
   onTimeFormatChange: (format: TimeFormat) => void;
 }) {
-  const RESET_MESSAGE =
-    'This clears your saved forecasts and returns to setup. They can’t be recovered.';
+  const [deleting, setDeleting] = useState(false);
 
-  function confirmReset() {
-    Alert.alert('Reset app?', RESET_MESSAGE, [
+  const DELETE_MESSAGE =
+    'This erases your account and clears your saved forecasts, then returns to setup. ' +
+    'Neither can be recovered.';
+
+  // Deletion needs the network, so it can fail. Say so and leave the account intact rather than
+  // clearing the app locally — the token is the only handle on the account, and a device that
+  // has forgotten it can never delete what it left behind.
+  async function runDelete() {
+    setDeleting(true);
+    try {
+      await onDeleteAccount();
+    } catch {
+      Alert.alert(
+        'Couldn’t delete account',
+        'Your account is unchanged. Check your connection and try again.',
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function confirmDelete() {
+    Alert.alert('Delete account?', DELETE_MESSAGE, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Reset', style: 'destructive', onPress: onReset },
+      { text: 'Delete', style: 'destructive', onPress: runDelete },
     ]);
   }
 
@@ -157,8 +181,21 @@ export default function SettingsTab({ onReset, units, onUnitsChange, timeFormat,
         </View>
       ))}
 
-      <TouchableOpacity style={styles.resetBtn} onPress={confirmReset} activeOpacity={0.7}>
-        <Text style={styles.resetBtnText}>Reset app</Text>
+      {/* Account */}
+      <Text style={[styles.heading, { marginTop: 28 }]}>Account</Text>
+      <Text style={styles.sectionNote}>
+        Your account is an anonymous token — no name, email, or phone number. Deleting it removes
+        it from our servers.
+      </Text>
+      <TouchableOpacity
+        style={[styles.resetBtn, deleting && styles.resetBtnDisabled]}
+        onPress={confirmDelete}
+        disabled={deleting}
+        activeOpacity={0.7}
+      >
+        {deleting
+          ? <ActivityIndicator color="#cc2222" />
+          : <Text style={styles.resetBtnText}>Delete account</Text>}
       </TouchableOpacity>
 
       <Text style={styles.footer}>
@@ -166,6 +203,12 @@ export default function SettingsTab({ onReset, units, onUnitsChange, timeFormat,
         <Text style={styles.link} onPress={() => Linking.openURL('https://open-meteo.com/')}>
           Open-Meteo
         </Text>.
+      </Text>
+
+      <Text style={styles.legalLinks}>
+        <Text style={styles.link} onPress={() => Linking.openURL(TERMS_URL)}>Terms &amp; Conditions</Text>
+        {'   ·   '}
+        <Text style={styles.link} onPress={() => Linking.openURL(PRIVACY_URL)}>Privacy Policy</Text>
       </Text>
     </ScrollView>
   );
@@ -197,9 +240,12 @@ const styles = StyleSheet.create({
   toggleBtnActive: { backgroundColor: '#fff' },
   toggleText: { fontSize: 13, color: '#6e6e73', fontWeight: '500' },
   toggleTextActive: { color: '#1c1c1e' },
-  // Full-width destructive action, sitting on its own below the reference sections.
-  resetBtn: { backgroundColor: '#fff', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
+  // Full-width destructive action, sitting on its own below the reference sections. Height is
+  // fixed so swapping the label for a spinner mid-delete doesn't make the row jump.
+  resetBtn: { backgroundColor: '#fff', borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  resetBtnDisabled: { opacity: 0.6 },
   resetBtnText: { color: '#cc2222', fontSize: 15, fontWeight: '600' },
+  sectionNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: -4, marginBottom: 10 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 },
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#1c1c1e', marginRight: 8 },
@@ -222,4 +268,5 @@ const styles = StyleSheet.create({
   varAggLabel: { fontWeight: '700', color: '#8e8e93' },
 
   footer: { fontSize: 13, color: '#8e8e93', marginTop: 20, lineHeight: 19 },
+  legalLinks: { fontSize: 13, color: '#8e8e93', marginTop: 12, lineHeight: 19 },
 });
