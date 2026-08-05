@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { forecast, health, inbound, sms, testPage, createAccountRoute, verifyAccountRoute } from "./routes.js";
+import { forecast, health, sms, createAccountRoute, verifyAccountRoute } from "./routes.js";
 import { landing, privacy, terms, contactCard } from "./legal.js";
 import { migrate } from "./db.js";
 import { log } from "./log.js";
@@ -15,14 +15,11 @@ app.get("/terms", terms);
 app.get("/contact.vcf", contactCard);
 app.use("/forecast", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/forecast", forecast);
-app.post("/inbound", inbound);
 app.post("/sms", sms);
 app.use("/account", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/account", createAccountRoute);
 app.use("/account/verify", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/account/verify", verifyAccountRoute);
-app.get("/test", testPage);
-app.post("/test", testPage);
 
 const port = parseInt(process.env["PORT"] ?? "8080");
 

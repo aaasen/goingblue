@@ -1,14 +1,11 @@
 import type { Context } from "hono";
 import { dispatchForecast, extractUserToken, extractVersion, type DispatchResult } from "./dispatch.js";
-import { sendGarminReply } from "./garmin.js";
 import { ping } from "./db.js";
 import { createAccount, accountExists, recordRequest } from "./accounts.js";
 import { isValidToken, normalizeToken } from "@weather/protocol";
 import { twiml, validateTwilioSignature } from "./twilio.js";
 import { probeReply } from "./probes.js";
 import { log } from "./log.js";
-
-const REPLY_ADDRESS = "inreach@going.blue";
 
 // Standard HELP keyword response. STOP/START are handled by Twilio's Advanced Opt-Out and never
 // reach this webhook; HELP is forwarded here so we control the reply text. Identifies the brand,
@@ -22,8 +19,8 @@ const HELP_REPLY =
 // trimmed message, case-insensitively, so a forecast request is never mistaken for a keyword.
 const HELP_KEYWORDS = new Set(["help", "info"]);
 
-// Human-readable replies for requests the gateway cannot route. These go back over SMS or
-// Garmin, so they must be short and tell a person in the field what to do next.
+// Human-readable replies for requests the gateway cannot route. These go back over SMS, so
+// they must be short and tell a person in the field what to do next.
 const REPLY_MISSING_VERSION =
   'Missing protocol version: include a version word (e.g. "v1") or update the Going Blue app.';
 const replyUnsupported = (v: number) =>
@@ -74,37 +71,6 @@ export async function forecast(c: Context) {
     case "unsupported_version": return c.text(replyFor(result), 400);
     case "unavailable": return c.text(REPLY_UNAVAILABLE, 503);
   }
-}
-
-export async function inbound(c: Context) {
-  const form = await c.req.parseBody();
-  const text = String(form["text"] ?? "");
-  const sender = String(form["from"] ?? "");
-  const match = text.match(/https:\/\/inreachlink\.com\/\S+/);
-  const replyUrl = match?.[0] ?? null;
-
-  log.info("email.inbound", {
-    from: sender,
-    subject: String(form["subject"] ?? ""),
-    reply_url: replyUrl,
-    len: text.length,
-    text,
-  });
-
-  if (replyUrl) {
-    const result = await buildForecast(text.replace(replyUrl, "").trim());
-    // Errors also go back over the Garmin link: the sender is in the field with no other
-    // feedback channel, so a short "update the app" note beats silence.
-    const reply = replyFor(result);
-    try {
-      // The outcome is logged by sendGarminReply itself, which has the transport detail.
-      await sendGarminReply(replyUrl, REPLY_ADDRESS, reply);
-    } catch (e) {
-      log.error("garmin.reply_failed", { reply_url: replyUrl, err: e });
-    }
-  }
-
-  return c.text("OK", 200);
 }
 
 // POST /sms — Twilio inbound-SMS webhook. Twilio delivers each text a user sends to the Going
@@ -185,60 +151,4 @@ export async function verifyAccountRoute(c: Context) {
     log.error("account.verify_failed", { err: e });
     return c.text("Verification unavailable", 503);
   }
-}
-
-const TEST_HTML = (opts: {
-  replyUrl: string;
-  replyAddress: string;
-  message: string;
-  result: string;
-}) => `<!doctype html>
-<html>
-<head><meta charset=utf-8><title>Garmin Reply Test</title>
-<style>
-  body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 16px; }
-  label { display: block; margin-top: 16px; font-weight: bold; }
-  input, textarea { width: 100%; box-sizing: border-box; padding: 6px; margin-top: 4px; font-family: monospace; }
-  textarea { height: 80px; }
-  button { margin-top: 16px; padding: 8px 20px; font-size: 1em; cursor: pointer; }
-  pre { background: #f4f4f4; padding: 12px; white-space: pre-wrap; word-break: break-all; }
-  .ok { color: green; } .err { color: red; }
-</style>
-</head>
-<body>
-<h2>Garmin Reply Test</h2>
-<form method=post>
-  <label>Reply URL (inreachlink.com/…)</label>
-  <input name=reply_url value="${opts.replyUrl}" required>
-  <label>Reply address</label>
-  <input name=reply_address value="${opts.replyAddress}">
-  <label>Message</label>
-  <textarea name=message>${opts.message}</textarea>
-  <button type=submit>Send</button>
-</form>
-${opts.result}
-</body></html>`;
-
-export async function testPage(c: Context) {
-  let replyUrl = "";
-  let replyAddress = "inreach@going.blue";
-  let message = "";
-  let resultHtml = "";
-
-  if (c.req.method === "POST") {
-    const form = await c.req.parseBody();
-    replyUrl = String(form["reply_url"] ?? "").trim();
-    replyAddress = String(form["reply_address"] ?? replyAddress).trim();
-    message = String(form["message"] ?? "").trim();
-    try {
-      const success = await sendGarminReply(replyUrl, replyAddress, message);
-      resultHtml = success
-        ? `<p class=ok><b>Success</b></p>`
-        : `<p class=err><b>Failed</b></p>`;
-    } catch (e) {
-      resultHtml = `<pre class=err>${e}</pre>`;
-    }
-  }
-
-  return c.html(TEST_HTML({ replyUrl, replyAddress, message, result: resultHtml }));
 }

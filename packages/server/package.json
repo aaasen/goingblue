@@ -14,7 +14,6 @@
     "@weather/protocol": "workspace:*",
     "base32768": "^5.0.1",
     "hono": "^4.6.0",
-    "node-html-parser": "^7.1.0",
     "pg": "^8.13.0"
   },
   "devDependencies": {

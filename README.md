@@ -201,11 +201,10 @@ npx expo start -c
 
 #### Inbound messages
 
-The server receives forecast requests over two transports, each fetching a forecast from the
-request body and replying on the same channel:
+The server receives forecast requests over SMS, fetching a forecast from the request body and
+replying on the same channel. Satellite messengers reach the service the same way — an inReach
+sends to the Going Blue number as a text, so it needs no transport of its own:
 
-- **Email** (`POST /inbound`) — forwarded Garmin inReach messages. The reply is posted back via
-  the message's `inreachlink.com` reply URL.
 - **SMS** (`POST /sms`) — Twilio inbound-SMS webhook. Point your Twilio number's "A message comes
   in" webhook at `https://<host>/sms` (HTTP POST). The forecast is returned as TwiML, which Twilio
   delivers back to the sender, so no Twilio REST credentials are required for replies. Set

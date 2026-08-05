@@ -7,7 +7,7 @@ How Going Blue ships new protocol versions without breaking clients in the field
 Old protocol versions are kept alive as **frozen containers**, not as code paths on main:
 
 - **`packages/server` — the gateway.** Continuously deployed, never frozen. Owns every
-  transport (Twilio SMS, inbound email, Garmin replies), accounts, quotas, request logging,
+  transport (Twilio SMS), accounts, quotas, request logging,
   legal pages, and the web app. It routes each forecast request to the codec server for the
   request's protocol version and knows almost nothing about the message grammar.
 - **`packages/codec-server` — one running container per shipped protocol version.** Stateless:
