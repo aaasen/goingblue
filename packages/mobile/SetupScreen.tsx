@@ -118,19 +118,6 @@ export default function SetupScreen({ onReady, units, onUnitsChange, timeFormat,
         </View>
       </View>
 
-      <Text style={styles.consentNote}>
-        When you send a forecast request to Going Blue, you agree to receive a reply with that
-        forecast. Going Blue only ever replies to requests you send — it sends no marketing,
-        recurring, or other unsolicited messages. Message and data rates may apply; reply STOP
-        to opt out, HELP for help.
-      </Text>
-
-      <Text style={styles.legalLinks}>
-        <Text style={styles.link} onPress={() => Linking.openURL(TERMS_URL)}>Terms &amp; Conditions</Text>
-        {'   ·   '}
-        <Text style={styles.link} onPress={() => Linking.openURL(PRIVACY_URL)}>Privacy Policy</Text>
-      </Text>
-
       <TouchableOpacity
         style={[styles.btn, styles.btnPrimary, busy && styles.btnDisabled]}
         onPress={handleStart}
@@ -138,6 +125,12 @@ export default function SetupScreen({ onReady, units, onUnitsChange, timeFormat,
       >
         {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Start</Text>}
       </TouchableOpacity>
+
+      <Text style={styles.legalLinks}>
+        <Text style={styles.link} onPress={() => Linking.openURL(TERMS_URL)}>Terms &amp; Conditions</Text>
+        {'   ·   '}
+        <Text style={styles.link} onPress={() => Linking.openURL(PRIVACY_URL)}>Privacy Policy</Text>
+      </Text>
     </ScrollView>
   );
 }
@@ -168,8 +161,7 @@ const styles = StyleSheet.create({
   brand: { fontSize: 30, fontWeight: '700', color: '#2a6bb5', marginBottom: 8 },
   tagline: { fontSize: 15, color: '#3a3a3c', lineHeight: 21, marginBottom: 24 },
   label: { fontSize: 12, fontWeight: '600', color: '#6e6e73', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 24, marginBottom: 8 },
-  consentNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: 24, marginBottom: 16 },
-  legalLinks: { fontSize: 13, color: '#6e6e73', marginBottom: 24 },
+  legalLinks: { fontSize: 13, color: '#6e6e73', marginTop: 20, textAlign: 'center' },
   link: { color: '#2a6bb5', fontWeight: '500' },
 
   contactBtn: { backgroundColor: '#2a6bb5', borderRadius: 10, paddingVertical: 11, alignItems: 'center', marginTop: 2 },
