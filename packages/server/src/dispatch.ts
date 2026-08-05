@@ -1,4 +1,5 @@
 import { isValidToken, normalizeToken } from "@weather/protocol";
+import { log } from "./log.js";
 
 // Routes a forecast request to the codec server for its protocol version. The gateway's
 // knowledge of the message grammar is deliberately tiny — a `vN` version token to route by and
@@ -50,10 +51,10 @@ export async function dispatchForecast(body: string): Promise<DispatchResult> {
   try {
     const resp = await fetch(`${url}/encode`, { method: "POST", body });
     if (resp.ok) return { kind: "ok", encoded: await resp.text() };
-    console.error(`codec v${version} responded ${resp.status}: ${await resp.text()}`);
+    log.error("codec.error_response", { version, status: resp.status, body: await resp.text() });
     return { kind: "unavailable" };
   } catch (e) {
-    console.error(`codec v${version} unreachable:`, e);
+    log.error("codec.unreachable", { version, err: e });
     return { kind: "unavailable" };
   }
 }

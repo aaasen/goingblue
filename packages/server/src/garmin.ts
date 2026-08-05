@@ -1,4 +1,5 @@
 import { parse } from "node-html-parser";
+import { log } from "./log.js";
 
 export function parseReplyPage(html: string): { guid: string; messageId: string } | null {
   const doc = parse(html);
@@ -20,10 +21,8 @@ export async function sendGarminReply(
   replyAddress: string,
   message: string,
 ): Promise<boolean> {
-  console.log("garmin: fetching reply page", replyUrl);
   const pageResp = await fetch(replyUrl, { headers: BROWSER_HEADERS });
   const pageText = await pageResp.text();
-  console.log("garmin: page status=%d final_url=%s", pageResp.status, pageResp.url);
 
   // Forward session cookies to the POST request
   const setCookies: string[] =
@@ -32,17 +31,19 @@ export async function sendGarminReply(
 
   const parsed = parseReplyPage(pageText);
   if (!parsed) {
-    console.error(`garmin: Guid not found in page (len=${pageText.length})`);
-    console.debug("garmin: page body:", pageText.slice(0, 2000));
+    log.error("garmin.guid_missing", {
+      reply_url: replyUrl,
+      page_status: pageResp.status,
+      final_url: pageResp.url,
+      page_len: pageText.length,
+    });
+    log.debug("garmin.page_body", { body: pageText.slice(0, 2000) });
     return false;
   }
 
   const { guid, messageId } = parsed;
-  console.log("garmin: guid=%s message_id=%s", guid, messageId);
-
   const baseUrl = pageResp.url.split("/textmessage")[0];
   const apiUrl = `${baseUrl}/TextMessage/TxtMsg`;
-  console.log("garmin: posting to %s (message len=%d)", apiUrl, message.length);
 
   const response = await fetch(apiUrl, {
     method: "POST",
@@ -63,17 +64,33 @@ export async function sendGarminReply(
   });
 
   const body = await response.text();
-  console.log("garmin: post status=%d body=%s", response.status, body.slice(0, 500));
 
   let result: unknown;
   try {
     result = JSON.parse(body);
   } catch {
-    console.error("garmin: response is not JSON:", body.slice(0, 500));
+    log.error("garmin.response_not_json", {
+      api_url: apiUrl,
+      status: response.status,
+      body: body.slice(0, 500),
+    });
     return false;
   }
 
+  // One line for the whole send, carrying every field the step-by-step logging used to print:
+  // which page was fetched, what it yielded, where the reply was posted, and how it landed.
   const success = (result as { Success?: boolean }).Success === true;
-  if (!success) console.error("garmin: Success=False, full response:", result);
+  const fields = {
+    reply_url: replyUrl,
+    page_status: pageResp.status,
+    final_url: pageResp.url,
+    guid,
+    message_id: messageId,
+    api_url: apiUrl,
+    message_len: message.length,
+    status: response.status,
+  };
+  if (success) log.info("garmin.reply_sent", fields);
+  else log.error("garmin.reply_rejected", { ...fields, response: result });
   return success;
 }

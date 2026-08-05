@@ -1,4 +1,5 @@
 import pg from "pg";
+import { log } from "./log.js";
 
 // Postgres access for the accounts/requests store. The pool is created lazily on first
 // use so that importing this module (e.g. from tests) never opens a connection; tests that
@@ -32,7 +33,7 @@ export function getPool(): pg.Pool {
     idleTimeoutMillis: 30_000,
   });
   // Without a listener, a backend-initiated socket error would crash the process.
-  pool.on("error", (err) => console.error("pg pool error:", err));
+  pool.on("error", (err) => log.error("db.pool_error", { err }));
   return pool;
 }
 
@@ -83,7 +84,7 @@ export async function ping(): Promise<boolean> {
     await query("select 1");
     return true;
   } catch (e) {
-    console.error("db ping failed:", e);
+    log.error("db.ping_failed", { err: e });
     return false;
   }
 }

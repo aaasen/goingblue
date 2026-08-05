@@ -6,6 +6,7 @@ import { createAccount, accountExists, recordRequest } from "./accounts.js";
 import { isValidToken, normalizeToken } from "@weather/protocol";
 import { twiml, validateTwilioSignature } from "./twilio.js";
 import { probeReply } from "./probes.js";
+import { log } from "./log.js";
 
 const REPLY_ADDRESS = "inreach@going.blue";
 
@@ -44,7 +45,7 @@ async function logRequest(token: string | null, chars: number, version: number |
   try {
     await recordRequest(token, chars, version);
   } catch (e) {
-    console.error("recordRequest failed:", e);
+    log.error("request.record_failed", { err: e });
   }
 }
 
@@ -52,10 +53,15 @@ async function logRequest(token: string | null, chars: number, version: number |
 // per-version request counts are the sunset metric: a frozen codec container is retired only
 // once its version has gone quiet (VERSIONING.md).
 async function buildForecast(body: string): Promise<DispatchResult> {
+  const version = extractVersion(body);
   const result = await dispatchForecast(body);
-  console.log(`forecast dispatch: v${extractVersion(body)} -> ${result.kind}`);
+  log.info("forecast.dispatch", {
+    version,
+    kind: result.kind,
+    chars: result.kind === "ok" ? result.encoded.length : undefined,
+  });
   if (result.kind === "ok") {
-    await logRequest(extractUserToken(body), result.encoded.length, extractVersion(body));
+    await logRequest(extractUserToken(body), result.encoded.length, version);
   }
   return result;
 }
@@ -77,11 +83,13 @@ export async function inbound(c: Context) {
   const match = text.match(/https:\/\/inreachlink\.com\/\S+/);
   const replyUrl = match?.[0] ?? null;
 
-  console.log("=== Inbound Email ===");
-  console.log("from:", sender);
-  console.log("subject:", form["subject"]);
-  console.log("text:", text);
-  console.log("reply_url:", replyUrl);
+  log.info("email.inbound", {
+    from: sender,
+    subject: String(form["subject"] ?? ""),
+    reply_url: replyUrl,
+    len: text.length,
+    text,
+  });
 
   if (replyUrl) {
     const result = await buildForecast(text.replace(replyUrl, "").trim());
@@ -89,10 +97,10 @@ export async function inbound(c: Context) {
     // feedback channel, so a short "update the app" note beats silence.
     const reply = replyFor(result);
     try {
-      const success = await sendGarminReply(replyUrl, REPLY_ADDRESS, reply);
-      console.log("garmin reply sent:", success);
+      // The outcome is logged by sendGarminReply itself, which has the transport detail.
+      await sendGarminReply(replyUrl, REPLY_ADDRESS, reply);
     } catch (e) {
-      console.error("sendGarminReply failed:", e);
+      log.error("garmin.reply_failed", { reply_url: replyUrl, err: e });
     }
   }
 
@@ -117,16 +125,14 @@ export async function sms(c: Context) {
     // differ (internal scheme/host), so allow pinning it via TWILIO_WEBHOOK_URL.
     const url = process.env["TWILIO_WEBHOOK_URL"] ?? c.req.url;
     if (!validateTwilioSignature(authToken, signature, url, params)) {
-      console.error("sms: invalid Twilio signature");
+      log.error("sms.invalid_signature", { url });
       return c.text("Invalid signature", 403);
     }
   }
 
   const body = params["Body"] ?? "";
   const sender = params["From"] ?? "";
-  console.log("=== Inbound SMS ===");
-  console.log("from:", sender);
-  console.log("text:", body);
+  log.info("sms.inbound", { from: sender, len: body.length, text: body });
 
   if (HELP_KEYWORDS.has(body.trim().toLowerCase())) {
     return c.text(twiml(HELP_REPLY), 200, { "Content-Type": "text/xml" });
@@ -136,7 +142,7 @@ export async function sms(c: Context) {
   // and never recorded as a served request.
   const probe = probeReply(body);
   if (probe !== null) {
-    console.log("probe reply:", probe);
+    log.info("sms.probe_reply", { len: probe.length, reply: probe });
     return c.text(twiml(probe), 200, { "Content-Type": "text/xml" });
   }
 
@@ -159,7 +165,7 @@ export async function createAccountRoute(c: Context) {
     const token = await createAccount();
     return c.json({ token });
   } catch (e) {
-    console.error("createAccount failed:", e);
+    log.error("account.create_failed", { err: e });
     return c.text("Could not create account", 503);
   }
 }
@@ -176,7 +182,7 @@ export async function verifyAccountRoute(c: Context) {
     const exists = await accountExists(normalizeToken(raw));
     return c.json({ valid: exists });
   } catch (e) {
-    console.error("verifyAccount failed:", e);
+    log.error("account.verify_failed", { err: e });
     return c.text("Verification unavailable", 503);
   }
 }

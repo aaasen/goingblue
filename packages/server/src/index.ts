@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 import { forecast, health, inbound, sms, testPage, createAccountRoute, verifyAccountRoute } from "./routes.js";
 import { landing, privacy, terms, contactCard } from "./legal.js";
 import { migrate } from "./db.js";
+import { log } from "./log.js";
 
 const app = new Hono();
 
@@ -29,9 +30,9 @@ const port = parseInt(process.env["PORT"] ?? "8080");
 // path for quotas/rate limiting and records every request), so a migration failure is
 // logged loudly; requests that need the DB will surface the error on their own path.
 migrate()
-  .then(() => console.log("db schema ready"))
-  .catch((e) => console.error("db migrate failed:", e));
+  .then(() => log.info("db.schema_ready"))
+  .catch((e) => log.error("db.migrate_failed", { err: e }));
 
 serve({ fetch: app.fetch, port }, () => {
-  console.log(`Server listening on :${port}`);
+  log.info("server.listening", { port });
 });

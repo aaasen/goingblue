@@ -21,6 +21,7 @@ import { fetchWeatherApi } from "openmeteo";
 import { Variable } from "@openmeteo/sdk/variable.js";
 import type { VariableWithValues } from "@openmeteo/sdk/variable-with-values.js";
 import type { WeatherApiResponse } from "@openmeteo/sdk/weather-api-response.js";
+import { log } from "./log.js";
 
 // Each forecast center resolves to a pair of Open-Meteo model ids: one for surface variables and
 // one for pressure-level variables (500/600/700 hPa wind + temp). They're the same id except for
@@ -248,7 +249,7 @@ async function fetchOpenMeteo(
   // from a local fixture server instead of hitting the live API.
   const base = process.env["OPEN_METEO_BASE_URL"] ?? "https://api.open-meteo.com";
   const url = `${base}/v1/forecast`;
-  console.log("Open-Meteo request:", url, params);
+  log.info("openmeteo.request", { url, ...params });
   const results = await fetchWeatherApi(url, params);
   const resp = results[0];
   if (!resp) throw new Error("Open-Meteo returned no result");
