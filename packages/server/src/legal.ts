@@ -5,7 +5,31 @@ const LAST_UPDATED = "June 16, 2026";
 const CONTACT_EMAIL = "help@going.blue";
 const FORECAST_NUMBER = "+14254345858";
 
-const PAGE = (title: string, body: string, showUpdated = true) => `<!doctype html>
+// The landing page is set on a photo of Sultana. It is a wide panorama, so it is anchored to
+// the bottom edge: cover-cropping a 2.6:1 image into a portrait phone viewport keeps the summit
+// and throws away only sky. Served at two widths from /img (assets.ts) — the small one is plenty
+// for a phone and a quarter of the bytes.
+const PHOTO_CSS = `
+  body.photo::before {
+    content: ""; position: fixed; inset: 0; z-index: -1;
+    background: linear-gradient(rgba(12, 34, 64, 0.2), rgba(12, 34, 64, 0.42)),
+      url(/img/sultana-1200.jpg) center bottom / cover no-repeat #0c2240;
+  }
+  @media (min-width: 801px) {
+    body.photo::before {
+      background-image: linear-gradient(rgba(12, 34, 64, 0.2), rgba(12, 34, 64, 0.42)),
+        url(/img/sultana-2400.jpg);
+    }
+  }
+  body.photo .card {
+    background: rgba(255, 255, 255, 0.94);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    border-radius: 14px; padding: 26px 30px 22px;
+    box-shadow: 0 10px 40px rgba(8, 24, 48, 0.3);
+  }
+`;
+
+const PAGE = (title: string, body: string, showUpdated = true, photo = false) => `<!doctype html>
 <html lang=en>
 <head>
 <meta charset=utf-8>
@@ -21,9 +45,10 @@ const PAGE = (title: string, body: string, showUpdated = true) => `<!doctype htm
   a { color: #0b62c4; }
   .appbtn { display: inline-block; background: #0b62c4; color: #fff; padding: 11px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 0.6em 0 1.2em; }
   footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
-</style>
+${photo ? PHOTO_CSS : ""}</style>
 </head>
-<body>
+<body${photo ? " class=photo" : ""}>
+<div class=card>
 <h1>${title}</h1>
 ${showUpdated ? `<p class=updated>Last updated: ${LAST_UPDATED}</p>` : ""}
 ${body}
@@ -31,6 +56,7 @@ ${body}
   ${BRAND} is operated as a sole proprietorship by Lane Aasen.<br>
   <a href="/">Home</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a>
 </footer>
+</div>
 </body>
 </html>`;
 
@@ -209,7 +235,7 @@ const VCARD = [
 ].join("\r\n");
 
 export function landing(c: Context) {
-  return c.html(PAGE(BRAND, LANDING_BODY, false));
+  return c.html(PAGE(BRAND, LANDING_BODY, false, true));
 }
 
 // Served inline (no Content-Disposition: attachment) so iOS offers to add the contact rather

@@ -8,6 +8,11 @@ packages/*/dist/
 # Benchmark data: cached Open-Meteo responses (data/raw) and HTML reports (data/benchmarks)
 data/
 
+# Full-resolution photo originals. Only the resized, EXIF-stripped derivatives under
+# packages/server/public are tracked and deployed; keep the camera files out of the repo.
+/*.jpg
+/*.jpeg
+
 # macOS
 .DS_Store
 

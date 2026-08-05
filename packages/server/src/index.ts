@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { forecast, health, sms, createAccountRoute, verifyAccountRoute } from "./routes.js";
 import { landing, privacy, terms, contactCard } from "./legal.js";
+import { image } from "./assets.js";
 import { migrate } from "./db.js";
 import { log } from "./log.js";
 
@@ -13,6 +14,7 @@ app.get("/health", health);
 app.get("/privacy", privacy);
 app.get("/terms", terms);
 app.get("/contact.vcf", contactCard);
+app.get("/img/:name", image);
 app.use("/forecast", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/forecast", forecast);
 app.post("/sms", sms);

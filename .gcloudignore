@@ -9,6 +9,12 @@ packages/*/dist/
 # Benchmark data: cached Open-Meteo responses and HTML reports, never needed in the build
 data/
 
+# Photo originals at the repo root — the pages serve the resized copies in
+# packages/server/public, so the multi-megabyte source files never need uploading.
+/*.jpg
+/*.jpeg
+/*.png
+
 # API keys
 .env
 
