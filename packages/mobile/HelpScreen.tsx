@@ -8,8 +8,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 const FORECAST_NUMBER = '(425) 434-5858';
 // Opening the hosted vCard hands the user off to the system's own "add contact" flow, so the app
-// needs no Contacts permission. Earthmate reads the phone's contacts, which is what makes the
-// number addressable from an inReach without typing it out.
+// needs no Contacts permission. Only the SMS route uses it — Earthmate keeps its own contact list.
 const CONTACT_VCF_URL = 'https://going.blue/contact.vcf';
 
 // Android needs this opted into before LayoutAnimation does anything; on iOS it's already on.
@@ -52,9 +51,6 @@ export default function HelpScreen({ visible, onClose }: Props) {
 
           <Device name="Garmin Earthmate" open={open === 'Garmin Earthmate'} onToggle={toggle}>
             <EarthmateSteps />
-          </Device>
-          <Device name="Garmin Messenger" open={open === 'Garmin Messenger'} onToggle={toggle}>
-            <MessengerSteps />
           </Device>
           <Device name="SMS" open={open === 'SMS'} onToggle={toggle}>
             <SmsSteps />
@@ -111,40 +107,6 @@ function EarthmateSteps() {
         <Text style={styles.para}>
           Tap <Bold>Copy Message</Bold> on the Builder tab, then send the message to Going Blue
           through the Earthmate app.
-        </Text>
-      </Step>
-
-      <Step n={3} title="Copy the reply">
-        <Text style={styles.para}>
-          When the response arrives, tap the message, tap the share button, and choose{' '}
-          <Bold>Copy</Bold>.
-        </Text>
-      </Step>
-
-      <Step n={4} title="Read the forecast">
-        <Text style={styles.para}>
-          Paste the reply into the <Bold>Decoder</Bold> tab to visualize the forecast.
-        </Text>
-      </Step>
-    </>
-  );
-}
-
-function MessengerSteps() {
-  return (
-    <>
-      <Step n={1} title="Add Going Blue as a contact">
-        <Text style={styles.para}>
-          Garmin Messenger reads your phone&apos;s contacts, so saving the card here is what makes the
-          number addressable from the messenger without typing it out.
-        </Text>
-        <ContactCard />
-      </Step>
-
-      <Step n={2} title="Send the request">
-        <Text style={styles.para}>
-          Tap <Bold>Copy Message</Bold> on the Builder tab, then paste it into the Garmin Messenger
-          app and send it to Going Blue.
         </Text>
       </Step>
 
