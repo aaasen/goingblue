@@ -1,7 +1,7 @@
 import {
   Modal, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import DeviceSetup from './DeviceSetup';
+import GettingStarted from './GettingStarted';
 
 interface Props {
   visible: boolean;
@@ -9,8 +9,8 @@ interface Props {
 }
 
 // Reached from the Builder tab's "How do I get a forecast?" link. Setup's steps only show on first
-// run, so this is where that explanation lives afterwards — same DeviceSetup sections, framed as a
-// sheet.
+// run, so this is where that explanation lives afterwards — the same GettingStarted sections,
+// framed as a sheet.
 export default function HelpScreen({ visible, onClose }: Props) {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -29,7 +29,7 @@ export default function HelpScreen({ visible, onClose }: Props) {
             <Text style={styles.bold}>Builder</Text> tab, then send it from whichever device you carry.
           </Text>
 
-          <DeviceSetup />
+          <GettingStarted />
         </ScrollView>
       </SafeAreaView>
     </Modal>
