@@ -1,6 +1,4 @@
 import { StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity, Alert } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
-import { formatToken } from '@weather/protocol';
 import UnitsToggle from './UnitsToggle';
 import type { TimeFormat, Units } from './settings';
 
@@ -79,8 +77,7 @@ const VARIABLES: VarInfo[] = [
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function SettingsTab({ token, onReset, units, onUnitsChange, timeFormat, onTimeFormatChange }: {
-  token: string;
+export default function SettingsTab({ onReset, units, onUnitsChange, timeFormat, onTimeFormatChange }: {
   onReset: () => void;
   units: Units;
   onUnitsChange: (u: Units) => void;
@@ -88,10 +85,10 @@ export default function SettingsTab({ token, onReset, units, onUnitsChange, time
   onTimeFormatChange: (format: TimeFormat) => void;
 }) {
   const RESET_MESSAGE =
-    'This forgets the token on this device and returns to setup. The account still exists on the server — make sure you’ve saved the token if you want to get back to it.';
+    'This clears your saved forecasts and returns to setup. They can’t be recovered.';
 
   function confirmReset() {
-    Alert.alert('Reset account?', RESET_MESSAGE, [
+    Alert.alert('Reset app?', RESET_MESSAGE, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Reset', style: 'destructive', onPress: onReset },
     ]);
@@ -120,28 +117,6 @@ export default function SettingsTab({ token, onReset, units, onUnitsChange, time
               </TouchableOpacity>
             ))}
           </View>
-        </View>
-      </View>
-
-      {/* Account */}
-      <Text style={[styles.heading, { marginTop: 28 }]}>Your account</Text>
-      <View style={styles.card}>
-        <Text style={styles.tokenValue} selectable>{formatToken(token)}</Text>
-        <Text style={styles.tokenNote}>
-          This token identifies your account. Save it to move your account to another device — enter
-          it under “I already have a token” during setup.
-        </Text>
-        <View style={styles.accountBtns}>
-          <TouchableOpacity
-            style={styles.copyBtn}
-            onPress={() => Clipboard.setStringAsync(token)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.copyBtnText}>Copy token</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.resetBtn} onPress={confirmReset} activeOpacity={0.7}>
-            <Text style={styles.resetBtnText}>Reset account</Text>
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -182,6 +157,10 @@ export default function SettingsTab({ token, onReset, units, onUnitsChange, time
         </View>
       ))}
 
+      <TouchableOpacity style={styles.resetBtn} onPress={confirmReset} activeOpacity={0.7}>
+        <Text style={styles.resetBtnText}>Reset app</Text>
+      </TouchableOpacity>
+
       <Text style={styles.footer}>
         Weather data provided by{' '}
         <Text style={styles.link} onPress={() => Linking.openURL('https://open-meteo.com/')}>
@@ -218,13 +197,9 @@ const styles = StyleSheet.create({
   toggleBtnActive: { backgroundColor: '#fff' },
   toggleText: { fontSize: 13, color: '#6e6e73', fontWeight: '500' },
   toggleTextActive: { color: '#1c1c1e' },
-  tokenValue: { fontSize: 20, fontWeight: '600', fontFamily: 'Courier', color: '#1c1c1e', letterSpacing: 1, marginBottom: 10 },
-  tokenNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginBottom: 12 },
-  accountBtns: { flexDirection: 'row', gap: 10 },
-  copyBtn: { backgroundColor: '#eef3fa', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
-  copyBtnText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },
-  resetBtn: { backgroundColor: '#faecec', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
-  resetBtnText: { color: '#cc2222', fontSize: 14, fontWeight: '600' },
+  // Full-width destructive action, sitting on its own below the reference sections.
+  resetBtn: { backgroundColor: '#fff', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
+  resetBtnText: { color: '#cc2222', fontSize: 15, fontWeight: '600' },
   cardHeader: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 },
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#1c1c1e', marginRight: 8 },

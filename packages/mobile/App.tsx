@@ -106,7 +106,7 @@ export default function App() {
         accessibilityElementsHidden={tab !== 'settings'}
         importantForAccessibility={tab === 'settings' ? 'auto' : 'no-hide-descendants'}
       >
-        <SettingsTab token={token} onReset={handleReset} units={units} onUnitsChange={setUnits} timeFormat={timeFormat} onTimeFormatChange={setTimeFormat} />
+        <SettingsTab onReset={handleReset} units={units} onUnitsChange={setUnits} timeFormat={timeFormat} onTimeFormatChange={setTimeFormat} />
       </View>
     </View>
   );
