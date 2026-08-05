@@ -10,8 +10,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.laneaasen.weather",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSLocationWhenInUseUsageDescription": "Used to fetch a weather forecast for your current position."
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -42,7 +41,16 @@
           "backgroundColor": "#f2f2f7"
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Going Blue uses your location to fetch a forecast for where you are. You can also pick a location on the map instead.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "motionUsagePermission": false
+        }
+      ]
     ]
   }
 }
