@@ -37,3 +37,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# App Store screenshots (scripts/capture-screenshot.sh) — a few MB each, retaken every release,
+# and they live in App Store Connect once uploaded. Drop this line to track them instead.
+/screenshots
