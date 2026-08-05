@@ -31,6 +31,17 @@
         "projectId": "d7df179b-5e9e-4cce-8b42-27288a8f1298"
       }
     },
-    "owner": "laneaasen"
+    "owner": "laneaasen",
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "imageWidth": 147,
+          "resizeMode": "contain",
+          "backgroundColor": "#f2f2f7"
+        }
+      ]
+    ]
   }
 }
