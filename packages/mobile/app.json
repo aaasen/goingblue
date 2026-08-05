@@ -26,14 +26,6 @@
         }
       }
     },
-    "web": {
-      "favicon": "./assets/favicon.png",
-      "bundler": "metro",
-      "output": "single"
-    },
-    "experiments": {
-      "baseUrl": "/app"
-    },
     "extra": {
       "eas": {
         "projectId": "d7df179b-5e9e-4cce-8b42-27288a8f1298"

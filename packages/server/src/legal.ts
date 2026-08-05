@@ -29,11 +29,13 @@ ${body}
 <footer>
   ${BRAND} is operated as a sole proprietorship by Lane Aasen.
   Questions? Contact <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.<br>
-  <a href="/">Home</a> · <a href="/app">App</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a>
+  <a href="/">Home</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a>
 </footer>
 </body>
 </html>`;
 
+// The companion app is iOS-only and distributed through the App Store; the landing page links to
+// it once the listing is live (drop an `<a class=appbtn href="...">` back in below).
 const LANDING_BODY = `
 <p class=tagline>On-request weather forecasts delivered by text message — built for
 satellite messengers like the Garmin inReach, and for mobile phones.</p>
@@ -42,8 +44,6 @@ satellite messengers like the Garmin inReach, and for mobile phones.</p>
 You send a short text containing a location and the forecast options you want; ${BRAND}
 replies with a compact, encoded forecast that the companion app decodes into a full
 multi-day forecast — small enough to fit within satellite messaging size limits.</p>
-
-<p><a class=appbtn href="/app">Open the ${BRAND} app →</a></p>
 
 <div class=cta>
   <h2 style="margin-top:0">Get weather forecasts by text</h2>
@@ -62,7 +62,7 @@ multi-day forecast — small enough to fit within satellite messaging size limit
   forecast options, from your satellite messenger or mobile phone.</li>
   <li>${BRAND} fetches the forecast for that location and replies to you with a single
   message.</li>
-  <li>Open the <a href="/app">companion app</a> to decode and view the full forecast.</li>
+  <li>Open the ${BRAND} companion app to decode and view the full forecast.</li>
 </ol>
 
 <p>${BRAND} only ever replies to a message you send first and sends no marketing, promotional,

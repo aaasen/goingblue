@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity, Alert, Platform } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity, Alert } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { formatToken } from '@weather/protocol';
 import UnitsToggle from './UnitsToggle';
@@ -91,13 +91,6 @@ export default function SettingsTab({ token, onReset, units, onUnitsChange, time
     'This forgets the token on this device and returns to setup. The account still exists on the server — make sure you’ve saved the token if you want to get back to it.';
 
   function confirmReset() {
-    // react-native-web's Alert doesn't fire button callbacks, so use window.confirm on web.
-    if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.confirm(`Reset account?\n\n${RESET_MESSAGE}`)) {
-        onReset();
-      }
-      return;
-    }
     Alert.alert('Reset account?', RESET_MESSAGE, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Reset', style: 'destructive', onPress: onReset },

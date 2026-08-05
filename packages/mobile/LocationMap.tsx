@@ -29,8 +29,8 @@ const PICKED_DELTA = 0.4;
 // expo.android.config.googleMaps.apiKey in app.json.
 const provider = Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT;
 
-// react-native-maps native map. A `.web.tsx` sibling renders nothing on web, where the map module
-// isn't available — callers fall back to the lat/lon text inputs there.
+// react-native-maps native map. Callers also expose lat/lon text inputs for setting a custom
+// location without the map.
 export default function LocationMap({ coord, onPick, height, active = true, flush = false }: Props) {
   const mapRef = useRef<MapView>(null);
   const fullscreenMapRef = useRef<MapView>(null);

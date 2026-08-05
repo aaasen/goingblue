@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isValidToken, normalizeToken } from '@weather/protocol';
@@ -13,19 +12,9 @@ function devNativeApiBase(): string {
 }
 
 // Base URL for the API. Account provisioning runs over normal internet during app setup (never
-// over satellite), so it can talk to the server directly.
-//   - dev web (Metro web): browser and API share localhost, so use an absolute cross-origin URL.
-//   - dev native: derive the dev machine's host from Metro (see devNativeApiBase).
-//   - production web: the server hosts this app at /app, so call it same-origin (relative). This
-//     avoids CORS entirely and works regardless of host (localhost or going.blue).
-//   - production native: no shared origin, so target the deployed server directly.
-export const API_BASE = __DEV__
-  ? Platform.OS === 'web'
-    ? 'http://localhost:8080'
-    : devNativeApiBase()
-  : Platform.OS === 'web'
-    ? ''
-    : 'https://going.blue';
+// over satellite), so it can talk to the server directly. In dev, derive the dev machine's host
+// from Metro (see devNativeApiBase); in production, target the deployed server.
+export const API_BASE = __DEV__ ? devNativeApiBase() : 'https://going.blue';
 
 const TOKEN_KEY = 'user_token';
 
