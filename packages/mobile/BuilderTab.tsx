@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
+import * as Network from 'expo-network';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
@@ -41,6 +42,13 @@ const FORECAST_NUMBER = '(425) 434-5858';
 const FORECAST_NUMBER_E164 = '+14254345858';
 const DEFAULT_MESSAGES = 1;
 const FORECAST_URL = `${API_BASE}/forecast`;
+// How long to wait on the forecast fetch before giving up. A connection the OS calls up but that
+// carries nothing — a captive portal, a bar of stalled signal — otherwise hangs on the platform's
+// own timeout, a minute of spinner with nothing to show for it.
+const FETCH_TIMEOUT_MS = 15000;
+// Shown both under a greyed-out Get Forecast and when the fetch times out: the same fact either
+// way, and both times the answer is to take one of the other two routes.
+const OFFLINE_MESSAGE = 'Not connected to the internet, use SMS or satellite instead.';
 
 // Variables a forecast center can't supply. Only the freezing level varies now — GEM and ECMWF
 // have no freezing-level product (Europe's pressure winds are filled from IFS 0.25°).
@@ -174,6 +182,11 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const [modelInfo, setModelInfo] = useState(false);
   const [varsInfo, setVarsInfo] = useState(false);
   const [help, setHelp] = useState(false);
+  // Only `isConnected` is portable: iOS reports `isInternetReachable` as a copy of it rather than
+  // verifying anything, so treating them as two signals would promise more than the OS gives. It's
+  // undefined until the first reading lands, which isn't yet grounds to call the user offline —
+  // hence the explicit `=== false`, so the button doesn't flicker disabled on mount.
+  const offline = Network.useNetworkState().isConnected === false;
 
   // The reply always spans a single 160-char message; that sets the response length budget.
   const maxChars = DEFAULT_MESSAGES * CHARS_PER_MESSAGE;
@@ -202,7 +215,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
   // In current-location mode the buttons stay tappable so they can request GPS on demand.
   const copyDisabled = locating || (locationMode === 'custom' && !coordsValid);
-  const fetchDisabled = copyDisabled || fetching;
+  const fetchDisabled = copyDisabled || fetching || offline;
 
   async function requestCurrentLocation(): Promise<{ lat: number; lon: number } | null> {
     setLocating(true);
@@ -274,17 +287,26 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
       return;
     }
     setFetching(true);
+    // An abort we raised ourselves is indistinguishable from any other in the catch, so the timer
+    // records that it fired. AbortController rather than AbortSignal.timeout, which React Native's
+    // fetch polyfill doesn't carry.
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, FETCH_TIMEOUT_MS);
     try {
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: msg,
+        signal: controller.signal,
       });
       if (!resp.ok) throw new Error(await resp.text());
       onForecastReceived(await resp.text());
     } catch (e) {
-      Alert.alert('Error', String(e));
+      if (timedOut) Alert.alert('No connection', OFFLINE_MESSAGE);
+      else Alert.alert('Error', String(e));
     } finally {
+      clearTimeout(timer);
       setFetching(false);
     }
   }
@@ -389,6 +411,10 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
           variant="primary"
         />
       </View>
+
+      {/* Says why Get Forecast is greyed out. Keyed on `offline` alone, not on fetchDisabled — a
+          button greyed for want of a location is a different problem with a different fix. */}
+      {offline && <Text style={styles.offlineNote}>{OFFLINE_MESSAGE}</Text>}
 
       <TouchableOpacity
         style={styles.helpLink}
@@ -564,6 +590,8 @@ const styles = StyleSheet.create({
   btnDisabled: { backgroundColor: '#aeaeb2', borderColor: '#aeaeb2' },
   btnIcon: { marginRight: 8 },
   btnText: { fontSize: 16, fontWeight: '600' },
+
+  offlineNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, textAlign: 'center', marginTop: 10 },
 
   helpLink: { alignSelf: 'center', marginTop: 18, paddingVertical: 6, paddingHorizontal: 12 },
   helpLinkText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },
