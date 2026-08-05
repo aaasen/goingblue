@@ -234,7 +234,15 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
     try {
       const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Location unavailable', canAskAgain ? LOCATION_DENIED : LOCATION_BLOCKED);
+        // Offer Settings only once the OS has stopped asking. While it still prompts, tapping
+        // the button again is the shorter way back, and Settings isn't where a soft denial gets
+        // fixed. openSettings lands on the app's own page — a deep link to the Location pane
+        // needs a private URL scheme Apple rejects for.
+        if (canAskAgain) Alert.alert('Location unavailable', LOCATION_DENIED);
+        else Alert.alert('Location unavailable', LOCATION_BLOCKED, [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => { Linking.openSettings(); } },
+        ]);
         return null;
       }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
