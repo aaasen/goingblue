@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { forecast, health, inbound, sms, testPage, createAccountRoute, verifyAccountRoute } from "./routes.js";
-import { landing, privacy, terms } from "./legal.js";
+import { landing, privacy, terms, contactCard } from "./legal.js";
 import { migrate } from "./db.js";
 
 const app = new Hono();
@@ -11,6 +11,7 @@ app.get("/", landing);
 app.get("/health", health);
 app.get("/privacy", privacy);
 app.get("/terms", terms);
+app.get("/contact.vcf", contactCard);
 app.use("/forecast", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/forecast", forecast);
 app.post("/inbound", inbound);

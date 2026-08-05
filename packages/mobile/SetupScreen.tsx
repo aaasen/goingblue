@@ -9,6 +9,10 @@ import type { TimeFormat, Units } from './settings';
 const FORECAST_EMAIL = 'inreach@going.blue';
 const TERMS_URL = 'https://going.blue/terms';
 const PRIVACY_URL = 'https://going.blue/privacy';
+// Opening the hosted vCard hands the user off to the system's own "add contact" flow, so the
+// app needs no Contacts permission. Earthmate reads the phone's contacts, which is what makes
+// the number reachable from the inReach without typing it out.
+const CONTACT_VCF_URL = 'https://going.blue/contact.vcf';
 
 interface Props {
   // Called with the provisioned token once setup completes; the token is already persisted.
@@ -51,6 +55,13 @@ export default function SetupScreen({ onReady, units, onUnitsChange, timeFormat,
         <Text style={styles.bold} selectable>{FORECAST_EMAIL}</Text>{' '}
         from your Garmin inReach.
       </Step>
+      <TouchableOpacity
+        style={styles.contactBtn}
+        onPress={() => Linking.openURL(CONTACT_VCF_URL)}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.contactBtnText}>Save Going Blue to Contacts</Text>
+      </TouchableOpacity>
       <Step n={3} title="View the forecast">
         Copy the forecast response into the <Bold>Decoder</Bold> tab to visualize the forecast.
       </Step>
@@ -128,6 +139,9 @@ const styles = StyleSheet.create({
   consentNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: 24, marginBottom: 16 },
   legalLinks: { fontSize: 13, color: '#6e6e73', marginBottom: 24 },
   link: { color: '#2a6bb5', fontWeight: '500' },
+
+  contactBtn: { backgroundColor: '#eef3fa', borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 4, marginBottom: 8 },
+  contactBtnText: { color: '#2a6bb5', fontSize: 15, fontWeight: '600' },
 
   btn: { height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   btnPrimary: { backgroundColor: '#2a6bb5' },
