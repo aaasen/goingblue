@@ -74,19 +74,21 @@ const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 // Help copy for the optional variable groups. Each optional variable costs response length, so
 // the modal closes by noting the trade-off against forecast detail and range.
 const VAR_INFO = [
-  { name: 'Precip Chance', desc: 'Chance of any precipitation during each period' },
   { name: 'Detailed Clouds', desc: 'Low (<3km), medium (3-8km), and high (>8km) cloud cover' },
   { name: 'High Altitude Winds', desc: 'Winds at 500, 600, and 700 hPa pressure levels' },
   { name: 'Freezing Level', desc: 'Altitude at which atmospheric temperature drops to 0°C' },
+  { name: 'Precip Chance', desc: 'Chance of any precipitation during each period' },
 ];
 
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
 // protocol variables together (e.g. "Clouds" covers high/mid/low cloud cover, not total).
+// Order is display order only — the server ORs the `v:` codes into a mask, so the emitted
+// order carries no meaning. Precip chance sits last: it costs the most for the least detail.
 const VAR_GROUPS = [
-  { value: 'precip', code: 'p', label: 'Precip Chance', vars: CONFIGURABLE_VAR_GROUPS.p },
   { value: 'clouds', code: 'c', label: 'Detailed Clouds', vars: CONFIGURABLE_VAR_GROUPS.c },
   { value: 'highwind', code: 'w', label: 'High Altitude Winds', vars: CONFIGURABLE_VAR_GROUPS.w },
   { value: 'freeze', code: 'f', label: 'Freezing Level', vars: CONFIGURABLE_VAR_GROUPS.f },
+  { value: 'precip', code: 'p', label: 'Precip Chance', vars: CONFIGURABLE_VAR_GROUPS.p },
 ];
 
 // No extra variables selected by default.
