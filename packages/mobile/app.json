@@ -41,7 +41,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#f2f2f7"
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }
