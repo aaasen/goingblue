@@ -5,51 +5,59 @@ const LAST_UPDATED = "August 5, 2026";
 const CONTACT_EMAIL = "help@going.blue";
 const FORECAST_NUMBER = "+14254345858";
 
-// The landing page is set on a photo of Sultana. It is a wide panorama, so it is anchored to
-// the bottom edge: cover-cropping a 2.6:1 image into a portrait phone viewport keeps the summit
-// and throws away only sky. Served at two widths from /img (assets.ts) — the small one is plenty
-// for a phone and a quarter of the bytes.
-const PHOTO_CSS = `
-  body.photo::before {
-    content: ""; position: fixed; inset: 0; z-index: -1;
-    background: linear-gradient(rgba(12, 34, 64, 0.2), rgba(12, 34, 64, 0.42)),
-      url(/img/sultana-1200.jpg) center bottom / cover no-repeat #0c2240;
+// The landing page is headed by a full-bleed photo of Sultana in a band of its own, with the
+// masthead over it — the photo is a defined section of the page, not the backdrop behind all of
+// it. Served at two widths from /img (assets.ts); the small one is plenty for a phone and a
+// quarter of the bytes.
+//
+// The source photo is cropped so the summit is the center of the frame, which is what lets the
+// band crop around it: horizontally `center` holds the summit in the middle at any width. The
+// vertical is `top` rather than `center` because the summit sits a tenth of a frame below the
+// upper edge — on a band wider than the photo's 2.46:1 the `cover` crop eats height, and any
+// anchor but the top carries the peak up and out of the band.
+//
+// The app icon sits above the title. The icon file is square and unrounded (iOS applies the mask
+// itself), so the corner radius is ours to draw: 22.4% of the width is Apple's own superellipse
+// proportion, which is what makes it read as an app icon rather than a photo.
+const HERO_CSS = `
+  .hero {
+    display: flex; align-items: center; justify-content: center;
+    height: 480px; padding: 0 20px; text-align: center; color: #fff;
+    background: linear-gradient(rgba(12, 34, 64, 0.15), rgba(12, 34, 64, 0.5)),
+      url(/img/sultana-1200.jpg) center top / cover no-repeat #0c2240;
   }
   @media (min-width: 801px) {
-    body.photo::before {
-      background-image: linear-gradient(rgba(12, 34, 64, 0.2), rgba(12, 34, 64, 0.42)),
+    .hero {
+      background-image: linear-gradient(rgba(12, 34, 64, 0.15), rgba(12, 34, 64, 0.5)),
         url(/img/sultana-2400.jpg);
     }
   }
-  body.photo .card {
-    background: rgba(255, 255, 255, 0.94);
-    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-    border-radius: 14px; padding: 26px 30px 22px;
-    box-shadow: 0 10px 40px rgba(8, 24, 48, 0.3);
+  @media (max-width: 600px) { .hero { height: 380px; } }
+  .hero h1 { margin: 0.5em 0 0.12em; font-size: 2.2em; letter-spacing: -0.02em;
+    text-shadow: 0 2px 10px rgba(6, 18, 36, 0.55); }
+  .hero .subtitle { margin: 0; font-size: 1.2em;
+    text-shadow: 0 2px 10px rgba(6, 18, 36, 0.55); }
+  .appicon { display: block; width: 116px; height: 116px; margin: 0 auto; border-radius: 26px;
+    box-shadow: 0 6px 22px rgba(6, 18, 36, 0.45); }
+  @media (max-width: 600px) {
+    .appicon { width: 92px; height: 92px; border-radius: 21px; }
+    .hero h1 { font-size: 1.85em; }
+    .hero .subtitle { font-size: 1.05em; }
   }
 `;
 
-// The app icon over the title, as a masthead. The icon file is square and unrounded (iOS applies
-// the mask itself), so the corner radius is ours to draw: 22.4% of the width is Apple's own
-// superellipse proportion, which is what makes it read as an app icon rather than a photo.
-const MASTHEAD_CSS = `
-  .masthead { text-align: center; margin-bottom: 2.2em; }
-  .masthead h1 { margin: 0.55em 0 0.15em; font-size: 2em; letter-spacing: -0.02em; }
-  .appicon { display: block; width: 116px; height: 116px; margin: 0 auto; border-radius: 26px;
-    box-shadow: 0 5px 18px rgba(8, 24, 48, 0.24); }
-  .subtitle { margin: 0; color: #4a5568; font-size: 1.15em; }
-`;
+type PageOpts = { showUpdated?: boolean; subtitle?: string };
 
-type PageOpts = { showUpdated?: boolean; photo?: boolean; subtitle?: string };
-
-const PAGE = (title: string, body: string, { showUpdated = true, photo = false, subtitle }: PageOpts = {}) => `<!doctype html>
+// `subtitle` is what makes a page a landing page: it swaps the plain <h1> for the photo band.
+const PAGE = (title: string, body: string, { showUpdated = true, subtitle }: PageOpts = {}) => `<!doctype html>
 <html lang=en>
 <head>
 <meta charset=utf-8>
 <meta name=viewport content="width=device-width, initial-scale=1">
 <title>${title === BRAND ? BRAND : `${title} — ${BRAND}`}</title>
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; line-height: 1.55; }
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #1a1a1a; line-height: 1.55; }
+  .wrap { max-width: 720px; margin: 40px auto; padding: 0 20px; }
   h1 { font-size: 1.6em; }
   h2 { font-size: 1.15em; margin-top: 1.8em; }
   .updated { color: #666; font-size: 0.9em; }
@@ -57,17 +65,20 @@ const PAGE = (title: string, body: string, { showUpdated = true, photo = false, 
   a { color: #0b62c4; }
   .appbtn { display: inline-block; background: #0b62c4; color: #fff; padding: 11px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 0.6em 0 1.2em; }
   footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
-${subtitle ? MASTHEAD_CSS : ""}${photo ? PHOTO_CSS : ""}</style>
+${subtitle ? HERO_CSS : ""}</style>
 </head>
-<body${photo ? " class=photo" : ""}>
-<div class=card>
+<body>
 ${subtitle
-  ? `<div class=masthead>
-  <img class=appicon src="/img/icon-512.jpg" width=116 height=116 alt="">
-  <h1>${title}</h1>
-  <p class=subtitle>${subtitle}</p>
-</div>`
-  : `<h1>${title}</h1>`}
+  ? `<header class=hero>
+  <div>
+    <img class=appicon src="/img/icon-512.jpg" width=116 height=116 alt="">
+    <h1>${title}</h1>
+    <p class=subtitle>${subtitle}</p>
+  </div>
+</header>`
+  : ""}
+<div class=wrap>
+${subtitle ? "" : `<h1>${title}</h1>`}
 ${showUpdated ? `<p class=updated>Last updated: ${LAST_UPDATED}</p>` : ""}
 ${body}
 <footer>
@@ -78,48 +89,42 @@ ${body}
 </body>
 </html>`;
 
+// The marketing copy is kept in step with the App Store listing's description — the two are read
+// back to back by anyone deciding whether to install, so they should not tell different stories.
 // The companion app is iOS-only and distributed through the App Store; the landing page links to
 // it once the listing is live (drop an `<a class=appbtn href="...">` back in below).
+//
+// The page is marketing only: the SMS consent language, the opt-out wording and the safety
+// disclaimer live on /support, /privacy and /terms, reached through the footer. If an A2P 10DLC
+// campaign review asks for consent language on the public site, it goes back here.
 const LANDING_BODY = `
-<p>On-request weather forecasts delivered by text message — built for
-satellite messengers like the Garmin inReach, and for mobile phones.</p>
-
-<p>${BRAND} gives you better forecasts than the default satellite-messenger weather service.
-You send a short text containing a location and the forecast options you want; ${BRAND}
-replies with a compact, encoded forecast that the companion app decodes into a full
-multi-day forecast — small enough to fit within satellite messaging size limits.</p>
-
-<div class=cta>
-  <h2 style="margin-top:0">Get weather forecasts by text</h2>
-  <p><strong>Text START to (425) 434-5858 to get weather forecasts from ${BRAND}.</strong>
-  One message is sent in response to each forecast request. Message and data rates may apply.
-  Reply HELP for help, STOP to opt out.
-  Terms: <a href="https://going.blue/terms">https://going.blue/terms</a>
-  Privacy: <a href="https://going.blue/privacy">https://going.blue/privacy</a></p>
-</div>
+<p>${BRAND} is a weather app designed specifically for satellite messengers. It was built for a
+Denali ski expedition with one goal: to get you all the weather information you would have at
+home, wherever you are. ${BRAND} uses a custom compression codec and decoder app to pack hundreds
+of forecast data points into a single 160-character message.</p>
 
 <h2>How it works</h2>
 <ol>
-  <li>Text <strong>START</strong> to (425) 434-5858 to opt in; ${BRAND} replies with a welcome
-  message.</li>
-  <li>Send a text message to ${BRAND} with a location (latitude and longitude) and your
-  forecast options, from your satellite messenger or mobile phone.</li>
-  <li>${BRAND} fetches the forecast for that location and replies to you with a single
-  message.</li>
-  <li>Open the ${BRAND} companion app to decode and view the full forecast.</li>
+  <li>Build a forecast request in the app. Choose the location, model, and variables that you
+  care about.</li>
+  <li>Send it from your satellite messenger, as a text message, or over the internet.</li>
+  <li>Paste the reply back into the app's decoder to see a detailed meteogram.</li>
 </ol>
 
-<p>${BRAND} only ever replies to a message you send first and sends no marketing, promotional,
-recurring, or unsolicited messages. Message frequency is controlled entirely by you. We never
-sell or share your phone number or opt-in consent with third parties.</p>
-
-<h2>Important: forecasts are informational</h2>
-<p>Forecasts are provided for informational purposes only and may be inaccurate, delayed, or
-unavailable. Do not rely on ${BRAND} as your sole source of weather information for decisions
-affecting safety, including in remote or backcountry settings.</p>
-
-<p>See our <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms &amp; Conditions</a>
-for full details. Questions? Contact <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>
+<h2>Forecast details</h2>
+<ul>
+  <li>Support for any satellite messenger that works over SMS. Tested with Garmin inReach and
+  ZOLEO. Also works over the internet if you are in service.</li>
+  <li>Temperature, snow, rain, wind, and cloud cover included by default.</li>
+  <li>Optional variables such as pressure-level winds, cloud cover by height, and freezing
+  level.</li>
+  <li>Over 30 high-resolution regional models from American, Canadian, and European forecast
+  centers. Automatically use the highest resolution model for your location or pull multiple
+  models to compare.</li>
+  <li>Hourly detail or extended range up to 13 days.</li>
+  <li>Past forecasts are saved on your device so that you can easily compare multiple forecasts
+  and see trends without requesting a new forecast.</li>
+</ul>
 `;
 
 // The App Store listing points its Support URL here rather than at the landing page: a reviewer
@@ -380,7 +385,6 @@ export function landing(c: Context) {
   return c.html(
     PAGE(BRAND, LANDING_BODY, {
       showUpdated: false,
-      photo: true,
       subtitle: "Weather forecasts over satellite",
     }),
   );

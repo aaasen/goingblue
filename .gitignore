@@ -8,8 +8,10 @@ packages/*/dist/
 # Benchmark data: cached Open-Meteo responses (data/raw) and HTML reports (data/benchmarks)
 data/
 
-# Full-resolution photo originals. Only the resized, EXIF-stripped derivatives under
-# packages/server/public are tracked and deployed; keep the camera files out of the repo.
+# Camera files dropped at the repo root stay out of it. The cropped master under
+# packages/server/assets is the exception and is tracked — it is the provenance for the served
+# derivatives under packages/server/public, and the crop is hand-made. Both it and the
+# derivatives are stripped of EXIF first; the master's is GPS-tagged.
 /*.jpg
 /*.jpeg
 

@@ -7,6 +7,18 @@ import { log } from "./log.js";
 // middleware. Paths resolve relative to this module (dist/ at runtime), so `packages/server/public`
 // is found whether the server is started from the repo root or from inside the container.
 const ASSETS: Record<string, { file: string; type: string }> = {
+  // The landing-page photo, resampled from ../assets/sultana.jpg — the master, cropped so the
+  // summit is the center of the frame, which is the point the hero band crops around. Regenerate
+  // both widths together, and bump the name if the page has shipped: these are served immutable
+  // for a year, so a changed photo under an unchanged URL never reaches a repeat visitor. The
+  // master is Display P3 and carries the camera's EXIF, so resizing is not the whole job: convert
+  // to sRGB (browsers that ignore the embedded profile render P3 oversaturated) and drop EXIF
+  // (the master is GPS-tagged). `sips` does neither, so resize with Pillow —
+  //   img = ImageCms.profileToProfile(src, <master profile>, ImageCms.createProfile("sRGB"),
+  //                                   outputMode="RGB")
+  //   img.resize((w, round(w * src.height / src.width)), Image.LANCZOS).save(
+  //       out, "JPEG", quality=70, optimize=True, progressive=True, icc_profile=<sRGB bytes>)
+  // — which lands both files within a few KB of the weights they replaced.
   "sultana-2400.jpg": { file: "../public/sultana-2400.jpg", type: "image/jpeg" },
   "sultana-1200.jpg": { file: "../public/sultana-1200.jpg", type: "image/jpeg" },
   // The app icon, resized from packages/mobile/assets/icon.png. Regenerate it from that source
