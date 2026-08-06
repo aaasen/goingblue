@@ -48,7 +48,7 @@
           "locationWhenInUsePermission": "Going Blue uses your location to fetch a forecast for where you are. You can also pick a location on the map instead.",
           "locationAlwaysAndWhenInUsePermission": false,
           "locationAlwaysPermission": false,
-          "motionUsagePermission": false
+          "motionUsagePermission": "Used to improve the accuracy of your current location when fetching a forecast."
         }
       ]
     ]
