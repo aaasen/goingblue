@@ -18,6 +18,9 @@ data/
 # API keys
 .env
 
+# Deployment target — read by deploy.sh on the way in, never needed inside the build.
+deploy.env
+
 # Native build output under the mobile package. The gateway Dockerfile builds the Expo *web*
 # export, which needs the mobile source but never the regenerable iOS/Android native dirs
 # (~1 GB of iOS Pods/build). gcloud ignores nested .gitignore files, so mirror those rules here.

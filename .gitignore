@@ -28,3 +28,6 @@ A2P\ 10DLC.md
 
 # API keys (node --env-file)
 .env
+
+# Deployment target (GCP project/region/instance names); documented in deploy.sh
+deploy.env
