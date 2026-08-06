@@ -29,7 +29,20 @@ const PHOTO_CSS = `
   }
 `;
 
-const PAGE = (title: string, body: string, showUpdated = true, photo = false) => `<!doctype html>
+// The app icon over the title, as a masthead. The icon file is square and unrounded (iOS applies
+// the mask itself), so the corner radius is ours to draw: 22.4% of the width is Apple's own
+// superellipse proportion, which is what makes it read as an app icon rather than a photo.
+const MASTHEAD_CSS = `
+  .masthead { text-align: center; margin-bottom: 2.2em; }
+  .masthead h1 { margin: 0.55em 0 0.15em; font-size: 2em; letter-spacing: -0.02em; }
+  .appicon { display: block; width: 116px; height: 116px; margin: 0 auto; border-radius: 26px;
+    box-shadow: 0 5px 18px rgba(8, 24, 48, 0.24); }
+  .subtitle { margin: 0; color: #4a5568; font-size: 1.15em; }
+`;
+
+type PageOpts = { showUpdated?: boolean; photo?: boolean; subtitle?: string };
+
+const PAGE = (title: string, body: string, { showUpdated = true, photo = false, subtitle }: PageOpts = {}) => `<!doctype html>
 <html lang=en>
 <head>
 <meta charset=utf-8>
@@ -40,16 +53,21 @@ const PAGE = (title: string, body: string, showUpdated = true, photo = false) =>
   h1 { font-size: 1.6em; }
   h2 { font-size: 1.15em; margin-top: 1.8em; }
   .updated { color: #666; font-size: 0.9em; }
-  .tagline { color: #444; font-size: 1.1em; }
   .cta { background: #f0f6fc; border: 1px solid #cfe2f5; border-radius: 8px; padding: 16px 20px; margin: 1.8em 0; }
   a { color: #0b62c4; }
   .appbtn { display: inline-block; background: #0b62c4; color: #fff; padding: 11px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 0.6em 0 1.2em; }
   footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
-${photo ? PHOTO_CSS : ""}</style>
+${subtitle ? MASTHEAD_CSS : ""}${photo ? PHOTO_CSS : ""}</style>
 </head>
 <body${photo ? " class=photo" : ""}>
 <div class=card>
-<h1>${title}</h1>
+${subtitle
+  ? `<div class=masthead>
+  <img class=appicon src="/img/icon-512.jpg" width=116 height=116 alt="">
+  <h1>${title}</h1>
+  <p class=subtitle>${subtitle}</p>
+</div>`
+  : `<h1>${title}</h1>`}
 ${showUpdated ? `<p class=updated>Last updated: ${LAST_UPDATED}</p>` : ""}
 ${body}
 <footer>
@@ -63,7 +81,7 @@ ${body}
 // The companion app is iOS-only and distributed through the App Store; the landing page links to
 // it once the listing is live (drop an `<a class=appbtn href="...">` back in below).
 const LANDING_BODY = `
-<p class=tagline>On-request weather forecasts delivered by text message — built for
+<p>On-request weather forecasts delivered by text message — built for
 satellite messengers like the Garmin inReach, and for mobile phones.</p>
 
 <p>${BRAND} gives you better forecasts than the default satellite-messenger weather service.
@@ -295,7 +313,13 @@ const VCARD = [
 ].join("\r\n");
 
 export function landing(c: Context) {
-  return c.html(PAGE(BRAND, LANDING_BODY, false, true));
+  return c.html(
+    PAGE(BRAND, LANDING_BODY, {
+      showUpdated: false,
+      photo: true,
+      subtitle: "Weather forecasts over satellite",
+    }),
+  );
 }
 
 // Served inline (no Content-Disposition: attachment) so iOS offers to add the contact rather

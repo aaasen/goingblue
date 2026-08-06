@@ -9,6 +9,9 @@ import { log } from "./log.js";
 const ASSETS: Record<string, { file: string; type: string }> = {
   "sultana-2400.jpg": { file: "../public/sultana-2400.jpg", type: "image/jpeg" },
   "sultana-1200.jpg": { file: "../public/sultana-1200.jpg", type: "image/jpeg" },
+  // The app icon, resized from packages/mobile/assets/icon.png. Regenerate it from that source
+  // (and bump the filename) whenever the app icon changes, so the two never drift apart.
+  "icon-512.jpg": { file: "../public/icon-512.jpg", type: "image/jpeg" },
 };
 
 const cache = new Map<string, Buffer>();
