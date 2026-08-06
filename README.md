@@ -372,4 +372,12 @@ pnpm benchmark --request-hour 18   # local hour of the request (default 7)
 
 ## License
 
-This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). You may read, modify, and use the code for any noncommercial purpose. Commercial use is reserved to the copyright holder.
+Copyright 2025-2026 Lane Aasen
+
+Licensed under the [Apache License, Version 2.0](LICENSE). You may use, modify, and distribute this
+software, including commercially, provided you retain the copyright and license notices and state
+any significant changes you make. The license includes an express patent grant. See [NOTICE](NOTICE)
+for the required attribution notice.
+
+Forecast data comes from [Open-Meteo](https://open-meteo.com/) via its public API and is subject to
+Open-Meteo's own terms; no Open-Meteo source code is included here.
