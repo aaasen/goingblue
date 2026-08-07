@@ -87,13 +87,32 @@ For variables like snow and rain which are sparse but have large variability, we
 
 ### Forecast Packing
 
-Going Blue uses an entropy coder which means that the forecast length is not predictable. It depends on the entropy of the forecast, with stable (low-entropy) conditions taking few bits to encode and variable (high-entropy) conditions taking many bits to encode. In practice, forecasts range between 44 and 193 data points with a median of 99.
+Going Blue uses an entropy coder which means that the forecast length is not predictable. It depends on the entropy of the forecast, with stable (low-entropy) conditions taking few bits to encode and variable (high-entropy) conditions taking many bits to encode. In practice, forecasts with the default variable set range between 40 to 225 time periods, with an average near 100.
 
-We can't promise a 3 day hourly forecast or a 10 day forecast at 3h resolution. At the minimum of 44 data points, we can choose between almost 2 days of hourly data or a 10 day forecast at 6h resolution. The app allows the user to select a fill priority: `detail`, `auto`, or `range`. The server fetches the forecast and then tries to fit as much data into the message as possible. At each step, it can either extend the range of the forecast or increase the detail. The fill priority determines which it tries to do. These fill ladders are pre-defined and shared between the server and client. The server sends back a sequence number so that the client can derive the resolution of each forecast point. The server does a binary search of the sequence number to find the largest forecast that can fit within the character budget.
+We can't promise a 3 day hourly forecast or a 10 day forecast at 3h resolution. At the minimum of 40 data points, we can choose between almost 2 days of hourly data or a 10 day forecast at 6h resolution. The app allows the user to select a fill priority: `detail`, `auto`, or `range`. The server fetches the forecast and then tries to fit as much data into the message as possible. At each step, it can either extend the range of the forecast (up to 13 days) or increase the detail (12h/6h/3h/1h resolution). The fill priority determines which it tries to do. These fill ladders are pre-defined and shared between the server and client. The server sends back a sequence number so that the client can derive the resolution of each forecast point. The server does a binary search of the sequence number to find the largest forecast that can fit within the character budget.
+
+### Header Format
+
+To keep the message small, the server never sends the client information that it already has. When the client creates a request, it stores request metadata like forecast location, model, variables, priority mode, UTC offset, and request time in a local cache. The client sends a request index to the server and the server sends that index back in the response. The client can then recover all of the forecast metadata from that index. Using this, the entire header can be packed into just 5 characters:
+
+| Field   | Bits | Meaning                                                        |
+| ------- | ---: | -------------------------------------------------------------- |
+| version |  1 char | base-85 index = protocol version; read before anything else |
+| `index`  |    7 | message index the client stores its request context under        |
+| `seq`   |    8 | fill sequence number to derive forecast length and layout |
+| `elev`  |    7 | elevation in 100 m steps                                          |
+| `class` |    3 | which of the 8 codebook classes the body used                   |
 
 ### Strategy by Variable
 
-Each variable has a different quantization method and codebook strategy:
+Each variable has a different quantization method and codebook strategy. The variables that are always included are:
+1. Weathercode
+2. Temperature
+3. Snow
+4. Rain
+5. Wind gust
+6. Wind speed
+7. Wind direction
 
 | Variable             | Model | States (the symbol alphabet)                          | Codebook keyed by                              | Quantization                          |
 | -------------------- | ----- | ------------------------------------------------------ | ---------------------------------------------- | ------------------------------------- |
