@@ -54,7 +54,11 @@ In this example, the clear -> clear transition is very likely so it gets a 1-bit
 
 The actual entropy coder that Going Blue uses is [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems#Range_variants_(rANS)_and_streaming) which removes the 1-bit floor of Huffman coding by encoding the entire forecast into a single large number instead of going symbol by symbol. See this [post](https://kedartatwawadi.github.io/post--ANS/) for a great explanation of asymmetric numeral systems. With the Huffman coder, we can reach 1.248 bits/symbol. rANS brings us much closer to actual entropy of the data, which is 0.833 bits/symbol. 
 
-The same technique can be applied to other weather variables
+The same technique can be applied to other weather variables. Correlation between variables can also be used. For example, precipitation probability is keyed off of weathercode class, since a rainy weathercode is a good signal that precipitation probability is non-zero.
+
+For variables with large ranges, like temperature, we encode the starting temperature and then the delta of each forecast point. This avoids having a separate codebook for every possible temperature.
+
+For variables like snow and rain which are sparse but have large variability, we use a sqrt scale. This provides detail at small amounts while preserving range for larger values. With rain, we might have an hour with 0.01" and a 12 hour period with 5" of rain. A sqrt scale allows us to represent both extremes on a scale with only 64 values. 
 
 | Variable             | Model | States (the symbol alphabet)                          | Codebook keyed by                              | Quantization                          |
 | -------------------- | ----- | ------------------------------------------------------ | ---------------------------------------------- | ------------------------------------- |
@@ -63,9 +67,10 @@ The same technique can be applied to other weather variables
 | precipitation prob.  | value | eighths 0…7                                             | resolution × previous value × same-period weathercode class | 0–100% in eighths        |
 | snow                 | value | 64 companded steps                                      | resolution × previous-value bucket (0 \| 1–3 \| 4–9 \| 10–20 \| 21+) × same-period weathercode class | sqrt-companded, 0–200 cm |
 | rain                 | value | 64 companded steps                                      | resolution × previous-value bucket (same) × same-period weathercode class | sqrt-companded, 0–144 mm |
-| freezing level       | delta | Δ −31…+31                                               | one shared table                               | 1000 ft steps, 0–31000 ft; 5-bit anchor |
+| freezing level       | delta | Δ −31…+31                                               | resolution × same-period temperature Δ bucket (≤−2 \| −1 \| 0 \| +1 \| ≥+2); resolution alone when temp is absent | 1000 ft steps, 0–31000 ft; 5-bit anchor |
 | cloud (high/mid/low) | delta | Δ −7…+7                                                 | one shared table per level                     | 0–100% in eighths; 3-bit anchor       |
-| wind speed           | delta | Δ −31…+31                                               | resolution × level; 600/700 hPa by the upper level's Δ bucket | 5 mph steps, 0–155 mph; 5-bit anchor |
+| wind gust            | delta | Δ −17…+17                                               | resolution (encodes first, no context of its own) | extended Beaufort force 0…17, km/h bands; 5-bit anchor |
+| wind speed           | delta | Δ −17…+17                                               | resolution × level; surface by the gust column's Δ bucket; 600/700 hPa by the upper level's Δ bucket | extended Beaufort force 0…17, km/h bands (midpoint decode); 5-bit anchor |
 | wind direction       | value | 8 cardinals                                             | resolution × previous direction (× upper direction for 600/700 hPa); calm periods emit no symbol | 45° points |
 
 ## Development
