@@ -74,7 +74,7 @@ For variables with large ranges, like temperature, we encode the starting temper
 For variables like snow and rain which are sparse but have large variability, we use a sqrt scale. This provides detail at small amounts while preserving range for larger values. With rain, we might have an hour with 0.1mm rain and a 12 hour period with 100mm of rain. A sqrt scale allows us to represent both extremes on a scale with only 64 values. Rain values range from 0.036mm to 144mm and snow from 0.05cm to 200cm in a single time period. 
 
 ```math
-c = \min\left(\operatorname{round}\left(63\sqrt{\frac{v}{v_{\max}}}\right),\ 63\right)
+c = \min\left(\left\lfloor 63\sqrt{\frac{v}{v_{\max}}} \right\rceil,\ 63\right)
 \qquad
 \hat{v} = v_{\max}\left(\frac{c}{63}\right)^2
 ```
