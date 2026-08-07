@@ -85,6 +85,12 @@ For variables like snow and rain which are sparse but have large variability, we
 | Rain (mm) | 0 | 0.036 | 0.145 | 0.327 | …  | 9.29 | 37.15 | 83.59 | …  | 139.47 | 144.00 |
 | Step      | — | 0.036 | 0.109 | 0.181 | …  | 1.13 | 2.29  | 3.45  | …  | 4.46   | 4.54   |
 
+### Forecast Packing
+
+Going Blue uses an entropy coder which means that the forecast length is not predictable. It depends on the entropy of the forecast, with stable (low-entropy) conditions taking few bits to encode and variable (high-entropy) conditions taking many bits to encode. In practice, forecasts range between 44 and 193 data points with a median of 99.
+
+We can't promise a 3 day hourly forecast or a 10 day forecast at 3h resolution. At the minimum of 44 data points, we can choose between almost 2 days of hourly data or a 10 day forecast at 6h resolution. The app allows the user to select a fill priority: `detail`, `auto`, or `range`. The server fetches the forecast and then tries to fit as much data into the message as possible. At each step, it can either extend the range of the forecast or increase the detail. The fill priority determines which it tries to do. These fill ladders are pre-defined and shared between the server and client. The server sends back a sequence number so that the client can derive the resolution of each forecast point. The server does a binary search of the sequence number to find the largest forecast that can fit within the character budget.
+
 ### Strategy by Variable
 
 Each variable has a different quantization method and codebook strategy:
@@ -104,15 +110,17 @@ Each variable has a different quantization method and codebook strategy:
 
 ### Alphabet
 
-Going Blue transmits messages over SMS. Satellite messengers like Garmin inReach and ZOLEO support SMS.
+Going Blue transmits messages over SMS. Satellite messengers like Garmin inReach and ZOLEO can send messages to the number over SMS. The path a message takes from a satellite messenger like inReach looks something like this:
 
-SMS uses a [GSM-7](https://en.wikipedia.org/wiki/GSM_03.38) alphabet with 7 bits per character.
+```
+inReach -iridium-> garmin -sms-> twilio -http-> going blue
+```
 
-### Forecast Packing
+Each layer of the transport uses a different encoding that can transform or split a message. SMS uses a [GSM-7](https://en.wikipedia.org/wiki/GSM_03.38) alphabet with 7 bits per character. Garmin apps only support printable ASCII. Going Blue uses the intersection of printable ASCII and GSM-7 basic minus the space character for a base-85 alphabet:
 
-Going Blue uses an entropy coder which means that the forecast length is not predictable. It depends on the entropy of the forecast, with stable (low-entropy) conditions taking few bits to encode and variable (high-entropy) conditions taking many bits to encode. In practice, a high-entropy forecasts takes about twice as much space as low-entropy forecasts.
-
-We can't promise a 3 day hourly forecast or a 10 day forecast at 3h resolution. Instead, the app allows the user to select a fill priority: `detail`, `auto`, or `range`. The server fetches the forecast and then tries to fit as much data into the message as possible. At each step, it can either extend the range of the forecast or increase the detail. The fill priority determines which it tries to do. These fill ladders are pre-defined and shared between the server and client. The server sends back a sequence number so that the client can derive the resolution of each forecast point. The server does a binary search of the sequence number to find the largest forecast that can fit within the character budget.
+```
+!"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz
+```
 
 ## Development
 
