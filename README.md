@@ -71,7 +71,7 @@ For variables with large ranges, like temperature, we encode the starting temper
 
 ### Sqrt Scale for Large Ranges
 
-For variables like snow and rain which are sparse but have large variability, we use a sqrt scale. This provides detail at small amounts while preserving range for larger values. With rain, we might have an hour with 0.1mm rain and a 12 hour period with 100mm of rain. A sqrt scale allows us to represent both extremes on a scale with only 64 values. Rain values range from 0.036mm to 144mm and snow from 0.05cm to 200cm in a single time period. 
+For variables like snow and rain which are sparse but have large variability, we use a sqrt scale. This provides detail at small amounts while preserving range for larger values. With rain, we might have an hour with 0.1mm rain and a 12 hour period with 100mm of rain. A sqrt scale allows us to represent both extremes on a scale with only 64 values. Rain values range from 0.036mm to 144mm and snow from 0.05cm to 200cm in a single time period.
 
 ```math
 \begin{aligned}
@@ -97,7 +97,7 @@ To keep the message small, the server never sends the client information that it
 
 | Field   | Bits | Meaning                                                        |
 | ------- | ---: | -------------------------------------------------------------- |
-| version |  1 char | base-85 index = protocol version; read before anything else |
+| version |  7 | base-85 index = protocol version; read before anything else |
 | `index`  |    7 | message index the client stores its request context under        |
 | `seq`   |    8 | fill sequence number to derive forecast length and layout |
 | `elev`  |    7 | elevation in 100 m steps                                          |
@@ -135,7 +135,7 @@ Going Blue transmits messages over SMS. Satellite messengers like Garmin inReach
 inReach -iridium-> garmin -sms-> twilio -http-> going blue
 ```
 
-Each layer of the transport uses a different encoding that can transform or split a message. SMS uses a [GSM-7](https://en.wikipedia.org/wiki/GSM_03.38) alphabet with 7 bits per character. Garmin apps only support printable ASCII. Going Blue uses the intersection of printable ASCII and GSM-7 basic minus the space character for a base-85 alphabet. This provides log₂(85) ≈ 6.409 bis per character.
+Each layer of the transport uses a different encoding that can transform or split a message. SMS uses a [GSM-7](https://en.wikipedia.org/wiki/GSM_03.38) alphabet with 7 bits per character. Garmin apps only support printable ASCII. Going Blue uses the intersection of printable ASCII and GSM-7 basic minus the space character for a base-85 alphabet. This provides log₂(85) ≈ 6.409 bits per character.
 
 ```
 !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz
