@@ -74,24 +74,16 @@ For variables with large ranges, like temperature, we encode the starting temper
 For variables like snow and rain which are sparse but have large variability, we use a sqrt scale. This provides detail at small amounts while preserving range for larger values. With rain, we might have an hour with 0.1mm rain and a 12 hour period with 100mm of rain. A sqrt scale allows us to represent both extremes on a scale with only 64 values. Rain values range from 0.036mm to 144mm and snow from 0.05cm to 200cm in a single time period. 
 
 ```math
-c = \min\left(\mathrm{round}\left(63\sqrt{\frac{v}{v_{\max}}}\right),\ 63\right)
-\qquad
-\hat{v} = v_{\max}\left(\frac{c}{63}\right)^2
+\begin{aligned}
+\mathrm{encode:}\quad c &= \min\left(\left\lfloor 63\sqrt{\frac{v}{v_{\max}}} \right\rceil,\ 63\right) \\
+\mathrm{decode:}\quad \hat{v} &= v_{\max}\left(\frac{c}{63}\right)^2
+\end{aligned}
 ```
 
-| Code | Rain (mm) |
-| ---: | --------: |
-| 0    | 0         |
-| 1    | 0.036     |
-| 2    | 0.145     |
-| 3    | 0.327     |
-| …    | …         |
-| 16   | 9.29      |
-| 32   | 37.15     |
-| 48   | 83.59     |
-| …    | …         |
-| 62   | 139.47    |
-| 63   | 144.00    |
+| Code      | 0 | 1     | 2     | 3     | …  | 16   | 32    | 48    | …  | 62     | 63     |
+| --------- | -: | ----: | ----: | ----: | -: | ---: | ----: | ----: | -: | -----: | -----: |
+| Rain (mm) | 0 | 0.036 | 0.145 | 0.327 | …  | 9.29 | 37.15 | 83.59 | …  | 139.47 | 144.00 |
+| Step      | — | 0.036 | 0.109 | 0.181 | …  | 1.13 | 2.29  | 3.45  | …  | 4.46   | 4.54   |
 
 ### Strategy by Variable
 
