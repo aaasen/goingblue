@@ -13,4 +13,4 @@
 **/.expo/
 .claude/
 *.har
-DEPLOYMENT.md
+docs/private/

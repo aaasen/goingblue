@@ -15,7 +15,7 @@ DB_USER="${DB_USER:-postgres}"
 # Cloud SQL connection. INSTANCE_CONNECTION_NAME is "project:region:instance" (see the
 # instance's "Connection name" in the console). Secrets are NOT here — DB_PASS (database
 # password) and TWILIO_AUTH_TOKEN (verifies the inbound-SMS webhook signature) live in Secret
-# Manager (see one-time setup in DEPLOYMENT.md) and are injected as env vars.
+# Manager (see one-time setup in docs/private/DEPLOYMENT.md) and are injected as env vars.
 INSTANCE_CONNECTION_NAME="${PROJECT}:${REGION}:${SQL_INSTANCE}"
 TWILIO_WEBHOOK_URL="${PUBLIC_URL}/sms"
 # Protocol version → codec-server service URL (deployed by deploy-codec.sh; see VERSIONING.md).

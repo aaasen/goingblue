@@ -21,6 +21,10 @@ data/
 # Deployment target — read by deploy.sh on the way in, never needed inside the build.
 deploy.env
 
+# Private notes (runbooks, A2P 10DLC registration, TODO). A hand-authored .gcloudignore replaces
+# the .gitignore fallback entirely, so these must be listed here too or they ride along.
+docs/private/
+
 # Native build output under the mobile package. The gateway Dockerfile builds the Expo *web*
 # export, which needs the mobile source but never the regenerable iOS/Android native dirs
 # (~1 GB of iOS Pods/build). gcloud ignores nested .gitignore files, so mirror those rules here.

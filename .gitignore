@@ -18,11 +18,9 @@ data/
 # macOS
 .DS_Store
 
-TODO.md
-
-# Private deployment notes
-DEPLOYMENT.md
-A2P\ 10DLC.md
+# Private notes: deployment runbooks, the A2P 10DLC registration, and the working TODO.
+# Nested under docs/ rather than ignoring docs/ outright, so docs/ stays free for public docs.
+docs/private/
 
 .claude
 
