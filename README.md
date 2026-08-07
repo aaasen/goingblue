@@ -102,13 +102,17 @@ Each variable has a different quantization method and codebook strategy:
 | wind speed           | delta | Δ −17…+17                                               | resolution × level; surface by the gust column's Δ bucket; 600/700 hPa by the upper level's Δ bucket | extended Beaufort force 0…17, km/h bands (midpoint decode); 5-bit anchor |
 | wind direction       | value | 8 cardinals                                             | resolution × previous direction (× upper direction for 600/700 hPa); calm periods emit no symbol | 45° points |
 
-## Encoding
+### Alphabet
 
 Going Blue transmits messages over SMS. Satellite messengers like Garmin inReach and ZOLEO support SMS.
 
 SMS uses a [GSM-7](https://en.wikipedia.org/wiki/GSM_03.38) alphabet with 7 bits per character.
 
+### Forecast Packing
 
+Going Blue uses an entropy coder which means that the forecast length is not predictable. It depends on the entropy of the forecast, with stable (low-entropy) conditions taking few bits to encode and variable (high-entropy) conditions taking many bits to encode. In practice, a high-entropy forecasts takes about twice as much space as low-entropy forecasts.
+
+We can't promise a 3 day hourly forecast or a 10 day forecast at 3h resolution. Instead, the app allows the user to select a fill priority: `detail`, `auto`, or `range`. The server fetches the forecast and then tries to fit as much data into the message as possible. At each step, it can either extend the range of the forecast or increase the detail. The fill priority determines which it tries to do. These fill ladders are pre-defined and shared between the server and client. The server sends back a sequence number so that the client can derive the resolution of each forecast point. The server does a binary search of the sequence number to find the largest forecast that can fit within the character budget.
 
 ## Development
 
