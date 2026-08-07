@@ -2,11 +2,13 @@
 
 Going Blue is a weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom compression codec and decoder app to pack hundreds of forecast data points into a single 160-character message. Going Blue is deployed at [going.blue](https://going.blue/).
 
+<img src="packages/mobile/screenshots/01-meteogram-mont-blanc.png" width="320" alt="Decoded forecast for Mont Blanc: temperature curve, precipitation, wind, cloud cover, and pressure-level winds">
+
 ## How it works
 
 To use Going Blue, a user:
 1. Creates a forecast request in the app, specifying location, weather model, and weather variables.
-1. Sends the forecast request to the Going Blue over the internet, SMS, or satellite messenger like Garmin inReach or ZOLEO.
+1. Sends the forecast request to Going Blue over the internet, SMS, or satellite messenger like Garmin inReach or ZOLEO.
 1. Receives an encoded forecast.
 1. Pastes the encoded forecast into the app to visualize the forecast.
 
@@ -25,7 +27,9 @@ The service is written in TypeScript. There are four packages:
 
 ## Compression
 
-Going Blue uses Markov model of weather combined with a [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) entropy coder. 
+Going Blue uses a Markov model of weather combined with a [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) entropy coder.
+
+### Markov Model
 
 To see how this works, let's step through an example of encoding the weathercode, which is a general summary of weather conditions in a single symbol. There are 28 different weathercodes, so encoding weathercode without compression would take 5 bits. We can take advantage of the fact that the current weather is a good predictor of future weather. For example, if it is currently sunny, this is the probability distribution of the next hour's weather:
 
@@ -38,9 +42,11 @@ To see how this works, let's step through an example of encoding the weathercode
 | 🌦️ light drizzle | 0.458% |
 | … everything else | 0.192% combined |
 
-We can then represent a forecast as series of state transitions with different probabilities i.e. a Markov chain: ☀️ -> ☀️ -> ⛅ -> ⛅ -> 🌦️. 
+We can then represent a forecast as series of state transitions with different probabilities i.e. a Markov chain: ☀️ -> ☀️ -> ⛅ -> ⛅ -> 🌦️.
 
-We can then feed this probability distribution into an entropy coder like a Huffman coder. In Huffman coding, each symbol is assigned a code based on its probability. The more likely a symbol is, the shorter its code: 
+### Entropy Coding
+
+We can then feed this probability distribution into an entropy coder like a Huffman coder. In Huffman coding, each symbol is assigned a code based on its probability. The more likely a symbol is, the shorter its code:
 
 | conditions | P | bits | code |
 |---|---|---|---|
@@ -49,16 +55,47 @@ We can then feed this probability distribution into an entropy coder like a Huff
 | ⛅ partly cloudy | 2.67% | 3 | `110` |
 | ☁️ overcast | 2.58% | 4 | `1110` |
 | 🌦️ light drizzle | 0.458% | 5 | `11110` |
+| … everything else | 0.192% combined | 6+ | `111110…` |
 
-In this example, the clear -> clear transition is very likely so it gets a 1-bit code: `0`. The clear -> light drizzle transition is unlikely, so it gets a 5-bit code: `11110`. The expected length of the encoded forecast is only 1.248 bits/symbol, far below the 5 bits/symbol that would be required to encode any of the 28 different weathercodes. The actual encoded length may vary depending on the forecast. If it's completely clear for the entire forecast period, we will just use 1 bit per period. In more variable conditions, we will need more bits for each forecast period. 
+In this example, the clear -> clear transition is very likely so it gets a 1-bit code: `0`. The clear -> light drizzle transition is unlikely, so it gets a 5-bit code: `11110`. The expected length of the encoded forecast is only 1.248 bits/symbol, far below the 5 bits/symbol that would be required to encode any of the 28 different weathercodes. The actual encoded length may vary depending on the forecast. If it's completely clear for the entire forecast period, we will just use 1 bit per period. In more variable conditions, we will need more bits for each forecast period.
 
-The actual entropy coder that Going Blue uses is [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems#Range_variants_(rANS)_and_streaming) which removes the 1-bit floor of Huffman coding by encoding the entire forecast into a single large number instead of going symbol by symbol. See this [post](https://kedartatwawadi.github.io/post--ANS/) for a great explanation of asymmetric numeral systems. With the Huffman coder, we can reach 1.248 bits/symbol. rANS brings us much closer to actual entropy of the data, which is 0.833 bits/symbol. 
+The actual entropy coder that Going Blue uses is [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems#Range_variants_(rANS)_and_streaming) which removes the 1-bit floor of Huffman coding by encoding the entire forecast into a single large number instead of going symbol by symbol. See this [post](https://kedartatwawadi.github.io/post--ANS/) for a great explanation of asymmetric numeral systems. With the Huffman coder, we can reach 1.248 bits/symbol. rANS brings us much closer to actual entropy of the data, which is 0.833 bits/symbol.
 
-The same technique can be applied to other weather variables. Correlation between variables can also be used. For example, precipitation probability is keyed off of weathercode class, since a rainy weathercode is a good signal that precipitation probability is non-zero.
+### Cross-Variable Correlation
 
-For variables with large ranges, like temperature, we encode the starting temperature and then the delta of each forecast point. This avoids having a separate codebook for every possible temperature.
+The same technique can be applied to other weather variables. Correlation between variables can also be used. For example, weathercodes are split into classes that give a general weather bucket: rainy, snowy, dry, etc. Weathercode is always included so this data can be used to condition other variables for free. Snow, rain, and precipitation probability are keyed off of weathercode class.
 
-For variables like snow and rain which are sparse but have large variability, we use a sqrt scale. This provides detail at small amounts while preserving range for larger values. With rain, we might have an hour with 0.01" and a 12 hour period with 5" of rain. A sqrt scale allows us to represent both extremes on a scale with only 64 values. 
+### Delta Encoding
+
+For variables with large ranges, like temperature, we encode the starting temperature and then the delta of each forecast point. This avoids having a separate codebook for every possible temperature. It also allows the codec to more easily capture trends. For example, if the temperature rose 2°C in the last hour, it is likely still rising in the next hour. The delta provides more information about the next hour's temperature than the absolute temperature does.
+
+### Sqrt Scale for Large Ranges
+
+For variables like snow and rain which are sparse but have large variability, we use a sqrt scale. This provides detail at small amounts while preserving range for larger values. With rain, we might have an hour with 0.1mm rain and a 12 hour period with 100mm of rain. A sqrt scale allows us to represent both extremes on a scale with only 64 values. Rain values range from 0.036mm to 144mm and snow from 0.05cm to 200cm in a single time period. 
+
+```math
+c = \min\left(\operatorname{round}\left(63\sqrt{\frac{v}{v_{\max}}}\right),\ 63\right)
+\qquad
+\hat{v} = v_{\max}\left(\frac{c}{63}\right)^2
+```
+
+| Code | Rain (mm) |
+| ---: | --------: |
+| 0    | 0         |
+| 1    | 0.036     |
+| 2    | 0.145     |
+| 3    | 0.327     |
+| …    | …         |
+| 16   | 9.29      |
+| 32   | 37.15     |
+| 48   | 83.59     |
+| …    | …         |
+| 62   | 139.47    |
+| 63   | 144.00    |
+
+### Strategy by Variable
+
+Each variable has a different quantization method and codebook strategy:
 
 | Variable             | Model | States (the symbol alphabet)                          | Codebook keyed by                              | Quantization                          |
 | -------------------- | ----- | ------------------------------------------------------ | ---------------------------------------------- | ------------------------------------- |
@@ -73,7 +110,19 @@ For variables like snow and rain which are sparse but have large variability, we
 | wind speed           | delta | Δ −17…+17                                               | resolution × level; surface by the gust column's Δ bucket; 600/700 hPa by the upper level's Δ bucket | extended Beaufort force 0…17, km/h bands (midpoint decode); 5-bit anchor |
 | wind direction       | value | 8 cardinals                                             | resolution × previous direction (× upper direction for 600/700 hPa); calm periods emit no symbol | 45° points |
 
+## Encoding
+
+Going Blue transmits messages over SMS. Satellite messengers like Garmin inReach and ZOLEO support SMS.
+
+SMS uses a [GSM-7](https://en.wikipedia.org/wiki/GSM_03.38) alphabet with 7 bits per character.
+
+
+
 ## Development
+
+Requirements:
+1. Docker
+2. tmux
 
 Everything needed to run locally is bundled into one tmux session:
 
