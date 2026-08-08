@@ -3,7 +3,7 @@
  *
  * One script, two phases:
  *   1. Collect — pull 14-day hourly windows from Open-Meteo's Historical Forecast API (a
- *      continuous best-estimate archive), one window every ~10 days across YEARS_BACK years, for
+ *      continuous best-estimate archive), one window every ~10 days across a fixed span, for
  *      every source production serves (per-center seamless blends + best_match). Rows land in the
  *      corpus SQLite DB (corpus-db.ts); the planner fetches only (source, location, window,
  *      variable) cells the DB doesn't have, batched per call, so variables/sources/locations are

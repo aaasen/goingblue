@@ -13,9 +13,21 @@ export const HORIZON_DAYS = 14;
 export const WINDOW_HOURS = HORIZON_DAYS * 24;
 
 export const CADENCE_DAYS = 10;    // one window every ~10 days
-export const YEARS_BACK = 2;       // sample windows across the past two years (per-source archive depth varies)
-export const ANCHOR_LAG_DAYS = 5;  // newest window ends a few days ago so the best-estimate has settled
+export const ANCHOR_LAG_DAYS = 5;  // a window needs a few settled days before the best-estimate is final
 export const GRID_ANCHOR_MS = Date.UTC(2026, 5, 25); // 2026-06-25, the imported corpus's newest window
+
+// The corpus spans a FIXED range of windows, not a trailing N years. The trailing form (windows
+// newer than `now - YEARS_BACK`) quietly shrank the corpus from the back as the calendar
+// advanced: once a window fell off, the planner stopped seeing it, so its cells missed every
+// later add-pass — the gust backfill and the 2026-07-31 variable expansion both left stale cells
+// behind that way — and a newly added source could never cover them at all. Pinning both ends
+// makes the window set reproducible (same corpus today and next month, so codebooks derived
+// weeks apart train on the same data) and lets a new source backfill the whole of it.
+//
+// Both bounds must sit on the lattice; sampleWindows asserts it. Widening the span is a
+// deliberate edit here, and costs one add-pass over the new windows for every source.
+export const CORPUS_FIRST_WINDOW = Date.UTC(2024, 5, 25); // 2024-06-25, the corpus's oldest window
+export const CORPUS_LAST_WINDOW = Date.UTC(2026, 6, 15);  // 2026-07-15
 
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -33,15 +45,26 @@ export function windowIso(index: number): string {
 
 // The window start timestamps (00:00 UTC) to sample, newest first.
 export function sampleWindows(): number[] {
-  const now = new Date();
-  // Newest usable window ends ANCHOR_LAG_DAYS ago (so the best-estimate archive has settled)…
-  const latest = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) -
-    (ANCHOR_LAG_DAYS + HORIZON_DAYS - 1) * DAY_MS;
-  // …snapped DOWN to the lattice.
-  const newest = GRID_ANCHOR_MS +
-    Math.floor((latest - GRID_ANCHOR_MS) / (CADENCE_DAYS * DAY_MS)) * (CADENCE_DAYS * DAY_MS);
-  const earliest = newest - YEARS_BACK * 365 * DAY_MS;
+  const step = CADENCE_DAYS * DAY_MS;
+  for (const [name, t] of [["CORPUS_FIRST_WINDOW", CORPUS_FIRST_WINDOW],
+                           ["CORPUS_LAST_WINDOW", CORPUS_LAST_WINDOW]] as const) {
+    if ((t - GRID_ANCHOR_MS) % step !== 0) {
+      throw new Error(`lattice: ${name} (${runIso(t)}) is off the ${CADENCE_DAYS}-day grid`);
+    }
+  }
+  if (CORPUS_LAST_WINDOW < CORPUS_FIRST_WINDOW) {
+    throw new Error("lattice: CORPUS_LAST_WINDOW precedes CORPUS_FIRST_WINDOW");
+  }
+  // A window's last hour must be ANCHOR_LAG_DAYS in the past, or its tail comes back null from
+  // the best-estimate archive. This throws rather than clamping: silently trimming the newest
+  // window is exactly the sliding behaviour the fixed bounds exist to remove.
+  const settled = Date.now() - (ANCHOR_LAG_DAYS + HORIZON_DAYS - 1) * DAY_MS;
+  if (CORPUS_LAST_WINDOW > settled) {
+    const newest = GRID_ANCHOR_MS + Math.floor((settled - GRID_ANCHOR_MS) / step) * step;
+    throw new Error(`lattice: CORPUS_LAST_WINDOW (${runIso(CORPUS_LAST_WINDOW)}) has not settled yet — ` +
+      `the newest usable window starts ${runIso(newest)}`);
+  }
   const starts: number[] = [];
-  for (let t = newest; t >= earliest; t -= CADENCE_DAYS * DAY_MS) starts.push(t);
+  for (let t = CORPUS_LAST_WINDOW; t >= CORPUS_FIRST_WINDOW; t -= step) starts.push(t);
   return starts;
 }
