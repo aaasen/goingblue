@@ -30,7 +30,7 @@
  *     (-0.136, occ min=858). See derive-freeze-delta-codebooks.ts and freezeDeltaBook in
  *     entropy.ts.
  *
- *   node packages/codec-server/scripts/analyze-cross-var-heldout.ts
+ *   pnpm exec tsx packages/codec-server/scripts/analyze-cross-var-heldout.ts
  */
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {

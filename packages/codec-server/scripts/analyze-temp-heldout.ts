@@ -16,7 +16,7 @@
  * phase by the UTC offset), representativeTemps sampling via rowsFromWindows, 1 °C quantization,
  * clamp-to-±32-and-heal delta chain, escape (|Δ|>7) charged its 6 raw payload bits.
  *
- *   node packages/codec-server/scripts/analyze-temp-heldout.ts
+ *   pnpm exec tsx packages/codec-server/scripts/analyze-temp-heldout.ts
  */
 import { rowsFromWindows, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import { V1_CODEBOOKS, RANS_PROB_BITS } from "@weather/protocol";

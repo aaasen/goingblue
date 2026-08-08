@@ -9,7 +9,7 @@
  * sources). Re-recording is only legitimate alongside a deliberate protocol version bump.
  *
  *   pnpm --filter @weather/protocol build
- *   node scripts/record-goldens.ts               # from packages/codec-server
+ *   pnpm exec tsx scripts/record-goldens.ts               # from packages/codec-server
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

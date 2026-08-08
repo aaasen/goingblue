@@ -2,7 +2,7 @@
  * Codebook-class ladder: learn K per-message-selectable codebook classes by Lloyd's/EM in
  * code-length space, and measure what each K buys on the held-out eval split.
  *
- *   node packages/codec-server/scripts/derive-class-ladder.ts [--k 2,4,8] [--alpha 200] [--iters 25]
+ *   pnpm exec tsx packages/codec-server/scripts/derive-class-ladder.ts [--k 2,4,8] [--alpha 200] [--iters 25]
  *
  * Runs on the per-cell sparse counts precomputed by extract-cell-counts.ts (run that first).
  * The unit is one forecast cell (location × window, message-shaped — a location's winter and

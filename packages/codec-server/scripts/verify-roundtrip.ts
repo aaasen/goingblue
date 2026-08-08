@@ -9,8 +9,8 @@
  * This is the strongest guard against coder edge cases synthetic tests miss (renormalization
  * boundaries, trailing zero words, escape paths under real weather).
  *
- *   node scripts/verify-roundtrip.ts             # every ~200th corpus forecast (see --stride)
- *   node scripts/verify-roundtrip.ts --stride 1  # the whole corpus (hours)
+ *   pnpm exec tsx scripts/verify-roundtrip.ts             # every ~200th corpus forecast (see --stride)
+ *   pnpm exec tsx scripts/verify-roundtrip.ts --stride 1  # the whole corpus (hours)
  */
 import { encodeFillSeq, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import { eachForecast } from "./derive-lib.ts";

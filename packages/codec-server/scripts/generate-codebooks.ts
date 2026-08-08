@@ -6,7 +6,7 @@
  *   pnpm generate                       # from the repo root (builds the protocol first)
  *
  * The corpus lives in the SQLite DB at data/corpus.db — expand it with
- * `node scripts/benchmark.ts --collect-only` (or import an old JSON tree: import-corpus-json.ts).
+ * `pnpm exec tsx scripts/benchmark.ts --collect-only` (or import an old JSON tree: import-corpus-json.ts).
  * The tables are v1 wire format, so after regenerating: rebuild the protocol, regenerate the wire
  * fixture (packages/protocol/scripts/generate-fixture.ts), and run the protocol tests —
  * test/codebooks.test.ts fails until the protocol version is bumped (the deliberate manual step)
@@ -22,7 +22,7 @@ const dir = dirname(fileURLToPath(import.meta.url));
 const OUT = join(dir, "..", "..", "protocol", "src", "codebooks.gen.ts");
 
 if (!existsSync(DB_PATH)) {
-  console.error(`No corpus DB at ${DB_PATH} — run \`node scripts/benchmark.ts --collect-only\` first.`);
+  console.error(`No corpus DB at ${DB_PATH} — run \`pnpm exec tsx scripts/benchmark.ts --collect-only\` first.`);
   process.exit(1);
 }
 

@@ -14,7 +14,7 @@
  * Direction sequences are collected under calm gating (no symbol when quantized speed = 0; the
  * context chain carries the last encoded direction), matching the planned wire behavior.
  *
- *   node scripts/analyze-wind-heldout.ts
+ *   pnpm exec tsx scripts/analyze-wind-heldout.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD, type HourlyData } from "../src/forecast.ts";
 import { eachForecast, foldOf, N_FOLDS, scaledWeights } from "./derive-lib.ts";

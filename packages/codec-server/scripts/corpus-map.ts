@@ -14,7 +14,7 @@
  * Output lands in docs/ (tracked, unlike data/) because the README embeds it — regenerate after
  * the registry changes so the committed map matches.
  *
- *   node packages/codec-server/scripts/corpus-map.ts [out.svg]   # default: docs/corpus-map.svg
+ *   pnpm exec tsx packages/codec-server/scripts/corpus-map.ts [out.svg]   # default: docs/corpus-map.svg
  */
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";

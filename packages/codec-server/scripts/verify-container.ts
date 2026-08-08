@@ -4,7 +4,7 @@
  * fix; see VERSIONING.md). Serves the recorded Open-Meteo responses from a local fixture
  * server, POSTs every golden request to the container's /encode, and diffs the exact bytes.
  *
- *   node scripts/verify-container.ts --codec-url http://localhost:9090 [--port 8199]
+ *   pnpm exec tsx scripts/verify-container.ts --codec-url http://localhost:9090 [--port 8199]
  *
  * Start the container under test with its upstream pointed at this script, e.g.:
  *   docker run -p 9090:8081 -e OPEN_METEO_BASE_URL=http://host.docker.internal:8199 codec:v1
@@ -23,7 +23,7 @@ const { values } = parseArgs({
 });
 const codecUrl = values["codec-url"];
 if (!codecUrl) {
-  console.error("usage: node scripts/verify-container.ts --codec-url <url> [--port 8199]");
+  console.error("usage: pnpm exec tsx scripts/verify-container.ts --codec-url <url> [--port 8199]");
   process.exit(2);
 }
 

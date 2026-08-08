@@ -2,7 +2,7 @@
  * Shared helpers for the codebook derivation scripts (derive-*.ts). Each derive script exports
  * `derive()`, returning the integer weight tables it owns keyed by the constant name they get in
  * packages/protocol/src/codebooks.gen.ts — generate-codebooks.ts collects them all and writes
- * that file. Run standalone (`node scripts/derive-foo.ts`), a script prints its tables and stats
+ * that file. Run standalone (`pnpm exec tsx scripts/derive-foo.ts`), a script prints its tables and stats
  * without writing anything.
  */
 import { fileURLToPath } from "node:url";
@@ -184,7 +184,7 @@ export function renderTable(name: string, t: number[] | number[][] | number[][][
   return `export const ${name}: number[] = [${(t as number[]).join(", ")}];`;
 }
 
-// Direct-run guard: `node scripts/derive-foo.ts` derives and prints that script's tables (stats
+// Direct-run guard: `pnpm exec tsx scripts/derive-foo.ts` derives and prints that script's tables (stats
 // go to the console from derive() itself) without touching codebooks.gen.ts.
 export function runStandalone(moduleUrl: string, derive: () => Promise<DerivedTables>): void {
   if (process.argv[1] !== fileURLToPath(moduleUrl)) return;

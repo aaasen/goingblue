@@ -27,7 +27,7 @@
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
- *   node packages/codec-server/scripts/derive-wind-speed-delta-codebooks.ts
+ *   pnpm exec tsx packages/codec-server/scripts/derive-wind-speed-delta-codebooks.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import { VARS_BIT, type Period } from "@weather/protocol";
