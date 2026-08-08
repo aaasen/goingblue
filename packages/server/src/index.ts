@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 import { forecast, health, sms, createAccountRoute, verifyAccountRoute, deleteAccountRoute } from "./routes.js";
 import { landing, support, privacy, terms, contactCard } from "./legal.js";
 import { image } from "./assets.js";
+import { benchmark } from "./benchmark.js";
 import { migrate } from "./db.js";
 import { log } from "./log.js";
 
@@ -15,6 +16,7 @@ app.get("/support", support);
 app.get("/privacy", privacy);
 app.get("/terms", terms);
 app.get("/contact.vcf", contactCard);
+app.get("/benchmark", benchmark);
 app.get("/img/:name", image);
 app.use("/forecast", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/forecast", forecast);

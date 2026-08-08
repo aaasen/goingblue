@@ -26,6 +26,11 @@
  *   node packages/codec-server/scripts/benchmark.ts --dump <source> <loc> <window>  # inspect one cell
  *   node packages/codec-server/scripts/benchmark.ts --help              # all options
  *
+ * Reports land in data/benchmarks (gitignored). going.blue/benchmark serves one published copy;
+ * promoting a run is a manual, deliberate step — it is a public page:
+ *
+ *   gzip -9 -c data/benchmarks/<run>.html > packages/server/public/benchmark.html.gz
+ *
  * API usage counts toward the plan's monthly call volume; cap a run with --limit.
  * OPEN_METEO_API_KEY switches to the commercial endpoint.
  */
