@@ -18,7 +18,9 @@ set -euo pipefail
 SESSION="weather"
 GATEWAY_PORT="${GATEWAY_PORT:-8080}"
 CODEC_PORT="${CODEC_PORT:-8082}"
-DB_ENV="DB_USER=postgres DB_PASS=dev DB_NAME=goingblue"
+# STATS_PASS is what registers /stats at all (index.ts fails closed without it), so local dev
+# needs one or the dashboard is a 404 here. Log in as lane/dev.
+DB_ENV="DB_USER=postgres DB_PASS=dev DB_NAME=goingblue STATS_PASS=dev"
 
 if [ "${1:-}" = "kill" ]; then
   tmux kill-session -t "$SESSION" 2>/dev/null || true

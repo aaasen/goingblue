@@ -1,10 +1,12 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { basicAuth } from "hono/basic-auth";
 import { cors } from "hono/cors";
 import { forecast, health, sms, createAccountRoute, verifyAccountRoute, deleteAccountRoute } from "./routes.js";
 import { landing, support, privacy, terms, contactCard } from "./legal.js";
 import { image } from "./assets.js";
 import { benchmark } from "./benchmark.js";
+import { stats } from "./stats.js";
 import { migrate } from "./db.js";
 import { log } from "./log.js";
 
@@ -28,6 +30,26 @@ app.post("/account/verify", verifyAccountRoute);
 app.use("/account/delete", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/account/delete", deleteAccountRoute);
 
+// The stats dashboard is the one route here that isn't for users, so it is the one route behind
+// a password. Basic auth rather than a secret in the URL: Cloud Run records httpRequest.requestUrl
+// for every request, so a `?key=` or `/stats/<secret>` scheme would file the password in Cloud
+// Logging for a month; the Authorization header is not logged, and browsers keep it in the
+// keychain. hono's basicAuth compares in constant time, so there is no credential check to get
+// wrong here.
+//
+// Registered only when the secret exists, and registered as one unit with its middleware: if
+// STATS_PASS is ever missing the path 404s, because the failure mode of the alternative — route
+// present, middleware absent — is a public read-only view of the request table.
+const statsPass = process.env["STATS_PASS"];
+if (statsPass) {
+  app.use("/stats", basicAuth({
+    username: process.env["STATS_USER"] ?? "lane",
+    password: statsPass,
+    realm: "Going Blue stats",
+  }));
+  app.get("/stats", stats);
+}
+
 const port = parseInt(process.env["PORT"] ?? "8080");
 
 // Apply schema on startup. The database is a required dependency (it gates the forecast
@@ -38,5 +60,5 @@ migrate()
   .catch((e) => log.error("db.migrate_failed", { err: e }));
 
 serve({ fetch: app.fetch, port }, () => {
-  log.info("server.listening", { port });
+  log.info("server.listening", { port, stats: statsPass ? "enabled" : "disabled_no_secret" });
 });

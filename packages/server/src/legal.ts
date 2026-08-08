@@ -72,11 +72,13 @@ const SHOTS_CSS = `
   @media (max-width: 600px) { .shots figure { flex: 0 0 230px; } }
 `;
 
-type PageOpts = { showUpdated?: boolean; subtitle?: string };
+type PageOpts = { showUpdated?: boolean; subtitle?: string; css?: string };
 
 // `subtitle` is what makes a page a landing page: it swaps the plain <h1> for the photo band, and
-// brings in the styles for the screenshot strip below it.
-const PAGE = (title: string, body: string, { showUpdated = true, subtitle }: PageOpts = {}) => `<!doctype html>
+// brings in the styles for the screenshot strip below it. `css` appends a page's own rules to the
+// same <style> block, which is what lets a page with more than prose in it (the stats dashboard)
+// share this shell instead of growing a second one.
+export const PAGE = (title: string, body: string, { showUpdated = true, subtitle, css }: PageOpts = {}) => `<!doctype html>
 <html lang=en>
 <head>
 <meta charset=utf-8>
@@ -92,7 +94,7 @@ const PAGE = (title: string, body: string, { showUpdated = true, subtitle }: Pag
   a { color: #0b62c4; }
   .appbtn { display: inline-block; background: #0b62c4; color: #fff; padding: 11px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 0.6em 0 1.2em; }
   footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
-${subtitle ? HERO_CSS + SHOTS_CSS : ""}</style>
+${subtitle ? HERO_CSS + SHOTS_CSS : ""}${css ?? ""}</style>
 </head>
 <body>
 ${subtitle
