@@ -1,4 +1,4 @@
-import { v1Codec } from "./versions/v1.js";
+import { v2Codec } from "./versions/v2.js";
 import { peekVersion } from "./version.js";
 import type { ForecastMessage, VersionedCodec, ContextResolver } from "./model.js";
 
@@ -15,7 +15,7 @@ import type { ForecastMessage, VersionedCodec, ContextResolver } from "./model.j
 // longer decode as expired (past forecasts are a short-lived buffer, not long-term storage).
 // See VERSIONING.md for the freeze/sunset runbooks.
 export const CODECS: Record<number, VersionedCodec> = {
-  1: v1Codec,
+  2: v2Codec,
 };
 
 export function supportedVersions(): number[] {

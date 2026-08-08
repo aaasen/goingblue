@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { v1Codec, V1_HEADER_CHARS } from "../src/versions/v1.js";
+import { v2Codec, V2_VERSION, V2_HEADER_CHARS } from "../src/versions/v2.js";
 import { layoutFor, maxFillSeq, MODE_DETAIL, MODE_RANGE } from "../src/layout.js";
 import { DEFAULT_VARS_MASK } from "../src/constants.js";
 import type { ForecastMessage, Period, RequestContext } from "../src/model.js";
@@ -19,7 +19,7 @@ function msgFor(mode: number, seq: number): ForecastMessage {
   // codebooks off it, and the decoder derives the same value from the layout.
   const first = new Date(layout.periodStartUtcHour[0] * 3600000);
   return {
-    version: 1,
+    version: V2_VERSION,
     code: 0,
     days: layout.days,
     models_mask: 0b0001,
@@ -43,13 +43,13 @@ const ctxOf = (m: ForecastMessage): RequestContext => ({
 });
 
 function dec(m: ForecastMessage): ForecastMessage {
-  return v1Codec.decode(v1Codec.encode(m), () => ctxOf(m));
+  return v2Codec.decode(v2Codec.encode(m), () => ctxOf(m));
 }
 
-describe("v1 seq header", () => {
+describe("v2 seq header", () => {
   it("uses a 5-char header", () => {
-    expect(V1_HEADER_CHARS).toBe(5);
-    expect(v1Codec.encode(msgFor(MODE_RANGE, 1)).length).toBeGreaterThanOrEqual(V1_HEADER_CHARS);
+    expect(V2_HEADER_CHARS).toBe(5);
+    expect(v2Codec.encode(msgFor(MODE_RANGE, 1)).length).toBeGreaterThanOrEqual(V2_HEADER_CHARS);
   });
 
   it("round-trips the smallest layout (seq 1: one 12h day, two periods)", () => {
@@ -72,9 +72,9 @@ describe("v1 seq header", () => {
     // The header field is 8 bits (1..256); encode enforces only the field range — the
     // path-length check belongs to decode, where the mode is known.
     const m = msgFor(MODE_RANGE, 2);
-    expect(() => v1Codec.encode({ ...m, seq: 0 })).toThrow(/seq/);
-    expect(() => v1Codec.encode({ ...m, seq: 257 })).toThrow(/seq/);
-    expect(() => v1Codec.encode({ ...m, seq: undefined as unknown as number })).toThrow(/seq/);
+    expect(() => v2Codec.encode({ ...m, seq: 0 })).toThrow(/seq/);
+    expect(() => v2Codec.encode({ ...m, seq: 257 })).toThrow(/seq/);
+    expect(() => v2Codec.encode({ ...m, seq: undefined as unknown as number })).toThrow(/seq/);
   });
 
   it("rejects a decoded seq beyond the context mode's fill sequence", () => {
@@ -82,6 +82,6 @@ describe("v1 seq header", () => {
     const m = msgFor(MODE_DETAIL, maxFillSeq(MODE_DETAIL));
     expect(maxFillSeq(MODE_DETAIL)).toBeGreaterThan(maxFillSeq(MODE_RANGE));
     const rangeCtx = { ...ctxOf(m), mode: MODE_RANGE };
-    expect(() => v1Codec.decode(v1Codec.encode(m), () => rangeCtx)).toThrow(/fill sequence/);
+    expect(() => v2Codec.decode(v2Codec.encode(m), () => rangeCtx)).toThrow(/fill sequence/);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CODECS, layoutFor, maxFillSeq, FILL_SLOTS, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
+  CODECS, V2_VERSION, layoutFor, maxFillSeq, FILL_SLOTS, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, type RequestContext,
 } from "@weather/protocol";
 import { encodeFillSeq, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.js";
@@ -65,7 +65,7 @@ function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
     modelsMask: 0b010, // American (US): has freeze + pressure-level vars, so nothing is masked off
     varsMask: TEST_VARS,
     maxChars: 160,
-    decoderVersion: 1,
+    decoderVersion: V2_VERSION,
     code: 7,
     startEpochHour: REQ_UTC_HOUR,
     userToken: null,
@@ -73,7 +73,7 @@ function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
   };
 }
 
-const codec = CODECS[1];
+const codec = CODECS[V2_VERSION];
 
 function encodeSeq(p: ForecastParams, h = HOURLY, times = TIMES) {
   return (seq: number) =>

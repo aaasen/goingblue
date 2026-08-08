@@ -1,6 +1,6 @@
 // All weight tables live in codebooks.gen.ts (the base set — codebook class 0) and
 // codebooks-classes.gen.ts (classes 1..CODEBOOK_CLASSES-1), written by the derive pipeline —
-// never edited by hand. They are wire format; see V1_CODEBOOKS at the bottom of this file.
+// never edited by hand. They are wire format; see V2_CODEBOOKS at the bottom of this file.
 import {
   WEATHERCODE_BOOTSTRAP_WEIGHTS, WEATHERCODE_WEIGHTS,
   WIND_DIR_BOOTSTRAP_WEIGHTS, WIND_DIR_WEIGHTS_BY_RES, WIND_DIR_UPPER_WEIGHTS_BY_RES,
@@ -148,7 +148,7 @@ const NDIR = 8;
 // companded scales (held-out sfc+gust 2.638 vs 3.595 b/period under linear 5 kph — see
 // analyze-wind-scale-heldout.ts): Beaufort bands track perceptible wind differences, which is
 // also where the delta probability mass moves. Decoded values are band midpoints (kph); the
-// bounds are wire format and pinned in V1_CODEBOOKS below.
+// bounds are wire format and pinned in V2_CODEBOOKS below.
 export const BEAUFORT_KPH_LOWER: readonly number[] =
   [0, 1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118, 134, 150, 167, 184, 202];
 export const BEAUFORT_MAX = BEAUFORT_KPH_LOWER.length - 1; // 17
@@ -176,7 +176,7 @@ export function upperDeltaBucket(d: number): number {
   return d <= -2 ? 0 : d === -1 ? 1 : d === 0 ? 2 : d === 1 ? 3 : 4;
 }
 
-// must mirror the freeze column width in v1.ts (0..31)
+// must mirror the freeze column width in v2.ts (0..31)
 export const FREEZE_DELTA_MAX = 31;
 
 // Previous-value buckets for the accumulation columns: 0 | 1-3 | 4-9 | 10-20 | 21+.
@@ -195,7 +195,7 @@ const TEMP_DELTA_ESCAPE_BIAS = 1 << (TEMP_DELTA_ESCAPE_BITS - 1); // 32
 // The escape field's raw range. A delta outside it is NOT representable — encodeTempDelta (and
 // the coder's raw bypass beneath it) refuses to emit it rather than truncating, so the encoder
 // must clamp into this range and diff later periods against the clamped reconstruction
-// (see the temp column in v1.ts).
+// (see the temp column in v2.ts).
 export const TEMP_DELTA_MIN = -TEMP_DELTA_ESCAPE_BIAS;                      // -32
 export const TEMP_DELTA_MAX = (1 << TEMP_DELTA_ESCAPE_BITS) - 1 - TEMP_DELTA_ESCAPE_BIAS; // 31
 
@@ -220,13 +220,13 @@ function tempDeltaSym(delta: number): number {
 }
 
 // ── Codebook classes ────────────────────────────────────────────────────────────
-// One ClassBooks per codebook class: the complete set of table-lookup functions the v1 body
+// One ClassBooks per codebook class: the complete set of table-lookup functions the v2 body
 // codec keys symbols with. Class 0 is the global (train-corpus-wide) tables in codebooks.gen.ts;
 // classes 1..CODEBOOK_CLASSES-1 (codebooks-classes.gen.ts) were learned by EM in code-length
 // space over the corpus (see codec-server/scripts/derive-class-ladder.ts) — regional/seasonal regimes
 // (marine, tropical, polar...) whose conditional distributions are sharper than the global
 // mixture. The encoder builds the body under every class and keeps the cheapest (held-out
-// -2.5% body bits at K=8); the 3-bit selector rides free in the v1 header. Which class a
+// -2.5% body bits at K=8); the 3-bit selector rides free in the v2 header. Which class a
 // message used is in-band — the decoder needs nothing external.
 //
 // What a class does NOT change: alphabets, context functions (above), column structure. Only
@@ -406,7 +406,7 @@ export function decodeTempDelta(src: SymSource, book: CodeBook): number {
 }
 
 // ── Class-0 aliases ─────────────────────────────────────────────────────────────
-// The base class's books under their historical names, for tests and analysis scripts. The v1
+// The base class's books under their historical names, for tests and analysis scripts. The v2
 // codec itself goes through CLASS_BOOKS — never these.
 const BASE = CLASS_BOOKS[0];
 export const encodeWeathercode = BASE.encodeWeathercode;
@@ -425,7 +425,7 @@ export const rainBook = BASE.rainBook;
 export const tempDeltaBook = BASE.tempDeltaBook;
 
 // ── Wire-format freeze ──────────────────────────────────────────────────────────
-// Every table above is wire format: re-deriving any of them changes what already-encoded v1
+// Every table above is wire format: re-deriving any of them changes what already-encoded v2
 // messages mean, silently — a decode under drifted tables produces plausible garbage, not an
 // error. This bundle exists so test/codebooks.test.ts can pin a digest of it per protocol
 // version; change a table (or the temp escape geometry, or the coder geometry) and that test
@@ -477,7 +477,7 @@ const bundleOf = (t: ClassTableSet) => ({
     todBuckets: TEMP_DELTA_TOD_BUCKETS,
   },
 });
-export const V1_CODEBOOKS = {
+export const V2_CODEBOOKS = {
   rans: { probBits: RANS_PROB_BITS, stateLow: RANS_L, wordBits: RANS_WORD_BITS },
   ...bundleOf(BASE_TABLES),
   weathercodeClassOf: WEATHERCODE_CLASS, // keys the wet columns' tables — drift desyncs them silently

@@ -1,7 +1,7 @@
 /**
  * Derive single cloud-cover-delta Huffman codebooks from the corpus's pooled hour-to-hour
  * quantized cloud-cover delta distributions — same method as derive-freeze-delta-codebooks.ts.
- * The quantized cloud-cover step (0..7, 3-bit — see the cloud columns in v1.ts) is bounded, so the
+ * The quantized cloud-cover step (0..7, 3-bit — see the cloud columns in v2.ts) is bounded, so the
  * full delta range -7..7 (15 symbols) fits directly in the alphabet — no escape/raw-payload
  * fallback needed. Low/mid/high clouds are derived SEPARATELY (not pooled): low clouds are
  * local/convective and change quickly, high clouds are broad cirrus sheets that persist for hours,
@@ -25,7 +25,7 @@ import {
   type CellCounter, type DerivedTables,
 } from "./derive-lib.ts";
 
-const STEP_BITS = 3;               // matches the cloud column width in v1.ts (steps 0..7)
+const STEP_BITS = 3;               // matches the cloud column width in v2.ts (steps 0..7)
 const STEP_MAX = (1 << STEP_BITS) - 1;
 const NSYM = 2 * STEP_MAX + 1;     // 15: deltas -7..7, no escape needed (already bounded)
 const RES_IDX = 4;                 // 1h — finest, most samples

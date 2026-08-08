@@ -22,7 +22,7 @@ const HELP_KEYWORDS = new Set(["help", "info"]);
 // Human-readable replies for requests the gateway cannot route. These go back over SMS, so
 // they must be short and tell a person in the field what to do next.
 const REPLY_MISSING_VERSION =
-  'Missing protocol version: include a version word (e.g. "v1") or update the Going Blue app.';
+  'Missing protocol version: include a version word (e.g. "v2") or update the Going Blue app.';
 const replyUnsupported = (v: number) =>
   `Protocol v${v} is no longer supported. Please update the Going Blue app and resend.`;
 const REPLY_UNAVAILABLE = "Forecast unavailable, please try again.";

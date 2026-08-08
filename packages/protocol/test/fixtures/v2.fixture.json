@@ -7,9 +7,9 @@
     "mode": 0,
     "utcOffsetHours": -9
   },
-  "encoded": "\"!!I6tOt<;PaZO?K>b$$O)0o<2UP,rCmGi24d-Yug'Z$9\"P=hlj?J!c_#J\"Ws*LR-k(;QU",
+  "encoded": "#!!I6tOt<;PaZO?K>b$$O)0o<2UP,rCmGi24d-Yug'Z$9\"P=hlj?J!c_#J\"Ws*LR-k(;QU",
   "decoded": {
-    "version": 1,
+    "version": 2,
     "code": 0,
     "codebookClass": 5,
     "days": 3,

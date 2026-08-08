@@ -14,7 +14,7 @@ import { dbLocations, listCells, loadCell, openDb } from "./corpus-db.ts";
 // reserved for the benchmark report and never influence a codebook.
 export const DERIVE_SOURCE = "best_match";
 
-// ── Wind quantization (must match v1.ts) ────────────────────────────────────────
+// ── Wind quantization (must match v2.ts) ────────────────────────────────────────
 // Every wind speed column quantizes to the extended Beaufort scale (forces 0..17): band lower
 // bounds in km/h — the standard 13 forces plus the force 13..17 extension so hurricane-force
 // gusts and jet winds don't clip (corpus maxima: gust 225, 500 hPa 293 kph). Chosen 2026-07-31:

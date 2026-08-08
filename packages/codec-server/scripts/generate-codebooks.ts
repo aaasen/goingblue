@@ -7,7 +7,7 @@
  *
  * The corpus lives in the SQLite DB at data/corpus.db — expand it with
  * `pnpm exec tsx scripts/benchmark.ts --collect-only` (or import an old JSON tree: import-corpus-json.ts).
- * The tables are v1 wire format, so after regenerating: rebuild the protocol, regenerate the wire
+ * The tables are v2 wire format, so after regenerating: rebuild the protocol, regenerate the wire
  * fixture (packages/protocol/scripts/generate-fixture.ts), and run the protocol tests —
  * test/codebooks.test.ts fails until the protocol version is bumped (the deliberate manual step)
  * and the new codebook digest recorded.
@@ -49,7 +49,7 @@ for (const script of scripts) {
 
 const header = `// GENERATED FILE — do not edit by hand. Written by \`pnpm generate\`
 // (packages/codec-server/scripts/generate-codebooks.ts): integer weight tables derived from
-// the cached forecast corpus (data/raw/gfs). These tables are v1 wire format — regenerating
+// the cached forecast corpus (data/raw/gfs). These tables are v2 wire format — regenerating
 // changes what already-encoded messages mean, so test/codebooks.test.ts pins their digest per
 // protocol version and fails until the version is bumped and the new digest recorded. See
 // packages/protocol/src/entropy.ts for how each table is used and the derive-*-codebooks.ts

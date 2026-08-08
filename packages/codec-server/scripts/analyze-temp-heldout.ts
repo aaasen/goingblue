@@ -19,7 +19,7 @@
  *   pnpm exec tsx packages/codec-server/scripts/analyze-temp-heldout.ts
  */
 import { rowsFromWindows, HOURS_PER_PERIOD } from "../src/forecast.ts";
-import { V1_CODEBOOKS, RANS_PROB_BITS } from "@weather/protocol";
+import { V2_CODEBOOKS, RANS_PROB_BITS } from "@weather/protocol";
 import { eachForecast, foldOf, N_FOLDS, scaledWeights } from "./derive-lib.ts";
 
 const CORE_RADIUS = 7;
@@ -278,10 +278,10 @@ interface Row { label: string; bits: Record<number, number>; n: Record<number, n
 const rows: Row[] = [];
 
 // A0 — the pre-conditioning shipped tables (cheapest-of-16 + 4 selector bits per column).
-// Only runs while V1_CODEBOOKS still carries flat selector tables; after the A4r adoption the
+// Only runs while V2_CODEBOOKS still carries flat selector tables; after the A4r adoption the
 // shipped scheme IS a ladder rung (prevΔ × tod8 × res), so this row is historical. For the
 // record it measured 2.648 b/period overall (12h 5.367 · 6h 4.244 · 3h 3.232 · 1h 1.980).
-const shippedFlat = (V1_CODEBOOKS.tempDelta as { weights?: number[][] }).weights;
+const shippedFlat = (V2_CODEBOOKS.tempDelta as { weights?: number[][] }).weights;
 if (shippedFlat) {
   const bits: Record<number, number> = Object.fromEntries(RES_IDXS.map((r) => [r, 0]));
   const n: Record<number, number> = Object.fromEntries(RES_IDXS.map((r) => [r, 0]));

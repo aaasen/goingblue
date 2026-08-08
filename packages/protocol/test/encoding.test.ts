@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
-  v1MessageToString,
-  v1MessageFromString,
-  v1EncodeBreakdown,
-  V1_VERSION,
+  v2MessageToString,
+  v2MessageFromString,
+  v2EncodeBreakdown,
+  V2_VERSION,
   encodeVersion,
   decodeMessage,
   type ForecastMessage,
@@ -31,7 +31,7 @@ const bmid = beaufortMidKph;
 const qSnow = (cm: number) => expandSqrt(compandSqrt(cm, SNOW_K, ACCUM_BITS), SNOW_K);
 const qRain = (mm: number) => expandSqrt(compandSqrt(mm, RAIN_K, ACCUM_BITS), RAIN_K);
 
-// Every v1 variable (bit 12 is `rain`, 6-bit liquid precip; bit 13, formerly tmin, is reserved).
+// Every v2 variable (bit 12 is `rain`, 6-bit liquid precip; bit 13, formerly tmin, is reserved).
 const ALL_VARS =
   (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) |
   (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 12);
@@ -95,7 +95,7 @@ function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean 
     ? { mode: MODE_RANGE, days: 1, seq: overrides.seq, hourOfDay: 0, stepHours: 12 }
     : uniformLayout(n, opts.hourly ?? false);
   return {
-    version: V1_VERSION,
+    version: V2_VERSION,
     code: 0,
     days,
     models_mask,
@@ -130,15 +130,15 @@ const ctxOf = (m: ForecastMessage): RequestContext => ({
 const noCtx = (): RequestContext | undefined => undefined;
 
 function roundTrip(m: ForecastMessage): ForecastMessage {
-  return v1MessageFromString(v1MessageToString(m), () => ctxOf(m));
+  return v2MessageFromString(v2MessageToString(m), () => ctxOf(m));
 }
 
-describe("v1 round-trip encoding", () => {
+describe("v2 round-trip encoding", () => {
   it("preserves header fields", () => {
     // Three 12h periods → two slots of Range's ramp at seq 2; single model
     const original = msg({ models_mask: 0b001, month: 1, day: 31 });
     const decoded = roundTrip(original);
-    expect(decoded.version).toBe(V1_VERSION);
+    expect(decoded.version).toBe(V2_VERSION);
     expect(decoded.days).toBe(2);
     expect(decoded.seq).toBe(2);
     expect(decoded.mode).toBe(MODE_RANGE);
@@ -330,8 +330,8 @@ describe("v1 round-trip encoding", () => {
     const vars_mask = 1 << VARS_BIT.freeze;
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, freeze_m: 6 * 304.8 }));
     const swings = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, freeze_m: (i % 2 === 0 ? 2 : 13) * 304.8 }));
-    const flatLen = v1MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const swingsLen = v1MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
+    const flatLen = v2MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
+    const swingsLen = v2MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(swingsLen);
   });
 
@@ -345,8 +345,8 @@ describe("v1 round-trip encoding", () => {
     const vars_mask = 1 << bit;
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, [field]: 40 }));
     const swings = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, [field]: i % 2 === 0 ? 0 : 100 }));
-    const flatLen = v1MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const swingsLen = v1MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
+    const flatLen = v2MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
+    const swingsLen = v2MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(swingsLen);
   });
 
@@ -361,26 +361,26 @@ describe("v1 round-trip encoding", () => {
   });
 
   it("throws when decoding a different version's tag", () => {
-    // Swap the self-describing version prefix to v3; the v1 codec must reject it.
-    const encoded = v1MessageToString(msg());
+    // Swap the self-describing version prefix to v3; the v2 codec must reject it.
+    const encoded = v2MessageToString(msg());
     const reTagged = encodeVersion(3) + encoded.slice(1);
-    expect(() => v1MessageFromString(reTagged, noCtx)).toThrow(/Version mismatch.*v3/);
+    expect(() => v2MessageFromString(reTagged, noCtx)).toThrow(/Version mismatch.*v3/);
   });
 
   it("dispatches an unknown version to a clear error", () => {
-    const encoded = v1MessageToString(msg());
+    const encoded = v2MessageToString(msg());
     const reTagged = encodeVersion(7) + encoded.slice(1);
     expect(() => decodeMessage(reTagged, noCtx)).toThrow(/Unsupported protocol version: v7/);
   });
 
   it("throws on short message", () => {
-    // Valid v1 tag but no room for the header.
-    expect(() => v1MessageFromString(encodeVersion(V1_VERSION) + "abc", noCtx)).toThrow("Unexpected message length");
+    // Valid v2 tag but no room for the header.
+    expect(() => v2MessageFromString(encodeVersion(V2_VERSION) + "abc", noCtx)).toThrow("Unexpected message length");
   });
 
   it("throws when the message code can't be resolved", () => {
-    const encoded = v1MessageToString(msg({ code: 5 }));
-    expect(() => v1MessageFromString(encoded, () => undefined)).toThrow(/Unknown forecast code 5/);
+    const encoded = v2MessageToString(msg({ code: 5 }));
+    expect(() => v2MessageFromString(encoded, () => undefined)).toThrow(/Unknown forecast code 5/);
   });
 
   it("round-trips the message code", () => {
@@ -426,8 +426,8 @@ describe("v1 round-trip encoding", () => {
   it("encodes a near-constant surface wind speed column smaller than a wide-swinging one", () => {
     const flat = Array.from({ length: 64 }, () => ({ weathercode: 0, wind_sfc_kph: bmid(7), wind_sfc_dir: 0 }));
     const swings = Array.from({ length: 64 }, (_, i) => ({ weathercode: 0, wind_sfc_kph: bmid(i % 2 === 0 ? 2 : 13), wind_sfc_dir: 0 }));
-    expect(v1MessageToString(windMsg(flat, { hourly: true })).length)
-      .toBeLessThan(v1MessageToString(windMsg(swings, { hourly: true })).length);
+    expect(v2MessageToString(windMsg(flat, { hourly: true })).length)
+      .toBeLessThan(v2MessageToString(windMsg(swings, { hourly: true })).length);
   });
 
   it("round-trips surface wind at 1h resolution (the resolution-keyed direction codebook)", () => {
@@ -470,7 +470,7 @@ describe("v1 round-trip encoding", () => {
     const forces = [4, 1, 0, 1, 6]; // force ≤ 1 (< 6 kph) is calm for direction purposes
     const build = (dirs: number[]) =>
       windMsg(forces.map((f, i) => ({ weathercode: 0, wind_sfc_kph: bmid(f), wind_sfc_dir: dirs[i] })));
-    expect(v1MessageToString(build(dirsA))).toBe(v1MessageToString(build(dirsB)));
+    expect(v2MessageToString(build(dirsA))).toBe(v2MessageToString(build(dirsB)));
   });
 
   it("calm periods display the last decoded direction (0 before any)", () => {
@@ -507,7 +507,7 @@ describe("v1 round-trip encoding", () => {
     const alone = msg({ ...sixHourly, vars_mask: 1 << VARS_BIT.w600,
       periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_600_kph: bmid(6), wind_600_dir: 6 }))] });
     const w600Bits = (m: ForecastMessage) =>
-      v1EncodeBreakdown(m).columns.find((c) => c.name === "w600")!.bits;
+      v2EncodeBreakdown(m).columns.find((c) => c.name === "w600")!.bits;
     expect(w600Bits(both)).toBeLessThan(w600Bits(alone));
   });
 
@@ -567,7 +567,7 @@ describe("v1 round-trip encoding", () => {
       periods: [Array.from({ length: n }, (_, i) => ({ weathercode: 0,
         wind_sfc_kph: bmid(rising(i) + 2), wind_sfc_dir: 6 }))] });
     const windBits = (m: ForecastMessage) =>
-      v1EncodeBreakdown(m).columns.find((c) => c.name === "wind")!.bits;
+      v2EncodeBreakdown(m).columns.find((c) => c.name === "wind")!.bits;
     expect(windBits(both)).toBeLessThan(windBits(alone));
   });
 
@@ -595,8 +595,8 @@ describe("delta temperature encoding", () => {
     const vars_mask = 1 << VARS_BIT.temp;
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, temp_c: 5 }));
     const spread = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, temp_c: i - 20 }));
-    const flatLen = v1MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const spreadLen = v1MessageToString(msg({ vars_mask, periods: [spread] }, { hourly: true })).length;
+    const flatLen = v2MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
+    const spreadLen = v2MessageToString(msg({ vars_mask, periods: [spread] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(spreadLen);
   });
 
@@ -652,14 +652,14 @@ describe("body decode desync detection", () => {
       { ...PERIOD, wind_700_dir: 7 },
     ]];
     const m = msg({ periods });
-    const encoded = v1MessageToString(m);
+    const encoded = v2MessageToString(m);
     // Resolve with a vars_mask missing that final column: the decoder reads every earlier column
     // identically, then stops with the wind-700 bits unread — the shape of codebook or
     // request-store drift, which would otherwise return garbage values silently.
     const drifted = { ...ctxOf(m), vars_mask: m.vars_mask & ~(1 << VARS_BIT.w700) };
-    expect(() => v1MessageFromString(encoded, () => drifted)).toThrow(/desynced/);
+    expect(() => v2MessageFromString(encoded, () => drifted)).toThrow(/desynced/);
     // The same message with the true context still decodes.
-    expect(() => v1MessageFromString(encoded, () => ctxOf(m))).not.toThrow();
+    expect(() => v2MessageFromString(encoded, () => ctxOf(m))).not.toThrow();
   });
 });
 
@@ -679,8 +679,8 @@ describe("order-1 precipitation encoding", () => {
     // base-85 encoded char length) since a few bits of savings can land on either side of a char
     // boundary and not move the visible string length.
     const snowy = Array.from({ length: 72 }, () => snowPeriod(20));
-    const dryBits = v1EncodeBreakdown(msg({ vars_mask, periods: [dry] }, { hourly: true })).bodyBits;
-    const snowyBits = v1EncodeBreakdown(msg({ vars_mask, periods: [snowy] }, { hourly: true })).bodyBits;
+    const dryBits = v2EncodeBreakdown(msg({ vars_mask, periods: [dry] }, { hourly: true })).bodyBits;
+    const snowyBits = v2EncodeBreakdown(msg({ vars_mask, periods: [snowy] }, { hourly: true })).bodyBits;
     expect(dryBits).toBeLessThan(snowyBits);
   });
 
@@ -691,8 +691,8 @@ describe("order-1 precipitation encoding", () => {
     decoded.periods[0].forEach((p, i) => expect(p.snow_cm).toBeCloseTo(qSnow(vals[i]), 5));
     // Mostly-dry beats a column where every cell is nonzero and widely spread.
     const dense = Array.from({ length: 72 }, (_, i) => snowPeriod(3 * (i + 1)));
-    const sparseBits = v1EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true })).bodyBits;
-    const denseBits = v1EncodeBreakdown(msg({ vars_mask, periods: [dense] }, { hourly: true })).bodyBits;
+    const sparseBits = v2EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true })).bodyBits;
+    const denseBits = v2EncodeBreakdown(msg({ vars_mask, periods: [dense] }, { hourly: true })).bodyBits;
     expect(sparseBits).toBeLessThan(denseBits);
   });
 
@@ -704,7 +704,7 @@ describe("order-1 precipitation encoding", () => {
     const snowing = Array.from({ length: 72 }, () => ({ ...PERIOD, weathercode: 71, snow_cm: 6 }));
     const clear = snowing.map((p) => ({ ...p, weathercode: 0 }));
     const snowBits = (periods: Period[]) =>
-      v1EncodeBreakdown(msg({ vars_mask, periods: [periods] }, { hourly: true }))
+      v2EncodeBreakdown(msg({ vars_mask, periods: [periods] }, { hourly: true }))
         .columns.find((c) => c.name === "snow")!.bits;
     expect(snowBits(snowing)).toBeLessThan(snowBits(clear));
   });

@@ -1,7 +1,8 @@
 import { RESOLUTION_HOURS } from "./constants.js";
 
-// Priority-mode fill layout (v3 of the fill scheme, still protocol v1 — the app is undeployed
-// and the format evolves in place). The user picks a PRIORITY MODE (Detail / Auto / Range), not
+// Priority-mode fill layout (v3 of the fill scheme, protocol v2). v1 is shipped and frozen in
+// its own container, so changes here land in v2 and never move v1's bits (see VERSIONING.md).
+// The user picks a PRIORITY MODE (Detail / Auto / Range), not
 // a duration or resolution; the server fills the message budget by walking that mode's
 // refinement path and binary-searching the largest step whose encoding fits. The wire carries
 // only the sequence number `seq` — both sides derive the identical period layout from

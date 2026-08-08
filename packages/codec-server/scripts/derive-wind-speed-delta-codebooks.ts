@@ -3,7 +3,7 @@
  * tables for the 600/700 hPa columns.
  *
  * The quantized speed domain is the extended Beaufort scale, forces 0..17, for EVERY wind
- * column (see quantWind in derive-lib.ts / v1.ts — chosen 2026-07-31 over linear and other
+ * column (see quantWind in derive-lib.ts / v2.ts — chosen 2026-07-31 over linear and other
  * companded scales, analyze-wind-scale-heldout.ts). Deltas -17..17 (35 symbols) fit directly
  * in the alphabet — no escape needed.
  *
@@ -39,11 +39,11 @@ import {
 const NRES = 5;
 const NLEVEL = 4;                  // sfc, 500, 600, 700
 const NBUCKET = 5;                 // upper Δ buckets: ≤-2, -1, 0, +1, ≥+2
-const SPEED_MAX = 17;              // extended Beaufort force domain, must match v1.ts
+const SPEED_MAX = 17;              // extended Beaufort force domain, must match v2.ts
 const NSYM = 2 * SPEED_MAX + 1;    // 35: deltas -17..17
 const WIND_MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
 const SPEED_FIELDS = ["wind_sfc_kph", "wind_500_kph", "wind_600_kph", "wind_700_kph"] as const;
-const UPPER_OF = [-1, -1, 1, 2];   // 600 | 500Δ, 700 | 600Δ — must match v1.ts
+const UPPER_OF = [-1, -1, 1, 2];   // 600 | 500Δ, 700 | 600Δ — must match v2.ts
 // [res][level] wire cost: only 500 encodes there in corpus conditions — sfc is charged under
 // the gust script's conditioned tables (gust always present in counting), 600/700 under the
 // upper-Δ tables. A symbol is never charged twice.
