@@ -4,6 +4,7 @@ const BRAND = "Going Blue";
 const LAST_UPDATED = "August 5, 2026";
 const CONTACT_EMAIL = "help@going.blue";
 const FORECAST_NUMBER = "+14254345858";
+const REPO_URL = "https://github.com/aaasen/goingblue";
 
 // The landing page is headed by a full-bleed photo of Sultana in a band of its own, with the
 // masthead over it — the photo is a defined section of the page, not the backdrop behind all of
@@ -184,6 +185,11 @@ of forecast data points into a single 160-character message.</p>
   <li>Past forecasts are saved on your device so that you can easily compare multiple forecasts
   and see trends without requesting a new forecast.</li>
 </ul>
+
+<h2>Open source</h2>
+<p>${BRAND} is open source under the Apache License 2.0 and the source code is hosted at
+<a href="${REPO_URL}">github.com/aaasen/goingblue</a>. Feedback is welcome! If you have suggestions or need weather data that is not included in the app,
+file an issue on GitHub or email <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>
 `;
 
 // The App Store listing points its Support URL here rather than at the landing page: a reviewer
