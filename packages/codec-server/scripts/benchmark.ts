@@ -50,7 +50,7 @@ import {
   type SeriesRow,
 } from "./corpus-db.ts";
 import { runIso, sampleWindows } from "./lattice.ts";
-import { API_KEY, ApiError, ENDPOINT, fetchWindow } from "./om-fetch.ts";
+import { API_KEY, ApiError, endpointFor, fetchWindow, type ApiKind } from "./om-fetch.ts";
 import { LOCATIONS, type Location } from "./locations.ts";
 
 const BENCHMARKS_DIR = join(REPO_ROOT, "data", "benchmarks"); // timestamped HTML reports
@@ -111,12 +111,27 @@ const levelVars = (levels: number[]) =>
   ]);
 const uniq = (vars: string[]) => [...new Set(vars)];
 
+// Air quality rides the same corpus: `series` is keyed by source, and the AQ cells share the
+// weather lattice, so every AQ hour lines up with the same cell's weather hours for cross-column
+// conditioning. Ten variables is deliberate — Open-Meteo weights a call by max(1, nVars/10), so
+// the tenth is free and this set never needs a second pull. `us_aqi_pm2_5` is the smoke column
+// under consideration; `us_aqi_ozone` + `us_aqi` let the "max of the two sub-indices
+// reconstructs the headline" shortcut be checked; `european_aqi*` keeps the EU-scale variant
+// evaluable; `carbon_monoxide` is the biomass-burning tracer that dust and sea salt don't
+// confound; `aerosol_optical_depth` is the only one that sees smoke aloft. uv_index and
+// visibility are deliberately absent — the 2026-07-31 expansion already collected both.
+const AIR_QUALITY_HOURLY = [
+  "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi", "pm2_5", "pm10",
+  "carbon_monoxide", "aerosol_optical_depth", "dust", "european_aqi", "european_aqi_pm2_5",
+];
+
 // The sources production will serve (see memory: model menu by center). `id` doubles as the
-// Open-Meteo `models` param. The two ECMWF entries are one logical center — HRES 9 km surface +
-// IFS 0.25° pressure levels — kept as separate source rows and merged only at read time.
-// `sample` marks sources that collect the stratified global sample (koppen/ocean strata) —
-// best_match only: it is what production serves, and 10k sites × the other centers would
-// multiply the pull for no training benefit.
+// Open-Meteo `models` param — except where `apiModel` overrides it, which is how a source can
+// key the DB by one name and select an upstream domain by another. The two ECMWF entries are one
+// logical center — HRES 9 km surface + IFS 0.25° pressure levels — kept as separate source rows
+// and merged only at read time. `sample` marks sources that collect the stratified global sample
+// (koppen/ocean strata) — best_match and cams only: they are what production serves, and 10k
+// sites × the other centers would multiply the pull for no training benefit.
 interface SourceDef {
   id: string;
   label: string;
@@ -124,6 +139,8 @@ interface SourceDef {
   candidate: string[]; // pilot set: wire + everything under consideration (capability matrix)
   collect?: string[];  // full-pull set for the non-pilot collect; defaults to wire
   sample: boolean;
+  api?: ApiKind;       // which Open-Meteo API serves it (default: historical forecast)
+  apiModel?: string;   // models=/domains= value when it differs from `id` (the DB key)
 }
 const GFS_WIRE = [...BASE_HOURLY, ...CLOUD_HOURLY, ...HIGHWIND_HOURLY, ...FREEZE_HOURLY];
 // Everything best_match can serve: wire + surface candidates + all 8 levels × 6 fields.
@@ -159,6 +176,22 @@ const SOURCES: SourceDef[] = [
     // 2026-07-31 expansion pull: while commercial access lasts, the sample source collects the
     // full candidate set corpus-wide — planCollection makes this one add-pass call per cell.
     collect: BEST_MATCH_FULL,
+  },
+  {
+    id: "cams", label: "CAMS air quality", sample: true,
+    api: "air-quality",
+    // `auto` = CAMS European (0.1°, hourly) inside Europe, CAMS global (0.4°, 3-hourly)
+    // elsewhere. Pinned deliberately for train/serve parity: production would serve the best
+    // available domain, so the codebooks must be trained on that same mixture. The two disagree
+    // sharply — Zurich 2025-08-01 reads 6.3 µg/m³ PM2.5 on europe vs 37.6 on global — so
+    // changing this later invalidates the corpus rather than extending it.
+    apiModel: "auto",
+    // Nothing air-quality is on the wire yet, so there is no backfill set: an AQ column that
+    // ships later adds its variables here. Until then `collect` alone drives the pull, and
+    // dropping it stops the pull rather than silently re-pulling under a new definition.
+    wire: [],
+    candidate: AIR_QUALITY_HOURLY,
+    collect: AIR_QUALITY_HOURLY,
   },
 ];
 // The report (and the derive pipeline, via derive-lib DERIVE_SOURCE) reads best_match — the
@@ -281,6 +314,7 @@ interface Args {
   open: boolean; // open the HTML report when done (default true; --no-open to suppress)
   // shared
   location?: string;
+  source?: string;       // restrict collection to one SOURCES entry (collect only)
 }
 
 const USAGE = `benchmark.ts — collect the forecast corpus and benchmark the encoding against it
@@ -305,6 +339,9 @@ Collect options
   --limit <n>               max fetches this run (0 = unlimited); pace big pulls with this
   --concurrency <n>         fetches in flight, 1-32 (default 8)
   --location <id>           restrict to one registry location (also filters the report)
+  --source <id>             restrict collection to one source (gfs_seamless, ecmwf_ifs,
+                            ecmwf_ifs025, gem_seamless, best_match, cams) — stage a big
+                            single-source pull without dragging in other sources' backfill
 
 Report options
   --mode <m>                mode view the report opens on: detail/auto/range (default auto)
@@ -354,6 +391,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--request-hour") args.requestHour = parseInt(argv[++i], 10);
     else if (a === "--max-chars") args.maxChars = parseInt(argv[++i], 10);
     else if (a === "--location") args.location = argv[++i];
+    else if (a === "--source") args.source = argv[++i];
     else throw new Error(`Unknown argument: ${a} (--help lists the options)`);
   }
   if (!MODES.includes(args.mode)) {
@@ -400,7 +438,9 @@ function planCollection(db: ReturnType<typeof openDb>, args: Args, locations: Lo
   const windowIsos = (args.pilot ? pilotWindows(windows) : windows).map(runIso);
   const plan: PlannedCall[] = [];
   const sampledStrata = new Set<Location["stratum"]>(["koppen", "ocean", "peaks"]);
-  for (const source of SOURCES) {
+  const sources = args.source ? SOURCES.filter((s) => s.id === args.source) : SOURCES;
+  if (!sources.length) throw new Error(`No source matches --source ${args.source} (have: ${SOURCES.map((s) => s.id).join(", ")})`);
+  for (const source of sources) {
     const wanted = args.pilot ? source.candidate : (source.collect ?? source.wire);
     const locs = locations
       .filter((l) => !sampledStrata.has(l.stratum) || source.sample)
@@ -444,12 +484,16 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
   mirrorLocations(db);
   const plan = planCollection(db, args, locations);
 
-  console.log(`== Collect (historical forecast${args.pilot ? ", pilot candidate spec" : ""}) ==`);
-  console.log(`  endpoint: ${ENDPOINT}${API_KEY ? " (commercial key)" : ""}`);
-  for (const source of SOURCES) {
+  console.log(`== Collect (historical archive${args.pilot ? ", pilot candidate spec" : ""}) ==`);
+  console.log(`  key: ${API_KEY ? "commercial" : "none (free endpoints)"}`);
+  for (const api of ["forecast", "air-quality"] as ApiKind[]) {
+    console.log(`  ${api.padEnd(12)} → ${endpointFor(api)}`);
+  }
+  for (const source of SOURCES.filter((s) => !args.source || s.id === args.source)) {
     const calls = plan.filter((c) => c.source === source);
     const wanted = args.pilot ? source.candidate : (source.collect ?? source.wire);
-    console.log(`  ${source.id.padEnd(14)} ${String(calls.length).padStart(5)} calls (${wanted.length} vars wanted)`);
+    const via = source.apiModel && source.apiModel !== source.id ? ` [${source.apiModel}]` : "";
+    console.log(`  ${source.id.padEnd(14)} ${String(calls.length).padStart(6)} calls (${wanted.length} vars wanted)${via}`);
   }
   console.log(`  plan total: ${plan.length} calls`);
   if (args.limit) console.log(`  --limit ${args.limit}: capping this run to ${args.limit} fetches`);
@@ -471,6 +515,7 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
   const RETRY_ATTEMPTS = 3;
   const retries: { call: PlannedCall; attempts: number }[] = [];
   let nextIdx = 0, started = 0, fetched = 0, failed = 0;
+  const allNull = new Map<string, number>(); // "source/variable" → cells that came back empty
 
   // Default output is one progress line — completed/planned, %, remaining-time estimate from
   // the observed pace — rewritten in place on a TTY, printed every 50 calls otherwise.
@@ -517,7 +562,9 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
       await gate.wait();
       try {
         const res = await fetchWindow({
-          apiModel: call.source.id, lat: call.loc.lat, lon: call.loc.lon, elevM: call.loc.elev_m,
+          apiModel: call.source.apiModel ?? call.source.id,
+          api: call.source.api,
+          lat: call.loc.lat, lon: call.loc.lon, elevM: call.loc.elev_m,
           windowStart: call.windowStart, variables: call.vars,
         });
         const fetchedAt = new Date().toISOString();
@@ -525,6 +572,16 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
           source: call.source.id, locationId: call.loc.id, windowStart: call.windowStart,
           variable, values: s.values, unit: s.unit, fetchedAt,
         }));
+        // An all-null series is recorded (so the planner stops retrying a variable the model
+        // genuinely lacks), which also means a NAME mismatch between request and response would
+        // be stored as real absence and never revisited. Tally it per variable so the run
+        // summary shows it instead of it passing as a clean pull — see the allNull report below.
+        for (const r of rows) {
+          if (r.values.every((v) => v == null)) {
+            const key = `${call.source.id}/${r.variable}`;
+            allNull.set(key, (allNull.get(key) ?? 0) + 1);
+          }
+        }
         upsertSeries(db, rows);
         upsertLocationMeta(db, call.source.id, call.loc.id, res.resolvedLat, res.resolvedLon, res.modelElevation);
         fetched++;
@@ -548,6 +605,12 @@ async function collect(args: Args, locations: Location[]): Promise<void> {
 
   if (progressShown) process.stdout.write("\n");
   console.log(`  done: fetched=${fetched} failed=${failed}`);
+  if (allNull.size) {
+    console.log(`  all-null series (source lacks the variable, or the response name didn't match the request):`);
+    for (const [key, n] of [...allNull].sort((a, b) => b[1] - a[1])) {
+      console.log(`    ${key.padEnd(40)} ${n} of ${fetched} cells`);
+    }
+  }
   db.close();
 }
 
