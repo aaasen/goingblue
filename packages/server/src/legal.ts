@@ -46,9 +46,35 @@ const HERO_CSS = `
   }
 `;
 
+// The screenshots run in one horizontally scrolling strip rather than a stacked column: they are
+// portrait phone shots, and five of them down the page would push every word of the copy below
+// the fold. The strip is what buys them their width: a shot is 300px in the text column and 230px
+// on a phone — big enough to read the meteogram rather than just recognize one — where a row that
+// had to fit them all would have to draw each at a third of that. Nothing says "scroll me" except
+// a shot cut off by the edge, so the widths also leave one mid-frame: two and a good part of the
+// third in the text column, one and half of the second on a phone.
+//
+// The negative margins cancel the wrap's 20px padding so the strip scrolls edge to edge, with the
+// padding moved inside it to keep the first shot flush with the text above. It spans the wrap's
+// border box and no more — a `100vw` full-bleed would overflow the body by the width of a desktop
+// scrollbar.
+//
+// `scroll-snap-type: proximity`, not `mandatory`: the strip is a glance, not a carousel, and
+// mandatory snapping fights a user who is flicking through it.
+const SHOTS_CSS = `
+  .shots { display: flex; gap: 16px; margin: 1.8em -20px; padding: 0 20px 10px;
+    overflow-x: auto; scroll-snap-type: x proximity; }
+  .shots figure { flex: 0 0 300px; margin: 0; scroll-snap-align: center; }
+  .shots img { display: block; width: 100%; height: auto; border-radius: 14px;
+    border: 1px solid #e2e6ea; box-shadow: 0 2px 10px rgba(6, 18, 36, 0.08); }
+  .shots figcaption { margin-top: 0.7em; color: #666; font-size: 0.85em; line-height: 1.45; }
+  @media (max-width: 600px) { .shots figure { flex: 0 0 230px; } }
+`;
+
 type PageOpts = { showUpdated?: boolean; subtitle?: string };
 
-// `subtitle` is what makes a page a landing page: it swaps the plain <h1> for the photo band.
+// `subtitle` is what makes a page a landing page: it swaps the plain <h1> for the photo band, and
+// brings in the styles for the screenshot strip below it.
 const PAGE = (title: string, body: string, { showUpdated = true, subtitle }: PageOpts = {}) => `<!doctype html>
 <html lang=en>
 <head>
@@ -65,7 +91,7 @@ const PAGE = (title: string, body: string, { showUpdated = true, subtitle }: Pag
   a { color: #0b62c4; }
   .appbtn { display: inline-block; background: #0b62c4; color: #fff; padding: 11px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 0.6em 0 1.2em; }
   footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
-${subtitle ? HERO_CSS : ""}</style>
+${subtitle ? HERO_CSS + SHOTS_CSS : ""}</style>
 </head>
 <body>
 ${subtitle
@@ -102,6 +128,39 @@ const LANDING_BODY = `
 Denali ski expedition with one goal: to get you all the weather information you would have at
 home, wherever you are. ${BRAND} uses a custom compression codec and decoder app to pack hundreds
 of forecast data points into a single 160-character message.</p>
+
+<div class=shots>
+  <figure>
+    <img src="/img/shot-meteogram-640.jpg" width=640 height=1391 loading=lazy
+      alt="A seven-day meteogram: a temperature curve with weather icons along the top, and below it
+      hourly temperature, precipitation, wind, cloud cover and pressure-level winds.">
+    <figcaption>A week of weather, unpacked from one 160-character reply.</figcaption>
+  </figure>
+  <figure>
+    <img src="/img/shot-detail-640.jpg" width=640 height=1391 loading=lazy
+      alt="One hour selected in the meteogram, with a panel showing conditions, temperature, rain
+      and snow totals, wind, sunrise, sunset and moon phase.">
+    <figcaption>Tap any hour for its detail, down to the moon phase.</figcaption>
+  </figure>
+  <figure>
+    <img src="/img/shot-wind-640.jpg" width=640 height=1391 loading=lazy
+      alt="A Denali forecast showing freezing level, cloud cover split into high, mid and low, and
+      winds at the 500, 600 and 700 hPa pressure levels.">
+    <figcaption>Freezing level, cloud by height, and winds aloft.</figcaption>
+  </figure>
+  <figure>
+    <img src="/img/shot-builder-640.jpg" width=640 height=1391 loading=lazy
+      alt="The Builder tab, with location, priority, model and extra-variable choices above buttons
+      to copy the message, send it by SMS, or fetch it over the internet.">
+    <figcaption>Choose the location, model and variables, then send it whichever way you can.</figcaption>
+  </figure>
+  <figure>
+    <img src="/img/shot-history-640.jpg" width=640 height=1391 loading=lazy
+      alt="The Decoder tab's list of past forecasts, each row showing the time, model, coordinates
+      and variables, with a Load button.">
+    <figcaption>Every forecast you decode stays on your phone to compare against.</figcaption>
+  </figure>
+</div>
 
 <h2>How it works</h2>
 <ol>

@@ -24,6 +24,18 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   // The app icon, resized from packages/mobile/assets/icon.png. Regenerate it from that source
   // (and bump the filename) whenever the app icon changes, so the two never drift apart.
   "icon-512.jpg": { file: "../public/icon-512.jpg", type: "image/jpeg" },
+  // The landing page's screenshot strip — the same shots as the App Store listing, resized from
+  // packages/mobile/screenshots (the 1320x2868 masters, already sRGB with no EXIF, so a plain
+  // Pillow resize + `save(out, "JPEG", quality=78, optimize=True, progressive=True)` is the whole
+  // job). 640px keeps them past 2x at the 300px the strip draws them. They are JPEG, not PNG,
+  // because the masters are 4x the weight for UI text nobody reads at strip size; keep the App
+  // Store listing on the PNG masters. Regenerate from the same masters and bump the width in the
+  // name if the app's screens change.
+  "shot-meteogram-640.jpg": { file: "../public/shot-meteogram-640.jpg", type: "image/jpeg" },
+  "shot-detail-640.jpg": { file: "../public/shot-detail-640.jpg", type: "image/jpeg" },
+  "shot-wind-640.jpg": { file: "../public/shot-wind-640.jpg", type: "image/jpeg" },
+  "shot-builder-640.jpg": { file: "../public/shot-builder-640.jpg", type: "image/jpeg" },
+  "shot-history-640.jpg": { file: "../public/shot-history-640.jpg", type: "image/jpeg" },
 };
 
 const cache = new Map<string, Buffer>();
