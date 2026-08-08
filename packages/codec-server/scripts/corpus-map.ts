@@ -11,7 +11,10 @@
  * equirectangular projection is a direct lat/lon mapping, so basemap and dots register
  * exactly. Colors adapt to light/dark via prefers-color-scheme.
  *
- *   node packages/codec-server/scripts/corpus-map.ts [out.svg]   # default: data/corpus-map.svg
+ * Output lands in docs/ (tracked, unlike data/) because the README embeds it — regenerate after
+ * the registry changes so the committed map matches.
+ *
+ *   node packages/codec-server/scripts/corpus-map.ts [out.svg]   # default: docs/corpus-map.svg
  */
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
@@ -22,7 +25,7 @@ import { LOCATIONS, type Location } from "./locations.ts";
 const GEO_PATH = join(REPO_ROOT, "data", "ne_110m_admin_0_countries.geojson");
 const GEO_URL =
   "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson";
-const OUT_PATH = process.argv[2] ?? join(REPO_ROOT, "data", "corpus-map.svg");
+const OUT_PATH = process.argv[2] ?? join(REPO_ROOT, "docs", "corpus-map.svg");
 
 // Categorical palette (validated light/dark pair per slot), assigned in fixed order.
 const GROUPS = [
