@@ -217,6 +217,15 @@ eas build --platform ios --profile preview
 pnpm test
 ```
 
+### Codec Versioning
+
+The Going Blue codec relies on the client and server having identical codebooks. Since clients may be out of service and unable to update for long periods of time, the service maintains support for old versions. Each forecast request starts with a version number e.g. `v1`. The gateway server routes each message to the appropriate codec service. Each version of the codec is a separate container running from `main` tagged at a specific version. Golden messages are kept for each codec version so that changes to the codec service can be made (for example patching security vulnerabilities) while that the message format does not change. This approach allows the codec to evolve quickly without sacrificing support for older clients in the field.
+
+#### v1 -> v2 (in development)
+
+ - Add support for air quality variables: AQI, pm2.5, etc.
+ - Update precipitation type based on temperature/freezing level. Open-Meteo only adjusts temperature based on elevation. Precip type is not adjusted from the model grid cell. This can cause some weird forecasts, for example showing that it is -9F and raining at the summit of Denali.
+
 ## License
 
 Copyright 2025-2026 Lane Aasen
