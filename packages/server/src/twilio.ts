@@ -13,10 +13,13 @@ function escapeXml(s: string): string {
 // Build a TwiML response that replies to the inbound SMS with `message`. Returning this from the
 // webhook is the whole outbound path: Twilio sends the reply to the original sender, so no Twilio
 // REST credentials are needed. An empty/whitespace message yields a bare <Response/>, which tells
-// Twilio to do nothing (no reply SMS) — used when we have no useful answer to send back.
-export function twiml(message: string): string {
-  const trimmed = message.trim();
-  const body = trimmed ? `<Message>${escapeXml(trimmed)}</Message>` : "";
+// Twilio to do nothing (no reply SMS) — used when we have no useful answer to send back. An array
+// yields one <Message> per entry, i.e. separate SMS messages from a single inbound.
+export function twiml(message: string | string[]): string {
+  const parts = (Array.isArray(message) ? message : [message])
+    .map((m) => m.trim())
+    .filter(Boolean);
+  const body = parts.map((m) => `<Message>${escapeXml(m)}</Message>`).join("");
   return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>${body}</Response>`;
 }
 

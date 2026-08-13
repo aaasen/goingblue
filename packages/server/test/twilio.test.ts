@@ -25,6 +25,13 @@ describe("twiml", () => {
   it("emits a bare Response (no reply) for an empty or whitespace message", () => {
     expect(twiml("")).toBe('<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>');
     expect(twiml("   ")).toBe('<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>');
+    expect(twiml([])).toBe('<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>');
+  });
+
+  it("emits one Message per array entry, dropping blank entries", () => {
+    expect(twiml(["a", " ", "b"])).toBe(
+      '<?xml version="1.0" encoding="UTF-8"?>\n<Response><Message>a</Message><Message>b</Message></Response>',
+    );
   });
 });
 

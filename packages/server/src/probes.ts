@@ -42,6 +42,24 @@ function positionCoded(length: number): string {
   return s;
 }
 
+// Random characters from a contiguous Unicode block, one LCG byte per char. Used for the
+// single-block capacity probes: same entropy shape as base32768 output but with total block
+// locality, which is the axis that separated probe 1 (fit) from probe 3 (split) in the field.
+function blockRandom(bytes: Uint8Array, first: number, size: number): string {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(first + (b % size));
+  return s;
+}
+
+// Random CJK needs more than 8 bits per char (20992-char block), so consume two LCG bytes each.
+function cjkRandom(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i + 1 < bytes.length; i += 2) {
+    s += String.fromCharCode(0x4e00 + (((bytes[i] << 8) | bytes[i + 1]) % 20992));
+  }
+  return s;
+}
+
 // Characters most likely to be mangled somewhere in the pipeline, each preceded by an ASCII
 // marker letter so a substitution is attributable by eye. Covers Twilio Smart Encoding targets
 // (curly quotes, dashes, ellipsis, NBSP), NFC/NFD (precomposed é vs e+combining acute), NFKC
@@ -57,17 +75,52 @@ const RISKY =
 //   4: 45 chars (84 LCG bytes) — short enough that "probe 4 " + payload (53 units) copies back
 //      in a single frame, giving a guaranteed in-field round-trip verdict.
 //   5: risky characters above (42 units).
+//
+// 6-12 (added after the 2026-08-09 field run) probe the relay's frame budget. Field facts so
+// far: 45 scattered base32768 chars fit one bubble, 66 split balanced (33+33) despite leaving
+// Twilio as one segment, and 70 sequential single-block chars fit. Working model: ~140 bytes
+// of UTF-8-ish budget per bubble, with block locality the variable that saved probe 1.
+// (base32768's final char encodes the bit tail from a 7-bit repertoire that is 2-byte UTF-8,
+// so a k-char payload is 3(k-1)+2 bytes unless the bit length divides 15 evenly.)
+//   6: 46 chars b32768 (137 UTF-8 bytes) — fits iff the byte budget is at least 137; a split
+//      here pins the budget to [135, 136], i.e. probe 4's length is already the cap.
+//   7: 47 chars b32768 (exactly 140 bytes) — the knife edge: fits iff the budget is the full
+//      140 with no per-frame overhead.
+//   8: 70 random Cyrillic (2-byte UTF-8, exactly 140 bytes) — does a 2-byte block buy ~70
+//      chars/bubble? Decides base2048 viability (~770 bits/bubble).
+//   9: 70 random CJK (single block, high entropy, 210 bytes) — if this fits like probe 1 did,
+//      capacity is locality/unit-governed and base16384 gives ~980 bits/bubble (2.2x base85).
+//  10: 56 chars b32768 (164 bytes) — guaranteed split (28+28) under any ~140-byte model,
+//      replicating whether the balanced split is deterministic; and if 6 and 7 somehow both
+//      fit alongside probe 3's 66-char split, this bisects the (47, 66) char interval.
+//  11: 67 random Cyrillic (134 bytes) — if 8 splits, distinguishes a 134-byte usable payload
+//      (concat-header-style overhead) from something smaller.
+//  12: 134 chars b32768 — deliberately TWO Twilio segments (67+67 units): does the relay
+//      re-split each 201-byte segment (predicted 4 bubbles ~34+33+34+33), and do all parts
+//      arrive in order? Decides whether long replies should be server-chunked instead.
 export const PROBES: Record<number, string> = {
   1: positionCoded(70),
   2: positionCoded(140),
   3: encode(lcgBytes(42, 123)),
   4: encode(lcgBytes(7, 84)),
   5: RISKY,
+  6: encode(lcgBytes(11, 85)),
+  7: encode(lcgBytes(13, 87)),
+  8: blockRandom(lcgBytes(23, 70), 0x0400, 96),
+  9: cjkRandom(lcgBytes(29, 140)),
+  10: encode(lcgBytes(17, 104)),
+  11: blockRandom(lcgBytes(31, 67), 0x0400, 96),
+  12: encode(lcgBytes(19, 250)),
 };
 
+// The capacity battery, sent as one reply per probe from a single inbound "probe all" — one
+// field send instead of seven. The burst itself is an experiment: seven queued messages model
+// the "server pre-chunks long replies" alternative to probe 12's carrier concat.
+const BATTERY = [6, 7, 8, 9, 10, 11, 12];
+
 const USAGE =
-  "Probes: 1=70 wide, 2=140 wide, 3=b32768, 4=b32768 short, 5=risky chars. " +
-  "Send 'probe N', then verify with 'probe N <pasted reply>'.";
+  "Probes: 1=70 wide, 2=140 wide, 3/4=b32768 66/45, 5=risky, 6/7/10/12=b32768 46/47/56/134, " +
+  "8/11=cyr 70/67, 9=cjk 70. 'probe all'=6-12. Verify: 'probe N <paste>'.";
 
 const cp = (s: string, i: number) => "U+" + s.codePointAt(i)!.toString(16).toUpperCase();
 
@@ -93,8 +146,10 @@ function verify(n: number, expected: string, got: string): string {
 }
 
 // Handle a probe command, or return null if the message is not one. "probe" alone (or an unknown
-// number) explains the probe set; "probe N" returns the payload; "probe N <text>" verifies.
-export function probeReply(body: string): string | null {
+// number) explains the probe set; "probe N" returns the payload; "probe N <text>" verifies;
+// "probe all" returns the whole capacity battery, one message per probe.
+export function probeReply(body: string): string | string[] | null {
+  if (/^probe\s*all$/i.test(body.trim())) return BATTERY.map((n) => PROBES[n]);
   const match = body.trim().match(/^probe\s*(\d*)\s?([\s\S]*)$/i);
   if (!match) return null;
   const n = match[1] ? Number(match[1]) : NaN;

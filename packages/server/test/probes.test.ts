@@ -35,6 +35,42 @@ describe("probe payloads", () => {
     expect(decode(PROBES[4])).toHaveLength(84);
   });
 
+  it("sizes the capacity battery to its frame-budget predictions", () => {
+    // base32768 ladder in UTF-8 bytes: 137 (fits iff budget >= 137), 140 (knife edge),
+    // 164 (guaranteed split), 401 across exactly two Twilio UCS-2 segments (67+67 units).
+    const ladder = [
+      [6, 46, 137],
+      [7, 47, 140],
+      [10, 56, 164],
+      [12, 134, 401],
+    ] as const;
+    for (const [n, chars, bytes] of ladder) {
+      expect(PROBES[n].length).toBe(chars);
+      expect(Buffer.byteLength(PROBES[n], "utf8")).toBe(bytes);
+      expect(() => decode(PROBES[n])).not.toThrow();
+    }
+    // Single-block probes: Cyrillic at exactly 140 and 134 UTF-8 bytes, CJK at 70 chars.
+    expect(PROBES[8].length).toBe(70);
+    expect(PROBES[11].length).toBe(67);
+    expect(PROBES[9].length).toBe(70);
+    expect(Buffer.byteLength(PROBES[8], "utf8")).toBe(140);
+    expect(Buffer.byteLength(PROBES[11], "utf8")).toBe(134);
+    expect(Buffer.byteLength(PROBES[9], "utf8")).toBe(210);
+  });
+
+  it("draws single-block probes only from their blocks, skipping combining marks", () => {
+    for (const c of PROBES[8] + PROBES[11]) {
+      const u = c.charCodeAt(0);
+      expect(u).toBeGreaterThanOrEqual(0x0400);
+      expect(u).toBeLessThan(0x0460);
+    }
+    for (const c of PROBES[9]) {
+      const u = c.charCodeAt(0);
+      expect(u).toBeGreaterThanOrEqual(0x4e00);
+      expect(u).toBeLessThan(0x4e00 + 20992);
+    }
+  });
+
   it("keeps probe 5's NFD sequence and NBSP distinct from their lookalikes", () => {
     expect(PROBES[5]).toContain("GéHé");
     expect(PROBES[5]).toContain("S T");
@@ -54,8 +90,14 @@ describe("probeReply", () => {
 
   it("returns usage for bare or unknown probe commands", () => {
     expect(probeReply("probe")).toContain("Probes:");
-    expect(probeReply("probe 9")).toContain("Probes:");
+    expect(probeReply("probe 13")).toContain("Probes:");
     expect(probeReply("Probe")).toContain("Probes:");
+  });
+
+  it("returns the capacity battery as one message per probe for 'probe all'", () => {
+    const battery = probeReply("probe all");
+    expect(battery).toEqual([6, 7, 8, 9, 10, 11, 12].map((n) => PROBES[n]));
+    expect(probeReply("Probe All")).toEqual(battery);
   });
 
   it("returns payloads for 'probe N' in any casing/spacing", () => {

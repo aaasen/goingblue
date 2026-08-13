@@ -108,7 +108,8 @@ export async function sms(c: Context) {
   // and never recorded as a served request.
   const probe = probeReply(body);
   if (probe !== null) {
-    log.info("sms.probe_reply", { len: probe.length, reply: probe });
+    const parts = Array.isArray(probe) ? probe : [probe];
+    log.info("sms.probe_reply", { messages: parts.length, len: parts.join("").length, reply: parts });
     return c.text(twiml(probe), 200, { "Content-Type": "text/xml" });
   }
 
