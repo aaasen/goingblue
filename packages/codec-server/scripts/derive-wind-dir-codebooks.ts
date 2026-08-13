@@ -150,9 +150,9 @@ export function counter(): CellCounter {
   };
 }
 
-export async function derive(): Promise<DerivedTables> {
+export async function derive(precounted?: Float64Array): Promise<DerivedTables> {
   const c = counter();
-  const counts = await deriveCounts(c);
+  const counts = precounted ?? await deriveCounts(c);
   let symbols = 0;
   const { offsets } = tableOffsets(c.tables);
   // Every emission lands exactly once in bootstrap/low/high (upper double-counts high symbols).

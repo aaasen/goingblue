@@ -122,9 +122,9 @@ export function counter(): CellCounter {
   };
 }
 
-export async function derive(): Promise<DerivedTables> {
+export async function derive(precounted?: Float64Array): Promise<DerivedTables> {
   const c = counter();
-  const counts = await deriveCounts(c);
+  const counts = precounted ?? await deriveCounts(c);
   // Training-set mean bits/period per resolution, for the generation log (held-out numbers are
   // the ladder's job).
   const L = c.costBits(counts);

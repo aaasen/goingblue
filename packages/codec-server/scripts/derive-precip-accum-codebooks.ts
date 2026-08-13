@@ -150,9 +150,9 @@ export function counter(): CellCounter {
   };
 }
 
-export async function derive(): Promise<DerivedTables> {
+export async function derive(precounted?: Float64Array): Promise<DerivedTables> {
   const c = counter();
-  const counts = await deriveCounts(c);
+  const counts = precounted ?? await deriveCounts(c);
   const { offsets } = tableOffsets(c.tables);
   // Training-set mean bits/transition per variable, for the generation log (the held-out scheme
   // ladder lives in analyze-cross-var-heldout.ts).

@@ -128,9 +128,9 @@ export function counter(): CellCounter {
   };
 }
 
-export async function derive(): Promise<DerivedTables> {
+export async function derive(precounted?: Float64Array): Promise<DerivedTables> {
   const c = counter();
-  const counts = await deriveCounts(c);
+  const counts = precounted ?? await deriveCounts(c);
   let samples = 0;
   for (let i = 0; i < c.tables[0].dims.reduce((a, b) => a * b, 1); i++) samples += counts[i];
   console.log(`Delta samples across 5 resolutions × 4 levels: ${samples}`);

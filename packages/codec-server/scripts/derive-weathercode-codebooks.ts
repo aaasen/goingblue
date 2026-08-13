@@ -78,9 +78,9 @@ export function counter(): CellCounter {
   };
 }
 
-export async function derive(): Promise<DerivedTables> {
+export async function derive(precounted?: Float64Array): Promise<DerivedTables> {
   const c = counter();
-  const counts = await deriveCounts(c);
+  const counts = precounted ?? await deriveCounts(c);
   const { offsets } = tableOffsets(c.tables);
   const BOOT = offsets.weathercodeBootstrap, TRANS = offsets.weathercode;
   const firstCounts = rowAt(counts, BOOT, NSYM);

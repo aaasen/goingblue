@@ -14,6 +14,22 @@ import { dbLocations, listCells, loadCell, modelElevations, openDb } from "./cor
 // reserved for the benchmark report and never influence a codebook.
 export const DERIVE_SOURCE = "best_match";
 
+// The hourly variables the derivation pipeline consumes: everything adjustPrecipPhase and
+// rowsFromWindows/aggregateHourly read, plus the counters' direct accesses. eachForecast loads
+// ONLY these by default — corpus cells carry every collected series (~80), and JSON-parsing the
+// unused ones tripled scan time. IMPORTANT: a derive/analyze script that reads a variable not
+// listed here sees an absent column and silently counts nothing — add the variable here (or
+// pass `vars: null` to eachForecast for an unfiltered load) when introducing one.
+export const DERIVE_VARS: readonly string[] = [
+  "temperature_2m", "freezing_level_height", "weather_code",
+  "rain", "showers", "snowfall", "precipitation_probability",
+  "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m",
+  "wind_speed_500hPa", "wind_direction_500hPa",
+  "wind_speed_600hPa", "wind_direction_600hPa",
+  "wind_speed_700hPa", "wind_direction_700hPa",
+  "cloud_cover", "cloud_cover_high", "cloud_cover_mid", "cloud_cover_low",
+];
+
 // ── Wind quantization (must match v2.ts) ────────────────────────────────────────
 // Every wind speed column quantizes to the extended Beaufort scale (forces 0..17): band lower
 // bounds in km/h — the standard 13 forces plus the force 13..17 extension so hurricane-force
@@ -96,21 +112,32 @@ export function rowCostBits(weights: number[]): number[] {
 // Sums every train-split cell's counts into one flat vector — the corpus-wide counts the old
 // inline derive loops produced.
 export async function deriveCounts(counter: CellCounter): Promise<Float64Array> {
-  const counts = new Float64Array(counter.nSlots);
+  return (await deriveCountsMulti([counter]))[0];
+}
+
+// Same, for SEVERAL counters in one corpus scan — one loadCell + adjustPrecipPhase per cell
+// instead of one per script. generate-codebooks.ts feeds every derive script's counter through
+// this and hands each script its vector via derive(precounted); standalone runs still take the
+// single-counter path above. Returns one count vector per counter, in order.
+export async function deriveCountsMulti(counters: CellCounter[]): Promise<Float64Array[]> {
+  const vecs = counters.map((c) => new Float64Array(c.nSlots));
+  const adds = vecs.map((v) => (slot: number) => { v[slot]++; });
   await eachForecast((h, startHour, _loc, pos) => {
-    counter.countCell(h, startHour, pos, (slot) => { counts[slot]++; });
+    for (let i = 0; i < counters.length; i++) counters[i].countCell(h, startHour, pos, adds[i]);
   });
-  return counts;
+  return vecs;
 }
 
 // Visits every train-split forecast in the corpus DB (WAL mode — safe alongside a concurrent
 // collect). `loc` is the corpus location id — the unit held-out folds divide on. `pos` is the
 // location's lat/lon from the registry mirror, for scripts that need geography (UTC offset,
-// solar position).
+// solar position). Cells are loaded with only the DERIVE_VARS series by default (see that
+// list's caveat); pass `vars: null` for the full ~80-variable load.
 export async function eachForecast(
   cb: (hourly: HourlyData, startHour: number, loc: string, pos?: { lat: number; lon: number },
        split?: string) => void,
   split: "train" | "all" = "train",
+  vars: readonly string[] | null = DERIVE_VARS,
 ): Promise<void> {
   const db = openDb();
   const locs = dbLocations(db);
@@ -123,7 +150,7 @@ export async function eachForecast(
     const loc = locs.get(locationId);
     if (!loc) continue;
     if (split === "train" && loc.split !== "train") continue; // eval/favorites: never trained on
-    const raw = loadCell(db, DERIVE_SOURCE, locationId, windowStart);
+    const raw = loadCell(db, DERIVE_SOURCE, locationId, windowStart, vars);
     if (!raw) continue;
     const hourly = adjustPrecipPhase(raw, elevs.get(locationId) ?? loc.elev_m ?? null);
     cells++;

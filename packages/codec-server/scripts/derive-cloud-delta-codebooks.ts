@@ -77,9 +77,9 @@ export function counter(): CellCounter {
   };
 }
 
-export async function derive(): Promise<DerivedTables> {
+export async function derive(precounted?: Float64Array): Promise<DerivedTables> {
   const c = counter();
-  const counts = await deriveCounts(c);
+  const counts = precounted ?? await deriveCounts(c);
   const { offsets } = tableOffsets(c.tables);
   for (const { field, name } of CLOUD_FIELDS) {
     const row = rowAt(counts, offsets[field], NSYM);

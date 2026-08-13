@@ -120,9 +120,9 @@ export function counter(): CellCounter {
   };
 }
 
-export async function derive(): Promise<DerivedTables> {
+export async function derive(precounted?: Float64Array): Promise<DerivedTables> {
   const c = counter();
-  const counts = await deriveCounts(c);
+  const counts = precounted ?? await deriveCounts(c);
   const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
   const bitsUnder = (row: number[], table: number[]): number => {
     const cost = rowCostBits(scaledWeights(table));

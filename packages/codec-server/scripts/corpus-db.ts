@@ -151,10 +151,17 @@ export function windowTimes(windowStart: string): string[] {
 
 // Reassemble one cell into the HourlyData shape the production encode path consumes
 // (aggregateHourly/toFullPeriod key it by canonical variable names). Null if the cell is empty.
-export function loadCell(db: DatabaseSync, source: string, locationId: string, windowStart: string): HourlyData | null {
+// `vars` restricts the load to those variables (cells carry every collected series — ~80 —
+// while most consumers read a fraction of them, and JSON-parsing the rest dominated scan time);
+// omit it / pass null for the full cell.
+export function loadCell(
+  db: DatabaseSync, source: string, locationId: string, windowStart: string,
+  vars?: readonly string[] | null,
+): HourlyData | null {
+  const filter = vars?.length ? ` AND variable IN (${vars.map(() => "?").join(", ")})` : "";
   const rows = db.prepare(
-    `SELECT variable, values_json FROM series WHERE source = ? AND location_id = ? AND window_start = ?`,
-  ).all(source, locationId, windowStart) as { variable: string; values_json: string }[];
+    `SELECT variable, values_json FROM series WHERE source = ? AND location_id = ? AND window_start = ?${filter}`,
+  ).all(source, locationId, windowStart, ...(vars ?? [])) as { variable: string; values_json: string }[];
   if (rows.length === 0) return null;
   const h: Record<string, unknown> = { time: windowTimes(windowStart) };
   for (const r of rows) h[r.variable] = JSON.parse(r.values_json);
