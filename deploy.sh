@@ -23,9 +23,10 @@ TWILIO_WEBHOOK_URL="${PUBLIC_URL}/sms"
 # An unmapped version gets the "please update the app" reply, so deploy the codec service for
 # the current version BEFORE the first gateway deploy that expects it.
 CODEC_URL_V1="$(gcloud run services describe "${SERVICE}-codec-v1" --project "$PROJECT" --region "$REGION" --format 'value(status.url)')"
+CODEC_URL_V2="$(gcloud run services describe "${SERVICE}-codec-v2" --project "$PROJECT" --region "$REGION" --format 'value(status.url)')"
 
 gcloud run deploy "$SERVICE" --project "$PROJECT" --source . --region "$REGION" \
   --allow-unauthenticated --platform managed \
   --add-cloudsql-instances "$INSTANCE_CONNECTION_NAME" \
-  --set-env-vars "INSTANCE_CONNECTION_NAME=$INSTANCE_CONNECTION_NAME,DB_USER=$DB_USER,DB_NAME=$DB_NAME,TWILIO_WEBHOOK_URL=$TWILIO_WEBHOOK_URL,CODEC_URL_V1=$CODEC_URL_V1" \
+  --set-env-vars "INSTANCE_CONNECTION_NAME=$INSTANCE_CONNECTION_NAME,DB_USER=$DB_USER,DB_NAME=$DB_NAME,TWILIO_WEBHOOK_URL=$TWILIO_WEBHOOK_URL,CODEC_URL_V1=$CODEC_URL_V1,CODEC_URL_V2=$CODEC_URL_V2" \
   --set-secrets "DB_PASS=DB_PASS:latest,TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest,STATS_PASS=STATS_PASS:latest"
