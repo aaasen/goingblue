@@ -167,6 +167,19 @@ Some interesting findings from the evaluation:
 1. Wind is the most expensive variable (steady, gust, direction combined) taking an average of 40.1% of the message. Temperature is the second most expensive at 24.6% followed by weathercode at 19%. Since snow and rain are sparse, they only take up an average of 10.8% combined. 
 1. A 1st-percentile forecast containing all optional variables (detailed clouds, high altitude winds, freezing level, and precip chance) still delivers 7 days of forecast data at 6h resolution for 3 days and 12h resolution for the next 4 days.
 
+### Elevation Correction
+
+Open-Meteo accepts an elevation parameter for forecasts and adjusts temperature from the model's grid cell elevation using temperature lapse rate. It does not adjust other variables like precipitation type. This can lead to contradictory forecasts in the mountains. For example, a forecast for the summit of Denali may show very low temperatures and rain if it is raining at the grid cell elevation (~3000m for GFS). 
+
+To fix this, rain is remapped to snow if the forecast elevation is above the freezing level. It is also remapped to snow if the temperature is below -2°C to handle inversions and forecast centers that do not support freezing level (GEM, ECMWF). Snow is never remapped to rain. Rain is translated to snow at a 7:1 SWE ratio for parity with Open-Meteo. More accurate snow:liquid mapping may be added in the future.
+
+The following weathercodes are remapped:
+ - 51/53/55 (drizzle)        → 71/73/75 (snow)
+ - 61/63/65 (rain)           → 71/73/75 (snow)
+ - 80/81/82 (rain showers)   → 85/85/86 (snow showers)
+
+Freezing drizzle (56/57) and freezing rain (66/67) are not transformed.
+
 ## Development
 
 Requirements:
@@ -223,8 +236,8 @@ The Going Blue codec relies on the client and server having identical codebooks.
 
 #### v1 -> v2 (in development)
 
+ - Elevation correction for precipitation type. Remap rain to snow at sub-freezing temperatures.
  - Add support for air quality variables: AQI, pm2.5, etc.
- - Update precipitation type based on temperature/freezing level. Open-Meteo only adjusts temperature based on elevation. Precip type is not adjusted from the model grid cell. This can cause some weird forecasts, for example showing that it is -9F and raining at the summit of Denali.
 
 ## License
 
