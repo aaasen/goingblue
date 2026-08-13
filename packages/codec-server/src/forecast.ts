@@ -273,6 +273,81 @@ function mergeHourly(surf: HourlyData, pres: HourlyData, pressureVars: string[])
   return surf;
 }
 
+// ── Elevation correction for precipitation type (README "Elevation Correction") ──────────────
+//
+// Open-Meteo's elevation downscaling lapse-corrects temperature only; weathercode and the
+// rain/showers/snowfall split pass through from the model's grid-cell surface (2818 m for GFS
+// at Denali). A summit request can therefore pair -20 °C with a drizzle code and liquid rain
+// decided ~3 km below the site. Fix: remap liquid → snow for hours where the site sits above
+// the model's freezing level, or where the (downscaled) temperature is at or below -2 °C — the
+// temperature catch covers cold-air inversions and the centers with no freezing-level product
+// (GEM, ECMWF). One-directional by design: snow is never remapped to rain (snow survives well
+// below the freezing level), and freezing drizzle/rain (56/57/66/67) is the model explicitly
+// asserting supercooled liquid, so those hours are left alone entirely.
+//
+// Applied per-hour BEFORE aggregation (fetchHourly here; derive-lib/benchmark for the corpus),
+// so a window straddling a frontal passage aggregates mixed rather than winner-take-all — and
+// codebook derivation sees exactly the distributions production encodes.
+const PHASE_TEMP_MAX_C = -2;
+// Open-Meteo's own snow:liquid convention (1 mm water equivalent = 0.7 cm snow, 7:1 by depth),
+// so converted snow is consistent with natively-reported snowfall in the same series.
+const SNOW_CM_PER_MM = 0.7;
+const WC_LIQUID_TO_SNOW: Record<number, number> = {
+  51: 71, 53: 73, 55: 75, // drizzle       → snow
+  61: 71, 63: 73, 65: 75, // rain          → snow
+  80: 85, 81: 85, 82: 86, // rain showers  → snow showers
+};
+const WC_SUPERCOOLED = new Set([56, 57, 66, 67]);
+
+// Pure: returns a new HourlyData sharing every untouched column. `siteElevM` is the elevation
+// the temperature was downscaled to (the API response's `elevation` field; location_meta's
+// model_elevation for corpus cells) — null skips the freezing-level test, leaving the
+// temperature catch. A freezing level of 0 is Open-Meteo's "whole column below freezing"
+// sentinel, a real value the >= comparison handles — only null/missing disables the test.
+export function adjustPrecipPhase(h: HourlyData, siteElevM: number | null): HourlyData {
+  const temp = h.temperature_2m;
+  const fz = h.freezing_level_height as (number | null)[] | undefined;
+  const wc = h.weather_code as (number | null)[] | undefined;
+  const rain = h.rain as (number | null)[] | undefined;
+  const showers = h.showers as (number | null)[] | undefined;
+  const snow = h.snowfall as (number | null)[] | undefined;
+
+  const n = h.time.length;
+  const outRain = rain && [...rain];
+  const outShowers = showers && [...showers];
+  const outWc = wc && [...wc];
+  // Snowfall may be absent from an offline cell even when rain is present; materialize it as
+  // soon as liquid needs somewhere to go so the amount isn't dropped.
+  let outSnow = snow && [...snow];
+
+  for (let i = 0; i < n; i++) {
+    const t = temp?.[i] ?? null;
+    const f = fz?.[i] ?? null;
+    const snowy =
+      (siteElevM != null && f != null && siteElevM >= f) ||
+      (t != null && t <= PHASE_TEMP_MAX_C);
+    if (!snowy) continue;
+    const code = outWc?.[i] ?? null;
+    if (code != null && WC_SUPERCOOLED.has(code)) continue;
+    const liquid = (outRain?.[i] ?? 0) + (outShowers?.[i] ?? 0);
+    if (liquid > 0) {
+      outSnow ??= new Array<number | null>(n).fill(null);
+      outSnow[i] = (outSnow[i] ?? 0) + liquid * SNOW_CM_PER_MM;
+      if (outRain) outRain[i] = 0;
+      if (outShowers) outShowers[i] = 0;
+    }
+    const mapped = code != null ? WC_LIQUID_TO_SNOW[code] : undefined;
+    if (mapped !== undefined && outWc) outWc[i] = mapped;
+  }
+
+  const out = { ...h };
+  if (outRain) out.rain = outRain;
+  if (outShowers) out.showers = outShowers;
+  if (outSnow) out.snowfall = outSnow;
+  if (outWc) out.weather_code = outWc;
+  return out as HourlyData;
+}
+
 async function fetchHourly(
   modelKey: string,
   nDays: number,
@@ -296,7 +371,8 @@ async function fetchHourly(
     const { hourly, elevation } = await fetchOpenMeteo(
       center.surface, [...surfaceVars, ...pressureVars], nDays, lat, lon, tz, elev_m, pastDays,
     );
-    return [hourly, hourly.time, elevation];
+    const adjusted = adjustPrecipPhase(hourly, elevation);
+    return [adjusted, adjusted.time, elevation];
   }
 
   // Split sources (Europe): surface fields from the 9 km HRES, pressure levels from IFS 0.25°.
@@ -306,7 +382,8 @@ async function fetchHourly(
     fetchOpenMeteo(center.pressure, pressureVars, nDays, lat, lon, tz, elev_m, pastDays),
   ]);
   const merged = mergeHourly(surf.hourly, pres.hourly, pressureVars);
-  return [merged, merged.time, surf.elevation];
+  const adjusted = adjustPrecipPhase(merged, surf.elevation);
+  return [adjusted, adjusted.time, surf.elevation];
 }
 
 

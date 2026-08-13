@@ -37,7 +37,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { buildFillMessage, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
+import { adjustPrecipPhase, buildFillMessage, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import {
   VARS_BIT, ALWAYS_VARS, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
   fillProfile, maxFillSeq, v2EncodeBreakdown, V2_VERSION,
@@ -802,12 +802,15 @@ async function report(args: Args): Promise<void> {
   const groupLocs = new Map<string, Set<string>>();
 
   for (const cell of cells) {
-    const h = loadCell(db, REPORT_SOURCE.id, cell.locId, cell.windowStart);
-    if (!h) { skipped++; continue; }
+    const raw = loadCell(db, REPORT_SOURCE.id, cell.locId, cell.windowStart);
+    if (!raw) { skipped++; continue; }
     // The DB's time axis is the fixed window grid (loadCell), so the old short-record case is
     // structurally gone; a cell missing a whole base variable still gets skipped below.
-    if (!baseComplete(h)) { skipped++; continue; }
+    if (!baseComplete(raw)) { skipped++; continue; }
     const { locId, lat, lon, elevation } = cell;
+    // Same precip-phase correction production applies after fetch (src/forecast.ts), so the
+    // report encodes the distributions clients actually receive.
+    const h = adjustPrecipPhase(raw, elevation);
     const utcOffsetHours = utcOffsetFor(lon);
     const startEpochHour = requestUtcHour(
       Math.floor(Date.parse(cell.windowStart + "Z") / 3600000), utcOffsetHours, args.requestHour);

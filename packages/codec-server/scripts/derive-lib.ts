@@ -6,8 +6,8 @@
  * without writing anything.
  */
 import { fileURLToPath } from "node:url";
-import type { HourlyData } from "../src/forecast.ts";
-import { dbLocations, listCells, loadCell, openDb } from "./corpus-db.ts";
+import { adjustPrecipPhase, type HourlyData } from "../src/forecast.ts";
+import { dbLocations, listCells, loadCell, modelElevations, openDb } from "./corpus-db.ts";
 
 // The derivation corpus: the production source's cells in the corpus DB (see corpus-db.ts).
 // Only `split: "train"` locations are visited — eval sites (including all favorites) are
@@ -114,14 +114,18 @@ export async function eachForecast(
 ): Promise<void> {
   const db = openDb();
   const locs = dbLocations(db);
+  // Site elevation for the precip-phase correction: the elevation the API downscaled the cell's
+  // temperature to (grid-snap or pinned), same input production hands adjustPrecipPhase.
+  const elevs = modelElevations(db, DERIVE_SOURCE);
   let cells = 0;
   const seen = new Set<string>();
   for (const { locationId, windowStart } of listCells(db, DERIVE_SOURCE)) {
     const loc = locs.get(locationId);
     if (!loc) continue;
     if (split === "train" && loc.split !== "train") continue; // eval/favorites: never trained on
-    const hourly = loadCell(db, DERIVE_SOURCE, locationId, windowStart);
-    if (!hourly) continue;
+    const raw = loadCell(db, DERIVE_SOURCE, locationId, windowStart);
+    if (!raw) continue;
+    const hourly = adjustPrecipPhase(raw, elevs.get(locationId) ?? loc.elev_m ?? null);
     cells++;
     seen.add(locationId);
     cb(hourly, Math.floor(Date.parse(windowStart + "Z") / 3600000), locationId,
