@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity,
   ActivityIndicator, Alert, TextInput, Modal, Linking, Platform,
@@ -11,7 +11,8 @@ import SegmentedControl from '@react-native-segmented-control/segmented-control'
 import {
   VARS_BIT, V2_VERSION,
   ALWAYS_VARS_MASK, CONFIGURABLE_VAR_GROUPS, MODEL_BIT,
-  MODE_DETAIL, MODE_AUTO, MODE_RANGE, type RequestContext,
+  MODE_DETAIL, MODE_AUTO, MODE_RANGE, predictCenter, estimatedLastFullRunMs, FILL_SLOTS,
+  type RequestContext, type Center,
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
@@ -95,6 +96,10 @@ const MODEL_INFO = [
 ];
 const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 
+// Stands in for the model stack until there's a location to attribute. Every selector option but
+// EU resolves differently from place to place, so without coordinates there's nothing to name.
+const MODEL_HINT_NO_LOCATION = 'Set a location to see which models will be used.';
+
 // Help copy for the optional variable groups. Each optional variable costs response length, so
 // the modal closes by noting the trade-off against forecast detail and range.
 const VAR_INFO = [
@@ -174,6 +179,51 @@ function parseLatLon(s: string): { lat: number; lon: number } | null {
   return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
 }
 
+// The last instant any forecast can reach: the end of the final day slot the fill path can cover
+// (see layout.ts — the remainder of the request day plus FILL_HORIZON_DAYS whole local days).
+// The maximum, not what a given request will get — how far the fill actually reaches depends on
+// the weather's entropy, which isn't knowable before the reply comes back.
+function forecastWindowEndMs(coords: { lat: number; lon: number }, startEpochHour: number): number {
+  const offset = requestOffsetHours(coords, startEpochHour);
+  const day0 = Math.floor((startEpochHour + offset) / 24) * 24; // local midnight of the request day
+  return (day0 + 24 * FILL_SLOTS - offset) * 3600000;
+}
+
+// The models the selected option actually serves this location from, in the order they take over
+// as each one's horizon runs out. Times come from the aligned request hour rather than the wall
+// clock, so this reads the same instant the request would be stamped with.
+//
+// predictCenter returns Open-Meteo's priority order, which is a per-variable fill order, not a
+// timeline: a model below another one is there to fill values the one above lacks at an hour it
+// already covers. Two things therefore keep a model out of the chain. It's shadowed — nothing it
+// reaches is left uncovered by the models above it, as with the ICON that sits under a GFS which
+// both outranks and outlasts it over Seattle. Or it only comes into range past the end of the
+// forecast window, which is where most of the trailing global models go: over the Alps IFS covers
+// every slot the fill can reach, so the GFS behind it is real in the API and unreachable here.
+//
+// The survivors can still repeat a label: the AROME 15-minute domains carry their parent's short
+// label and reach ~6 hours ahead of it, so both clear the horizon test. Keeping each label's
+// first appearance leaves one entry per distinct model.
+function modelStackLabel(
+  model: string,
+  coords: { lat: number; lon: number },
+  startEpochHour: number,
+): string | null {
+  const nowMs = startEpochHour * 3600000;
+  const windowEndMs = forecastWindowEndMs(coords, startEpochHour);
+  const labels: string[] = [];
+  let covered = 0;
+  for (const spec of predictCenter(model as Center, coords.lat, coords.lon).models) {
+    if (covered >= windowEndMs) break;
+    const end = estimatedLastFullRunMs(spec, nowMs) + spec.horizonHours * 3600000;
+    if (end <= covered) continue;
+    covered = end;
+    const label = `${spec.shortLabel} ${spec.resKm}km`;
+    if (!labels.includes(label)) labels.push(label);
+  }
+  return labels.length ? labels.join(' › ') : null;
+}
+
 interface Props {
   token: string;
   onForecastReceived: (encoded: string) => void;
@@ -225,9 +275,31 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
     : parsedCustomCoords;
   const coordsValid = resolvedCoords != null
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
+  // What the selected option resolves to here, so the choice isn't abstract: "Auto" means a 2km
+  // model in the Alps and a 9km one over the Alaska Range, and the US and Canadian stacks drop to
+  // their global member outside their short-range domains. Which models serve depends on run age,
+  // hence the clock — but only through horizons that move together, so the chain is stable enough
+  // that recomputing it on render is all it needs.
+  const modelStack = coordsValid
+    ? modelStackLabel(model, resolvedCoords, alignedStartEpochHour())
+    : null;
   // In current-location mode the buttons stay tappable so they can request GPS on demand.
   const copyDisabled = locating || (locationMode === 'custom' && !coordsValid);
   const fetchDisabled = copyDisabled || fetching || offline;
+
+  // Read the phone's position, assuming permission is already in hand. Null when no fix came back
+  // — indoors, airplane mode, a cold start that timed out. Says nothing itself: its two callers
+  // differ only in whether a failure is worth reporting, so that stays with them.
+  async function fetchPosition(): Promise<{ lat: number; lon: number } | null> {
+    try {
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      setGpsCoords(coords);
+      return coords;
+    } catch {
+      return null;
+    }
+  }
 
   async function requestCurrentLocation(): Promise<{ lat: number; lon: number } | null> {
     setLocating(true);
@@ -245,19 +317,31 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
         ]);
         return null;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-      setGpsCoords(coords);
+      const coords = await fetchPosition();
+      // The error behind a missing fix names nothing useful, so don't put it in front of anyone —
+      // the fallback is the same whatever it was.
+      if (coords == null) Alert.alert('Location unavailable', LOCATION_FAILED);
       return coords;
-    } catch {
-      // No fix rather than no permission: indoors, airplane mode, a cold start that timed out.
-      // The underlying error text names none of that usefully, so don't put it in front of anyone.
-      Alert.alert('Location unavailable', LOCATION_FAILED);
-      return null;
     } finally {
       setLocating(false);
     }
   }
+
+  // Fill in the current location the first time the builder is opened, so the model subtext has
+  // coordinates to attribute before the user touches anything. Only when access has already been
+  // granted: an unprompted permission dialog on open asks for something the user hasn't tried to
+  // do yet, and the send buttons still raise the prompt at the moment it's actually needed. The
+  // attempt is silent and doesn't set `locating` either — nothing waits on it, so a background
+  // convenience shouldn't spin the buttons or raise an alert about a fix nobody asked for.
+  const autoLocated = useRef(false);
+  useEffect(() => {
+    if (!active || autoLocated.current || gpsCoords != null) return;
+    autoLocated.current = true;
+    (async () => {
+      const { granted } = await Location.getForegroundPermissionsAsync();
+      if (granted) await fetchPosition();
+    })();
+  }, [active]);
 
   // Resolve the location (asking for GPS on demand in current-location mode), allocate the message
   // code the reply will echo, and build the request it belongs to. Null when there's no usable
@@ -384,6 +468,10 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
           selectedIndex={MODELS.findIndex((m) => m.value === model)}
           onChange={(e) => setModel(MODELS[e.nativeEvent.selectedSegmentIndex].value)}
         />
+        {/* Left to wrap rather than clipped to a line: the deepest chains run five models (the
+            ICON-D2 branch over central Europe), and truncating would hide exactly the long-range
+            model the last days of the forecast come from. */}
+        <Text style={styles.modelHint}>{modelStack ?? MODEL_HINT_NO_LOCATION}</Text>
       </Section>
 
       <Section label="Extra Variables" info={() => setVarsInfo(true)}>
@@ -604,6 +692,7 @@ const styles = StyleSheet.create({
   coordInput: { flex: 1, fontSize: 15, color: '#1c1c1e' },
   coordInputInvalid: { color: '#cc2222' },
   mapHint: { fontSize: 12, color: '#8e8e93', marginTop: 10 },
+  modelHint: { fontSize: 12, color: '#8e8e93', lineHeight: 17, marginTop: 8 },
 
   // Stacked full-width actions, so each one's icon and label sit on a single centered row.
   buttons: { gap: 10, marginTop: 4 },
