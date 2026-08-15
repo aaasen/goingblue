@@ -1719,15 +1719,16 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     <CanvasTile tile={tile} els={els} totalH={totalH} paint={paint} onPress={onPressTile} />
   ), [els, totalH, paint, onPressTile]);
 
-  // The highlight rides scrollX on the native driver. The animated graph is built once and the
-  // selected column's edge pushed in with setValue: swapping in a fresh Animated.subtract per
-  // selection re-attaches the native node, which doesn't recompute until the next scroll event —
-  // the box would sit on the old column until the user nudges the list.
-  const selectedLeft = useRef(new Animated.Value(0)).current;
-  const highlightX = useRef(Animated.subtract(selectedLeft, scrollX)).current;
-  useEffect(() => {
-    if (selected != null) selectedLeft.setValue(NAME_W + selected * CELL_W);
-  }, [selected, selectedLeft]);
+  // The selection overlay tracks the scroll on the native driver, but only the scroll: which column
+  // it sits on is a discrete jump, so it rides a static `left` that commits with everything else
+  // about the selection. Pushing the column offset through the animated graph instead splits the
+  // two apart — the offset would arrive a frame late, through an effect and then an async native
+  // node, while the cloud percentages inside the overlay update in the commit itself, so the new
+  // column's numbers paint over the old column before the box slides. The graph is built once and
+  // never re-attached: a fresh node per selection doesn't recompute until the next scroll event,
+  // which would strand the overlay off-screen-left until the user nudged the list.
+  const scrollShift = useRef(Animated.multiply(scrollX, -1)).current;
+  const selectedLeft = selected != null ? NAME_W + selected * CELL_W : 0;
 
   return (
     <View>
@@ -1768,16 +1769,20 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
         <View pointerEvents="none" style={styles.highlightClip}>
           <Animated.View
             style={[styles.highlightBox, {
+              left: selectedLeft,
               height: totalH - 31,
-              transform: [{ translateX: highlightX }],
+              transform: [{ translateX: scrollShift }],
             }]}
           />
-          {/* Cloud percentages, in the highlighted column's own cells. They ride the same animated
-              x as the box, so they stay on their cells through a scroll, and they are drawn over
-              the canvas rather than into it — a selection must not rebuild the scene (see
-              CanvasTile). Near-black throughout: the cover wash tops out at a mid gray, which
-              never darkens far enough for white to be the better ink. */}
-          <Animated.View style={[styles.cloudReadout, { transform: [{ translateX: highlightX }] }]}>
+          {/* Cloud percentages, in the highlighted column's own cells. They sit on the same left
+              edge as the box and take the same scroll shift, so they stay on their cells through a
+              scroll and move with the box on a selection, and they are drawn over the canvas rather
+              than into it — a selection must not rebuild the scene (see CanvasTile). Near-black
+              throughout: the cover wash tops out at a mid gray, which never darkens far enough for
+              white to be the better ink. */}
+          <Animated.View
+            style={[styles.cloudReadout, { left: selectedLeft, transform: [{ translateX: scrollShift }] }]}
+          >
             {cloudRows.map(({ kind, top, height }) => {
               const pct = periods[selected][CLOUD_KEYS[kind]];
               // A missing value keeps the canvas's own dash — there is no reading to give.
@@ -2194,7 +2199,8 @@ const styles = StyleSheet.create({
   highlightClip: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden' },
   // Starts below the 31px day-label band (same boundary the night shading uses).
   highlightBox: { position: 'absolute', top: 31, width: CELL_W, borderWidth: 1.5, borderColor: 'rgba(255,59,48,0.5)' },
-  cloudReadout: { position: 'absolute', top: 0, left: 0, bottom: 0, width: CELL_W },
+  // `left` is set per selection — see the selection overlay in ModelCanvas.
+  cloudReadout: { position: 'absolute', top: 0, bottom: 0, width: CELL_W },
   cloudReadoutText: {
     position: 'absolute', left: 0, width: CELL_W, textAlign: 'center',
     fontSize: 12, fontWeight: '600', color: C.label,
