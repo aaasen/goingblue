@@ -751,17 +751,23 @@ const CLOUD_KEYS = {
 } as const satisfies Record<string, keyof Period>;
 type CloudKind = keyof typeof CLOUD_KEYS;
 
-// The air-quality rows. Each names its scale in the label: the US and European indices are
-// different scales with different category edges, and a bare "42" on adjacent rows would invite
-// exactly the comparison that doesn't hold. Order runs headline first, then its components, US
-// before Europe — the same order the wire encodes them in.
+// The air-quality rows, each naming its pollutant and nothing else. The scale used to ride in
+// every label, back when a request could ask for both indices at once and a bare "42" on adjacent
+// rows would have invited exactly the comparison that doesn't hold. The scale is now a preference,
+// so a forecast carries one index and the section header can say which once, for all of them.
+// Order runs headline first, then its components, US before Europe — the same order the wire
+// encodes them in.
 const AQ_KEYS = {
-  'aqi': { field: 'aqi', label: 'AQI (US)', scale: 'us' },
-  'aqi-pm25': { field: 'aqi_pm25', label: 'Smoke (US)', scale: 'us' },
-  'aqi-o3': { field: 'aqi_o3', label: 'Ozone (US)', scale: 'us' },
-  'aqi-eu': { field: 'aqi_eu', label: 'AQI (EU)', scale: 'eu' },
-  'aqi-eu-pm25': { field: 'aqi_eu_pm25', label: 'Smoke (EU)', scale: 'eu' },
+  'aqi': { field: 'aqi', label: 'AQI', scale: 'us' },
+  'aqi-pm25': { field: 'aqi_pm25', label: 'PM2.5', scale: 'us' },
+  'aqi-o3': { field: 'aqi_o3', label: 'Ozone', scale: 'us' },
+  'aqi-eu': { field: 'aqi_eu', label: 'AQI', scale: 'eu' },
+  'aqi-eu-pm25': { field: 'aqi_eu_pm25', label: 'PM2.5', scale: 'eu' },
 } as const satisfies Record<string, { field: keyof Period; label: string; scale: 'us' | 'eu' }>;
+
+// How the header names each scale. "European" rather than "EU" because it's read as prose there,
+// not as the tag on a row.
+const AQ_SCALE_WORD = { us: 'US', eu: 'European' } as const;
 type AqKind = keyof typeof AQ_KEYS;
 const AQ_KINDS = Object.keys(AQ_KEYS) as AqKind[];
 
@@ -818,13 +824,24 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
   // this row it read as one more thing GFS or IFS had produced.
   rows.push({ kind: 'model', height: ROW_H.MODEL, label: 'Model' });
 
-  // Air quality, below the model line and carrying its own attribution in its header. Any subset
-  // of the five can be present — they are five separate request variables — and the rows stop at
-  // the CAMS horizon, roughly four days out, past which every cell is empty rather than zero.
+  // Air quality, below the model line and carrying its own attribution in its header: the CAMS
+  // domain serving this location, then the index its numbers are on. Any subset of the variables
+  // can be present — they are separate request variables — and the rows stop at the CAMS horizon,
+  // roughly four days out, past which every cell is empty rather than zero.
+  //
+  // Grouped by scale rather than assuming one, which is only true of forecasts requested since the
+  // scale became a preference. A stored message from before that can hold both indices, and one
+  // header can't speak for rows on two of them.
   const aqRows = AQ_KINDS.filter((k) => has((p) => p[AQ_KEYS[k].field]));
-  if (aqRows.length) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Air quality (${camsDomain(lat, lon)})` });
-    for (const kind of aqRows)
+  for (const scale of ['us', 'eu'] as const) {
+    const scaleRows = aqRows.filter((k) => AQ_KEYS[k].scale === scale);
+    if (!scaleRows.length) continue;
+    rows.push({
+      kind: 'section',
+      height: ROW_H.SECTION,
+      label: `Air quality (${camsDomain(lat, lon)}, ${AQ_SCALE_WORD[scale]} scale)`,
+    });
+    for (const kind of scaleRows)
       rows.push({ kind, height: ROW_H.WIND, label: AQ_KEYS[kind].label });
   }
 

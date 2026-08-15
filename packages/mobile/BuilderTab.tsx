@@ -15,6 +15,7 @@ import {
   type RequestContext, type Center,
 } from '@weather/protocol';
 import { API_BASE } from './account';
+import { type AqiScale } from './settings';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import { allocCode } from './cache';
 import LocationMap from './LocationMap';
@@ -112,41 +113,115 @@ const DEVICE_INFO = [
   { name: 'inReach', desc: 'Copies the request so you can paste it into your satellite messenger' },
 ];
 
-// Help copy for the optional variable groups. Each optional variable costs response length, so
-// the modal closes by noting the trade-off against forecast detail and range.
-const VAR_INFO = [
-  { name: 'Detailed Clouds', desc: 'Low (<3km), medium (3-8km), and high (>8km) cloud cover' },
-  { name: 'High Altitude Winds', desc: 'Winds at 500, 600, and 700 hPa pressure levels' },
-  { name: 'Freezing Level', desc: 'Altitude at which atmospheric temperature drops to 0°C' },
-  { name: 'Precip Chance', desc: 'Chance of any precipitation during each period' },
-  { name: 'Air Quality (US)', desc: 'US Air Quality Index, 0-500. The headline number, worst reading of each period' },
-  { name: 'Smoke (US)', desc: 'The PM2.5 part of the US index — wildfire smoke and haze, on the same 0-500 scale' },
-  { name: 'Ozone (US)', desc: 'The ozone part of the US index — summer smog, which peaks in the afternoon' },
-  { name: 'Air Quality (Europe)', desc: 'European Air Quality Index, a different 0-100+ scale with its own categories' },
-  { name: 'Smoke (Europe)', desc: 'The PM2.5 part of the European index, averaged over 24 hours the way that scale defines it' },
-];
+// Id of the subgroup the air-quality toggles fold under — stable across a change of scale, which
+// its heading is not, so folding it open survives switching from one index to the other.
+const AIR_SUBGROUP = 'air';
+
+interface VarGroup {
+  value: string;
+  code: string;
+  label: string;
+  // Help copy for this group, shown in the Extra Variables modal. Kept beside the label so the two
+  // can't drift: a row and its explanation are written once, in one place.
+  desc: string;
+  vars: readonly string[];
+  // Set to fold this group into a collapsible sub-list under that subgroup's heading. Purely
+  // display: the request carries each member's own code, and a subgroup is never toggled as a unit.
+  subgroup?: string;
+  // Set on the variables that belong to one air-quality index. Only the scale the reader has
+  // chosen in Settings is offered; the other index's groups are left out of the list entirely, so
+  // a request can't carry a scale the reader doesn't read in.
+  scale?: AqiScale;
+}
 
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
 // protocol variables together (e.g. "Clouds" covers high/mid/low cloud cover, not total).
 // Order is display order only — the server ORs the `v:` codes into a mask, so the emitted
-// order carries no meaning. Precip chance sits last: it costs the most for the least detail.
+// order carries no meaning. Precip chance sits last of the weather groups: it costs the most for
+// the least detail.
 // The air-quality entries are single variables rather than bundles: smoke and ozone are different
 // hazards on different schedules (a smoke plume arrives and stays for days; ozone peaks every
-// afternoon), and someone watching for fire smoke shouldn't have to pay for the rest. The US and
-// European indices are separate scales, not translations of each other — see the AQI ladders in
-// the protocol — so they are separate toggles too, labelled by region rather than left to be
-// mistaken for one another.
-const VAR_GROUPS = [
-  { value: 'clouds', code: 'c', label: 'Detailed Clouds', vars: CONFIGURABLE_VAR_GROUPS.c },
-  { value: 'highwind', code: 'w', label: 'High Altitude Winds', vars: CONFIGURABLE_VAR_GROUPS.w },
-  { value: 'freeze', code: 'f', label: 'Freezing Level', vars: CONFIGURABLE_VAR_GROUPS.f },
-  { value: 'precip', code: 'p', label: 'Precip Chance', vars: CONFIGURABLE_VAR_GROUPS.p },
-  { value: 'aqi', code: 'a', label: 'Air Quality (US)', vars: CONFIGURABLE_VAR_GROUPS.a },
-  { value: 'smoke', code: 's', label: 'Smoke (US)', vars: CONFIGURABLE_VAR_GROUPS.s },
-  { value: 'ozone', code: 'o', label: 'Ozone (US)', vars: CONFIGURABLE_VAR_GROUPS.o },
-  { value: 'aqi-eu', code: 'e', label: 'Air Quality (Europe)', vars: CONFIGURABLE_VAR_GROUPS.e },
-  { value: 'smoke-eu', code: '2', label: 'Smoke (Europe)', vars: CONFIGURABLE_VAR_GROUPS['2'] },
+// afternoon), and someone watching for fire smoke shouldn't have to pay for the rest. Their labels
+// name the pollutant and never the region: only one index is on offer at a time, so a row here is
+// unambiguous, and the scale it's read on is settled in Settings.
+const VAR_GROUPS: VarGroup[] = [
+  {
+    value: 'clouds', code: 'c', label: 'Detailed Clouds', vars: CONFIGURABLE_VAR_GROUPS.c,
+    desc: 'Low (<3km), medium (3-8km), and high (>8km) cloud cover',
+  },
+  {
+    value: 'highwind', code: 'w', label: 'High Altitude Winds', vars: CONFIGURABLE_VAR_GROUPS.w,
+    desc: 'Winds at 500, 600, and 700 hPa pressure levels',
+  },
+  {
+    value: 'freeze', code: 'f', label: 'Freezing Level', vars: CONFIGURABLE_VAR_GROUPS.f,
+    desc: 'Altitude at which atmospheric temperature drops to 0°C',
+  },
+  {
+    value: 'precip', code: 'p', label: 'Precip Chance', vars: CONFIGURABLE_VAR_GROUPS.p,
+    desc: 'Chance of any precipitation during each period',
+  },
+  {
+    value: 'aqi', code: 'a', label: 'AQI (Dominant pollutant)', vars: CONFIGURABLE_VAR_GROUPS.a,
+    subgroup: AIR_SUBGROUP, scale: 'us',
+    desc: 'The headline index, 0-500 — whichever pollutant is worst, at its worst hour in the period',
+  },
+  {
+    value: 'smoke', code: 's', label: 'PM2.5 (Smoke)', vars: CONFIGURABLE_VAR_GROUPS.s,
+    subgroup: AIR_SUBGROUP, scale: 'us',
+    desc: 'The fine-particulate part of the index — wildfire smoke and haze, on the same 0-500 scale',
+  },
+  {
+    value: 'ozone', code: 'o', label: 'Ozone (Smog)', vars: CONFIGURABLE_VAR_GROUPS.o,
+    subgroup: AIR_SUBGROUP, scale: 'us',
+    desc: 'The ozone part of the index — summer smog, which peaks in the afternoon',
+  },
+  {
+    value: 'aqi-eu', code: 'e', label: 'AQI (Dominant pollutant)', vars: CONFIGURABLE_VAR_GROUPS.e,
+    subgroup: AIR_SUBGROUP, scale: 'eu',
+    desc: 'The headline index, a 0-100+ scale with its own categories — whichever pollutant is worst',
+  },
+  {
+    value: 'smoke-eu', code: '2', label: 'PM2.5 (Smoke)', vars: CONFIGURABLE_VAR_GROUPS['2'],
+    subgroup: AIR_SUBGROUP, scale: 'eu',
+    desc: 'The fine-particulate part of the index, averaged over 24 hours the way that scale defines it',
+  },
 ];
+
+// The groups on offer under a given scale preference: everything that isn't tied to an index, plus
+// the chosen index's own. The single source for both what the list draws and what the request can
+// carry, so a hidden group can't reach the `v:` token.
+function visibleVarGroups(scale: AqiScale): VarGroup[] {
+  return VAR_GROUPS.filter((g) => g.scale == null || g.scale === scale);
+}
+
+// The same groups as a display tree: runs of groups sharing a subgroup become one collapsible
+// node, sitting where the run's first member did. Derived rather than written out a second time,
+// so a new group can only ever be added in one place.
+type VarNode =
+  | { kind: 'group'; group: VarGroup }
+  | { kind: 'subgroup'; id: string; label: string; members: VarGroup[] };
+
+// One drawn row of the open list, flattened out of the tree so the hairline separator can be
+// dropped from the last row whichever kind it turns out to be.
+type VarRow =
+  | { key: string; kind: 'toggle'; group: VarGroup; indent: boolean }
+  | { key: string; kind: 'subgroup'; id: string; label: string; members: VarGroup[] };
+
+function buildVarTree(scale: AqiScale): VarNode[] {
+  // Air quality is the only subgroup. Its heading names the hazard and nothing else: which index
+  // is in force is a Settings preference, and repeating it on every visit to the builder would
+  // put a choice in front of the reader that isn't theirs to make here.
+  const label = 'Air Quality';
+  const tree: VarNode[] = [];
+  for (const group of visibleVarGroups(scale)) {
+    const open = tree[tree.length - 1];
+    if (group.subgroup == null) tree.push({ kind: 'group', group });
+    else if (open?.kind === 'subgroup' && open.id === group.subgroup) open.members.push(group);
+    else tree.push({ kind: 'subgroup', id: group.subgroup, label, members: [group] });
+  }
+  return tree;
+}
 
 // No extra variables selected by default.
 const DEFAULT_GROUPS = new Set<string>();
@@ -259,15 +334,20 @@ interface Props {
   // Owned by App so it can be read from storage behind the splash — see App.tsx.
   device: Device;
   onDeviceChange: (device: Device) => void;
+  // Which air-quality index to offer. A Settings preference, changed there rather than here.
+  aqiScale: AqiScale;
 }
 
-export default function BuilderTab({ token, onForecastReceived, active, device, onDeviceChange }: Props) {
+export default function BuilderTab({ token, onForecastReceived, active, device, onDeviceChange, aqiScale }: Props) {
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [customCoords, setCustomCoords] = useState('');
   const [mode, setMode] = useState(MODE_AUTO);
   const [model, setModel] = useState('best');
   const [groups, setGroups] = useState<Set<string>>(new Set(DEFAULT_GROUPS));
+  // Subgroups start closed. Nothing is selected by default, so a closed one hides only rows whose
+  // state its own count already reports.
+  const [openSubgroups, setOpenSubgroups] = useState<Set<string>>(new Set());
   const [messageCopied, setMessageCopied] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -287,11 +367,17 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
 
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
   // Expand the always-on variables plus any enabled groups for the stored request context. Only
-  // configurable variables go in the message because the server adds the always-on set.
-  const activeGroups = VAR_GROUPS
+  // configurable variables go in the message because the server adds the always-on set. Read off
+  // the scale-filtered list, so switching the Settings preference drops the other index's
+  // variables from the request without having to clear what's ticked: come back to that scale and
+  // the selection is as it was left.
+  const activeGroups = visibleVarGroups(aqiScale)
     .filter((g) => groups.has(g.value))
     .map((g) => ({ ...g, vars: g.vars.filter((v) => !unavail.includes(v)) }))
     .filter((g) => g.vars.length > 0);
+  // What a closed subgroup counts. A group the model can't supply adds nothing to the request, so
+  // it isn't reported as if it did — activeGroups has already dropped those.
+  const activeValues = new Set(activeGroups.map((g) => g.value));
   const configurableVars = activeGroups.flatMap((g) => g.vars);
   const variableCodes = activeGroups.map((g) => g.code);
   const varsMask = configurableVars.reduce(
@@ -423,6 +509,18 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
     });
   }
 
+  // Open or close a subgroup's rows. Selection is untouched: folding the air-quality rows away is
+  // a way to stop looking at them, not a way to turn them off, and a request built with the list
+  // closed still carries whatever is ticked inside it.
+  function toggleSubgroup(id: string) {
+    setOpenSubgroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   async function handleFetch() {
     const msg = await prepareMessage();
     if (msg == null) return;
@@ -465,6 +563,24 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
   // Copy is the only action with something to confirm — the other two hand off to another app,
   // which is its own confirmation.
   const copied = device === 'inreach' && messageCopied;
+
+  // The list to draw, under the scale the reader has chosen. Cheap enough to rebuild each render,
+  // like the model chain above it.
+  const varTree = buildVarTree(aqiScale);
+  // The variable rows to draw: each subgroup's heading always, its members only while it's open.
+  const varRows: VarRow[] = [];
+  for (const node of varTree) {
+    if (node.kind === 'group') {
+      varRows.push({ key: node.group.value, kind: 'toggle', group: node.group, indent: false });
+      continue;
+    }
+    varRows.push({ key: node.id, kind: 'subgroup', id: node.id, label: node.label, members: node.members });
+    if (openSubgroups.has(node.id)) {
+      for (const group of node.members) {
+        varRows.push({ key: group.value, kind: 'toggle', group, indent: true });
+      }
+    }
+  }
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
@@ -523,18 +639,52 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
 
       <Section label="Extra Variables" info={() => setVarsInfo(true)}>
         <View style={styles.varList}>
-          {VAR_GROUPS.map((group, idx) => {
+          {varRows.map((row, idx) => {
+            const border = idx < varRows.length - 1 && styles.varRowBorder;
+            if (row.kind === 'subgroup') {
+              // Nothing under the heading is selectable when the model supplies none of it, which
+              // no current model does to air quality — CAMS is a separate forecast from the
+              // weather center. Handled anyway so the rule lives with the rows, not with the data.
+              const disabled = row.members.every((m) => m.vars.every((v) => unavail.includes(v)));
+              const open = openSubgroups.has(row.id);
+              const selected = row.members.filter((m) => activeValues.has(m.value)).length;
+              return (
+                <TouchableOpacity
+                  key={row.key}
+                  style={[styles.varRow, border]}
+                  onPress={() => !disabled && toggleSubgroup(row.id)}
+                  activeOpacity={disabled ? 1 : 0.6}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: open, disabled }}
+                  accessibilityLabel={`${row.label}, ${selected} of ${row.members.length} selected`}
+                >
+                  <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{row.label}</Text>
+                  <View style={styles.varRowTrailing}>
+                    {/* Only when something is on: a "0" against every other row's blank check
+                        column would read as a value rather than as an empty count. */}
+                    {selected > 0 && <Text style={styles.varCount}>{selected}</Text>}
+                    <MaterialCommunityIcons
+                      name={open ? 'chevron-up' : 'chevron-down'}
+                      size={20}
+                      color="#8e8e93"
+                    />
+                  </View>
+                </TouchableOpacity>
+              );
+            }
             // A group is unavailable when the model can't supply any of its variables.
-            const disabled = group.vars.every((v) => unavail.includes(v));
-            const checked = groups.has(group.value) && !disabled;
+            const disabled = row.group.vars.every((v) => unavail.includes(v));
+            const checked = groups.has(row.group.value) && !disabled;
             return (
               <TouchableOpacity
-                key={group.value}
-                style={[styles.varRow, idx < VAR_GROUPS.length - 1 && styles.varRowBorder]}
-                onPress={() => !disabled && toggleGroup(group.value)}
+                key={row.key}
+                style={[styles.varRow, row.indent && styles.varRowIndent, border]}
+                onPress={() => !disabled && toggleGroup(row.group.value)}
                 activeOpacity={disabled ? 1 : 0.6}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked, disabled }}
               >
-                <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{group.label}</Text>
+                <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{row.group.label}</Text>
                 <Text style={[styles.varCheck, !checked && styles.varCheckHidden]}>✓</Text>
               </TouchableOpacity>
             );
@@ -620,16 +770,27 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
           By default, Going Blue forecasts include temperature, precipitation, wind, and basic cloud
           cover. The following variables are optional:
         </Text>
-        {VAR_INFO.map((v) => (
-          <Text key={v.name} style={styles.modalItemIndent}>
-            <Text style={styles.modalBold}>{v.name}</Text> — {v.desc}
+        {/* Same tree the list draws from, so the modal describes exactly the rows on screen —
+            including which air-quality index the scale preference has put there. */}
+        {varTree.map((node) => (node.kind === 'group' ? (
+          <Text key={node.group.value} style={styles.modalItemIndent}>
+            <Text style={styles.modalBold}>{node.group.label}</Text> — {node.group.desc}
           </Text>
-        ))}
+        ) : (
+          <View key={node.id}>
+            <Text style={styles.modalSubhead}>{node.label}</Text>
+            {node.members.map((m) => (
+              <Text key={m.value} style={[styles.modalItemIndent, styles.modalItemNested]}>
+                <Text style={styles.modalBold}>{m.label}</Text> — {m.desc}
+              </Text>
+            ))}
+          </View>
+        )))}
         <Text style={[styles.modalBody, styles.modalNote]}>Each added variable takes away from the detail and range of each forecast.</Text>
         <Text style={[styles.modalBody, styles.modalNote]}>
           Air quality comes from a different forecast (CAMS) than the weather, and only reaches
-          about four days out — later periods leave those rows blank. The US and European indices
-          are separate scales: the same number means different things on each.
+          about four days out — later periods leave those rows blank. Which index it uses is a
+          Settings preference.
         </Text>
       </InfoModal>
     </ScrollView>
@@ -721,6 +882,9 @@ const styles = StyleSheet.create({
   modalBody: { fontSize: 15, color: '#3a3a3c', lineHeight: 22 },
   modalItem: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginBottom: 10 },
   modalItemIndent: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginTop: 10, paddingLeft: 12 },
+  // Entries under a subgroup heading, set in one step further than the top-level ones.
+  modalItemNested: { paddingLeft: 24 },
+  modalSubhead: { fontSize: 15, fontWeight: '700', color: '#1c1c1e', marginTop: 14, paddingLeft: 12 },
   modalBold: { fontWeight: '700', color: '#1c1c1e' },
   modalNote: { marginTop: 14 },
   modalLink: { color: '#2a6bb5', textDecorationLine: 'underline' },
@@ -734,11 +898,16 @@ const styles = StyleSheet.create({
 
   varList: { backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
   varRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10 },
+  // Members of an open subgroup, set in from their heading and off the white of the top-level rows.
+  varRowIndent: { paddingLeft: 32, backgroundColor: '#fafafc' },
   varRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
   varLabel: { fontSize: 15, color: '#1c1c1e' },
   varLabelDim: { color: '#aeaeb2' },
   varCheck: { fontSize: 17, fontWeight: '600', color: '#2a6bb5' },
   varCheckHidden: { opacity: 0 },
+  // The subgroup heading's right-hand side: how many of its rows are on, then the disclosure.
+  varRowTrailing: { flexDirection: 'row', alignItems: 'center' },
+  varCount: { fontSize: 13, color: '#8e8e93', marginRight: 6 },
 
   customCoords: { marginTop: 10, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
   customCoordsInvalid: { borderWidth: 1, borderColor: '#cc2222' },

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity, Alert } from 'react-native';
 import UnitsToggle from './UnitsToggle';
-import type { TimeFormat, Units } from './settings';
+import { AQI_SCALES, type AqiScale, type TimeFormat, type Units } from './settings';
 
 const TERMS_URL = 'https://going.blue/terms';
 const PRIVACY_URL = 'https://going.blue/privacy';
@@ -81,12 +81,16 @@ const VARIABLES: VarInfo[] = [
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function SettingsTab({ onDeleteAccount, units, onUnitsChange, timeFormat, onTimeFormatChange }: {
+export default function SettingsTab({
+  onDeleteAccount, units, onUnitsChange, timeFormat, onTimeFormatChange, aqiScale, onAqiScaleChange,
+}: {
   onDeleteAccount: () => Promise<void>;
   units: Units;
   onUnitsChange: (u: Units) => void;
   timeFormat: TimeFormat;
   onTimeFormatChange: (format: TimeFormat) => void;
+  aqiScale: AqiScale;
+  onAqiScaleChange: (scale: AqiScale) => void;
 }) {
   const [deleting, setDeleting] = useState(false);
 
@@ -138,6 +142,26 @@ export default function SettingsTab({ onDeleteAccount, units, onUnitsChange, tim
                 activeOpacity={0.7}
               >
                 <Text style={[styles.toggleText, timeFormat === format && styles.toggleTextActive]}>{format}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+        {/* Which scale the air-quality variables are requested and drawn on. A preference rather
+            than a builder option: the two indices aren't convertible, so this is the scale the
+            reader reads in, and the builder offers only that one's variables. */}
+        <View style={[styles.preferenceRow, styles.preferenceRowSpacing]}>
+          <Text style={styles.controlLabel}>Air quality</Text>
+          <View style={styles.toggle}>
+            {AQI_SCALES.map((scale) => (
+              <TouchableOpacity
+                key={scale.value}
+                style={[styles.toggleBtn, aqiScale === scale.value && styles.toggleBtnActive]}
+                onPress={() => onAqiScaleChange(scale.value)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.toggleText, aqiScale === scale.value && styles.toggleTextActive]}>
+                  {scale.label}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>

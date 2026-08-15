@@ -6,11 +6,29 @@ import { DEFAULT_DEVICE, isDevice, type Device } from './devices';
 export type Units = 'imperial' | 'metric';
 export type TimeFormat = '12h' | '24h';
 
+// Which air-quality index the app works in. Unlike units this isn't a conversion — the US and
+// European indices are separate scales built from different averaging windows and breakpoints, so
+// the same number means different things on each and there's no arithmetic between them. It's a
+// preference rather than a per-request choice for that reason: a reader learns one scale's
+// categories and stays there, and picking it once keeps the builder from offering both.
+export type AqiScale = 'us' | 'eu';
+
+// The scales, in selector order, with the label the toggle and the builder's heading share.
+export const AQI_SCALES: { value: AqiScale; label: string }[] = [
+  { value: 'us', label: 'US' },
+  { value: 'eu', label: 'Europe' },
+];
+
 const UNITS_KEY = 'display_units';
 const TIME_FORMAT_KEY = 'time_format';
+const AQI_SCALE_KEY = 'aqi_scale';
 const DEVICE_KEY = 'builder_device';
 const DEFAULT_UNITS: Units = 'metric';
 const DEFAULT_TIME_FORMAT: TimeFormat = '24h';
+// The US index is the default because it's the one this app's readers are most likely to know:
+// the forecast number is a US number and the air-quality question that drives the feature is
+// wildfire smoke over the western US.
+const DEFAULT_AQI_SCALE: AqiScale = 'us';
 
 export async function loadUnits(): Promise<Units> {
   try {
@@ -36,6 +54,19 @@ export async function loadTimeFormat(): Promise<TimeFormat> {
 
 export async function saveTimeFormat(format: TimeFormat): Promise<void> {
   try { await AsyncStorage.setItem(TIME_FORMAT_KEY, format); } catch { /* ignore */ }
+}
+
+export async function loadAqiScale(): Promise<AqiScale> {
+  try {
+    const value = await AsyncStorage.getItem(AQI_SCALE_KEY);
+    return AQI_SCALES.some((s) => s.value === value) ? (value as AqiScale) : DEFAULT_AQI_SCALE;
+  } catch {
+    return DEFAULT_AQI_SCALE;
+  }
+}
+
+export async function saveAqiScale(scale: AqiScale): Promise<void> {
+  try { await AsyncStorage.setItem(AQI_SCALE_KEY, scale); } catch { /* ignore */ }
 }
 
 // The device the builder sends through. Persisted because it's a property of what the user carries

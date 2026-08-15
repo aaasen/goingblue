@@ -8,7 +8,11 @@ import SettingsTab from './SettingsTab';
 import SetupScreen from './SetupScreen';
 import { loadToken, clearToken, deleteAccount } from './account';
 import { clearStore } from './cache';
-import { loadDevice, loadTimeFormat, loadUnits, saveDevice, saveTimeFormat, saveUnits, type TimeFormat, type Units } from './settings';
+import {
+  loadAqiScale, loadDevice, loadTimeFormat, loadUnits,
+  saveAqiScale, saveDevice, saveTimeFormat, saveUnits,
+  type AqiScale, type TimeFormat, type Units,
+} from './settings';
 import { DEFAULT_DEVICE, type Device } from './devices';
 
 type Tab = 'builder' | 'decoder' | 'settings';
@@ -27,6 +31,7 @@ export default function App() {
   const [token, setToken] = useState<string | null | undefined>(undefined);
   const [units, setUnitsState] = useState<Units>('metric');
   const [timeFormat, setTimeFormatState] = useState<TimeFormat>('24h');
+  const [aqiScale, setAqiScaleState] = useState<AqiScale>('us');
   // Builder-only, but loaded here with the rest: the builder is the tab that comes up first, so
   // reading it inside that tab would draw the action button as Get Forecast and rename it a frame
   // later. Behind the splash, the stored device is already in hand.
@@ -36,14 +41,15 @@ export default function App() {
   // preferences decide how it reads. Applying them as they land would draw the first screen in
   // metric/24h and correct it a moment later, in full view now that the splash waits for this.
   useEffect(() => {
-    Promise.all([loadToken(), loadUnits(), loadTimeFormat(), loadDevice()])
-      .then(([t, u, f, d]) => {
+    Promise.all([loadToken(), loadUnits(), loadTimeFormat(), loadAqiScale(), loadDevice()])
+      .then(([t, u, f, a, d]) => {
         setUnitsState(u);
         setTimeFormatState(f);
+        setAqiScaleState(a);
         setDeviceState(d);
         setToken(t);
       })
-      // All three swallow their own storage errors, so this should be unreachable — but the
+      // All of them swallow their own storage errors, so this should be unreachable — but the
       // splash now waits on this promise, and a rejection would leave it up for good with no way
       // out but reinstalling. Falling through to setup keeps a broken launch recoverable.
       .catch(() => setToken(null));
@@ -65,6 +71,11 @@ export default function App() {
   function setTimeFormat(format: TimeFormat) {
     setTimeFormatState(format);
     saveTimeFormat(format);
+  }
+
+  function setAqiScale(scale: AqiScale) {
+    setAqiScaleState(scale);
+    saveAqiScale(scale);
   }
 
   function setDevice(d: Device) {
@@ -138,6 +149,7 @@ export default function App() {
           active={tab === 'builder'}
           device={device}
           onDeviceChange={setDevice}
+          aqiScale={aqiScale}
         />
       </View>
       <View
@@ -152,7 +164,15 @@ export default function App() {
         accessibilityElementsHidden={tab !== 'settings'}
         importantForAccessibility={tab === 'settings' ? 'auto' : 'no-hide-descendants'}
       >
-        <SettingsTab onDeleteAccount={handleDeleteAccount} units={units} onUnitsChange={setUnits} timeFormat={timeFormat} onTimeFormatChange={setTimeFormat} />
+        <SettingsTab
+          onDeleteAccount={handleDeleteAccount}
+          units={units}
+          onUnitsChange={setUnits}
+          timeFormat={timeFormat}
+          onTimeFormatChange={setTimeFormat}
+          aqiScale={aqiScale}
+          onAqiScaleChange={setAqiScale}
+        />
       </View>
     </View>
   );
