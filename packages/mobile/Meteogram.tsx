@@ -298,35 +298,52 @@ const WIND_INK = '#000000';
 //         (https://developers.google.com/maps/documentation/air-quality/laqis); breaks every 20
 //         to 100, matching Open-Meteo's european_aqi definition, which is what we decode.
 //
-// Unlike everything else on the meteogram these fills are fully saturated, so each band carries
-// the ink its own contrast demands rather than assuming black: both scales are legible dark-on-
-// light through band 4 and flip to white for the top two, every band clearing WCAG AA for normal
-// text (worst case: US "Unhealthy" red at 5.25:1 black, EU "Very poor" at 8.96:1 white).
-// Verified by computing relative luminance over the published hex values — recheck if a color
-// here is ever edited.
-interface AqBand { max: number; color: string; ink: string; name: string }
+// Ink per band, dark on the light fills and white on the dark ones — chosen by measured luminance
+// at the draw site, except where `ink` pins it.
+interface AqBand { max: number; color: string; name: string; ink?: string }
 const AQ_BANDS: Record<'us' | 'eu', AqBand[]> = {
   us: [
-    { max: 50, color: '#00e400', ink: '#000000', name: 'Good' },
-    { max: 100, color: '#ffff00', ink: '#000000', name: 'Moderate' },
-    { max: 150, color: '#ff7e00', ink: '#000000', name: 'Unhealthy for sensitive groups' },
-    { max: 200, color: '#ff0000', ink: '#000000', name: 'Unhealthy' },
-    { max: 300, color: '#8f3f97', ink: '#ffffff', name: 'Very unhealthy' },
-    { max: Infinity, color: '#7e0023', ink: '#ffffff', name: 'Hazardous' },
+    { max: 50, color: '#00e400', name: 'Good' },
+    { max: 100, color: '#ffff00', name: 'Moderate' },
+    { max: 150, color: '#ff7e00', name: 'Unhealthy for sensitive groups' },
+    // The one band where the measurement and the eye disagree. Black clears 5.25:1 on pure red
+    // and white only 4.00:1, but black on saturated red reads muddy and vibrates at 11.5px, so
+    // white is pinned here deliberately: below AA for normal text on this band alone, well clear
+    // of the 3:1 floor, and the reading is repeated in the detail panel. Delete `ink` to go back
+    // to the measured choice.
+    { max: 200, color: '#ff0000', name: 'Unhealthy', ink: '#ffffff' },
+    { max: 300, color: '#8f3f97', name: 'Very unhealthy' },
+    { max: Infinity, color: '#7e0023', name: 'Hazardous' },
   ],
   // Cyan-to-purple where the US ramp is green-to-maroon, which is the two scales' own doing and
   // happens to be exactly what keeps the rows from reading as one scale when both are shown.
   eu: [
-    { max: 20, color: '#50f0e6', ink: '#000000', name: 'Good' },
-    { max: 40, color: '#50ccaa', ink: '#000000', name: 'Fair' },
-    { max: 60, color: '#f0e641', ink: '#000000', name: 'Moderate' },
-    { max: 80, color: '#ff5050', ink: '#000000', name: 'Poor' },
-    { max: 100, color: '#960032', ink: '#ffffff', name: 'Very poor' },
-    { max: Infinity, color: '#7d2181', ink: '#ffffff', name: 'Extremely poor' },
+    { max: 20, color: '#50f0e6', name: 'Good' },
+    { max: 40, color: '#50ccaa', name: 'Fair' },
+    { max: 60, color: '#f0e641', name: 'Moderate' },
+    { max: 80, color: '#ff5050', name: 'Poor' },
+    { max: 100, color: '#960032', name: 'Very poor' },
+    { max: Infinity, color: '#7d2181', name: 'Extremely poor' },
   ],
 };
 const aqBand = (value: number, scale: 'us' | 'eu'): AqBand =>
   AQ_BANDS[scale].find((b) => value < b.max) ?? AQ_BANDS[scale][AQ_BANDS[scale].length - 1];
+
+// Which CAMS domain served, predicted from the location the way the model row predicts the
+// weather centers — the response carries no domain id, and it isn't worth wire bits. Open-Meteo's
+// `domains=auto` takes the European ensemble where it reaches and the global model everywhere
+// else, and the two differ enough to be worth naming: 0.1° hourly against 0.4° three-hourly, which
+// at a 38px column is the difference between a forecast that resolves a valley and one that
+// averages a county. Bounds are the CAMS regional domain, 25W/30N/45E/72N since June 2019.
+// Europe's horizon is 4 days and the global model's 5 — both at or past the wire's own 96h clamp,
+// so the row's length doesn't depend on which one answered.
+const CAMS_EUROPE_BOUNDS = { west: -25, east: 45, south: 30, north: 72 };
+function camsDomain(lat: number, lon: number): string {
+  const b = CAMS_EUROPE_BOUNDS;
+  return lat >= b.south && lat <= b.north && lon >= b.west && lon <= b.east
+    ? 'CAMS Europe 11km'
+    : 'CAMS Global 45km';
+}
 
 function windAlpha(mph: number): number {
   const t = Math.min(1, Math.max(0, (mph - WIND_FADE_LO) / (WIND_FADE_HI - WIND_FADE_LO)));
@@ -748,7 +765,7 @@ const AQ_KEYS = {
 type AqKind = keyof typeof AQ_KEYS;
 const AQ_KINDS = Object.keys(AQ_KEYS) as AqKind[];
 
-function buildRows(periods: Period[], u: Units): Row[] {
+function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[] {
   const rows: Row[] = [];
   const has = (fn: (p: Period) => unknown) => periods.some((p) => fn(p) != null);
   const tU = tempUnit(u), frU = freezeUnit(u), wU = windUnit(u);
@@ -767,17 +784,6 @@ function buildRows(periods: Period[], u: Units): Row[] {
     if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.WIND, label: `Wind ${wU}` });
     if (has((p) => p.wind_gust_kph)) rows.push({ kind: 'wind-gust', height: ROW_H.WIND, label: `Gust ${wU}` });
     if (has((p) => p.wind_sfc_dir)) rows.push({ kind: 'wind-dir', height: ROW_H.DIR, label: 'Dir' });
-  }
-
-  // Air quality is a surface reading, so it follows the surface block and comes before the
-  // upper-air sections. Any subset of the five can be present — they are five separate request
-  // variables — and the rows stop at the CAMS horizon, roughly four days out, past which every
-  // cell is empty rather than zero.
-  const aqRows = AQ_KINDS.filter((k) => has((p) => p[AQ_KEYS[k].field]));
-  if (aqRows.length) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Air quality' });
-    for (const kind of aqRows)
-      rows.push({ kind, height: ROW_H.WIND, label: AQ_KEYS[kind].label });
   }
 
   // Freezing level is an altitude, not a surface reading — it heads the upper-air sections with
@@ -803,10 +809,24 @@ function buildRows(periods: Period[], u: Units): Row[] {
     if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.WIND_UPPER, label: pressureLabel(700) });
   }
 
-  // Which model each column's numbers came from, along the bottom. Unconditional: unlike every
-  // row above it this one isn't read off the message — it is predicted from the location and the
-  // forecast's start, so there is always something to draw.
+  // Which model each column's numbers came from. Unconditional: unlike every row above it this
+  // one isn't read off the message — it is predicted from the location and the forecast's start,
+  // so there is always something to draw.
+  //
+  // It closes the weather rows rather than the whole graph, because what it names covers only
+  // what is above it. Air quality comes from CAMS, not from any of these centers, and sat under
+  // this row it read as one more thing GFS or IFS had produced.
   rows.push({ kind: 'model', height: ROW_H.MODEL, label: 'Model' });
+
+  // Air quality, below the model line and carrying its own attribution in its header. Any subset
+  // of the five can be present — they are five separate request variables — and the rows stop at
+  // the CAMS horizon, roughly four days out, past which every cell is empty rather than zero.
+  const aqRows = AQ_KINDS.filter((k) => has((p) => p[AQ_KEYS[k].field]));
+  if (aqRows.length) {
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Air quality (${camsDomain(lat, lon)})` });
+    for (const kind of aqRows)
+      rows.push({ kind, height: ROW_H.WIND, label: AQ_KEYS[kind].label });
+  }
 
   return rows;
 }
@@ -1626,19 +1646,34 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
 
       case 'aqi': case 'aqi-pm25': case 'aqi-o3': case 'aqi-eu': case 'aqi-eu-pm25': {
         const { field, scale } = AQ_KEYS[row.kind];
-        periods.forEach((p, i) => {
-          const v = p[field] as number | undefined;
+        const valueAt = (i: number) => periods[i][field] as number | undefined;
+        // Painted as the wind ribbon is: one gradient per run of columns that have a value, exact
+        // at each column's center and blended between them. The category edges become gradients
+        // rather than steps, which is the trade — but the number is printed in every cell, so the
+        // reader gets the precise value from the digits and the shape of an episode from the
+        // color. A hard step per column made a smoke plume read as a bar chart of six categories
+        // instead of as something arriving.
+        valueRuns(n, (i) => valueAt(i) != null).forEach((run) => {
+          els.push(windRibbon(
+            `aqbg${ri}-${run[0]}`, run,
+            (i) => ({ left: colLeft(i), center: colCenter(i), right: colLeft(i) + CELL_W }),
+            (i) => aqBand(valueAt(i)!, scale).color, top, row.height,
+          ));
+        });
+        periods.forEach((_, i) => {
+          const v = valueAt(i);
           const cx = colCenter(i);
           // Past the CAMS horizon there is no forecast at all, which is a different thing from
           // clean air — so those columns get the empty-cell dash and no colored ground, exactly
           // like a wind row with nothing in it.
           if (v == null) { els.push(centerText(`aq${ri}-${i}`, '—', cx, mid, fonts.wind, C.nil)); return; }
+          // The gradient is exact at the column's center, which is where the digits sit, so the
+          // ink is measured against this cell's own band rather than the blend either side. One
+          // white for the whole row was tried and doesn't survive the light fills — on EPA's
+          // yellow it is 1.07:1, and on the orange and the EU cyan barely better.
           const band = aqBand(v, scale);
-          els.push(
-            <Rect key={`aqbg${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W} height={row.height}
-              color={band.color} />,
-          );
-          els.push(centerText(`aq${ri}-${i}`, String(Math.round(v)), cx, mid, fonts.wind, band.ink));
+          els.push(centerText(`aq${ri}-${i}`, String(Math.round(v)), cx, mid, fonts.wind,
+            band.ink ?? bandInk(hexRgb(band.color))));
         });
         break;
       }
@@ -1784,8 +1819,16 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     () => buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups, modelBands }),
     [periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups, modelBands],
   );
-  // The model row is the last one buildRows appends, so it ends at the bottom of the canvas.
-  const modelRowTop = totalH - ROW_H.MODEL;
+  // Walked rather than measured from the bottom: the model row closes the weather rows, and the
+  // air-quality block sits below it when the request asked for any of it.
+  const modelRowTop = useMemo(() => {
+    let y = ROW_H.DATE;
+    for (const row of rows) {
+      if (row.kind === 'model') return y;
+      y += row.height;
+    }
+    return y;
+  }, [rows]);
 
   // Where the cloud-cover rows sit in the canvas, so the selected column can carry its percentages
   // as text. The rows are shaded by cover and otherwise unlabelled — a number in all three rows of
@@ -2020,7 +2063,9 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
       // inside the tolerance attribution already has: a horizon boundary moves with the age of
       // the newest full-length run, which is only known to within its run interval.
       attributionMs: dates[0].getTime(),
-      rows: buildRows(periods, units),
+      // lat/lon decide which CAMS domain the air-quality header names, the same way they decide
+      // the model row's chain.
+      rows: buildRows(periods, units, msg.lat, msg.lon),
       // The wall clock everything is labelled on belongs to the forecast point, not to wherever
       // the reader is: a Tokyo forecast read from Seattle names Tokyo's hours and breaks its days
       // at Tokyo's midnight. The offset rides along on the message, so a forecast pulled up later
