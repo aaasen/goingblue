@@ -46,13 +46,21 @@ function priorityLabel(msg: ForecastMessage): string {
   return MODE_NAMES[msg.mode] ?? MODE_NAMES[DEFAULT_MODE];
 }
 
+/**
+ * The forecast point's elevation, in the user's units. Empty at sea level, which
+ * is also what the wire format reports when it has no elevation to carry.
+ */
+function elevationLabel(msg: ForecastMessage, units: Units): string {
+  if (msg.elevation <= 0) return '';
+  return units === 'imperial'
+    ? `${Math.round(msg.elevation * 3.28084).toLocaleString()}ft`
+    : `${Math.round(msg.elevation).toLocaleString()}m`;
+}
+
 function metaLabel(msg: ForecastMessage, units: Units): string {
   const models = modelLabelsFromMask(msg.models_mask);
-  const elevStr = msg.elevation > 0
-    ? units === 'imperial'
-      ? ` · ${Math.round(msg.elevation * 3.28084).toLocaleString()}ft`
-      : ` · ${Math.round(msg.elevation).toLocaleString()}m`
-    : '';
+  const elev = elevationLabel(msg, units);
+  const elevStr = elev ? ` · ${elev}` : '';
   return `${latLonLabel(msg)}${elevStr} · ${spanLabel(msg)} · ${models.join(' + ')}`;
 }
 
@@ -71,15 +79,21 @@ function normalizedForecastData(encoded: string): string {
   return encoded.replace(/\s/g, '').replace(/^fw:/i, '');
 }
 
-/** Compact cached-forecast label (request time · models · priority · location). */
-function cacheMetaLabel(slot: Slot, token: string, includeDate = false): string {
+/**
+ * Cached-forecast label (request time · models · priority · location). `detailed`
+ * is for the loaded forecast's own meta row, which has the width for the request
+ * date and the forecast point's elevation; the past-forecast list stays compact.
+ */
+function cacheMetaLabel(slot: Slot, token: string, units: Units, detailed = false): string {
   try {
     const msg = decodeAny(slot.encoded!, token);
     const models = modelIconsFromMask(msg.models_mask).join(' ');
-    const requested = includeDate
+    const requested = detailed
       ? requestDateTimeLabel(slot.requestedAt)
       : requestTimeLabel(slot.requestedAt);
-    return `${requested} · ${models} · ${priorityLabel(msg)} · ${latLonLabel(msg)}`;
+    const elev = detailed ? elevationLabel(msg, units) : '';
+    const elevStr = elev ? ` · ${elev}` : '';
+    return `${requested} · ${models} · ${priorityLabel(msg)} · ${latLonLabel(msg)}${elevStr}`;
   } catch {
     return 'Unknown';
   }
@@ -240,7 +254,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
                   style={[styles.pastItem, isLoaded && styles.pastItemLoaded]}
                 >
                   <View style={styles.pastDetails}>
-                    <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, token)}</Text>
+                    <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, token, units)}</Text>
                     {variableIcons.length > 0 && (
                       <View style={styles.variableRow}>
                         <Text style={styles.variableLabel}>Variables:</Text>
@@ -326,7 +340,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
           {/* Meta */}
           <View style={styles.metaRow}>
             <Text style={styles.metaText} numberOfLines={3}>
-              {loadedSlot ? cacheMetaLabel(loadedSlot, token, true) : metaLabel(decoded, units)}
+              {loadedSlot ? cacheMetaLabel(loadedSlot, token, units, true) : metaLabel(decoded, units)}
             </Text>
             {decodedVariableIcons.length > 0 && (
               <View style={styles.variableRow}>
