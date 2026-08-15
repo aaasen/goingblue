@@ -94,10 +94,10 @@ const PRIORITIES = [
 // Model-selector help copy. Each line pairs the option's flag label with the forecast center(s)
 // behind it and, where it's a blend, the short-range/global pair with resolution and horizon.
 const MODEL_INFO = [
-  { name: '🌐 Auto', desc: 'Chooses the highest resolution model for your location from over 30 regional weather models' },
-  { name: '🇺🇸 US', desc: 'Blend of HRRR (3km, 48hr, continental US) and GFS (13km, 16 day, global)' },
-  { name: '🇨🇦 CA', desc: 'Blend of HRDPS (2.5km, 48hr, Canada) and GEM (15km, 10 day, global)' },
-  { name: '🇪🇺 EU', desc: 'IFS HRES (9km, 15 day, global)' },
+  { name: '🌐 Auto', desc: 'Chooses the highest resolution model for your location from over 30 regional weather models.' },
+  { name: '🇺🇸 US', desc: 'Blend of HRRR (3km, 48hr, continental US) and GFS (13km, 16 day, global).' },
+  { name: '🇨🇦 CA', desc: 'Blend of HRDPS (2.5km, 48hr, Canada) and GEM (15km, 10 day, global).' },
+  { name: '🇪🇺 EU', desc: 'IFS HRES (9km, 15 day, global).' },
 ];
 const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 
@@ -108,9 +108,9 @@ const MODEL_HINT_NO_LOCATION = 'Set a location to see which models will be used.
 // Device-selector help copy. Each line says what the button does on that device and what the route
 // costs the user — data, a text message, or satellite airtime.
 const DEVICE_INFO = [
-  { name: 'Internet', desc: 'Fetches the forecast straight over your data connection, for when you still have service' },
-  { name: 'SMS', desc: 'Opens Messages with the request ready to send, for weak cell reception without data' },
-  { name: 'inReach', desc: 'Copies the request so you can paste it into your satellite messenger' },
+  { name: 'Internet', desc: 'Fetches the forecast straight over your data connection, for when you still have service.' },
+  { name: 'SMS', desc: 'Opens Messages with the request ready to send, for weak cell reception without data.' },
+  { name: 'inReach', desc: 'Copies the request so you can paste it into your satellite messenger.' },
 ];
 
 // Id of the subgroup the air-quality toggles fold under — stable across a change of scale, which
@@ -147,44 +147,47 @@ interface VarGroup {
 const VAR_GROUPS: VarGroup[] = [
   {
     value: 'clouds', code: 'c', label: 'Detailed Clouds', vars: CONFIGURABLE_VAR_GROUPS.c,
-    desc: 'Low (<3km), medium (3-8km), and high (>8km) cloud cover',
+    desc: 'Low, medium, and high cloud cover.',
   },
   {
     value: 'highwind', code: 'w', label: 'High Altitude Winds', vars: CONFIGURABLE_VAR_GROUPS.w,
-    desc: 'Winds at 500, 600, and 700 hPa pressure levels',
+    desc: 'Winds at 500, 600, and 700 hPa pressure levels.',
   },
   {
     value: 'freeze', code: 'f', label: 'Freezing Level', vars: CONFIGURABLE_VAR_GROUPS.f,
-    desc: 'Altitude at which atmospheric temperature drops to 0°C',
+    desc: 'Altitude at which atmospheric temperature drops to 0°C.',
   },
   {
     value: 'precip', code: 'p', label: 'Precip Chance', vars: CONFIGURABLE_VAR_GROUPS.p,
-    desc: 'Chance of any precipitation during each period',
+    desc: 'Chance of measurable precipitation during the period.',
   },
   {
     value: 'aqi', code: 'a', label: 'AQI (Dominant pollutant)', vars: CONFIGURABLE_VAR_GROUPS.a,
     subgroup: AIR_SUBGROUP, scale: 'us',
-    desc: 'The headline index, 0-500 — whichever pollutant is worst, at its worst hour in the period',
+    desc: 'Index of the worst pollutant out of PM2.5, PM10, ozone, nitrogen dioxide, sulphur '
+      + 'dioxide, and carbon monoxide.',
   },
   {
     value: 'smoke', code: 's', label: 'PM2.5 (Smoke)', vars: CONFIGURABLE_VAR_GROUPS.s,
     subgroup: AIR_SUBGROUP, scale: 'us',
-    desc: 'The fine-particulate part of the index — wildfire smoke and haze, on the same 0-500 scale',
+    desc: 'Fine-particulate pollution from wildfire smoke and haze.',
   },
   {
     value: 'ozone', code: 'o', label: 'Ozone (Smog)', vars: CONFIGURABLE_VAR_GROUPS.o,
     subgroup: AIR_SUBGROUP, scale: 'us',
-    desc: 'The ozone part of the index — summer smog, which peaks in the afternoon',
+    desc: 'Summer smog, which peaks in the afternoon.',
   },
   {
     value: 'aqi-eu', code: 'e', label: 'AQI (Dominant pollutant)', vars: CONFIGURABLE_VAR_GROUPS.e,
     subgroup: AIR_SUBGROUP, scale: 'eu',
-    desc: 'The headline index, a 0-100+ scale with its own categories — whichever pollutant is worst',
+    desc: 'Index of the worst pollutant out of PM2.5, PM10, ozone, nitrogen dioxide, and sulphur '
+      + 'dioxide.',
   },
   {
     value: 'smoke-eu', code: '2', label: 'PM2.5 (Smoke)', vars: CONFIGURABLE_VAR_GROUPS['2'],
     subgroup: AIR_SUBGROUP, scale: 'eu',
-    desc: 'The fine-particulate part of the index, averaged over 24 hours the way that scale defines it',
+    desc: 'Fine-particulate pollution from wildfire smoke and haze, averaged over 24 hours the way '
+      + 'this scale defines it.',
   },
 ];
 
@@ -200,13 +203,19 @@ function visibleVarGroups(scale: AqiScale): VarGroup[] {
 // so a new group can only ever be added in one place.
 type VarNode =
   | { kind: 'group'; group: VarGroup }
-  | { kind: 'subgroup'; id: string; label: string; members: VarGroup[] };
+  | { kind: 'subgroup'; id: string; label: string; desc: string; members: VarGroup[] };
 
 // One drawn row of the open list, flattened out of the tree so the hairline separator can be
 // dropped from the last row whichever kind it turns out to be.
 type VarRow =
   | { key: string; kind: 'toggle'; group: VarGroup; indent: boolean }
   | { key: string; kind: 'subgroup'; id: string; label: string; members: VarGroup[] };
+
+// What the two scales and their shared source need said once, above the rows, rather than
+// repeated in each one's own line.
+const AIR_DESC =
+  'There are two different scales for air quality: US (0-500), and European (0-100). The scale '
+  + 'can be changed in Settings. Sourced from the CAMS model, which has a time horizon of 4 days.';
 
 function buildVarTree(scale: AqiScale): VarNode[] {
   // Air quality is the only subgroup. Its heading names the hazard and nothing else: which index
@@ -218,7 +227,7 @@ function buildVarTree(scale: AqiScale): VarNode[] {
     const open = tree[tree.length - 1];
     if (group.subgroup == null) tree.push({ kind: 'group', group });
     else if (open?.kind === 'subgroup' && open.id === group.subgroup) open.members.push(group);
-    else tree.push({ kind: 'subgroup', id: group.subgroup, label, members: [group] });
+    else tree.push({ kind: 'subgroup', id: group.subgroup, label, desc: AIR_DESC, members: [group] });
   }
   return tree;
 }
@@ -744,7 +753,7 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
       <InfoModal visible={modelInfo} title="Model" onClose={() => setModelInfo(false)}>
         {MODEL_INFO.map((m) => (
           <Text key={m.name} style={styles.modalItem}>
-            <Text style={styles.modalBold}>{m.name}</Text> — {m.desc}
+            <Text style={styles.modalBold}>{m.name}</Text>: {m.desc}
           </Text>
         ))}
         <Text style={styles.modalBody}>
@@ -760,38 +769,34 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
         <Text style={styles.modalBody}>How the request leaves your phone:</Text>
         {DEVICE_INFO.map((d) => (
           <Text key={d.name} style={styles.modalItemIndent}>
-            <Text style={styles.modalBold}>{d.name}</Text> — {d.desc}
+            <Text style={styles.modalBold}>{d.name}</Text>: {d.desc}
           </Text>
         ))}
       </InfoModal>
 
       <InfoModal visible={varsInfo} title="Extra Variables" onClose={() => setVarsInfo(false)}>
         <Text style={styles.modalBody}>
-          By default, Going Blue forecasts include temperature, precipitation, wind, and basic cloud
-          cover. The following variables are optional:
+          By default, forecasts include temperature, rain, snow, wind, and basic cloud cover. The
+          following variables are optional:
         </Text>
         {/* Same tree the list draws from, so the modal describes exactly the rows on screen —
             including which air-quality index the scale preference has put there. */}
         {varTree.map((node) => (node.kind === 'group' ? (
           <Text key={node.group.value} style={styles.modalItemIndent}>
-            <Text style={styles.modalBold}>{node.group.label}</Text> — {node.group.desc}
+            <Text style={styles.modalBold}>{node.group.label}</Text>: {node.group.desc}
           </Text>
         ) : (
           <View key={node.id}>
             <Text style={styles.modalSubhead}>{node.label}</Text>
+            <Text style={styles.modalSubdesc}>{node.desc}</Text>
             {node.members.map((m) => (
               <Text key={m.value} style={[styles.modalItemIndent, styles.modalItemNested]}>
-                <Text style={styles.modalBold}>{m.label}</Text> — {m.desc}
+                <Text style={styles.modalBold}>{m.label}</Text>: {m.desc}
               </Text>
             ))}
           </View>
         )))}
-        <Text style={[styles.modalBody, styles.modalNote]}>Each added variable takes away from the detail and range of each forecast.</Text>
-        <Text style={[styles.modalBody, styles.modalNote]}>
-          Air quality comes from a different forecast (CAMS) than the weather, and only reaches
-          about four days out — later periods leave those rows blank. Which index it uses is a
-          Settings preference.
-        </Text>
+        <Text style={[styles.modalBody, styles.modalNote]}>Each added variable takes away from the detail and range of the forecast.</Text>
       </InfoModal>
     </ScrollView>
   );
@@ -907,6 +912,8 @@ const styles = StyleSheet.create({
   // Entries under a subgroup heading, set in one step further than the top-level ones.
   modalItemNested: { paddingLeft: 24 },
   modalSubhead: { fontSize: 15, fontWeight: '700', color: '#1c1c1e', marginTop: 14, paddingLeft: 12 },
+  // A subgroup's own paragraph, sitting between its heading and its entries at the heading's indent.
+  modalSubdesc: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginTop: 4, paddingLeft: 12 },
   modalBold: { fontWeight: '700', color: '#1c1c1e' },
   modalNote: { marginTop: 14 },
   modalLink: { color: '#2a6bb5', textDecorationLine: 'underline' },
