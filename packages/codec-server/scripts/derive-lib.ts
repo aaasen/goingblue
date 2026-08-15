@@ -6,7 +6,10 @@
  * without writing anything.
  */
 import { fileURLToPath } from "node:url";
-import { adjustPrecipPhase, type HourlyData } from "../src/forecast.ts";
+import {
+  adjustPrecipPhase, aggregateHourly, rowsFromWindows, HOURS_PER_PERIOD,
+  type HourlyData, type Row,
+} from "../src/forecast.ts";
 import { dbLocations, listCells, loadCell, modelElevations, openDb } from "./corpus-db.ts";
 
 // The derivation corpus: the production source's cells in the corpus DB (see corpus-db.ts).
@@ -32,6 +35,11 @@ export const DERIVE_VARS: readonly string[] = [
   // indices in full: each headline plus every constituent the scale defines.
   "us_aqi", "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi_pm10",
   "us_aqi_nitrogen_dioxide", "us_aqi_sulphur_dioxide",
+  // No wire column of its own, but the US headline's max is taken over it, so the
+  // dominant-pollutant tables need it to know which constituent is leading. Listing it only in
+  // EXTRA_SOURCE_VARS is not enough — that says which source serves a variable, this says which
+  // variables to load — and the miss is silent: every US period counted as "no attribution".
+  "us_aqi_carbon_monoxide",
   "european_aqi", "european_aqi_pm2_5", "european_aqi_pm10",
   "european_aqi_nitrogen_dioxide", "european_aqi_ozone", "european_aqi_sulphur_dioxide",
 ];
@@ -103,15 +111,85 @@ export function tableOffsets(tables: CountedTable[]): { offsets: Record<string, 
   return { offsets, nSlots: n };
 }
 
+// ── Shared per-cell aggregation ─────────────────────────────────────────────────
+//
+// Every counter walks the same cell at the same five resolutions, and aggregating the hourly
+// series into periods costs more than the counting that follows it. Nine scripts each doing it
+// meant nine identical aggregations per cell; they now share one, computed on FIRST USE and
+// memoized for the rest of the cell, so a counter that never asks pays nothing.
+//
+// There are two anchorings and they are not interchangeable — a period boundary in one does not
+// land where the other's does:
+//   `atMidnight` — periods from the cell's first LOCAL MIDNIGHT (freeze, gust, temp, air quality)
+//   `atRequest`  — periods from the request hour floored to the period (cloud, precip,
+//                  weathercode, both wind columns)
+export interface ResSlice { hpp: number; start: number; n: number; rows: Row[] }
+
+export interface CellCtx {
+  hourly: HourlyData;
+  startHour: number;
+  pos?: { lat: number; lon: number };
+  // Null when this cell has too few periods at that resolution to count (or, for atMidnight,
+  // when the cell has no position to take a UTC offset from).
+  atMidnight(res: number): ResSlice | null;
+  atRequest(res: number): ResSlice | null;
+}
+
+const N_RES_SLICES = 5;
+
+export function makeCellCtx(
+  h: HourlyData, startHour: number, pos?: { lat: number; lon: number },
+): CellCtx {
+  const midnight: (ResSlice | null | undefined)[] = new Array(N_RES_SLICES);
+  const request: (ResSlice | null | undefined)[] = new Array(N_RES_SLICES);
+  return {
+    hourly: h, startHour, pos,
+    atMidnight(res) {
+      const memo = midnight[res];
+      if (memo !== undefined) return memo;
+      let slice: ResSlice | null = null;
+      if (pos && h.time?.length) {
+        const off = Math.round(pos.lon / 15);
+        const dataStart = Math.floor(Date.parse(`${h.time[0]}:00Z`) / 3600000);
+        const dataEnd = dataStart + h.time.length;
+        const hpp = HOURS_PER_PERIOD[res];
+        const firstUtc = Math.ceil((dataStart + off) / 24) * 24 - off;
+        const n = Math.floor((dataEnd - firstUtc) / hpp);
+        if (n >= 3) {
+          const windows: number[][] = [];
+          for (let p = 0; p < n; p++) {
+            const w: number[] = [];
+            for (let eh = firstUtc + p * hpp; eh < firstUtc + (p + 1) * hpp; eh++) w.push(eh - dataStart);
+            windows.push(w);
+          }
+          slice = { hpp, start: firstUtc, n, rows: rowsFromWindows(h, h.time, windows, off) };
+        }
+      }
+      midnight[res] = slice;
+      return slice;
+    },
+    atRequest(res) {
+      const memo = request[res];
+      if (memo !== undefined) return memo;
+      let slice: ResSlice | null = null;
+      if (h.time?.length) {
+        const hpp = HOURS_PER_PERIOD[res];
+        const start = Math.floor(startHour / hpp) * hpp;
+        const n = Math.floor(h.time.length / hpp);
+        if (n >= 2) slice = { hpp, start, n, rows: aggregateHourly(h, h.time, n, res, start) };
+      }
+      request[res] = slice;
+      return slice;
+    },
+  };
+}
+
 export interface CellCounter {
   tables: CountedTable[];
   nSlots: number;
   // Adds this cell's symbol emissions (wire granularity — one add per symbol the encoder would
   // emit under these tables) into `add(slot)`.
-  countCell(
-    h: HourlyData, startHour: number, pos: { lat: number; lon: number } | undefined,
-    add: (slot: number) => void,
-  ): void;
+  countCell(ctx: CellCtx, add: (slot: number) => void): void;
   // Assembles the script's shipped weight tables from an accumulated count vector (applying the
   // same empty-row fallbacks the old inline derivation did).
   tablesFrom(counts: ArrayLike<number>): DerivedTables;
@@ -144,12 +222,17 @@ export async function deriveCounts(counter: CellCounter): Promise<Float64Array> 
 // instead of one per script. generate-codebooks.ts feeds every derive script's counter through
 // this and hands each script its vector via derive(precounted); standalone runs still take the
 // single-counter path above. Returns one count vector per counter, in order.
-export async function deriveCountsMulti(counters: CellCounter[]): Promise<Float64Array[]> {
+export async function deriveCountsMulti(
+  counters: CellCounter[], shard?: { index: number; total: number },
+): Promise<Float64Array[]> {
   const vecs = counters.map((c) => new Float64Array(c.nSlots));
   const adds = vecs.map((v) => (slot: number) => { v[slot]++; });
   await eachForecast((h, startHour, _loc, pos) => {
-    for (let i = 0; i < counters.length; i++) counters[i].countCell(h, startHour, pos, adds[i]);
-  });
+    // One context per cell: the aggregation every counter would otherwise redo is computed on
+    // first use and shared by all of them.
+    const ctx = makeCellCtx(h, startHour, pos);
+    for (let i = 0; i < counters.length; i++) counters[i].countCell(ctx, adds[i]);
+  }, "train", DERIVE_VARS, shard);
   return vecs;
 }
 
@@ -163,6 +246,7 @@ export async function eachForecast(
        split?: string) => void,
   split: "train" | "all" = "train",
   vars: readonly string[] | null = DERIVE_VARS,
+  shard?: { index: number; total: number },
 ): Promise<void> {
   const db = openDb();
   const locs = dbLocations(db);
@@ -180,7 +264,12 @@ export async function eachForecast(
     .filter((e) => e.vars.length > 0);
   let cells = 0;
   const seen = new Set<string>();
+  let index = -1;
   for (const { locationId, windowStart } of listCells(db, DERIVE_SOURCE)) {
+    // Sharded BEFORE the split filter, on the listCells order, which is a deterministic
+    // ORDER BY — so the shards partition the corpus identically on every run and every worker.
+    index++;
+    if (shard && index % shard.total !== shard.index) continue;
     const loc = locs.get(locationId);
     if (!loc) continue;
     if (split === "train" && loc.split !== "train") continue; // eval/favorites: never trained on
@@ -198,7 +287,8 @@ export async function eachForecast(
       { lat: loc.lat, lon: loc.lon }, loc.split ?? undefined);
   }
   db.close();
-  console.log(`  scanned ${cells} cells over ${seen.size} ${split === "train" ? "train " : ""}locations (${DERIVE_SOURCE})`);
+  if (!shard)
+    console.log(`  scanned ${cells} cells over ${seen.size} ${split === "train" ? "train " : ""}locations (${DERIVE_SOURCE})`);
 }
 
 // Deterministic 5-fold assignment by location id, for held-out (split-by-location) checks.

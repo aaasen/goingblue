@@ -50,6 +50,7 @@ import { rowsFromWindows, HOURS_PER_PERIOD, type Row } from "../src/forecast.ts"
 import {
   AQI_US_LOWER, AQI_EU_LOWER, AQI_DELTA_NSYM, AQI_DELTA_ESCAPE_BITS,
   AQI_RESIDUAL_MAX, AQI_NO_DATA, aqiDeltaSym,
+  AQI_US_RESIDUAL_MASKS, AQI_EU_RESIDUAL_MASKS, AQ_HORIZON_HOURS,
   quantAqi, tempDeltaBucket, tempTodBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_TOD_BUCKETS,
 } from "@weather/protocol";
 import {
@@ -93,11 +94,20 @@ const ctxCount = (c: Column) => NPREV * (c.tod ? NTOD : 1);
 // Each headline's residual tables: the count-table name, the generated constant, the headline's
 // own column, and the three constituents that key it — in AQI_BASE_* bit order (pm2.5, ozone,
 // pm10), which is what makes `mask` here the same mask v2.ts derives from vars_mask.
-const RESIDUALS: { name: string; table: string; head: string; base: [string, string, string] }[] = [
+// `masks` is the set the codec actually codes as residuals (AQI_*_RESIDUAL_MASKS in entropy.ts).
+// The other presence masks fall back to the headline's own deltas, so their table rows are never
+// looked up — counting them was ~9 of every 14 residual increments spent on rows nothing reads.
+// The rows still exist in the shipped table, uniform, because the mask indexes it directly; a
+// mode set that grew without a regeneration would ship a uniform row, which the codebook digest
+// catches (V2_CODEBOOKS carries the mode sets alongside the weights).
+const RESIDUALS: {
+  name: string; table: string; head: string;
+  base: [string, string, string]; masks: ReadonlySet<number>;
+}[] = [
   { name: "usResidual", table: "AQI_RESIDUAL_WEIGHTS_BY_MASK_RES", head: "usAqi",
-    base: ["usPm25", "usO3", "usPm10"] },
+    base: ["usPm25", "usO3", "usPm10"], masks: AQI_US_RESIDUAL_MASKS },
   { name: "euResidual", table: "AQI_EU_RESIDUAL_WEIGHTS_BY_MASK_RES", head: "euAqi",
-    base: ["euPm25", "euO3", "euPm10"] },
+    base: ["euPm25", "euO3", "euPm10"], masks: AQI_EU_RESIDUAL_MASKS },
 ];
 const NMASK = 8; // 3-bit presence mask; row 0 is generated but never looked up
 
@@ -107,13 +117,13 @@ const NMASK = 8; // 3-bit presence mask; row 0 is generated but never looked up
 // sub-indices share a band from being decided by an arbitrary rule.
 const DOMINANT: {
   name: string; bootstrap: string; table: string;
-  head: (r: Row) => number | null; lower: readonly number[];
+  head: string;
   of: ((r: Row) => number | null)[];
 }[] = [
   {
     name: "usDominant",
     bootstrap: "AQ_DOMINANT_BOOTSTRAP_WEIGHTS", table: "AQ_DOMINANT_WEIGHTS",
-    head: (r) => r.us_aqi, lower: AQI_US_LOWER,
+    head: "usAqi",
     of: [
       (r) => r.us_aqi_pm2_5, (r) => r.us_aqi_ozone, (r) => r.us_aqi_pm10,
       (r) => r.us_aqi_nitrogen_dioxide, (r) => r.us_aqi_sulphur_dioxide,
@@ -123,7 +133,7 @@ const DOMINANT: {
   {
     name: "euDominant",
     bootstrap: "AQ_DOMINANT_EU_BOOTSTRAP_WEIGHTS", table: "AQ_DOMINANT_EU_WEIGHTS",
-    head: (r) => r.european_aqi, lower: AQI_EU_LOWER,
+    head: "euAqi",
     of: [
       (r) => r.european_aqi_pm2_5, (r) => r.european_aqi_ozone, (r) => r.european_aqi_pm10,
       (r) => r.european_aqi_nitrogen_dioxide, (r) => r.european_aqi_sulphur_dioxide,
@@ -173,7 +183,8 @@ export function counter(): CellCounter {
 
   return {
     tables, nSlots,
-    countCell(h, _startHour, pos, add) {
+    countCell(ctx, add) {
+      const { hourly: h, pos } = ctx;
       // Air quality rides a second corpus source; a cell the CAMS pull didn't cover has no AQ
       // columns at all and contributes nothing.
       if (!pos || !h.time?.length || !h.us_aqi) return;
@@ -181,19 +192,21 @@ export function counter(): CellCounter {
       const dataStart = Math.floor(Date.parse(`${h.time[0]}:00Z`) / 3600000);
       const dataEnd = dataStart + h.time.length;
       for (let res = 0; res < NRES; res++) {
-        const hpp = HOURS_PER_PERIOD[res];
-        const firstUtc = Math.ceil((dataStart + off) / 24) * 24 - off; // first local midnight
-        const n = Math.floor((dataEnd - firstUtc) / hpp);
+        // Periods anchored to the cell's first local midnight, aggregated once per cell
+        // and shared with every other counter that wants this anchoring.
+        const slice = ctx.atMidnight(res);
+        if (!slice) continue;
+        // Clamped to the horizon the WIRE encodes. Production stops every air-quality column at
+        // AQ_HORIZON_HOURS (aqPeriodCount in v2.ts), so periods past it are never emitted — and
+        // at fine resolutions they were most of what got counted, a 12-day window being three
+        // times the horizon. Training on them diluted the tables with lead times the encoder
+        // never carries, and cost the scan the same 3x.
+        const { hpp, start: firstUtc } = slice;
+        const n = Math.min(slice.n, Math.ceil(AQ_HORIZON_HOURS / hpp));
         if (n < 3) continue;
-        const windows: number[][] = [];
-        for (let p = 0; p < n; p++) {
-          const w: number[] = [];
-          for (let eh = firstUtc + p * hpp; eh < firstUtc + (p + 1) * hpp; eh++) w.push(eh - dataStart);
-          windows.push(w);
-        }
         // Aggregated exactly as production aggregates (maxOf over the period's hours), so the
         // deltas counted here are the deltas the encoder will emit.
-        const rows = rowsFromWindows(h, h.time, windows, off);
+        const rows = slice.rows;
         const tods = rows.map((_, p) => tempTodBucket((firstUtc + p * hpp) * 2 + hpp + off * 2));
 
         const quantized: Record<string, number[]> = {};
@@ -221,11 +234,12 @@ export function counter(): CellCounter {
           const NSYM = d.of.length + 1;      // pollutants + the explicit unknown
           const UNKNOWN = d.of.length;
           let prev: number | null = null;
+          const head = quantized[d.head];
           for (let p = 0; p < n; p++) {
             // A period whose headline has no reading carries no symbol at all and leaves the
             // chain where it was; one whose constituents are missing carries the unknown symbol,
             // which is itself a context for the next period.
-            if (quantAqi(d.head(rows[p]), d.lower) === AQI_NO_DATA) continue;
+            if (head[p] === AQI_NO_DATA) continue;
             const dom = dominantOf(rows, p, d.of) ?? UNKNOWN;
             add(offsets[d.name] + (prev === null ? 0 : prev + 1) * NSYM + dom);
             prev = dom;
@@ -238,16 +252,17 @@ export function counter(): CellCounter {
         // what lets a single pass fit every table the encoder might select.
         for (const r of RESIDUALS) {
           const a = quantized[r.head];
-          const base = r.base.map((b) => quantized[b]);
+          const [b0, b1, b2] = r.base.map((b) => quantized[b]);
           for (let p = 0; p < n; p++) {
             if (a[p] === AQI_NO_DATA) continue;
-            for (let mask = 1; mask < NMASK; mask++) {
+            const v0 = b0[p], v1 = b1[p], v2 = b2[p];
+            for (const mask of r.masks) {
+              // The subset maxima, written out rather than re-scanned per mask: the shipped mode
+              // sets only ever ask for pm2.5+ozone, ozone+pm10 and all three.
               let m = 0, ok = true;
-              for (let i = 0; i < base.length; i++) {
-                if (!(mask & (1 << i))) continue;
-                if (base[i][p] === AQI_NO_DATA) { ok = false; break; }
-                if (base[i][p] > m) m = base[i][p];
-              }
+              if (mask & 1) { if (v0 === AQI_NO_DATA) ok = false; else m = v0; }
+              if (ok && (mask & 2)) { if (v1 === AQI_NO_DATA) ok = false; else if (v1 > m) m = v1; }
+              if (ok && (mask & 4)) { if (v2 === AQI_NO_DATA) ok = false; else if (v2 > m) m = v2; }
               if (!ok) continue;
               // Clamped, not skipped: the headline is the max over sub-indices this mask may not
               // carry, so it is ≥ that max by construction — a negative here would be a
@@ -353,9 +368,20 @@ export async function derive(precounted?: Float64Array): Promise<DerivedTables> 
         share[sym] += counts[slot];
       }
     }
+    const unknownPct = (100 * share[NS - 1]) / Math.max(1, n);
     console.log(
       `  ${d.name.padEnd(11)} n=${n} mean=${(bits / Math.max(1, n)).toFixed(3)} b/period` +
-      `  [${share.map((c, i) => `${i}=${(100 * c / Math.max(1, n)).toFixed(1)}%`).join(" ")}]`);
+      `  [${share.map((c, i) => `${i}=${(100 * c / Math.max(1, n)).toFixed(1)}%`).join(" ")}]` +
+      `  unknown=${unknownPct.toFixed(1)}%`);
+    // The unknown symbol is for upstream returning a headline without its constituents, which the
+    // corpus barely sees. A large share means the constituents weren't LOADED rather than missing
+    // — the usual cause being a variable routed in EXTRA_SOURCE_VARS but left out of DERIVE_VARS,
+    // which reads as an absent column and counts as no attribution. Shipping that would cost
+    // ~10 b/period on a column measured at 0.25.
+    if (unknownPct > 5)
+      console.warn(
+        `  !! ${d.name}: ${unknownPct.toFixed(1)}% of periods have NO attribution — check that` +
+        ` every constituent it reads is in DERIVE_VARS, not only in EXTRA_SOURCE_VARS.`);
   }
 
   // Every residual mask, so the log shows both the ones the wire selects and the ones it rejects

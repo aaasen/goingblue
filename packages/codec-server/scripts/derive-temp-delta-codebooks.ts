@@ -66,23 +66,19 @@ export function counter(): CellCounter {
 
   return {
     tables, nSlots,
-    countCell(h, _startHour, pos, add) {
+    countCell(ctx, add) {
+      const { hourly: h, pos } = ctx;
       if (!pos || !h.time?.length || !h.temperature_2m) return;
       const off = Math.round(pos.lon / 15);
       const dataStart = Math.floor(Date.parse(`${h.time[0]}:00Z`) / 3600000);
       const dataEnd = dataStart + h.time.length;
       for (let res = 0; res < NRES; res++) {
-        const hpp = HOURS_PER_PERIOD[res];
-        const firstUtc = Math.ceil((dataStart + off) / 24) * 24 - off; // first local midnight
-        const n = Math.floor((dataEnd - firstUtc) / hpp);
-        if (n < 3) continue;
-        const windows: number[][] = [];
-        for (let p = 0; p < n; p++) {
-          const w: number[] = [];
-          for (let eh = firstUtc + p * hpp; eh < firstUtc + (p + 1) * hpp; eh++) w.push(eh - dataStart);
-          windows.push(w);
-        }
-        const rows = rowsFromWindows(h, h.time, windows, off);
+        // Periods anchored to the cell's first local midnight, aggregated once per cell
+        // and shared with every other counter that wants this anchoring.
+        const slice = ctx.atMidnight(res);
+        if (!slice) continue;
+        const { hpp, start: firstUtc, n } = slice;
+        const rows = slice.rows;
         if (rows.some((r) => r.temp_c == null)) continue;
         const q = rows.map((r) => Math.min(Math.max(Math.round(r.temp_c! + 100), 0), 255));
 

@@ -154,7 +154,7 @@ const CLOUD_DELTA_COLUMNS: {
 // the data runs out; a ragged edge inside it still has the ladder's no-data symbol to fall back
 // on. Periods past the clamp carry no AQ symbols at all and decode with the fields absent —
 // "not forecast", which is what the app draws as an empty cell.
-const AQ_HORIZON_HOURS = 96;
+export const AQ_HORIZON_HOURS = 96;
 const AQ_ANCHOR_BITS = VAR_BITS_V2[VARS_BIT.aqi]; // 5; every AQ column shares the width
 
 // How many leading periods an AQ column covers. Always ≥ 1 (the first period starts at offset 0).

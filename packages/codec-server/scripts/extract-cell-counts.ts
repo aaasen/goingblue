@@ -23,7 +23,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { REPO_ROOT } from "./corpus-db.ts";
-import { eachForecast, tableOffsets, type CellCounter } from "./derive-lib.ts";
+import { eachForecast, makeCellCtx, tableOffsets, type CellCounter } from "./derive-lib.ts";
 
 export const CELL_COUNTS_BIN = join(REPO_ROOT, "data", "cell-counts.bin");
 export const CELL_COUNTS_META = join(REPO_ROOT, "data", "cell-counts.meta.json");
@@ -85,8 +85,9 @@ async function main(): Promise<void> {
   const started = Date.now();
 
   await eachForecast((h, startHour, loc, pos, split) => {
+    const ctx = makeCellCtx(h, startHour, pos);
     for (let i = 0; i < segments.length; i++)
-      segments[i].counter.countCell(h, startHour, pos, adders[i]);
+      segments[i].counter.countCell(ctx, adders[i]);
     if (touched.length === 0) return;
     touched.sort((a, b) => a - b);
     const nnz = touched.length;

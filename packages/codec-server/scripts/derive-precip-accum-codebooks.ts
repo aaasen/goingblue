@@ -102,13 +102,13 @@ export function counter(): CellCounter {
 
   return {
     tables, nSlots,
-    countCell(h, startHour, _pos, add) {
+    countCell(ctx, add) {
       for (let resIdx = 0; resIdx < NRES; resIdx++) {
-        const hpp = HOURS_PER_PERIOD[resIdx];
-        const start = Math.floor(startHour / hpp) * hpp;
-        const n = Math.floor(h.time.length / hpp);
-        if (n < 2) continue;
-        const rows = aggregateHourly(h, h.time, n, resIdx, start);
+        // Periods anchored to the request hour, aggregated once per cell and shared with every
+        // other counter using this anchoring.
+        const slice = ctx.atRequest(resIdx);
+        if (!slice) continue;
+        const { n, rows } = slice;
         const periods: Period[] = rows.map((r) => toFullPeriod(r, VARS_MASK, "US"));
         // Class of the symbol the encoder would emit, not of the raw code — WMO2IDX maps an
         // unknown code to index 0, exactly as v2.ts's weathercode column does.

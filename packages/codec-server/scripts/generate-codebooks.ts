@@ -12,7 +12,10 @@
  * test/codebooks.test.ts fails until the protocol version is bumped (the deliberate manual step)
  * and the new codebook digest recorded.
  */
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+import { cpus, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { deriveCountsMulti, renderTable, type CellCounter, type DerivedTables } from "./derive-lib.ts";
@@ -43,9 +46,58 @@ for (const script of scripts) {
   mods.push({ script, derive: mod.derive, counter: mod.counter() });
 }
 
-console.log(`Scanning the corpus once for ${mods.length} derive scripts…`);
+// The scan is split across processes: counting is CPU-bound and embarrassingly parallel, since
+// every cell contributes independently to a flat vector of integer counts. Each shard sums its
+// own vectors and the parent adds them — integers add associatively, so the result is
+// bit-identical to a single-process run and cannot depend on how the shards interleave.
+//
+// Child processes rather than worker threads because the scripts are TypeScript: the children have
+// to come up under the same tsx loader, and worker_threads does not let us pass loader flags
+// through per worker. tsx's CLI is resolved from the package rather than taken from
+// process.argv[1] — tsx re-execs, so by the time this file is running argv[1] is this script, and
+// spawning that under bare node gets far enough to strip the types and then fails to resolve the
+// codebase's `.js` specifiers back to `.ts`. SQLite is read-only here and the DB is in WAL mode,
+// so concurrent readers are safe.
+const TSX_CLI = join(dirname(createRequire(import.meta.url).resolve("tsx/package.json")), "dist", "cli.mjs");
+const WORKERS = existsSync(TSX_CLI)
+  ? Number(process.env.DERIVE_WORKERS ?? "") || Math.max(1, cpus().length - 2)
+  : 1; // no loader to hand the children — fall back to scanning in this process
+const nSlots = mods.map((m) => m.counter.nSlots);
+
+async function scanSharded(): Promise<Float64Array[]> {
+  const totals = nSlots.map((n) => new Float64Array(n));
+  const tmp = mkdtempSync(join(tmpdir(), "derive-"));
+  try {
+    await Promise.all(Array.from({ length: WORKERS }, (_, i) => new Promise<void>((ok, fail) => {
+      const out = join(tmp, `shard-${i}.bin`);
+      const child = spawn(
+        process.execPath,
+        [TSX_CLI, join(dir, "derive-worker.ts"), String(i), String(WORKERS), out, ...scripts],
+        { stdio: ["ignore", "inherit", "inherit"] },
+      );
+      child.on("error", fail);
+      child.on("exit", (code) => {
+        if (code !== 0) return fail(new Error(`shard ${i} exited ${code}`));
+        // Each shard's file is its counters' Float64Arrays back to back, in `scripts` order.
+        const buf = readFileSync(out);
+        let off = 0;
+        for (let c = 0; c < totals.length; c++) {
+          const v = new Float64Array(buf.buffer, buf.byteOffset + off, nSlots[c]);
+          for (let k = 0; k < v.length; k++) totals[c][k] += v[k];
+          off += nSlots[c] * 8;
+        }
+        ok();
+      });
+    })));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+  return totals;
+}
+
+console.log(`Scanning the corpus once for ${mods.length} derive scripts across ${WORKERS} processes…`);
 const scanStarted = Date.now();
-const countVecs = await deriveCountsMulti(mods.map((m) => m.counter));
+const countVecs = WORKERS > 1 ? await scanSharded() : await deriveCountsMulti(mods.map((m) => m.counter));
 console.log(`(scan ${((Date.now() - scanStarted) / 1000).toFixed(1)}s)`);
 
 const tables: DerivedTables = {};

@@ -74,13 +74,13 @@ export function counter(): CellCounter {
 
   return {
     tables, nSlots,
-    countCell(h, startHour, _pos, add) {
+    countCell(ctx, add) {
       for (let resIdx = 0; resIdx < NRES; resIdx++) {
-        const hpp = HOURS_PER_PERIOD[resIdx];
-        const start = Math.floor(startHour / hpp) * hpp;
-        const n = Math.floor(h.time.length / hpp);
-        if (n < 2) continue;
-        const rows = aggregateHourly(h, h.time, n, resIdx, start);
+        // Periods anchored to the request hour, aggregated once per cell and shared with every
+        // other counter using this anchoring.
+        const slice = ctx.atRequest(resIdx);
+        if (!slice) continue;
+        const { n, rows } = slice;
         const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US", resIdx));
         const sp = SPEED_FIELDS.map((f, L) => periods.map((p) => qSpeed((p as any)[f], L)));
         for (let L = 0; L < NLEVEL; L++) {

@@ -47,7 +47,10 @@ export function counter(): CellCounter {
 
   return {
     tables, nSlots,
-    countCell(h, startHour, _pos, add) {
+    countCell(ctx, add) {
+      // Its own aggregation: one resolution, capped at 128 periods and anchored on the raw
+      // request hour, so neither shared slice fits.
+      const { hourly: h, startHour } = ctx;
       const n = Math.min(128, Math.floor(h.time.length / HOURS_PER_PERIOD[RES_IDX]));
       const periods = aggregateHourly(h, h.time, n, RES_IDX, startHour).map((r) =>
         toFullPeriod(r, CLOUD_MASK, "US", RES_IDX));
