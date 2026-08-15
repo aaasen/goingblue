@@ -183,14 +183,14 @@ const VAR_GROUPS: VarGroup[] = [
     desc: 'Summer smog, which peaks in the afternoon.',
   },
   {
-    value: 'no2', code: 'd', label: 'Nitrogen Dioxide', vars: CONFIGURABLE_VAR_GROUPS.d,
+    value: 'no2', code: 'd', label: 'NO₂ (Traffic)', vars: CONFIGURABLE_VAR_GROUPS.d,
     subgroup: AIR_SUBGROUP, scale: 'us',
-    desc: 'Traffic and combustion exhaust, worst near busy roads at rush hour.',
+    desc: 'Combustion exhaust, worst near busy roads at rush hour.',
   },
   {
-    value: 'so2', code: 'u', label: 'Sulphur Dioxide', vars: CONFIGURABLE_VAR_GROUPS.u,
+    value: 'so2', code: 'u', label: 'SO₂ (Industrial/Volcanic)', vars: CONFIGURABLE_VAR_GROUPS.u,
     subgroup: AIR_SUBGROUP, scale: 'us',
-    desc: 'Industrial and volcanic emissions.',
+    desc: 'Smelters, coal plants, ship fuel, and volcanic vents.',
   },
   {
     value: 'aqi-eu', code: 'e', label: 'AQI (Dominant pollutant)', vars: CONFIGURABLE_VAR_GROUPS.e,
@@ -214,14 +214,14 @@ const VAR_GROUPS: VarGroup[] = [
     desc: 'Summer smog, which peaks in the afternoon. This scale\'s most common worst pollutant.',
   },
   {
-    value: 'no2-eu', code: 'n', label: 'Nitrogen Dioxide', vars: CONFIGURABLE_VAR_GROUPS.n,
+    value: 'no2-eu', code: 'n', label: 'NO₂ (Traffic)', vars: CONFIGURABLE_VAR_GROUPS.n,
     subgroup: AIR_SUBGROUP, scale: 'eu',
-    desc: 'Traffic and combustion exhaust, worst near busy roads at rush hour.',
+    desc: 'Combustion exhaust, worst near busy roads at rush hour.',
   },
   {
-    value: 'so2-eu', code: 'q', label: 'Sulphur Dioxide', vars: CONFIGURABLE_VAR_GROUPS.q,
+    value: 'so2-eu', code: 'q', label: 'SO₂ (Industrial/Volcanic)', vars: CONFIGURABLE_VAR_GROUPS.q,
     subgroup: AIR_SUBGROUP, scale: 'eu',
-    desc: 'Industrial and volcanic emissions.',
+    desc: 'Smelters, coal plants, ship fuel, and volcanic vents.',
   },
 ];
 
