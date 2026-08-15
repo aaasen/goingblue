@@ -121,25 +121,47 @@ const uniq = (vars: string[]) => [...new Set(vars)];
 
 // Air quality rides the same corpus: `series` is keyed by source, and the AQ cells share the
 // weather lattice, so every AQ hour lines up with the same cell's weather hours for cross-column
-// conditioning. Ten variables is deliberate — Open-Meteo weights a call by max(1, nVars/10), so
-// the tenth is free and this set never needs a second pull. `us_aqi_pm2_5` is the smoke column
-// under consideration; `us_aqi_ozone` + `us_aqi` let the "max of the two sub-indices
-// reconstructs the headline" shortcut be checked; `european_aqi*` keeps the EU-scale variant
-// evaluable; `carbon_monoxide` is the biomass-burning tracer that dust and sea salt don't
-// confound; `aerosol_optical_depth` is the only one that sees smoke aloft. uv_index and
-// visibility are deliberately absent — the 2026-07-31 expansion already collected both.
-// The four european_aqi_* sub-indices below were added AFTER the first pull, for the columns the
-// wire can't ship yet: only european_aqi and european_aqi_pm2_5 came back in it, and the European
-// headline is driven by NO2/O3/SO2 rather than particulates ~77% of the time, so those three
-// can't be inferred from what's stored. planCollection fetches only missing series, so the
-// add-pass should issue one four-variable call per cell — weight max(1, 4/10) = 1, the same
-// ~132k units the original pull cost. Confirm the planned call count on a small run first: the
-// list is 14 variables now, and a whole-set refetch would weight 1.4 instead.
+// conditioning.
+//
+// The set covers both indices completely — every constituent of each, in both forms. US AQI is
+// built from six pollutants (PM2.5, PM10, O3, NO2, SO2, CO), the European index from five (the
+// same minus CO); each appears here as its raw concentration AND as its sub-index, because the
+// sub-index carries the regulatory breakpoint companding that made `us_aqi_pm2_5` encode at
+// 0.97 b/p against raw `us_aqi`'s 1.77, while the raw field is what any re-derivation (or a
+// different index's breakpoints) has to start from. Both headlines are stored so the
+// "headline = max of sub-indices" residual stays checkable on each scale. `dust` and
+// `aerosol_optical_depth` are not index constituents — they are the smoke tracers that sea salt
+// and haze don't confound, and AOD is the only field that sees smoke aloft. uv_index and
+// visibility are deliberately absent: the 2026-07-31 expansion already collected both.
+//
+// Pull history — nothing here is ever refetched, planCollection plans per missing series:
+//   2026-08-08  first pull, the 10 vars through `european_aqi_pm2_5`, 132,212 cells.
+//   2026-08-15  the four `european_aqi_*` constituents, for the reserved columns the wire can't
+//               ship yet — the EU headline is NO2/O3/SO2-driven ~77% of the time, so they can't
+//               be inferred from what was stored.
+//   2026-08-15  the raw O3/NO2/SO2 concentrations and the four missing `us_aqi_*` sub-indices,
+//               completing both indices in the same add-pass.
+// That leaves 11 variables missing per cell, so the add-pass is one call each — weight
+// max(1, 11/10) = 1.1, ~10% over what the 4-variable pass alone would have cost. Confirm the
+// planned call count with --dry-run before committing to a run: ~132k calls means the add-pass
+// worked, and a whole-set refetch would weight 2.1 across every cell instead.
 const AIR_QUALITY_HOURLY = [
-  "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi", "pm2_5", "pm10",
-  "carbon_monoxide", "aerosol_optical_depth", "dust", "european_aqi", "european_aqi_pm2_5",
-  "european_aqi_pm10", "european_aqi_nitrogen_dioxide", "european_aqi_ozone",
-  "european_aqi_sulphur_dioxide",
+  // US AQI constituents: raw concentration + sub-index, then the headline.
+  "pm2_5", "us_aqi_pm2_5",
+  "pm10", "us_aqi_pm10",
+  "ozone", "us_aqi_ozone",
+  "nitrogen_dioxide", "us_aqi_nitrogen_dioxide",
+  "sulphur_dioxide", "us_aqi_sulphur_dioxide",
+  "carbon_monoxide", "us_aqi_carbon_monoxide",
+  "us_aqi",
+  // European AQI: the same five pollutants (no CO), sub-indices + headline. The raw
+  // concentrations above are shared — CAMS reports one field per pollutant, and the two scales
+  // differ only in their breakpoints and averaging windows.
+  "european_aqi_pm2_5", "european_aqi_pm10", "european_aqi_ozone",
+  "european_aqi_nitrogen_dioxide", "european_aqi_sulphur_dioxide",
+  "european_aqi",
+  // Smoke tracers, not index constituents.
+  "dust", "aerosol_optical_depth",
 ];
 
 // The sources production will serve (see memory: model menu by center). `id` doubles as the
