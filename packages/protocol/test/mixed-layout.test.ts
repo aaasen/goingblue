@@ -16,11 +16,16 @@ import {
   type RequestContext,
   type FillLayout,
   beaufortMidKph,
+  aqiMid,
+  aqPeriodCount,
+  AQI_US_LOWER,
+  AQI_EU_LOWER,
 } from "../src/index.js";
 
-// Every variable (bit 8 is `gust`; bit 12 is `rain`; bit 13, formerly tmin, is reserved).
+// Every variable (bit 8 is `gust`; bit 12 is `rain`; bits 13..17 are air quality — bits 18..21
+// are reserved for European sub-indices with no corpus yet, so nothing encodes them).
 // periodAt sets no gust value, so the always-on gust column encodes as calm — harmless here.
-const ALL_VARS = (1 << 13) - 1;
+const ALL_VARS = (1 << 18) - 1;
 
 // Request: 2026-07-12 at 13:00 local, UTC-9. Detail mode unless a test says otherwise — its
 // path has the richest resolution mixes (1h/3h/6h/12h in one message).
@@ -50,6 +55,13 @@ function periodAt(i: number): Period {
     cloud_high: Math.round((i % 8) * 100 / 7),
     cloud_mid: Math.round(((i + 3) % 8) * 100 / 7),
     cloud_low: Math.round(((i + 5) % 8) * 100 / 7),
+    // Air quality, as ladder band representatives so they round-trip exactly. The headline stays
+    // at or above both US sub-indices, which is the relationship its residual coding assumes.
+    aqi: aqiMid(9 + (i % 6), AQI_US_LOWER),
+    aqi_pm25: aqiMid(4 + (i % 5), AQI_US_LOWER),
+    aqi_o3: aqiMid(3 + (i % 4), AQI_US_LOWER),
+    aqi_eu: aqiMid(5 + (i % 7), AQI_EU_LOWER),
+    aqi_eu_pm25: aqiMid(2 + (i % 5), AQI_EU_LOWER),
   };
 }
 
@@ -133,6 +145,30 @@ describe("mixed-layout round-trip encoding", () => {
       expect(d.cloud_high).toBe(p.cloud_high);
       expect(d.cloud_low).toBe(p.cloud_low);
     });
+  });
+
+  it("clamps air quality to the CAMS horizon on every mode's longest layout", () => {
+    // The clamp counts periods, not days, so a message whose spans change mid-column is where a
+    // period-count mismatch between the two sides would show up. Both sides derive it from
+    // periodHours alone; this asserts the decoded shape against that same derivation.
+    for (const mode of [MODE_DETAIL, MODE_AUTO, MODE_RANGE]) {
+      const { original, decoded } = roundTrip(maxFillSeq(mode), mode);
+      const nAq = aqPeriodCount(original.periodHours);
+      let start = 0;
+      original.periods[0].forEach((p, i) => {
+        const d = decoded.periods[0][i];
+        if (i < nAq) {
+          expect(start, `${mode}/${i} inside the horizon`).toBeLessThan(96);
+          expect(d.aqi, `${mode}/${i}`).toBe(p.aqi);
+          expect(d.aqi_eu, `${mode}/${i}`).toBe(p.aqi_eu);
+        } else {
+          expect(start, `${mode}/${i} past the horizon`).toBeGreaterThanOrEqual(96);
+          expect(d.aqi, `${mode}/${i}`).toBeUndefined();
+          expect(d.aqi_eu, `${mode}/${i}`).toBeUndefined();
+        }
+        start += original.periodHours[i];
+      });
+    }
   });
 
   it("round-trips every seq of every mode's path", () => {

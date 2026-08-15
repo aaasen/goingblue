@@ -49,6 +49,7 @@ import {
   mirrorLocations, modelElevations, openDb, presentVars, upsertLocationMeta, upsertSeries,
   type SeriesRow,
 } from "./corpus-db.ts";
+import { EXTRA_SOURCE_VARS } from "./derive-lib.ts";
 import { runIso, sampleWindows } from "./lattice.ts";
 import { API_KEY, ApiError, endpointFor, fetchWindow, type ApiKind } from "./om-fetch.ts";
 import { LOCATIONS, type Location } from "./locations.ts";
@@ -58,15 +59,22 @@ const BENCHMARKS_DIR = join(REPO_ROOT, "data", "benchmarks"); // timestamped HTM
 // ── Collection config ────────────────────────────────────────────────────────────
 
 // Protocol variable groups mirroring the app's selector (BuilderTab.tsx); the report's toggles.
-type GroupId = "clouds" | "highwind" | "freeze" | "precip";
-const GROUP_IDS: GroupId[] = ["clouds", "highwind", "freeze", "precip"];
+type GroupId =
+  | "clouds" | "highwind" | "freeze" | "precip"
+  | "aqi" | "smoke" | "ozone" | "aqiEu" | "smokeEu";
+const GROUP_IDS: GroupId[] = [
+  "clouds", "highwind", "freeze", "precip", "aqi", "smoke", "ozone", "aqiEu", "smokeEu",
+];
 const GROUP_LABEL: Record<GroupId, string> = {
   clouds: "Clouds", highwind: "High Altitude Winds", freeze: "Freezing Level",
   precip: "Precip Chance",
+  aqi: "Air Quality (US)", smoke: "Smoke (US)", ozone: "Ozone (US)",
+  aqiEu: "Air Quality (EU)", smokeEu: "Smoke (EU)",
 };
 // Short forms for the frontier chart, where each curve is labelled on the plot itself.
 const GROUP_SHORT: Record<GroupId, string> = {
   clouds: "Cloud", highwind: "Wind", freeze: "FL", precip: "Precip",
+  aqi: "AQI", smoke: "Smoke", ozone: "O3", aqiEu: "AQI-EU", smokeEu: "Smoke-EU",
 };
 
 // Open-Meteo hourly series behind the current wire format. The Historical Forecast API provides
@@ -120,9 +128,18 @@ const uniq = (vars: string[]) => [...new Set(vars)];
 // evaluable; `carbon_monoxide` is the biomass-burning tracer that dust and sea salt don't
 // confound; `aerosol_optical_depth` is the only one that sees smoke aloft. uv_index and
 // visibility are deliberately absent — the 2026-07-31 expansion already collected both.
+// The four european_aqi_* sub-indices below were added AFTER the first pull, for the columns the
+// wire can't ship yet: only european_aqi and european_aqi_pm2_5 came back in it, and the European
+// headline is driven by NO2/O3/SO2 rather than particulates ~77% of the time, so those three
+// can't be inferred from what's stored. planCollection fetches only missing series, so the
+// add-pass should issue one four-variable call per cell — weight max(1, 4/10) = 1, the same
+// ~132k units the original pull cost. Confirm the planned call count on a small run first: the
+// list is 14 variables now, and a whole-set refetch would weight 1.4 instead.
 const AIR_QUALITY_HOURLY = [
   "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi", "pm2_5", "pm10",
   "carbon_monoxide", "aerosol_optical_depth", "dust", "european_aqi", "european_aqi_pm2_5",
+  "european_aqi_pm10", "european_aqi_nitrogen_dioxide", "european_aqi_ozone",
+  "european_aqi_sulphur_dioxide",
 ];
 
 // The sources production will serve (see memory: model menu by center). `id` doubles as the
@@ -272,12 +289,23 @@ const GROUP_VARS: Record<GroupId, string[]> = {
   highwind: ["w500", "w600", "w700"],
   freeze: ["freeze"],
   precip: ["precip"],
+  aqi: ["aqi"],
+  smoke: ["aq_pm25"],
+  ozone: ["aq_o3"],
+  aqiEu: ["aqi_eu"],
+  smokeEu: ["aqi_eu_pm25"],
 };
 const maskOf = (vars: string[]) => vars.reduce((m, v) => m | (1 << VARS_BIT[v]), 0);
 const BASE_MASK = maskOf(BASE_VARS);
 
-// All variable-group combinations (bit i = GROUP_IDS[i]).
-const COMBOS = [...Array(1 << GROUP_IDS.length).keys()];
+// The variable selections the report draws: the base set, each group on its own, and everything
+// at once. This used to be the full power set, which the air-quality groups would have taken from
+// 16 selections to 512 — and the report never rendered more than these anyway (the frontier chart
+// and the mode comparison both walk base + `1 << i`, and the pooled line is explicitly the mean of
+// those, not of all combinations). Bitmask numbering is unchanged, so the "mode:combo" view keys
+// still address the same selections.
+const ALL_COMBO = (1 << GROUP_IDS.length) - 1;
+const COMBOS = [0, ...GROUP_IDS.map((_, i) => 1 << i), ALL_COMBO];
 const comboGroups = (c: number): GroupId[] => GROUP_IDS.filter((_, i) => c & (1 << i));
 const comboMask = (c: number) => BASE_MASK | maskOf(comboGroups(c).flatMap((g) => GROUP_VARS[g]));
 const DEFAULT_COMBO = 0; // base variables only (no optional groups)
@@ -792,7 +820,7 @@ async function report(args: Args): Promise<void> {
   }
 
   const forecasts: { location: string }[] = [];
-  const allMask = comboMask(COMBOS.length - 1); // every group on
+  const allMask = comboMask(ALL_COMBO); // every group on — a bitmask, not an index into COMBOS
   let versionBits = 0, headerBits = 0, skipped = 0, short = 0, uncovered = 0;
 
   // Per-stratum breakdown bookkeeping: the group of each fitted cell, in push order per mode
@@ -804,6 +832,13 @@ async function report(args: Args): Promise<void> {
   for (const cell of cells) {
     const raw = loadCell(db, REPORT_SOURCE.id, cell.locId, cell.windowStart);
     if (!raw) { skipped++; continue; }
+    // Air quality lives on the `cams` source over the same lattice cell, so the report's
+    // air-quality combos measure real values rather than an all-null column. A cell the CAMS pull
+    // didn't reach simply keeps those columns empty (see EXTRA_SOURCE_VARS in derive-lib.ts).
+    for (const [source, srcVars] of Object.entries(EXTRA_SOURCE_VARS)) {
+      const extra = loadCell(db, source, cell.locId, cell.windowStart, srcVars);
+      if (extra) for (const v of srcVars) if (extra[v]) raw[v] = extra[v];
+    }
     // The DB's time axis is the fixed window grid (loadCell), so the old short-record case is
     // structurally gone; a cell missing a whole base variable still gets skipped below.
     if (!baseComplete(raw)) { skipped++; continue; }

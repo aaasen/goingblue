@@ -283,6 +283,51 @@ const WIND_FADE_LO = 6;
 const WIND_FADE_HI = 10;
 const WIND_INK = '#000000';
 
+// ── Air quality ────────────────────────────────────────────────────────────
+// Two scales, two palettes, kept in separate tables on purpose: the US index puts its first break
+// at 50 and its worst category above 300, the European index breaks every 20 and calls anything
+// over 100 extremely poor. Running one through the other's thresholds would paint clean air
+// orange, or a genuinely bad day green.
+//
+// The OFFICIAL palettes, not approximations of them — these exact colors are what a reader has
+// already learned to read on AirNow, on the EEA's map, and in every phone weather app, and that
+// recognition is most of what the row is for. Boundaries, names and colors all come from the
+// publishers:
+//   US  — EPA/AirNow, https://docs.airnowapi.org/aq101 (breaks at 50/100/150/200/300)
+//   EU  — the EEA's European AQI, as documented in Google's Air Quality API reference
+//         (https://developers.google.com/maps/documentation/air-quality/laqis); breaks every 20
+//         to 100, matching Open-Meteo's european_aqi definition, which is what we decode.
+//
+// Unlike everything else on the meteogram these fills are fully saturated, so each band carries
+// the ink its own contrast demands rather than assuming black: both scales are legible dark-on-
+// light through band 4 and flip to white for the top two, every band clearing WCAG AA for normal
+// text (worst case: US "Unhealthy" red at 5.25:1 black, EU "Very poor" at 8.96:1 white).
+// Verified by computing relative luminance over the published hex values — recheck if a color
+// here is ever edited.
+interface AqBand { max: number; color: string; ink: string; name: string }
+const AQ_BANDS: Record<'us' | 'eu', AqBand[]> = {
+  us: [
+    { max: 50, color: '#00e400', ink: '#000000', name: 'Good' },
+    { max: 100, color: '#ffff00', ink: '#000000', name: 'Moderate' },
+    { max: 150, color: '#ff7e00', ink: '#000000', name: 'Unhealthy for sensitive groups' },
+    { max: 200, color: '#ff0000', ink: '#000000', name: 'Unhealthy' },
+    { max: 300, color: '#8f3f97', ink: '#ffffff', name: 'Very unhealthy' },
+    { max: Infinity, color: '#7e0023', ink: '#ffffff', name: 'Hazardous' },
+  ],
+  // Cyan-to-purple where the US ramp is green-to-maroon, which is the two scales' own doing and
+  // happens to be exactly what keeps the rows from reading as one scale when both are shown.
+  eu: [
+    { max: 20, color: '#50f0e6', ink: '#000000', name: 'Good' },
+    { max: 40, color: '#50ccaa', ink: '#000000', name: 'Fair' },
+    { max: 60, color: '#f0e641', ink: '#000000', name: 'Moderate' },
+    { max: 80, color: '#ff5050', ink: '#000000', name: 'Poor' },
+    { max: 100, color: '#960032', ink: '#ffffff', name: 'Very poor' },
+    { max: Infinity, color: '#7d2181', ink: '#ffffff', name: 'Extremely poor' },
+  ],
+};
+const aqBand = (value: number, scale: 'us' | 'eu'): AqBand =>
+  AQ_BANDS[scale].find((b) => value < b.max) ?? AQ_BANDS[scale][AQ_BANDS[scale].length - 1];
+
 function windAlpha(mph: number): number {
   const t = Math.min(1, Math.max(0, (mph - WIND_FADE_LO) / (WIND_FADE_HI - WIND_FADE_LO)));
   return Number((t * t * (3 - 2 * t)).toFixed(3)); // smoothstep, so both ends ease
@@ -671,6 +716,7 @@ function pressureLabel(level: 500 | 600 | 700): string {
 type RowKind =
   | 'clouds' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc' | 'wind-gust' | 'wind-dir'
   | 'cloud-high' | 'cloud-mid' | 'cloud-low'
+  | 'aqi' | 'aqi-pm25' | 'aqi-o3' | 'aqi-eu' | 'aqi-eu-pm25'
   | 'wind-500' | 'wind-600' | 'wind-700' | 'model' | 'section';
 
 interface Row {
@@ -687,6 +733,20 @@ const CLOUD_KEYS = {
   'cloud-low': 'cloud_low',
 } as const satisfies Record<string, keyof Period>;
 type CloudKind = keyof typeof CLOUD_KEYS;
+
+// The air-quality rows. Each names its scale in the label: the US and European indices are
+// different scales with different category edges, and a bare "42" on adjacent rows would invite
+// exactly the comparison that doesn't hold. Order runs headline first, then its components, US
+// before Europe — the same order the wire encodes them in.
+const AQ_KEYS = {
+  'aqi': { field: 'aqi', label: 'AQI (US)', scale: 'us' },
+  'aqi-pm25': { field: 'aqi_pm25', label: 'Smoke (US)', scale: 'us' },
+  'aqi-o3': { field: 'aqi_o3', label: 'Ozone (US)', scale: 'us' },
+  'aqi-eu': { field: 'aqi_eu', label: 'AQI (EU)', scale: 'eu' },
+  'aqi-eu-pm25': { field: 'aqi_eu_pm25', label: 'Smoke (EU)', scale: 'eu' },
+} as const satisfies Record<string, { field: keyof Period; label: string; scale: 'us' | 'eu' }>;
+type AqKind = keyof typeof AQ_KEYS;
+const AQ_KINDS = Object.keys(AQ_KEYS) as AqKind[];
 
 function buildRows(periods: Period[], u: Units): Row[] {
   const rows: Row[] = [];
@@ -707,6 +767,17 @@ function buildRows(periods: Period[], u: Units): Row[] {
     if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.WIND, label: `Wind ${wU}` });
     if (has((p) => p.wind_gust_kph)) rows.push({ kind: 'wind-gust', height: ROW_H.WIND, label: `Gust ${wU}` });
     if (has((p) => p.wind_sfc_dir)) rows.push({ kind: 'wind-dir', height: ROW_H.DIR, label: 'Dir' });
+  }
+
+  // Air quality is a surface reading, so it follows the surface block and comes before the
+  // upper-air sections. Any subset of the five can be present — they are five separate request
+  // variables — and the rows stop at the CAMS horizon, roughly four days out, past which every
+  // cell is empty rather than zero.
+  const aqRows = AQ_KINDS.filter((k) => has((p) => p[AQ_KEYS[k].field]));
+  if (aqRows.length) {
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Air quality' });
+    for (const kind of aqRows)
+      rows.push({ kind, height: ROW_H.WIND, label: AQ_KEYS[kind].label });
   }
 
   // Freezing level is an altitude, not a surface reading — it heads the upper-air sections with
@@ -1217,6 +1288,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
   // day. Everything above reads as text or glyphs and is unharmed by the tint.
   const TINTABLE_STOP = new Set<RowKind>([
     'wind-sfc', 'wind-gust', 'wind-dir', 'freeze', 'cloud-high', 'cloud-mid', 'cloud-low',
+    ...AQ_KINDS, // air-quality cells carry their category as a fill, same as the wind ribbon
     'wind-500', 'wind-600', 'wind-700', 'model',
   ]);
   const nightBottom = (() => {
@@ -1548,6 +1620,25 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
           // Rows carrying an inline arrow split the (now shorter) row evenly above and below center.
           els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, arrow ? mid - 6 : mid, fonts.wind, WIND_INK));
           els.push(centerText(`wa${ri}-${i}`, arrow, cx, mid + 6, fonts.data, WIND_INK));
+        });
+        break;
+      }
+
+      case 'aqi': case 'aqi-pm25': case 'aqi-o3': case 'aqi-eu': case 'aqi-eu-pm25': {
+        const { field, scale } = AQ_KEYS[row.kind];
+        periods.forEach((p, i) => {
+          const v = p[field] as number | undefined;
+          const cx = colCenter(i);
+          // Past the CAMS horizon there is no forecast at all, which is a different thing from
+          // clean air — so those columns get the empty-cell dash and no colored ground, exactly
+          // like a wind row with nothing in it.
+          if (v == null) { els.push(centerText(`aq${ri}-${i}`, '—', cx, mid, fonts.wind, C.nil)); return; }
+          const band = aqBand(v, scale);
+          els.push(
+            <Rect key={`aqbg${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W} height={row.height}
+              color={band.color} />,
+          );
+          els.push(centerText(`aq${ri}-${i}`, String(Math.round(v)), cx, mid, fonts.wind, band.ink));
         });
         break;
       }
@@ -2119,6 +2210,15 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
   if (has((q) => q.cloud_high)) rows.push(['Cloud high (>8km)', p.cloud_high != null ? `${p.cloud_high}%` : '—']);
   if (has((q) => q.cloud_mid)) rows.push(['Cloud mid (3–8km)', p.cloud_mid != null ? `${p.cloud_mid}%` : '—']);
   if (has((q) => q.cloud_low)) rows.push(['Cloud low (<3km)', p.cloud_low != null ? `${p.cloud_low}%` : '—']);
+  // Air quality reads out with its category named — the number alone doesn't say whether to go
+  // outside, and the two scales name their categories differently at the same value. A period
+  // past the CAMS horizon has no value at all and says so.
+  for (const kind of AQ_KINDS) {
+    const { field, label, scale } = AQ_KEYS[kind];
+    if (!has((q) => q[field])) continue;
+    const v = p[field] as number | undefined;
+    rows.push([label, v != null ? `${Math.round(v)} · ${aqBand(v, scale).name}` : 'Not forecast']);
+  }
 
   return (
     <View style={styles.detailPanel}>

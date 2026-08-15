@@ -41,8 +41,21 @@ export const VARS_BIT: Record<string, number> = {
   ccm: 10,   // mid cloud cover
   ccl: 11,   // low cloud cover
   rain: 12,  // liquid precipitation (rain + showers), mm
-  // bit 13 formerly carried tmin (min temperature), removed when temp became a single
-  // representative sample per period — reserved for the next new variable.
+  // Air quality (CAMS), on two incompatible index scales — see the AQI ladders in entropy.ts.
+  // Every one of these is model-independent: the `m:` center selection does not apply, and they
+  // reach only ~4 days (AQ_HORIZON_HOURS in v2.ts). Bit 13 is the slot tmin left when temp
+  // became a single representative sample per period.
+  aq_pm25: 13,     // US AQI PM2.5 sub-index — the smoke column
+  aq_o3: 14,       // US AQI ozone sub-index
+  aqi: 15,         // US AQI, the headline index (max over every sub-index)
+  aqi_eu: 16,      // European AQI, the headline index
+  aqi_eu_pm25: 17, // European AQI PM2.5 sub-index (a 24h running mean upstream, so it's smooth)
+  // Bits 18..21 are RESERVED for the remaining European sub-indices, with the request codes
+  // they will claim: pm10 (18, `1`), no2 (19, `n`), ozone (20, `3`), so2 (21, `q`). Their
+  // codebooks can't be derived until the corpus carries them — the CAMS pull collected only
+  // european_aqi and european_aqi_pm2_5 — and they matter, since the European headline is
+  // driven by NO2/O3/SO2 rather than particulates ~77% of the time. Held open here so adding
+  // them after the next pull doesn't reshuffle the columns already in the field.
 };
 
 // Core forecast variables are implicit in every request. The request's `v:` token only carries
@@ -53,13 +66,27 @@ export const ALWAYS_VARS_MASK = ALWAYS_VARS.reduce(
   0,
 );
 
-// Single-character request codes for the user-configurable variable groups.
+// Single-character request codes for the user-configurable variable groups. A group is however
+// many protocol variables one toggle turns on together: the cloud and upper-wind toggles cover
+// three each, while every air-quality index is its own toggle — the pollutants behave differently
+// enough (smoke vs photochemical smog) that a reader wants them separately, and each costs its own
+// share of the message budget. The codes reserved for the not-yet-derivable European sub-indices
+// are listed with their bits in VARS_BIT above.
 export const CONFIGURABLE_VAR_GROUPS = {
   p: ["precip"],
   c: ["cch", "ccm", "ccl"],
   w: ["w500", "w600", "w700"],
   f: ["freeze"],
+  a: ["aqi"],           // US Air Quality Index
+  s: ["aq_pm25"],       // smoke
+  o: ["aq_o3"],         // ozone
+  e: ["aqi_eu"],        // European AQI
+  "2": ["aqi_eu_pm25"], // European PM2.5 sub-index
 } as const;
+
+// The request codes above, as a character class for the compact `v:` token (`v:aso`). Derived
+// rather than written out so a new group can't be added without the parser accepting it.
+export const VAR_GROUP_CODES = Object.keys(CONFIGURABLE_VAR_GROUPS).join("");
 
 export const WMO_BITS = 5;
 

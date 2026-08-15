@@ -103,6 +103,9 @@ const OPTIONAL_VARIABLE_ICONS = [
   { vars: ['cch', 'ccm', 'ccl'], symbol: '☁️', label: 'Detailed clouds' },
   { vars: ['w500', 'w600', 'w700'], symbol: '💨', label: 'High altitude winds' },
   { vars: ['freeze'], symbol: '🌡️', label: 'Freezing level' },
+  // One icon for the whole air-quality block: which index a request picked is the meteogram's
+  // business, and five near-identical chips on a cache row would say less than one.
+  { vars: ['aqi', 'aq_pm25', 'aq_o3', 'aqi_eu', 'aqi_eu_pm25'], symbol: '🌫️', label: 'Air quality' },
 ];
 
 function variableIconsForMask(mask: number) {

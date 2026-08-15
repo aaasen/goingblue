@@ -47,6 +47,18 @@ export interface Period {
 
   // Visibility in kilometers.
   vis_km?: number;        // 0–15 km
+
+  // Air quality indices, worst value over the period. Two scales that share no arithmetic: the
+  // US EPA index runs 0–500 with 50/100/150/200/300 category edges, the European index runs
+  // 0–100+ with edges every 20. A 40 is "good" on one and "moderate" on the other, so they must
+  // never share a palette or a threshold. Each is present only when its own vars_mask bit is set
+  // AND the period falls inside the CAMS horizon (AQ_HORIZON_HOURS in v2.ts) — periods past it
+  // carry no air-quality data at all, so `undefined` here means "not forecast", not "clean".
+  aqi?: number;          // US AQI, headline (the max over its sub-indices)
+  aqi_pm25?: number;     // US AQI PM2.5 sub-index — smoke
+  aqi_o3?: number;       // US AQI ozone sub-index
+  aqi_eu?: number;       // European AQI, headline
+  aqi_eu_pm25?: number;  // European AQI PM2.5 sub-index
 }
 
 // Decoded forecast message. Each protocol version defines its own header format;

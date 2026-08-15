@@ -6,8 +6,13 @@
  *
  *   pnpm exec tsx scripts/verify-container.ts --codec-url http://localhost:9090 [--port 8199]
  *
- * Start the container under test with its upstream pointed at this script, e.g.:
- *   docker run -p 9090:8081 -e OPEN_METEO_BASE_URL=http://host.docker.internal:8199 codec:v1
+ * Start the container under test with BOTH upstreams pointed at this script — air quality comes
+ * from a second Open-Meteo API, and a container that still has the live one configured would
+ * fetch real air quality and encode something the goldens can't match:
+ *   docker run -p 9090:8081 \
+ *     -e OPEN_METEO_BASE_URL=http://host.docker.internal:8199 \
+ *     -e AIR_QUALITY_BASE_URL=http://host.docker.internal:8199 codec:v1
+ * The fixture server keys on path+query, so both APIs share it without collision.
  */
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";

@@ -11,6 +11,8 @@ import {
   WEATHERCODE_CLASS, CLASS_BOOKS, CODEBOOK_CLASSES, type ClassBooks,
   encodeWindSpeedDelta, decodeWindSpeedDelta, quantWind, beaufortMidKph, CALM_MAX_FORCE,
   encodeFreezeDelta, decodeFreezeDelta,
+  encodeAqiDelta, decodeAqiDelta, quantAqi, aqiMid,
+  AQI_US_LOWER, AQI_EU_LOWER, AQI_RESIDUAL_MAX,
   encodeTempDelta, decodeTempDelta, tempTodBucket,
   TEMP_DELTA_MIN, TEMP_DELTA_MAX,
   makeBitSink, makeBitSource, type CodeBook, type DeltaCodec,
@@ -67,8 +69,10 @@ const HEADER_CHARS = nCharsForBits(V2_HEADER_BITS); // packed-header chars (excl
 // wind: 8 = 5-bit speed (extended Beaufort force 0..17) + 3-bit direction (raw-width
 // equivalent; both entropy-coded).
 // gust: 5 = speed only, no direction (bit 8, formerly cloud_total).
-export const VAR_BITS_V2 = [3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6];
+// air quality: 5 bits each — a 26-symbol ladder (0 = no data, 1..25 bands), both scales.
+export const VAR_BITS_V2 = [3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6, 5, 5, 5, 5, 5];
 //                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^g ^cch ^ccm ^ccl ^rain
+//                                                    ^aq_pm25 ^aq_o3 ^aqi ^aqi_eu ^aqi_eu_pm25
 
 const TEMP_OFFSET = 100;
 
@@ -131,6 +135,61 @@ const CLOUD_DELTA_COLUMNS: {
   { bit: VARS_BIT.ccm, field: "cloud_mid", codecOf: (bk) => bk.cloudMidDelta },
   { bit: VARS_BIT.ccl, field: "cloud_low", codecOf: (bk) => bk.cloudLowDelta },
 ];
+
+// ── Air quality ────────────────────────────────────────────────────────────────
+// Five columns over two incompatible index scales (see the AQI ladders in entropy.ts), all from
+// CAMS, all model-independent — the `m:` center selection does not apply to any of them.
+//
+// THE 4-DAY CLAMP. CAMS forecasts 5 days from an init at most 12h old, so the data reaches ~4.5
+// days from a request; the fill window reaches 12. Rather than pay for a per-message horizon
+// field, every AQ column simply stops after the periods whose START is within AQ_HORIZON_HOURS of
+// the first period's start — derived from the layout, which both sides already have, so the clamp
+// costs zero wire bits (the same free-clamp idea as the GEM availability clamp in the server's
+// buildLayoutMessage). 96h is deliberately inside the ~108h worst case, so the clamp bites before
+// the data runs out; a ragged edge inside it still has the ladder's no-data symbol to fall back
+// on. Periods past the clamp carry no AQ symbols at all and decode with the fields absent —
+// "not forecast", which is what the app draws as an empty cell.
+const AQ_HORIZON_HOURS = 96;
+const AQ_ANCHOR_BITS = VAR_BITS_V2[VARS_BIT.aqi]; // 5; every AQ column shares the width
+
+// How many leading periods an AQ column covers. Always ≥ 1 (the first period starts at offset 0).
+export function aqPeriodCount(periodHours: number[]): number {
+  let start = 0;
+  let n = 0;
+  for (const h of periodHours) {
+    if (start >= AQ_HORIZON_HOURS) break;
+    n++;
+    start += h;
+  }
+  return n;
+}
+
+// The four plain anchor+delta AQ columns, in body order. The US headline (bit 15) is NOT here:
+// it conditions on the two US sub-indices, so it encodes after every column it might read.
+// `tod` marks the columns whose driver is diurnal — ozone is photochemical and the headline
+// follows whichever sub-index leads it — and is ignored by the others' books.
+const AQ_DELTA_COLUMNS: {
+  bit: number;
+  field: "aqi_pm25" | "aqi_o3" | "aqi_eu" | "aqi_eu_pm25";
+  lower: readonly number[];
+  bookOf(bk: ClassBooks): (res: number, tod: number, prevDelta: number | null) => CodeBook;
+}[] = [
+  { bit: VARS_BIT.aq_pm25, field: "aqi_pm25", lower: AQI_US_LOWER,
+    bookOf: (bk) => (res, _tod, prev) => bk.aqPm25Book(res, prev) },
+  { bit: VARS_BIT.aq_o3, field: "aqi_o3", lower: AQI_US_LOWER,
+    bookOf: (bk) => (res, tod, prev) => bk.aqO3Book(res, tod, prev) },
+  { bit: VARS_BIT.aqi_eu, field: "aqi_eu", lower: AQI_EU_LOWER,
+    bookOf: (bk) => (res, tod, prev) => bk.aqiEuBook(res, tod, prev) },
+  { bit: VARS_BIT.aqi_eu_pm25, field: "aqi_eu_pm25", lower: AQI_EU_LOWER,
+    bookOf: (bk) => (res, _tod, prev) => bk.aqiEuPm25Book(res, prev) },
+];
+
+// Whether the US headline can be coded as a residual: both sub-indices are on the wire, so both
+// sides can take max(pm25, o3) as the baseline it almost always equals. With either missing the
+// residual is worse than the headline's own deltas (measured 2.21/2.72 vs 1.27 b/period), so the
+// column falls back — the same context-availability switch freezeDeltaBook and sfcSpeedBook use.
+const aqiHasResidualContext = (varsMask: number): boolean =>
+  (varsMask & (1 << VARS_BIT.aq_pm25)) !== 0 && (varsMask & (1 << VARS_BIT.aq_o3)) !== 0;
 
 // Value columns (precip chance, snow, rain), in body (column-major) order: each cell's quantized
 // value is entropy-coded directly — no anchor, no deltas — under a codebook keyed by (the period's
@@ -221,6 +280,7 @@ function reader(bits: number[], books: ClassBooks) {
     sym: (book: CodeBook): number => src.sym(book),
     windSpeedDelta: (book: CodeBook): number => decodeWindSpeedDelta(src, book),
     freezeDelta: (book: CodeBook): number => decodeFreezeDelta(src, book),
+    aqiDelta: (book: CodeBook): number => decodeAqiDelta(src, book),
     delta: (codec: DeltaCodec): number => codec.decode(src),
     tempDelta: (book: CodeBook): number => decodeTempDelta(src, book),
     assertDone: (): void => src.assertDone(),
@@ -344,6 +404,67 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
       }
     }
     mark(BIT_NAME[col.bit], before);
+  }
+
+  // Air quality: per model, a ladder anchor on the first period then period-over-period deltas,
+  // stopping at the 4-day clamp (aqPeriodCount). Each delta's table is keyed by the arriving
+  // period's resolution, its time-of-day bucket where the column's driver is diurnal, and the
+  // previous delta in the same column. Quantized values (not the raw index) are kept so the
+  // headline column below can take its residual against exactly what the decoder will reconstruct.
+  const nAq = aqPeriodCount(msg.periodHours);
+  const aqQuant = new Map<number, number[][]>();
+  for (const col of AQ_DELTA_COLUMNS) {
+    if (!(msg.vars_mask & (1 << col.bit))) continue;
+    before = em.cost;
+    const book = col.bookOf(books);
+    const q: number[][] = msg.periods.map((rows) =>
+      rows.slice(0, nAq).map((c) => quantAqi(c[col.field], col.lower)));
+    for (let m = 0; m < nModels; m++) {
+      em.raw(q[m][0], AQ_ANCHOR_BITS);
+      let prevDelta: number | null = null;
+      for (let p = 1; p < nAq; p++) {
+        const delta = q[m][p] - q[m][p - 1];
+        encodeAqiDelta(em, book(res[p], tod[p], prevDelta), delta);
+        prevDelta = delta;
+      }
+    }
+    aqQuant.set(col.bit, q);
+    mark(BIT_NAME[col.bit], before);
+  }
+
+  // The US headline. With both sub-indices on the wire it is the residual against their max —
+  // zero 98.5% of the time, since the headline IS that max unless a pollutant the wire doesn't
+  // carry (PM10, CO, NO2, SO2) is leading. The residual is non-negative by that definition; a
+  // negative one can only come from a band-edge rounding artifact, or from upstream returning a
+  // headline of nothing while a sub-index has a value, and clamping it to 0 resolves both to
+  // "the headline equals the worst sub-index we know about" — the best available estimate rather
+  // than a fabricated clean reading. Without both sub-indices the column codes its own deltas.
+  if (msg.vars_mask & (1 << VARS_BIT.aqi)) {
+    before = em.cost;
+    const q: number[][] = msg.periods.map((rows) =>
+      rows.slice(0, nAq).map((c) => quantAqi(c.aqi, AQI_US_LOWER)));
+    if (aqiHasResidualContext(msg.vars_mask)) {
+      const pm = aqQuant.get(VARS_BIT.aq_pm25)!;
+      const o3 = aqQuant.get(VARS_BIT.aq_o3)!;
+      for (let m = 0; m < nModels; m++) {
+        for (let p = 0; p < nAq; p++) {
+          const base = Math.max(pm[m][p], o3[m][p]);
+          em.sym(books.aqiResidualBook(res[p]),
+            Math.min(Math.max(q[m][p] - base, 0), AQI_RESIDUAL_MAX));
+        }
+      }
+    } else {
+      for (let m = 0; m < nModels; m++) {
+        em.raw(q[m][0], AQ_ANCHOR_BITS);
+        let prevDelta: number | null = null;
+        for (let p = 1; p < nAq; p++) {
+          const delta = q[m][p] - q[m][p - 1];
+          encodeAqiDelta(em, books.aqiDeltaBook(res[p], tod[p], prevDelta), delta);
+          prevDelta = delta;
+        }
+      }
+    }
+    mark(BIT_NAME[VARS_BIT.aqi], before);
   }
 
   // Value columns (precip chance, snow, rain): each cell's quantized value entropy-coded under a
@@ -643,6 +764,56 @@ function decodeBody(
       for (let p = 1; p < nPeriods; p++) {
         quant += rd.delta(codec);
         periods[m][p][col.field] = Math.round((quant * 100) / 7);
+      }
+    }
+  }
+
+  // Air quality mirrors buildBody exactly, including the 4-day clamp: only the first
+  // aqPeriodCount periods carry symbols, and the periods past it are left without the fields —
+  // absent means "not forecast", never "clean". A decoded no-data symbol is likewise left absent.
+  const nAq = aqPeriodCount(periodHours);
+  const aqQuant = new Map<number, number[][]>();
+  for (const col of AQ_DELTA_COLUMNS) {
+    if (!(vars_mask & (1 << col.bit))) continue;
+    const book = col.bookOf(books);
+    const q: number[][] = Array.from({ length: nModels }, () => new Array<number>(nAq).fill(0));
+    for (let m = 0; m < nModels; m++) {
+      let quant = rd.int(AQ_ANCHOR_BITS);
+      q[m][0] = quant;
+      periods[m][0][col.field] = aqiMid(quant, col.lower);
+      let prevDelta: number | null = null;
+      for (let p = 1; p < nAq; p++) {
+        const delta = rd.aqiDelta(book(res[p], tod[p], prevDelta));
+        quant += delta;
+        q[m][p] = quant;
+        periods[m][p][col.field] = aqiMid(quant, col.lower);
+        prevDelta = delta;
+      }
+    }
+    aqQuant.set(col.bit, q);
+  }
+
+  if (vars_mask & (1 << VARS_BIT.aqi)) {
+    if (aqiHasResidualContext(vars_mask)) {
+      const pm = aqQuant.get(VARS_BIT.aq_pm25)!;
+      const o3 = aqQuant.get(VARS_BIT.aq_o3)!;
+      for (let m = 0; m < nModels; m++) {
+        for (let p = 0; p < nAq; p++) {
+          const resid = rd.sym(books.aqiResidualBook(res[p]));
+          periods[m][p].aqi = aqiMid(Math.max(pm[m][p], o3[m][p]) + resid, AQI_US_LOWER);
+        }
+      }
+    } else {
+      for (let m = 0; m < nModels; m++) {
+        let quant = rd.int(AQ_ANCHOR_BITS);
+        periods[m][0].aqi = aqiMid(quant, AQI_US_LOWER);
+        let prevDelta: number | null = null;
+        for (let p = 1; p < nAq; p++) {
+          const delta = rd.aqiDelta(books.aqiDeltaBook(res[p], tod[p], prevDelta));
+          quant += delta;
+          periods[m][p].aqi = aqiMid(quant, AQI_US_LOWER);
+          prevDelta = delta;
+        }
       }
     }
   }

@@ -28,7 +28,20 @@ export const DERIVE_VARS: readonly string[] = [
   "wind_speed_600hPa", "wind_direction_600hPa",
   "wind_speed_700hPa", "wind_direction_700hPa",
   "cloud_cover", "cloud_cover_high", "cloud_cover_mid", "cloud_cover_low",
+  // Air quality — served from a different corpus source, see EXTRA_SOURCE_VARS below.
+  "us_aqi", "us_aqi_pm2_5", "us_aqi_ozone", "european_aqi", "european_aqi_pm2_5",
 ];
+
+// Variables that live on a SECOND corpus source rather than DERIVE_SOURCE. Air quality was
+// collected under `cams`, whose cells share the weather lattice cell-for-cell (same location, same
+// window), so every AQ hour lines up with the same cell's weather hours and both can be counted in
+// one pass. eachForecast routes each requested variable to the source that has it and merges the
+// results into one HourlyData — the Open-Meteo names don't collide across the two APIs. A cell with
+// no `cams` row just comes back without the AQ columns, and the AQ counter skips it.
+export const EXTRA_SOURCE_VARS: Record<string, readonly string[]> = {
+  cams: ["us_aqi", "us_aqi_pm2_5", "us_aqi_ozone", "european_aqi", "european_aqi_pm2_5"],
+};
+const EXTRA_SOURCE_VAR_SET = new Set(Object.values(EXTRA_SOURCE_VARS).flat());
 
 // ── Wind quantization (must match v2.ts) ────────────────────────────────────────
 // Every wind speed column quantizes to the extended Beaufort scale (forces 0..17): band lower
@@ -144,14 +157,28 @@ export async function eachForecast(
   // Site elevation for the precip-phase correction: the elevation the API downscaled the cell's
   // temperature to (grid-snap or pinned), same input production hands adjustPrecipPhase.
   const elevs = modelElevations(db, DERIVE_SOURCE);
+  // Split the requested variables by which source carries them, once, outside the cell loop. A
+  // source nobody asked for is never queried, so scripts that read no air quality pay nothing.
+  const primaryVars = vars?.filter((v) => !EXTRA_SOURCE_VAR_SET.has(v)) ?? null;
+  const extraLoads = Object.entries(EXTRA_SOURCE_VARS)
+    .map(([source, srcVars]) => ({
+      source,
+      vars: vars ? srcVars.filter((v) => vars.includes(v)) : [...srcVars],
+    }))
+    .filter((e) => e.vars.length > 0);
   let cells = 0;
   const seen = new Set<string>();
   for (const { locationId, windowStart } of listCells(db, DERIVE_SOURCE)) {
     const loc = locs.get(locationId);
     if (!loc) continue;
     if (split === "train" && loc.split !== "train") continue; // eval/favorites: never trained on
-    const raw = loadCell(db, DERIVE_SOURCE, locationId, windowStart, vars);
+    const raw = loadCell(db, DERIVE_SOURCE, locationId, windowStart, primaryVars);
     if (!raw) continue;
+    for (const e of extraLoads) {
+      const extra = loadCell(db, e.source, locationId, windowStart, e.vars);
+      if (!extra) continue;
+      for (const v of e.vars) if (extra[v]) raw[v] = extra[v];
+    }
     const hourly = adjustPrecipPhase(raw, elevs.get(locationId) ?? loc.elev_m ?? null);
     cells++;
     seen.add(locationId);

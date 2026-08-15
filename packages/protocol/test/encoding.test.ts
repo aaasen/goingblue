@@ -20,6 +20,10 @@ import {
   SNOW_K,
   RAIN_K,
   beaufortMidKph,
+  quantAqi,
+  aqiMid,
+  AQI_US_LOWER,
+  AQI_EU_LOWER,
 } from "../src/index.js";
 
 // Wind speeds quantize to extended Beaufort forces; tests express speeds as forces and expect
@@ -31,10 +35,15 @@ const bmid = beaufortMidKph;
 const qSnow = (cm: number) => expandSqrt(compandSqrt(cm, SNOW_K, ACCUM_BITS), SNOW_K);
 const qRain = (mm: number) => expandSqrt(compandSqrt(mm, RAIN_K, ACCUM_BITS), RAIN_K);
 
-// Every v2 variable (bit 12 is `rain`, 6-bit liquid precip; bit 13, formerly tmin, is reserved).
+// Every v2 variable: bits 0..12 weather, 13..17 air quality (bits 18..21 are reserved for the
+// European sub-indices the corpus can't train yet, so nothing encodes them).
 const ALL_VARS =
   (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) |
-  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 12);
+  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 12) |
+  (1 << 13) | (1 << 14) | (1 << 15) | (1 << 16) | (1 << 17);
+const AQ_VARS =
+  (1 << VARS_BIT.aq_pm25) | (1 << VARS_BIT.aq_o3) | (1 << VARS_BIT.aqi) |
+  (1 << VARS_BIT.aqi_eu) | (1 << VARS_BIT.aqi_eu_pm25);
 
 const PERIOD: Period = {
   weathercode: 73,
@@ -55,7 +64,19 @@ const PERIOD: Period = {
   cloud_high: 60,
   cloud_mid: 40,
   cloud_low: 20,
+  // Air quality. The headline sits at or above both sub-indices' bands, which is what the wire
+  // assumes when it codes it as a residual against their max.
+  aqi: 118,
+  aqi_pm25: 96,
+  aqi_o3: 42,
+  aqi_eu: 55,
+  aqi_eu_pm25: 31,
 };
+
+// Air-quality values decode to their ladder band's representative, so expectations go through
+// the same quantization rather than the raw input (as with qSnow/qRain above).
+const qUs = (v: number) => aqiMid(quantAqi(v, AQI_US_LOWER), AQI_US_LOWER);
+const qEu = (v: number) => aqiMid(quantAqi(v, AQI_EU_LOWER), AQI_EU_LOWER);
 
 function popcount(n: number): number {
   let c = 0;
@@ -192,9 +213,105 @@ describe("v2 round-trip encoding", () => {
     expect(p.cloud_low).toBe(Math.round(Math.round((PERIOD.cloud_low     ?? 0) * 7 / 100) * 100 / 7));
   });
 
+  it("round-trips every air-quality column on its own scale", () => {
+    const p = roundTrip(msg({ vars_mask: AQ_VARS })).periods[0][0];
+    expect(p.aqi).toBe(qUs(PERIOD.aqi!));
+    expect(p.aqi_pm25).toBe(qUs(PERIOD.aqi_pm25!));
+    expect(p.aqi_o3).toBe(qUs(PERIOD.aqi_o3!));
+    // The European values go through the EU ladder — a scale with different band edges, so a
+    // value quantized against the US ladder here would come back a different number.
+    expect(p.aqi_eu).toBe(qEu(PERIOD.aqi_eu!));
+    expect(p.aqi_eu_pm25).toBe(qEu(PERIOD.aqi_eu_pm25!));
+  });
+
+  it("round-trips each air-quality variable selected alone", () => {
+    const cases: [number, keyof Period, (v: number) => number | undefined][] = [
+      [VARS_BIT.aqi, "aqi", qUs],
+      [VARS_BIT.aq_pm25, "aqi_pm25", qUs],
+      [VARS_BIT.aq_o3, "aqi_o3", qUs],
+      [VARS_BIT.aqi_eu, "aqi_eu", qEu],
+      [VARS_BIT.aqi_eu_pm25, "aqi_eu_pm25", qEu],
+    ];
+    for (const [bit, field, q] of cases) {
+      const p = roundTrip(msg({ vars_mask: 1 << bit })).periods[0][0];
+      expect(p[field], `${field} alone`).toBe(q(PERIOD[field] as number));
+      // Nothing else in the air-quality block rides along on one bit.
+      for (const [, other] of cases) if (other !== field) expect(p[other]).toBeUndefined();
+    }
+  });
+
+  it("codes the US headline as a residual only when both sub-indices are on the wire", () => {
+    // The headline exactly equals its worst sub-index here — the 97% case the residual coding is
+    // for. (PERIOD itself sits one band above, so the round-trip tests cover a nonzero residual.)
+    const led: Period = { ...PERIOD, aqi: PERIOD.aqi_pm25 };
+    const aqiBits = (varsMask: number) =>
+      v2EncodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
+        .columns.find((c) => c.name === "aqi")!.bits;
+    const withBoth = aqiBits((1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25) | (1 << VARS_BIT.aq_o3));
+    const withOne = aqiBits((1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25));
+    const alone = aqiBits(1 << VARS_BIT.aqi);
+    // With both sub-indices decoded, the headline is their max plus a residual of zero — far
+    // cheaper than carrying its own anchor and deltas.
+    expect(withBoth).toBeLessThan(alone);
+    // With only one sub-index there is no max to take, so the column falls back to its own
+    // deltas and costs the same as it does alone.
+    expect(withOne).toBeCloseTo(alone, 6);
+  });
+
+  it("decodes a missing headline as the worst sub-index rather than as clean air", () => {
+    // Upstream can return a headline of nothing for an hour where a sub-index has a value. The
+    // residual is non-negative by construction, so that clamps to "equal to the worst sub-index"
+    // — the best estimate available, and never a fabricated 0.
+    const gap: Period = { ...PERIOD, aqi: undefined };
+    const varsMask = (1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25) | (1 << VARS_BIT.aq_o3);
+    const p = roundTrip(msg({ vars_mask: varsMask, periods: [[gap, gap, gap]] })).periods[0][0];
+    expect(p.aqi).toBe(qUs(PERIOD.aqi_pm25!)); // pm25 (96) outranks o3 (42)
+  });
+
+  it("leaves a column's missing values absent rather than reading them as zero", () => {
+    // A column with no residual context carries the ladder's no-data symbol, which decodes to an
+    // absent field — "not forecast", not "the cleanest air there is".
+    const gap: Period = { ...PERIOD, aqi_eu: undefined };
+    const periods = [[PERIOD, gap, PERIOD]];
+    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.aqi_eu, periods }));
+    expect(decoded.periods[0][0].aqi_eu).toBe(qEu(PERIOD.aqi_eu!));
+    expect(decoded.periods[0][1].aqi_eu).toBeUndefined();
+    expect(decoded.periods[0][2].aqi_eu).toBe(qEu(PERIOD.aqi_eu!));
+  });
+
+  it("stops the air-quality columns at the 4-day CAMS horizon", () => {
+    // 26 twelve-hour periods = 13 days. CAMS reaches ~4.5 days, so the columns cover the first
+    // 96 hours — eight periods — and the rest carry no air-quality symbols at all.
+    const periods = [Array(26).fill(PERIOD)];
+    // Temp rides along so the last period can show the clamp is per-column, not per-message.
+    const decoded = roundTrip(msg({ vars_mask: AQ_VARS | (1 << VARS_BIT.temp), periods }));
+    const row = decoded.periods[0];
+    expect(row).toHaveLength(26);
+    for (let p = 0; p < 8; p++) expect(row[p].aqi_pm25, `period ${p}`).toBe(qUs(PERIOD.aqi_pm25!));
+    for (let p = 8; p < 26; p++) {
+      expect(row[p].aqi, `period ${p}`).toBeUndefined();
+      expect(row[p].aqi_pm25, `period ${p}`).toBeUndefined();
+      expect(row[p].aqi_eu, `period ${p}`).toBeUndefined();
+    }
+    // The weather columns are unaffected — the clamp is per-column, not per-message.
+    expect(row[25].temp_c).toBe(PERIOD.temp_c);
+  });
+
+  it("charges nothing for the periods past the air-quality horizon", () => {
+    // The clamp is derived from the layout on both sides, so it costs no header bits and emits
+    // no symbols: a 13-day message pays for the same eight periods a 4-day one does.
+    const short = v2EncodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(8).fill(PERIOD)] }));
+    const long = v2EncodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(26).fill(PERIOD)] }));
+    const aqBits = (b: typeof short) =>
+      b.columns.filter((c) => c.name.startsWith("aq")).reduce((s, c) => s + c.bits, 0);
+    expect(aqBits(long)).toBeCloseTo(aqBits(short), 6);
+  });
+
   it("omits all optional fields when vars_mask=0", () => {
     const decoded = roundTrip(msg({ vars_mask: 0 }));
     const p = decoded.periods[0][0];
+    expect(p.aqi).toBeUndefined();
+    expect(p.aqi_eu).toBeUndefined();
     expect(p.precip).toBeUndefined();
     expect(p.temp_c).toBeUndefined();
     expect(p.snow_cm).toBeUndefined();

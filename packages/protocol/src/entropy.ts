@@ -12,6 +12,8 @@ import {
   PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES,
   SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES,
   RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_RES,
+  AQ_PM25_DELTA_WEIGHTS_BY_RES, AQ_O3_DELTA_WEIGHTS_BY_RES, AQI_DELTA_WEIGHTS_BY_RES,
+  AQI_EU_DELTA_WEIGHTS_BY_RES, AQI_EU_PM25_DELTA_WEIGHTS_BY_RES, AQI_RESIDUAL_WEIGHTS_BY_RES,
 } from "./codebooks.gen.js";
 import { CLASS_TABLES, CODEBOOK_CLASSES, type ClassTableSet } from "./codebooks-classes.gen.js";
 import {
@@ -219,6 +221,79 @@ function tempDeltaSym(delta: number): number {
   return Math.abs(delta) <= TEMP_DELTA_CORE_RADIUS ? delta + TEMP_DELTA_CORE_RADIUS : TEMP_DELTA_ESCAPE_SYM;
 }
 
+// ── Air quality index ladders ───────────────────────────────────────────────────
+// Both AQ scales quantize to a 25-band ladder plus symbol 0 = NO DATA, so 26 symbols fit the same
+// 5-bit anchor the wind columns use. The bands are non-uniform, spending resolution where the
+// corpus mass and the decisions both are: the top of each ladder is one open band, since the
+// difference between 400 and 500 US AQI changes nothing a reader would do. Symbol 0 covers an
+// isolated upstream null and a failed air-quality fetch alike — without it a missing hour would
+// have to encode as band 1, which reads as the cleanest air there is. These bounds are wire
+// format and pinned in V2_CODEBOOKS below.
+//
+// The two ladders are NOT interchangeable. The US EPA index runs 0-500 with its categories at
+// 50/100/150/200/300; the European index runs 0-100+ with categories every 20 and uses a 24h
+// running mean for particulates (which is why the European PM2.5 column is so much smoother than
+// the instantaneous US one). Passing a value to the wrong ladder silently misreports the air.
+export const AQI_US_LOWER: readonly number[] =
+  [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 250, 300, 400, 500];
+export const AQI_EU_LOWER: readonly number[] =
+  [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 45, 50, 55, 60, 70, 80, 90, 100, 120, 150, 200, 300, 400, 500];
+
+// Symbol 0 is "no data"; the bands occupy 1..AQI_MAX_SYM.
+export const AQI_NO_DATA = 0;
+export const AQI_MAX_SYM = AQI_US_LOWER.length; // 25
+
+// Period-over-period deltas span the whole ladder in both directions (-25..25), but the ends are
+// nearly unvisited: across every resolution in the corpus, |delta| > 7 happens in 0.003% (US
+// PM2.5) to 0.05% (US ozone) of periods. So the alphabet is the temp column's shape — a ±7 core
+// plus one ESCAPE symbol followed by a raw 6-bit field — which costs ~0.006 b/period and keeps
+// each conditioned table 16 symbols wide instead of 51. Three of the five AQ tables are
+// res × tod × prevΔ, so that is the difference between ~33k and ~10k generated weights.
+export const AQI_DELTA_CORE_RADIUS = 7;
+export const AQI_DELTA_NSYM = 2 * AQI_DELTA_CORE_RADIUS + 2; // 16: 15 core + escape
+const AQI_DELTA_ESCAPE_SYM = AQI_DELTA_NSYM - 1;
+export const AQI_DELTA_ESCAPE_BITS = 6;
+const AQI_DELTA_ESCAPE_BIAS = 1 << (AQI_DELTA_ESCAPE_BITS - 1); // 32, so the field spans -32..31
+export function aqiDeltaSym(delta: number): number {
+  return Math.abs(delta) <= AQI_DELTA_CORE_RADIUS ? delta + AQI_DELTA_CORE_RADIUS : AQI_DELTA_ESCAPE_SYM;
+}
+
+// Emits one period-over-period AQI ladder step under `book`. The ladder bounds the delta to
+// ±AQI_MAX_SYM (±25), which the escape field's -32..31 covers with room to spare, so unlike the
+// temp column there is nothing for the caller to clamp.
+export function encodeAqiDelta(sink: SymSink, book: CodeBook, delta: number): void {
+  const sym = aqiDeltaSym(delta);
+  sink.sym(book, sym);
+  if (sym === AQI_DELTA_ESCAPE_SYM) sink.raw(delta + AQI_DELTA_ESCAPE_BIAS, AQI_DELTA_ESCAPE_BITS);
+}
+
+export function decodeAqiDelta(src: SymSource, book: CodeBook): number {
+  const sym = src.sym(book);
+  if (sym === AQI_DELTA_ESCAPE_SYM) return src.raw(AQI_DELTA_ESCAPE_BITS) - AQI_DELTA_ESCAPE_BIAS;
+  return sym - AQI_DELTA_CORE_RADIUS;
+}
+
+// The headline residual `index − max(sub-index)` is non-negative by construction (the headline
+// is the max over sub-indices the wire already carries) and can reach the top of the ladder.
+export const AQI_RESIDUAL_MAX = AQI_MAX_SYM;
+
+// Quantize an index value onto one of the ladders. null/undefined — an hour the upstream model
+// didn't forecast — is AQI_NO_DATA, never band 1.
+export function quantAqi(value: number | null | undefined, lower: readonly number[]): number {
+  if (value == null || Number.isNaN(value)) return AQI_NO_DATA;
+  let b = 1;
+  while (b < lower.length && value >= lower[b]) b++;
+  return b;
+}
+
+// Band representative for decode: the midpoint, except the open top band, which reads as its own
+// lower bound. AQI_NO_DATA has no value — the caller leaves the field undefined.
+export function aqiMid(sym: number, lower: readonly number[]): number | undefined {
+  if (sym <= AQI_NO_DATA || sym > lower.length) return undefined;
+  if (sym === lower.length) return lower[sym - 1];
+  return Math.round((lower[sym - 1] + lower[sym]) / 2);
+}
+
 // ── Codebook classes ────────────────────────────────────────────────────────────
 // One ClassBooks per codebook class: the complete set of table-lookup functions the v2 body
 // codec keys symbols with. Class 0 is the global (train-corpus-wide) tables in codebooks.gen.ts;
@@ -280,6 +355,22 @@ export interface ClassBooks {
   // sign; the previous delta adds the airmass's actual trajectory. See
   // codec-server/scripts/derive-temp-delta-codebooks.ts.
   tempDeltaBook(res: number, tod: number, prevDelta: number | null): CodeBook;
+  // Air quality. Every AQ book is CLASS-INDEPENDENT — see AQ_BOOKS below — so these five resolve
+  // to the same tables whichever class the header selected. `prevDelta` is the previous decoded
+  // delta in the same column, null for the column's first (no bootstrap table: an AQ column's
+  // first delta is one symbol in a hundred, so it shares the no-change context). `tod` is the
+  // arriving period's tempTodBucket, carried by the columns whose driver is diurnal.
+  // See codec-server/scripts/derive-air-quality-codebooks.ts.
+  aqPm25Book(res: number, prevDelta: number | null): CodeBook;
+  aqO3Book(res: number, tod: number, prevDelta: number | null): CodeBook;
+  aqiEuBook(res: number, tod: number, prevDelta: number | null): CodeBook;
+  aqiEuPm25Book(res: number, prevDelta: number | null): CodeBook;
+  // The US headline's FALLBACK column — its own deltas, used when the wire isn't carrying both
+  // sub-indices to take a residual against.
+  aqiDeltaBook(res: number, tod: number, prevDelta: number | null): CodeBook;
+  // The US headline's conditioned column: the residual against max(pm25, o3) when both are in
+  // vars_mask. Zero 98.5% of the time, so resolution alone keys it.
+  aqiResidualBook(res: number): CodeBook;
 }
 
 function buildClassBooks(t: ClassTableSet): ClassBooks {
@@ -347,8 +438,39 @@ function buildClassBooks(t: ClassTableSet): ClassBooks {
       if (prevDelta === null) return tempDeltaBootstrap;
       return tempDeltaTablesByRes[res][tempDeltaBucket(prevDelta) * TEMP_DELTA_TOD_BUCKETS + tod];
     },
+    ...AQ_BOOKS,
   };
 }
+
+// ── Air-quality books (class-independent) ───────────────────────────────────────
+// The codebook classes were fit by EM over the WEATHER columns' per-cell counts, and air quality
+// was deliberately left out of that fit: derive-air-quality-codebooks.ts is not registered in
+// extract-cell-counts.ts, so cell-counts.bin and the class ladder are untouched by these columns.
+// Every class therefore shares one AQ table set, built once here and spread into each ClassBooks.
+// When the ladder is retrained with the AQ counts these tables move into ClassTableSet like every
+// other table and this block goes away — a strictly-better encoding, so it is a follow-up rather
+// than a limitation of the format.
+const aqDeltaByResPrev = (weights: number[][][]) => {
+  const tables = weights.map((rows) => rows.map(buildTable));
+  // A column's first delta has no predecessor and shares the no-change bucket — the shape a
+  // fresh column looks most like, and rare enough not to deserve a table of its own.
+  return (res: number, prevDelta: number | null): CodeBook =>
+    tables[res][tempDeltaBucket(prevDelta ?? 0)];
+};
+const aqDeltaByResTodPrev = (weights: number[][][]) => {
+  const tables = weights.map((rows) => rows.map(buildTable));
+  return (res: number, tod: number, prevDelta: number | null): CodeBook =>
+    tables[res][tempDeltaBucket(prevDelta ?? 0) * TEMP_DELTA_TOD_BUCKETS + tod];
+};
+const aqiResidualTables = AQI_RESIDUAL_WEIGHTS_BY_RES.map(buildTable);
+const AQ_BOOKS = {
+  aqPm25Book: aqDeltaByResPrev(AQ_PM25_DELTA_WEIGHTS_BY_RES),
+  aqO3Book: aqDeltaByResTodPrev(AQ_O3_DELTA_WEIGHTS_BY_RES),
+  aqiDeltaBook: aqDeltaByResTodPrev(AQI_DELTA_WEIGHTS_BY_RES),
+  aqiEuBook: aqDeltaByResTodPrev(AQI_EU_DELTA_WEIGHTS_BY_RES),
+  aqiEuPm25Book: aqDeltaByResPrev(AQI_EU_PM25_DELTA_WEIGHTS_BY_RES),
+  aqiResidualBook: (res: number): CodeBook => aqiResidualTables[res],
+};
 
 // The base (class 0) table set — codebooks.gen.ts as one ClassTableSet.
 const BASE_TABLES: ClassTableSet = {
@@ -477,9 +599,25 @@ const bundleOf = (t: ClassTableSet) => ({
     todBuckets: TEMP_DELTA_TOD_BUCKETS,
   },
 });
+// Air quality is pinned once, outside bundleOf: the classes don't carry AQ tables (see AQ_BOOKS),
+// so there is one set for every class. The ladders go in alongside the weights — they are what
+// gives a symbol its meaning, exactly like beaufortKphLower for the wind columns.
+const airQualityBundle = {
+  usLadder: AQI_US_LOWER,
+  euLadder: AQI_EU_LOWER,
+  deltaCoreRadius: AQI_DELTA_CORE_RADIUS,
+  deltaEscapeBits: AQI_DELTA_ESCAPE_BITS,
+  pm25ByRes: AQ_PM25_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  o3ByRes: AQ_O3_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  aqiByRes: AQI_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  euByRes: AQI_EU_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  euPm25ByRes: AQI_EU_PM25_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  residualByRes: AQI_RESIDUAL_WEIGHTS_BY_RES.map(qf),
+};
 export const V2_CODEBOOKS = {
   rans: { probBits: RANS_PROB_BITS, stateLow: RANS_L, wordBits: RANS_WORD_BITS },
   ...bundleOf(BASE_TABLES),
+  airQuality: airQualityBundle,
   weathercodeClassOf: WEATHERCODE_CLASS, // keys the wet columns' tables — drift desyncs them silently
   beaufortKphLower: BEAUFORT_KPH_LOWER,  // wind quantization geometry — drift re-means every speed symbol
   // Classes 1..CODEBOOK_CLASSES-1 (class 0 is the base bundle spread above).

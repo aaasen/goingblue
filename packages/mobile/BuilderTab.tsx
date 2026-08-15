@@ -66,7 +66,9 @@ const LOCATION_BLOCKED =
 const LOCATION_FAILED = `Couldn’t get your current location. ${LOCATION_FALLBACK}`;
 
 // Variables a forecast center can't supply. Only the freezing level varies now — GEM and ECMWF
-// have no freezing-level product (Europe's pressure winds are filled from IFS 0.25°).
+// have no freezing-level product (Europe's pressure winds are filled from IFS 0.25°). The
+// air-quality variables never appear here: they come from CAMS, not from the weather center, so
+// the `m:` choice doesn't reach them.
 const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
   best: [],
   us: [],
@@ -117,17 +119,33 @@ const VAR_INFO = [
   { name: 'High Altitude Winds', desc: 'Winds at 500, 600, and 700 hPa pressure levels' },
   { name: 'Freezing Level', desc: 'Altitude at which atmospheric temperature drops to 0°C' },
   { name: 'Precip Chance', desc: 'Chance of any precipitation during each period' },
+  { name: 'Air Quality (US)', desc: 'US Air Quality Index, 0-500. The headline number, worst reading of each period' },
+  { name: 'Smoke (US)', desc: 'The PM2.5 part of the US index — wildfire smoke and haze, on the same 0-500 scale' },
+  { name: 'Ozone (US)', desc: 'The ozone part of the US index — summer smog, which peaks in the afternoon' },
+  { name: 'Air Quality (Europe)', desc: 'European Air Quality Index, a different 0-100+ scale with its own categories' },
+  { name: 'Smoke (Europe)', desc: 'The PM2.5 part of the European index, averaged over 24 hours the way that scale defines it' },
 ];
 
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
 // protocol variables together (e.g. "Clouds" covers high/mid/low cloud cover, not total).
 // Order is display order only — the server ORs the `v:` codes into a mask, so the emitted
 // order carries no meaning. Precip chance sits last: it costs the most for the least detail.
+// The air-quality entries are single variables rather than bundles: smoke and ozone are different
+// hazards on different schedules (a smoke plume arrives and stays for days; ozone peaks every
+// afternoon), and someone watching for fire smoke shouldn't have to pay for the rest. The US and
+// European indices are separate scales, not translations of each other — see the AQI ladders in
+// the protocol — so they are separate toggles too, labelled by region rather than left to be
+// mistaken for one another.
 const VAR_GROUPS = [
   { value: 'clouds', code: 'c', label: 'Detailed Clouds', vars: CONFIGURABLE_VAR_GROUPS.c },
   { value: 'highwind', code: 'w', label: 'High Altitude Winds', vars: CONFIGURABLE_VAR_GROUPS.w },
   { value: 'freeze', code: 'f', label: 'Freezing Level', vars: CONFIGURABLE_VAR_GROUPS.f },
   { value: 'precip', code: 'p', label: 'Precip Chance', vars: CONFIGURABLE_VAR_GROUPS.p },
+  { value: 'aqi', code: 'a', label: 'Air Quality (US)', vars: CONFIGURABLE_VAR_GROUPS.a },
+  { value: 'smoke', code: 's', label: 'Smoke (US)', vars: CONFIGURABLE_VAR_GROUPS.s },
+  { value: 'ozone', code: 'o', label: 'Ozone (US)', vars: CONFIGURABLE_VAR_GROUPS.o },
+  { value: 'aqi-eu', code: 'e', label: 'Air Quality (Europe)', vars: CONFIGURABLE_VAR_GROUPS.e },
+  { value: 'smoke-eu', code: '2', label: 'Smoke (Europe)', vars: CONFIGURABLE_VAR_GROUPS['2'] },
 ];
 
 // No extra variables selected by default.
@@ -608,6 +626,11 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
           </Text>
         ))}
         <Text style={[styles.modalBody, styles.modalNote]}>Each added variable takes away from the detail and range of each forecast.</Text>
+        <Text style={[styles.modalBody, styles.modalNote]}>
+          Air quality comes from a different forecast (CAMS) than the weather, and only reaches
+          about four days out — later periods leave those rows blank. The US and European indices
+          are separate scales: the same number means different things on each.
+        </Text>
       </InfoModal>
     </ScrollView>
   );

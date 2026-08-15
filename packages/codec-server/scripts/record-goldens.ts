@@ -39,6 +39,12 @@ const VARIANTS = [
   { name: "detail-us-pcwf", tokens: "p:d m:us c:160 v:pcwf" },
   { name: "range-eu-320", tokens: "p:r m:eu c:320" },
   { name: "auto-ca-80-c", tokens: "p:a m:ca c:80 v:c" },
+  // Air quality pins the second upstream API's response shape alongside the weather one, and
+  // `aso` is the selection where the US headline codes as a residual against its sub-indices —
+  // the one air-quality path with a context switch in it. Range reaches past the 4-day CAMS
+  // horizon, so the clamp is pinned here too.
+  { name: "range-best-aso", tokens: "p:r m:best c:320 v:aso" },
+  { name: "auto-best-e2", tokens: "p:a m:best c:160 v:e2" },
 ];
 
 interface GoldenCase {

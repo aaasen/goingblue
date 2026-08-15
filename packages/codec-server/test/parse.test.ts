@@ -107,6 +107,37 @@ describe("parseRequest", () => {
     );
     expect(parseRequest("v:f").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["freeze"]));
     expect(parseRequest("v:p").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["precip"]));
+    // Air quality: one code per index, so a reader can ask for smoke without paying for ozone.
+    expect(parseRequest("v:a").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi"]));
+    expect(parseRequest("v:s").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_pm25"]));
+    expect(parseRequest("v:o").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_o3"]));
+    expect(parseRequest("v:e").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu"]));
+    expect(parseRequest("v:2").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu_pm25"]));
+  });
+
+  it("v: mixes air-quality codes into the compact form", () => {
+    // The compact form is matched as a character class; a code missing from it would fall through
+    // to the comma-separated path and silently request nothing.
+    expect(parseRequest("v:aso").varsMask).toBe(
+      ALWAYS_VARS_MASK |
+      (1 << VARS_BIT["aqi"]) |
+      (1 << VARS_BIT["aq_pm25"]) |
+      (1 << VARS_BIT["aq_o3"]),
+    );
+    expect(parseRequest("v:cfe2").varsMask).toBe(
+      ALWAYS_VARS_MASK |
+      (1 << VARS_BIT["cch"]) | (1 << VARS_BIT["ccm"]) | (1 << VARS_BIT["ccl"]) |
+      (1 << VARS_BIT["freeze"]) |
+      (1 << VARS_BIT["aqi_eu"]) | (1 << VARS_BIT["aqi_eu_pm25"]),
+    );
+  });
+
+  it("air quality is available on every center — it doesn't come from the weather model", () => {
+    // CAMS serves it whatever the `m:` choice is, so unlike the freezing level it is never
+    // dropped for GEM or ECMWF.
+    for (const center of ["best", "us", "ca", "eu"]) {
+      expect(parseRequest(`m:${center} v:a`).varsMask & (1 << VARS_BIT["aqi"])).toBeTruthy();
+    }
   });
 
   it("precip is opt-in, not part of the always-on set", () => {

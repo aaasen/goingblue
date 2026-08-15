@@ -2,6 +2,7 @@ import {
   MODEL_BIT,
   ALWAYS_VARS_MASK,
   CONFIGURABLE_VAR_GROUPS,
+  VAR_GROUP_CODES,
   VARS_BIT,
   isValidToken,
   normalizeToken,
@@ -92,6 +93,10 @@ const SURFACE_VARS = [
 const PRESSURE_LEVELS = [500, 600, 700];
 const PRESSURE_VAR_NAMES = ["temperature", "wind_speed", "wind_direction"];
 
+// Matches a `v:` value written as bare group codes rather than variable names. Built from the
+// group table so it stays in step with it; the codes are all regex-safe single characters.
+const COMPACT_VAR_CODES = new RegExp(`^[${VAR_GROUP_CODES}]+$`);
+
 function degToDirIdx(deg: number | null | undefined): number {
   if (deg == null) return 0;
   return Math.round(deg / 45) % 8;
@@ -172,13 +177,33 @@ export interface Row {
   cloud_cover_high: number | null;
   cloud_cover_mid: number | null;
   cloud_cover_low: number | null;
+  // Air quality (CAMS, fetched from a different Open-Meteo API — see fetchAirQuality). Null both
+  // where the request didn't ask for air quality and past the CAMS horizon.
+  us_aqi: number | null;
+  us_aqi_pm2_5: number | null;
+  us_aqi_ozone: number | null;
+  european_aqi: number | null;
+  european_aqi_pm2_5: number | null;
 }
+
+// The air-quality variables, in the order their columns encode. Named once here because three
+// paths have to agree on them: the upstream request, the row aggregation, and the corpus derive.
+export const AIR_QUALITY_VARS = [
+  "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi", "european_aqi", "european_aqi_pm2_5",
+] as const;
 
 // Map an SDK variable — identified by (enum, altitude, pressureLevel) — back to the Open-Meteo
 // request name the rest of the pipeline keys on (`temperature_2m`, `wind_speed_500hPa`). Mirrors
 // the corpus collector's canonicalName (scripts/om-fetch.ts) so both fetch paths agree on names.
+// The `pm2p5` → `pm2_5` rewrite is load-bearing for the air-quality columns: the FlatBuffers
+// Variable enum spells the PM2.5 fraction `pm2p5` (a valid identifier) while the API's request
+// names — the keys decodeResponse looks up by — spell it `pm2_5`. Without it `us_aqi_pm2_5` and
+// `european_aqi_pm2_5` miss the by-name lookup and come back as all-null columns, which would
+// encode as "no data" for every period rather than as an error. (The enum's
+// `pm2_5_total_organic_matter` already uses the API spelling; the `pm2p5` token can't match
+// inside it.) Mirrors the corpus collector's canonicalName in scripts/om-fetch.ts.
 function canonicalName(v: VariableWithValues): string {
-  const base = Variable[v.variable()];
+  const base = Variable[v.variable()].replace("pm2p5", "pm2_5");
   if (v.pressureLevel() !== 0) return `${base}_${v.pressureLevel()}hPa`;
   if (v.altitude() !== 0) return `${base}_${v.altitude()}m`;
   return base;
@@ -349,6 +374,57 @@ export function adjustPrecipPhase(h: HourlyData, siteElevM: number | null): Hour
   return out as HourlyData;
 }
 
+// The air-quality variables a request needs, given its vars_mask — empty when it asked for none,
+// which is the common case and skips the upstream call entirely.
+export function airQualityVarsFor(varsMask: number): string[] {
+  const wanted: [number, string][] = [
+    [VARS_BIT.aq_pm25, "us_aqi_pm2_5"],
+    [VARS_BIT.aq_o3, "us_aqi_ozone"],
+    [VARS_BIT.aqi, "us_aqi"],
+    [VARS_BIT.aqi_eu, "european_aqi"],
+    [VARS_BIT.aqi_eu_pm25, "european_aqi_pm2_5"],
+  ];
+  return wanted.filter(([bit]) => varsMask & (1 << bit)).map(([, name]) => name);
+}
+
+// Air quality comes from a DIFFERENT Open-Meteo API (its own host and path), so it can't ride the
+// weather request. `domains=auto` is pinned, not a default: it resolves to CAMS European (0.1°,
+// hourly) inside Europe and CAMS global (0.4°, 3-hourly) elsewhere, and that is the exact mixture
+// the codebooks were trained on. The two domains disagree sharply — Zurich reads 6.3 µg/m³ PM2.5
+// on europe against 37.6 on global — so changing this silently re-means every AQ symbol.
+// No `elevation`: terrain downscaling is a forecast-API knob and the AQ API rejects it.
+// 5 forecast days is what CAMS runs; the wire clamps to 4 anyway (AQ_HORIZON_HOURS in v2.ts).
+const AIR_QUALITY_FORECAST_DAYS = 5;
+async function fetchAirQuality(
+  hourlyVars: string[], lat: number, lon: number, tz: string, pastDays: number,
+): Promise<HourlyData | null> {
+  const params: Record<string, unknown> = {
+    latitude: lat,
+    longitude: lon,
+    hourly: hourlyVars,
+    timezone: tz,
+    forecast_days: AIR_QUALITY_FORECAST_DAYS,
+    domains: "auto",
+  };
+  if (pastDays > 0) params.past_days = pastDays;
+  const base = process.env["AIR_QUALITY_BASE_URL"] ?? "https://air-quality-api.open-meteo.com";
+  const url = `${base}/v1/air-quality`;
+  log.info("openmeteo.airquality.request", { url, ...params });
+  try {
+    const results = await fetchWeatherApi(url, params);
+    const resp = results[0];
+    if (!resp) throw new Error("Open-Meteo air quality returned no result");
+    return decodeResponse(resp, hourlyVars).hourly;
+  } catch (err) {
+    // Soft failure: air quality is an extra column, not the forecast. The weather still goes out;
+    // the AQ columns encode their no-data symbol, which the app draws as an empty cell. Logged at
+    // ERROR even so — the reader asked for air quality and didn't get it, which is worth seeing in
+    // Error Reporting rather than burying at INFO because the request itself survived.
+    log.error("openmeteo.airquality.failed", { err });
+    return null;
+  }
+}
+
 async function fetchHourly(
   modelKey: string,
   nDays: number,
@@ -357,6 +433,7 @@ async function fetchHourly(
   tz: string,
   elev_m?: number,
   pastDays = 0,
+  airQualityVars: string[] = [],
 ): Promise<[HourlyData, string[], number]> {
   const center = CENTERS[modelKey];
   const pressureVars = PRESSURE_VAR_NAMES.flatMap((v) =>
@@ -368,21 +445,32 @@ async function fetchHourly(
     ? SURFACE_VARS
     : SURFACE_VARS.filter((v) => v !== "freezing_level_height");
 
+  // Air quality is a separate API, so it goes out alongside the weather rather than with it, and
+  // only when the request asked for it. Its horizon is shorter than the weather's, so the merge
+  // below leaves the tail hours null — which is exactly what the wire's 4-day clamp expects.
+  const aqPromise = airQualityVars.length
+    ? fetchAirQuality(airQualityVars, lat, lon, tz, pastDays)
+    : Promise.resolve(null);
+  const withAirQuality = (h: HourlyData, aq: HourlyData | null): HourlyData =>
+    aq ? mergeHourly(h, aq, airQualityVars) : h;
+
   if (center.surface === center.pressure) {
-    const { hourly, elevation } = await fetchOpenMeteo(
-      center.surface, [...surfaceVars, ...pressureVars], nDays, lat, lon, tz, elev_m, pastDays,
-    );
-    const adjusted = adjustPrecipPhase(hourly, elevation);
+    const [{ hourly, elevation }, aq] = await Promise.all([
+      fetchOpenMeteo(center.surface, [...surfaceVars, ...pressureVars], nDays, lat, lon, tz, elev_m, pastDays),
+      aqPromise,
+    ]);
+    const adjusted = adjustPrecipPhase(withAirQuality(hourly, aq), elevation);
     return [adjusted, adjusted.time, elevation];
   }
 
   // Split sources (Europe): surface fields from the 9 km HRES, pressure levels from IFS 0.25°.
   // Elevation comes from the surface source (its finer grid is the better terrain match).
-  const [surf, pres] = await Promise.all([
+  const [surf, pres, aq] = await Promise.all([
     fetchOpenMeteo(center.surface, surfaceVars, nDays, lat, lon, tz, elev_m, pastDays),
     fetchOpenMeteo(center.pressure, pressureVars, nDays, lat, lon, tz, elev_m, pastDays),
+    aqPromise,
   ]);
-  const merged = mergeHourly(surf.hourly, pres.hourly, pressureVars);
+  const merged = withAirQuality(mergeHourly(surf.hourly, pres.hourly, pressureVars), aq);
   const adjusted = adjustPrecipPhase(merged, surf.elevation);
   return [adjusted, adjusted.time, surf.elevation];
 }
@@ -589,6 +677,13 @@ export function rowsFromWindows(
       cloud_cover_high: maxOf(pick(h.cloud_cover_high)),
       cloud_cover_mid: maxOf(pick(h.cloud_cover_mid)),
       cloud_cover_low: maxOf(pick(h.cloud_cover_low)),
+      // Worst air in the window, the same semantics gusts get: a period that contains an hour of
+      // unhealthy smoke is an unhealthy period, however clean its other hours were.
+      us_aqi: maxOf(pickUnk("us_aqi")),
+      us_aqi_pm2_5: maxOf(pickUnk("us_aqi_pm2_5")),
+      us_aqi_ozone: maxOf(pickUnk("us_aqi_ozone")),
+      european_aqi: maxOf(pickUnk("european_aqi")),
+      european_aqi_pm2_5: maxOf(pickUnk("european_aqi_pm2_5")),
     };
   });
   return rows;
@@ -623,6 +718,14 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period
   if (varsMask & (1 << VARS_BIT.cch)) p.cloud_high  = Math.round(r.cloud_cover_high ?? 0);
   if (varsMask & (1 << VARS_BIT.ccm)) p.cloud_mid   = Math.round(r.cloud_cover_mid  ?? 0);
   if (varsMask & (1 << VARS_BIT.ccl)) p.cloud_low   = Math.round(r.cloud_cover_low  ?? 0);
+  // Air quality, left UNDEFINED rather than coalesced to 0 where the value is missing: 0 is the
+  // cleanest air on either scale, so claiming it for an hour CAMS never forecast would be a lie.
+  // The codec encodes an absent value as its no-data symbol (see the AQ columns in v2.ts).
+  if ((varsMask & (1 << VARS_BIT.aqi))         && r.us_aqi            != null) p.aqi         = r.us_aqi;
+  if ((varsMask & (1 << VARS_BIT.aq_pm25))     && r.us_aqi_pm2_5      != null) p.aqi_pm25    = r.us_aqi_pm2_5;
+  if ((varsMask & (1 << VARS_BIT.aq_o3))       && r.us_aqi_ozone      != null) p.aqi_o3      = r.us_aqi_ozone;
+  if ((varsMask & (1 << VARS_BIT.aqi_eu))      && r.european_aqi      != null) p.aqi_eu      = r.european_aqi;
+  if ((varsMask & (1 << VARS_BIT.aqi_eu_pm25)) && r.european_aqi_pm2_5 != null) p.aqi_eu_pm25 = r.european_aqi_pm2_5;
   return p;
 }
 
@@ -714,9 +817,11 @@ export function parseRequest(body: string): ForecastParams {
         }
         if (mask) modelsMask = mask;
       } else if (key === "v") {
-        // Compact group codes need no delimiter (`v:pcwf`). Keep accepting comma-separated and
-        // long-form protocol variable names for requests produced by older clients.
-        const requestedVars = /^[pcwf]+$/.test(val) ? [...val] : val.split(",");
+        // Compact group codes need no delimiter (`v:pcwf`, `v:aso`). The character class comes
+        // from the group table itself, so a group added there can't be silently unparseable here.
+        // Keep accepting comma-separated and long-form protocol variable names for requests
+        // produced by older clients.
+        const requestedVars = COMPACT_VAR_CODES.test(val) ? [...val] : val.split(",");
         for (const v of requestedVars) {
           const group = CONFIGURABLE_VAR_GROUPS[
             v as keyof typeof CONFIGURABLE_VAR_GROUPS
@@ -889,7 +994,7 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   // UTC day boundary. Models whose horizon ends earlier (GEM: 10 days) return nulls for the
   // tail hours, which buildLayoutMessage treats as unservable — the seq search clamps to them.
   const [h, times, elevation] = await fetchHourly(
-    modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1,
+    modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1, airQualityVarsFor(params.varsMask),
   );
 
   const best = fitFillToBudget(

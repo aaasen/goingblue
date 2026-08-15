@@ -2,10 +2,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { DEFAULT_VARS_MASK, VARS_BIT } from "@weather/protocol";
+import { ALWAYS_VARS_MASK, DEFAULT_VARS_MASK, VARS_BIT } from "@weather/protocol";
 import { Variable } from "@openmeteo/sdk/variable.js";
 import {
   aggregateRows,
+  airQualityVarsFor,
   toFullPeriod,
   type Row,
 } from "../src/forecast.js";
@@ -139,6 +140,11 @@ function row(snow_cm: number): Row {
     cloud_cover_high: 0,
     cloud_cover_mid: 90,
     cloud_cover_low: 100,
+    us_aqi: 118,
+    us_aqi_pm2_5: 96,
+    us_aqi_ozone: 42,
+    european_aqi: 55,
+    european_aqi_pm2_5: 31,
   };
 }
 
@@ -161,6 +167,48 @@ describe("toFullPeriod — gust", () => {
   it("omits gust when the bit is unset", () => {
     expect(toFullPeriod(row(0), DEFAULT_VARS_MASK & ~(1 << VARS_BIT.gust), "EU").wind_gust_kph)
       .toBeUndefined();
+  });
+});
+
+describe("toFullPeriod — air quality", () => {
+  const AQ_BITS = [
+    [VARS_BIT.aqi, "aqi", 118],
+    [VARS_BIT.aq_pm25, "aqi_pm25", 96],
+    [VARS_BIT.aq_o3, "aqi_o3", 42],
+    [VARS_BIT.aqi_eu, "aqi_eu", 55],
+    [VARS_BIT.aqi_eu_pm25, "aqi_eu_pm25", 31],
+  ] as const;
+
+  it("carries each index only under its own bit", () => {
+    for (const [bit, field, value] of AQ_BITS) {
+      const p = toFullPeriod(row(0), ALWAYS_VARS_MASK | (1 << bit), "EU");
+      expect(p[field], field).toBe(value);
+      for (const [, other] of AQ_BITS) if (other !== field) expect(p[other]).toBeUndefined();
+    }
+  });
+
+  it("is served on every center — CAMS doesn't depend on the weather model", () => {
+    // The freezing level gets cleared for GEM and ECMWF; air quality never does.
+    for (const center of ["BEST", "US", "CA", "EU"]) {
+      const p = toFullPeriod(row(0), ALWAYS_VARS_MASK | (1 << VARS_BIT.aqi), center);
+      expect(p.aqi, center).toBe(118);
+    }
+  });
+
+  it("leaves a missing value absent instead of reading it as zero", () => {
+    // 0 is the cleanest air on either scale, so an hour CAMS didn't forecast must not claim it.
+    const missing = { ...row(0), us_aqi: null };
+    const p = toFullPeriod(missing, ALWAYS_VARS_MASK | (1 << VARS_BIT.aqi), "EU");
+    expect(p.aqi).toBeUndefined();
+  });
+});
+
+describe("airQualityVarsFor", () => {
+  it("asks upstream for exactly the indices the request selected", () => {
+    expect(airQualityVarsFor(ALWAYS_VARS_MASK)).toEqual([]);
+    expect(airQualityVarsFor(1 << VARS_BIT.aq_pm25)).toEqual(["us_aqi_pm2_5"]);
+    expect(airQualityVarsFor((1 << VARS_BIT.aqi) | (1 << VARS_BIT.aqi_eu)))
+      .toEqual(["us_aqi", "european_aqi"]);
   });
 });
 

@@ -21,7 +21,9 @@ import {
   type RequestContext,
 } from "@weather/protocol";
 
-const ALL_VARS = ((1 << 13) - 1) & ~(1 << 8); // bit 8 (formerly cloud_total) is reserved
+// Bits 0..17 (bit 8, formerly cloud_total, is reserved). 13..17 are the air-quality columns,
+// which this run covers with real CAMS values — eachForecast joins them onto each cell.
+const ALL_VARS = ((1 << 18) - 1) & ~(1 << 8);
 const UTC_OFFSET = 0;
 // Request at midnight (whole day 0) and mid-afternoon (partial day 0) to cover both layouts.
 const REQUEST_HOURS_OF_DAY = [0, 13];
