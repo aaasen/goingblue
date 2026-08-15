@@ -13,7 +13,7 @@ interface Props {
 // framed as a sheet.
 export default function HelpScreen({ visible, onClose }: Props) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <SafeAreaView style={styles.root}>
         <View style={styles.header}>
           <Text style={styles.title}>How do I get a forecast?</Text>
@@ -32,11 +32,12 @@ export default function HelpScreen({ visible, onClose }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f2f2f7' },
-  // A page sheet rounds its own top corners, and the title sat far enough into that curve to be
-  // cut by it. Clear the radius before drawing anything.
+  // The safe area carries the status bar inset now that this runs the full height, so the header
+  // only needs the same 12pt the tab bar's rows use. It kept 24 as a page sheet, to clear the
+  // rounded corners UIKit drew over the title.
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 24, paddingBottom: 12,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
   },
   title: { flex: 1, fontSize: 20, fontWeight: '700', color: '#1c1c1e' },
   done: { fontSize: 16, fontWeight: '600', color: '#2a6bb5', paddingLeft: 12 },

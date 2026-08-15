@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  StyleSheet, Text, View, ScrollView, TouchableOpacity,
+  StyleSheet, Text, View, ScrollView, TouchableOpacity, SafeAreaView,
   ActivityIndicator, Alert, TextInput, Modal, Linking, Platform,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
@@ -853,20 +853,32 @@ function ActionButton({ icon, label, onPress, disabled, busy, variant }: {
   );
 }
 
+// The ⓘ screens. A centered card was the wrong container once the variable list grew past a
+// screen: bounding it left the card filling the display anyway, minus a margin, with its body
+// cut mid-sentence at a scroll edge that didn't look like one. Full screen rather than a page
+// sheet because UIKit rounds a sheet's corners to the display's own curve, which reads as a lot
+// of radius for a page of text — and RN gives no way to ask for less. The trade is the swipe-down
+// dismissal a sheet comes with, so Done is the way out and sits where a sheet's would.
 function InfoModal({ visible, title, onClose, children }: {
   visible: boolean; title: string; onClose: () => void; children: React.ReactNode;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-          <Text style={styles.modalTitle}>{title}</Text>
-          {children}
-          <TouchableOpacity style={styles.modalButton} onPress={onClose} accessibilityRole="button">
-            <Text style={styles.modalButtonText}>Got it</Text>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+      <SafeAreaView style={styles.sheet}>
+        <View style={styles.sheetHeader}>
+          <Text style={styles.sheetTitle}>{title}</Text>
+          <TouchableOpacity
+            onPress={onClose}
+            accessibilityRole="button"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Text style={styles.sheetDone}>Done</Text>
           </TouchableOpacity>
-        </TouchableOpacity>
-      </TouchableOpacity>
+        </View>
+        <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
+          {children}
+        </ScrollView>
+      </SafeAreaView>
     </Modal>
   );
 }
@@ -876,9 +888,19 @@ const styles = StyleSheet.create({
   // Bottom pad covers the home-indicator inset the scroll view now extends under.
   content: { padding: 16, paddingBottom: 72 },
 
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', padding: 32 },
-  modalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20, width: '100%', maxWidth: 340 },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#1c1c1e', marginBottom: 10 },
+  // Sheet frame, matching HelpScreen's. The safe area carries the status bar inset now that this
+  // runs the full height, so the header only needs the same 12pt the tab bar's rows use.
+  sheet: { flex: 1, backgroundColor: '#fff' },
+  sheetHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
+  },
+  sheetTitle: { flex: 1, fontSize: 20, fontWeight: '700', color: '#1c1c1e' },
+  sheetDone: { fontSize: 16, fontWeight: '600', color: '#2a6bb5', paddingLeft: 12 },
+  sheetScroll: { flex: 1 },
+  sheetContent: { paddingHorizontal: 16, paddingBottom: 40 },
+
+  // Sheet body copy, shared by all four ⓘ sheets.
   modalBody: { fontSize: 15, color: '#3a3a3c', lineHeight: 22 },
   modalItem: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginBottom: 10 },
   modalItemIndent: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginTop: 10, paddingLeft: 12 },
@@ -888,8 +910,6 @@ const styles = StyleSheet.create({
   modalBold: { fontWeight: '700', color: '#1c1c1e' },
   modalNote: { marginTop: 14 },
   modalLink: { color: '#2a6bb5', textDecorationLine: 'underline' },
-  modalButton: { marginTop: 18, height: 44, borderRadius: 12, backgroundColor: '#2a6bb5', alignItems: 'center', justifyContent: 'center' },
-  modalButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 
   section: { marginBottom: 20 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
