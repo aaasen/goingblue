@@ -105,12 +105,12 @@ const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 // EU resolves differently from place to place, so without coordinates there's nothing to name.
 const MODEL_HINT_NO_LOCATION = 'Set a location to see which models will be used.';
 
-// Device-selector help copy. Each line says what the button does on that device and what the route
-// costs the user — data, a text message, or satellite airtime.
+// Device-selector help copy. Each line says how the forecast travels on that device, which is what
+// picks between them: the route a reader has left is usually the only one they have.
 const DEVICE_INFO = [
-  { name: 'Internet', desc: 'Fetches the forecast straight over your data connection, for when you still have service.' },
-  { name: 'SMS', desc: 'Opens Messages with the request ready to send, for weak cell reception without data.' },
-  { name: 'inReach', desc: 'Copies the request so you can paste it into your satellite messenger.' },
+  { name: 'Internet', desc: 'Fetches the forecast over a WiFi or cellular data connection.' },
+  { name: 'SMS', desc: 'Sends the forecast over a text message for weak cell reception without data.' },
+  { name: 'inReach', desc: 'Copies the message so that it can be pasted into the Garmin Earthmate app and sent over inReach.' },
 ];
 
 // Id of the subgroup the air-quality toggles fold under — stable across a change of scale, which
@@ -766,7 +766,10 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
       </InfoModal>
 
       <InfoModal visible={deviceInfo} title="Device" onClose={() => setDeviceInfo(false)}>
-        <Text style={styles.modalBody}>How the request leaves your phone:</Text>
+        <Text style={styles.modalBody}>
+          Going Blue can deliver forecasts with several different devices. Each device has a
+          different message length and character set.
+        </Text>
         {DEVICE_INFO.map((d) => (
           <Text key={d.name} style={styles.modalItemIndent}>
             <Text style={styles.modalBold}>{d.name}</Text>: {d.desc}
