@@ -2144,15 +2144,21 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
           {segs.map((seg, i) => {
             const start = colLeft(seg.start);
             const end = colLeft(seg.end);
-            // The label is measured as its BOX, not its glyphs: styles.stickyDominantText pads it
-            // 4px each side to cut the rule, and translateX moves that box's left edge. Centring
-            // on the glyph width alone would let the backing hang over the run's cap.
-            const textWidth = fonts.model.getTextWidth(seg.label) + 8;
+            // Measured as the label's BOX, not its glyphs: the plate is padded to cut the rule
+            // where the text sits, and translateX moves that box's left edge, so centring on the
+            // glyphs alone would let the plate hang over the run's cap.
+            //
+            // The PAD is what gives way on a narrow run, not the label. A single period is 38px
+            // and "PM2.5" is ~31 of them, so a fixed 4px each side overflowed and the name was
+            // dropped entirely — a bracket with nothing in it. The pad shrinks to whatever is
+            // left instead, down to nothing, and only a run too narrow for the glyphs themselves
+            // goes unlabelled.
+            const glyphW = fonts.model.getTextWidth(seg.label);
             const runW = end - start;
-            // A one-period run is a single 38px column, which "PM2.5" only just fits. A run too
-            // narrow for its own name goes unlabelled rather than spilling over its neighbours —
-            // the dotted rule and the ticks still show it is there.
-            if (textWidth > runW - 2) return null;
+            const avail = runW - 2;
+            if (glyphW > avail) return null;
+            const pad = Math.max(0, Math.min(4, (avail - glyphW) / 2));
+            const textWidth = glyphW + pad * 2;
             // Centered in the VISIBLE part of the run, not pinned to the edge: the label tracks
             // the middle of however much of its band is on screen, and comes to rest in the
             // middle of the band once the whole thing fits. Clamped to the run so a sliver at the
@@ -2190,6 +2196,7 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
               <Animated.Text
                 key={`dom${i}`}
                 style={[styles.stickyModelText, styles.stickyDominantText, {
+                  paddingHorizontal: pad,
                   transform: [{ translateX }],
                 }]}
               >
@@ -2604,7 +2611,7 @@ const styles = StyleSheet.create({
   // The pollutant label sits ON its run's dotted rule, so it needs a plate to cut the dashes
   // where the text is. The row is white, so the plate is invisible and does only that job.
   stickyDominantText: {
-    lineHeight: ROW_H.WIND, paddingHorizontal: 4,
+    lineHeight: ROW_H.WIND,
     color: '#1c1c1e', backgroundColor: '#ffffff',
   },
   modelHeaderBar: { paddingHorizontal: 14, paddingVertical: 7 },
