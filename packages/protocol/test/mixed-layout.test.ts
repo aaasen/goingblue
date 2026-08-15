@@ -69,6 +69,8 @@ function periodAt(i: number): Period {
     aqi_eu_pm10: aqiMid(2 + (i % 4), AQI_EU_LOWER),
     aqi_eu_no2: aqiMid(1 + (i % 3), AQI_EU_LOWER),
     aqi_eu_so2: aqiMid(1 + (i % 2), AQI_EU_LOWER),
+    aqi_dominant: i % 6,
+    aqi_eu_dominant: i % 5,
   };
 }
 

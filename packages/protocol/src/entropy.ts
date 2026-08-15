@@ -18,6 +18,8 @@ import {
   AQI_EU_PM10_DELTA_WEIGHTS_BY_RES, AQI_EU_NO2_DELTA_WEIGHTS_BY_RES,
   AQI_EU_O3_DELTA_WEIGHTS_BY_RES, AQI_EU_SO2_DELTA_WEIGHTS_BY_RES,
   AQI_EU_RESIDUAL_WEIGHTS_BY_MASK_RES,
+  AQ_DOMINANT_BOOTSTRAP_WEIGHTS, AQ_DOMINANT_WEIGHTS,
+  AQ_DOMINANT_EU_BOOTSTRAP_WEIGHTS, AQ_DOMINANT_EU_WEIGHTS,
 } from "./codebooks.gen.js";
 import { CLASS_TABLES, CODEBOOK_CLASSES, type ClassTableSet } from "./codebooks-classes.gen.js";
 import {
@@ -320,6 +322,31 @@ export const AQI_BASE_MASKS = 8; // 0..7; mask 0 (none carried) has no residual 
 // present/absent) use, with 8 states instead of 2. Pinned here rather than emitted by the derive
 // pipeline so a regeneration can't silently flip a mode and change the wire format; the closest
 // call is EU ozone+pm10 at 0.978 vs 1.180, a comfortable margin.
+// ── The dominant pollutant ───────────────────────────────────────────────────────
+// Each scale's constituents IN WIRE ORDER: a headline's dominant-pollutant symbol is a position
+// in this list, so the order is wire format. The first three are the ones that ever lead (and the
+// ones the residual keys on); the rest are here because the headline's max is taken over them and
+// a symbol that could never be emitted would be a lie about what the index means. US carbon
+// monoxide has NO column of its own (see VARS_BIT) but keeps its symbol for exactly that reason.
+export const AQ_DOMINANT_US: readonly string[] = ["pm2.5", "ozone", "pm10", "no2", "so2", "co"];
+export const AQ_DOMINANT_EU: readonly string[] = ["pm2.5", "ozone", "pm10", "no2", "so2"];
+
+// Each alphabet carries ONE MORE symbol than it has pollutants: an explicit "unknown", emitted
+// when the headline has a reading but the constituents behind it don't, so the column never has
+// to invent an attribution. Upstream returning a headline without its parts is rare enough that
+// the corpus barely sees it — which is the point: a symbol that costs nothing when unused is a
+// better answer than naming PM2.5 because it happens to be index 0. Decodes to an absent field,
+// which the app draws as "—", the same as a period with no reading at all.
+export const aqDominantUnknown = (names: readonly string[]): number => names.length;
+export const aqDominantNSym = (names: readonly string[]): number => names.length + 1;
+
+// The identity is coded order-1 on the PREVIOUS period's dominant, which is where nearly all of
+// the structure is — the leading pollutant persists. Held-out b/period: marginal 1.139 (US) /
+// 1.151 (EU), order-1 0.252 / 0.254. Adding resolution and time-of-day axes measured 0.239/0.244
+// and 0.225/0.230 — 0.013 to 0.027, under the bar the cross-variable work set, so neither axis is
+// carried. The column's first period has no predecessor and uses a bootstrap table: unlike the AQ
+// delta columns (whose first symbol looks like "no change"), the marginal and the conditioned
+// distributions differ by 0.9 b/period here, far too much to share a row.
 const residualModeSet = (...masks: number[]) => new Set(masks);
 export const AQI_US_RESIDUAL_MASKS: ReadonlySet<number> = residualModeSet(
   AQI_BASE_PM25 | AQI_BASE_O3,
@@ -434,6 +461,10 @@ export interface ClassBooks {
   // resolution. The residual is a spike at zero, so a richer context would only split it.
   aqiResidualBook(res: number, baseMask: number): CodeBook;
   aqiEuResidualBook(res: number, baseMask: number): CodeBook;
+  // The headline's dominant-pollutant symbol, keyed by the previous period's dominant
+  // (null for the column's first, which uses the bootstrap table).
+  aqDominantBook(prev: number | null): CodeBook;
+  aqDominantEuBook(prev: number | null): CodeBook;
 }
 
 function buildClassBooks(t: ClassTableSet): ClassBooks {
@@ -532,6 +563,11 @@ const aqResidualByMaskRes = (weights: number[][][]) => {
   const tables = weights.map((rows) => rows.map(buildTable));
   return (res: number, baseMask: number): CodeBook => tables[baseMask][res];
 };
+const aqDominantOrder1 = (bootstrapWeights: number[], weights: number[][]) => {
+  const bootstrap = buildTable(bootstrapWeights);
+  const tables = weights.map(buildTable);
+  return (prev: number | null): CodeBook => (prev === null ? bootstrap : tables[prev]);
+};
 const AQ_BOOKS = {
   aqPm25Book: aqDeltaByResPrev(AQ_PM25_DELTA_WEIGHTS_BY_RES),
   aqO3Book: aqDeltaByResTodPrev(AQ_O3_DELTA_WEIGHTS_BY_RES),
@@ -547,6 +583,8 @@ const AQ_BOOKS = {
   aqiEuSo2Book: aqDeltaByResPrev(AQI_EU_SO2_DELTA_WEIGHTS_BY_RES),
   aqiResidualBook: aqResidualByMaskRes(AQI_RESIDUAL_WEIGHTS_BY_MASK_RES),
   aqiEuResidualBook: aqResidualByMaskRes(AQI_EU_RESIDUAL_WEIGHTS_BY_MASK_RES),
+  aqDominantBook: aqDominantOrder1(AQ_DOMINANT_BOOTSTRAP_WEIGHTS, AQ_DOMINANT_WEIGHTS),
+  aqDominantEuBook: aqDominantOrder1(AQ_DOMINANT_EU_BOOTSTRAP_WEIGHTS, AQ_DOMINANT_EU_WEIGHTS),
 };
 
 // The base (class 0) table set — codebooks.gen.ts as one ClassTableSet.
@@ -701,6 +739,12 @@ const airQualityBundle = {
   // a delta series.
   residualByMaskRes: AQI_RESIDUAL_WEIGHTS_BY_MASK_RES.map((rows) => rows.map(qf)),
   euResidualByMaskRes: AQI_EU_RESIDUAL_WEIGHTS_BY_MASK_RES.map((rows) => rows.map(qf)),
+  dominantUs: AQ_DOMINANT_US,
+  dominantEu: AQ_DOMINANT_EU,
+  dominantBootstrap: qf(AQ_DOMINANT_BOOTSTRAP_WEIGHTS),
+  dominantByPrev: AQ_DOMINANT_WEIGHTS.map(qf),
+  dominantEuBootstrap: qf(AQ_DOMINANT_EU_BOOTSTRAP_WEIGHTS),
+  dominantEuByPrev: AQ_DOMINANT_EU_WEIGHTS.map(qf),
   usResidualMasks: [...AQI_US_RESIDUAL_MASKS].sort((a, b) => a - b),
   euResidualMasks: [...AQI_EU_RESIDUAL_MASKS].sort((a, b) => a - b),
 };

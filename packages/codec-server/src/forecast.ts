@@ -185,6 +185,9 @@ export interface Row {
   us_aqi_pm10: number | null;
   us_aqi_nitrogen_dioxide: number | null;
   us_aqi_sulphur_dioxide: number | null;
+  // Not a wire column, but the US headline's max is taken over it, so the dominant-pollutant
+  // column has to be able to name it. Fetched whenever the US headline is requested.
+  us_aqi_carbon_monoxide: number | null;
   european_aqi: number | null;
   european_aqi_pm2_5: number | null;
   european_aqi_pm10: number | null;
@@ -216,7 +219,33 @@ export const AQ_BIT_VARS: [bit: number, cams: string, period: keyof Period][] = 
   [VARS_BIT.aqi_eu, "european_aqi", "aqi_eu"],
 ];
 
-export const AIR_QUALITY_VARS = AQ_BIT_VARS.map(([, cams]) => cams);
+// Each headline: the bit that selects it, the Period field naming its dominant constituent, and
+// that scale's constituents IN WIRE ORDER (AQ_DOMINANT_US/_EU). The order is wire format — the
+// column transmits a position in this list. Selecting a headline fetches all of them, including
+// US carbon monoxide, which has no column of its own: the index maxes over it, so a truthful
+// answer to "which pollutant is this" has to be able to say so.
+export const AQ_DOMINANT_SOURCES: [bit: number, field: keyof Period, cams: string[]][] = [
+  [VARS_BIT.aqi, "aqi_dominant", [
+    "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi_pm10",
+    "us_aqi_nitrogen_dioxide", "us_aqi_sulphur_dioxide", "us_aqi_carbon_monoxide",
+  ]],
+  [VARS_BIT.aqi_eu, "aqi_eu_dominant", [
+    "european_aqi_pm2_5", "european_aqi_ozone", "european_aqi_pm10",
+    "european_aqi_nitrogen_dioxide", "european_aqi_sulphur_dioxide",
+  ]],
+];
+
+// Every air-quality series the server may fetch: the columns, plus any constituent that only
+// the dominant-pollutant argmax needs (US carbon monoxide). Constituents first, headlines
+// last, matching the order the columns encode in.
+export const AIR_QUALITY_VARS: string[] = (() => {
+  const names = AQ_BIT_VARS.map(([, cams]) => cams);
+  const extra = AQ_DOMINANT_SOURCES.flatMap(([, , cams]) => cams)
+    .filter((v) => !names.includes(v));
+  // Headlines encode last, so keep them at the tail when splicing the extras in.
+  const heads = names.slice(-2);
+  return [...names.slice(0, -2), ...extra, ...heads];
+})();
 
 // Map an SDK variable — identified by (enum, altitude, pressureLevel) — back to the Open-Meteo
 // request name the rest of the pipeline keys on (`temperature_2m`, `wind_speed_500hPa`). Mirrors
@@ -403,7 +432,14 @@ export function adjustPrecipPhase(h: HourlyData, siteElevM: number | null): Hour
 // The air-quality variables a request needs, given its vars_mask — empty when it asked for none,
 // which is the common case and skips the upstream call entirely.
 export function airQualityVarsFor(varsMask: number): string[] {
-  return AQ_BIT_VARS.filter(([bit]) => varsMask & (1 << bit)).map(([, name]) => name);
+  const want = new Set(
+    AQ_BIT_VARS.filter(([bit]) => varsMask & (1 << bit)).map(([, name]) => name));
+  // A headline needs every constituent of its scale, not just the ones with columns — the
+  // dominant-pollutant column is an argmax over all of them.
+  for (const [bit, , cams] of AQ_DOMINANT_SOURCES)
+    if (varsMask & (1 << bit)) for (const v of cams) want.add(v);
+  // Emitted in AIR_QUALITY_VARS order so the upstream request is stable across masks.
+  return AIR_QUALITY_VARS.filter((v) => want.has(v));
 }
 
 // Air quality comes from a DIFFERENT Open-Meteo API (its own host and path), so it can't ride the
@@ -698,7 +734,7 @@ export function rowsFromWindows(
       cloud_cover_low: maxOf(pick(h.cloud_cover_low)),
       // Worst air in the window, the same semantics gusts get: a period that contains an hour of
       // unhealthy smoke is an unhealthy period, however clean its other hours were.
-      ...Object.fromEntries(AQ_BIT_VARS.map(([, cams]) => [cams, maxOf(pickUnk(cams))])),
+      ...Object.fromEntries(AIR_QUALITY_VARS.map((cams) => [cams, maxOf(pickUnk(cams))])),
     } as Row;
   });
   return rows;
@@ -736,9 +772,25 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period
   // Air quality, left UNDEFINED rather than coalesced to 0 where the value is missing: 0 is the
   // cleanest air on either scale, so claiming it for an hour CAMS never forecast would be a lie.
   // The codec encodes an absent value as its no-data symbol (see the AQ columns in v2.ts).
+  const aq = r as unknown as Record<string, number | null>;
   for (const [bit, cams, field] of AQ_BIT_VARS) {
-    const v = (r as unknown as Record<string, number | null>)[cams];
+    const v = aq[cams];
     if ((varsMask & (1 << bit)) && v != null) (p[field] as number) = v;
+  }
+  // Which constituent each selected headline is reporting: the argmax over RAW concentrations,
+  // not the banded sub-indices. At ladder resolution two pollutants share the top band ~8% of the
+  // time, and raw values essentially never tie, so picking here means the wire never has to carry
+  // a tiebreak rule. Left absent if any constituent is missing — there is then no honest answer,
+  // and the codec skips the symbol for periods whose headline has no reading.
+  for (const [bit, field, cams] of AQ_DOMINANT_SOURCES) {
+    if (!(varsMask & (1 << bit))) continue;
+    let best = -Infinity, bi = -1;
+    for (let i = 0; i < cams.length; i++) {
+      const v = aq[cams[i]];
+      if (v == null) { bi = -1; break; }
+      if (v > best) { best = v; bi = i; }
+    }
+    if (bi >= 0) (p[field] as number) = bi;
   }
   return p;
 }

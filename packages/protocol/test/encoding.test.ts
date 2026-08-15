@@ -89,6 +89,10 @@ const PERIOD: Period = {
   aqi_eu_pm10: 22,
   aqi_eu_no2: 14,
   aqi_eu_so2: 6,
+  // PM2.5 (96) leads the US constituents; ozone (48) leads the European ones — indices into
+  // AQ_DOMINANT_US / AQ_DOMINANT_EU.
+  aqi_dominant: 0,
+  aqi_eu_dominant: 1,
 };
 
 // Air-quality values decode to their ladder band's representative, so expectations go through
@@ -281,6 +285,41 @@ describe("v2 round-trip encoding", () => {
         }
       }
     }
+  });
+
+  it("names the dominant pollutant for every period a headline reports", () => {
+    // The identity rides the headline's own bit — asking for AQI alone is enough to get it.
+    for (const [bit, field, expected] of [
+      [VARS_BIT.aqi, "aqi_dominant", PERIOD.aqi_dominant],
+      [VARS_BIT.aqi_eu, "aqi_eu_dominant", PERIOD.aqi_eu_dominant],
+    ] as const) {
+      const decoded = roundTrip(msg({ vars_mask: 1 << bit }));
+      for (let p = 0; p < decoded.periods[0].length; p++)
+        expect(decoded.periods[0][p][field], `${field} period ${p}`).toBe(expected);
+    }
+  });
+
+  it("carries the dominant pollutant independently of the headline's coding mode", () => {
+    // Whether the headline codes as a residual or as its own deltas is a function of vars_mask;
+    // the pollutant it names must not change with it.
+    const withAll = (1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25)
+      | (1 << VARS_BIT.aq_o3) | (1 << VARS_BIT.aq_pm10);
+    for (const varsMask of [1 << VARS_BIT.aqi, withAll]) {
+      const d = roundTrip(msg({ vars_mask: varsMask })).periods[0][0];
+      expect(d.aqi_dominant, `mask ${varsMask}`).toBe(PERIOD.aqi_dominant);
+    }
+  });
+
+  it("names no pollutant for a period whose headline has no reading", () => {
+    // A no-data headline has nothing to attribute, so no symbol is emitted — and the decoder
+    // knows which periods those are because it reads the headline first.
+    const gap: Period = { ...PERIOD, aqi: undefined };
+    const periods = [[PERIOD, gap, PERIOD]];
+    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.aqi, periods }));
+    expect(decoded.periods[0][0].aqi_dominant).toBe(PERIOD.aqi_dominant);
+    expect(decoded.periods[0][1].aqi).toBeUndefined();
+    expect(decoded.periods[0][1].aqi_dominant).toBeUndefined();
+    expect(decoded.periods[0][2].aqi_dominant).toBe(PERIOD.aqi_dominant);
   });
 
   it("ignores the constituents that never lead an index as headline context", () => {

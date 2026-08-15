@@ -56,6 +56,12 @@ export interface Period {
   // carry no air-quality data at all, so `undefined` here means "not forecast", not "clean".
   // Each headline is EXACTLY the max over its own scale's sub-indices — measured over 52M corpus
   // periods, it exceeds that max in 0.00% of them — which is what lets it code as a residual.
+  // Which constituent the headline is reporting — an index into AQ_DOMINANT_US/_EU (entropy.ts),
+  // present whenever its headline is. Carried rather than derived: the reader who asks for the
+  // headline alone has no sub-index columns to take an argmax over, and even one who has them all
+  // only has BANDED values, which tie ~8% of the time. The encoder picks by raw concentration.
+  aqi_dominant?: number;
+  aqi_eu_dominant?: number;
   aqi?: number;          // US AQI, headline (the max over its sub-indices)
   aqi_pm25?: number;     // US AQI PM2.5 sub-index — smoke
   aqi_o3?: number;       // US AQI ozone sub-index

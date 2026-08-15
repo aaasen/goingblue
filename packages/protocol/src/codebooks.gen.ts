@@ -2840,3 +2840,17 @@ export const WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES: number[][][] = [
     [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 14, 119, 437, 313, 94, 16, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   ],
 ];
+
+// BOOTSTRAP STUBS — overwritten by the next `pnpm generate`. Uniform weights, so the codec runs
+// and round-trips correctly (just without the corpus's skew) before the tables have been derived;
+// test/codebooks.test.ts fails on the digest until they have been.
+export const AQ_DOMINANT_BOOTSTRAP_WEIGHTS: number[] = [1, 1, 1, 1, 1, 1, 1];
+export const AQ_DOMINANT_WEIGHTS: number[][] = [
+  [1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1],
+];
+export const AQ_DOMINANT_EU_BOOTSTRAP_WEIGHTS: number[] = [1, 1, 1, 1, 1, 1];
+export const AQ_DOMINANT_EU_WEIGHTS: number[][] = [
+  [1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1],
+];

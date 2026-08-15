@@ -15,6 +15,7 @@ import {
   AQI_US_LOWER, AQI_EU_LOWER, AQI_RESIDUAL_MAX,
   AQI_BASE_PM25, AQI_BASE_O3, AQI_BASE_PM10,
   AQI_US_RESIDUAL_MASKS, AQI_EU_RESIDUAL_MASKS,
+  AQ_DOMINANT_US, AQ_DOMINANT_EU, AQI_NO_DATA, aqDominantUnknown, aqDominantNSym,
   encodeTempDelta, decodeTempDelta, tempTodBucket,
   TEMP_DELTA_MIN, TEMP_DELTA_MAX,
   makeBitSink, makeBitSource, type CodeBook, type DeltaCodec,
@@ -217,6 +218,11 @@ interface AqHeadline {
   residualMasks: ReadonlySet<number>;
   residualBook(bk: ClassBooks, res: number, baseMask: number): CodeBook;
   deltaBook(bk: ClassBooks, res: number, tod: number, prevDelta: number | null): CodeBook;
+  // The dominant-pollutant column that rides this headline: which constituent it is reporting.
+  dominantField: "aqi_dominant" | "aqi_eu_dominant";
+  nDominant: number;
+  dominantUnknown: number;
+  dominantBook(bk: ClassBooks, prev: number | null): CodeBook;
 }
 const AQ_HEADLINES: AqHeadline[] = [
   {
@@ -225,6 +231,9 @@ const AQ_HEADLINES: AqHeadline[] = [
     residualMasks: AQI_US_RESIDUAL_MASKS,
     residualBook: (bk, res, m) => bk.aqiResidualBook(res, m),
     deltaBook: (bk, res, tod, prev) => bk.aqiDeltaBook(res, tod, prev),
+    dominantField: "aqi_dominant", nDominant: aqDominantNSym(AQ_DOMINANT_US),
+    dominantUnknown: aqDominantUnknown(AQ_DOMINANT_US),
+    dominantBook: (bk, prev) => bk.aqDominantBook(prev),
   },
   {
     bit: VARS_BIT.aqi_eu, field: "aqi_eu", lower: AQI_EU_LOWER,
@@ -232,6 +241,9 @@ const AQ_HEADLINES: AqHeadline[] = [
     residualMasks: AQI_EU_RESIDUAL_MASKS,
     residualBook: (bk, res, m) => bk.aqiEuResidualBook(res, m),
     deltaBook: (bk, res, tod, prev) => bk.aqiEuBook(res, tod, prev),
+    dominantField: "aqi_eu_dominant", nDominant: aqDominantNSym(AQ_DOMINANT_EU),
+    dominantUnknown: aqDominantUnknown(AQ_DOMINANT_EU),
+    dominantBook: (bk, prev) => bk.aqDominantEuBook(prev),
   },
 ];
 
@@ -501,6 +513,11 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
     const q: number[][] = msg.periods.map((rows) =>
       rows.slice(0, nAq).map((c) => quantAqi(c[h.field], h.lower)));
     const baseMask = aqBaseMask(h, msg.vars_mask);
+    // What the DECODER will reconstruct, which is not always q: the residual is clamped
+    // non-negative, so a headline below its own baseline comes back as the baseline. The
+    // dominant-pollutant pass below gates on this, so both sides agree on which periods carry a
+    // symbol without spending a bit saying so.
+    const recon: number[][] = msg.periods.map(() => new Array<number>(nAq).fill(0));
     if (h.residualMasks.has(baseMask)) {
       const bases = h.baseBits
         .filter((_, i) => baseMask & (1 << i))
@@ -509,19 +526,36 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
         for (let p = 0; p < nAq; p++) {
           let base = 0;
           for (const b of bases) if (b[m][p] > base) base = b[m][p];
-          em.sym(h.residualBook(books, res[p], baseMask),
-            Math.min(Math.max(q[m][p] - base, 0), AQI_RESIDUAL_MAX));
+          const resid = Math.min(Math.max(q[m][p] - base, 0), AQI_RESIDUAL_MAX);
+          em.sym(h.residualBook(books, res[p], baseMask), resid);
+          recon[m][p] = base + resid;
         }
       }
     } else {
       for (let m = 0; m < nModels; m++) {
         em.raw(q[m][0], AQ_ANCHOR_BITS);
+        recon[m][0] = q[m][0];
         let prevDelta: number | null = null;
         for (let p = 1; p < nAq; p++) {
           const delta = q[m][p] - q[m][p - 1];
           encodeAqiDelta(em, h.deltaBook(books, res[p], tod[p], prevDelta), delta);
+          recon[m][p] = q[m][p];
           prevDelta = delta;
         }
+      }
+    }
+    // Which constituent the headline is reporting, order-1 on the previous period's answer. Only
+    // periods that decode to an actual reading carry one — a no-data headline has no pollutant to
+    // name, and the decoder knows which those are because it reads the headline first.
+    for (let m = 0; m < nModels; m++) {
+      let prevDom: number | null = null;
+      for (let p = 0; p < nAq; p++) {
+        if (recon[m][p] === AQI_NO_DATA) continue;
+        const raw = msg.periods[m][p][h.dominantField];
+        const dom = raw == null ? h.dominantUnknown
+          : Math.min(Math.max(Math.round(raw), 0), h.nDominant - 1);
+        em.sym(h.dominantBook(books, prevDom), dom);
+        prevDom = dom;
       }
     }
     mark(BIT_NAME[h.bit], before);
@@ -858,6 +892,7 @@ function decodeBody(
   for (const h of AQ_HEADLINES) {
     if (!(vars_mask & (1 << h.bit))) continue;
     const baseMask = aqBaseMask(h, vars_mask);
+    const recon: number[][] = Array.from({ length: nModels }, () => new Array<number>(nAq).fill(0));
     if (h.residualMasks.has(baseMask)) {
       const bases = h.baseBits
         .filter((_, i) => baseMask & (1 << i))
@@ -867,20 +902,32 @@ function decodeBody(
           const resid = rd.sym(h.residualBook(books, res[p], baseMask));
           let base = 0;
           for (const b of bases) if (b[m][p] > base) base = b[m][p];
-          periods[m][p][h.field] = aqiMid(base + resid, h.lower);
+          recon[m][p] = base + resid;
+          periods[m][p][h.field] = aqiMid(recon[m][p], h.lower);
         }
       }
     } else {
       for (let m = 0; m < nModels; m++) {
         let quant = rd.int(AQ_ANCHOR_BITS);
+        recon[m][0] = quant;
         periods[m][0][h.field] = aqiMid(quant, h.lower);
         let prevDelta: number | null = null;
         for (let p = 1; p < nAq; p++) {
           const delta = rd.aqiDelta(h.deltaBook(books, res[p], tod[p], prevDelta));
           quant += delta;
+          recon[m][p] = quant;
           periods[m][p][h.field] = aqiMid(quant, h.lower);
           prevDelta = delta;
         }
+      }
+    }
+    for (let m = 0; m < nModels; m++) {
+      let prevDom: number | null = null;
+      for (let p = 0; p < nAq; p++) {
+        if (recon[m][p] === AQI_NO_DATA) continue;
+        const dom = rd.sym(h.dominantBook(books, prevDom));
+        if (dom !== h.dominantUnknown) periods[m][p][h.dominantField] = dom;
+        prevDom = dom;
       }
     }
   }

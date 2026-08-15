@@ -6,6 +6,7 @@ import {
 } from '@shopify/react-native-skia';
 import {
   CARDINALS, RAIN_MAX_MM, modelsFromMask, startDatetime, predictCenter, attributeHour,
+  AQ_DOMINANT_US, AQ_DOMINANT_EU,
   type Center, type ForecastMessage, type ModelSpec, type Period,
 } from '@weather/protocol';
 import type { TimeFormat, Units } from './settings';
@@ -407,6 +408,26 @@ function valueRuns(n: number, has: (i: number) => boolean): number[][] {
   return runs;
 }
 
+// A run of consecutive periods reporting the same dominant pollutant. Held apart from the scene
+// for the same reason model bands are: the label is drawn as RN text outside the canvas so it can
+// stick to the visible edge, and a run can be wider than the screen.
+interface DominantSegment { start: number; end: number; label: string }
+function dominantSegments(periods: Period[], kind: AqDominantKind): DominantSegment[] {
+  const { field, value, scale } = AQ_DOMINANT_KEYS[kind];
+  const nameOf = (i: number) => pollutantName(scale, periods[i][field] as number | undefined);
+  const aqiOf = (i: number) => periods[i][value] as number | undefined;
+  const segs: DominantSegment[] = [];
+  for (let i = 0; i < periods.length; ) {
+    const label = nameOf(i);
+    if (aqiOf(i) == null || label == null) { i++; continue; }
+    let j = i;
+    while (j + 1 < periods.length && aqiOf(j + 1) != null && nameOf(j + 1) === label) j++;
+    segs.push({ start: i, end: j + 1, label });
+    i = j + 1;
+  }
+  return segs;
+}
+
 type Slot = { left: number; center: number; right: number };
 
 // A run of wind columns painted as one horizontal gradient rather than a rect per column: the
@@ -734,6 +755,7 @@ type RowKind =
   | 'clouds' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc' | 'wind-gust' | 'wind-dir'
   | 'cloud-high' | 'cloud-mid' | 'cloud-low'
   | 'aqi' | 'aqi-pm25' | 'aqi-o3' | 'aqi-pm10' | 'aqi-no2' | 'aqi-so2'
+  | 'aqi-dominant' | 'aqi-eu-dominant'
   | 'aqi-eu' | 'aqi-eu-pm25' | 'aqi-eu-o3' | 'aqi-eu-pm10' | 'aqi-eu-no2' | 'aqi-eu-so2'
   | 'wind-500' | 'wind-600' | 'wind-700' | 'model' | 'section';
 
@@ -781,6 +803,31 @@ const AQ_KEYS = {
 const AQ_SCALE_WORD = { us: 'US', eu: 'European' } as const;
 type AqKind = keyof typeof AQ_KEYS;
 const AQ_KINDS = Object.keys(AQ_KEYS) as AqKind[];
+
+// The dominant-pollutant row: which constituent the headline above it is reporting. It sits
+// directly under its headline and shares that row's colored ground — the fill is the HEADLINE's
+// band, not a category of its own, so the pair reads as one block: how bad, and what it is.
+const AQ_DOMINANT_KEYS = {
+  'aqi-dominant': { field: 'aqi_dominant', value: 'aqi', scale: 'us' },
+  'aqi-eu-dominant': { field: 'aqi_eu_dominant', value: 'aqi_eu', scale: 'eu' },
+} as const satisfies Record<string, { field: keyof Period; value: keyof Period; scale: 'us' | 'eu' }>;
+type AqDominantKind = keyof typeof AQ_DOMINANT_KEYS;
+const AQ_DOMINANT_KINDS = Object.keys(AQ_DOMINANT_KEYS) as AqDominantKind[];
+// Which headline row each dominant row follows.
+const AQ_DOMINANT_FOR: Partial<Record<AqKind, AqDominantKind>> = {
+  'aqi': 'aqi-dominant',
+  'aqi-eu': 'aqi-eu-dominant',
+};
+// The wire carries a position in the scale's constituent list (AQ_DOMINANT_US/_EU in the
+// protocol); these are the same pollutants written the way the rows above them are labelled.
+const POLLUTANT_LABEL: Record<string, string> = {
+  'pm2.5': 'PM2.5', ozone: 'Ozone', pm10: 'PM10', no2: 'NO₂', so2: 'SO₂', co: 'CO',
+};
+const pollutantName = (scale: 'us' | 'eu', idx: number | undefined): string | undefined => {
+  const ids = scale === 'us' ? AQ_DOMINANT_US : AQ_DOMINANT_EU;
+  if (idx == null || idx < 0 || idx >= ids.length) return undefined;
+  return POLLUTANT_LABEL[ids[idx]] ?? ids[idx];
+};
 
 function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[] {
   const rows: Row[] = [];
@@ -852,8 +899,14 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
       height: ROW_H.SECTION,
       label: `Air quality (${camsDomain(lat, lon)}, ${AQ_SCALE_WORD[scale]} scale)`,
     });
-    for (const kind of scaleRows)
+    for (const kind of scaleRows) {
       rows.push({ kind, height: ROW_H.WIND, label: AQ_KEYS[kind].label });
+      // A headline brings its dominant-pollutant row with it — it rides the same request bit,
+      // so if the headline has values this does too.
+      const dom = AQ_DOMINANT_FOR[kind];
+      if (dom && has((p) => p[AQ_DOMINANT_KEYS[dom].field] as unknown))
+        rows.push({ kind: dom, height: ROW_H.WIND, label: 'Pollutant' });
+    }
   }
 
   return rows;
@@ -1337,6 +1390,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
   const TINTABLE_STOP = new Set<RowKind>([
     'wind-sfc', 'wind-gust', 'wind-dir', 'freeze', 'cloud-high', 'cloud-mid', 'cloud-low',
     ...AQ_KINDS, // air-quality cells carry their category as a fill, same as the wind ribbon
+    ...AQ_DOMINANT_KINDS, // and the dominant row is painted with its headline's fill
     'wind-500', 'wind-600', 'wind-700', 'model',
   ]);
   const nightBottom = (() => {
@@ -1709,6 +1763,46 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         break;
       }
 
+      case 'aqi-dominant': case 'aqi-eu-dominant': {
+        // Painted exactly like the headline row above it, from the HEADLINE's value — same
+        // Left white on purpose. The row carries no measurement of its own — the AQI band above
+        // it already says how bad the air is — so shading it in those same colours would read as
+        // a second reading rather than as a caption on the first.
+        //
+        // The name itself is NOT drawn here: it is RN text in a sticky overlay, so a run wider
+        // than the screen keeps its label in frame the way the model bands and day headers do.
+        // What the canvas draws is the bracket the label sits in.
+        const segs = dominantSegments(periods, row.kind);
+        const named = new Set<number>();
+        segs.forEach((sg) => { for (let i = sg.start; i < sg.end; i++) named.add(i); });
+        periods.forEach((_, i) => {
+          if (named.has(i)) return;
+          els.push(centerText(`dm${ri}-${i}`, '—', colCenter(i), mid, fonts.wind, C.nil));
+        });
+        segs.forEach((sg, si) => {
+          const x0 = colLeft(sg.start), x1 = colLeft(sg.end);
+          // |____| : a dotted rule on the text's own centre line, closed by a cap at each end of
+          // the run. The caps rise from the rule toward the AQI row above, so the bracket points
+          // at the numbers it is qualifying. They are also what marks a handover — two of them
+          // land back to back where runs touch — so the full-height white tick that used to do
+          // that job is gone; two rules saying the same thing in a 26px row was one too many.
+          // The label rides over the rule on a white plate, which is what keeps the dashes from
+          // striking through it: the label moves with the scroll and the canvas can't follow it,
+          // so the gap has to travel with the text rather than be cut into the line.
+          const y = mid;
+          els.push(
+            <Line key={`dmrule${ri}-${si}`} p1={vec(x0 + 1, y)} p2={vec(x1 - 1, y)}
+              color={C.date} strokeWidth={1} opacity={0.45}>
+              <DashPathEffect intervals={[1.5, 2.5]} />
+            </Line>,
+          );
+          for (const [xi, x] of [[0, x0 + 1], [1, x1 - 1]] as const)
+            els.push(<Line key={`dmcap${ri}-${si}-${xi}`}
+              p1={vec(x, y - 6)} p2={vec(x, y)} color={C.date} strokeWidth={1} opacity={0.45} />);
+        });
+        break;
+      }
+
       case 'wind-dir': {
         // Chunky solid arrow (shaft + triangular head), rotated per direction. Text glyphs are
         // too thin at this size. Drawn pointing east and rotated to where the wind blows toward:
@@ -1852,6 +1946,20 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   );
   // Walked rather than measured from the bottom: the model row closes the weather rows, and the
   // air-quality block sits below it when the request asked for any of it.
+  // Every dominant-pollutant row in this block: where it sits and the runs it labels. Walked
+  // alongside modelRowTop because the labels are RN text outside the canvas, same as the model
+  // names — a run of one pollutant can be wider than the screen.
+  const dominantRows = useMemo(() => {
+    const out: { kind: AqDominantKind; top: number; segs: DominantSegment[] }[] = [];
+    let y = ROW_H.DATE;
+    for (const row of rows) {
+      if (row.kind === 'aqi-dominant' || row.kind === 'aqi-eu-dominant')
+        out.push({ kind: row.kind, top: y, segs: dominantSegments(periods, row.kind) });
+      y += row.height;
+    }
+    return out;
+  }, [rows, periods]);
+
   const modelRowTop = useMemo(() => {
     let y = ROW_H.DATE;
     for (const row of rows) {
@@ -1905,7 +2013,10 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
         data={tiles}
         horizontal
         bounces={false}
-        showsHorizontalScrollIndicator
+        // No scroll indicator: it draws at the bottom of the list over whatever row is last,
+        // and the overview strip above already shows where the viewport sits in the window —
+        // which it does continuously, and for the whole forecast rather than the scroll extent.
+        showsHorizontalScrollIndicator={false}
         scrollEventThrottle={16}
         keyExtractor={(tile) => String(tile.offset)}
         // The paint epoch lives outside `data`, so tell the list its cells are stale when it moves.
@@ -2020,6 +2131,71 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
           );
         })}
       </View>
+      {/* The dominant pollutant rides its run the way a model name rides its band: pinned to the
+          visible edge while the run is in view, handing over at the tick. Written once per run —
+          a stretch of PM2.5 is one fact, and repeating it per column buried the thing that does
+          change, which is where it stops being PM2.5. */}
+      {dominantRows.map(({ kind, top, segs }) => (
+        <View key={`dom-${kind}`} pointerEvents="none"
+          style={[styles.stickyModelRow, { top, height: ROW_H.WIND }]}>
+          {segs.map((seg, i) => {
+            const start = colLeft(seg.start);
+            const end = colLeft(seg.end);
+            // The label is measured as its BOX, not its glyphs: styles.stickyDominantText pads it
+            // 4px each side to cut the rule, and translateX moves that box's left edge. Centring
+            // on the glyph width alone would let the backing hang over the run's cap.
+            const textWidth = fonts.model.getTextWidth(seg.label) + 8;
+            const runW = end - start;
+            // A one-period run is a single 38px column, which "PM2.5" only just fits. A run too
+            // narrow for its own name goes unlabelled rather than spilling over its neighbours —
+            // the dotted rule and the ticks still show it is there.
+            if (textWidth > runW - 2) return null;
+            // Centered in the VISIBLE part of the run, not pinned to the edge: the label tracks
+            // the middle of however much of its band is on screen, and comes to rest in the
+            // middle of the band once the whole thing fits. Clamped to the run so a sliver at the
+            // edge of the screen can't push the name out over the run next door.
+            //
+            // NOTE `screenW`, not `width` — in this scope `width` is the CONTENT width
+            // (NAME_W + n · CELL_W), which is several screens across. The sticky day and model
+            // labels use it only as a far extrapolation anchor, where any value past the pin
+            // gives the slope they want; here it is the viewport that defines "visible", and
+            // using the content width instead puts the label off the right of the screen.
+            const labelX = (sx: number) => {
+              const l = Math.max(start - sx, 0);
+              const r = Math.min(end - sx, screenW);
+              const c = (l + r) / 2 - textWidth / 2;
+              return Math.min(Math.max(c, start - sx), end - sx - textWidth);
+            };
+            // The function is piecewise linear; these are its knees, so sampling exactly here
+            // reproduces it rather than approximating it. Outer anchors extend the end slopes.
+            const knees = [
+              start - screenW + textWidth,
+              Math.min(start, end - screenW),
+              Math.max(start, end - screenW),
+              end - textWidth,
+            ];
+            const inputRange: number[] = [];
+            for (const v of [knees[0] - screenW, ...knees, knees[3] + screenW])
+              if (!inputRange.length || v > inputRange[inputRange.length - 1] + 0.01)
+                inputRange.push(v);
+            const translateX = inputRange.length >= 2
+              ? scrollX.interpolate({
+                  inputRange, outputRange: inputRange.map(labelX), extrapolate: 'extend',
+                })
+              : Animated.subtract(start + (runW - textWidth) / 2, scrollX);
+            return (
+              <Animated.Text
+                key={`dom${i}`}
+                style={[styles.stickyModelText, styles.stickyDominantText, {
+                  transform: [{ translateX }],
+                }]}
+              >
+                {seg.label}
+              </Animated.Text>
+            );
+          })}
+        </View>
+      ))}
       </View>
     </View>
   );
@@ -2294,6 +2470,13 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
     if (!has((q) => q[field])) continue;
     const v = p[field] as number | undefined;
     rows.push([label, v != null ? `${Math.round(v)} · ${aqBand(v, scale).name}` : 'Not forecast']);
+    // The headline's line is followed by what is driving it, so the readout answers "how bad"
+    // and "of what" together.
+    const dom = AQ_DOMINANT_FOR[kind];
+    if (!dom) continue;
+    const dk = AQ_DOMINANT_KEYS[dom];
+    if (!has((q) => q[dk.field] as unknown)) continue;
+    rows.push(['Dominant pollutant', pollutantName(dk.scale, p[dk.field] as number | undefined) ?? '—']);
   }
 
   return (
@@ -2415,6 +2598,12 @@ const styles = StyleSheet.create({
   // label, from the band it sits on.
   stickyModelRow: { position: 'absolute', left: 0, right: 0, overflow: 'hidden' },
   stickyModelText: { position: 'absolute', top: 0, fontSize: 11, fontWeight: '600', lineHeight: ROW_H.MODEL },
+  // The pollutant label sits ON its run's dotted rule, so it needs a plate to cut the dashes
+  // where the text is. The row is white, so the plate is invisible and does only that job.
+  stickyDominantText: {
+    lineHeight: ROW_H.WIND, paddingHorizontal: 4,
+    color: '#1c1c1e', backgroundColor: '#ffffff',
+  },
   modelHeaderBar: { paddingHorizontal: 14, paddingVertical: 7 },
   modelHeaderText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   sep: { height: 10, backgroundColor: '#f2f2f7' },

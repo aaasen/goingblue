@@ -146,6 +146,7 @@ function row(snow_cm: number): Row {
     us_aqi_pm10: 60,
     us_aqi_nitrogen_dioxide: 18,
     us_aqi_sulphur_dioxide: 9,
+    us_aqi_carbon_monoxide: 5,
     european_aqi: 55,
     european_aqi_pm2_5: 31,
     european_aqi_ozone: 48,
@@ -201,6 +202,28 @@ describe("toFullPeriod — air quality", () => {
     }
   });
 
+  it("names the dominant pollutant by raw concentration, not by band", () => {
+    // row() has PM2.5 96 leading the US constituents and ozone 48 leading the European ones —
+    // indices into AQ_DOMINANT_US / AQ_DOMINANT_EU.
+    const p = toFullPeriod(row(0), ALWAYS_VARS_MASK | (1 << VARS_BIT.aqi) | (1 << VARS_BIT.aqi_eu), "EU");
+    expect(p.aqi_dominant).toBe(0);
+    expect(p.aqi_eu_dominant).toBe(1);
+
+    // Raw values decide, so a pollutant that would share PM2.5's ladder band still wins outright
+    // when its concentration is higher. 100 and 96 are both US band 15 (100..119 → the same
+    // symbol), and ozone must still be named.
+    const ozoneLeads = { ...row(0), us_aqi_ozone: 100 };
+    expect(toFullPeriod(ozoneLeads, ALWAYS_VARS_MASK | (1 << VARS_BIT.aqi), "EU").aqi_dominant).toBe(1);
+  });
+
+  it("leaves the dominant pollutant absent when a constituent is missing", () => {
+    // With one constituent unknown there is no honest argmax — better to say nothing than to name
+    // the worst of what happened to arrive.
+    const partial = { ...row(0), us_aqi_ozone: null };
+    expect(toFullPeriod(partial, ALWAYS_VARS_MASK | (1 << VARS_BIT.aqi), "EU").aqi_dominant)
+      .toBeUndefined();
+  });
+
   it("is served on every center — CAMS doesn't depend on the weather model", () => {
     // The freezing level gets cleared for GEM and ECMWF; air quality never does.
     for (const center of ["BEST", "US", "CA", "EU"]) {
@@ -221,8 +244,18 @@ describe("airQualityVarsFor", () => {
   it("asks upstream for exactly the indices the request selected", () => {
     expect(airQualityVarsFor(ALWAYS_VARS_MASK)).toEqual([]);
     expect(airQualityVarsFor(1 << VARS_BIT.aq_pm25)).toEqual(["us_aqi_pm2_5"]);
-    expect(airQualityVarsFor((1 << VARS_BIT.aqi) | (1 << VARS_BIT.aqi_eu)))
-      .toEqual(["us_aqi", "european_aqi"]);
+    // A headline drags in every constituent of its scale — the dominant-pollutant column is an
+    // argmax over all of them, including US carbon monoxide, which has no column of its own.
+    expect(airQualityVarsFor(1 << VARS_BIT.aqi)).toEqual([
+      "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi_pm10",
+      "us_aqi_nitrogen_dioxide", "us_aqi_sulphur_dioxide", "us_aqi_carbon_monoxide",
+      "us_aqi",
+    ]);
+    expect(airQualityVarsFor(1 << VARS_BIT.aqi_eu)).toEqual([
+      "european_aqi_pm2_5", "european_aqi_ozone", "european_aqi_pm10",
+      "european_aqi_nitrogen_dioxide", "european_aqi_sulphur_dioxide",
+      "european_aqi",
+    ]);
   });
 });
 

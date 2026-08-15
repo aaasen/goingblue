@@ -101,6 +101,48 @@ const RESIDUALS: { name: string; table: string; head: string; base: [string, str
 ];
 const NMASK = 8; // 3-bit presence mask; row 0 is generated but never looked up
 
+// The dominant-pollutant column that rides each headline: the constituents it can name, in wire
+// order (AQ_DOMINANT_US/_EU in entropy.ts), and the tables it fills. Counted from RAW values, not
+// banded ones — that is how the encoder picks, and it is what keeps the ~8% of periods where two
+// sub-indices share a band from being decided by an arbitrary rule.
+const DOMINANT: {
+  name: string; bootstrap: string; table: string;
+  head: (r: Row) => number | null; lower: readonly number[];
+  of: ((r: Row) => number | null)[];
+}[] = [
+  {
+    name: "usDominant",
+    bootstrap: "AQ_DOMINANT_BOOTSTRAP_WEIGHTS", table: "AQ_DOMINANT_WEIGHTS",
+    head: (r) => r.us_aqi, lower: AQI_US_LOWER,
+    of: [
+      (r) => r.us_aqi_pm2_5, (r) => r.us_aqi_ozone, (r) => r.us_aqi_pm10,
+      (r) => r.us_aqi_nitrogen_dioxide, (r) => r.us_aqi_sulphur_dioxide,
+      (r) => r.us_aqi_carbon_monoxide,
+    ],
+  },
+  {
+    name: "euDominant",
+    bootstrap: "AQ_DOMINANT_EU_BOOTSTRAP_WEIGHTS", table: "AQ_DOMINANT_EU_WEIGHTS",
+    head: (r) => r.european_aqi, lower: AQI_EU_LOWER,
+    of: [
+      (r) => r.european_aqi_pm2_5, (r) => r.european_aqi_ozone, (r) => r.european_aqi_pm10,
+      (r) => r.european_aqi_nitrogen_dioxide, (r) => r.european_aqi_sulphur_dioxide,
+    ],
+  },
+];
+
+// The dominant constituent of one row, by raw value. null when any constituent is missing — the
+// headline has no pollutant to name then, and the column emits nothing.
+function dominantOf(rows: Row[], p: number, cols: ((r: Row) => number | null)[]): number | null {
+  let best = -Infinity, bi = -1;
+  for (let i = 0; i < cols.length; i++) {
+    const v = cols[i](rows[p]);
+    if (v == null || Number.isNaN(v)) return null;
+    if (v > best) { best = v; bi = i; }
+  }
+  return bi;
+}
+
 export function counter(): CellCounter {
   const tables = [
     ...COLUMNS.map((c) => ({ name: c.name, dims: [NRES, ctxCount(c), NDELTA] })),
@@ -109,6 +151,8 @@ export function counter(): CellCounter {
     // richer context would only split it. Every mask is counted from the same periods; which of
     // them the wire actually uses is v2.ts's call (AQI_*_RESIDUAL_MASKS).
     ...RESIDUALS.map((r) => ({ name: r.name, dims: [NMASK, NRES, NRESID] })),
+    // [prev + 1][sym]: row 0 is the bootstrap (no predecessor), rows 1.. are order-1.
+    ...DOMINANT.map((d) => ({ name: d.name, dims: [d.of.length + 2, d.of.length + 1] })),
   ];
   const { offsets, nSlots } = tableOffsets(tables);
 
@@ -170,6 +214,24 @@ export function counter(): CellCounter {
           }
         }
 
+        // The dominant pollutant, order-1 on the previous period's answer. A period whose
+        // constituents aren't all present carries no symbol and also breaks the chain, so the
+        // next one it does carry starts from the bootstrap row — exactly what the codec does.
+        for (const d of DOMINANT) {
+          const NSYM = d.of.length + 1;      // pollutants + the explicit unknown
+          const UNKNOWN = d.of.length;
+          let prev: number | null = null;
+          for (let p = 0; p < n; p++) {
+            // A period whose headline has no reading carries no symbol at all and leaves the
+            // chain where it was; one whose constituents are missing carries the unknown symbol,
+            // which is itself a context for the next period.
+            if (quantAqi(d.head(rows[p]), d.lower) === AQI_NO_DATA) continue;
+            const dom = dominantOf(rows, p, d.of) ?? UNKNOWN;
+            add(offsets[d.name] + (prev === null ? 0 : prev + 1) * NSYM + dom);
+            prev = dom;
+          }
+        }
+
         // Each headline's residual, under every presence mask, counted only where the headline
         // and the mask's constituents all exist — a period missing one encodes through the
         // no-data symbol, not through this table. One period contributes to all 7 masks, which is
@@ -209,6 +271,12 @@ export function counter(): CellCounter {
           Array.from({ length: NRES }, (_, res) =>
             scaledWeights(rowAt(counts, offsets[r.name] + (mask * NRES + res) * NRESID, NRESID))));
       }
+      for (const d of DOMINANT) {
+        const NSYM = d.of.length + 1;
+        out[d.bootstrap] = scaledWeights(rowAt(counts, offsets[d.name], NSYM));
+        out[d.table] = Array.from({ length: NSYM }, (_, prev) =>
+          scaledWeights(rowAt(counts, offsets[d.name] + (prev + 1) * NSYM, NSYM)));
+      }
       return out;
     },
     costBits(counts) {
@@ -232,6 +300,14 @@ export function counter(): CellCounter {
             const cost = rowCostBits(scaledWeights(rowAt(counts, start, NRESID)));
             for (let s = 0; s < NRESID; s++) L[start + s] = cost[s];
           }
+        }
+      }
+      for (const d of DOMINANT) {
+        const NSYM = d.of.length + 1;
+        for (let row = 0; row <= NSYM; row++) {
+          const start = offsets[d.name] + row * NSYM;
+          const cost = rowCostBits(scaledWeights(rowAt(counts, start, NSYM)));
+          for (let s = 0; s < NSYM; s++) L[start + s] = cost[s];
         }
       }
       return L;
@@ -264,6 +340,24 @@ export async function derive(precounted?: Float64Array): Promise<DerivedTables> 
     }
     console.log(`  ${col.name.padEnd(7)} n=${allN} mean=${(allBits / Math.max(1, allN)).toFixed(3)} b/period  [${parts.join(" ")}]`);
   }
+  // The dominant-pollutant column: its marginal share and its order-1 cost.
+  for (const d of DOMINANT) {
+    const NS = d.of.length + 1;
+    let bits = 0, n = 0;
+    const share = new Array<number>(NS).fill(0);
+    for (let row = 0; row <= NS; row++) {
+      for (let sym = 0; sym < NS; sym++) {
+        const slot = offsets[d.name] + row * NS + sym;
+        bits += counts[slot] * L[slot];
+        n += counts[slot];
+        share[sym] += counts[slot];
+      }
+    }
+    console.log(
+      `  ${d.name.padEnd(11)} n=${n} mean=${(bits / Math.max(1, n)).toFixed(3)} b/period` +
+      `  [${share.map((c, i) => `${i}=${(100 * c / Math.max(1, n)).toFixed(1)}%`).join(" ")}]`);
+  }
+
   // Every residual mask, so the log shows both the ones the wire selects and the ones it rejects
   // in favour of the headline's own deltas (printed above as usAqi / euAqi).
   const MASK_LABEL = ["-", "pm2.5", "o3", "pm2.5+o3", "pm10", "pm2.5+pm10", "o3+pm10", "all3"];
