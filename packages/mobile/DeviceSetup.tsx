@@ -82,8 +82,8 @@ function EarthmateSteps() {
 
       <Step n={2} title="Send the request">
         <Text style={styles.para}>
-          Tap <Bold>Copy Message</Bold> on the Builder tab, then send the message to Going Blue
-          through the Earthmate app.
+          On the Builder tab, choose <Bold>inReach</Bold> as your device and tap{' '}
+          <Bold>Copy Message</Bold>, then send the message to Going Blue through the Earthmate app.
         </Text>
       </Step>
 
@@ -116,7 +116,8 @@ function SmsSteps() {
 
       <Step n={2} title="Send the request">
         <Text style={styles.para}>
-          Tap <Bold>Send SMS</Bold> on the Builder tab and send the message.
+          On the Builder tab, choose <Bold>SMS</Bold> as your device, tap <Bold>Send SMS</Bold>, and
+          send the message.
         </Text>
       </Step>
 

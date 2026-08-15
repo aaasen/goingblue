@@ -20,6 +20,7 @@ import { allocCode } from './cache';
 import LocationMap from './LocationMap';
 import HelpScreen from './HelpScreen';
 import { MODELS } from './models';
+import { DEVICES, type Device } from './devices';
 
 // The request time, in UTC hours since the epoch, aligned down to the hour. Sent in the request
 // (`t:`) so the forecast window is fixed against delivery delay, and stored in the request
@@ -48,8 +49,9 @@ const FORECAST_URL = `${API_BASE}/forecast`;
 // own timeout, a minute of spinner with nothing to show for it.
 const FETCH_TIMEOUT_MS = 15000;
 // Shown both under a greyed-out Get Forecast and when the fetch times out: the same fact either
-// way, and both times the answer is to take one of the other two routes.
-const OFFLINE_MESSAGE = 'Not connected to the internet, use SMS or satellite instead.';
+// way, and both times the answer is to take one of the other two routes — which now means changing
+// the device rather than reaching for a different button.
+const OFFLINE_MESSAGE = 'Not connected to the internet. Choose SMS or inReach to send your request instead.';
 
 // Every way current location can fail ends at the same fallback: pick the spot yourself. Current
 // location is a convenience — nothing in the app needs it — so these say what went wrong and then
@@ -99,6 +101,14 @@ const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 // Stands in for the model stack until there's a location to attribute. Every selector option but
 // EU resolves differently from place to place, so without coordinates there's nothing to name.
 const MODEL_HINT_NO_LOCATION = 'Set a location to see which models will be used.';
+
+// Device-selector help copy. Each line says what the button does on that device and what the route
+// costs the user — data, a text message, or satellite airtime.
+const DEVICE_INFO = [
+  { name: 'Internet', desc: 'Fetches the forecast straight over your data connection, for when you still have service' },
+  { name: 'SMS', desc: 'Opens Messages with the request ready to send, for weak cell reception without data' },
+  { name: 'inReach', desc: 'Copies the request so you can paste it into your satellite messenger' },
+];
 
 // Help copy for the optional variable groups. Each optional variable costs response length, so
 // the modal closes by noting the trade-off against forecast detail and range.
@@ -228,9 +238,12 @@ interface Props {
   token: string;
   onForecastReceived: (encoded: string) => void;
   active: boolean;
+  // Owned by App so it can be read from storage behind the splash — see App.tsx.
+  device: Device;
+  onDeviceChange: (device: Device) => void;
 }
 
-export default function BuilderTab({ token, onForecastReceived, active }: Props) {
+export default function BuilderTab({ token, onForecastReceived, active, device, onDeviceChange }: Props) {
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [customCoords, setCustomCoords] = useState('');
@@ -241,6 +254,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const [fetching, setFetching] = useState(false);
   const [locating, setLocating] = useState(false);
   const [priorityInfo, setPriorityInfo] = useState(false);
+  const [deviceInfo, setDeviceInfo] = useState(false);
   const [modelInfo, setModelInfo] = useState(false);
   const [varsInfo, setVarsInfo] = useState(false);
   const [help, setHelp] = useState(false);
@@ -283,9 +297,9 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   const modelStack = coordsValid
     ? modelStackLabel(model, resolvedCoords, alignedStartEpochHour())
     : null;
-  // In current-location mode the buttons stay tappable so they can request GPS on demand.
-  const copyDisabled = locating || (locationMode === 'custom' && !coordsValid);
-  const fetchDisabled = copyDisabled || fetching || offline;
+  // In current-location mode the button stays tappable so it can request GPS on demand.
+  const sendDisabled = locating || (locationMode === 'custom' && !coordsValid);
+  const fetchDisabled = sendDisabled || fetching || offline;
 
   // Read the phone's position, assuming permission is already in hand. Null when no fix came back
   // — indoors, airplane mode, a cold start that timed out. Says nothing itself: its two callers
@@ -349,7 +363,7 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
   //
   // Callers just stop on null and say nothing: the only branch that can produce one is a failed
   // requestCurrentLocation, which has already raised its own alert and notice. The other route to
-  // null — custom mode with unparseable coordinates — greys out all three buttons, so it never
+  // null — custom mode with unparseable coordinates — greys out the action button, so it never
   // gets this far.
   async function prepareMessage(): Promise<string | null> {
     let coords = resolvedCoords;
@@ -418,6 +432,21 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
       setFetching(false);
     }
   }
+
+  // What the one action button does, per device. The label and icon come from the device table
+  // (devices.ts); what stays here is the part that depends on this screen's state — which handler
+  // sends the request, and what has to be true before it can. Only the internet route needs a
+  // connection, and only it can sit in a fetch, so only it is greyed out by either.
+  const ACTIONS: Record<Device, { onPress: () => void; disabled: boolean; busy: boolean }> = {
+    internet: { onPress: handleFetch, disabled: fetchDisabled, busy: fetching || locating },
+    sms: { onPress: handleSendSms, disabled: sendDisabled, busy: locating },
+    inreach: { onPress: handleCopy, disabled: sendDisabled, busy: locating },
+  };
+  const deviceSpec = DEVICES.find((d) => d.value === device)!;
+  const action = ACTIONS[device];
+  // Copy is the only action with something to confirm — the other two hand off to another app,
+  // which is its own confirmation.
+  const copied = device === 'inreach' && messageCopied;
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
@@ -495,38 +524,34 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
         </View>
       </Section>
 
-      {/* The three ways out of the builder, in the order they're reached for: copy the message to
-          paste into a satellite messenger, hand it to Messages, or skip the wire entirely. */}
+      {/* The way out of the builder. Which device you carry decides how the request travels, so it
+          sits with the button it drives rather than up with the forecast's own options. */}
+      <Section label="Device" info={() => setDeviceInfo(true)}>
+        <SegmentedControl
+          values={DEVICES.map((d) => d.label)}
+          selectedIndex={DEVICES.findIndex((d) => d.value === device)}
+          onChange={(e) => {
+            setMessageCopied(false);
+            onDeviceChange(DEVICES[e.nativeEvent.selectedSegmentIndex].value);
+          }}
+        />
+      </Section>
+
       <View style={styles.buttons}>
         <ActionButton
-          icon={messageCopied ? 'check' : 'satellite-variant'}
-          label={messageCopied ? 'Copied' : 'Copy Message (inReach/ZOLEO)'}
-          onPress={handleCopy}
-          disabled={copyDisabled}
-          busy={locating}
-          variant={messageCopied ? 'success' : 'outline'}
-        />
-        <ActionButton
-          icon="message-text"
-          label="Send SMS"
-          onPress={handleSendSms}
-          disabled={copyDisabled}
-          busy={locating}
-          variant="outline"
-        />
-        <ActionButton
-          icon="wifi"
-          label="Get Forecast"
-          onPress={handleFetch}
-          disabled={fetchDisabled}
-          busy={fetching}
-          variant="primary"
+          icon={copied ? 'check' : deviceSpec.icon}
+          label={copied ? 'Copied' : deviceSpec.action}
+          onPress={action.onPress}
+          disabled={action.disabled}
+          busy={action.busy}
+          variant={copied ? 'success' : 'primary'}
         />
       </View>
 
-      {/* Says why Get Forecast is greyed out. Keyed on `offline` alone, not on fetchDisabled — a
-          button greyed for want of a location is a different problem with a different fix. */}
-      {offline && <Text style={styles.offlineNote}>{OFFLINE_MESSAGE}</Text>}
+      {/* Says why Get Forecast is greyed out, so it's shown only when that's the button on screen.
+          Keyed on `offline` alone, not on fetchDisabled — a button greyed for want of a location is
+          a different problem with a different fix. */}
+      {device === 'internet' && offline && <Text style={styles.offlineNote}>{OFFLINE_MESSAGE}</Text>}
 
       <TouchableOpacity
         style={styles.helpLink}
@@ -561,6 +586,15 @@ export default function BuilderTab({ token, onForecastReceived, active }: Props)
           </Text>
           .
         </Text>
+      </InfoModal>
+
+      <InfoModal visible={deviceInfo} title="Device" onClose={() => setDeviceInfo(false)}>
+        <Text style={styles.modalBody}>How the request leaves your phone:</Text>
+        {DEVICE_INFO.map((d) => (
+          <Text key={d.name} style={styles.modalItemIndent}>
+            <Text style={styles.modalBold}>{d.name}</Text> — {d.desc}
+          </Text>
+        ))}
       </InfoModal>
 
       <InfoModal visible={varsInfo} title="Extra Variables" onClose={() => setVarsInfo(false)}>
@@ -609,10 +643,10 @@ function ActionButton({ icon, label, onPress, disabled, busy, variant }: {
   onPress: () => void;
   disabled: boolean;
   busy: boolean;
-  variant: 'primary' | 'outline' | 'success';
+  variant: 'primary' | 'success';
 }) {
-  const fill = { primary: styles.btnPrimary, outline: styles.btnOutline, success: styles.btnSuccess }[variant];
-  const tint = disabled || variant === 'primary' ? '#fff' : variant === 'success' ? '#2a8f5a' : '#2a6bb5';
+  const fill = { primary: styles.btnPrimary, success: styles.btnSuccess }[variant];
+  const tint = disabled || variant === 'primary' ? '#fff' : '#2a8f5a';
   return (
     <TouchableOpacity
       style={[styles.btn, fill, disabled && styles.btnDisabled]}
@@ -694,11 +728,10 @@ const styles = StyleSheet.create({
   mapHint: { fontSize: 12, color: '#8e8e93', marginTop: 10 },
   modelHint: { fontSize: 12, color: '#8e8e93', lineHeight: 17, marginTop: 8 },
 
-  // Stacked full-width actions, so each one's icon and label sit on a single centered row.
-  buttons: { gap: 10, marginTop: 4 },
+  // Full-width action, its icon and label on a single centered row.
+  buttons: { marginTop: 4 },
   btn: { flexDirection: 'row', height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   btnPrimary: { backgroundColor: '#2a6bb5' },
-  btnOutline: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d1d6' },
   btnSuccess: { backgroundColor: '#e8f5ec', borderWidth: 1, borderColor: '#2a8f5a' },
   btnDisabled: { backgroundColor: '#aeaeb2', borderColor: '#aeaeb2' },
   btnIcon: { marginRight: 8 },

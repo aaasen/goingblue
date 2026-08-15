@@ -8,7 +8,8 @@ import SettingsTab from './SettingsTab';
 import SetupScreen from './SetupScreen';
 import { loadToken, clearToken, deleteAccount } from './account';
 import { clearStore } from './cache';
-import { loadTimeFormat, loadUnits, saveTimeFormat, saveUnits, type TimeFormat, type Units } from './settings';
+import { loadDevice, loadTimeFormat, loadUnits, saveDevice, saveTimeFormat, saveUnits, type TimeFormat, type Units } from './settings';
+import { DEFAULT_DEVICE, type Device } from './devices';
 
 type Tab = 'builder' | 'decoder' | 'settings';
 
@@ -26,15 +27,20 @@ export default function App() {
   const [token, setToken] = useState<string | null | undefined>(undefined);
   const [units, setUnitsState] = useState<Units>('metric');
   const [timeFormat, setTimeFormatState] = useState<TimeFormat>('24h');
+  // Builder-only, but loaded here with the rest: the builder is the tab that comes up first, so
+  // reading it inside that tab would draw the action button as Get Forecast and rename it a frame
+  // later. Behind the splash, the stored device is already in hand.
+  const [device, setDeviceState] = useState<Device>(DEFAULT_DEVICE);
 
   // Settled together rather than one at a time: the token decides which screen comes up, and the
   // preferences decide how it reads. Applying them as they land would draw the first screen in
   // metric/24h and correct it a moment later, in full view now that the splash waits for this.
   useEffect(() => {
-    Promise.all([loadToken(), loadUnits(), loadTimeFormat()])
-      .then(([t, u, f]) => {
+    Promise.all([loadToken(), loadUnits(), loadTimeFormat(), loadDevice()])
+      .then(([t, u, f, d]) => {
         setUnitsState(u);
         setTimeFormatState(f);
+        setDeviceState(d);
         setToken(t);
       })
       // All three swallow their own storage errors, so this should be unreachable — but the
@@ -59,6 +65,11 @@ export default function App() {
   function setTimeFormat(format: TimeFormat) {
     setTimeFormatState(format);
     saveTimeFormat(format);
+  }
+
+  function setDevice(d: Device) {
+    setDeviceState(d);
+    saveDevice(d);
   }
 
   function onForecastReceived(encoded: string) {
@@ -121,7 +132,13 @@ export default function App() {
         accessibilityElementsHidden={tab !== 'builder'}
         importantForAccessibility={tab === 'builder' ? 'auto' : 'no-hide-descendants'}
       >
-        <BuilderTab token={token} onForecastReceived={onForecastReceived} active={tab === 'builder'} />
+        <BuilderTab
+          token={token}
+          onForecastReceived={onForecastReceived}
+          active={tab === 'builder'}
+          device={device}
+          onDeviceChange={setDevice}
+        />
       </View>
       <View
         style={[styles.tabContent, tab !== 'decoder' && styles.tabHidden]}

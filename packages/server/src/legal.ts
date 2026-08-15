@@ -218,8 +218,9 @@ The <strong>Setup</strong> section in the app walks through each one.</p>
 <ol>
   <li>On the <strong>Builder</strong> tab, set a location, pick a weather model, and choose the
   variables you want.</li>
-  <li>Send the request — <strong>Get Forecast</strong> over the internet, <strong>Send SMS</strong>
-  from your phone, or <strong>Copy Message</strong> to paste into your messenger.</li>
+  <li>Choose your device and send the request — <strong>Internet</strong> fetches the forecast over
+  your data connection, <strong>SMS</strong> texts it from your phone, and <strong>inReach</strong>
+  copies the message to paste into your satellite messenger.</li>
   <li>Paste the reply into the <strong>Decoder</strong> tab to see the full forecast.</li>
 </ol>
 
