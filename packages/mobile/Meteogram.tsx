@@ -5,8 +5,8 @@ import {
   LinearGradient, Skia, vec, matchFont, type SkFont,
 } from '@shopify/react-native-skia';
 import {
-  CARDINALS, RAIN_MAX_MM, modelsFromMask, startDatetime,
-  type ForecastMessage, type Period,
+  CARDINALS, RAIN_MAX_MM, modelsFromMask, startDatetime, predictCenter, attributeHour,
+  type Center, type ForecastMessage, type ModelSpec, type Period,
 } from '@weather/protocol';
 import type { TimeFormat, Units } from './settings';
 import { precipMark, weatherGlyph, wmoName, type MoonPhase, type Prim } from './weatherGlyph';
@@ -46,6 +46,8 @@ const ROW_H = {
   // Upper-level rows stack an inline direction arrow under the speed, so they get extra padding.
   WIND_UPPER: 30,
   DIR: 30,
+  // The serving-model band: one line of text on a colored ground, like the wind rows.
+  MODEL: 26,
 } as const;
 
 // Accumulation areas use the codec's sqrt companding on a fixed full-scale (RAIN_MAX_MM of
@@ -168,6 +170,15 @@ const MODEL_COLORS: Record<string, string> = {
   'European (ECMWF)': '#7040b0',
 };
 
+// The selector option each display name stands for, which is what the model row is attributed
+// against (MODEL_NAMES, by MODEL_BIT order).
+const MODEL_CENTERS: Record<string, Center> = {
+  'Auto': 'best',
+  'American (NOAA)': 'us',
+  'Canadian (GEM)': 'ca',
+  'European (ECMWF)': 'eu',
+};
+
 // ── Weather code classification ──────────────────────────────────────────--
 
 const SNOW_CODES = new Set([56, 57, 66, 67, 71, 73, 75, 77, 85, 86]);
@@ -280,6 +291,46 @@ function windAlpha(mph: number): number {
 function windColor(kph: number): string {
   const mph = kph / 1.60934;
   return rgb(rampRgb(WIND_STOPS, mph), windAlpha(mph));
+}
+
+// Serving-model bands are shaded by the model's grid spacing rather than by its identity: what a
+// reader wants off this row at a glance is how fine the forecast under a stretch of columns is,
+// and the km number the band carries then reads as its own legend. Deep for a convective-scale
+// model, pale for a global one. It also keeps the row honest where a chain's resolution is not
+// monotonic — over the Alps Open-Meteo runs the whole DWD ladder (2 › 7 › 13 km) before falling
+// back to IFS at 9 km, and the band lightens and re-darkens exactly as the numbers do.
+//
+// The ramp steps across its middle rather than sweeping through it: between 3 and 5 km it jumps
+// the luminance band where neither a white nor a black label clears 4.5:1 (see bandInk). Nothing
+// Open-Meteo serves has a grid spacing in that gap — the short-range models sit at 1–3 km and the
+// regional and global ones at 5 km and up — so the jump costs no distinction that exists.
+const MODEL_RES_STOPS: ColorStop[] = [
+  [1, [40, 78, 126]],
+  [3, [72, 112, 160]],
+  [5, [126, 163, 200]],
+  [13, [172, 197, 220]],
+  [25, [206, 220, 233]],
+];
+
+function modelBandRgb(spec: ModelSpec | null): [number, number, number] {
+  // No model reaches a period only past the last horizon in the chain — Canada's stack ends at
+  // GDPS's 240h inside a longer window. The band takes the key column's own gray there: the row
+  // has nothing to name, which is different from naming a coarse model.
+  return spec ? rampRgb(MODEL_RES_STOPS, spec.resKm) : hexRgb(C.keyBg);
+}
+
+// Ink for a band: white on the deep near-term colors, near-black on the pale far-term ones.
+// Whichever of the two contrasts better, which is the WCAG relative luminance either side of
+// √(0.05 · 1.05) − 0.05 — the point where a white and a black label read equally well. Worth
+// computing rather than eyeballing: a mid blue reads as a dark ground and takes white text at
+// barely 4.4:1, where black on the same ground is 11.5:1.
+const INK_CROSSOVER = Math.sqrt(0.05 * 1.05) - 0.05;
+function bandInk(channels: [number, number, number]): string {
+  const [r, g, b] = channels.map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > INK_CROSSOVER ? '#1c1c1e' : '#ffffff';
 }
 
 // Runs of consecutive columns that have a value, so gaps stay gaps.
@@ -620,7 +671,7 @@ function pressureLabel(level: 500 | 600 | 700): string {
 type RowKind =
   | 'clouds' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc' | 'wind-gust' | 'wind-dir'
   | 'cloud-high' | 'cloud-mid' | 'cloud-low'
-  | 'wind-500' | 'wind-600' | 'wind-700' | 'section';
+  | 'wind-500' | 'wind-600' | 'wind-700' | 'model' | 'section';
 
 interface Row {
   kind: RowKind;
@@ -672,7 +723,52 @@ function buildRows(periods: Period[], u: Units): Row[] {
     if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.WIND_UPPER, label: pressureLabel(700) });
   }
 
+  // Which model each column's numbers came from, along the bottom. Unconditional: unlike every
+  // row above it this one isn't read off the message — it is predicted from the location and the
+  // forecast's start, so there is always something to draw.
+  rows.push({ kind: 'model', height: ROW_H.MODEL, label: 'Model' });
+
   return rows;
+}
+
+// ── Serving-model attribution ──────────────────────────────────────────────
+
+// Runs of consecutive periods served by the same model. `spec` is null past the last horizon in
+// the chain.
+interface ModelSegment { start: number; end: number; spec: ModelSpec | null }
+
+/**
+ * Attribute each period to the model that serves it, collapsed into runs.
+ *
+ * `refMs` is the instant the horizons are measured from — the forecast's own start, not the
+ * clock. Which model covers a given hour depends on how old the newest full-length run is, so
+ * reading it off the wall clock would let the row drift while a message sits on screen, and
+ * would re-attribute a forecast pulled up days later to models that never touched it.
+ *
+ * A period is attributed by its midpoint. A 12h period can straddle a handoff, and the seam
+ * blends the two models over three hours in any case, so no single answer is exactly right
+ * there; the midpoint is the one that speaks for the most of the period.
+ */
+function modelSegments(
+  dates: Date[], steps: number[], chain: ModelSpec[], refMs: number,
+): ModelSegment[] {
+  const segments: ModelSegment[] = [];
+  dates.forEach((d, i) => {
+    const spec = attributeHour(chain, d.getTime() + steps[i] * 1800000, refMs).model;
+    const previous = segments[segments.length - 1];
+    if (previous && previous.spec === spec) previous.end = i + 1;
+    else segments.push({ start: i, end: i + 1, spec });
+  });
+  return segments;
+}
+
+// The name and grid spacing of the model behind a band, stepping down to the bare name and then
+// to nothing as the band narrows. A model can serve a single period — AROME HD's 15-minute domain
+// reaches about six hours, which is one column of a 12h fill — and there a clipped name would say
+// less than a colored band the reader can compare against a labelled one.
+function fitModelLabel(spec: ModelSpec | null, available: number, font: SkFont): string {
+  const forms = spec ? [`${spec.shortLabel} ${spec.resKm}km`, spec.shortLabel] : ['—'];
+  return forms.find((f) => font.getTextWidth(f) <= available) ?? '';
 }
 
 // ── Drawing helpers ────────────────────────────────────────────────────────
@@ -689,6 +785,9 @@ interface Fonts {
   // Wind speeds sit on the ribbon's colored ground; a small light face keeps the numbers from
   // shouting over it in a short row.
   wind: SkFont;
+  // Model names are drawn as RN text over the canvas, so this face is only ever measured — it
+  // must match styles.stickyModelText for the sticky arithmetic to hold.
+  model: SkFont;
 }
 
 function centerText(key: string, text: string, cx: number, cy: number, font: SkFont, color: string): ReactNode {
@@ -1085,11 +1184,14 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
 
 // Full Skia scene for one model. Pure, and called through useMemo: overlay-only state like the
 // selected column must not rebuild the elements, since any rebuild repaints every mounted tile.
-function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups }: {
+function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups, modelBands }: {
   // `dates` are absolute instants — what the sun and the now marker answer to. `zoned` is the same
   // series on the forecast point's wall clock, which is what the hour and day labels read.
   periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat;
   now: number; lat: number; lon: number; fonts: Fonts; dayGroups: DayGroup[];
+  // The model row's bands. Their labels are not drawn here — they stick to the viewport's left
+  // edge, like the day labels, so they live in the overlay above the canvas.
+  modelBands: ModelSegment[];
 }): ReactNode[] {
   const n = periods.length;
   const width = NAME_W + n * CELL_W;
@@ -1106,7 +1208,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
   // day. Everything above reads as text or glyphs and is unharmed by the tint.
   const TINTABLE_STOP = new Set<RowKind>([
     'wind-sfc', 'wind-gust', 'wind-dir', 'freeze', 'cloud-high', 'cloud-mid', 'cloud-low',
-    'wind-500', 'wind-600', 'wind-700',
+    'wind-500', 'wind-600', 'wind-700', 'model',
   ]);
   const nightBottom = (() => {
     let y = ROW_H.DATE;
@@ -1470,6 +1572,25 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         break;
       }
 
+      case 'model': {
+        // One band per run of columns the same model serves, so a handoff reads as the width of
+        // what it hands over rather than as a per-column repetition of the name. The separator is
+        // drawn in the page's own white: at a handoff two bands can be a shade apart (ICON-EU 7km
+        // beside ICON 13km), and a rule of their own is what keeps the seam a boundary.
+        modelBands.forEach((band, bi) => {
+          const x0 = colLeft(band.start);
+          els.push(
+            <Rect key={`mdl${ri}-${bi}`} x={x0} y={top} width={colLeft(band.end) - x0}
+              height={row.height} color={rgb(modelBandRgb(band.spec))} />,
+          );
+          if (bi > 0) {
+            els.push(<Line key={`mdlsep${ri}-${bi}`} p1={vec(x0, top)} p2={vec(x0, top + row.height)}
+              color="#ffffff" strokeWidth={1} />);
+          }
+        });
+        break;
+      }
+
       case 'cloud-high': case 'cloud-mid': case 'cloud-low': {
         const key = (row.kind === 'cloud-high' ? 'cloud_high'
           : row.kind === 'cloud-mid' ? 'cloud_mid' : 'cloud_low') as keyof Period;
@@ -1528,10 +1649,13 @@ const CanvasTile = memo(function CanvasTile({ tile, els, totalH, paint, onPress 
   );
 });
 
-function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, blockIndex, selected, onSelectColumn, paint }: {
+function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
   periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; lat: number; lon: number; fonts: Fonts;
+  // The selector option this block was fetched under, and the instant its model horizons are
+  // measured from — see modelSegments.
+  center: Center; attributionMs: number;
   blockIndex: number; selected: number | null; onSelectColumn: (block: number, period: number) => void;
   // Epoch that remounts every canvas after this tab was hidden — see Meteogram.
   paint: number;
@@ -1551,10 +1675,18 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   const colLeft = (i: number) => NAME_W + i * CELL_W;
 
   const dayGroups = useMemo(() => buildDayGroups(zoned), [zoned]);
-  const els = useMemo(
-    () => buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups }),
-    [periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups],
+  // Held apart from the scene because the labels are drawn outside it, and memoized for the same
+  // reason as the tiles: a fresh array on every render would repaint every mounted canvas.
+  const modelBands = useMemo(
+    () => modelSegments(dates, steps, predictCenter(center, lat, lon).models, attributionMs),
+    [dates, steps, center, lat, lon, attributionMs],
   );
+  const els = useMemo(
+    () => buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups, modelBands }),
+    [periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups, modelBands],
+  );
+  // The model row is the last one buildRows appends, so it ends at the bottom of the canvas.
+  const modelRowTop = totalH - ROW_H.MODEL;
 
   const onPressTile = useCallback((locationX: number, tileOffset: number) => {
     const x = tileOffset + locationX;
@@ -1644,6 +1776,41 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
           );
         })}
       </View>
+      {/* Model names ride above their bands the way the day labels ride above their columns: a
+          band can run four screens wide — IFS covering everything past the short-range models —
+          and a label centered in it would be off screen for most of that span. Each one sticks to
+          the visible left edge while its own band is in view, then hands over at the seam. */}
+      <View pointerEvents="none" style={[styles.stickyModelRow, { top: modelRowTop, height: ROW_H.MODEL }]}>
+        {modelBands.map((band, i) => {
+          const start = colLeft(band.start);
+          const end = colLeft(band.end);
+          const label = fitModelLabel(band.spec, end - start - 16, fonts.model);
+          if (!label) return null;
+          const textWidth = fonts.model.getTextWidth(label);
+          // Where the label stops being pinned and starts leaving with its band: two pads short of
+          // the band's right edge, which is where the pinned line and the parked one meet — the
+          // label then holds one pad inside the seam for the rest of the scroll.
+          const stickyEnd = end - textWidth - 16;
+          const translateX = stickyEnd > start
+            ? scrollX.interpolate({
+                inputRange: [0, start, stickyEnd, width],
+                outputRange: [start + 8, 8, 8, end - textWidth - 8 - width],
+                extrapolate: 'extend',
+              })
+            : Animated.subtract(start + 8, scrollX);
+          return (
+            <Animated.Text
+              key={`mdl${i}`}
+              style={[styles.stickyModelText, {
+                color: bandInk(modelBandRgb(band.spec)),
+                transform: [{ translateX }],
+              }]}
+            >
+              {label}
+            </Animated.Text>
+          );
+        })}
+      </View>
       </View>
     </View>
   );
@@ -1694,6 +1861,7 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
     strip: matchFont({ fontSize: 11, fontWeight: '300' }),
     stripSub: matchFont({ fontSize: 9.5, fontWeight: '300' }),
     wind: matchFont({ fontSize: 11.5, fontWeight: '400' }),
+    model: matchFont({ fontSize: 11, fontWeight: '600' }),
   }), []);
 
   const blocks = useMemo(() => msg.periods.map((periods, mi) => {
@@ -1710,6 +1878,13 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
     return {
       name: models[mi] ?? `Model ${mi + 1}`,
       color: MODEL_COLORS[models[mi]] ?? '#666',
+      center: MODEL_CENTERS[models[mi]] ?? 'best',
+      // What the model row measures each model's horizon from. The message doesn't carry the
+      // request time — the header holds the first period's start, which is that time floored to
+      // the first period's resolution (see layout.ts), so it runs up to one period early. That is
+      // inside the tolerance attribution already has: a horizon boundary moves with the age of
+      // the newest full-length run, which is only known to within its run interval.
+      attributionMs: dates[0].getTime(),
       rows: buildRows(periods, units),
       // The wall clock everything is labelled on belongs to the forecast point, not to wherever
       // the reader is: a Tokyo forecast read from Seattle names Tokyo's hours and breaks its days
@@ -1735,6 +1910,7 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
             </View>
           )}
           <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} zoned={b.zoned} steps={b.steps} units={units} timeFormat={timeFormat} now={now} lat={msg.lat} lon={msg.lon} fonts={fonts}
+            center={b.center} attributionMs={b.attributionMs}
             blockIndex={bi}
             selected={sel?.block === bi ? sel.period : null}
             onSelectColumn={selectColumn} paint={paint} />
@@ -2009,6 +2185,10 @@ const styles = StyleSheet.create({
   detailValue: { fontSize: 13, fontWeight: '600', color: C.label },
   stickyDayRow: { position: 'absolute', top: 0, left: 0, right: 0, height: 31, overflow: 'hidden' },
   stickyDayText: { position: 'absolute', top: 4, color: C.date, fontSize: 14, fontWeight: '600', lineHeight: 24 },
+  // Clipped to the band row so a label can never ride up into the row above it. Color comes per
+  // label, from the band it sits on.
+  stickyModelRow: { position: 'absolute', left: 0, right: 0, overflow: 'hidden' },
+  stickyModelText: { position: 'absolute', top: 0, fontSize: 11, fontWeight: '600', lineHeight: ROW_H.MODEL },
   modelHeaderBar: { paddingHorizontal: 14, paddingVertical: 7 },
   modelHeaderText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   sep: { height: 10, backgroundColor: '#f2f2f7' },
