@@ -13,6 +13,8 @@ import {
   encodeFreezeDelta, decodeFreezeDelta,
   encodeAqiDelta, decodeAqiDelta, quantAqi, aqiMid,
   AQI_US_LOWER, AQI_EU_LOWER, AQI_RESIDUAL_MAX,
+  AQI_BASE_PM25, AQI_BASE_O3, AQI_BASE_PM10,
+  AQI_US_RESIDUAL_MASKS, AQI_EU_RESIDUAL_MASKS,
   encodeTempDelta, decodeTempDelta, tempTodBucket,
   TEMP_DELTA_MIN, TEMP_DELTA_MAX,
   makeBitSink, makeBitSource, type CodeBook, type DeltaCodec,
@@ -70,9 +72,11 @@ const HEADER_CHARS = nCharsForBits(V2_HEADER_BITS); // packed-header chars (excl
 // equivalent; both entropy-coded).
 // gust: 5 = speed only, no direction (bit 8, formerly cloud_total).
 // air quality: 5 bits each — a 26-symbol ladder (0 = no data, 1..25 bands), both scales.
-export const VAR_BITS_V2 = [3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6, 5, 5, 5, 5, 5];
+export const VAR_BITS_V2 = [3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5];
 //                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^g ^cch ^ccm ^ccl ^rain
 //                                                    ^aq_pm25 ^aq_o3 ^aqi ^aqi_eu ^aqi_eu_pm25
+//                                     ^aqi_eu_pm10 ^aqi_eu_no2 ^aqi_eu_o3 ^aqi_eu_so2
+//                                                  ^aq_pm10 ^aq_no2 ^aq_so2
 
 const TEMP_OFFSET = 100;
 
@@ -164,13 +168,19 @@ export function aqPeriodCount(periodHours: number[]): number {
   return n;
 }
 
-// The four plain anchor+delta AQ columns, in body order. The US headline (bit 15) is NOT here:
-// it conditions on the two US sub-indices, so it encodes after every column it might read.
-// `tod` marks the columns whose driver is diurnal — ozone is photochemical and the headline
-// follows whichever sub-index leads it — and is ignored by the others' books.
+// The eleven plain anchor+delta AQ columns, in body order — every constituent of both indices.
+// The two HEADLINES are NOT here: each conditions on its own scale's sub-indices, so both encode
+// after every column they might read. Within this list PM2.5, ozone and PM10 come first on each
+// scale because they are the three a headline residual can key on (AQI_BASE_* in entropy.ts);
+// the rest never lead an index and are carried purely because a reader may want to see them.
+// `tod` marks the columns whose driver is diurnal — ozone is photochemical, NO2 follows the
+// traffic cycle — and is ignored by the others' books.
+type AqField =
+  | "aqi_pm25" | "aqi_o3" | "aqi_pm10" | "aqi_no2" | "aqi_so2"
+  | "aqi_eu_pm25" | "aqi_eu_o3" | "aqi_eu_pm10" | "aqi_eu_no2" | "aqi_eu_so2";
 const AQ_DELTA_COLUMNS: {
   bit: number;
-  field: "aqi_pm25" | "aqi_o3" | "aqi_eu" | "aqi_eu_pm25";
+  field: AqField;
   lower: readonly number[];
   bookOf(bk: ClassBooks): (res: number, tod: number, prevDelta: number | null) => CodeBook;
 }[] = [
@@ -178,18 +188,61 @@ const AQ_DELTA_COLUMNS: {
     bookOf: (bk) => (res, _tod, prev) => bk.aqPm25Book(res, prev) },
   { bit: VARS_BIT.aq_o3, field: "aqi_o3", lower: AQI_US_LOWER,
     bookOf: (bk) => (res, tod, prev) => bk.aqO3Book(res, tod, prev) },
-  { bit: VARS_BIT.aqi_eu, field: "aqi_eu", lower: AQI_EU_LOWER,
-    bookOf: (bk) => (res, tod, prev) => bk.aqiEuBook(res, tod, prev) },
+  { bit: VARS_BIT.aq_pm10, field: "aqi_pm10", lower: AQI_US_LOWER,
+    bookOf: (bk) => (res, _tod, prev) => bk.aqPm10Book(res, prev) },
+  { bit: VARS_BIT.aq_no2, field: "aqi_no2", lower: AQI_US_LOWER,
+    bookOf: (bk) => (res, tod, prev) => bk.aqNo2Book(res, tod, prev) },
+  { bit: VARS_BIT.aq_so2, field: "aqi_so2", lower: AQI_US_LOWER,
+    bookOf: (bk) => (res, _tod, prev) => bk.aqSo2Book(res, prev) },
   { bit: VARS_BIT.aqi_eu_pm25, field: "aqi_eu_pm25", lower: AQI_EU_LOWER,
     bookOf: (bk) => (res, _tod, prev) => bk.aqiEuPm25Book(res, prev) },
+  { bit: VARS_BIT.aqi_eu_o3, field: "aqi_eu_o3", lower: AQI_EU_LOWER,
+    bookOf: (bk) => (res, tod, prev) => bk.aqiEuO3Book(res, tod, prev) },
+  { bit: VARS_BIT.aqi_eu_pm10, field: "aqi_eu_pm10", lower: AQI_EU_LOWER,
+    bookOf: (bk) => (res, _tod, prev) => bk.aqiEuPm10Book(res, prev) },
+  { bit: VARS_BIT.aqi_eu_no2, field: "aqi_eu_no2", lower: AQI_EU_LOWER,
+    bookOf: (bk) => (res, tod, prev) => bk.aqiEuNo2Book(res, tod, prev) },
+  { bit: VARS_BIT.aqi_eu_so2, field: "aqi_eu_so2", lower: AQI_EU_LOWER,
+    bookOf: (bk) => (res, _tod, prev) => bk.aqiEuSo2Book(res, prev) },
 ];
 
-// Whether the US headline can be coded as a residual: both sub-indices are on the wire, so both
-// sides can take max(pm25, o3) as the baseline it almost always equals. With either missing the
-// residual is worse than the headline's own deltas (measured 2.21/2.72 vs 1.27 b/period), so the
-// column falls back — the same context-availability switch freezeDeltaBook and sfcSpeedBook use.
-const aqiHasResidualContext = (varsMask: number): boolean =>
-  (varsMask & (1 << VARS_BIT.aq_pm25)) !== 0 && (varsMask & (1 << VARS_BIT.aq_o3)) !== 0;
+// One headline's residual wiring: which sub-index columns can form its baseline, and which
+// presence masks are actually cheaper as a residual than as the headline's own deltas.
+interface AqHeadline {
+  bit: number;
+  field: "aqi" | "aqi_eu";
+  lower: readonly number[];
+  // The three constituents that ever lead this index, in AQI_BASE_* bit order.
+  baseBits: [pm25: number, o3: number, pm10: number];
+  residualMasks: ReadonlySet<number>;
+  residualBook(bk: ClassBooks, res: number, baseMask: number): CodeBook;
+  deltaBook(bk: ClassBooks, res: number, tod: number, prevDelta: number | null): CodeBook;
+}
+const AQ_HEADLINES: AqHeadline[] = [
+  {
+    bit: VARS_BIT.aqi, field: "aqi", lower: AQI_US_LOWER,
+    baseBits: [VARS_BIT.aq_pm25, VARS_BIT.aq_o3, VARS_BIT.aq_pm10],
+    residualMasks: AQI_US_RESIDUAL_MASKS,
+    residualBook: (bk, res, m) => bk.aqiResidualBook(res, m),
+    deltaBook: (bk, res, tod, prev) => bk.aqiDeltaBook(res, tod, prev),
+  },
+  {
+    bit: VARS_BIT.aqi_eu, field: "aqi_eu", lower: AQI_EU_LOWER,
+    baseBits: [VARS_BIT.aqi_eu_pm25, VARS_BIT.aqi_eu_o3, VARS_BIT.aqi_eu_pm10],
+    residualMasks: AQI_EU_RESIDUAL_MASKS,
+    residualBook: (bk, res, m) => bk.aqiEuResidualBook(res, m),
+    deltaBook: (bk, res, tod, prev) => bk.aqiEuBook(res, tod, prev),
+  },
+];
+
+// Which of a headline's three keyable constituents vars_mask carries, as an AQI_BASE_* mask.
+// Derived identically on both sides, so selecting the mode costs no wire bits.
+const aqBaseMask = (h: AqHeadline, varsMask: number): number => {
+  const [pm25, o3, pm10] = h.baseBits;
+  return (varsMask & (1 << pm25) ? AQI_BASE_PM25 : 0)
+    | (varsMask & (1 << o3) ? AQI_BASE_O3 : 0)
+    | (varsMask & (1 << pm10) ? AQI_BASE_PM10 : 0);
+};
 
 // Value columns (precip chance, snow, rain), in body (column-major) order: each cell's quantized
 // value is entropy-coded directly — no anchor, no deltas — under a codebook keyed by (the period's
@@ -432,24 +485,31 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
     mark(BIT_NAME[col.bit], before);
   }
 
-  // The US headline. With both sub-indices on the wire it is the residual against their max —
-  // zero 98.5% of the time, since the headline IS that max unless a pollutant the wire doesn't
-  // carry (PM10, CO, NO2, SO2) is leading. The residual is non-negative by that definition; a
-  // negative one can only come from a band-edge rounding artifact, or from upstream returning a
-  // headline of nothing while a sub-index has a value, and clamping it to 0 resolves both to
-  // "the headline equals the worst sub-index we know about" — the best available estimate rather
-  // than a fabricated clean reading. Without both sub-indices the column codes its own deltas.
-  if (msg.vars_mask & (1 << VARS_BIT.aqi)) {
+  // The headlines, each after its own scale's constituents. With enough of {pm2.5, ozone, pm10}
+  // on the wire the headline is the residual against their max — the headline IS that max, so the
+  // residual is zero for every period no uncarried pollutant is leading. The residual is
+  // non-negative by that definition; a negative one can only come from a band-edge rounding
+  // artifact, or from upstream returning a headline of nothing while a sub-index has a value, and
+  // clamping it to 0 resolves both to "the headline equals the worst sub-index we know about" —
+  // the best available estimate rather than a fabricated clean reading. For the presence masks
+  // where a residual costs MORE than the headline's own deltas (any single constituent, and the
+  // pairs that miss too much leadership mass — see AQI_*_RESIDUAL_MASKS) the column falls back to
+  // its own delta series instead.
+  for (const h of AQ_HEADLINES) {
+    if (!(msg.vars_mask & (1 << h.bit))) continue;
     before = em.cost;
     const q: number[][] = msg.periods.map((rows) =>
-      rows.slice(0, nAq).map((c) => quantAqi(c.aqi, AQI_US_LOWER)));
-    if (aqiHasResidualContext(msg.vars_mask)) {
-      const pm = aqQuant.get(VARS_BIT.aq_pm25)!;
-      const o3 = aqQuant.get(VARS_BIT.aq_o3)!;
+      rows.slice(0, nAq).map((c) => quantAqi(c[h.field], h.lower)));
+    const baseMask = aqBaseMask(h, msg.vars_mask);
+    if (h.residualMasks.has(baseMask)) {
+      const bases = h.baseBits
+        .filter((_, i) => baseMask & (1 << i))
+        .map((bit) => aqQuant.get(bit)!);
       for (let m = 0; m < nModels; m++) {
         for (let p = 0; p < nAq; p++) {
-          const base = Math.max(pm[m][p], o3[m][p]);
-          em.sym(books.aqiResidualBook(res[p]),
+          let base = 0;
+          for (const b of bases) if (b[m][p] > base) base = b[m][p];
+          em.sym(h.residualBook(books, res[p], baseMask),
             Math.min(Math.max(q[m][p] - base, 0), AQI_RESIDUAL_MAX));
         }
       }
@@ -459,12 +519,12 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
         let prevDelta: number | null = null;
         for (let p = 1; p < nAq; p++) {
           const delta = q[m][p] - q[m][p - 1];
-          encodeAqiDelta(em, books.aqiDeltaBook(res[p], tod[p], prevDelta), delta);
+          encodeAqiDelta(em, h.deltaBook(books, res[p], tod[p], prevDelta), delta);
           prevDelta = delta;
         }
       }
     }
-    mark(BIT_NAME[VARS_BIT.aqi], before);
+    mark(BIT_NAME[h.bit], before);
   }
 
   // Value columns (precip chance, snow, rain): each cell's quantized value entropy-coded under a
@@ -793,25 +853,32 @@ function decodeBody(
     aqQuant.set(col.bit, q);
   }
 
-  if (vars_mask & (1 << VARS_BIT.aqi)) {
-    if (aqiHasResidualContext(vars_mask)) {
-      const pm = aqQuant.get(VARS_BIT.aq_pm25)!;
-      const o3 = aqQuant.get(VARS_BIT.aq_o3)!;
+  // The headlines mirror buildBody: residual against the max of whichever keyable constituents
+  // vars_mask carries, or the column's own deltas for the masks where that is cheaper.
+  for (const h of AQ_HEADLINES) {
+    if (!(vars_mask & (1 << h.bit))) continue;
+    const baseMask = aqBaseMask(h, vars_mask);
+    if (h.residualMasks.has(baseMask)) {
+      const bases = h.baseBits
+        .filter((_, i) => baseMask & (1 << i))
+        .map((bit) => aqQuant.get(bit)!);
       for (let m = 0; m < nModels; m++) {
         for (let p = 0; p < nAq; p++) {
-          const resid = rd.sym(books.aqiResidualBook(res[p]));
-          periods[m][p].aqi = aqiMid(Math.max(pm[m][p], o3[m][p]) + resid, AQI_US_LOWER);
+          const resid = rd.sym(h.residualBook(books, res[p], baseMask));
+          let base = 0;
+          for (const b of bases) if (b[m][p] > base) base = b[m][p];
+          periods[m][p][h.field] = aqiMid(base + resid, h.lower);
         }
       }
     } else {
       for (let m = 0; m < nModels; m++) {
         let quant = rd.int(AQ_ANCHOR_BITS);
-        periods[m][0].aqi = aqiMid(quant, AQI_US_LOWER);
+        periods[m][0][h.field] = aqiMid(quant, h.lower);
         let prevDelta: number | null = null;
         for (let p = 1; p < nAq; p++) {
-          const delta = rd.aqiDelta(books.aqiDeltaBook(res[p], tod[p], prevDelta));
+          const delta = rd.aqiDelta(h.deltaBook(books, res[p], tod[p], prevDelta));
           quant += delta;
-          periods[m][p].aqi = aqiMid(quant, AQI_US_LOWER);
+          periods[m][p][h.field] = aqiMid(quant, h.lower);
           prevDelta = delta;
         }
       }

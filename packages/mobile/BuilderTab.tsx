@@ -173,9 +173,24 @@ const VAR_GROUPS: VarGroup[] = [
     desc: 'Fine-particulate pollution from wildfire smoke and haze.',
   },
   {
+    value: 'pm10', code: 'm', label: 'PM10 (Dust)', vars: CONFIGURABLE_VAR_GROUPS.m,
+    subgroup: AIR_SUBGROUP, scale: 'us',
+    desc: 'Coarse particulates like blowing dust, pollen, and road grit.',
+  },
+  {
     value: 'ozone', code: 'o', label: 'Ozone (Smog)', vars: CONFIGURABLE_VAR_GROUPS.o,
     subgroup: AIR_SUBGROUP, scale: 'us',
     desc: 'Summer smog, which peaks in the afternoon.',
+  },
+  {
+    value: 'no2', code: 'd', label: 'Nitrogen Dioxide', vars: CONFIGURABLE_VAR_GROUPS.d,
+    subgroup: AIR_SUBGROUP, scale: 'us',
+    desc: 'Traffic and combustion exhaust, worst near busy roads at rush hour.',
+  },
+  {
+    value: 'so2', code: 'u', label: 'Sulphur Dioxide', vars: CONFIGURABLE_VAR_GROUPS.u,
+    subgroup: AIR_SUBGROUP, scale: 'us',
+    desc: 'Industrial and volcanic emissions.',
   },
   {
     value: 'aqi-eu', code: 'e', label: 'AQI (Dominant pollutant)', vars: CONFIGURABLE_VAR_GROUPS.e,
@@ -186,8 +201,27 @@ const VAR_GROUPS: VarGroup[] = [
   {
     value: 'smoke-eu', code: '2', label: 'PM2.5 (Smoke)', vars: CONFIGURABLE_VAR_GROUPS['2'],
     subgroup: AIR_SUBGROUP, scale: 'eu',
-    desc: 'Fine-particulate pollution from wildfire smoke and haze, averaged over 24 hours the way '
-      + 'this scale defines it.',
+    desc: 'Fine-particulate pollution from wildfire smoke and haze.',
+  },
+  {
+    value: 'pm10-eu', code: '1', label: 'PM10 (Dust)', vars: CONFIGURABLE_VAR_GROUPS['1'],
+    subgroup: AIR_SUBGROUP, scale: 'eu',
+    desc: 'Coarse particulates like blowing dust, pollen, and road grit.',
+  },
+  {
+    value: 'ozone-eu', code: '3', label: 'Ozone (Smog)', vars: CONFIGURABLE_VAR_GROUPS['3'],
+    subgroup: AIR_SUBGROUP, scale: 'eu',
+    desc: 'Summer smog, which peaks in the afternoon. This scale\'s most common worst pollutant.',
+  },
+  {
+    value: 'no2-eu', code: 'n', label: 'Nitrogen Dioxide', vars: CONFIGURABLE_VAR_GROUPS.n,
+    subgroup: AIR_SUBGROUP, scale: 'eu',
+    desc: 'Traffic and combustion exhaust, worst near busy roads at rush hour.',
+  },
+  {
+    value: 'so2-eu', code: 'q', label: 'Sulphur Dioxide', vars: CONFIGURABLE_VAR_GROUPS.q,
+    subgroup: AIR_SUBGROUP, scale: 'eu',
+    desc: 'Industrial and volcanic emissions.',
   },
 ];
 

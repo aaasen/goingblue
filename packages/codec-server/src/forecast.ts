@@ -182,15 +182,41 @@ export interface Row {
   us_aqi: number | null;
   us_aqi_pm2_5: number | null;
   us_aqi_ozone: number | null;
+  us_aqi_pm10: number | null;
+  us_aqi_nitrogen_dioxide: number | null;
+  us_aqi_sulphur_dioxide: number | null;
   european_aqi: number | null;
   european_aqi_pm2_5: number | null;
+  european_aqi_pm10: number | null;
+  european_aqi_ozone: number | null;
+  european_aqi_nitrogen_dioxide: number | null;
+  european_aqi_sulphur_dioxide: number | null;
 }
 
-// The air-quality variables, in the order their columns encode. Named once here because three
-// paths have to agree on them: the upstream request, the row aggregation, and the corpus derive.
-export const AIR_QUALITY_VARS = [
-  "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi", "european_aqi", "european_aqi_pm2_5",
-] as const;
+// The air-quality variables, in the order their columns encode — every constituent of both
+// indices first, then the two headlines, which code as residuals against constituents that must
+// therefore already be decoded. Named once here because three paths have to agree on them: the
+// upstream request, the row aggregation, and the corpus derive.
+// Every air-quality column: its vars_mask bit, the Open-Meteo/CAMS variable it comes from (which
+// is also the Row field), and the Period field it decodes into. One table so the upstream request,
+// the row aggregation and the period fill cannot drift apart — a mismatch here is silent, and
+// costs an all-null column rather than an error (the `pm2p5` rewrite below is the same hazard).
+export const AQ_BIT_VARS: [bit: number, cams: string, period: keyof Period][] = [
+  [VARS_BIT.aq_pm25, "us_aqi_pm2_5", "aqi_pm25"],
+  [VARS_BIT.aq_o3, "us_aqi_ozone", "aqi_o3"],
+  [VARS_BIT.aq_pm10, "us_aqi_pm10", "aqi_pm10"],
+  [VARS_BIT.aq_no2, "us_aqi_nitrogen_dioxide", "aqi_no2"],
+  [VARS_BIT.aq_so2, "us_aqi_sulphur_dioxide", "aqi_so2"],
+  [VARS_BIT.aqi_eu_pm25, "european_aqi_pm2_5", "aqi_eu_pm25"],
+  [VARS_BIT.aqi_eu_o3, "european_aqi_ozone", "aqi_eu_o3"],
+  [VARS_BIT.aqi_eu_pm10, "european_aqi_pm10", "aqi_eu_pm10"],
+  [VARS_BIT.aqi_eu_no2, "european_aqi_nitrogen_dioxide", "aqi_eu_no2"],
+  [VARS_BIT.aqi_eu_so2, "european_aqi_sulphur_dioxide", "aqi_eu_so2"],
+  [VARS_BIT.aqi, "us_aqi", "aqi"],
+  [VARS_BIT.aqi_eu, "european_aqi", "aqi_eu"],
+];
+
+export const AIR_QUALITY_VARS = AQ_BIT_VARS.map(([, cams]) => cams);
 
 // Map an SDK variable — identified by (enum, altitude, pressureLevel) — back to the Open-Meteo
 // request name the rest of the pipeline keys on (`temperature_2m`, `wind_speed_500hPa`). Mirrors
@@ -377,14 +403,7 @@ export function adjustPrecipPhase(h: HourlyData, siteElevM: number | null): Hour
 // The air-quality variables a request needs, given its vars_mask — empty when it asked for none,
 // which is the common case and skips the upstream call entirely.
 export function airQualityVarsFor(varsMask: number): string[] {
-  const wanted: [number, string][] = [
-    [VARS_BIT.aq_pm25, "us_aqi_pm2_5"],
-    [VARS_BIT.aq_o3, "us_aqi_ozone"],
-    [VARS_BIT.aqi, "us_aqi"],
-    [VARS_BIT.aqi_eu, "european_aqi"],
-    [VARS_BIT.aqi_eu_pm25, "european_aqi_pm2_5"],
-  ];
-  return wanted.filter(([bit]) => varsMask & (1 << bit)).map(([, name]) => name);
+  return AQ_BIT_VARS.filter(([bit]) => varsMask & (1 << bit)).map(([, name]) => name);
 }
 
 // Air quality comes from a DIFFERENT Open-Meteo API (its own host and path), so it can't ride the
@@ -679,12 +698,8 @@ export function rowsFromWindows(
       cloud_cover_low: maxOf(pick(h.cloud_cover_low)),
       // Worst air in the window, the same semantics gusts get: a period that contains an hour of
       // unhealthy smoke is an unhealthy period, however clean its other hours were.
-      us_aqi: maxOf(pickUnk("us_aqi")),
-      us_aqi_pm2_5: maxOf(pickUnk("us_aqi_pm2_5")),
-      us_aqi_ozone: maxOf(pickUnk("us_aqi_ozone")),
-      european_aqi: maxOf(pickUnk("european_aqi")),
-      european_aqi_pm2_5: maxOf(pickUnk("european_aqi_pm2_5")),
-    };
+      ...Object.fromEntries(AQ_BIT_VARS.map(([, cams]) => [cams, maxOf(pickUnk(cams))])),
+    } as Row;
   });
   return rows;
 }
@@ -721,11 +736,10 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period
   // Air quality, left UNDEFINED rather than coalesced to 0 where the value is missing: 0 is the
   // cleanest air on either scale, so claiming it for an hour CAMS never forecast would be a lie.
   // The codec encodes an absent value as its no-data symbol (see the AQ columns in v2.ts).
-  if ((varsMask & (1 << VARS_BIT.aqi))         && r.us_aqi            != null) p.aqi         = r.us_aqi;
-  if ((varsMask & (1 << VARS_BIT.aq_pm25))     && r.us_aqi_pm2_5      != null) p.aqi_pm25    = r.us_aqi_pm2_5;
-  if ((varsMask & (1 << VARS_BIT.aq_o3))       && r.us_aqi_ozone      != null) p.aqi_o3      = r.us_aqi_ozone;
-  if ((varsMask & (1 << VARS_BIT.aqi_eu))      && r.european_aqi      != null) p.aqi_eu      = r.european_aqi;
-  if ((varsMask & (1 << VARS_BIT.aqi_eu_pm25)) && r.european_aqi_pm2_5 != null) p.aqi_eu_pm25 = r.european_aqi_pm2_5;
+  for (const [bit, cams, field] of AQ_BIT_VARS) {
+    const v = (r as unknown as Record<string, number | null>)[cams];
+    if ((varsMask & (1 << bit)) && v != null) (p[field] as number) = v;
+  }
   return p;
 }
 

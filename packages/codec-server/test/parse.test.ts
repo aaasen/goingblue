@@ -111,8 +111,15 @@ describe("parseRequest", () => {
     expect(parseRequest("v:a").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi"]));
     expect(parseRequest("v:s").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_pm25"]));
     expect(parseRequest("v:o").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_o3"]));
+    expect(parseRequest("v:m").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_pm10"]));
+    expect(parseRequest("v:d").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_no2"]));
+    expect(parseRequest("v:u").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_so2"]));
     expect(parseRequest("v:e").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu"]));
     expect(parseRequest("v:2").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu_pm25"]));
+    expect(parseRequest("v:1").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu_pm10"]));
+    expect(parseRequest("v:3").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu_o3"]));
+    expect(parseRequest("v:n").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu_no2"]));
+    expect(parseRequest("v:q").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu_so2"]));
   });
 
   it("v: mixes air-quality codes into the compact form", () => {

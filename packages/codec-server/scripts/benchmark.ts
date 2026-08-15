@@ -61,25 +61,32 @@ const BENCHMARKS_DIR = join(REPO_ROOT, "data", "benchmarks"); // timestamped HTM
 // Protocol variable groups mirroring the app's selector (BuilderTab.tsx); the report's toggles.
 type GroupId =
   | "clouds" | "highwind" | "freeze" | "precip"
-  | "aqi" | "smoke" | "ozone" | "aqiEu" | "smokeEu";
+  | "aqi" | "smoke" | "ozone" | "pm10" | "no2" | "so2"
+  | "aqiEu" | "smokeEu" | "pm10Eu" | "ozoneEu" | "no2Eu" | "so2Eu";
 const GROUP_IDS: GroupId[] = [
-  "clouds", "highwind", "freeze", "precip", "aqi", "smoke", "ozone", "aqiEu", "smokeEu",
+  "clouds", "highwind", "freeze", "precip",
+  "aqi", "smoke", "ozone", "pm10", "no2", "so2",
+  "aqiEu", "smokeEu", "pm10Eu", "ozoneEu", "no2Eu", "so2Eu",
 ];
 const GROUP_LABEL: Record<GroupId, string> = {
   clouds: "Clouds", highwind: "High Altitude Winds", freeze: "Freezing Level",
   precip: "Precip Chance",
   aqi: "Air Quality (US)", smoke: "Smoke (US)", ozone: "Ozone (US)",
-  aqiEu: "Air Quality (EU)", smokeEu: "Smoke (EU)",
+  pm10: "PM10 (US)", no2: "NO2 (US)", so2: "SO2 (US)",
+  aqiEu: "Air Quality (EU)", smokeEu: "Smoke (EU)", pm10Eu: "PM10 (EU)",
+  ozoneEu: "Ozone (EU)", no2Eu: "NO2 (EU)", so2Eu: "SO2 (EU)",
 };
 // Short forms for the frontier chart, where each curve is labelled on the plot itself.
 const GROUP_SHORT: Record<GroupId, string> = {
   clouds: "Cloud", highwind: "Wind", freeze: "FL", precip: "Precip",
-  aqi: "AQI", smoke: "Smoke", ozone: "O3", aqiEu: "AQI-EU", smokeEu: "Smoke-EU",
+  aqi: "AQI", smoke: "Smoke", ozone: "O3", pm10: "PM10", no2: "NO2", so2: "SO2",
+  aqiEu: "AQI-EU", smokeEu: "Smoke-EU", pm10Eu: "PM10-EU", ozoneEu: "O3-EU",
+  no2Eu: "NO2-EU", so2Eu: "SO2-EU",
 };
 // Which groups the frontier chart breaks out on hover. The air-quality variables all cost about
 // the same and all cost little (the 4-day clamp means they only pay for the front of the window),
-// so their five curves landed on top of each other in the same corner of the plot with their
-// labels overlapping — five lines saying one thing, at the price of making the four curves that
+// so their curves landed on top of each other in the same corner of the plot with their labels
+// overlapping — now thirteen lines saying one thing, at the price of making the four curves that
 // differ hard to follow. US AQI stands in for the group; the rest keep their rows in the mode
 // comparison table, which is where their individual numbers are legible anyway.
 const FRONTIER_GROUPS = new Set<GroupId>(["clouds", "highwind", "freeze", "precip", "aqi"]);
@@ -321,8 +328,15 @@ const GROUP_VARS: Record<GroupId, string[]> = {
   aqi: ["aqi"],
   smoke: ["aq_pm25"],
   ozone: ["aq_o3"],
+  pm10: ["aq_pm10"],
+  no2: ["aq_no2"],
+  so2: ["aq_so2"],
   aqiEu: ["aqi_eu"],
   smokeEu: ["aqi_eu_pm25"],
+  pm10Eu: ["aqi_eu_pm10"],
+  ozoneEu: ["aqi_eu_o3"],
+  no2Eu: ["aqi_eu_no2"],
+  so2Eu: ["aqi_eu_so2"],
 };
 const maskOf = (vars: string[]) => vars.reduce((m, v) => m | (1 << VARS_BIT[v]), 0);
 const BASE_MASK = maskOf(BASE_VARS);

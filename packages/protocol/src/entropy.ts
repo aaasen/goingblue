@@ -13,7 +13,11 @@ import {
   SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES,
   RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_RES,
   AQ_PM25_DELTA_WEIGHTS_BY_RES, AQ_O3_DELTA_WEIGHTS_BY_RES, AQI_DELTA_WEIGHTS_BY_RES,
-  AQI_EU_DELTA_WEIGHTS_BY_RES, AQI_EU_PM25_DELTA_WEIGHTS_BY_RES, AQI_RESIDUAL_WEIGHTS_BY_RES,
+  AQI_EU_DELTA_WEIGHTS_BY_RES, AQI_EU_PM25_DELTA_WEIGHTS_BY_RES, AQI_RESIDUAL_WEIGHTS_BY_MASK_RES,
+  AQ_PM10_DELTA_WEIGHTS_BY_RES, AQ_NO2_DELTA_WEIGHTS_BY_RES, AQ_SO2_DELTA_WEIGHTS_BY_RES,
+  AQI_EU_PM10_DELTA_WEIGHTS_BY_RES, AQI_EU_NO2_DELTA_WEIGHTS_BY_RES,
+  AQI_EU_O3_DELTA_WEIGHTS_BY_RES, AQI_EU_SO2_DELTA_WEIGHTS_BY_RES,
+  AQI_EU_RESIDUAL_WEIGHTS_BY_MASK_RES,
 } from "./codebooks.gen.js";
 import { CLASS_TABLES, CODEBOOK_CLASSES, type ClassTableSet } from "./codebooks-classes.gen.js";
 import {
@@ -277,6 +281,56 @@ export function decodeAqiDelta(src: SymSource, book: CodeBook): number {
 // is the max over sub-indices the wire already carries) and can reach the top of the ladder.
 export const AQI_RESIDUAL_MAX = AQI_MAX_SYM;
 
+// ── The headline residual's baseline ─────────────────────────────────────────────
+// Each headline IS the max over its scale's sub-indices — over 52M corpus periods it exceeds that
+// max in 0.00% of them, on both scales. So when the wire already carries some of those
+// sub-indices, the headline can be coded as a residual against their max instead of as its own
+// delta series. How well that works depends entirely on how much of the LEADERSHIP MASS the
+// carried subset covers (share of periods where each constituent is the max):
+//
+//   US   pm2.5 56.9%   ozone 40.3%   pm10 2.8%   no2/so2/co 0.0%
+//   EU   ozone 68.6%   pm2.5 23.1%   pm10 8.3%   no2 0.1%   so2 0.0%
+//
+// Only PM2.5, ozone and PM10 ever lead — the same three on both scales, in different order — so
+// only those three key the residual tables. NO2/SO2/CO are carried as columns but never as
+// context: adding NO2 to the US baseline measured 0.275 b/period, bit-for-bit identical to
+// leaving it out. The key is a 3-bit presence mask over the three, so each of the 7 non-empty
+// combinations gets its own fitted table rather than one table averaged over all of them.
+export const AQI_BASE_PM25 = 1;
+export const AQI_BASE_O3 = 2;
+export const AQI_BASE_PM10 = 4;
+export const AQI_BASE_MASKS = 8; // 0..7; mask 0 (none carried) has no residual table
+
+// WHICH masks actually code as a residual. A baseline covering only one constituent is far WORSE
+// than the headline's own deltas — the residual is then nonzero in every period something else
+// leads (96% of them for US PM10) and spans the whole ladder, while the headline's own series is
+// smooth. Held-out b/period, residual vs own-deltas (US 0.935, EU 1.180):
+//
+//   mask            US resid          EU resid
+//   pm2.5             2.273  ✗          3.269  ✗
+//   ozone             2.832  ✗          1.718  ✗
+//   pm10              3.085  ✗          3.377  ✗
+//   pm2.5+ozone       0.275  ✓          0.653  ✓
+//   pm2.5+pm10        2.185  ✗          3.100  ✗
+//   ozone+pm10        2.501  ✗          0.978  ✓
+//   all three         0.036  ✓          0.040  ✓
+//
+// Both sides derive the mask from vars_mask, so choosing the mode costs zero wire bits — the same
+// context-availability switch freezeDeltaBook (temp present/absent) and sfcSpeedBook (gust
+// present/absent) use, with 8 states instead of 2. Pinned here rather than emitted by the derive
+// pipeline so a regeneration can't silently flip a mode and change the wire format; the closest
+// call is EU ozone+pm10 at 0.978 vs 1.180, a comfortable margin.
+const residualModeSet = (...masks: number[]) => new Set(masks);
+export const AQI_US_RESIDUAL_MASKS: ReadonlySet<number> = residualModeSet(
+  AQI_BASE_PM25 | AQI_BASE_O3,
+  AQI_BASE_PM25 | AQI_BASE_O3 | AQI_BASE_PM10,
+);
+export const AQI_EU_RESIDUAL_MASKS: ReadonlySet<number> = residualModeSet(
+  AQI_BASE_PM25 | AQI_BASE_O3,
+  AQI_BASE_O3 | AQI_BASE_PM10,
+  AQI_BASE_PM25 | AQI_BASE_O3 | AQI_BASE_PM10,
+);
+
 // Quantize an index value onto one of the ladders. null/undefined — an hour the upstream model
 // didn't forecast — is AQI_NO_DATA, never band 1.
 export function quantAqi(value: number | null | undefined, lower: readonly number[]): number {
@@ -363,14 +417,23 @@ export interface ClassBooks {
   // See codec-server/scripts/derive-air-quality-codebooks.ts.
   aqPm25Book(res: number, prevDelta: number | null): CodeBook;
   aqO3Book(res: number, tod: number, prevDelta: number | null): CodeBook;
-  aqiEuBook(res: number, tod: number, prevDelta: number | null): CodeBook;
+  aqPm10Book(res: number, prevDelta: number | null): CodeBook;
+  aqNo2Book(res: number, tod: number, prevDelta: number | null): CodeBook;
+  aqSo2Book(res: number, prevDelta: number | null): CodeBook;
   aqiEuPm25Book(res: number, prevDelta: number | null): CodeBook;
-  // The US headline's FALLBACK column — its own deltas, used when the wire isn't carrying both
-  // sub-indices to take a residual against.
+  aqiEuPm10Book(res: number, prevDelta: number | null): CodeBook;
+  aqiEuO3Book(res: number, tod: number, prevDelta: number | null): CodeBook;
+  aqiEuNo2Book(res: number, tod: number, prevDelta: number | null): CodeBook;
+  aqiEuSo2Book(res: number, prevDelta: number | null): CodeBook;
+  // Each headline's FALLBACK column — its own deltas, used for the presence masks where a
+  // residual would cost more than they do (see AQI_*_RESIDUAL_MASKS above).
   aqiDeltaBook(res: number, tod: number, prevDelta: number | null): CodeBook;
-  // The US headline's conditioned column: the residual against max(pm25, o3) when both are in
-  // vars_mask. Zero 98.5% of the time, so resolution alone keys it.
-  aqiResidualBook(res: number): CodeBook;
+  aqiEuBook(res: number, tod: number, prevDelta: number | null): CodeBook;
+  // Each headline's conditioned column: the residual against the max of whichever of
+  // {pm2.5, ozone, pm10} vars_mask carries, keyed by that 3-bit presence mask and the
+  // resolution. The residual is a spike at zero, so a richer context would only split it.
+  aqiResidualBook(res: number, baseMask: number): CodeBook;
+  aqiEuResidualBook(res: number, baseMask: number): CodeBook;
 }
 
 function buildClassBooks(t: ClassTableSet): ClassBooks {
@@ -462,14 +525,28 @@ const aqDeltaByResTodPrev = (weights: number[][][]) => {
   return (res: number, tod: number, prevDelta: number | null): CodeBook =>
     tables[res][tempDeltaBucket(prevDelta ?? 0) * TEMP_DELTA_TOD_BUCKETS + tod];
 };
-const aqiResidualTables = AQI_RESIDUAL_WEIGHTS_BY_RES.map(buildTable);
+// Residual tables are [baseMask][res]. Mask 0 is never looked up (no carried constituent means
+// the headline codes its own deltas), but the row is generated so the array indexes by mask
+// directly rather than by mask-1.
+const aqResidualByMaskRes = (weights: number[][][]) => {
+  const tables = weights.map((rows) => rows.map(buildTable));
+  return (res: number, baseMask: number): CodeBook => tables[baseMask][res];
+};
 const AQ_BOOKS = {
   aqPm25Book: aqDeltaByResPrev(AQ_PM25_DELTA_WEIGHTS_BY_RES),
   aqO3Book: aqDeltaByResTodPrev(AQ_O3_DELTA_WEIGHTS_BY_RES),
+  aqPm10Book: aqDeltaByResPrev(AQ_PM10_DELTA_WEIGHTS_BY_RES),
+  aqNo2Book: aqDeltaByResTodPrev(AQ_NO2_DELTA_WEIGHTS_BY_RES),
+  aqSo2Book: aqDeltaByResPrev(AQ_SO2_DELTA_WEIGHTS_BY_RES),
   aqiDeltaBook: aqDeltaByResTodPrev(AQI_DELTA_WEIGHTS_BY_RES),
   aqiEuBook: aqDeltaByResTodPrev(AQI_EU_DELTA_WEIGHTS_BY_RES),
   aqiEuPm25Book: aqDeltaByResPrev(AQI_EU_PM25_DELTA_WEIGHTS_BY_RES),
-  aqiResidualBook: (res: number): CodeBook => aqiResidualTables[res],
+  aqiEuPm10Book: aqDeltaByResPrev(AQI_EU_PM10_DELTA_WEIGHTS_BY_RES),
+  aqiEuO3Book: aqDeltaByResTodPrev(AQI_EU_O3_DELTA_WEIGHTS_BY_RES),
+  aqiEuNo2Book: aqDeltaByResTodPrev(AQI_EU_NO2_DELTA_WEIGHTS_BY_RES),
+  aqiEuSo2Book: aqDeltaByResPrev(AQI_EU_SO2_DELTA_WEIGHTS_BY_RES),
+  aqiResidualBook: aqResidualByMaskRes(AQI_RESIDUAL_WEIGHTS_BY_MASK_RES),
+  aqiEuResidualBook: aqResidualByMaskRes(AQI_EU_RESIDUAL_WEIGHTS_BY_MASK_RES),
 };
 
 // The base (class 0) table set — codebooks.gen.ts as one ClassTableSet.
@@ -609,10 +686,23 @@ const airQualityBundle = {
   deltaEscapeBits: AQI_DELTA_ESCAPE_BITS,
   pm25ByRes: AQ_PM25_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
   o3ByRes: AQ_O3_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  pm10ByRes: AQ_PM10_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  no2ByRes: AQ_NO2_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  so2ByRes: AQ_SO2_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
   aqiByRes: AQI_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
   euByRes: AQI_EU_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
   euPm25ByRes: AQI_EU_PM25_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
-  residualByRes: AQI_RESIDUAL_WEIGHTS_BY_RES.map(qf),
+  euPm10ByRes: AQI_EU_PM10_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  euO3ByRes: AQI_EU_O3_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  euNo2ByRes: AQI_EU_NO2_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  euSo2ByRes: AQI_EU_SO2_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+  // Residuals are [baseMask][res]; the mode sets say which masks use them at all, and are wire
+  // format just as much as the weights are — a decoder that disagreed would read a residual as
+  // a delta series.
+  residualByMaskRes: AQI_RESIDUAL_WEIGHTS_BY_MASK_RES.map((rows) => rows.map(qf)),
+  euResidualByMaskRes: AQI_EU_RESIDUAL_WEIGHTS_BY_MASK_RES.map((rows) => rows.map(qf)),
+  usResidualMasks: [...AQI_US_RESIDUAL_MASKS].sort((a, b) => a - b),
+  euResidualMasks: [...AQI_EU_RESIDUAL_MASKS].sort((a, b) => a - b),
 };
 export const V2_CODEBOOKS = {
   rans: { probBits: RANS_PROB_BITS, stateLow: RANS_L, wordBits: RANS_WORD_BITS },

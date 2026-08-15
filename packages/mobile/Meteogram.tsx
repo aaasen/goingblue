@@ -733,7 +733,8 @@ function pressureLabel(level: 500 | 600 | 700): string {
 type RowKind =
   | 'clouds' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc' | 'wind-gust' | 'wind-dir'
   | 'cloud-high' | 'cloud-mid' | 'cloud-low'
-  | 'aqi' | 'aqi-pm25' | 'aqi-o3' | 'aqi-eu' | 'aqi-eu-pm25'
+  | 'aqi' | 'aqi-pm25' | 'aqi-o3' | 'aqi-pm10' | 'aqi-no2' | 'aqi-so2'
+  | 'aqi-eu' | 'aqi-eu-pm25' | 'aqi-eu-o3' | 'aqi-eu-pm10' | 'aqi-eu-no2' | 'aqi-eu-so2'
   | 'wind-500' | 'wind-600' | 'wind-700' | 'model' | 'section';
 
 interface Row {
@@ -755,14 +756,24 @@ type CloudKind = keyof typeof CLOUD_KEYS;
 // every label, back when a request could ask for both indices at once and a bare "42" on adjacent
 // rows would have invited exactly the comparison that doesn't hold. The scale is now a preference,
 // so a forecast carries one index and the section header can say which once, for all of them.
-// Order runs headline first, then its components, US before Europe — the same order the wire
-// encodes them in.
+// Order runs headline first, then its components, US before Europe. The two particulate rows sit
+// together (PM2.5 then PM10, fine before coarse) because a reader comparing them is reading one
+// thing — how much of what is in the air — and splitting them around ozone made that a scroll.
+// This is DISPLAY order only; the wire encodes PM2.5, ozone, PM10 (see AQ_DELTA_COLUMNS in v2.ts,
+// where the three residual-keyable constituents lead so both headlines can read them).
 const AQ_KEYS = {
   'aqi': { field: 'aqi', label: 'AQI', scale: 'us' },
   'aqi-pm25': { field: 'aqi_pm25', label: 'PM2.5', scale: 'us' },
+  'aqi-pm10': { field: 'aqi_pm10', label: 'PM10', scale: 'us' },
   'aqi-o3': { field: 'aqi_o3', label: 'Ozone', scale: 'us' },
+  'aqi-no2': { field: 'aqi_no2', label: 'NO₂', scale: 'us' },
+  'aqi-so2': { field: 'aqi_so2', label: 'SO₂', scale: 'us' },
   'aqi-eu': { field: 'aqi_eu', label: 'AQI', scale: 'eu' },
   'aqi-eu-pm25': { field: 'aqi_eu_pm25', label: 'PM2.5', scale: 'eu' },
+  'aqi-eu-pm10': { field: 'aqi_eu_pm10', label: 'PM10', scale: 'eu' },
+  'aqi-eu-o3': { field: 'aqi_eu_o3', label: 'Ozone', scale: 'eu' },
+  'aqi-eu-no2': { field: 'aqi_eu_no2', label: 'NO₂', scale: 'eu' },
+  'aqi-eu-so2': { field: 'aqi_eu_so2', label: 'SO₂', scale: 'eu' },
 } as const satisfies Record<string, { field: keyof Period; label: string; scale: 'us' | 'eu' }>;
 
 // How the header names each scale. "European" rather than "EU" because it's read as prose there,
@@ -1661,7 +1672,10 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         break;
       }
 
-      case 'aqi': case 'aqi-pm25': case 'aqi-o3': case 'aqi-eu': case 'aqi-eu-pm25': {
+      case 'aqi': case 'aqi-pm25': case 'aqi-o3': case 'aqi-pm10':
+      case 'aqi-no2': case 'aqi-so2':
+      case 'aqi-eu': case 'aqi-eu-pm25': case 'aqi-eu-o3': case 'aqi-eu-pm10':
+      case 'aqi-eu-no2': case 'aqi-eu-so2': {
         const { field, scale } = AQ_KEYS[row.kind];
         const valueAt = (i: number) => periods[i][field] as number | undefined;
         // Painted as the wind ribbon is: one gradient per run of columns that have a value, exact

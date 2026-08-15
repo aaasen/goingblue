@@ -1,39 +1,41 @@
 /**
- * Derive the air-quality codebooks: five columns over two index scales (see the AQI ladders in
+ * Derive the air-quality codebooks: thirteen columns over two index scales (see the AQI ladders in
  * the protocol's entropy.ts), all trained from the `cams` corpus source, which shares the weather
- * lattice cell-for-cell (derive-lib.ts EXTRA_SOURCE_VARS does the join).
+ * lattice cell-for-cell (derive-lib.ts EXTRA_SOURCE_VARS does the join). Both indices are carried
+ * in full — each headline plus every constituent the scale defines.
  *
- * Each column's conditioning was chosen from the corpus, not assumed (3h periods, maxOf, held-out
- * numbers printed by the ladder below):
+ * Each column's conditioning was chosen from the corpus, not assumed. Held-out b/period pooled
+ * over 12h/6h/3h/1h (analyze-aq-constituents-heldout.ts), `tod` where it earned its place:
  *
- *   US PM2.5 sub-index   delta | res, prevΔ            1.00 b/period  (1.05 unconditioned)
- *   US ozone sub-index   delta | res, tod8, prevΔ      1.48           (1.99 unconditioned)
- *   US headline          residual vs max(pm25, o3)     0.15           (98.5% exactly zero)
- *                        delta | res, tod8, prevΔ      1.27           (when a sub-index is absent)
- *   European headline    delta | res, tod8, prevΔ      1.64           (1.92 unconditioned)
- *   European PM2.5       delta | res, prevΔ            0.89           (0.95 unconditioned)
+ *   US    pm2.5 0.800   ozone 1.083   pm10 0.528   no2 0.204   so2 0.124
+ *   EU    pm2.5 0.703   ozone 1.319   pm10 0.621   no2 0.263   so2 0.061
+ *   headlines, own deltas:  US 0.935   EU 1.180
  *
  * Why those shapes:
  *
- * - OZONE IS DIURNAL (it is photochemical), so it wants the temp column's res × tod8 × prevΔ
- *   ladder. Conditioning it on the same period's PM2.5 delta instead bought 0.004 b/period —
- *   different chemistry, no shared signal — and was rejected.
- * - THE US HEADLINE IS max(pm25, o3) 98.5% of the time once quantized, so when both sub-index
- *   columns are already on the wire it codes as a residual against their max and costs a rounding
- *   error. That only works against BOTH: measured against one alone the residual costs 2.21
- *   (PM2.5) / 2.72 (ozone), worse than just coding the headline's own deltas. Hence two table
- *   sets and a context-availability switch, the same shape freezeDeltaBook (temp present/absent)
- *   and sfcSpeedBook (gust present/absent) already use.
+ * - OZONE IS DIURNAL (it is photochemical) and so is NO2 (it follows the traffic cycle), so those
+ *   columns want the temp column's res × tod8 × prevΔ ladder. Conditioning ozone on the same
+ *   period's PM2.5 delta instead bought 0.004 b/period — different chemistry, no shared signal —
+ *   and was rejected.
+ * - EACH HEADLINE IS EXACTLY THE MAX over its own constituents: across 52M corpus periods it
+ *   exceeds that max in 0.00% of them, on both scales. So a headline codes as a residual against
+ *   the max of whichever constituents the wire carries. Only PM2.5, ozone and PM10 ever lead
+ *   (US 56.9/40.3/2.8%, EU 23.1/68.6/8.3%), so only those three key the residual tables — NO2 in
+ *   the US baseline measured 0.275, bit-for-bit identical to leaving it out. The tables are keyed
+ *   by the 3-bit presence mask; which masks the wire actually codes as residuals is pinned in
+ *   entropy.ts, because a single-constituent baseline is 2-3x WORSE than the headline's own
+ *   deltas. See AQI_US_RESIDUAL_MASKS there for the full ladder.
+ * - THE TWO SCALES INVERT EACH OTHER. Ozone leads the European index (68.6%) where PM2.5 leads
+ *   the US one (56.9%), which is why the European headline had no usable residual until its ozone
+ *   sub-index was collected: against PM2.5 alone the residual costs 3.269 b/period.
  * - THE EUROPEAN COLUMNS DON'T COMPRESS AGAINST THE US ONES. The EU headline conditioned on the
- *   US delta costs 1.79, value-coded against the same-period US index 2.70, and as a residual
- *   against its own PM2.5 sub-index 3.27 — all worse than its own 1.64. The two scales weight
- *   pollutants differently and the EU headline is NO2/O3/SO2-driven ~77% of the time, so the
- *   often-quoted redundancy between the scales is category agreement, not codeable structure.
- *   EU PM2.5 conditioned on the US PM2.5 delta does help (0.806 vs 0.894), but 0.088 b/period is
- *   below the bar the cross-variable work set (its shipped candidates were 0.10-0.33), so it
- *   stays unconditioned.
- * - EU PM2.5 is the cheapest column because Open-Meteo's European index uses a 24h RUNNING MEAN
- *   for particulates; it is a far smoother series than the instantaneous US sub-index.
+ *   US delta costs 1.79, value-coded against the same-period US index 2.70 — both worse than its
+ *   own deltas. The two scales weight pollutants differently, so the often-quoted redundancy
+ *   between them is category agreement, not codeable structure. EU PM2.5 conditioned on the US
+ *   PM2.5 delta does help (0.806 vs 0.894), but 0.088 b/period is below the bar the
+ *   cross-variable work set (its shipped candidates were 0.10-0.33), so it stays unconditioned.
+ * - EU PM2.5 is a cheap column because Open-Meteo's European index uses a 24h RUNNING MEAN for
+ *   particulates; it is a far smoother series than the instantaneous US sub-index.
  *
  * These tables are NOT part of the codebook-class ladder — they are shared by every class (see
  * the AQ books in entropy.ts). Registering this script in extract-cell-counts.ts and re-running
@@ -75,18 +77,38 @@ interface Column {
 const COLUMNS: Column[] = [
   { name: "usPm25", table: "AQ_PM25_DELTA_WEIGHTS_BY_RES", of: (r) => r.us_aqi_pm2_5, lower: AQI_US_LOWER, tod: false },
   { name: "usO3", table: "AQ_O3_DELTA_WEIGHTS_BY_RES", of: (r) => r.us_aqi_ozone, lower: AQI_US_LOWER, tod: true },
+  { name: "usPm10", table: "AQ_PM10_DELTA_WEIGHTS_BY_RES", of: (r) => r.us_aqi_pm10, lower: AQI_US_LOWER, tod: false },
+  { name: "usNo2", table: "AQ_NO2_DELTA_WEIGHTS_BY_RES", of: (r) => r.us_aqi_nitrogen_dioxide, lower: AQI_US_LOWER, tod: true },
+  { name: "usSo2", table: "AQ_SO2_DELTA_WEIGHTS_BY_RES", of: (r) => r.us_aqi_sulphur_dioxide, lower: AQI_US_LOWER, tod: false },
   { name: "usAqi", table: "AQI_DELTA_WEIGHTS_BY_RES", of: (r) => r.us_aqi, lower: AQI_US_LOWER, tod: true },
-  { name: "euAqi", table: "AQI_EU_DELTA_WEIGHTS_BY_RES", of: (r) => r.european_aqi, lower: AQI_EU_LOWER, tod: true },
   { name: "euPm25", table: "AQI_EU_PM25_DELTA_WEIGHTS_BY_RES", of: (r) => r.european_aqi_pm2_5, lower: AQI_EU_LOWER, tod: false },
+  { name: "euO3", table: "AQI_EU_O3_DELTA_WEIGHTS_BY_RES", of: (r) => r.european_aqi_ozone, lower: AQI_EU_LOWER, tod: true },
+  { name: "euPm10", table: "AQI_EU_PM10_DELTA_WEIGHTS_BY_RES", of: (r) => r.european_aqi_pm10, lower: AQI_EU_LOWER, tod: false },
+  { name: "euNo2", table: "AQI_EU_NO2_DELTA_WEIGHTS_BY_RES", of: (r) => r.european_aqi_nitrogen_dioxide, lower: AQI_EU_LOWER, tod: true },
+  { name: "euSo2", table: "AQI_EU_SO2_DELTA_WEIGHTS_BY_RES", of: (r) => r.european_aqi_sulphur_dioxide, lower: AQI_EU_LOWER, tod: false },
+  { name: "euAqi", table: "AQI_EU_DELTA_WEIGHTS_BY_RES", of: (r) => r.european_aqi, lower: AQI_EU_LOWER, tod: true },
 ];
 const ctxCount = (c: Column) => NPREV * (c.tod ? NTOD : 1);
+
+// Each headline's residual tables: the count-table name, the generated constant, the headline's
+// own column, and the three constituents that key it — in AQI_BASE_* bit order (pm2.5, ozone,
+// pm10), which is what makes `mask` here the same mask v2.ts derives from vars_mask.
+const RESIDUALS: { name: string; table: string; head: string; base: [string, string, string] }[] = [
+  { name: "usResidual", table: "AQI_RESIDUAL_WEIGHTS_BY_MASK_RES", head: "usAqi",
+    base: ["usPm25", "usO3", "usPm10"] },
+  { name: "euResidual", table: "AQI_EU_RESIDUAL_WEIGHTS_BY_MASK_RES", head: "euAqi",
+    base: ["euPm25", "euO3", "euPm10"] },
+];
+const NMASK = 8; // 3-bit presence mask; row 0 is generated but never looked up
 
 export function counter(): CellCounter {
   const tables = [
     ...COLUMNS.map((c) => ({ name: c.name, dims: [NRES, ctxCount(c), NDELTA] })),
-    // The headline's residual against max(pm25, o3), keyed by resolution alone — the residual is
-    // zero almost everywhere, so a richer context would only split a spike.
-    { name: "usResidual", dims: [NRES, NRESID] },
+    // Each headline's residual against the max of its carried constituents, keyed by the 3-bit
+    // presence mask and the resolution — within a mask the residual is a spike at zero, so a
+    // richer context would only split it. Every mask is counted from the same periods; which of
+    // them the wire actually uses is v2.ts's call (AQI_*_RESIDUAL_MASKS).
+    ...RESIDUALS.map((r) => ({ name: r.name, dims: [NMASK, NRES, NRESID] })),
   ];
   const { offsets, nSlots } = tableOffsets(tables);
 
@@ -148,17 +170,31 @@ export function counter(): CellCounter {
           }
         }
 
-        // The headline residual, counted only where all three US values exist — a period missing
-        // one of them encodes through the no-data symbol, not through this table.
-        const a = quantized.usAqi, pm = quantized.usPm25, o3 = quantized.usO3;
-        for (let p = 0; p < n; p++) {
-          if (a[p] === AQI_NO_DATA || pm[p] === AQI_NO_DATA || o3[p] === AQI_NO_DATA) continue;
-          const resid = a[p] - Math.max(pm[p], o3[p]);
-          // Clamped, not skipped: the headline is the max over sub-indices the wire may not
-          // carry (PM10, CO, NO2, SO2), so it is ≥ max(pm25, o3) by construction — a negative
-          // here would be a quantization artifact at a band edge, and coding it as 0 costs one
-          // band, which is what the encoder does too.
-          add(offsets.usResidual + res * NRESID + Math.min(Math.max(resid, 0), AQI_RESIDUAL_MAX));
+        // Each headline's residual, under every presence mask, counted only where the headline
+        // and the mask's constituents all exist — a period missing one encodes through the
+        // no-data symbol, not through this table. One period contributes to all 7 masks, which is
+        // what lets a single pass fit every table the encoder might select.
+        for (const r of RESIDUALS) {
+          const a = quantized[r.head];
+          const base = r.base.map((b) => quantized[b]);
+          for (let p = 0; p < n; p++) {
+            if (a[p] === AQI_NO_DATA) continue;
+            for (let mask = 1; mask < NMASK; mask++) {
+              let m = 0, ok = true;
+              for (let i = 0; i < base.length; i++) {
+                if (!(mask & (1 << i))) continue;
+                if (base[i][p] === AQI_NO_DATA) { ok = false; break; }
+                if (base[i][p] > m) m = base[i][p];
+              }
+              if (!ok) continue;
+              // Clamped, not skipped: the headline is the max over sub-indices this mask may not
+              // carry, so it is ≥ that max by construction — a negative here would be a
+              // quantization artifact at a band edge, and coding it as 0 costs one band, which is
+              // what the encoder does too.
+              add(offsets[r.name] + (mask * NRES + res) * NRESID
+                + Math.min(Math.max(a[p] - m, 0), AQI_RESIDUAL_MAX));
+            }
+          }
         }
       }
     },
@@ -168,8 +204,11 @@ export function counter(): CellCounter {
         out[c.table] = resRows(counts, c).map(({ rows, marginal }) =>
           rows.map((row) => scaledWeights(sum(row) > 0 ? row : marginal)));
       }
-      out.AQI_RESIDUAL_WEIGHTS_BY_RES = Array.from({ length: NRES }, (_, res) =>
-        scaledWeights(rowAt(counts, offsets.usResidual + res * NRESID, NRESID)));
+      for (const r of RESIDUALS) {
+        out[r.table] = Array.from({ length: NMASK }, (_, mask) =>
+          Array.from({ length: NRES }, (_, res) =>
+            scaledWeights(rowAt(counts, offsets[r.name] + (mask * NRES + res) * NRESID, NRESID))));
+      }
       return out;
     },
     costBits(counts) {
@@ -186,10 +225,14 @@ export function counter(): CellCounter {
               L[start + s] = cost[s] + (s === ESCAPE_SYM ? AQI_DELTA_ESCAPE_BITS : 0);
           }));
       }
-      for (let res = 0; res < NRES; res++) {
-        const start = offsets.usResidual + res * NRESID;
-        const cost = rowCostBits(scaledWeights(rowAt(counts, start, NRESID)));
-        for (let s = 0; s < NRESID; s++) L[start + s] = cost[s];
+      for (const r of RESIDUALS) {
+        for (let mask = 0; mask < NMASK; mask++) {
+          for (let res = 0; res < NRES; res++) {
+            const start = offsets[r.name] + (mask * NRES + res) * NRESID;
+            const cost = rowCostBits(scaledWeights(rowAt(counts, start, NRESID)));
+            for (let s = 0; s < NRESID; s++) L[start + s] = cost[s];
+          }
+        }
       }
       return L;
     },
@@ -221,16 +264,26 @@ export async function derive(precounted?: Float64Array): Promise<DerivedTables> 
     }
     console.log(`  ${col.name.padEnd(7)} n=${allN} mean=${(allBits / Math.max(1, allN)).toFixed(3)} b/period  [${parts.join(" ")}]`);
   }
-  let rBits = 0, rN = 0, rZero = 0;
-  for (let res = 0; res < NRES; res++) {
-    for (let s = 0; s < NRESID; s++) {
-      const slot = offsets.usResidual + res * NRESID + s;
-      rBits += counts[slot] * L[slot];
-      rN += counts[slot];
-      if (s === 0) rZero += counts[slot];
+  // Every residual mask, so the log shows both the ones the wire selects and the ones it rejects
+  // in favour of the headline's own deltas (printed above as usAqi / euAqi).
+  const MASK_LABEL = ["-", "pm2.5", "o3", "pm2.5+o3", "pm10", "pm2.5+pm10", "o3+pm10", "all3"];
+  for (const r of RESIDUALS) {
+    for (let mask = 1; mask < NMASK; mask++) {
+      let rBits = 0, rN = 0, rZero = 0;
+      for (let res = 0; res < NRES; res++) {
+        for (let s = 0; s < NRESID; s++) {
+          const slot = offsets[r.name] + (mask * NRES + res) * NRESID + s;
+          rBits += counts[slot] * L[slot];
+          rN += counts[slot];
+          if (s === 0) rZero += counts[slot];
+        }
+      }
+      console.log(
+        `  ${r.name.padEnd(11)} ${MASK_LABEL[mask].padEnd(11)} n=${rN}` +
+        ` mean=${(rBits / Math.max(1, rN)).toFixed(3)} b/period` +
+        `  (zero ${(100 * rZero / Math.max(1, rN)).toFixed(2)}%)`);
     }
   }
-  console.log(`  residual n=${rN} mean=${(rBits / Math.max(1, rN)).toFixed(3)} b/period  (zero ${(100 * rZero / Math.max(1, rN)).toFixed(2)}%)`);
 
   return c.tablesFrom(counts);
 }

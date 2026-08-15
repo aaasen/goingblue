@@ -50,12 +50,22 @@ export const VARS_BIT: Record<string, number> = {
   aqi: 15,         // US AQI, the headline index (max over every sub-index)
   aqi_eu: 16,      // European AQI, the headline index
   aqi_eu_pm25: 17, // European AQI PM2.5 sub-index (a 24h running mean upstream, so it's smooth)
-  // Bits 18..21 are RESERVED for the remaining European sub-indices, with the request codes
-  // they will claim: pm10 (18, `1`), no2 (19, `n`), ozone (20, `3`), so2 (21, `q`). Their
-  // codebooks can't be derived until the corpus carries them — the CAMS pull collected only
-  // european_aqi and european_aqi_pm2_5 — and they matter, since the European headline is
-  // driven by NO2/O3/SO2 rather than particulates ~77% of the time. Held open here so adding
-  // them after the next pull doesn't reshuffle the columns already in the field.
+  // The remaining constituents, added once the 2026-08-15 CAMS pull carried them. Bits 18..21
+  // and their codes were held open for the European four while only european_aqi and
+  // european_aqi_pm2_5 existed in the corpus; the US three follow at 22..24.
+  //
+  // The two scales deliberately offer the SAME FIVE constituents. The US index also defines a
+  // carbon monoxide sub-index and the European one does not, but CO leads the US headline in
+  // 0.0% of corpus periods — it is never the pollutant a reader is being warned about — so
+  // carrying it would have bought a column that says nothing and made the two scales' menus
+  // differ for no reader-visible gain. Bit 25 is free if that judgement ever changes.
+  aqi_eu_pm10: 18, // European AQI PM10 sub-index
+  aqi_eu_no2: 19,  // European AQI nitrogen dioxide sub-index
+  aqi_eu_o3: 20,   // European AQI ozone sub-index — leads this scale 68.6% of the time
+  aqi_eu_so2: 21,  // European AQI sulphur dioxide sub-index
+  aq_pm10: 22,     // US AQI PM10 sub-index
+  aq_no2: 23,      // US AQI nitrogen dioxide sub-index
+  aq_so2: 24,      // US AQI sulphur dioxide sub-index
 };
 
 // Core forecast variables are implicit in every request. The request's `v:` token only carries
@@ -69,9 +79,8 @@ export const ALWAYS_VARS_MASK = ALWAYS_VARS.reduce(
 // Single-character request codes for the user-configurable variable groups. A group is however
 // many protocol variables one toggle turns on together: the cloud and upper-wind toggles cover
 // three each, while every air-quality index is its own toggle — the pollutants behave differently
-// enough (smoke vs photochemical smog) that a reader wants them separately, and each costs its own
-// share of the message budget. The codes reserved for the not-yet-derivable European sub-indices
-// are listed with their bits in VARS_BIT above.
+// enough (smoke vs photochemical smog vs traffic NO2) that a reader wants them separately, and
+// each costs its own share of the message budget.
 export const CONFIGURABLE_VAR_GROUPS = {
   p: ["precip"],
   c: ["cch", "ccm", "ccl"],
@@ -80,8 +89,15 @@ export const CONFIGURABLE_VAR_GROUPS = {
   a: ["aqi"],           // US Air Quality Index
   s: ["aq_pm25"],       // smoke
   o: ["aq_o3"],         // ozone
+  m: ["aq_pm10"],       // US PM10 sub-index
+  d: ["aq_no2"],        // US nitrogen dioxide sub-index
+  u: ["aq_so2"],        // US sulphur dioxide sub-index
   e: ["aqi_eu"],        // European AQI
   "2": ["aqi_eu_pm25"], // European PM2.5 sub-index
+  "1": ["aqi_eu_pm10"], // European PM10 sub-index
+  n: ["aqi_eu_no2"],    // European nitrogen dioxide sub-index
+  "3": ["aqi_eu_o3"],   // European ozone sub-index
+  q: ["aqi_eu_so2"],    // European sulphur dioxide sub-index
 } as const;
 
 // The request codes above, as a character class for the compact `v:` token (`v:aso`). Derived

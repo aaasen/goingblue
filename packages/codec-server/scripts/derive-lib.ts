@@ -28,8 +28,12 @@ export const DERIVE_VARS: readonly string[] = [
   "wind_speed_600hPa", "wind_direction_600hPa",
   "wind_speed_700hPa", "wind_direction_700hPa",
   "cloud_cover", "cloud_cover_high", "cloud_cover_mid", "cloud_cover_low",
-  // Air quality — served from a different corpus source, see EXTRA_SOURCE_VARS below.
-  "us_aqi", "us_aqi_pm2_5", "us_aqi_ozone", "european_aqi", "european_aqi_pm2_5",
+  // Air quality — served from a different corpus source, see EXTRA_SOURCE_VARS below. Both
+  // indices in full: each headline plus every constituent the scale defines.
+  "us_aqi", "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi_pm10",
+  "us_aqi_nitrogen_dioxide", "us_aqi_sulphur_dioxide",
+  "european_aqi", "european_aqi_pm2_5", "european_aqi_pm10",
+  "european_aqi_nitrogen_dioxide", "european_aqi_ozone", "european_aqi_sulphur_dioxide",
 ];
 
 // Variables that live on a SECOND corpus source rather than DERIVE_SOURCE. Air quality was
@@ -39,7 +43,12 @@ export const DERIVE_VARS: readonly string[] = [
 // results into one HourlyData — the Open-Meteo names don't collide across the two APIs. A cell with
 // no `cams` row just comes back without the AQ columns, and the AQ counter skips it.
 export const EXTRA_SOURCE_VARS: Record<string, readonly string[]> = {
-  cams: ["us_aqi", "us_aqi_pm2_5", "us_aqi_ozone", "european_aqi", "european_aqi_pm2_5"],
+  cams: [
+    "us_aqi", "us_aqi_pm2_5", "us_aqi_ozone", "european_aqi", "european_aqi_pm2_5",
+    "us_aqi_pm10", "us_aqi_nitrogen_dioxide", "us_aqi_sulphur_dioxide",
+    "european_aqi_pm10", "european_aqi_nitrogen_dioxide", "european_aqi_ozone",
+    "european_aqi_sulphur_dioxide",
+  ],
 };
 const EXTRA_SOURCE_VAR_SET = new Set(Object.values(EXTRA_SOURCE_VARS).flat());
 

@@ -143,8 +143,15 @@ function row(snow_cm: number): Row {
     us_aqi: 118,
     us_aqi_pm2_5: 96,
     us_aqi_ozone: 42,
+    us_aqi_pm10: 60,
+    us_aqi_nitrogen_dioxide: 18,
+    us_aqi_sulphur_dioxide: 9,
     european_aqi: 55,
     european_aqi_pm2_5: 31,
+    european_aqi_ozone: 48,
+    european_aqi_pm10: 22,
+    european_aqi_nitrogen_dioxide: 14,
+    european_aqi_sulphur_dioxide: 6,
   };
 }
 
@@ -175,8 +182,15 @@ describe("toFullPeriod — air quality", () => {
     [VARS_BIT.aqi, "aqi", 118],
     [VARS_BIT.aq_pm25, "aqi_pm25", 96],
     [VARS_BIT.aq_o3, "aqi_o3", 42],
+    [VARS_BIT.aq_pm10, "aqi_pm10", 60],
+    [VARS_BIT.aq_no2, "aqi_no2", 18],
+    [VARS_BIT.aq_so2, "aqi_so2", 9],
     [VARS_BIT.aqi_eu, "aqi_eu", 55],
     [VARS_BIT.aqi_eu_pm25, "aqi_eu_pm25", 31],
+    [VARS_BIT.aqi_eu_o3, "aqi_eu_o3", 48],
+    [VARS_BIT.aqi_eu_pm10, "aqi_eu_pm10", 22],
+    [VARS_BIT.aqi_eu_no2, "aqi_eu_no2", 14],
+    [VARS_BIT.aqi_eu_so2, "aqi_eu_so2", 6],
   ] as const;
 
   it("carries each index only under its own bit", () => {

@@ -55,13 +55,20 @@ function periodAt(i: number): Period {
     cloud_high: Math.round((i % 8) * 100 / 7),
     cloud_mid: Math.round(((i + 3) % 8) * 100 / 7),
     cloud_low: Math.round(((i + 5) % 8) * 100 / 7),
-    // Air quality, as ladder band representatives so they round-trip exactly. The headline stays
-    // at or above both US sub-indices, which is the relationship its residual coding assumes.
+    // Air quality, as ladder band representatives so they round-trip exactly. Each headline stays
+    // at or above every sub-index on its own scale, the relationship its residual coding assumes.
     aqi: aqiMid(9 + (i % 6), AQI_US_LOWER),
     aqi_pm25: aqiMid(4 + (i % 5), AQI_US_LOWER),
     aqi_o3: aqiMid(3 + (i % 4), AQI_US_LOWER),
+    aqi_pm10: aqiMid(3 + (i % 5), AQI_US_LOWER),
+    aqi_no2: aqiMid(2 + (i % 3), AQI_US_LOWER),
+    aqi_so2: aqiMid(1 + (i % 3), AQI_US_LOWER),
     aqi_eu: aqiMid(5 + (i % 7), AQI_EU_LOWER),
     aqi_eu_pm25: aqiMid(2 + (i % 5), AQI_EU_LOWER),
+    aqi_eu_o3: aqiMid(3 + (i % 4), AQI_EU_LOWER),
+    aqi_eu_pm10: aqiMid(2 + (i % 4), AQI_EU_LOWER),
+    aqi_eu_no2: aqiMid(1 + (i % 3), AQI_EU_LOWER),
+    aqi_eu_so2: aqiMid(1 + (i % 2), AQI_EU_LOWER),
   };
 }
 

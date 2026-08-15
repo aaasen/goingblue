@@ -12,6 +12,8 @@ import {
   CARDINALS,
   DEFAULT_VARS_MASK,
   VARS_BIT,
+  AQI_US_RESIDUAL_MASKS,
+  AQI_EU_RESIDUAL_MASKS,
   MODE_DETAIL,
   MODE_RANGE,
   compandSqrt,
@@ -35,15 +37,24 @@ const bmid = beaufortMidKph;
 const qSnow = (cm: number) => expandSqrt(compandSqrt(cm, SNOW_K, ACCUM_BITS), SNOW_K);
 const qRain = (mm: number) => expandSqrt(compandSqrt(mm, RAIN_K, ACCUM_BITS), RAIN_K);
 
-// Every v2 variable: bits 0..12 weather, 13..17 air quality (bits 18..21 are reserved for the
-// European sub-indices the corpus can't train yet, so nothing encodes them).
-const ALL_VARS =
-  (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) |
-  (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 12) |
-  (1 << 13) | (1 << 14) | (1 << 15) | (1 << 16) | (1 << 17);
-const AQ_VARS =
-  (1 << VARS_BIT.aq_pm25) | (1 << VARS_BIT.aq_o3) | (1 << VARS_BIT.aqi) |
-  (1 << VARS_BIT.aqi_eu) | (1 << VARS_BIT.aqi_eu_pm25);
+// Every v2 variable: bits 0..12 weather, 13..25 air quality (both indices in full).
+const ALL_VARS = Object.values(VARS_BIT).reduce((m, b) => m | (1 << b), 0);
+// Every air-quality column: its VARS_BIT name, its Period field, and which ladder it decodes on.
+const AQ_CASES: [bit: string, field: keyof Period, scale: "us" | "eu"][] = [
+  ["aq_pm25", "aqi_pm25", "us"],
+  ["aq_o3", "aqi_o3", "us"],
+  ["aq_pm10", "aqi_pm10", "us"],
+  ["aq_no2", "aqi_no2", "us"],
+  ["aq_so2", "aqi_so2", "us"],
+  ["aqi", "aqi", "us"],
+  ["aqi_eu_pm25", "aqi_eu_pm25", "eu"],
+  ["aqi_eu_o3", "aqi_eu_o3", "eu"],
+  ["aqi_eu_pm10", "aqi_eu_pm10", "eu"],
+  ["aqi_eu_no2", "aqi_eu_no2", "eu"],
+  ["aqi_eu_so2", "aqi_eu_so2", "eu"],
+  ["aqi_eu", "aqi_eu", "eu"],
+];
+const AQ_VARS = AQ_CASES.reduce((m, [bit]) => m | (1 << VARS_BIT[bit]), 0);
 
 const PERIOD: Period = {
   weathercode: 73,
@@ -64,13 +75,20 @@ const PERIOD: Period = {
   cloud_high: 60,
   cloud_mid: 40,
   cloud_low: 20,
-  // Air quality. The headline sits at or above both sub-indices' bands, which is what the wire
-  // assumes when it codes it as a residual against their max.
+  // Air quality. Each headline sits at or above every one of its own scale's sub-index bands,
+  // which is what the wire assumes when it codes the headline as a residual against their max.
   aqi: 118,
   aqi_pm25: 96,
   aqi_o3: 42,
+  aqi_pm10: 60,
+  aqi_no2: 18,
+  aqi_so2: 9,
   aqi_eu: 55,
   aqi_eu_pm25: 31,
+  aqi_eu_o3: 48,
+  aqi_eu_pm10: 22,
+  aqi_eu_no2: 14,
+  aqi_eu_so2: 6,
 };
 
 // Air-quality values decode to their ladder band's representative, so expectations go through
@@ -215,23 +233,15 @@ describe("v2 round-trip encoding", () => {
 
   it("round-trips every air-quality column on its own scale", () => {
     const p = roundTrip(msg({ vars_mask: AQ_VARS })).periods[0][0];
-    expect(p.aqi).toBe(qUs(PERIOD.aqi!));
-    expect(p.aqi_pm25).toBe(qUs(PERIOD.aqi_pm25!));
-    expect(p.aqi_o3).toBe(qUs(PERIOD.aqi_o3!));
     // The European values go through the EU ladder — a scale with different band edges, so a
     // value quantized against the US ladder here would come back a different number.
-    expect(p.aqi_eu).toBe(qEu(PERIOD.aqi_eu!));
-    expect(p.aqi_eu_pm25).toBe(qEu(PERIOD.aqi_eu_pm25!));
+    for (const [, field, scale] of AQ_CASES)
+      expect(p[field], field).toBe((scale === "eu" ? qEu : qUs)(PERIOD[field] as number));
   });
 
   it("round-trips each air-quality variable selected alone", () => {
-    const cases: [number, keyof Period, (v: number) => number | undefined][] = [
-      [VARS_BIT.aqi, "aqi", qUs],
-      [VARS_BIT.aq_pm25, "aqi_pm25", qUs],
-      [VARS_BIT.aq_o3, "aqi_o3", qUs],
-      [VARS_BIT.aqi_eu, "aqi_eu", qEu],
-      [VARS_BIT.aqi_eu_pm25, "aqi_eu_pm25", qEu],
-    ];
+    const cases: [number, keyof Period, (v: number) => number | undefined][] =
+      AQ_CASES.map(([bit, field, scale]) => [VARS_BIT[bit], field, scale === "eu" ? qEu : qUs]);
     for (const [bit, field, q] of cases) {
       const p = roundTrip(msg({ vars_mask: 1 << bit })).periods[0][0];
       expect(p[field], `${field} alone`).toBe(q(PERIOD[field] as number));
@@ -240,22 +250,49 @@ describe("v2 round-trip encoding", () => {
     }
   });
 
-  it("codes the US headline as a residual only when both sub-indices are on the wire", () => {
-    // The headline exactly equals its worst sub-index here — the 97% case the residual coding is
-    // for. (PERIOD itself sits one band above, so the round-trip tests cover a nonzero residual.)
+  it("codes a headline as a residual only under the masks where that is cheaper", () => {
+    // A headline exactly equals its worst sub-index here — the case the residual coding is for.
+    // (PERIOD itself sits one band above, so the round-trip tests cover a nonzero residual.)
+    const led: Period = { ...PERIOD, aqi: PERIOD.aqi_pm25, aqi_eu: PERIOD.aqi_eu_o3 };
+    const colBits = (name: string, varsMask: number) =>
+      v2EncodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
+        .columns.find((c) => c.name === name)!.bits;
+
+    // Only PM2.5, ozone and PM10 key the residual; the other constituents are never context, so
+    // adding them can't move the headline's cost. Each scale's mode set is measured, not assumed
+    // — see AQI_US_RESIDUAL_MASKS in entropy.ts for the held-out ladder behind these.
+    for (const [head, base, residualMasks] of [
+      ["aqi", ["aq_pm25", "aq_o3", "aq_pm10"], AQI_US_RESIDUAL_MASKS],
+      ["aqi_eu", ["aqi_eu_pm25", "aqi_eu_o3", "aqi_eu_pm10"], AQI_EU_RESIDUAL_MASKS],
+    ] as const) {
+      const alone = colBits(head, 1 << VARS_BIT[head]);
+      for (let mask = 1; mask < 8; mask++) {
+        const varsMask = base.reduce(
+          (m, b, i) => (mask & (1 << i) ? m | (1 << VARS_BIT[b]) : m), 1 << VARS_BIT[head]);
+        const bits = colBits(head, varsMask);
+        if (residualMasks.has(mask)) {
+          // The headline is the max of the carried constituents plus a residual of zero — far
+          // cheaper than carrying its own anchor and deltas.
+          expect(bits, `${head} mask ${mask} should be a residual`).toBeLessThan(alone);
+        } else {
+          // Too little of the leadership mass to take a max against, so the column falls back to
+          // its own deltas and costs exactly what it does alone.
+          expect(bits, `${head} mask ${mask} should fall back`).toBeCloseTo(alone, 6);
+        }
+      }
+    }
+  });
+
+  it("ignores the constituents that never lead an index as headline context", () => {
+    // NO2 and SO2 measured bit-for-bit identical in the US baseline whether present or not, so
+    // they are deliberately not part of the residual key.
     const led: Period = { ...PERIOD, aqi: PERIOD.aqi_pm25 };
     const aqiBits = (varsMask: number) =>
       v2EncodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
         .columns.find((c) => c.name === "aqi")!.bits;
-    const withBoth = aqiBits((1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25) | (1 << VARS_BIT.aq_o3));
-    const withOne = aqiBits((1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25));
-    const alone = aqiBits(1 << VARS_BIT.aqi);
-    // With both sub-indices decoded, the headline is their max plus a residual of zero — far
-    // cheaper than carrying its own anchor and deltas.
-    expect(withBoth).toBeLessThan(alone);
-    // With only one sub-index there is no max to take, so the column falls back to its own
-    // deltas and costs the same as it does alone.
-    expect(withOne).toBeCloseTo(alone, 6);
+    const keyed = (1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25) | (1 << VARS_BIT.aq_o3);
+    const plusUnkeyed = keyed | (1 << VARS_BIT.aq_no2) | (1 << VARS_BIT.aq_so2);
+    expect(aqiBits(plusUnkeyed)).toBeCloseTo(aqiBits(keyed), 6);
   });
 
   it("decodes a missing headline as the worst sub-index rather than as clean air", () => {
