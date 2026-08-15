@@ -236,8 +236,8 @@ The Going Blue codec relies on the client and server having identical codebooks.
 
 #### v1 -> v2 (in development)
 
- - Elevation correction for precipitation type. Remap rain to snow at sub-freezing temperatures.
- - Add support for air quality variables: AQI, pm2.5, etc.
+ - Adds elevation correction for precipitation type. Open-Meteo already adjusts temperature from grid cell elevation to forecast elevation using a temperature lapse rate formula. This change also remaps rain to snow when the forecast elevation is above the freezing level or the temperature is less than 2°C. Uses a 7:1 snow:liquid ratio. Weathercode is also remapped.
+ - Adds support for air quality variables: AQI, pm2.5, pm10, ozone, nitrogen dioxide, sulfur dioxide. Supports both American and European scales. 
 
 ## License
 
