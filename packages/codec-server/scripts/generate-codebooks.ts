@@ -68,27 +68,42 @@ async function scanSharded(): Promise<Float64Array[]> {
   const totals = nSlots.map((n) => new Float64Array(n));
   const tmp = mkdtempSync(join(tmpdir(), "derive-"));
   try {
-    await Promise.all(Array.from({ length: WORKERS }, (_, i) => new Promise<void>((ok, fail) => {
-      const out = join(tmp, `shard-${i}.bin`);
-      const child = spawn(
-        process.execPath,
-        [TSX_CLI, join(dir, "derive-worker.ts"), String(i), String(WORKERS), out, ...scripts],
-        { stdio: ["ignore", "inherit", "inherit"] },
-      );
-      child.on("error", fail);
-      child.on("exit", (code) => {
-        if (code !== 0) return fail(new Error(`shard ${i} exited ${code}`));
-        // Each shard's file is its counters' Float64Arrays back to back, in `scripts` order.
-        const buf = readFileSync(out);
-        let off = 0;
-        for (let c = 0; c < totals.length; c++) {
-          const v = new Float64Array(buf.buffer, buf.byteOffset + off, nSlots[c]);
-          for (let k = 0; k < v.length; k++) totals[c][k] += v[k];
-          off += nSlots[c] * 8;
-        }
-        ok();
-      });
-    })));
+    // allSettled, not all: the shards write into `tmp` as they finish, so tearing it down the
+    // moment one of them fails would pull the directory out from under every sibling still
+    // scanning. They then die on ENOENT while writing, and the cascade buries whichever failure
+    // actually started it — which is exactly how a worker killed under memory pressure read as
+    // six unexplained file-not-found errors.
+    const settled = await Promise.allSettled(
+      Array.from({ length: WORKERS }, (_, i) => new Promise<void>((ok, fail) => {
+        const out = join(tmp, `shard-${i}.bin`);
+        const child = spawn(
+          process.execPath,
+          [TSX_CLI, join(dir, "derive-worker.ts"), String(i), String(WORKERS), out, ...scripts],
+          { stdio: ["ignore", "inherit", "inherit"] },
+        );
+        child.on("error", fail);
+        child.on("exit", (code, signal) => {
+          // A signal rather than an exit code is the tell for the OS killing it — usually memory,
+          // and usually because something else heavy is running alongside.
+          if (signal) return fail(new Error(`shard ${i} killed by ${signal}`));
+          if (code !== 0) return fail(new Error(`shard ${i} exited ${code}`));
+          // Each shard's file is its counters' Float64Arrays back to back, in `scripts` order.
+          const buf = readFileSync(out);
+          let off = 0;
+          for (let c = 0; c < totals.length; c++) {
+            const v = new Float64Array(buf.buffer, buf.byteOffset + off, nSlots[c]);
+            for (let k = 0; k < v.length; k++) totals[c][k] += v[k];
+            off += nSlots[c] * 8;
+          }
+          ok();
+        });
+      })),
+    );
+    const failed = settled.filter((r) => r.status === "rejected");
+    if (failed.length)
+      throw new Error(
+        `${failed.length} of ${WORKERS} shards failed; the corpus was not fully counted.\n` +
+        failed.map((r) => `  ${(r as PromiseRejectedResult).reason}`).join("\n"));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
