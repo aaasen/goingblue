@@ -679,6 +679,15 @@ interface Row {
   label: string;
 }
 
+// The cloud-cover rows and the field each one reads. Shared by the scene, which shades the cells,
+// and by the selection readout, which labels them.
+const CLOUD_KEYS = {
+  'cloud-high': 'cloud_high',
+  'cloud-mid': 'cloud_mid',
+  'cloud-low': 'cloud_low',
+} as const satisfies Record<string, keyof Period>;
+type CloudKind = keyof typeof CLOUD_KEYS;
+
 function buildRows(periods: Period[], u: Units): Row[] {
   const rows: Row[] = [];
   const has = (fn: (p: Period) => unknown) => periods.some((p) => fn(p) != null);
@@ -1592,8 +1601,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
       }
 
       case 'cloud-high': case 'cloud-mid': case 'cloud-low': {
-        const key = (row.kind === 'cloud-high' ? 'cloud_high'
-          : row.kind === 'cloud-mid' ? 'cloud_mid' : 'cloud_low') as keyof Period;
+        const key = CLOUD_KEYS[row.kind];
         periods.forEach((p, i) => {
           const pct = p[key] as number | undefined;
           const cx = colCenter(i);
@@ -1688,6 +1696,20 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   // The model row is the last one buildRows appends, so it ends at the bottom of the canvas.
   const modelRowTop = totalH - ROW_H.MODEL;
 
+  // Where the cloud-cover rows sit in the canvas, so the selected column can carry its percentages
+  // as text. The rows are shaded by cover and otherwise unlabelled — a number in all three rows of
+  // every 38px column would be a wall of digits — so the selection is what asks for the reading,
+  // and it lands on the cells the reader just pointed at rather than only in the panel below.
+  const cloudRows = useMemo(() => {
+    const found: { kind: CloudKind; top: number; height: number }[] = [];
+    let y = ROW_H.DATE;
+    rows.forEach((row) => {
+      if (row.kind in CLOUD_KEYS) found.push({ kind: row.kind as CloudKind, top: y, height: row.height });
+      y += row.height;
+    });
+    return found;
+  }, [rows]);
+
   const onPressTile = useCallback((locationX: number, tileOffset: number) => {
     const x = tileOffset + locationX;
     if (x < NAME_W) return; // row-label gutter
@@ -1750,6 +1772,23 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
               transform: [{ translateX: highlightX }],
             }]}
           />
+          {/* Cloud percentages, in the highlighted column's own cells. They ride the same animated
+              x as the box, so they stay on their cells through a scroll, and they are drawn over
+              the canvas rather than into it — a selection must not rebuild the scene (see
+              CanvasTile). Near-black throughout: the cover wash tops out at a mid gray, which
+              never darkens far enough for white to be the better ink. */}
+          <Animated.View style={[styles.cloudReadout, { transform: [{ translateX: highlightX }] }]}>
+            {cloudRows.map(({ kind, top, height }) => {
+              const pct = periods[selected][CLOUD_KEYS[kind]];
+              // A missing value keeps the canvas's own dash — there is no reading to give.
+              if (pct == null) return null;
+              return (
+                <RNText key={kind} style={[styles.cloudReadoutText, { top, lineHeight: height }]}>
+                  {pct}%
+                </RNText>
+              );
+            })}
+          </Animated.View>
         </View>
       )}
       <View pointerEvents="none" style={styles.stickyDayRow}>
@@ -2155,6 +2194,11 @@ const styles = StyleSheet.create({
   highlightClip: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden' },
   // Starts below the 31px day-label band (same boundary the night shading uses).
   highlightBox: { position: 'absolute', top: 31, width: CELL_W, borderWidth: 1.5, borderColor: 'rgba(255,59,48,0.5)' },
+  cloudReadout: { position: 'absolute', top: 0, left: 0, bottom: 0, width: CELL_W },
+  cloudReadoutText: {
+    position: 'absolute', left: 0, width: CELL_W, textAlign: 'center',
+    fontSize: 12, fontWeight: '600', color: C.label,
+  },
   detailPanel: {
     backgroundColor: '#fff',
     borderTopWidth: StyleSheet.hairlineWidth,
