@@ -850,6 +850,18 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
     if (has((p) => p.wind_sfc_dir)) rows.push({ kind: 'wind-dir', height: ROW_H.DIR, label: 'Dir' });
   }
 
+  // Which model the numbers came from. Unconditional: unlike every other row this one isn't read
+  // off the message — it is predicted from the location and the forecast's start, so there is
+  // always something to draw.
+  //
+  // It sits under the always-on surface rows and above every optional group, where it reads as
+  // the attribution for everything below it until something else claims otherwise — which is
+  // exactly what the air-quality section header does, naming the CAMS domain for its own rows.
+  // Freezing level, cloud cover and the pressure levels all come from this same center, so a band
+  // above them attributes them correctly; air quality does not, and is the one block that has to
+  // say so for itself.
+  rows.push({ kind: 'model', height: ROW_H.MODEL, label: 'Model' });
+
   // Freezing level is an altitude, not a surface reading — it heads the upper-air sections with
   // its unit in the header, so the single row below it needs no label of its own.
   if (has((p) => p.freeze_m)) {
@@ -872,15 +884,6 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
     if (has((p) => p.wind_600_kph)) rows.push({ kind: 'wind-600', height: ROW_H.WIND_UPPER, label: pressureLabel(600) });
     if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.WIND_UPPER, label: pressureLabel(700) });
   }
-
-  // Which model each column's numbers came from. Unconditional: unlike every row above it this
-  // one isn't read off the message — it is predicted from the location and the forecast's start,
-  // so there is always something to draw.
-  //
-  // It closes the weather rows rather than the whole graph, because what it names covers only
-  // what is above it. Air quality comes from CAMS, not from any of these centers, and sat under
-  // this row it read as one more thing GFS or IFS had produced.
-  rows.push({ kind: 'model', height: ROW_H.MODEL, label: 'Model' });
 
   // Air quality, below the model line and carrying its own attribution in its header: the CAMS
   // domain serving this location, then the index its numbers are on. Any subset of the variables
