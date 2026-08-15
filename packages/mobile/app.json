@@ -21,9 +21,10 @@
       "predictiveBackGestureEnabled": false,
       "config": {
         "googleMaps": {
-          "apiKey": "REPLACE_WITH_ANDROID_MAPS_SDK_API_KEY"
+          "apiKey": "AIzaSyAeWPCtMKfyGTO2U5NjrfZJeehyS9Iu8KI"
         }
-      }
+      },
+      "package": "com.laneaasen.weather"
     },
     "extra": {
       "eas": {
