@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  CODECS, V2_VERSION, layoutFor, maxFillSeq, FILL_SLOTS, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
-  decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, type RequestContext,
+  CODECS, V2_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
+  MODE_DETAIL, MODE_AUTO, MODE_RANGE,
+  decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, MODEL_BIT, type RequestContext,
 } from "@weather/protocol";
 import { encodeFillSeq, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.js";
 
@@ -205,5 +206,55 @@ describe("fitFillToBudget", () => {
   it("returns the seq=1 layout even when it exceeds the budget", () => {
     const encoded = fitFillToBudget(encodeSeq(params()), (e) => e.length, maxFillSeq(MODE_AUTO), 1)!;
     expect(decodeMessage(encoded, () => ctx).seq).toBe(1);
+  });
+
+  // Why effectiveMode exists, end to end. GEM's data stops ~9 days out; Range's path covers the
+  // whole window at 12h before refining anything, so its servable layouts were all 12h and the
+  // search stopped with the budget mostly unspent.
+  describe("a Canadian request that asked for Range", () => {
+    // Nulls where GDPS's data stops: 240h from a run that can be 12h old and landed 7h after
+    // init — the worst case a request is guaranteed.
+    const lastHourWithData = REQ_UTC_HOUR + (240 - 12 - 7);
+    const gemLike: HourlyData = {
+      ...HOURLY,
+      temperature_2m: HOURLY.temperature_2m.map(
+        (v, i) => (DATA_START + i <= lastHourWithData ? v : null)),
+    };
+    // No freezing level: GEM has no such product, so toFullPeriod drops it anyway.
+    const caVars = TEST_VARS & ~(1 << VARS_BIT.freeze);
+    const caEncode = (mode: number) => {
+      const p = params({ mode, modelsMask: 1 << MODEL_BIT.CA, varsMask: caVars });
+      return (seq: number) =>
+        encodeFillSeq(gemLike, TIMES, p, seq, p.lat!, p.lon!, 500, "CA", codec);
+    };
+    const caCtx = (mode: number): RequestContext => ({
+      ...ctxFor(mode), model: MODEL_BIT.CA, vars_mask: caVars,
+    });
+
+    it("would strand a third of the budget as Range", () => {
+      // Measured on the encoded layouts rather than a decoded reply: with the substitution in
+      // place a CA message encoded under Range is unreachable — parseRequest resolves the mode
+      // before the encoder sees it, and the decoder resolves it the same way, so decoding one
+      // would (correctly) desync. This is the state the substitution removes.
+      const enc = caEncode(MODE_RANGE);
+      let best = 1;
+      for (let seq = 1; seq <= maxFillSeq(MODE_RANGE); seq++) {
+        const encoded = enc(seq);
+        if (encoded !== null && encoded.length <= 160) best = seq;
+      }
+      expect(fillProfile(MODE_RANGE, best).every((r) => r === 1)).toBe(true);
+      expect(enc(best)!.length).toBeLessThan(120); // nowhere near the 160 it was allowed
+    });
+
+    it("refines and spends the budget once resolved to Auto", () => {
+      const mode = effectiveMode(MODE_RANGE, MODEL_BIT.CA);
+      expect(mode).toBe(MODE_AUTO);
+      const encoded = fitFillToBudget(caEncode(mode), (e) => e.length, maxFillSeq(mode), 160)!;
+      const decoded = decodeMessage(encoded, () => caCtx(MODE_RANGE)); // client stored Range
+      expect(encoded.length).toBeLessThanOrEqual(160);
+      expect(encoded.length).toBeGreaterThan(140);
+      expect(decoded.periodHours!.some((ph) => ph < 12)).toBe(true);
+      expect(decoded.mode).toBe(MODE_RANGE); // labelled as requested, laid out as Auto
+    });
   });
 });

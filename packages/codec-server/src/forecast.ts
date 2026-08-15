@@ -8,6 +8,7 @@ import {
   layoutFor,
   type FillLayout,
   maxFillSeq,
+  effectiveMode,
   FILL_SLOTS,
   DEFAULT_MODE,
   MODE_DETAIL,
@@ -745,6 +746,13 @@ export function parseRequest(body: string): ForecastParams {
   if (isNaN(startEpochHour)) {
     startEpochHour = Math.floor(Date.now() / 3600000);
   }
+
+  // Resolve the mode against the center before anything downstream sees it: Range collapses to
+  // Auto for a center that can't fill the window (see effectiveMode). Requests carry the mode
+  // that was asked for — clients don't apply this rule — so it belongs here, where params.mode
+  // becomes the mode the message is encoded under, and again in the decoder, which redoes it
+  // from the stored request to reach the same layout.
+  mode = effectiveMode(mode, MODEL_BIT[firstModelKey(modelsMask)]);
 
   return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, decoderVersion, userToken, code, startEpochHour };
 }

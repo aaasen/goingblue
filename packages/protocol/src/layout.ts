@@ -1,4 +1,4 @@
-import { RESOLUTION_HOURS } from "./constants.js";
+import { RESOLUTION_HOURS, MODEL_BIT } from "./constants.js";
 
 // Priority-mode fill layout (v3 of the fill scheme, protocol v2). v1 is shipped and frozen in
 // its own container, so changes here land in v2 and never move v1's bits (see VERSIONING.md).
@@ -49,6 +49,39 @@ export const MODE_AUTO = 1;
 export const MODE_RANGE = 2;
 export const DEFAULT_MODE = MODE_AUTO;
 export const MODE_NAMES = ["Detail", "Auto", "Range"] as const;
+
+// Centers whose deepest model stops short of the window, by MODEL_BIT. Canada's GDPS runs 240h
+// twice a day and lands ~7h after init, so a request is guaranteed only 240 - 12 - 7 = 221h,
+// about 9 days against a window of 288-312h. NOAA (GFS 384h) and ECMWF (IFS 360h) clear it, as
+// does every best_match branch (its shallowest bottoms out in a ≥360h global model).
+const SHORT_HORIZON_MODELS = [MODEL_BIT.CA];
+
+/**
+ * The priority mode a request actually runs under.
+ *
+ * Range walks its whole coverage ramp at 12h before refining anything, so against a center that
+ * can't fill the window it was the one mode that broke: a layout with a slot the model has no
+ * data for is unservable, coverage only grows along a path, and the seq search therefore stopped
+ * inside the 12h ramp — Canada asking for Range got 10 days at 12h with a third of the message
+ * budget unspent. Auto interleaves refinement with coverage, so its servable steps already carry
+ * finer periods; Detail likewise. Mapping Range onto Auto for those centers spends the budget
+ * instead of stranding it.
+ *
+ * THE SERVER AND THE DECODER MUST BOTH APPLY THIS. The mode is not on the wire — the decoder
+ * recovers it from the stored request (see RequestContext) and derives the period layout from
+ * it. A request carries and a client stores the mode that was actually asked for; the
+ * substitution is made where the message is built (parseRequest) and made again where it is
+ * read (v2MessageFromString), against the same model, so both arrive at the same layout without
+ * the client needing to know this rule exists.
+ *
+ * Known limitation: it fixes Range, not the underlying clamp. Detail and Auto stay budget-bound
+ * only while the budget is around one 160-char message; a `c:` past roughly 200 chars runs them
+ * into the same data cliff, wasting the excess. Capping the window per model (a per-center slot
+ * cap that shortens every mode's path) is the general fix, deliberately not taken here.
+ */
+export function effectiveMode(mode: number, model: number): number {
+  return mode === MODE_RANGE && SHORT_HORIZON_MODELS.includes(model) ? MODE_AUTO : mode;
+}
 
 // Anchor profiles per mode: resolution index (1 = 12h … 4 = 1h, see RESOLUTION_HOURS) per
 // covered day slot. Rows shorter than FILL_SLOTS leave the remaining days uncovered at that

@@ -1,7 +1,7 @@
 import {
   WMO_CODES, VARS_BIT,
 } from "../constants.js";
-import { layoutFor, maxFillSeq } from "../layout.js";
+import { layoutFor, maxFillSeq, effectiveMode } from "../layout.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "../bits.js";
 import { encode, decode, encodeBodyLE, decodeBodyLE, nCharsForBits } from "../codec.js";
 import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js";
@@ -523,13 +523,19 @@ export function v2MessageFromString(s: string, resolve: ContextResolver): Foreca
   const { model, vars_mask, lat, lon, start, mode, utcOffsetHours } = ctx;
   if (mode == null || utcOffsetHours == null)
     throw new Error(`Forecast code ${code} matches a request without a priority mode`);
-  if (seq > maxFillSeq(mode))
-    throw new Error(`v2: seq ${seq} exceeds mode ${mode}'s fill sequence`);
+  // The mode the message was BUILT under, which for a short-horizon center isn't the one that
+  // was asked for (see effectiveMode). The stored request holds the requested mode — clients
+  // send and keep what the user picked — so the substitution is redone here against the same
+  // model the server resolved it against. Only the layout reads this; the message reports the
+  // requested mode, since that's what the reader chose and what the reply answers.
+  const layoutMode = effectiveMode(mode, model);
+  if (seq > maxFillSeq(layoutMode))
+    throw new Error(`v2: seq ${seq} exceeds mode ${layoutMode}'s fill sequence`);
   const models_mask = 1 << model; // a response carries exactly one model
 
   // The period layout is derived, not decoded: both sides compute it from the stored request.
   const requestUtcHour = Math.floor(start / 3600000);
-  const layout = layoutFor(mode, requestUtcHour, utcOffsetHours, seq);
+  const layout = layoutFor(layoutMode, requestUtcHour, utcOffsetHours, seq);
 
   // month/day/hour describe the FIRST PERIOD's start (which precedes the request time — the
   // first period is the one containing it), so display code can lay periods out from it.

@@ -168,6 +168,20 @@ describe("parseRequest", () => {
     expect(parseRequest("").mode).toBe(MODE_AUTO);
   });
 
+  it("resolves Range to Auto for a Canadian request", () => {
+    // The center can't fill the window, so Range would clamp to a 12h-flat layout with the
+    // budget unspent (see effectiveMode). Resolved at parse, so a hand-typed request gets the
+    // same substitution the app applies before sending — and params.mode is what the reply is
+    // encoded under, which is what the decoder derives its layout from.
+    expect(parseRequest("p:r m:ca").mode).toBe(MODE_AUTO);
+    expect(parseRequest("p:r m:us").mode).toBe(MODE_RANGE);
+    expect(parseRequest("p:r m:eu").mode).toBe(MODE_RANGE);
+    expect(parseRequest("p:r").mode).toBe(MODE_RANGE); // best_match default
+    // Only Range moves.
+    expect(parseRequest("p:d m:ca").mode).toBe(MODE_DETAIL);
+    expect(parseRequest("p:a m:ca").mode).toBe(MODE_AUTO);
+  });
+
   it("d: (the removed duration token) is ignored", () => {
     expect(parseRequest("d:7").mode).toBe(MODE_AUTO);
   });
