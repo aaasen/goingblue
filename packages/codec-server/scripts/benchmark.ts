@@ -76,6 +76,13 @@ const GROUP_SHORT: Record<GroupId, string> = {
   clouds: "Cloud", highwind: "Wind", freeze: "FL", precip: "Precip",
   aqi: "AQI", smoke: "Smoke", ozone: "O3", aqiEu: "AQI-EU", smokeEu: "Smoke-EU",
 };
+// Which groups the frontier chart breaks out on hover. The air-quality variables all cost about
+// the same and all cost little (the 4-day clamp means they only pay for the front of the window),
+// so their five curves landed on top of each other in the same corner of the plot with their
+// labels overlapping — five lines saying one thing, at the price of making the four curves that
+// differ hard to follow. US AQI stands in for the group; the rest keep their rows in the mode
+// comparison table, which is where their individual numbers are legible anyway.
+const FRONTIER_GROUPS = new Set<GroupId>(["clouds", "highwind", "freeze", "precip", "aqi"]);
 
 // Open-Meteo hourly series behind the current wire format. The Historical Forecast API provides
 // precipitation_probability (unlike single-runs, where it forced the ensemble variant).
@@ -974,7 +981,9 @@ async function report(args: Args): Promise<void> {
     model: REPORT_SOURCE.label,
     split: args.location ? `location ${args.location}` : args.split,
     strata,
-    groups: GROUP_IDS.map((g) => ({ id: g, label: GROUP_LABEL[g], short: GROUP_SHORT[g] })),
+    groups: GROUP_IDS.map((g) => ({
+      id: g, label: GROUP_LABEL[g], short: GROUP_SHORT[g], frontier: FRONTIER_GROUPS.has(g),
+    })),
     defaultCombo: DEFAULT_COMBO,
     views,
   };
@@ -1061,7 +1070,9 @@ interface ReportData {
   model: string; // single model (label), shown in the meta line
   split: string; // which held-out split the report covers (or the explicit --location)
   strata: StratumStat[];
-  groups: { id: GroupId; label: string; short: string }[];
+  // `frontier` marks the groups the fill-frontier chart breaks out on hover (FRONTIER_GROUPS);
+  // every group appears in the mode comparison regardless.
+  groups: { id: GroupId; label: string; short: string; frontier: boolean }[];
   defaultCombo: number;
   views: Record<string, ViewStats>;                        // "mode:combo" → stats
 }
@@ -1384,9 +1395,13 @@ function renderFrontier(s: ReportData): string {
     const slot = i + 1;
     const components = [
       { combo: s.defaultCombo, label: "Base", share: 0.8 },
-      ...s.groups.map((g, gi) => ({
-        combo: 1 << gi, label: g.short, share: [0.65, 0.5, 0.35][gi] ?? 0.5,
-      })),
+      // Mapped before it is filtered: the index IS the group's mask bit, so dropping entries
+      // first would silently re-point every curve after the gap at the wrong selection.
+      ...s.groups
+        .map((g, gi) => ({
+          combo: 1 << gi, label: g.short, share: [0.65, 0.5, 0.35][gi] ?? 0.5, frontier: g.frontier,
+        }))
+        .filter((c) => c.frontier),
     ].map((c, ci) => ({ ...c, dash: ci + 1, vs: s.views[`${md}:${c.combo}`] }))
       .filter((c) => c.vs);
     if (components.length === 0) return "";
@@ -1452,9 +1467,11 @@ function renderModeComparison(s: ReportData): string {
   </table>
   <h2>Fill frontier</h2>
   <p class="note">Percent of forecasts reaching each fill level, averaged over the base
-  variables and each optional variable added on its own — so the line moves when any variable's
-  encoding changes. An encoding improvement moves the curves to the right. Hover a mode to break
-  it into those component curves.</p>
+  variables and each of ${FRONTIER_GROUPS.size} optional variables added on its own — so the line
+  moves when any of their encodings changes. An encoding improvement moves the curves to the
+  right. Hover a mode to break it into those component curves. US AQI stands in for the
+  air-quality variables, which all cost about the same; every one of them has its own row in the
+  mode comparison below.</p>
   <div class="legend"><span class="legend-label">mode</span>${s.modes.map((m, i) =>
     `<span class="key"><i class="sw c${i + 1}"></i>${esc(modeLabel(m))}</span>`).join("")}</div>
   ${renderFrontier(s)}`;
@@ -1584,10 +1601,16 @@ function renderHtml(s: ReportData): string {
   .flabel.variant { font-size: 10px; font-weight: 500; }
   /* One dash pattern per variable selection, so the components are told apart by shape as well as
      by their label — colour is already spent on the duration. */
+  /* One per component curve, and there must be at least as many as the frontier draws — a curve
+     past the last pattern falls back to a solid stroke and is then indistinguishable from both the
+     mode's own line and every other overflowing curve. Six components today: base plus the five
+     groups in FRONTIER_GROUPS. */
   .frontier.dash1 { stroke-dasharray: 9 3; }
   .frontier.dash2 { stroke-dasharray: 5 3; }
   .frontier.dash3 { stroke-dasharray: 2 2; }
   .frontier.dash4 { stroke-dasharray: 1 3; }
+  .frontier.dash5 { stroke-dasharray: 9 3 2 3; }
+  .frontier.dash6 { stroke-dasharray: 5 2 1 2; }
   /* A duration's component curves stay hidden until that duration is hovered: four lines at rest,
      one duration's detail at a time. The .fhit path is a fat invisible line over the solid curve —
      a 2px stroke is far too thin to hover; the hidden components must not steal the pointer. */
