@@ -1,4 +1,5 @@
 import { encode } from "base32768";
+import { ALPHABET } from "@weather/protocol";
 
 // Field probes for testing character-set transparency over the satellite SMS path. The working
 // theory (from Twilio logs vs. observed delivery): Apple's satellite relay re-frames SMS as
@@ -11,6 +12,24 @@ import { encode } from "base32768";
 // each probe can be verified in the field by copying the reply back: "probe N <pasted text>"
 // compares against the expected payload and answers PASS/PARTIAL/FAIL in plain GSM-safe ASCII.
 // See PROBES.md at the repo root for the field procedure and expected bubble patterns.
+//
+// Probes 15-17 (round 4) ask the same kind of question of ZOLEO, where the unknown is length
+// rather than repertoire. A ZOLEO relays through a paired phone and picks its own route: with
+// cell or WiFi the app goes over the internet, and only without one does it go over Iridium. A
+// 240-character message observed on the internet route therefore measures nothing about the
+// satellite one, which is the route that matters — see the field procedure in PROBES.md, where
+// every ZOLEO probe is sent twice and the difference between the runs is the whole result.
+//
+// Probes 13-14 (round 3) ask a different question of a different route. Rounds 1-2 settled the
+// iPhone relay, whose pipe is wide enough for base32768; the SMS route is capped instead by the
+// septet — 160 GSM-7 characters per segment. The protocol alphabet is the intersection of GSM-7
+// basic and printable ASCII (85 characters) because one alphabet had to serve inReach too. Now
+// that the route picks the alphabet, the SMS route could also spend the 39 characters of GSM-7
+// basic that are NOT ASCII: still one septet each, so still 160 to a segment, but base-124
+// instead of base-85 — 8.5% more bits in the same message. These probes test whether that holds
+// end to end, which needs two things that are not the same thing: that all 39 characters arrive
+// unmangled (probe 13), and that a full 160-character message containing them still leaves as
+// ONE segment rather than being upgraded to UCS-2, which would cut the message to 70 (probe 14).
 
 // Deterministic byte stream (glibc-style LCG) so base32768 payloads are reproducible from the
 // seed alone — no RNG or clock at runtime.
@@ -60,6 +79,56 @@ function cjkRandom(bytes: Uint8Array): string {
   return s;
 }
 
+// The 39 characters of the GSM-7 basic table that are not ASCII, in table order (0x01…0x7F).
+// Each is a single septet, so on SMS they cost exactly what an ASCII character costs; they are
+// the whole prize of a base-124 SMS alphabet, and the whole reason it can't be the inReach one.
+export const GSM_EXTRA = "£¥èéùìòÇØøÅåΔΦΓΛΩΠΨΣΘΞÆæßÉ¤¡ÄÖÑÜ§¿äöñüà";
+
+// One distinct ASCII marker per GSM_EXTRA character — A–Z then a–m is exactly 39.
+const MARKERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklm";
+
+// Probe 13: every non-ASCII GSM-7 character, each preceded by its marker so a substitution is
+// attributable by eye on a screenshot — probe 5's convention, extended to the whole repertoire.
+//
+// The tail is the sharpest question in the set. Three GSM-7 characters sit at septet positions
+// that ASCII gives to characters the protocol alphabet already spends — 0x24 ¤ vs `$`, 0x40 ¡ vs
+// `@`, 0x5F § vs `_` — so a layer that confuses the GSM table with ASCII or Latin-1 substitutes
+// them into each OTHER. That is the one mangling that survives decoding: every other character
+// in this probe degrades to something outside the alphabet, which a decoder can reject, while
+// these three degrade to valid digits and silently change the forecast. Pairing each with its
+// twin makes the swap readable directly off the bubble as "$$@@__".
+function gsmMarked(): string {
+  let s = "";
+  for (let i = 0; i < GSM_EXTRA.length; i++) s += MARKERS[i] + GSM_EXTRA[i];
+  return s + "$¤@¡_§";
+}
+
+// Random characters from an arbitrary alphabet, one LCG byte each (modulo bias is irrelevant to
+// a probe). Used for the payloads whose point is that they are incompressible — a real body is
+// uniform over its alphabet, and round 2 found that compressibility, not length, decided where
+// Apple's relay split. Any route whose budget is really bytes-after-compression will treat one
+// of these differently from a ruler of the same length.
+function alphabetRandom(chars: string, bytes: Uint8Array): string {
+  let s = "";
+  for (const b of bytes) s += chars[b % chars.length];
+  return s;
+}
+
+// Position-coded ASCII — the ruler. Position i carries the units digit i % 10, except every
+// tenth, which carries its decade (0-9, then A-Z, then a-z, so 620 positions are addressable).
+// Reading "…89A123" off a screenshot gives the absolute index of that character, so ONE send
+// locates a truncation or a split boundary exactly, with no copy-back and no arithmetic. It is
+// probes 1-2's fullwidth-marker trick in characters a GSM-7 route will actually carry.
+//
+// Every character is in the protocol alphabet, which also makes this the most compressible
+// payload in the file — deliberately, since it is read against an incompressible one.
+const DECADES = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+function ruler(length: number): string {
+  let s = "";
+  for (let i = 0; i < length; i++) s += i % 10 === 0 ? DECADES[i / 10] : String(i % 10);
+  return s;
+}
+
 // Characters most likely to be mangled somewhere in the pipeline, each preceded by an ASCII
 // marker letter so a substitution is attributable by eye. Covers Twilio Smart Encoding targets
 // (curly quotes, dashes, ellipsis, NBSP), NFC/NFD (precomposed é vs e+combining acute), NFKC
@@ -98,6 +167,33 @@ const RISKY =
 //  12: 134 chars b32768 — deliberately TWO Twilio segments (67+67 units): does the relay
 //      re-split each 201-byte segment (predicted 4 bubbles ~34+33+34+33), and do all parts
 //      arrive in order? Decides whether long replies should be server-chunked instead.
+//
+// 13-14 (added 2026-08-16) are the SMS route's alphabet question, described at the top of this
+// file. Both are pure GSM-7 basic, so both should behave exactly like today's replies do:
+//  13: all 39 non-ASCII GSM-7 characters, marked, plus the $¤ @¡ _§ swap canaries (84 chars).
+//      Short enough that "probe 13 " + payload is 93 characters, so the copy-back verifying it
+//      is itself a single segment — this probe tests the inbound leg as well as the outbound.
+//  14: 160 characters of base-124 (seed 43) — a full segment's worth. One message means the
+//      chain kept GSM-7 and base-124 is real; three means something upgraded it to UCS-2 and
+//      the whole idea costs more than it pays.
+//
+// 15-17 (added 2026-08-16) measure ZOLEO's per-message length, which is the only reason its `d:`
+// code is still served as 160-character SMS. All three are sent twice, once with the paired
+// phone online and once in airplane mode; the pair of results is the measurement.
+//  15: 480-character ruler. The cap is unknown and the ruler is self-locating, so one send
+//      brackets it exactly rather than a ladder of sends bisecting it: read the last character
+//      that arrived. Whole ⇒ the route carries at least 480 (expected on the internet route);
+//      cut at N ⇒ the cap is N; delivered in pieces ⇒ read each piece's boundaries off its own
+//      characters. 480 is 4 concatenated SMS segments, so this also asks whether ZOLEO's
+//      gateway reassembles them. (DECADES addresses 620 if a later round needs to go longer.)
+//  16: 240 random base-85 characters — the length that was observed working over the internet,
+//      in incompressible form. Read against 15: if the ruler survives a length this does not,
+//      the budget is bytes-after-compression, which is exactly how Apple's relay behaved and
+//      would mean no fixed character cap exists to encode against.
+//  17: 240 units of position-coded wide text (probes 1-2's scheme). Asks whether ZOLEO is
+//      Unicode-transparent at all. If it is, and the cap is anywhere near 240, base32768 is
+//      worth far more here than the GSM-7 alphabet is — 15 bits a character against 6.4 — and
+//      the truncation index is readable from the same fullwidth markers.
 export const PROBES: Record<number, string> = {
   1: positionCoded(70),
   2: positionCoded(140),
@@ -111,16 +207,27 @@ export const PROBES: Record<number, string> = {
   10: encode(lcgBytes(17, 104)),
   11: blockRandom(lcgBytes(31, 67), 0x0400, 96),
   12: encode(lcgBytes(19, 250)),
+  13: gsmMarked(),
+  14: alphabetRandom(ALPHABET + GSM_EXTRA, lcgBytes(43, 160)),
+  15: ruler(480),
+  16: alphabetRandom(ALPHABET, lcgBytes(47, 240)),
+  17: positionCoded(240),
 };
 
-// The capacity battery, sent as one reply per probe from a single inbound "probe all" — one
-// field send instead of seven. The burst itself is an experiment: seven queued messages model
-// the "server pre-chunks long replies" alternative to probe 12's carrier concat.
-const BATTERY = [6, 7, 8, 9, 10, 11, 12];
+// The battery, sent as one reply per probe from a single inbound "probe all" — one field send
+// instead of several. It holds the GSM-7 pair; rounds 1-2 are settled (see PROBES.md) and their
+// probes remain individually sendable by number.
+//
+// The ZOLEO probes are deliberately NOT batteried. Each one's result is the shape it arrives in,
+// and round 2's `probe all` showed a burst is both fragile over satellite (coverage was lost
+// partway) and hard to read afterwards (the progress counter counted something nobody could
+// identify). Three long messages queued behind each other is exactly the case where that
+// ambiguity would eat the measurement, so 15-17 are sent one at a time.
+const BATTERY = [13, 14];
 
 const USAGE =
-  "Probes: 1=70 wide, 2=140 wide, 3/4=b32768 66/45, 5=risky, 6/7/10/12=b32768 46/47/56/134, " +
-  "8/11=cyr 70/67, 9=cjk 70. 'probe all'=6-12. Verify: 'probe N <paste>'.";
+  "Probes: 13=GSM-7 x39, 14=160ch b124; ZOLEO 15=480 ruler, 16=240 rnd, 17=240 wide. " +
+  "'probe all'=13,14. Old: 1-12 wide/b32768. Verify: 'probe N <paste>'.";
 
 const cp = (s: string, i: number) => "U+" + s.codePointAt(i)!.toString(16).toUpperCase();
 
