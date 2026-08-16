@@ -8,7 +8,7 @@ import {
 } from "../codec.js";
 import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js";
 import { WMO2IDX, type Period } from "../model.js";
-import type { ForecastMessage, VersionedCodec, ContextResolver } from "../model.js";
+import type { ForecastMessage, MessageHeader, VersionedCodec, ContextResolver } from "../model.js";
 import {
   WEATHERCODE_CLASS, CLASS_BOOKS, CODEBOOK_CLASSES, type ClassBooks,
   encodeWindSpeedDelta, decodeWindSpeedDelta, quantWind, beaufortMidKph, CALM_MAX_FORCE,
@@ -723,7 +723,14 @@ export function v2EncodeBreakdown(msg: ForecastMessage, alphabet: Alphabet = "ba
   };
 }
 
-export function v2MessageFromString(s: string, resolve: ContextResolver): ForecastMessage {
+// Reads the fixed-width prefix — version tag plus packed header — WITHOUT touching the body.
+//
+// Split out of the decode path (which calls it) because the prefix is readable from a message
+// that is only partly in hand: it is fixed-width and MSB-first, where the body's rANS stream
+// needs its every last character. That is what lets a reader who was handed a reply in pieces be
+// told which forecast the first piece belongs to, before there is enough of it to decode (see
+// parts.ts). Throws on anything that isn't this version's prefix.
+export function v2HeaderFromString(s: string): MessageHeader {
   const [version, rest] = takeVersion(s);
   if (version !== VERSION)
     throw new Error(`Version mismatch: encoded v${version}, expected v${VERSION}`);
@@ -731,15 +738,20 @@ export function v2MessageFromString(s: string, resolve: ContextResolver): Foreca
   if (rest.length < HEADER_CHARS)
     throw new Error(`Unexpected message length: ${s.length} chars`);
 
-  const headerBits = decode(rest.slice(0, HEADER_CHARS), HEADER_BITS);
-  const hr = headerReader(headerBits);
-
+  const hr = headerReader(decode(rest.slice(0, HEADER_CHARS), HEADER_BITS));
   const code = hr.int(CODE_BITS);
   const seq = hr.int(V2_SEQ_BITS) + 1;
   const elevation = hr.int(ELEV_BITS) * ELEV_STEP_M;
   const codebookClass = hr.int(CLASS_BITS);
   if (codebookClass >= CODEBOOK_CLASSES)
     throw new Error(`v2: unknown codebook class ${codebookClass} (this build has ${CODEBOOK_CLASSES})`);
+
+  return { version, code, seq, elevation, codebookClass };
+}
+
+export function v2MessageFromString(s: string, resolve: ContextResolver): ForecastMessage {
+  const { version, code, seq, elevation, codebookClass } = v2HeaderFromString(s);
+  const rest = s.slice(VERSION_PREFIX_CHARS);
 
   // Recover the request-echo fields the slim header omits.
   const ctx = resolve(code);
@@ -1014,6 +1026,7 @@ function decodeBody(
 
 export const v2Codec: VersionedCodec = {
   headerChars: V2_HEADER_CHARS,
+  header: v2HeaderFromString,
   encode: v2MessageToString,
   decode: v2MessageFromString,
 };

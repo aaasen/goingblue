@@ -1,6 +1,8 @@
 import { v2Codec } from "./versions/v2.js";
 import { peekVersion } from "./version.js";
-import type { ForecastMessage, VersionedCodec, ContextResolver } from "./model.js";
+import type {
+  ForecastMessage, MessageHeader, VersionedCodec, ContextResolver,
+} from "./model.js";
 import type { Alphabet } from "./codec.js";
 
 // The single source of truth mapping a protocol version number to its codec.
@@ -27,13 +29,25 @@ export function supportedVersions(): number[] {
 // and dispatching to exactly one codec. `resolve` recovers the request-echo fields the slim
 // response omits, keyed by the message code (see RequestContext).
 export function decodeMessage(s: string, resolve: ContextResolver): ForecastMessage {
+  return codecFor(s).decode(s, resolve);
+}
+
+// Reads a message's fixed-width prefix — version tag and packed header — without its body, by the
+// same version dispatch as decodeMessage. Throws when the string doesn't start with one, which is
+// how a caller holding an unlabelled fragment of a reply tells the first message from a later one:
+// only the first carries a header (see parts.ts).
+export function peekHeader(s: string): MessageHeader {
+  return codecFor(s).header(s);
+}
+
+function codecFor(s: string): VersionedCodec {
   const version = peekVersion(s);
   const codec = CODECS[version];
   if (!codec) {
     const supported = supportedVersions().map((v) => `v${v}`).join(", ");
     throw new Error(`Unsupported protocol version: v${version}. Supported: ${supported}`);
   }
-  return codec.decode(s, resolve);
+  return codec;
 }
 
 // Encodes a message using the codec for its `version` field, writing the body in `alphabet`

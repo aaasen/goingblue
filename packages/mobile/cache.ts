@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  CODECS, decodeMessage, mergeParts, peekVersion, readParts, reassembleReply, supportedVersions,
-  type ForecastMessage, type RequestContext,
+  CODECS, chunkLines, collectingChunks, decodeMessage, effectiveMode, maxFillSeq, mergeParts,
+  peekHeader, peekVersion, readParts, reassembleReply, supportedVersions,
+  type ForecastMessage, type ReplyOracles, type RequestContext,
 } from '@weather/protocol';
 
 // The response is slim (see the protocol's message-code scheme): it omits lat/lon/models/vars/
@@ -80,7 +81,11 @@ export function resolveContext(token: string, code: number): RequestContext | un
 // label. Reassembly then handles whitespace, so nothing is stripped before the part labels — the
 // space after "1/2" is what makes a label a label rather than a run of payload characters.
 export function normalizeReply(encoded: string): string {
-  return reassembleReply(encoded.trim().replace(/^fw:\s*/i, ''), headerCharsOf);
+  return reassembleReply(cleaned(encoded), headerCharsOf);
+}
+
+function cleaned(encoded: string): string {
+  return encoded.trim().replace(/^fw:\s*/i, '');
 }
 
 // The repeated header's width, read off a part's version tag. An unrecognized version falls back
@@ -90,19 +95,57 @@ function headerCharsOf(part: string): number {
   return (CODECS[peekVersion(part)] ?? CODECS[supportedVersions()[0]]).headerChars;
 }
 
+// What the merge rules need to know about a reply that only this layer can answer: reading one
+// takes the codec, and knowing whether the reader asked for it takes the store (see ReplyOracles).
+function oraclesFor(token: string): ReplyOracles {
+  return {
+    headerCharsOf,
+    decodes: (reply) => { try { decodeAny(reply, token); return true; } catch { return false; } },
+    isHead: (chunk) => headOfStoredRequest(chunk, token),
+  };
+}
+
+// Whether text begins a reply THIS device asked for: a well-formed header, for a request still in
+// the store, claiming a sequence that request's mode can produce.
+//
+// Every clause earns its place by the same argument, and it isn't only about precision. A message
+// failing any of them can never decode — not as a fragment, and not once every last piece of it
+// has been pasted. Accepting one as the start of a collection would be a trap: the reader would
+// work through their whole inbox to arrive at the error they'd have been shown immediately.
+function headOfStoredRequest(chunk: string, token: string): boolean {
+  try {
+    const { code, seq } = peekHeader(cleaned(chunk));
+    const ctx = resolveContext(token, code);
+    return !!ctx && seq <= maxFillSeq(effectiveMode(ctx.mode, ctx.model));
+  } catch {
+    return false;
+  }
+}
+
 // Folds a newly pasted message into what is already in the decoder, so a reply that arrived as
-// two messages can be pasted one at a time. Only another part of the SAME reply is appended;
-// anything else replaces, so pasting an unrelated forecast still starts clean (see mergeParts).
-export function mergeReply(existing: string, incoming: string): string {
-  return mergeParts(existing.trim(), incoming.trim().replace(/^fw:\s*/i, ''), headerCharsOf);
+// several messages can be pasted one at a time. Only another message of the SAME reply is
+// appended; anything else replaces, so pasting an unrelated forecast still starts clean. Labelled
+// parts merge in any order; an unlabelled reply the transport split appends in paste order and is
+// finished when it decodes (see mergeParts and mergeChunks).
+export function mergeReply(existing: string, incoming: string, token: string): string {
+  return mergeParts(existing.trim(), cleaned(incoming), oraclesFor(token));
 }
 
 // Which numbered messages a paste is carrying, for showing a reader collecting a multi-message
 // reply what has arrived and what is still out there. `total` is 0 when the text carries no part
 // labels at all, which is every single-message reply.
 export function replyParts(encoded: string): { total: number; have: number[] } {
-  const { total, parts } = readParts(encoded.trim().replace(/^fw:\s*/i, ''));
+  const { total, parts } = readParts(cleaned(encoded));
   return { total, have: [...parts.keys()].sort((a, b) => a - b) };
+}
+
+// How many messages of an UNLABELLED reply are held so far, or 0 when the text isn't one being
+// collected — because it decodes already, or because it never could. Nothing here says how many
+// are still to come: an unlabelled reply doesn't know its own length, which is why the only test
+// for a complete one is that it decodes.
+export function chunksCollected(encoded: string, token: string): number {
+  const text = cleaned(encoded);
+  return collectingChunks(text, oraclesFor(token)) ? chunkLines(text).length : 0;
 }
 
 export function decodeAny(encoded: string, token: string): ForecastMessage {

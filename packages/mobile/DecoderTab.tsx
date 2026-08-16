@@ -8,8 +8,8 @@ import {
   VARS_BIT, startDatetime, MODE_NAMES, DEFAULT_MODE, type ForecastMessage,
 } from '@weather/protocol';
 import {
-  decodeAny, loadStore, attachResponse, mergeReply, normalizeReply, prunePastForecasts, replyParts,
-  type Slot,
+  chunksCollected, decodeAny, loadStore, attachResponse, mergeReply, normalizeReply,
+  prunePastForecasts, replyParts, type Slot,
 } from './cache';
 import type { TimeFormat, Units } from './settings';
 import LocationMap from './LocationMap';
@@ -170,6 +170,10 @@ function dayLabel(day: number): string {
 
 // What a reader has pasted of a reply that arrived as several messages. Half a reply is a normal
 // in-progress state on this route, not a failure, so it gets its own state rather than an error.
+//
+// `total` is 0 when nothing in the reply says how many messages it has — the case where the
+// transport, not the server, broke it up. Then `have` is simply 1..n in paste order (see
+// chunksCollected), and how many are still to come is not knowable until the reply decodes.
 interface Collecting {
   total: number;
   have: number[];
@@ -179,24 +183,35 @@ interface Collecting {
 // box for what is still in the reader's messages — sitting directly under the paste button, since
 // what it asks for is another press of that button. The boxes are in message order and carry no
 // numbers: which one is missing is the position, and the caption says what to do about it.
+//
+// A labelled reply says how many messages it has, so all of them get a box from the start. An
+// unlabelled one doesn't: it gets a box per message pasted and a single open box after them,
+// which is the whole of what can honestly be shown about a reply whose length only decoding it
+// reveals. The reader keeps pasting until the forecast appears.
 function CollectingBox({ total, have }: Collecting) {
+  const boxes = total > 0
+    ? Array.from({ length: total }, (_, i) => have.includes(i + 1))
+    : [...have.map(() => true), false];
+  const boxLabel = (index: number, received: boolean): string => {
+    if (total > 0) return `Message ${index} of ${total} ${received ? 'received' : 'missing'}`;
+    return received ? `Message ${index} received` : 'Next message not yet pasted';
+  };
   return (
     <View style={styles.collectArea}>
       <View style={styles.segmentRow}>
-        {Array.from({ length: total }, (_, i) => i + 1).map((index) => {
-          const received = have.includes(index);
-          return (
-            <View
-              key={index}
-              style={[styles.segment, received ? styles.segmentReceived : styles.segmentMissing]}
-              accessibilityLabel={`Message ${index} of ${total} ${received ? 'received' : 'missing'}`}
-            >
-              {received && <Text style={styles.segmentCheck}>✓</Text>}
-            </View>
-          );
-        })}
+        {boxes.map((received, i) => (
+          <View
+            key={i}
+            style={[styles.segment, received ? styles.segmentReceived : styles.segmentMissing]}
+            accessibilityLabel={boxLabel(i + 1, received)}
+          >
+            {received && <Text style={styles.segmentCheck}>✓</Text>}
+          </View>
+        ))}
       </View>
-      <Text style={styles.collectCaption}>Paste remaining forecast segments</Text>
+      <Text style={styles.collectCaption}>
+        {total > 0 ? 'Paste remaining forecast segments' : 'Paste remaining message parts'}
+      </Text>
     </View>
   );
 }
@@ -285,6 +300,17 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
           setCollecting(parts);
           return;
         }
+        // The same in-progress state for a reply nothing labelled, which is what the reader has
+        // when the transport did the splitting. There is no error to distinguish here — an
+        // incomplete body fails to decode exactly the way corrupt text does — so what makes this
+        // a collection rather than a failure is that it starts with the header of a forecast this
+        // device asked for, and that is what chunksCollected checks.
+        const held = chunksCollected(forecastData, token);
+        if (held > 0) {
+          setError(null);
+          setCollecting({ total: 0, have: Array.from({ length: held }, (_, i) => i + 1) });
+          return;
+        }
         flash(FAILED_LABEL, true);
         if (msg.includes('different forecast') || msg.includes('pasted twice')) {
           // Reassembly failures that name the message at fault are the reader's to fix, so they go
@@ -320,19 +346,37 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
     try {
       const text = await Clipboard.getStringAsync();
       if (!text.trim()) return;
-      const merged = mergeReply(forecastData, text);
+      // Both the merge and the label below ask whether a message belongs to a request this device
+      // made, so the store has to be warm before either — it is loaded on mount, but a paste is
+      // the first thing a reader does and needn't lose that race.
+      await loadStore(token);
+      const merged = mergeReply(forecastData, text, token);
       const incoming = replyParts(text);
+      // Messages of an unlabelled reply are counted, not numbered: the reply says nothing about
+      // which one this was, only the reader's paste order does. Zero once it decodes.
+      const held = chunksCollected(merged, token);
       onForecastDataChange(merged);
       flash(
-        merged.trim() === forecastData.trim() ? 'Already loaded'
-          : incoming.have.length === 1 ? `Loaded part ${incoming.have[0]}/${incoming.total}`
-            : 'Loaded forecast',
+        merged.trim() === forecastData.trim() ? (held ? 'Already added' : 'Already loaded')
+          : held ? `Added message ${held}`
+            : incoming.have.length === 1 ? `Loaded part ${incoming.have[0]}/${incoming.total}`
+              : 'Loaded forecast',
       );
     } catch {
       setError('Could not read the clipboard.');
       flash(FAILED_LABEL, true);
     }
-  }, [forecastData, onForecastDataChange, flash]);
+  }, [forecastData, onForecastDataChange, flash, token]);
+
+  // Drops whatever is held. Nothing decoded is lost — a forecast that decoded is in the cache and
+  // a tap away in Past forecasts — but a half-collected reply is, which is the point: it is the
+  // way out of a collection that can never decode, and without it a reader who pasted the wrong
+  // message would be stuck in one, on a tab with no text field to edit.
+  const clearForecast = useCallback(() => {
+    if (outcomeTimer.current) clearTimeout(outcomeTimer.current);
+    setOutcome(null);
+    onForecastDataChange('');
+  }, [onForecastDataChange]);
 
   const loadPast = useCallback((encoded: string) => {
     suppressNextCache.current = true;
@@ -406,35 +450,47 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
     >
       {/* Primary action: pull the encoded reply straight off the clipboard. The button also carries
           the last press's outcome for a moment — a green check for what it loaded, a red ✕ when
-          the paste wouldn't decode — then goes back to offering the paste. */}
+          the paste wouldn't decode — then goes back to offering the paste. Clear sits beside it
+          rather than appearing with a state, because the state it is most needed in — a collection
+          that will never decode — is the one where a reader has least reason to expect it. */}
       <View style={styles.actionArea}>
-        <TouchableOpacity
-          style={[
-            styles.pasteBtn,
-            outcome && (outcome.failed ? styles.pasteBtnFailed : styles.pasteBtnDone),
-          ]}
-          onPress={pasteFromClipboard}
-          accessibilityRole="button"
-          accessibilityLabel={outcome?.label ?? 'Paste Forecast'}
-        >
-          {outcome && (
-            <MaterialCommunityIcons
-              name={outcome.failed ? 'close' : 'check'}
-              size={19}
-              color={outcome.failed ? '#c03030' : '#2a8f5a'}
-              style={styles.pasteBtnIcon}
-            />
-          )}
-          <Text
+        <View style={styles.pasteRow}>
+          <TouchableOpacity
             style={[
-              styles.pasteBtnText,
-              outcome && (outcome.failed ? styles.pasteBtnTextFailed : styles.pasteBtnTextDone),
+              styles.pasteBtn,
+              outcome && (outcome.failed ? styles.pasteBtnFailed : styles.pasteBtnDone),
             ]}
-            numberOfLines={1}
+            onPress={pasteFromClipboard}
+            accessibilityRole="button"
+            accessibilityLabel={outcome?.label ?? 'Paste Forecast'}
           >
-            {outcome?.label ?? 'Paste Forecast'}
-          </Text>
-        </TouchableOpacity>
+            {outcome && (
+              <MaterialCommunityIcons
+                name={outcome.failed ? 'close' : 'check'}
+                size={19}
+                color={outcome.failed ? '#c03030' : '#2a8f5a'}
+                style={styles.pasteBtnIcon}
+              />
+            )}
+            <Text
+              style={[
+                styles.pasteBtnText,
+                outcome && (outcome.failed ? styles.pasteBtnTextFailed : styles.pasteBtnTextDone),
+              ]}
+              numberOfLines={1}
+            >
+              {outcome?.label ?? 'Paste Forecast'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.clearBtn}
+            onPress={clearForecast}
+            accessibilityRole="button"
+            accessibilityLabel="Clear forecast"
+          >
+            <MaterialCommunityIcons name="close" size={22} color="#636366" />
+          </TouchableOpacity>
+        </View>
         {/* Both sit under the button, where what they ask for is another press of it. Only one can
             be showing: a paste is either short of its remaining messages or wrong, never both. */}
         {collecting && <CollectingBox {...collecting} />}
@@ -511,15 +567,29 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 14,
   },
+  pasteRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   // Same fills as the builder's Copy inReach Message button (BuilderTab's ActionButton), so a confirmed
-  // press looks the same on both tabs.
+  // press looks the same on both tabs. It takes the row's spare width, leaving Clear square —
+  // which is what keeps the outcome labels short enough not to truncate at one line.
   pasteBtn: {
+    flex: 1,
     flexDirection: 'row',
     height: 50,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#2a6bb5',
+  },
+  // Quiet beside the paste button: it is always available but rarely the thing to press.
+  clearBtn: {
+    width: 50,
+    height: 50,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f2f2f7',
+    borderWidth: 1,
+    borderColor: '#d1d1d6',
   },
   pasteBtnDone: { backgroundColor: '#e8f5ec', borderWidth: 1, borderColor: '#2a8f5a' },
   // The error box's own colours, so the button and the reason under it read as one thing.

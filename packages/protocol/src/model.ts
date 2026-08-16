@@ -146,6 +146,18 @@ export interface RequestContext {
 // is unknown (e.g. cycled out of the client's store), in which case decode throws.
 export type ContextResolver = (code: number) => RequestContext | undefined;
 
+// What a message's fixed-width prefix says about it, before the body is read — or, on a reply
+// still arriving in pieces, before the body is all there. Every version carries at least these:
+// the code identifying the request, and enough structural detail to tell a real message prefix
+// from a coincidence. Fields beyond `version` and `code` are version-specific in width.
+export interface MessageHeader {
+  version: number;
+  code: number;
+  seq: number;
+  elevation: number;
+  codebookClass: number;
+}
+
 // A codec for a single protocol version. The header format is version-specific, so the
 // codec is parameterized by its message type (defaulting to the common `ForecastMessage`).
 // `decode` takes a ContextResolver because the slim response omits the request-echo fields.
@@ -156,6 +168,9 @@ export interface VersionedCodec<M extends ForecastMessage = ForecastMessage> {
   // the packed header. Splitting a reply across messages repeats exactly this much in each part,
   // and reassembly strips it back off, so both ends need it without decoding anything.
   headerChars: number;
+  // Reads that prefix and nothing else, so a message can be identified while the rest of it is
+  // still in the reader's inbox. Throws when the string doesn't begin with a well-formed one.
+  header(str: string): MessageHeader;
   encode(msg: M, alphabet?: Alphabet): string;
   decode(str: string, resolve: ContextResolver): M;
 }

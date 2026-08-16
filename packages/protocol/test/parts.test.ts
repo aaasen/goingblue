@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   splitReply, reassembleReply, mergeParts, partLabel, PART_LABEL_CHARS,
+  chunkLines, collectingChunks, type ReplyOracles,
 } from "../src/parts.js";
 import { maxCharsFor, widePartBodyChars, MAX_MESSAGES } from "../src/devices.js";
 import { V2_HEADER_CHARS, v2Codec } from "../src/versions/v2.js";
@@ -10,6 +11,11 @@ import v2Fixture from "./fixtures/v2.fixture.json";
 const H = V2_HEADER_CHARS;
 const headerCharsOf = () => H;
 const round = (parts: string[]) => reassembleReply(parts.join("\n"), headerCharsOf);
+
+// Labelled parts carry everything the merge needs in the text itself, so these tests answer no to
+// both of the questions only a decoder can settle. The transport-split path, which is the one that
+// asks them, gets oracles built from a real codec further down.
+const labelled: ReplyOracles = { headerCharsOf, decodes: () => false, isHead: () => false };
 
 describe("splitting a reply", () => {
   const header = "AbCdE";
@@ -82,7 +88,7 @@ describe("reassembling a paste", () => {
 describe("merging a paste into what is already there", () => {
   const whole = "AbCdE0123456789";
   const [first, second] = splitReply(whole, H, 8);
-  const merge = (a: string, b: string) => mergeParts(a, b, headerCharsOf);
+  const merge = (a: string, b: string) => mergeParts(a, b, labelled);
 
   it("appends the other part of the same reply, in either arrival order", () => {
     expect(reassembleReply(merge(first, second), headerCharsOf)).toBe(whole);
@@ -164,6 +170,138 @@ describe("the multi-message budget", () => {
     expect(maxCharsFor("i", 0, H)).toBe(maxCharsFor("i", 1, H));
     expect(maxCharsFor("i", -3, H)).toBe(maxCharsFor("i", 1, H));
     expect(maxCharsFor("i", 99, H)).toBe(maxCharsFor("i", MAX_MESSAGES, H));
+  });
+});
+
+// Collecting a reply the SERVER never split — the recovery path for a transport that chunks
+// messages some way we didn't predict. Every chunk size below is one our model of the satellite
+// relay says is impossible, on purpose: this path is what a wrong model falls back to, so it must
+// not contain one.
+describe("a reply the transport broke up", () => {
+  const d = v2Fixture.decoded as ForecastMessage;
+  const req = v2Fixture.request;
+  const ctx = () => ({
+    model: 31 - Math.clz32(d.models_mask & -d.models_mask),
+    vars_mask: d.vars_mask,
+    lat: d.lat,
+    lon: d.lon,
+    start: Date.UTC(new Date().getUTCFullYear(), req.month - 1, req.day, req.hour),
+    mode: req.mode,
+    utcOffsetHours: req.utcOffsetHours,
+  });
+
+  const encoded = v2Codec.encode(d, "base85");
+  // A reader with two requests outstanding, which is what makes "a different reply" a case worth
+  // having: both codes resolve, so both first messages are heads.
+  const OTHER_CODE = (d.code + 1) % 128;
+  const requested = new Set([d.code, OTHER_CODE]);
+  // What the app wires in: reading a reply takes the codec, and knowing whether this reader asked
+  // for it takes their request store.
+  const oracles: ReplyOracles = {
+    headerCharsOf,
+    decodes: (reply) => {
+      try { v2Codec.decode(reassembleReply(reply, headerCharsOf), ctx); return true; }
+      catch { return false; }
+    },
+    isHead: (chunk) => {
+      try { return requested.has(v2Codec.header(chunk).code); } catch { return false; }
+    },
+  };
+  const merge = (a: string, b: string) => mergeParts(a, b, oracles);
+  const collecting = (held: string) => collectingChunks(held, oracles);
+
+  // Deliberately ragged, and four ways where the relay would give at most three.
+  const chunkAt = (s: string, sizes: number[]): string[] => {
+    const out: string[] = [];
+    let at = 0;
+    for (const size of sizes) { out.push(s.slice(at, at + size)); at += size; }
+    if (at < s.length) out.push(s.slice(at));
+    return out;
+  };
+  const chunks = chunkAt(encoded, [23, 41, 12]);
+
+  it("splits the fixture into more pieces than any transport we've measured", () => {
+    expect(chunks.length).toBe(4);
+    expect(chunks.join("")).toBe(encoded);
+  });
+
+  it("collects the pieces in paste order and decodes on the last one", () => {
+    let held = chunks[0];
+    expect(collecting(held)).toBe(true);
+    for (const chunk of chunks.slice(1, -1)) {
+      held = merge(held, chunk);
+      // Nothing to show yet: an incomplete body fails to decode exactly as corrupt text does.
+      expect(oracles.decodes(held)).toBe(false);
+      expect(collecting(held)).toBe(true);
+    }
+    held = merge(held, chunks[chunks.length - 1]);
+    expect(v2Codec.decode(reassembleReply(held, headerCharsOf), ctx)).toEqual(v2Fixture.decoded);
+    // Finished, so no longer a collection — which is what takes the boxes off the screen.
+    expect(collecting(held)).toBe(false);
+  });
+
+  it("counts the messages pasted so far", () => {
+    let held = chunks[0];
+    for (const chunk of chunks.slice(1, -1)) held = merge(held, chunk);
+    expect(chunkLines(held)).toEqual(chunks.slice(0, -1));
+  });
+
+  it("ignores a message already pasted, wherever it sits", () => {
+    const held = merge(chunks[0], chunks[1]);
+    expect(merge(held, chunks[1])).toBe(held);   // the one just added
+    expect(merge(held, chunks[0])).toBe(held);   // the header, which is also a head
+  });
+
+  it("starts over on the first message of a different reply", () => {
+    const otherHead = v2Codec
+      .encode({ ...d, code: OTHER_CODE } as ForecastMessage, "base85").slice(0, 23);
+    const held = merge(chunks[0], chunks[1]);
+    // A head is only ever a first message, so it opens a collection rather than joining one.
+    expect(oracles.isHead(otherHead)).toBe(true);
+    expect(merge(held, otherHead)).toBe(otherHead);
+  });
+
+  it("takes on a first message meant for someone else rather than risk a real one", () => {
+    // A header for a request this reader doesn't hold reads as an ordinary continuation and is
+    // appended — the collection then never decodes and they have to clear it. That is the cheaper
+    // of the two mistakes available here: the alternative test, "does this look like a header",
+    // would reset a collection on roughly one continuation message in eighty-five, always the
+    // same one, putting that forecast permanently out of reach. See mergeChunks.
+    const strayHead = v2Codec
+      .encode({ ...d, code: (d.code + 64) % 128 } as ForecastMessage, "base85").slice(0, 23);
+    expect(oracles.isHead(strayHead)).toBe(false);
+    expect(chunkLines(merge(chunks[0], strayHead))).toEqual([chunks[0], strayHead]);
+  });
+
+  it("won't start a collection from a message that isn't the first", () => {
+    // A later chunk carries no header, so on its own it is simply an unreadable paste — the
+    // reader is told so rather than invited to keep pasting into something that can never decode.
+    expect(collecting(chunks[1])).toBe(false);
+    expect(merge("", chunks[1])).toBe(chunks[1]);
+  });
+
+  it("takes a whole reply over a collection in progress", () => {
+    expect(merge(merge(chunks[0], chunks[1]), encoded)).toBe(encoded);
+  });
+
+  it("keeps a reply already collected when one of its messages is pasted again", () => {
+    // Once it decodes, the forecast is on screen and the messages are still in the reader's
+    // inbox. Pasting one again must not drop the forecast back to that one piece.
+    let held = chunks[0];
+    for (const chunk of chunks.slice(1)) held = merge(held, chunk);
+    for (const chunk of chunks) expect(merge(held, chunk)).toBe(held);
+    // Including after a round trip through the cache, which stores it reassembled.
+    const stored = reassembleReply(held, headerCharsOf);
+    for (const chunk of chunks) expect(merge(stored, chunk)).toBe(stored);
+  });
+
+  it("does not rescue a reader who pastes out of order", () => {
+    // The one thing this path asks of them, since nothing in the text says where a piece belongs.
+    let held = chunks[0];
+    for (const chunk of [chunks[2], chunks[1], chunks[3]]) held = merge(held, chunk);
+    expect(oracles.decodes(held)).toBe(false);
+    // And it stays collectable-looking, which is why clearing has to be reachable at any time.
+    expect(collecting(held)).toBe(true);
   });
 });
 

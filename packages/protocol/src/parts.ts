@@ -12,6 +12,13 @@
 // labelling also disposes of the one thing the field probes never confirmed — whether separately
 // queued messages arrive in order — because reassembly sorts by index and never trusts arrival
 // order.
+//
+// A reply can also arrive in pieces the server never made: a pipe that splits messages differently
+// than we measured, or a request that didn't say which device it would be read on, leaves the
+// reader holding numbered nothing — no index, no total, no repeated header. mergeChunks collects
+// those too, on the reader's terms: they paste in order, starting with the message that carries
+// the header, and the reply is finished when it decodes. It is the recovery path for our model of
+// a transport being wrong, so it assumes nothing about how that transport splits.
 
 // "i/N " — the two digits, the slash, and the space that separates the label from the payload.
 export const PART_LABEL_CHARS = 4;
@@ -82,6 +89,19 @@ export function readParts(pasted: string): PastedParts {
   return { parts, total, unlabelled, disagreedTotal, duplicated };
 }
 
+// What a caller must be able to answer about a reply for the merge rules below. Injected rather
+// than imported: reassembly runs BEFORE anything is decoded, and this file stays decode-free so
+// it can put a message back together without knowing how to read one.
+export interface ReplyOracles {
+  // The repeated header's width, read off a part's version tag.
+  headerCharsOf: (part: string) => number;
+  // Whether text decodes on its own as a complete reply.
+  decodes: (reply: string) => boolean;
+  // Whether text BEGINS a reply this reader asked for — a well-formed message header, for a
+  // request they still hold. Only the first message of a transport-split reply has one.
+  isHead: (chunk: string) => boolean;
+}
+
 // Folds a freshly pasted message into what the reader has already pasted, so the parts of one
 // reply can be collected a message at a time instead of all at once. Returns the text to keep.
 //
@@ -89,9 +109,8 @@ export function readParts(pasted: string): PastedParts {
 // whole single-message reply, a part of a different forecast, a different part count, or text
 // that isn't a numbered message at all. Appending is the special case, not the default — a
 // reader pasting an unrelated forecast must not have it silently welded onto the last one.
-export function mergeParts(
-  existing: string, incoming: string, headerCharsOf: (part: string) => number,
-): string {
+export function mergeParts(existing: string, incoming: string, oracles: ReplyOracles): string {
+  const { headerCharsOf } = oracles;
   const inc = readParts(incoming);
   const cur = readParts(existing);
   const usable = (p: PastedParts) =>
@@ -103,6 +122,9 @@ export function mergeParts(
   // count as unrelated text and REPLACE the complete forecast with one segment of it.
   const held = cur.total === 0 ? cur.unlabelled.join("") : "";
   if (usable(inc) && held && heldWhole(held, inc, headerCharsOf)) return existing;
+
+  // Nothing on either side carries a label: whatever broke this reply up, it wasn't the server.
+  if (inc.total === 0 && cur.total === 0) return mergeChunks(existing, incoming, oracles);
 
   if (!usable(inc) || !usable(cur) || cur.total !== inc.total) return incoming;
 
@@ -118,6 +140,64 @@ export function mergeParts(
     .sort((a, b) => a - b)
     .map((index) => partLabel(index, inc.total) + merged.get(index)!)
     .join("\n");
+}
+
+// The messages a collection is holding, in the order they were pasted. They are joined with
+// newlines rather than run together — whitespace is insignificant to reassembly either way, so
+// this costs nothing and keeps the boundaries, which is what lets a reader be told how many
+// messages they have and lets one pasted twice be recognized exactly rather than guessed at.
+export function chunkLines(collected: string): string[] {
+  return collected.split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
+// Whether text is a reply being collected a message at a time with NO labels to go on: it begins
+// with a header, so it is the front of a reply this reader asked for, and it doesn't decode, so
+// it isn't all there yet. Both halves are load-bearing — without the header test every unreadable
+// paste would look like a reply in progress, and without the decode test a finished one would.
+export function collectingChunks(collected: string, oracles: ReplyOracles): boolean {
+  const lines = chunkLines(collected);
+  return lines.length > 0 && oracles.isHead(lines[0]) && !oracles.decodes(collected);
+}
+
+// Folds a pasted message into a reply the TRANSPORT broke up, rather than the server: no labels,
+// no repeated header, nothing in the text saying which message this is or how many there are.
+//
+// So order is the reader's, not ours: messages append in the order they are pasted, and the only
+// test for a finished reply is that it decodes. Nothing here counts characters or assumes where a
+// pipe splits — this path exists precisely for the case where what we believe about the chunking
+// is wrong, so believing anything about it would defeat the purpose.
+function mergeChunks(existing: string, incoming: string, oracles: ReplyOracles): string {
+  const chunk = incoming.trim();
+
+  // A message of a reply that is already held WHOLE: the reader pasted a bubble again after
+  // collecting all of them, or after loading the forecast back from the cache, which stores it
+  // reassembled. The messages are consecutive slices of one reply, so one that is already in it
+  // appears verbatim — and without this the paste would count as unrelated text and drop a
+  // complete forecast back to a single piece of itself (the same trap heldWhole covers for
+  // labelled parts).
+  if (oracles.decodes(existing) && chunkLines(existing).join("").includes(chunk)) return existing;
+
+  // A reply that stands on its own is the whole of one, however many messages it arrived in.
+  if (oracles.decodes(incoming)) return incoming;
+  if (!collectingChunks(existing, oracles)) return incoming;
+
+  const lines = chunkLines(existing);
+  // Pasted again — the same message, wherever it sits in what's held. Idempotent rather than
+  // doubled: appending a second copy would break a collection that was until then fine.
+  if (lines.includes(chunk)) return existing;
+  // The first message of a different reply. Only the first message ever carries a header, so this
+  // starts a collection rather than joining one.
+  //
+  // isHead is the strict test — a header for a request the reader still holds — and it is the
+  // right one HERE too, not just for opening a collection. A weaker "does this look like a
+  // header" would reset a collection every time a later message happened to begin with a byte
+  // that reads as a version tag, which is about one message in eighty-five, and would do it the
+  // same way every time: that reply could never be collected at all. Welding on a message meant
+  // for someone else costs a Clear and a retry. Breaking a reply that would otherwise work costs
+  // the forecast.
+  if (oracles.isHead(chunk)) return chunk;
+
+  return [...lines, chunk].join("\n");
 }
 
 // Whether an unlabelled reply already contains every part of an incoming paste. Parts are
