@@ -1,6 +1,6 @@
 import type { ComponentProps } from 'react';
 import type MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { DEVICE_TRANSPORT, V2_HEADER_CHARS, maxCharsFor, type DeviceCode } from '@weather/protocol';
+import { DEVICE_TRANSPORT, type DeviceCode } from '@weather/protocol';
 
 // How the request leaves the phone, and how the reply comes back. The builder's single action
 // button is whatever the selected device's `action` says, but the device is more than a button
@@ -35,14 +35,11 @@ export function isDevice(value: unknown): value is Device {
   return DEVICES.some((d) => d.value === value);
 }
 
-// The `d:` token to send, and the reply budget that goes with it. Both come from the one table
-// the server reads, so a device can never ask for a length its route can't deliver.
+// The `d:` token to send. The reply budget that goes with it is no longer computed here: the
+// server derives it from `d:` and `n:` off the same protocol table, so there is nothing for the
+// client to state and no way for the two ends to disagree about it.
 export function deviceCode(device: Device): DeviceCode {
   return DEVICES.find((d) => d.value === device)!.code;
-}
-
-export function deviceMaxChars(device: Device, messages: number): number {
-  return maxCharsFor(deviceCode(device), messages, V2_HEADER_CHARS);
 }
 
 // Only the iPhone route splits a reply across messages; for everything else the reply is one

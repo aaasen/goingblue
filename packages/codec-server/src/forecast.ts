@@ -28,7 +28,6 @@ import {
   splitReply,
   supportedVersions,
   widePartBodyChars,
-  SMS_MAX_CHARS,
 } from "@weather/protocol";
 import { fetchWeatherApi } from "openmeteo";
 import { Variable } from "@openmeteo/sdk/variable.js";
@@ -850,9 +849,6 @@ export interface ForecastParams {
   userToken: string | null;
 }
 
-// Default response length cap when the request names no device: one SMS segment, the narrowest
-// route's limit (Garmin inReach) and so the safe choice for an unidentified sender.
-const DEFAULT_MAX_CHARS = SMS_MAX_CHARS;
 // `p:` token values → priority modes; a missing or unknown token means Auto.
 const MODE_TOKENS: Record<string, number> = {
   d: MODE_DETAIL, a: MODE_AUTO, r: MODE_RANGE,
@@ -868,8 +864,6 @@ export function parseRequest(body: string): ForecastParams {
   let modelsMask = 1; // Best Match default (bit 0)
   // Core variables are implicit; `v:` carries only user-configurable additions.
   let varsMask = ALWAYS_VARS_MASK;
-  let maxChars = DEFAULT_MAX_CHARS; // derived from `d:`/`n:` below, unless `c:` sets it outright
-  let explicitMaxChars: number | null = null; // a `c:` token wins over anything `d:`/`n:` imply
   let device: DeviceCode | null = null; // from `d:`; null keeps the base-85 SMS defaults
   let messages = 1; // from `n:`: how many messages the reply may be spread over
   let decoderVersion: number | null = null; // set from a `vN` token; required, no default
@@ -906,9 +900,6 @@ export function parseRequest(body: string): ForecastParams {
         // The location's UTC offset in whole hours; out-of-range values are ignored.
         const n = parseInt(val);
         if (!isNaN(n) && n >= -12 && n <= 14) utcOffsetHours = n;
-      } else if (key === "c") {
-        const n = parseInt(val);
-        if (!isNaN(n)) explicitMaxChars = Math.max(1, n);
       } else if (key === "d") {
         // The sending device picks the response alphabet and, with `n:`, how much of it fits
         // (see DEVICE_TRANSPORT). Unknown codes keep the defaults, which is the conservative
@@ -968,14 +959,18 @@ export function parseRequest(body: string): ForecastParams {
   // from the stored request to reach the same layout.
   mode = effectiveMode(mode, MODEL_BIT[firstModelKey(modelsMask)]);
 
-  // The reply budget, resolved last because it depends on three tokens at once. A multi-message
-  // wide reply repeats the header in every part, so its budget needs the header's width — read
-  // off the codec the request named. An unknown version falls back to the lowest one this image
-  // serves; the request is rejected for the version before the budget is ever spent.
+  // The reply budget, resolved last because it depends on three tokens at once. It is DERIVED,
+  // never stated: `d:` and `n:` name the route and how many messages it may spend, and the length
+  // follows from the one table both ends read. A multi-message wide reply repeats the header in
+  // every part, so its budget needs the header's width — read off the codec the request named. An
+  // unknown version falls back to the lowest one this image serves; the request is rejected for
+  // the version before the budget is ever spent.
   const alphabet = device ? DEVICE_TRANSPORT[device].alphabet : undefined;
   const codec = decoderVersion === null ? undefined : CODECS[decoderVersion];
   const headerChars = (codec ?? CODECS[supportedVersions()[0]]).headerChars;
-  maxChars = explicitMaxChars ?? maxCharsFor(device ?? "s", messages, headerChars);
+  // A request that names no device is budgeted as SMS: one 160-character segment, the narrowest
+  // route's limit and so the safe reading of an unidentified sender.
+  const maxChars = maxCharsFor(device ?? "s", messages, headerChars);
 
   return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, alphabet, messages, decoderVersion, userToken, code, startEpochHour };
 }

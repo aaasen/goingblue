@@ -50,15 +50,9 @@ describe("parseRequest", () => {
     expect(parseRequest("").maxChars).toBe(160);
   });
 
-  it("c: sets the max response length; the fill trims to it at encode time, not parse time", () => {
-    expect(parseRequest("c:320").maxChars).toBe(320);
-    // The budget doesn't change what's parsed — only how far the fill refines.
-    expect(parseRequest("c:320 p:d").mode).toBe(MODE_DETAIL);
-    expect(parseRequest("c:80 p:d").mode).toBe(MODE_DETAIL);
-  });
-
-  it("c: clamps the max response length to a minimum of 1", () => {
-    expect(parseRequest("c:0").maxChars).toBe(1);
+  it("the budget doesn't change what's parsed — only how far the fill refines", () => {
+    expect(parseRequest("d:i p:d").mode).toBe(MODE_DETAIL);
+    expect(parseRequest("d:g p:d").mode).toBe(MODE_DETAIL);
   });
 
   it("k: sets the message code, defaulting to 0", () => {
@@ -278,10 +272,13 @@ describe("parseRequest", () => {
     expect(parseRequest("d:x").maxChars).toBe(SMS_MAX_CHARS);
   });
 
-  it("an explicit c: overrides the device's length in either token order", () => {
-    expect(parseRequest("d:i c:320")).toMatchObject({ alphabet: "base32768", maxChars: 320 });
-    expect(parseRequest("c:320 d:i")).toMatchObject({ alphabet: "base32768", maxChars: 320 });
-    expect(parseRequest("c:40 d:g").maxChars).toBe(40);
+  // The length is derived, never stated: nothing in a request can widen the reply past what the
+  // route it names can carry.
+  it("ignores a length the request tries to state for itself", () => {
+    expect(parseRequest("d:i c:320")).toMatchObject({
+      alphabet: "base32768", maxChars: maxCharsFor("i", 1, V2_HEADER_CHARS),
+    });
+    expect(parseRequest("c:40 d:g").maxChars).toBe(SMS_MAX_CHARS);
   });
 
   it("n: spreads the reply over more messages", () => {

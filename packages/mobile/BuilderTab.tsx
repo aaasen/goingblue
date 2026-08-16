@@ -21,7 +21,7 @@ import { allocCode } from './cache';
 import LocationMap from './LocationMap';
 import HelpScreen from './HelpScreen';
 import { MODELS } from './models';
-import { DEVICES, deviceCode, deviceMaxChars, supportsMultiMessage, type Device } from './devices';
+import { DEVICES, deviceCode, supportsMultiMessage, type Device } from './devices';
 
 // The request time, in UTC hours since the epoch, aligned down to the hour. Sent in the request
 // (`t:`) so the forecast window is fixed against delivery delay, and stored in the request
@@ -39,8 +39,8 @@ function requestOffsetHours(coords: { lat: number; lon: number } | null, startEp
   return coords ? offsetHoursAt(coords.lat, coords.lon, startEpochHour * 3600000) : deviceOffsetHours();
 }
 
-// How many characters one message holds is now a property of the route, not a constant — see
-// deviceMaxChars in devices.ts.
+// How many characters one message holds is a property of the route, not a constant, and the
+// server derives it from the request's `d:` and `n:` — the client never states it.
 const FORECAST_NUMBER = '(425) 434-5858';
 // Same number in E.164, for the sms: URL — the display form's punctuation isn't a valid recipient.
 const FORECAST_NUMBER_E164 = '+14254345858';
@@ -284,7 +284,7 @@ const DEFAULT_GROUPS = new Set<string>();
 // included, even at the default length. `u:` carries the account token so the server can
 // attribute the request to the user. `k:` is the message code the slim response echoes so the
 // client can recover the request context (see cache.ts).
-function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], device: Device, messages: number, maxChars: number, code: number, startEpochHour: number): string {
+function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], device: Device, messages: number, code: number, startEpochHour: number): string {
   const parts: string[] = [`v${V2_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   parts.push(`p:${PRIORITIES.find((m) => m.value === mode)!.token}`);
@@ -292,13 +292,12 @@ function buildMsg(token: string, coords: { lat: number; lon: number } | null, mo
   parts.push(`m:${model}`);
   if (variableCodes.length) parts.push(`v:${variableCodes.join('')}`);
   // `d:` is what tells the server which pipe the reply has to fit down — it picks the response
-  // alphabet as well as its length. `c:` still goes out alongside it: the two agree here, and
-  // sending it keeps the request readable and lets a hand-typed one override the length.
+  // alphabet as well as its length. The length is derived from `d:` and `n:` at both ends, off
+  // the one table in the protocol, so the request no longer spends characters restating it.
   parts.push(`d:${deviceCode(device)}`);
   // Omitted at one message, which is every route but a split iPhone reply — so the requests that
   // worked before this existed still go out byte for byte unchanged.
   if (messages > 1) parts.push(`n:${messages}`);
-  parts.push(`c:${maxChars}`);
   parts.push(`u:${token}`);
   parts.push(`k:${code}`);
   parts.push(`t:${startEpochHour}`);
@@ -426,7 +425,6 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
   // How many messages the reply may use, and what that buys. Only the iPhone route can spend
   // more than one; everywhere else the choice isn't offered and this stays at the default.
   const messages = supportsMultiMessage(device) && twoMessages ? 2 : DEFAULT_MESSAGES;
-  const maxChars = deviceMaxChars(device, messages);
 
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
   // Expand the always-on variables plus any enabled groups for the stored request context. Only
@@ -540,7 +538,7 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return null;
     const startHour = alignedStartEpochHour();
     const code = await allocCode(token, buildContext(coords, mode, model, varsMask, startHour), `${modeName} · ${model.toUpperCase()}`);
-    return buildMsg(token, coords, mode, model, variableCodes, device, messages, maxChars, code, startHour);
+    return buildMsg(token, coords, mode, model, variableCodes, device, messages, code, startHour);
   }
 
   async function handleCopy() {
