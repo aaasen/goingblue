@@ -6,7 +6,9 @@ import * as Clipboard from 'expo-clipboard';
 import {
   VARS_BIT, startDatetime, MODE_NAMES, DEFAULT_MODE, type ForecastMessage,
 } from '@weather/protocol';
-import { decodeAny, loadStore, attachResponse, normalizeReply, prunePastForecasts, type Slot } from './cache';
+import {
+  decodeAny, loadStore, attachResponse, mergeReply, normalizeReply, prunePastForecasts, type Slot,
+} from './cache';
 import type { TimeFormat, Units } from './settings';
 import LocationMap from './LocationMap';
 import Meteogram from './Meteogram';
@@ -233,14 +235,17 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
     return () => { cancelled = true; };
   }, [forecastData, token]);
 
+  // A reply that arrived as two messages is pasted as two messages, so a paste folds into what
+  // is already here when — and only when — it is another part of the same reply (see mergeReply).
+  // Editing the field by hand still replaces outright: that is the reader typing, not collecting.
   const pasteFromClipboard = useCallback(async () => {
     try {
       const text = await Clipboard.getStringAsync();
-      if (text.trim()) onForecastDataChange(text.trim());
+      if (text.trim()) onForecastDataChange(mergeReply(forecastData, text));
     } catch {
       setError('Could not read the clipboard.');
     }
-  }, [onForecastDataChange]);
+  }, [forecastData, onForecastDataChange]);
 
   const loadPast = useCallback((encoded: string) => {
     suppressNextCache.current = true;

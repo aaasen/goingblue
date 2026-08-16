@@ -39,6 +39,79 @@ export function splitReply(encoded: string, headerChars: number, bodyCharsPerPar
   return bodies.map((b, i) => partLabel(i + 1, bodies.length) + header + b);
 }
 
+export interface PastedParts {
+  // Parts claimed by the labels, keyed by index. A repeated index keeps the LAST payload, so a
+  // part pasted twice replaces itself rather than doubling.
+  parts: Map<number, string>;
+  // How many parts the labels say there are; 0 when the text carries no labels at all.
+  total: number;
+  // Tokens that appeared before any label.
+  unlabelled: string[];
+  // A second, different part count, or null. Two labels disagreeing means two forecasts.
+  disagreedTotal: number | null;
+  // An index that appeared more than once, or null.
+  duplicated: number | null;
+}
+
+// Reads pasted text into its parts WITHOUT judging it. Nothing here throws: the same text is
+// an error when it's the whole of what a reader pasted (reassembleReply) and perfectly ordinary
+// when it's one message of several still arriving (mergeParts), so the two decisions live with
+// their callers rather than here.
+export function readParts(pasted: string): PastedParts {
+  const parts = new Map<number, string>();
+  const unlabelled: string[] = [];
+  let total = 0;
+  let disagreedTotal: number | null = null;
+  let duplicated: number | null = null;
+  let current: number | null = null;
+
+  for (const token of pasted.trim().split(/\s+/).filter(Boolean)) {
+    const label = token.match(PART_LABEL);
+    if (label) {
+      const [index, n] = [Number(label[1]), Number(label[2])];
+      if (total && n !== total) disagreedTotal ??= n;
+      if (parts.has(index)) duplicated ??= index;
+      total ||= n;
+      current = index;
+      parts.set(index, "");
+      continue;
+    }
+    if (current === null) unlabelled.push(token);
+    else parts.set(current, parts.get(current)! + token);
+  }
+  return { parts, total, unlabelled, disagreedTotal, duplicated };
+}
+
+// Folds a freshly pasted message into what the reader has already pasted, so the parts of one
+// reply can be collected a message at a time instead of all at once. Returns the text to keep.
+//
+// Anything that isn't demonstrably another part of the SAME reply replaces what came before: a
+// whole single-message reply, a part of a different forecast, a different part count, or text
+// that isn't a numbered message at all. Appending is the special case, not the default — a
+// reader pasting an unrelated forecast must not have it silently welded onto the last one.
+export function mergeParts(
+  existing: string, incoming: string, headerCharsOf: (part: string) => number,
+): string {
+  const inc = readParts(incoming);
+  const cur = readParts(existing);
+  const usable = (p: PastedParts) =>
+    p.total > 0 && p.disagreedTotal === null && !p.unlabelled.length && p.parts.size > 0;
+  if (!usable(inc) || !usable(cur) || cur.total !== inc.total) return incoming;
+
+  // Every part repeats the header, so comparing it is what tells "the rest of this reply" from
+  // "a different reply that also happens to come in two messages".
+  const first = (p: PastedParts) => p.parts.get(Math.min(...p.parts.keys()))!;
+  const headerChars = headerCharsOf(first(cur));
+  if (first(cur).slice(0, headerChars) !== first(inc).slice(0, headerChars)) return incoming;
+
+  const merged = new Map(cur.parts);
+  for (const [index, payload] of inc.parts) merged.set(index, payload);
+  return [...merged.keys()]
+    .sort((a, b) => a - b)
+    .map((index) => partLabel(index, inc.total) + merged.get(index)!)
+    .join("\n");
+}
+
 // Rebuilds the encoded reply from pasted text, which may hold one part, several, or an unlabelled
 // single message. Whitespace is not significant anywhere: parts may be pasted on separate lines,
 // run together on one, or in any order.
@@ -51,33 +124,14 @@ export function splitReply(encoded: string, headerChars: number, bodyCharsPerPar
 // both things a person can fix by going back to their messages, so they must not surface as a
 // generic decode failure.
 export function reassembleReply(pasted: string, headerCharsOf: (firstPart: string) => number): string {
-  const tokens = pasted.trim().split(/\s+/).filter(Boolean);
-
-  // Collect labelled runs: each label opens a part, and every token after it is that part's
-  // payload until the next label.
-  const parts = new Map<number, string>();
-  let total = 0;
-  let current: number | null = null;
-  const unlabelled: string[] = [];
-
-  for (const token of tokens) {
-    const label = token.match(PART_LABEL);
-    if (label) {
-      const [index, n] = [Number(label[1]), Number(label[2])];
-      if (total && n !== total)
-        throw new Error(`These messages are from different forecasts: one says ${total} parts, another says ${n}.`);
-      if (parts.has(index)) throw new Error(`Message ${index} of ${n} was pasted twice.`);
-      total = n;
-      current = index;
-      parts.set(index, "");
-      continue;
-    }
-    if (current === null) unlabelled.push(token);
-    else parts.set(current, parts.get(current)! + token);
-  }
+  const { total, parts, unlabelled, disagreedTotal, duplicated } = readParts(pasted);
 
   // No labels at all: a single-message reply, which is every route but a multi-message iPhone one.
   if (total === 0) return unlabelled.join("");
+
+  if (disagreedTotal !== null)
+    throw new Error(`These messages are from different forecasts: one says ${total} parts, another says ${disagreedTotal}.`);
+  if (duplicated !== null) throw new Error(`Message ${duplicated} of ${total} was pasted twice.`);
   if (unlabelled.length)
     throw new Error(`Some of the pasted text isn't part of a numbered message — paste each message on its own.`);
 

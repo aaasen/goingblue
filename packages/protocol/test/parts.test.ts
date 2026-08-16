@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { splitReply, reassembleReply, partLabel, PART_LABEL_CHARS } from "../src/parts.js";
+import {
+  splitReply, reassembleReply, mergeParts, partLabel, PART_LABEL_CHARS,
+} from "../src/parts.js";
 import { maxCharsFor, widePartBodyChars, MAX_MESSAGES } from "../src/devices.js";
 import { V2_HEADER_CHARS, v2Codec } from "../src/versions/v2.js";
 import type { ForecastMessage } from "../src/model.js";
@@ -72,6 +74,48 @@ describe("reassembling a paste", () => {
     expect(() => round([parts[0], parts[0]])).toThrow(/pasted twice/);
     expect(() => reassembleReply(`junk ${parts.join(" ")}`, headerCharsOf))
       .toThrow(/isn't part of a numbered message/);
+  });
+});
+
+// Collecting a reply one message at a time, which is how a reader actually receives it: the
+// second bubble arrives after they have already pasted the first.
+describe("merging a paste into what is already there", () => {
+  const whole = "AbCdE0123456789";
+  const [first, second] = splitReply(whole, H, 8);
+  const merge = (a: string, b: string) => mergeParts(a, b, headerCharsOf);
+
+  it("appends the other part of the same reply, in either arrival order", () => {
+    expect(reassembleReply(merge(first, second), headerCharsOf)).toBe(whole);
+    expect(reassembleReply(merge(second, first), headerCharsOf)).toBe(whole);
+  });
+
+  it("collects a three-part reply a message at a time", () => {
+    const parts = splitReply(whole, H, 4);
+    let held = parts[2];
+    held = merge(held, parts[0]);
+    expect(() => reassembleReply(held, headerCharsOf)).toThrow(/Missing message 2 of 3/);
+    held = merge(held, parts[1]);
+    expect(reassembleReply(held, headerCharsOf)).toBe(whole);
+  });
+
+  it("re-pasting a part replaces it rather than doubling it", () => {
+    expect(merge(first, first)).toBe(first);
+    expect(reassembleReply(merge(merge(first, second), second), headerCharsOf)).toBe(whole);
+  });
+
+  it("starts fresh on anything that isn't the rest of this reply", () => {
+    const other = splitReply("ZzZzZ9876543210", H, 8);
+    expect(merge(first, other[1])).toBe(other[1]);            // different forecast
+    expect(merge(first, splitReply(whole, H, 4)[1])).toBe(splitReply(whole, H, 4)[1]); // different count
+    expect(merge(first, "AbCdEwholeReply")).toBe("AbCdEwholeReply");  // an unlabelled reply
+    expect(merge("", second)).toBe(second);                   // nothing held yet
+    expect(merge("AbCdEwholeReply", second)).toBe(second);    // held reply wasn't multi-part
+  });
+
+  it("leaves the merged text readable by the same reassembly", () => {
+    const held = merge(first, second);
+    expect(held.startsWith("1/2 ")).toBe(true);
+    expect(held.split("\n")).toEqual([first, second]);
   });
 });
 

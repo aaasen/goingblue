@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  CODECS, decodeMessage, peekVersion, reassembleReply, supportedVersions,
+  CODECS, decodeMessage, mergeParts, peekVersion, reassembleReply, supportedVersions,
   type ForecastMessage, type RequestContext,
 } from '@weather/protocol';
 
@@ -80,9 +80,21 @@ export function resolveContext(token: string, code: number): RequestContext | un
 // label. Reassembly then handles whitespace, so nothing is stripped before the part labels — the
 // space after "1/2" is what makes a label a label rather than a run of payload characters.
 export function normalizeReply(encoded: string): string {
-  const text = encoded.trim().replace(/^fw:\s*/i, '');
-  return reassembleReply(text, (part) =>
-    (CODECS[peekVersion(part)] ?? CODECS[supportedVersions()[0]]).headerChars);
+  return reassembleReply(encoded.trim().replace(/^fw:\s*/i, ''), headerCharsOf);
+}
+
+// The repeated header's width, read off a part's version tag. An unrecognized version falls back
+// to the lowest codec this build carries; decoding then raises the version error properly, rather
+// than reassembly failing first with something less useful.
+function headerCharsOf(part: string): number {
+  return (CODECS[peekVersion(part)] ?? CODECS[supportedVersions()[0]]).headerChars;
+}
+
+// Folds a newly pasted message into what is already in the decoder, so a reply that arrived as
+// two messages can be pasted one at a time. Only another part of the SAME reply is appended;
+// anything else replaces, so pasting an unrelated forecast still starts clean (see mergeParts).
+export function mergeReply(existing: string, incoming: string): string {
+  return mergeParts(existing.trim(), incoming.trim().replace(/^fw:\s*/i, ''), headerCharsOf);
 }
 
 export function decodeAny(encoded: string, token: string): ForecastMessage {
