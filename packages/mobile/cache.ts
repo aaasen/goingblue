@@ -1,5 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodeMessage, type ForecastMessage, type RequestContext } from '@weather/protocol';
+import {
+  CODECS, decodeMessage, peekVersion, reassembleReply, supportedVersions,
+  type ForecastMessage, type RequestContext,
+} from '@weather/protocol';
 
 // The response is slim (see the protocol's message-code scheme): it omits lat/lon/models/vars/
 // resolution and carries only a 7-bit `code`. We store each outgoing request's context under its
@@ -69,9 +72,21 @@ export function resolveContext(token: string, code: number): RequestContext | un
   return contextMaps.get(token)?.get(code);
 }
 
+// Pasted text → the encoded message, whatever shape it arrived in: one message, or the numbered
+// parts of a reply the iPhone route split (see parts.ts). Both live here so the decoder tab, the
+// cache, and anything else that takes a paste agree on what counts as the same message.
+//
+// `fw:` comes off first: a forwarded message carries it ahead of everything, including a part
+// label. Reassembly then handles whitespace, so nothing is stripped before the part labels — the
+// space after "1/2" is what makes a label a label rather than a run of payload characters.
+export function normalizeReply(encoded: string): string {
+  const text = encoded.trim().replace(/^fw:\s*/i, '');
+  return reassembleReply(text, (part) =>
+    (CODECS[peekVersion(part)] ?? CODECS[supportedVersions()[0]]).headerChars);
+}
+
 export function decodeAny(encoded: string, token: string): ForecastMessage {
-  const text = encoded.replace(/\s/g, '').replace(/^fw:/i, '');
-  return decodeMessage(text, (code) => resolveContext(token, code));
+  return decodeMessage(normalizeReply(encoded), (code) => resolveContext(token, code));
 }
 
 // Allocate the next message code, storing the request context under it (evicting whatever slot the
@@ -91,7 +106,7 @@ export async function attachResponse(token: string, code: number, encoded: strin
   const store = await loadStore(token);
   const slot = store.slots.find((s) => s.code === code);
   if (slot) {
-    slot.encoded = encoded.replace(/\s/g, '').replace(/^fw:/i, '');
+    slot.encoded = normalizeReply(encoded);
     slot.savedAt = Date.now();
     await persist(token, store);
   }

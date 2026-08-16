@@ -152,6 +152,10 @@ export type ContextResolver = (code: number) => RequestContext | undefined;
 // `alphabet` selects the body's character set (default base-85); decode needs no such argument
 // because a body says which alphabet it is in — see bodyAlphabet.
 export interface VersionedCodec<M extends ForecastMessage = ForecastMessage> {
+  // Width of the fixed prefix every message of this version starts with — the version tag plus
+  // the packed header. Splitting a reply across messages repeats exactly this much in each part,
+  // and reassembly strips it back off, so both ends need it without decoding anything.
+  headerChars: number;
   encode(msg: M, alphabet?: Alphabet): string;
   decode(str: string, resolve: ContextResolver): M;
 }

@@ -6,7 +6,7 @@ import * as Clipboard from 'expo-clipboard';
 import {
   VARS_BIT, startDatetime, MODE_NAMES, DEFAULT_MODE, type ForecastMessage,
 } from '@weather/protocol';
-import { decodeAny, loadStore, attachResponse, prunePastForecasts, type Slot } from './cache';
+import { decodeAny, loadStore, attachResponse, normalizeReply, prunePastForecasts, type Slot } from './cache';
 import type { TimeFormat, Units } from './settings';
 import LocationMap from './LocationMap';
 import Meteogram from './Meteogram';
@@ -75,8 +75,16 @@ function requestDateTimeLabel(requestedAt: number): string {
   return `${date.toLocaleDateString()} ${requestTimeLabel(requestedAt)}`;
 }
 
+// Compares a paste against a cached slot on the REASSEMBLED message, so a reply pasted as two
+// numbered parts still matches the slot that holds it whole. This one must never throw: a paste
+// with only the first part of two is a normal in-progress state here, not an error, so anything
+// that won't reassemble yet falls back to its raw text and simply matches nothing.
 function normalizedForecastData(encoded: string): string {
-  return encoded.replace(/\s/g, '').replace(/^fw:/i, '');
+  try {
+    return normalizeReply(encoded);
+  } catch {
+    return encoded.replace(/\s/g, '');
+  }
 }
 
 /**
@@ -210,6 +218,11 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
           const match = msg.match(/encoded v(\d+)/);
           const encoded = match ? match[1] : '?';
           setError(`Version mismatch: this message uses protocol v${encoded}, which this app can't decode. Update the app or request a new forecast.`);
+        } else if (msg.includes('Missing message') || msg.includes('different forecast')
+            || msg.includes('pasted twice') || msg.includes("isn't part of a numbered message")) {
+          // Reassembly failures are the reader's to fix — they say which message is missing or
+          // mismatched — so they go through as written rather than as a decode failure.
+          setError(msg.replace(/^Error:\s*/, ''));
         } else if (msg.includes('Unknown forecast code')) {
           setError("This forecast doesn't match a request from this device — it may have been sent elsewhere or cycled out of history. Request a new forecast.");
         } else {

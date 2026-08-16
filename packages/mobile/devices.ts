@@ -1,6 +1,6 @@
 import type { ComponentProps } from 'react';
 import type MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { DEVICE_TRANSPORT, type DeviceCode } from '@weather/protocol';
+import { DEVICE_TRANSPORT, V2_HEADER_CHARS, maxCharsFor, type DeviceCode } from '@weather/protocol';
 
 // How the request leaves the phone, and how the reply comes back. The builder's single action
 // button is whatever the selected device's `action` says, but the device is more than a button
@@ -41,6 +41,12 @@ export function deviceCode(device: Device): DeviceCode {
   return DEVICES.find((d) => d.value === device)!.code;
 }
 
-export function deviceMaxChars(device: Device): number {
-  return DEVICE_TRANSPORT[deviceCode(device)].maxChars;
+export function deviceMaxChars(device: Device, messages: number): number {
+  return maxCharsFor(deviceCode(device), messages, V2_HEADER_CHARS);
+}
+
+// Only the iPhone route splits a reply across messages; for everything else the reply is one
+// message and the choice would be meaningless, so the builder offers it nowhere else.
+export function supportsMultiMessage(device: Device): boolean {
+  return DEVICE_TRANSPORT[deviceCode(device)].alphabet === 'base32768';
 }

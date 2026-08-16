@@ -19,8 +19,15 @@ import {
   type ForecastMessage,
   type VersionedCodec,
   type Alphabet,
+  type DeviceCode,
+  CODECS,
   DEVICE_TRANSPORT,
+  MAX_MESSAGES,
   isDeviceCode,
+  maxCharsFor,
+  splitReply,
+  supportedVersions,
+  widePartBodyChars,
   SMS_MAX_CHARS,
 } from "@weather/protocol";
 import { fetchWeatherApi } from "openmeteo";
@@ -826,6 +833,9 @@ export interface ForecastParams {
   // Character set for the response body, from the request's `d:` device token. Absent means
   // base-85, which is what every device but iPhone uses (see DEVICE_TRANSPORT).
   alphabet?: Alphabet;
+  // How many messages the reply may be spread over (`n:`, default 1). Only a wide reply is
+  // actually split; see splitReplyFor.
+  messages: number;
   // Protocol version from the request's `vN` token, or null when the token is absent. A version
   // is required — there is no default: each deployed codec server serves the version(s) baked
   // into its image, and defaulting would silently bind old hand-typed requests to whatever
@@ -858,9 +868,10 @@ export function parseRequest(body: string): ForecastParams {
   let modelsMask = 1; // Best Match default (bit 0)
   // Core variables are implicit; `v:` carries only user-configurable additions.
   let varsMask = ALWAYS_VARS_MASK;
-  let maxChars = DEFAULT_MAX_CHARS; // set from `d:`, or overridden outright by an explicit `c:`
-  let maxCharsFromRequest = false;  // whether a `c:` token was seen, so `d:` can't overwrite it
-  let alphabet: Alphabet | undefined; // set from `d:`; absent means base-85
+  let maxChars = DEFAULT_MAX_CHARS; // derived from `d:`/`n:` below, unless `c:` sets it outright
+  let explicitMaxChars: number | null = null; // a `c:` token wins over anything `d:`/`n:` imply
+  let device: DeviceCode | null = null; // from `d:`; null keeps the base-85 SMS defaults
+  let messages = 1; // from `n:`: how many messages the reply may be spread over
   let decoderVersion: number | null = null; // set from a `vN` token; required, no default
   let userToken: string | null = null; // set from a `u:` token in the request
   let code = 0; // client message code (`k:` token); echoed in the response so the client can
@@ -897,20 +908,17 @@ export function parseRequest(body: string): ForecastParams {
         if (!isNaN(n) && n >= -12 && n <= 14) utcOffsetHours = n;
       } else if (key === "c") {
         const n = parseInt(val);
-        if (!isNaN(n)) {
-          maxChars = Math.max(1, n);
-          maxCharsFromRequest = true;
-        }
+        if (!isNaN(n)) explicitMaxChars = Math.max(1, n);
       } else if (key === "d") {
-        // The sending device: it picks both the response alphabet and how much of it fits (see
-        // DEVICE_TRANSPORT). An explicit `c:` still wins — the benchmark and /encode drive the
-        // budget directly — so only the alphabet is unconditional. Unknown codes keep the
-        // defaults, which is the conservative direction: base-85 reaches every device.
-        if (isDeviceCode(val)) {
-          const transport = DEVICE_TRANSPORT[val];
-          alphabet = transport.alphabet;
-          if (!maxCharsFromRequest) maxChars = transport.maxChars;
-        }
+        // The sending device picks the response alphabet and, with `n:`, how much of it fits
+        // (see DEVICE_TRANSPORT). Unknown codes keep the defaults, which is the conservative
+        // direction: base-85 at one SMS segment reaches every device.
+        if (isDeviceCode(val)) device = val;
+      } else if (key === "n") {
+        // How many messages the reply may be spread over. Out-of-range values clamp rather than
+        // reject: a reply that is one message too short still decodes, one too long does not.
+        const n = parseInt(val);
+        if (!isNaN(n)) messages = Math.min(Math.max(n, 1), MAX_MESSAGES);
       } else if (key === "m") {
         let mask = 0;
         for (const m of val.split(",")) {
@@ -960,7 +968,16 @@ export function parseRequest(body: string): ForecastParams {
   // from the stored request to reach the same layout.
   mode = effectiveMode(mode, MODEL_BIT[firstModelKey(modelsMask)]);
 
-  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, alphabet, decoderVersion, userToken, code, startEpochHour };
+  // The reply budget, resolved last because it depends on three tokens at once. A multi-message
+  // wide reply repeats the header in every part, so its budget needs the header's width — read
+  // off the codec the request named. An unknown version falls back to the lowest one this image
+  // serves; the request is rejected for the version before the budget is ever spent.
+  const alphabet = device ? DEVICE_TRANSPORT[device].alphabet : undefined;
+  const codec = decoderVersion === null ? undefined : CODECS[decoderVersion];
+  const headerChars = (codec ?? CODECS[supportedVersions()[0]]).headerChars;
+  maxChars = explicitMaxChars ?? maxCharsFor(device ?? "s", messages, headerChars);
+
+  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, alphabet, messages, decoderVersion, userToken, code, startEpochHour };
 }
 
 function resolveLocation(params: ForecastParams): { lat: number; lon: number; elev_m?: number } {
@@ -1063,6 +1080,15 @@ export function buildLayoutMessage(
     periodHours: layout.periodHours,
     utcOffsetHours: params.utcOffsetHours,
   };
+}
+
+// The reply as the messages it will be sent in. Only a wide reply is ever split: it is the one
+// route where the transport won't reassemble what it breaks, so the parts have to be labelled and
+// self-identifying (see parts.ts). Everything else stays a single string, and its transport
+// concatenates its own segments as it always has.
+export function splitReplyFor(params: ForecastParams, encoded: string, headerChars: number): string[] {
+  if (params.alphabet !== "base32768") return [encoded];
+  return splitReply(encoded, headerChars, widePartBodyChars(headerChars));
 }
 
 // buildFillMessage + encode, for the request path (see fetchForecast).

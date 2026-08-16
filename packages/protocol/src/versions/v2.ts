@@ -1013,6 +1013,7 @@ function decodeBody(
 }
 
 export const v2Codec: VersionedCodec = {
+  headerChars: V2_HEADER_CHARS,
   encode: v2MessageToString,
   decode: v2MessageFromString,
 };

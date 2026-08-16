@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { CODECS, supportedVersions } from "@weather/protocol";
-import { fetchForecast, parseRequest } from "./forecast.js";
+import { fetchForecast, parseRequest, splitReplyFor } from "./forecast.js";
 import { log } from "./log.js";
 
 // The codec server: one container per shipped protocol version, frozen at that version's git
@@ -12,7 +12,10 @@ import { log } from "./log.js";
 //
 // Wire contract with the gateway (frozen across all versions):
 //   POST /encode   body: the raw request text, version token included
-//     200  the encoded forecast message
+//     200  the encoded forecast message, ONE MESSAGE PER LINE — the gateway sends each line as
+//          its own message and needs to know nothing else about them. A reply that fits one
+//          message is a single line, which is what every version before multi-message replies
+//          returned, so a frozen image stays correct without changing.
 //     400  the request is malformed (missing/unsupported version, bad parameters)
 //     503  upstream data unavailable — the gateway replies with its retry text
 const app = new Hono();
@@ -36,7 +39,7 @@ app.post("/encode", async (c) => {
 
   try {
     const encoded = await fetchForecast(params, codec);
-    return c.text(encoded, 200);
+    return c.text(splitReplyFor(params, encoded, codec.headerChars).join("\n"), 200);
   } catch (e) {
     log.error("encode.failed", { version: params.decoderVersion, err: e });
     return c.text("forecast unavailable", 503);

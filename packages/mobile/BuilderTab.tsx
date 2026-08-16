@@ -21,7 +21,7 @@ import { allocCode } from './cache';
 import LocationMap from './LocationMap';
 import HelpScreen from './HelpScreen';
 import { MODELS } from './models';
-import { DEVICES, deviceCode, deviceMaxChars, type Device } from './devices';
+import { DEVICES, deviceCode, deviceMaxChars, supportsMultiMessage, type Device } from './devices';
 
 // The request time, in UTC hours since the epoch, aligned down to the hour. Sent in the request
 // (`t:`) so the forecast window is fixed against delivery delay, and stored in the request
@@ -114,6 +114,13 @@ const DEVICE_INFO = [
   { name: 'inReach', desc: 'Copies the message so that it can be pasted into the Garmin Earthmate app and sent over inReach.' },
   { name: 'iPhone', desc: 'Sends the forecast over a text message, and asks for the reply in a form that fits a single message over satellite. Choose this on an iPhone that can text without cell service.' },
 ];
+
+// Why the iPhone route offers a message-count choice at all: one satellite bubble is a real
+// forecast but a thin one, and the reader deciding between one message and two needs to know
+// that before they are out of range and stuck with the answer.
+const IPHONE_MESSAGE_NOTE =
+  'iPhone satellite messages contain less information than text messages. Send multiple messages '
+  + 'for full forecast details';
 
 // Id of the subgroup the air-quality toggles fold under — stable across a change of scale, which
 // its heading is not, so folding it open survives switching from one index to the other.
@@ -277,7 +284,7 @@ const DEFAULT_GROUPS = new Set<string>();
 // included, even at the default length. `u:` carries the account token so the server can
 // attribute the request to the user. `k:` is the message code the slim response echoes so the
 // client can recover the request context (see cache.ts).
-function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], device: Device, maxChars: number, code: number, startEpochHour: number): string {
+function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], device: Device, messages: number, maxChars: number, code: number, startEpochHour: number): string {
   const parts: string[] = [`v${V2_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   parts.push(`p:${PRIORITIES.find((m) => m.value === mode)!.token}`);
@@ -288,6 +295,9 @@ function buildMsg(token: string, coords: { lat: number; lon: number } | null, mo
   // alphabet as well as its length. `c:` still goes out alongside it: the two agree here, and
   // sending it keeps the request readable and lets a hand-typed one override the length.
   parts.push(`d:${deviceCode(device)}`);
+  // Omitted at one message, which is every route but a split iPhone reply — so the requests that
+  // worked before this existed still go out byte for byte unchanged.
+  if (messages > 1) parts.push(`n:${messages}`);
   parts.push(`c:${maxChars}`);
   parts.push(`u:${token}`);
   parts.push(`k:${code}`);
@@ -383,11 +393,13 @@ interface Props {
   // Owned by App so it can be read from storage behind the splash — see App.tsx.
   device: Device;
   onDeviceChange: (device: Device) => void;
+  twoMessages: boolean;
+  onTwoMessagesChange: (on: boolean) => void;
   // Which air-quality index to offer. A Settings preference, changed there rather than here.
   aqiScale: AqiScale;
 }
 
-export default function BuilderTab({ token, onForecastReceived, active, device, onDeviceChange, aqiScale }: Props) {
+export default function BuilderTab({ token, onForecastReceived, active, device, onDeviceChange, twoMessages, onTwoMessagesChange, aqiScale }: Props) {
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [customCoords, setCustomCoords] = useState('');
@@ -411,10 +423,10 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
   // hence the explicit `=== false`, so the button doesn't flicker disabled on mount.
   const offline = Network.useNetworkState().isConnected === false;
 
-  // The reply always spans a single message, so the budget is one message on whatever route the
-  // reader picked: 160 base-85 characters over SMS or inReach, one satellite bubble's worth of
-  // base32768 on iPhone (see devices.ts).
-  const maxChars = DEFAULT_MESSAGES * deviceMaxChars(device);
+  // How many messages the reply may use, and what that buys. Only the iPhone route can spend
+  // more than one; everywhere else the choice isn't offered and this stays at the default.
+  const messages = supportsMultiMessage(device) && twoMessages ? 2 : DEFAULT_MESSAGES;
+  const maxChars = deviceMaxChars(device, messages);
 
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
   // Expand the always-on variables plus any enabled groups for the stored request context. Only
@@ -528,7 +540,7 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return null;
     const startHour = alignedStartEpochHour();
     const code = await allocCode(token, buildContext(coords, mode, model, varsMask, startHour), `${modeName} · ${model.toUpperCase()}`);
-    return buildMsg(token, coords, mode, model, variableCodes, device, maxChars, code, startHour);
+    return buildMsg(token, coords, mode, model, variableCodes, device, messages, maxChars, code, startHour);
   }
 
   async function handleCopy() {
@@ -757,6 +769,17 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
             onDeviceChange(DEVICES[e.nativeEvent.selectedSegmentIndex].value);
           }}
         />
+        {supportsMultiMessage(device) && (
+          <>
+            <Text style={styles.deviceNote}>{IPHONE_MESSAGE_NOTE}</Text>
+            <Text style={styles.subLabel}>Send two messages</Text>
+            <SegmentedControl
+              values={['On', 'Off']}
+              selectedIndex={twoMessages ? 0 : 1}
+              onChange={(e) => onTwoMessagesChange(e.nativeEvent.selectedSegmentIndex === 0)}
+            />
+          </>
+        )}
       </Section>
 
       <View style={styles.buttons}>
@@ -1005,6 +1028,8 @@ const styles = StyleSheet.create({
   btnText: { fontSize: 16, fontWeight: '600' },
 
   offlineNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, textAlign: 'center', marginTop: 10 },
+  deviceNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: 12 },
+  subLabel: { fontSize: 13, color: '#1c1c1e', fontWeight: '600', marginTop: 14, marginBottom: 8 },
 
   helpLink: { alignSelf: 'center', marginTop: 18, paddingVertical: 6, paddingHorizontal: 12 },
   helpLinkText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },

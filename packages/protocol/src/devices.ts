@@ -1,4 +1,5 @@
 import type { Alphabet } from "./codec.js";
+import { PART_LABEL_CHARS } from "./parts.js";
 
 // The device a request came from, carried as the request's `d:` token. It is the one knob that
 // picks how a reply is written: each route is a different pipe, with its own character set and
@@ -46,4 +47,37 @@ export const DEVICE_TRANSPORT: Record<DeviceCode, DeviceTransport> = {
 
 export function isDeviceCode(value: unknown): value is DeviceCode {
   return typeof value === "string" && value in DEVICE_TRANSPORT;
+}
+
+// The byte cap from the field measurements above. The 70-code-unit cap never binds a wide part —
+// a part is 52 units — so only this one appears in the arithmetic.
+const BUBBLE_BYTES = 140;
+// Every base32768 character is three UTF-8 bytes (its last character is two, so this is an upper
+// bound), and one UTF-16 code unit.
+const WIDE_CHAR_BYTES = 3;
+
+// How many messages a reply may be spread over. A reader has to paste each one, so this is a
+// patience limit rather than a technical one.
+export const MAX_MESSAGES = 4;
+
+// Body characters that fit in ONE labelled part: the bubble's bytes, less the "i/N " label and the
+// repeated header, divided among three-byte characters. With v2's 5-character header that is 43,
+// so a part is 52 code units — well inside the 70-unit cap, which never binds here.
+export function widePartBodyChars(headerChars: number): number {
+  return Math.floor((BUBBLE_BYTES - PART_LABEL_CHARS - headerChars) / WIDE_CHAR_BYTES);
+}
+
+// The encoded length to aim for when a reply may span `messages` messages.
+//
+// The single-message case is deliberately NOT `messages × per-part`: one message carries no label
+// and repeats no header, so it fits 45 body characters where each part of a split reply fits 43.
+// Splitting therefore costs a little per part and wins overall — two messages carry 86 body
+// characters (1290 bits) against one message's 45 (675), and past 1025 bits, which is what a full
+// 160-character SMS holds.
+export function maxCharsFor(code: DeviceCode, messages: number, headerChars: number): number {
+  const transport = DEVICE_TRANSPORT[code];
+  const n = Math.min(Math.max(Math.floor(messages) || 1, 1), MAX_MESSAGES);
+  if (transport.alphabet !== "base32768") return n * transport.maxChars;
+  if (n === 1) return transport.maxChars;
+  return headerChars + n * widePartBodyChars(headerChars);
 }

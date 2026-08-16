@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
 import {
   MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
-  IPHONE_MAX_CHARS, SMS_MAX_CHARS,
+  IPHONE_MAX_CHARS, SMS_MAX_CHARS, MAX_MESSAGES, V2_HEADER_CHARS, maxCharsFor,
 } from "@weather/protocol";
 import { parseRequest } from "../src/forecast.js";
 
@@ -282,5 +282,26 @@ describe("parseRequest", () => {
     expect(parseRequest("d:i c:320")).toMatchObject({ alphabet: "base32768", maxChars: 320 });
     expect(parseRequest("c:320 d:i")).toMatchObject({ alphabet: "base32768", maxChars: 320 });
     expect(parseRequest("c:40 d:g").maxChars).toBe(40);
+  });
+
+  it("n: spreads the reply over more messages", () => {
+    // Two messages buy less than twice one, because each labelled part repeats the header.
+    expect(parseRequest("d:i").maxChars).toBe(maxCharsFor("i", 1, V2_HEADER_CHARS));
+    expect(parseRequest("d:i n:2").maxChars).toBe(maxCharsFor("i", 2, V2_HEADER_CHARS));
+    expect(parseRequest("d:i n:2").maxChars).toBeLessThan(2 * parseRequest("d:i").maxChars);
+    expect(parseRequest("d:i n:2").messages).toBe(2);
+  });
+
+  it("n: defaults to one and clamps rather than rejecting", () => {
+    expect(parseRequest("").messages).toBe(1);
+    expect(parseRequest("d:i n:0").messages).toBe(1);
+    expect(parseRequest("d:i n:-4").messages).toBe(1);
+    expect(parseRequest("d:i n:99").messages).toBe(MAX_MESSAGES);
+    expect(parseRequest("d:i n:nonsense").messages).toBe(1);
+  });
+
+  it("n: is independent of the device, so token order never matters", () => {
+    expect(parseRequest("n:2 d:i").maxChars).toBe(parseRequest("d:i n:2").maxChars);
+    expect(parseRequest("n:2 d:g").maxChars).toBe(2 * SMS_MAX_CHARS);
   });
 });

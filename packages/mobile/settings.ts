@@ -23,6 +23,8 @@ const UNITS_KEY = 'display_units';
 const TIME_FORMAT_KEY = 'time_format';
 const AQI_SCALE_KEY = 'aqi_scale';
 const DEVICE_KEY = 'builder_device';
+const TWO_MESSAGES_KEY = 'builder_two_messages';
+const DEFAULT_TWO_MESSAGES = true;
 const DEFAULT_UNITS: Units = 'metric';
 const DEFAULT_TIME_FORMAT: TimeFormat = '24h';
 // The US index is the default because it's the one this app's readers are most likely to know:
@@ -84,4 +86,21 @@ export async function loadDevice(): Promise<Device> {
 
 export async function saveDevice(device: Device): Promise<void> {
   try { await AsyncStorage.setItem(DEVICE_KEY, device); } catch { /* ignore */ }
+}
+
+// Whether an iPhone satellite reply may span two messages instead of one. Persisted for the same
+// reason as the device: it's a standing choice about how you use the thing you carry, not a
+// per-request one. Defaults ON — one message is a thin forecast, and the reader who turned this
+// off did so knowing that, where a reader who never saw it did not.
+export async function loadTwoMessages(): Promise<boolean> {
+  try {
+    const value = await AsyncStorage.getItem(TWO_MESSAGES_KEY);
+    return value === null ? DEFAULT_TWO_MESSAGES : value === 'true';
+  } catch {
+    return DEFAULT_TWO_MESSAGES;
+  }
+}
+
+export async function saveTwoMessages(on: boolean): Promise<void> {
+  try { await AsyncStorage.setItem(TWO_MESSAGES_KEY, String(on)); } catch { /* ignore */ }
 }

@@ -9,8 +9,8 @@ import SetupScreen from './SetupScreen';
 import { loadToken, clearToken, deleteAccount } from './account';
 import { clearStore } from './cache';
 import {
-  loadAqiScale, loadDevice, loadTimeFormat, loadUnits,
-  saveAqiScale, saveDevice, saveTimeFormat, saveUnits,
+  loadAqiScale, loadDevice, loadTimeFormat, loadTwoMessages, loadUnits,
+  saveAqiScale, saveDevice, saveTimeFormat, saveTwoMessages, saveUnits,
   type AqiScale, type TimeFormat, type Units,
 } from './settings';
 import { DEFAULT_DEVICE, type Device } from './devices';
@@ -36,17 +36,21 @@ export default function App() {
   // reading it inside that tab would draw the action button as Get Forecast and rename it a frame
   // later. Behind the splash, the stored device is already in hand.
   const [device, setDeviceState] = useState<Device>(DEFAULT_DEVICE);
+  // Loaded alongside the device, and for the same reason: it changes the builder's request, so
+  // arriving late would mean the first request of a session could go out under the wrong budget.
+  const [twoMessages, setTwoMessagesState] = useState(true);
 
   // Settled together rather than one at a time: the token decides which screen comes up, and the
   // preferences decide how it reads. Applying them as they land would draw the first screen in
   // metric/24h and correct it a moment later, in full view now that the splash waits for this.
   useEffect(() => {
-    Promise.all([loadToken(), loadUnits(), loadTimeFormat(), loadAqiScale(), loadDevice()])
-      .then(([t, u, f, a, d]) => {
+    Promise.all([loadToken(), loadUnits(), loadTimeFormat(), loadAqiScale(), loadDevice(), loadTwoMessages()])
+      .then(([t, u, f, a, d, m]) => {
         setUnitsState(u);
         setTimeFormatState(f);
         setAqiScaleState(a);
         setDeviceState(d);
+        setTwoMessagesState(m);
         setToken(t);
       })
       // All of them swallow their own storage errors, so this should be unreachable — but the
@@ -81,6 +85,11 @@ export default function App() {
   function setDevice(d: Device) {
     setDeviceState(d);
     saveDevice(d);
+  }
+
+  function setTwoMessages(on: boolean) {
+    setTwoMessagesState(on);
+    saveTwoMessages(on);
   }
 
   function onForecastReceived(encoded: string) {
@@ -149,6 +158,8 @@ export default function App() {
           active={tab === 'builder'}
           device={device}
           onDeviceChange={setDevice}
+          twoMessages={twoMessages}
+          onTwoMessagesChange={setTwoMessages}
           aqiScale={aqiScale}
         />
       </View>

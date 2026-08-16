@@ -2,6 +2,7 @@ export * from "./constants.js";
 export * from "./bits.js";
 export * from "./codec.js";
 export * from "./devices.js";
+export * from "./parts.js";
 export * from "./version.js";
 export * from "./entropy.js";
 export * from "./rans.js";

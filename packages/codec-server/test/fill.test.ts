@@ -3,9 +3,12 @@ import {
   CODECS, V2_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, MODEL_BIT, IPHONE_MAX_CHARS,
+  V2_HEADER_CHARS, maxCharsFor, reassembleReply,
   type RequestContext,
 } from "@weather/protocol";
-import { encodeFillSeq, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.js";
+import {
+  encodeFillSeq, fitFillToBudget, splitReplyFor, type ForecastParams, type HourlyData,
+} from "../src/forecast.js";
 
 // ── Synthetic hourly data ───────────────────────────────────────────────────
 // 15 days of hourly samples starting a day before the request, mirroring the fetch
@@ -67,6 +70,7 @@ function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
     modelsMask: 0b010, // American (US): has freeze + pressure-level vars, so nothing is masked off
     varsMask: TEST_VARS,
     maxChars: 160,
+    messages: 1,
     decoderVersion: V2_VERSION,
     code: 7,
     startEpochHour: REQ_UTC_HOUR,
@@ -142,6 +146,44 @@ describe("encodeFillSeq", () => {
       const decoded = decodeMessage(reply, () => ctx);
       expect(decoded.periods[0].length).toBe(decoded.periodHours!.length);
       expect(decoded.mode).toBe(MODE_AUTO);
+    });
+
+    // Two messages, each its own bubble. This is the mode the builder defaults to, because one
+    // bubble is a real forecast but a thin one.
+    describe("spread over two messages", () => {
+      const p = params({
+        alphabet: "base32768",
+        messages: 2,
+        maxChars: maxCharsFor("i", 2, V2_HEADER_CHARS),
+      });
+      const encoded = fitFillToBudget(
+        encodeSeq(p), (e) => e.length, maxFillSeq(MODE_AUTO), p.maxChars)!;
+      const parts = splitReplyFor(p, encoded, V2_HEADER_CHARS);
+
+      it("sends exactly two, each inside a bubble", () => {
+        expect(parts).toHaveLength(2);
+        for (const part of parts) {
+          expect(Buffer.byteLength(part, "utf8")).toBeLessThanOrEqual(140);
+          expect(part.length).toBeLessThanOrEqual(70);
+        }
+      });
+
+      it("labels them and repeats the header", () => {
+        expect(parts[0].startsWith("1/2 ")).toBe(true);
+        expect(parts[1].startsWith("2/2 ")).toBe(true);
+        const header = (s: string) => s.slice(4, 4 + V2_HEADER_CHARS);
+        expect(header(parts[0])).toBe(header(parts[1]));
+      });
+
+      it("decodes to a fuller forecast than one message, in any paste order", () => {
+        const whole = reassembleReply(parts.join("\n"), () => V2_HEADER_CHARS);
+        expect(whole).toBe(encoded);
+        const decoded = decodeMessage(whole, () => ctx);
+        const reversed = reassembleReply([...parts].reverse().join(" "), () => V2_HEADER_CHARS);
+        expect(decodeMessage(reversed, () => ctx)).toEqual(decoded);
+        expect(decoded.periodHours!.length)
+          .toBeGreaterThan(decodeMessage(reply, () => ctx).periodHours!.length);
+      });
     });
 
     it("carries more of the forecast than base-85 would in the same bubble", () => {

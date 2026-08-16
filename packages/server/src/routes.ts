@@ -27,9 +27,13 @@ const replyUnsupported = (v: number) =>
   `Protocol v${v} is no longer supported. Please update the Going Blue app and resend.`;
 const REPLY_UNAVAILABLE = "Forecast unavailable, please try again.";
 
-function replyFor(result: DispatchResult): string {
+// A codec returns its reply as one message per line — the gateway's whole knowledge of the
+// format. Splitting here rather than in the codec keeps the grammar out of the gateway (see
+// dispatch.ts): a reply that fits one message is one line and comes back as one message, which
+// is what every frozen codec image returns.
+function replyFor(result: DispatchResult): string | string[] {
   switch (result.kind) {
-    case "ok": return result.encoded;
+    case "ok": return result.encoded.split("\n");
     case "missing_version": return REPLY_MISSING_VERSION;
     case "unsupported_version": return replyUnsupported(result.version);
     case "unavailable": return REPLY_UNAVAILABLE;
@@ -68,7 +72,7 @@ export async function forecast(c: Context) {
   switch (result.kind) {
     case "ok": return c.text(result.encoded, 200);
     case "missing_version": return c.text(REPLY_MISSING_VERSION, 400);
-    case "unsupported_version": return c.text(replyFor(result), 400);
+    case "unsupported_version": return c.text(replyUnsupported(result.version), 400);
     case "unavailable": return c.text(REPLY_UNAVAILABLE, 503);
   }
 }
