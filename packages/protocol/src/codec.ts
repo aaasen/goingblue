@@ -30,6 +30,34 @@ const A2I: Record<string, number> = Object.fromEntries(
   [...ALPHABET].map((c, i) => [c, i]),
 );
 
+// A character the alphabet doesn't contain is a corrupt message, not something to read past.
+// Every base-85 decode below goes through this, because both of the ways of carrying on are
+// silent: skipping the character shifts every later digit down a place, and reading it as zero
+// rewrites one digit and leaves the length intact. Either way a damaged message yields a
+// plausible forecast instead of an error, and nothing downstream can tell.
+//
+// Which is not hypothetical. Probe 13 (2026-08-16, docs/private/PROBES.md round 3) found a hop
+// on the inbound SMS leg that deterministically turns the ten Greek characters of GSM-7 into C1
+// controls; the same transcode on somebody's outbound leg is exactly this failure. Naming the
+// character and where it sits is what makes the next such report diagnosable from one message.
+//
+// base32768 needs no equivalent — its decoder already rejects characters outside its repertoire.
+//
+// `where` names the field the index counts from, because these two codecs are handed slices
+// rather than the whole message: an index alone would be ambiguous between the two, and the
+// header's is small enough to be mistaken for the body's.
+function digitAt(c: string, i: number, where: "header" | "body"): number {
+  const idx = A2I[c];
+  if (idx === undefined) {
+    const cp = c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0");
+    throw new Error(
+      `Malformed message: ${JSON.stringify(c)} (U+${cp}) at ${i} of the ${where} ` +
+      `is not a base-85 character`,
+    );
+  }
+  return idx;
+}
+
 export function encode(bits: number[]): string {
   if (bits.length === 0) return "";
   const nChars = nCharsForBits(bits.length);
@@ -46,9 +74,9 @@ export function encode(bits: number[]): string {
 export function decode(s: string, nBits: number): number[] {
   if (nBits === 0) return [];
   let value = 0n;
+  let i = 0;
   for (const c of s) {
-    const idx = A2I[c];
-    if (idx !== undefined) value = value * BASE_BIG + BigInt(idx);
+    value = value * BASE_BIG + BigInt(digitAt(c, i++, "header"));
   }
   const bits: number[] = new Array(nBits).fill(0);
   for (let i = nBits - 1; i >= 0; i--) {
@@ -78,9 +106,9 @@ export function encodeBodyLE(bits: number[]): string {
 export function decodeBodyLE(s: string): number[] {
   let value = 0n;
   let place = 1n;
+  let i = 0;
   for (const c of s) {
-    const idx = A2I[c];
-    if (idx !== undefined) value += BigInt(idx) * place;
+    value += BigInt(digitAt(c, i++, "body")) * place;
     place *= BASE_BIG;
   }
   const bits: number[] = [];

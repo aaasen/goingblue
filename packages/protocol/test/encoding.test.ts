@@ -26,6 +26,8 @@ import {
   aqiMid,
   AQI_US_LOWER,
   AQI_EU_LOWER,
+  ALPHABET,
+  V2_HEADER_CHARS,
 } from "../src/index.js";
 
 // Wind speeds quantize to extended Beaufort forces; tests express speeds as forces and expect
@@ -853,6 +855,56 @@ describe("body decode desync detection", () => {
     expect(() => v2MessageFromString(encoded, () => drifted)).toThrow(/desynced/);
     // The same message with the true context still decodes.
     expect(() => v2MessageFromString(encoded, () => ctxOf(m))).not.toThrow();
+  });
+});
+
+describe("corrupt character rejection", () => {
+  // U+0080 is what the field actually produces: probe 13 (2026-08-16) found a hop that turns
+  // GSM-7's Greek characters into C1 controls, Δ at septet 0x10 arriving as U+0080. É stands for
+  // the milder Latin-1 case. Both are single UTF-16 units, so they corrupt in place.
+  const CORRUPTIONS = [["\u0080", "U\\+0080"], ["\u00C9", "U\\+00C9"]] as const;
+
+  it("throws instead of decoding when a body character is not in the alphabet", () => {
+    const m = msg({});
+    const encoded = v2MessageToString(m);
+    expect(() => v2MessageFromString(encoded, () => ctxOf(m))).not.toThrow();
+
+    // A body character, well past the header.
+    const at = encoded.length - 3;
+    for (const [ch, label] of CORRUPTIONS) {
+      const damaged = encoded.slice(0, at) + ch + encoded.slice(at + 1);
+      expect(() => v2MessageFromString(damaged, () => ctxOf(m))).toThrow(
+        /is not a base-85 character/,
+      );
+      // The message names the character, its code point and where it sits — a corruption
+      // reported from the field has to be diagnosable from one pasted reply.
+      expect(() => v2MessageFromString(damaged, () => ctxOf(m))).toThrow(
+        // The index counts from the body, which starts after the version tag and header.
+        new RegExp(`${label}\\) at ${at - V2_HEADER_CHARS} of the body`),
+      );
+    }
+  });
+
+  it("throws instead of decoding when a header character is not in the alphabet", () => {
+    // The header is the worse of the two: it is read MSB-first, so skipping a character used to
+    // shift every later digit down a place and silently produce a different code and seq.
+    const m = msg({});
+    const encoded = v2MessageToString(m);
+    for (const [ch] of CORRUPTIONS) {
+      const damaged = encoded.slice(0, 2) + ch + encoded.slice(3);
+      expect(() => v2MessageFromString(damaged, () => ctxOf(m))).toThrow(
+        /is not a base-85 character/,
+      );
+    }
+  });
+
+  it("still decodes a message whose every character is in the alphabet", () => {
+    // The guard must not fire on the alphabet's own edges — the first and last characters of
+    // ALPHABET are the ones an off-by-one in the lookup would drop.
+    const m = msg({});
+    expect(() => v2MessageFromString(v2MessageToString(m), () => ctxOf(m))).not.toThrow();
+    expect(ALPHABET).toContain("!");
+    expect(ALPHABET).toContain("z");
   });
 });
 
