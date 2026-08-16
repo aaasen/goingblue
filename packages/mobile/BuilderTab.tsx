@@ -385,6 +385,13 @@ function modelStackLabel(
   return labels.length ? labels.join(' › ') : null;
 }
 
+// A forecast fetch on the wire. `cancelled` separates an abort we raised on purpose from the
+// timeout's and from any other failure, which the catch can't tell apart on its own.
+interface InFlight {
+  controller: AbortController;
+  cancelled: boolean;
+}
+
 interface Props {
   token: string;
   onForecastReceived: (encoded: string) => void;
@@ -425,6 +432,24 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
   // How many messages the reply may use, and what that buys. Only the iPhone route can spend
   // more than one; everywhere else the choice isn't offered and this stays at the default.
   const messages = supportsMultiMessage(device) && twoMessages ? 2 : DEFAULT_MESSAGES;
+
+  // The forecast fetch currently on the wire, so something other than its own timeout can call it
+  // off. Only the internet route has one — the other devices hand the request to another app and
+  // are done with it.
+  const inFlight = useRef<InFlight | null>(null);
+
+  // Drop the in-flight fetch, if there is one. The request itself is still valid — what's changed
+  // is that its reply would come back in the wrong shape for the route now selected, so it's
+  // abandoned rather than left to land. Marking it cancelled first keeps its own catch quiet: an
+  // abort we asked for isn't an error to report.
+  function cancelFetch() {
+    const req = inFlight.current;
+    if (req == null) return;
+    req.cancelled = true;
+    req.controller.abort();
+    inFlight.current = null;
+    setFetching(false);
+  }
 
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
   // Expand the always-on variables plus any enabled groups for the stored request context. Only
@@ -586,27 +611,38 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
     const msg = await prepareMessage();
     if (msg == null) return;
     setFetching(true);
-    // An abort we raised ourselves is indistinguishable from any other in the catch, so the timer
-    // records that it fired. AbortController rather than AbortSignal.timeout, which React Native's
-    // fetch polyfill doesn't carry.
-    const controller = new AbortController();
+    // An abort we raised ourselves is indistinguishable from any other in the catch, so both the
+    // timer and cancelFetch record that they fired. AbortController rather than
+    // AbortSignal.timeout, which React Native's fetch polyfill doesn't carry.
+    const req: InFlight = { controller: new AbortController(), cancelled: false };
+    inFlight.current = req;
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, FETCH_TIMEOUT_MS);
+    const timer = setTimeout(() => { timedOut = true; req.controller.abort(); }, FETCH_TIMEOUT_MS);
     try {
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: msg,
-        signal: controller.signal,
+        signal: req.controller.signal,
       });
       if (!resp.ok) throw new Error(await resp.text());
-      onForecastReceived(await resp.text());
+      const encoded = await resp.text();
+      // A reply that landed in the gap between the abort and this line answers a request the user
+      // has already walked away from — hand it on and the decoder opens on a route they left.
+      if (req.cancelled) return;
+      onForecastReceived(encoded);
     } catch (e) {
+      if (req.cancelled) return;
       if (timedOut) Alert.alert('No connection', OFFLINE_MESSAGE);
       else Alert.alert('Error', String(e));
     } finally {
       clearTimeout(timer);
-      setFetching(false);
+      // A cancel has already cleared the slot and stopped the spinner, and may have put a newer
+      // request in this one's place — either way this reply is no longer the one on screen.
+      if (inFlight.current === req) {
+        inFlight.current = null;
+        setFetching(false);
+      }
     }
   }
 
@@ -764,6 +800,11 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
           selectedIndex={DEVICES.findIndex((d) => d.value === device)}
           onChange={(e) => {
             setMessageCopied(false);
+            // The device is what the reply's length and alphabet are cut to, so a fetch started
+            // under the old one can only come back wrong. Switching is also how someone gets out
+            // of a stalled internet request — leaving it running would spin the button on a route
+            // that no longer fetches anything.
+            cancelFetch();
             onDeviceChange(DEVICES[e.nativeEvent.selectedSegmentIndex].value);
           }}
         />
