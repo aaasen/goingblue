@@ -1,6 +1,7 @@
 import { v2Codec } from "./versions/v2.js";
 import { peekVersion } from "./version.js";
 import type { ForecastMessage, VersionedCodec, ContextResolver } from "./model.js";
+import type { Alphabet } from "./codec.js";
 
 // The single source of truth mapping a protocol version number to its codec.
 //
@@ -35,12 +36,13 @@ export function decodeMessage(s: string, resolve: ContextResolver): ForecastMess
   return codec.decode(s, resolve);
 }
 
-// Encodes a message using the codec for its `version` field.
-export function encodeMessage(msg: ForecastMessage): string {
+// Encodes a message using the codec for its `version` field, writing the body in `alphabet`
+// (default base-85 — see the Alphabet type in codec.ts).
+export function encodeMessage(msg: ForecastMessage, alphabet?: Alphabet): string {
   const codec = CODECS[msg.version];
   if (!codec) {
     const supported = supportedVersions().map((v) => `v${v}`).join(", ");
     throw new Error(`Unsupported protocol version: v${msg.version}. Supported: ${supported}`);
   }
-  return codec.encode(msg);
+  return codec.encode(msg, alphabet);
 }

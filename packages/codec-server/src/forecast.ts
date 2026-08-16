@@ -18,6 +18,10 @@ import {
   type Period,
   type ForecastMessage,
   type VersionedCodec,
+  type Alphabet,
+  DEVICE_TRANSPORT,
+  isDeviceCode,
+  SMS_MAX_CHARS,
 } from "@weather/protocol";
 import { fetchWeatherApi } from "openmeteo";
 import { Variable } from "@openmeteo/sdk/variable.js";
@@ -819,6 +823,9 @@ export interface ForecastParams {
   modelsMask: number;
   varsMask: number;
   maxChars: number;
+  // Character set for the response body, from the request's `d:` device token. Absent means
+  // base-85, which is what every device but iPhone uses (see DEVICE_TRANSPORT).
+  alphabet?: Alphabet;
   // Protocol version from the request's `vN` token, or null when the token is absent. A version
   // is required — there is no default: each deployed codec server serves the version(s) baked
   // into its image, and defaulting would silently bind old hand-typed requests to whatever
@@ -833,7 +840,9 @@ export interface ForecastParams {
   userToken: string | null;
 }
 
-const DEFAULT_MAX_CHARS = 160; // default response length cap (Garmin inReach reply limit)
+// Default response length cap when the request names no device: one SMS segment, the narrowest
+// route's limit (Garmin inReach) and so the safe choice for an unidentified sender.
+const DEFAULT_MAX_CHARS = SMS_MAX_CHARS;
 // `p:` token values → priority modes; a missing or unknown token means Auto.
 const MODE_TOKENS: Record<string, number> = {
   d: MODE_DETAIL, a: MODE_AUTO, r: MODE_RANGE,
@@ -849,7 +858,9 @@ export function parseRequest(body: string): ForecastParams {
   let modelsMask = 1; // Best Match default (bit 0)
   // Core variables are implicit; `v:` carries only user-configurable additions.
   let varsMask = ALWAYS_VARS_MASK;
-  let maxChars = DEFAULT_MAX_CHARS; // override with a `c:` token in the request
+  let maxChars = DEFAULT_MAX_CHARS; // set from `d:`, or overridden outright by an explicit `c:`
+  let maxCharsFromRequest = false;  // whether a `c:` token was seen, so `d:` can't overwrite it
+  let alphabet: Alphabet | undefined; // set from `d:`; absent means base-85
   let decoderVersion: number | null = null; // set from a `vN` token; required, no default
   let userToken: string | null = null; // set from a `u:` token in the request
   let code = 0; // client message code (`k:` token); echoed in the response so the client can
@@ -886,7 +897,20 @@ export function parseRequest(body: string): ForecastParams {
         if (!isNaN(n) && n >= -12 && n <= 14) utcOffsetHours = n;
       } else if (key === "c") {
         const n = parseInt(val);
-        if (!isNaN(n)) maxChars = Math.max(1, n);
+        if (!isNaN(n)) {
+          maxChars = Math.max(1, n);
+          maxCharsFromRequest = true;
+        }
+      } else if (key === "d") {
+        // The sending device: it picks both the response alphabet and how much of it fits (see
+        // DEVICE_TRANSPORT). An explicit `c:` still wins — the benchmark and /encode drive the
+        // budget directly — so only the alphabet is unconditional. Unknown codes keep the
+        // defaults, which is the conservative direction: base-85 reaches every device.
+        if (isDeviceCode(val)) {
+          const transport = DEVICE_TRANSPORT[val];
+          alphabet = transport.alphabet;
+          if (!maxCharsFromRequest) maxChars = transport.maxChars;
+        }
       } else if (key === "m") {
         let mask = 0;
         for (const m of val.split(",")) {
@@ -936,7 +960,7 @@ export function parseRequest(body: string): ForecastParams {
   // from the stored request to reach the same layout.
   mode = effectiveMode(mode, MODEL_BIT[firstModelKey(modelsMask)]);
 
-  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, decoderVersion, userToken, code, startEpochHour };
+  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, alphabet, decoderVersion, userToken, code, startEpochHour };
 }
 
 function resolveLocation(params: ForecastParams): { lat: number; lon: number; elev_m?: number } {
@@ -1054,7 +1078,7 @@ export function encodeFillSeq(
   codec: VersionedCodec,
 ): string | null {
   const msg = buildFillMessage(h, times, params, seq, lat, lon, elevation, modelKey);
-  return msg === null ? null : codec.encode(msg);
+  return msg === null ? null : codec.encode(msg, params.alphabet);
 }
 
 // Duration-first fill: one upstream fetch covers every candidate layout, then a binary search

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   CODECS, V2_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
-  decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, MODEL_BIT, type RequestContext,
+  decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, MODEL_BIT, IPHONE_MAX_CHARS,
+  type RequestContext,
 } from "@weather/protocol";
 import { encodeFillSeq, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.js";
 
@@ -116,6 +117,41 @@ describe("encodeFillSeq", () => {
     for (let i = 1; i < sizes.length; i++) {
       expect(sizes[i]).toBeGreaterThan(sizes[i - 1]);
     }
+  });
+
+  // The whole point of the wide alphabet: a reply an iPhone receives over satellite has to land
+  // in ONE bubble, because Apple's relay splits anything larger and never reassembles it. The
+  // bubble is min(70 UTF-16 code units, ~140 bytes of compressed UTF-8) — see PROBES.md — so
+  // this measures the encoded reply against BOTH, in the units each cap is actually expressed in.
+  describe("an iPhone reply fits one satellite bubble", () => {
+    const iphone = params({ alphabet: "base32768", maxChars: IPHONE_MAX_CHARS });
+    const reply = fitFillToBudget(
+      encodeSeq(iphone), (e) => e.length, maxFillSeq(MODE_AUTO), iphone.maxChars)!;
+
+    it("clears both of the relay's caps", () => {
+      expect(reply.length).toBeLessThanOrEqual(70);                        // UTF-16 code units
+      expect(Buffer.byteLength(reply, "utf8")).toBeLessThanOrEqual(140);   // UTF-8 bytes
+    });
+
+    it("spends the budget it was given", () => {
+      expect(reply.length).toBeLessThanOrEqual(IPHONE_MAX_CHARS);
+      expect(reply.length).toBeGreaterThan(IPHONE_MAX_CHARS - 4);
+    });
+
+    it("decodes to the same forecast the reader asked for", () => {
+      const decoded = decodeMessage(reply, () => ctx);
+      expect(decoded.periods[0].length).toBe(decoded.periodHours!.length);
+      expect(decoded.mode).toBe(MODE_AUTO);
+    });
+
+    it("carries more of the forecast than base-85 would in the same bubble", () => {
+      // Same cap in code units — the one an all-ASCII reply would hit first — so this is the
+      // like-for-like comparison: 70 characters of base-85 against 70 of the wide encoding.
+      const narrow = fitFillToBudget(
+        encodeSeq(params({ maxChars: 70 })), (e) => e.length, maxFillSeq(MODE_AUTO), 70)!;
+      const periods = (s: string) => decodeMessage(s, () => ctx).periodHours!.length;
+      expect(periods(reply)).toBeGreaterThan(periods(narrow));
+    });
   });
 
   it("returns null when the upstream data doesn't cover the window", () => {

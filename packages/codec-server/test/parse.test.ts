@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
-import { MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE } from "@weather/protocol";
+import {
+  MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
+  IPHONE_MAX_CHARS, SMS_MAX_CHARS,
+} from "@weather/protocol";
 import { parseRequest } from "../src/forecast.js";
 
 const newToken = () => generateToken((n) => Uint8Array.from(randomBytes(n)));
@@ -256,5 +259,28 @@ describe("parseRequest", () => {
     expect(parseRequest("u:000000000000000").userToken).toBeNull();
     // Contains 'u', which is outside the Crockford alphabet → rejected.
     expect(parseRequest("u:uuuuuuuuuuuuuuuu").userToken).toBeNull();
+  });
+
+  it("d: picks the reply alphabet and length together", () => {
+    // iPhone is the only route wide enough to pay for base32768, and it buys one satellite
+    // bubble's worth — see DEVICE_TRANSPORT.
+    expect(parseRequest("d:i")).toMatchObject({ alphabet: "base32768", maxChars: IPHONE_MAX_CHARS });
+    for (const code of ["s", "z", "d", "g"]) {
+      expect(parseRequest(`d:${code}`)).toMatchObject({ alphabet: "base85", maxChars: SMS_MAX_CHARS });
+    }
+  });
+
+  it("d: absent or unknown keeps the base-85 SMS defaults", () => {
+    expect(parseRequest("").alphabet).toBeUndefined();
+    expect(parseRequest("").maxChars).toBe(SMS_MAX_CHARS);
+    // An unknown code must not silently widen the alphabet: base-85 reaches every device.
+    expect(parseRequest("d:x").alphabet).toBeUndefined();
+    expect(parseRequest("d:x").maxChars).toBe(SMS_MAX_CHARS);
+  });
+
+  it("an explicit c: overrides the device's length in either token order", () => {
+    expect(parseRequest("d:i c:320")).toMatchObject({ alphabet: "base32768", maxChars: 320 });
+    expect(parseRequest("c:320 d:i")).toMatchObject({ alphabet: "base32768", maxChars: 320 });
+    expect(parseRequest("c:40 d:g").maxChars).toBe(40);
   });
 });

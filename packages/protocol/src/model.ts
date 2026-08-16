@@ -1,4 +1,5 @@
 import { WMO_CODES } from "./constants.js";
+import type { Alphabet } from "./codec.js";
 
 export const WMO2IDX: Record<number, number> = Object.fromEntries(
   WMO_CODES.map((c, i) => [c, i]),
@@ -148,8 +149,10 @@ export type ContextResolver = (code: number) => RequestContext | undefined;
 // A codec for a single protocol version. The header format is version-specific, so the
 // codec is parameterized by its message type (defaulting to the common `ForecastMessage`).
 // `decode` takes a ContextResolver because the slim response omits the request-echo fields.
+// `alphabet` selects the body's character set (default base-85); decode needs no such argument
+// because a body says which alphabet it is in — see bodyAlphabet.
 export interface VersionedCodec<M extends ForecastMessage = ForecastMessage> {
-  encode(msg: M): string;
+  encode(msg: M, alphabet?: Alphabet): string;
   decode(str: string, resolve: ContextResolver): M;
 }
 

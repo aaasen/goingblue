@@ -21,7 +21,7 @@ import { allocCode } from './cache';
 import LocationMap from './LocationMap';
 import HelpScreen from './HelpScreen';
 import { MODELS } from './models';
-import { DEVICES, type Device } from './devices';
+import { DEVICES, deviceCode, deviceMaxChars, type Device } from './devices';
 
 // The request time, in UTC hours since the epoch, aligned down to the hour. Sent in the request
 // (`t:`) so the forecast window is fixed against delivery delay, and stored in the request
@@ -39,7 +39,8 @@ function requestOffsetHours(coords: { lat: number; lon: number } | null, startEp
   return coords ? offsetHoursAt(coords.lat, coords.lon, startEpochHour * 3600000) : deviceOffsetHours();
 }
 
-const CHARS_PER_MESSAGE = 160; // one SMS segment holds 160 characters (satellite messengers bill per segment)
+// How many characters one message holds is now a property of the route, not a constant — see
+// deviceMaxChars in devices.ts.
 const FORECAST_NUMBER = '(425) 434-5858';
 // Same number in E.164, for the sms: URL — the display form's punctuation isn't a valid recipient.
 const FORECAST_NUMBER_E164 = '+14254345858';
@@ -111,6 +112,7 @@ const DEVICE_INFO = [
   { name: 'Internet', desc: 'Fetches the forecast over a WiFi or cellular data connection.' },
   { name: 'SMS', desc: 'Sends the forecast over a text message for weak cell reception without data.' },
   { name: 'inReach', desc: 'Copies the message so that it can be pasted into the Garmin Earthmate app and sent over inReach.' },
+  { name: 'iPhone', desc: 'Sends the forecast over a text message, and asks for the reply in a form that fits a single message over satellite. Choose this on an iPhone that can text without cell service.' },
 ];
 
 // Id of the subgroup the air-quality toggles fold under — stable across a change of scale, which
@@ -275,13 +277,17 @@ const DEFAULT_GROUPS = new Set<string>();
 // included, even at the default length. `u:` carries the account token so the server can
 // attribute the request to the user. `k:` is the message code the slim response echoes so the
 // client can recover the request context (see cache.ts).
-function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], maxChars: number, code: number, startEpochHour: number): string {
+function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], device: Device, maxChars: number, code: number, startEpochHour: number): string {
   const parts: string[] = [`v${V2_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   parts.push(`p:${PRIORITIES.find((m) => m.value === mode)!.token}`);
   parts.push(`z:${requestOffsetHours(coords, startEpochHour)}`);
   parts.push(`m:${model}`);
   if (variableCodes.length) parts.push(`v:${variableCodes.join('')}`);
+  // `d:` is what tells the server which pipe the reply has to fit down — it picks the response
+  // alphabet as well as its length. `c:` still goes out alongside it: the two agree here, and
+  // sending it keeps the request readable and lets a hand-typed one override the length.
+  parts.push(`d:${deviceCode(device)}`);
   parts.push(`c:${maxChars}`);
   parts.push(`u:${token}`);
   parts.push(`k:${code}`);
@@ -405,8 +411,10 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
   // hence the explicit `=== false`, so the button doesn't flicker disabled on mount.
   const offline = Network.useNetworkState().isConnected === false;
 
-  // The reply always spans a single 160-char message; that sets the response length budget.
-  const maxChars = DEFAULT_MESSAGES * CHARS_PER_MESSAGE;
+  // The reply always spans a single message, so the budget is one message on whatever route the
+  // reader picked: 160 base-85 characters over SMS or inReach, one satellite bubble's worth of
+  // base32768 on iPhone (see devices.ts).
+  const maxChars = DEFAULT_MESSAGES * deviceMaxChars(device);
 
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
   // Expand the always-on variables plus any enabled groups for the stored request context. Only
@@ -520,7 +528,7 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return null;
     const startHour = alignedStartEpochHour();
     const code = await allocCode(token, buildContext(coords, mode, model, varsMask, startHour), `${modeName} · ${model.toUpperCase()}`);
-    return buildMsg(token, coords, mode, model, variableCodes, maxChars, code, startHour);
+    return buildMsg(token, coords, mode, model, variableCodes, device, maxChars, code, startHour);
   }
 
   async function handleCopy() {
@@ -600,6 +608,9 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
     internet: { onPress: handleFetch, disabled: fetchDisabled, busy: fetching || locating },
     sms: { onPress: handleSendSms, disabled: sendDisabled, busy: locating },
     inreach: { onPress: handleCopy, disabled: sendDisabled, busy: locating },
+    // iPhone hands off to Messages exactly as SMS does — same text, same recipient. What differs
+    // is the reply, which comes back in the wide alphabet so it lands in a single bubble.
+    iphone: { onPress: handleSendSms, disabled: sendDisabled, busy: locating },
   };
   const deviceSpec = DEVICES.find((d) => d.value === device)!;
   const action = ACTIONS[device];

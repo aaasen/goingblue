@@ -3,7 +3,9 @@ import {
 } from "../constants.js";
 import { layoutFor, maxFillSeq, effectiveMode } from "../layout.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "../bits.js";
-import { encode, decode, encodeBodyLE, decodeBodyLE, nCharsForBits } from "../codec.js";
+import {
+  encode, decode, encodeBodyLE, encodeBodyWide, decodeBodyAuto, nCharsForBits, type Alphabet,
+} from "../codec.js";
 import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js";
 import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, VersionedCodec, ContextResolver } from "../model.js";
@@ -674,9 +676,16 @@ function buildBestBody(msg: ForecastMessage, sink?: ColumnSink): { em: ReturnTyp
   return best;
 }
 
-export function v2MessageToString(msg: ForecastMessage): string {
+// The version tag and packed header are always base-85; only the body follows `alphabet`. See
+// the Alphabet type in codec.ts for why the ASCII prefix is the cheaper choice even on the
+// route that wants a wide body.
+function encodeBodyIn(alphabet: Alphabet, bits: number[]): string {
+  return alphabet === "base32768" ? encodeBodyWide(bits) : encodeBodyLE(bits);
+}
+
+export function v2MessageToString(msg: ForecastMessage, alphabet: Alphabet = "base85"): string {
   const { em, cls } = buildBestBody(msg);
-  return encodeVersion(VERSION) + encode(buildHeader(msg, cls)) + encodeBodyLE(em.bits);
+  return encodeVersion(VERSION) + encode(buildHeader(msg, cls)) + encodeBodyIn(alphabet, em.bits);
 }
 
 // One column's contribution to a message: its model cost in (fractional) bits.
@@ -696,11 +705,11 @@ export interface V2Breakdown {
   columns: ColumnBreakdown[];
 }
 
-export function v2EncodeBreakdown(msg: ForecastMessage): V2Breakdown {
+export function v2EncodeBreakdown(msg: ForecastMessage, alphabet: Alphabet = "base85"): V2Breakdown {
   const columns: ColumnBreakdown[] = [];
   const { em, cls } = buildBestBody(msg, (name, bits) => columns.push({ name, bits }));
   const body = em.bits;
-  const encoded = encodeVersion(VERSION) + encode(buildHeader(msg, cls)) + encodeBodyLE(body);
+  const encoded = encodeVersion(VERSION) + encode(buildHeader(msg, cls)) + encodeBodyIn(alphabet, body);
   const modelBits = columns.reduce((s, c) => s + c.bits, 0);
   return {
     encoded,
@@ -757,12 +766,13 @@ export function v2MessageFromString(s: string, resolve: ContextResolver): Foreca
   const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
 
   // The body has no length field: the rANS stream is self-delimiting given the known structure
-  // (nPeriods, nModels, vars_mask). decodeBodyLE materializes the meaningful low bits; renorm
-  // words past them read as 0 — exactly the trailing zero words encodeBodyLE dropped. The first
-  // period's UTC start hour and the UTC offset key the temp time-of-day tables — the identical
-  // values the encoder used (msg.hour is layout-derived on both sides).
+  // (nPeriods, nModels, vars_mask). decodeBodyAuto materializes the meaningful low bits, in
+  // whichever alphabet the body arrived in; renorm words past them read as 0 — exactly the
+  // trailing zero words the body encoder dropped. The first period's UTC start hour and the UTC
+  // offset key the temp time-of-day tables — the identical values the encoder used (msg.hour is
+  // layout-derived on both sides).
   const periods = decodeBody(
-    decodeBodyLE(rest.slice(HEADER_CHARS)), CLASS_BOOKS[codebookClass], vars_mask,
+    decodeBodyAuto(rest.slice(HEADER_CHARS)), CLASS_BOOKS[codebookClass], vars_mask,
     layout.periodHours, firstStart.getUTCHours(), utcOffsetHours, 1);
 
   return {
