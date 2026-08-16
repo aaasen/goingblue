@@ -1,5 +1,6 @@
 import { WMO_CODES } from "./constants.js";
 import type { Alphabet } from "./codec.js";
+import type { DeviceCode } from "./devices.js";
 
 export const WMO2IDX: Record<number, number> = Object.fromEntries(
   WMO_CODES.map((c, i) => [c, i]),
@@ -140,6 +141,15 @@ export interface RequestContext {
   // the period layout the slim header omits — see layout.ts.
   mode: number;
   utcOffsetHours: number;
+  // The route the request left by (the `d:` token), which is what decides the alphabet the reply
+  // is written in — the server reads it off DEVICE_TRANSPORT to encode, and the decoder reads it
+  // off here to decode, so the two ends agree without the reply carrying a flag.
+  //
+  // Optional because a stored request from before this was recorded has none, and because most
+  // contexts built in tests and tooling don't care; a context without one falls back to guessing
+  // the alphabet from the body (see bodyAlphabet), which is exact for every alphabet that
+  // predates it.
+  device?: DeviceCode;
 }
 
 // Resolves a message code to the originating request's context. Returns undefined when the code

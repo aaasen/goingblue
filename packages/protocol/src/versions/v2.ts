@@ -7,6 +7,7 @@ import {
   encode, decode, encodeBodyLE, encodeBodyWide, decodeBodyAuto, nCharsForBits, type Alphabet,
 } from "../codec.js";
 import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "../version.js";
+import { DEVICE_TRANSPORT } from "../devices.js";
 import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, MessageHeader, VersionedCodec, ContextResolver } from "../model.js";
 import {
@@ -680,7 +681,7 @@ function buildBestBody(msg: ForecastMessage, sink?: ColumnSink): { em: ReturnTyp
 // the Alphabet type in codec.ts for why the ASCII prefix is the cheaper choice even on the
 // route that wants a wide body.
 function encodeBodyIn(alphabet: Alphabet, bits: number[]): string {
-  return alphabet === "base32768" ? encodeBodyWide(bits) : encodeBodyLE(bits);
+  return alphabet === "base32768" ? encodeBodyWide(bits) : encodeBodyLE(bits, alphabet);
 }
 
 export function v2MessageToString(msg: ForecastMessage, alphabet: Alphabet = "base85"): string {
@@ -756,7 +757,7 @@ export function v2MessageFromString(s: string, resolve: ContextResolver): Foreca
   // Recover the request-echo fields the slim header omits.
   const ctx = resolve(code);
   if (!ctx) throw new Error(`Unknown forecast code ${code}: no matching request in the store`);
-  const { model, vars_mask, lat, lon, start, mode, utcOffsetHours } = ctx;
+  const { model, vars_mask, lat, lon, start, mode, utcOffsetHours, device } = ctx;
   if (mode == null || utcOffsetHours == null)
     throw new Error(`Forecast code ${code} matches a request without a priority mode`);
   // The mode the message was BUILT under, which for a short-horizon center isn't the one that
@@ -783,8 +784,15 @@ export function v2MessageFromString(s: string, resolve: ContextResolver): Foreca
   // trailing zero words the body encoder dropped. The first period's UTC start hour and the UTC
   // offset key the temp time-of-day tables — the identical values the encoder used (msg.hour is
   // layout-derived on both sides).
+  //
+  // The alphabet comes from the request's route, not the body: the server chose it off the same
+  // DEVICE_TRANSPORT row when it encoded, so reading it back off the stored `d:` is exact where
+  // inspecting the characters can only be a guess. A context without a route (one stored before
+  // the field existed) leaves decodeBodyAuto to guess, which it can still do correctly for every
+  // alphabet older than that context.
   const periods = decodeBody(
-    decodeBodyAuto(rest.slice(HEADER_CHARS)), CLASS_BOOKS[codebookClass], vars_mask,
+    decodeBodyAuto(rest.slice(HEADER_CHARS), device && DEVICE_TRANSPORT[device].alphabet),
+    CLASS_BOOKS[codebookClass], vars_mask,
     layout.periodHours, firstStart.getUTCHours(), utcOffsetHours, 1);
 
   return {

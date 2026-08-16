@@ -306,7 +306,7 @@ function buildMsg(token: string, coords: { lat: number; lon: number } | null, mo
 
 // The request context the client stores under the message code, mirroring how the server will
 // parse this request (so the recovered fields exactly match what the response was encoded with).
-function buildContext(coords: { lat: number; lon: number }, mode: number, model: string, varsMask: number, startEpochHour: number): RequestContext {
+function buildContext(coords: { lat: number; lon: number }, mode: number, model: string, varsMask: number, startEpochHour: number, device: Device): RequestContext {
   return {
     mode,
     utcOffsetHours: requestOffsetHours(coords, startEpochHour),
@@ -315,6 +315,10 @@ function buildContext(coords: { lat: number; lon: number }, mode: number, model:
     lat: coords.lat,
     lon: coords.lon,
     start: startEpochHour * 3600000, // UTC epoch ms
+    // The route decides the reply's alphabet, so the decoder needs it as much as the server does.
+    // Stored with the request rather than read from the selector at decode time: the selector can
+    // move between sending and reading, and the reply was written for the route it left by.
+    device: deviceCode(device),
   };
 }
 
@@ -562,7 +566,7 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return null;
     const startHour = alignedStartEpochHour();
-    const code = await allocCode(token, buildContext(coords, mode, model, varsMask, startHour), `${modeName} · ${model.toUpperCase()}`);
+    const code = await allocCode(token, buildContext(coords, mode, model, varsMask, startHour, device), `${modeName} · ${model.toUpperCase()}`);
     return buildMsg(token, coords, mode, model, variableCodes, device, messages, code, startHour);
   }
 

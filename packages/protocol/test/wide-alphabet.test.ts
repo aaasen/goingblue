@@ -137,10 +137,16 @@ describe("the iPhone one-bubble budget", () => {
     expect(replyBytes(IPHONE_MAX_CHARS + 1)).toBeGreaterThan(BUBBLE_BYTES);
   });
 
-  it("routes iPhone to the wide alphabet and everything else to base-85", () => {
+  it("routes iPhone to the wide alphabet, SMS to base-124, and the rest to base-85", () => {
     expect(DEVICE_TRANSPORT.i).toEqual({ alphabet: "base32768", maxChars: IPHONE_MAX_CHARS });
-    for (const code of ["s", "z", "d", "g"] as const) {
+    // SMS spends the whole of GSM-7 basic (see sms-alphabet.test.ts); the routes that can't take
+    // it stay on the intersection with ASCII. Every one of them is still a single 160-char
+    // segment — the alphabet changes what a character carries, not how many there are.
+    expect(DEVICE_TRANSPORT.s.alphabet).toBe("base124");
+    for (const code of ["z", "d", "g"] as const) {
       expect(DEVICE_TRANSPORT[code].alphabet).toBe("base85");
+    }
+    for (const code of ["s", "z", "d", "g"] as const) {
       expect(DEVICE_TRANSPORT[code].maxChars).toBe(160);
     }
   });

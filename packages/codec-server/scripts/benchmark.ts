@@ -40,7 +40,7 @@ import { join } from "node:path";
 import { adjustPrecipPhase, buildFillMessage, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import {
   VARS_BIT, ALWAYS_VARS, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
-  fillProfile, maxFillSeq, v2EncodeBreakdown, V2_VERSION,
+  fillProfile, maxFillSeq, v2EncodeBreakdown, V2_VERSION, type Alphabet,
   type ForecastMessage, type V2Breakdown,
 } from "@weather/protocol";
 
@@ -380,6 +380,11 @@ interface Args {
   split: "train" | "eval" | "all"; // which held-out split the report covers (--location bypasses)
   requestHour: number;   // local hour of day the request is assumed to arrive at
   maxChars: number;
+  // Which alphabet the body is written in, i.e. how many bits a reply character carries. It is a
+  // route property in production (see DEVICE_TRANSPORT), but the benchmark takes it directly so a
+  // run names what it measured rather than implying a device. Default base-85 keeps every earlier
+  // run comparable; it is still a real route's alphabet (internet and inReach both keep it).
+  alphabet: Alphabet;
   verbose: boolean;
   includeIncomplete: boolean;
   open: boolean; // open the HTML report when done (default true; --no-open to suppress)
@@ -420,6 +425,7 @@ Report options
                             training, the default), train, or all; --location bypasses this
   --request-hour <h>        local hour the request is assumed to arrive at, 0-23 (default 7)
   --max-chars <n>           message budget in characters (default 160)
+  --alphabet <name>         body alphabet: base85 (default), base124 (the SMS route), base32768
   --include-incomplete      keep forecasts with fully-null base series
   --no-open                 don't open the HTML report in the browser
 
@@ -440,8 +446,8 @@ function parseArgs(argv: string[]): Args {
   const args: Args = {
     limit: 0, concurrency: 8, dryRun: false, collectOnly: false, reportOnly: false, pilot: false,
     validate: false,
-    mode: MODE_AUTO, split: "eval", requestHour: 7, maxChars: 160, verbose: false,
-    includeIncomplete: false, open: true,
+    mode: MODE_AUTO, split: "eval", requestHour: 7, maxChars: 160, alphabet: "base85",
+    verbose: false, includeIncomplete: false, open: true,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -461,9 +467,13 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--split") args.split = argv[++i] as Args["split"];
     else if (a === "--request-hour") args.requestHour = parseInt(argv[++i], 10);
     else if (a === "--max-chars") args.maxChars = parseInt(argv[++i], 10);
+    else if (a === "--alphabet") args.alphabet = argv[++i] as Alphabet;
     else if (a === "--location") args.location = argv[++i];
     else if (a === "--source") args.source = argv[++i];
     else throw new Error(`Unknown argument: ${a} (--help lists the options)`);
+  }
+  if (!["base85", "base124", "base32768"].includes(args.alphabet)) {
+    throw new Error(`--alphabet must be one of base85, base124, base32768`);
   }
   if (!MODES.includes(args.mode)) {
     throw new Error(`--mode must be one of ${MODES.map(modeLabel).join(", ").toLowerCase()}`);
@@ -777,13 +787,14 @@ function fitFill(
   mode: number,
   varsMask: number,
   maxChars: number,
+  alphabet: Alphabet,
 ): Fit | null {
   return fitFillToBudget<Fit>(
     (seq) => {
       const msg = msgAt(seq);
       if (msg === null) return null; // upstream gap — unservable, same as in production
       const withVars: ForecastMessage = { ...msg, vars_mask: varsMask };
-      return { seq, periods: withVars.periods[0].length, breakdown: v2EncodeBreakdown(withVars) };
+      return { seq, periods: withVars.periods[0].length, breakdown: v2EncodeBreakdown(withVars, alphabet) };
     },
     (fit) => fit.breakdown.chars,
     maxFillSeq(mode),
@@ -923,7 +934,7 @@ async function report(args: Args): Promise<void> {
       groupLocs.get(cell.group)!.add(locId);
 
       for (const c of COMBOS) {
-        const fit = fitFill(msgAt, mode, comboMask(c), args.maxChars)!; // seq=1 is covered
+        const fit = fitFill(msgAt, mode, comboMask(c), args.maxChars, args.alphabet)!; // seq=1 is covered
         const vk = vkey(mode, c);
         fitsFor.get(vk)!.push({
           seq: fit.seq, periods: fit.periods,
@@ -1004,12 +1015,15 @@ async function report(args: Args): Promise<void> {
 
   await mkdir(BENCHMARKS_DIR, { recursive: true });
   const stamp = stats.timestamp.replace(/[:.]/g, "-").slice(0, 19);
-  const outPath = join(BENCHMARKS_DIR, `${stamp}_${args.maxChars}c.html`);
+  // The alphabet is in the name only when it isn't the default, so earlier reports keep theirs
+  // and two runs that differ ONLY by alphabet can't be told apart by timestamp alone.
+  const suffix = args.alphabet === "base85" ? "" : `_${args.alphabet}`;
+  const outPath = join(BENCHMARKS_DIR, `${stamp}_${args.maxChars}c${suffix}.html`);
   await writeFile(outPath, renderHtml(stats));
 
   const dv = views[vkey(defaultMode, stats.defaultCombo)];
   console.log(`\n== Benchmark ==`);
-  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${REPORT_SOURCE.label} (split: ${stats.split}), modes ${modes.map(modeLabel).join("/")}  |  max-chars=${args.maxChars}, request ${args.requestHour}:00 local`);
+  console.log(`  ${stats.forecasts} forecasts, ${stats.locations} locations, ${REPORT_SOURCE.label} (split: ${stats.split}), modes ${modes.map(modeLabel).join("/")}  |  max-chars=${args.maxChars} ${args.alphabet}, request ${args.requestHour}:00 local`);
   if (short) console.log(`  ignored ${short} cached forecast(s) from a shorter-window pull (< ${HORIZON_DAYS}d — leftovers, safe to delete)`);
   if (skipped) console.log(`  skipped ${skipped} forecast(s) with an incomplete base series`);
   if (uncovered) console.log(`  skipped ${uncovered} (forecast, mode) pair(s) the corpus window doesn't cover`);

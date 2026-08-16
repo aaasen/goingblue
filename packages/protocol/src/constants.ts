@@ -7,8 +7,35 @@ export const ELEV_BITS = 14; // 0..16383m
 // where each character is a single septet. Excludes the printable-ASCII characters that GSM-7
 // either omits (`) or relegates to the extension table, which would cost two septets each
 // ([ \ ] ^ { | } ~). This is base-85; see codec.ts.
+//
+// It is GSM-7 basic INTERSECT printable ASCII, and only the first half of that was ever an SMS
+// constraint. The ASCII half was there because one alphabet had to survive inReach too; now that
+// `d:` picks the alphabet per route (see devices.ts), the SMS route spends SMS_ALPHABET instead
+// and this stays the alphabet of every route that can't.
 export const ALPHABET =
   "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
+
+// The non-ASCII half of GSM-7 basic: 39 more characters, each still a single septet, so 160 of
+// them still fit one SMS segment. They are split by what they survive rather than listed in GSM
+// table order, because that split is the fallback (see SMS_ALPHABET).
+//
+// Latin-1: everything with an ISO-8859-1 equivalent. Measured intact end to end, in both
+// directions, by probe 13 (2026-08-16 — docs/private/PROBES.md round 3), including the three
+// whose GSM septet positions collide with ASCII characters this alphabet already spends
+// (0x24 ¤ vs $, 0x40 ¡ vs @, 0x5F § vs _) and which a Latin-1 confusion would swap silently.
+export const GSM_LATIN1 = "£¥èéùìòÇØøÅåÆæßÉ¤¡ÄÖÑÜ§¿äöñüà";
+
+// Greek: the ten GSM-7 basic characters with NO ISO-8859-1 equivalent, and so the ten with
+// somewhere to fall. Probe 13 found a hop on the inbound SMS leg that transcodes through Latin-1
+// and turns exactly these into C1 controls, deterministically — septet position q arriving as
+// U+0070+q. That leg is one a reply never travels, and the outbound leg carried all 39 byte-exact,
+// which is why they are spent. If a route ever mangles them outbound, the fallback is to drop
+// this term from SMS_ALPHABET: 114 characters, 6.6% over base-85 instead of 8.5%.
+export const GSM_GREEK = "ΔΦΓΛΩΠΨΣΘΞ";
+
+// What the SMS route writes a body in: base-124, 6.954 bits a character against base-85's 6.409.
+// The version tag and packed header stay base-85 on every route (see codec.ts).
+export const SMS_ALPHABET = ALPHABET + GSM_LATIN1 + GSM_GREEK;
 
 // The refinement ladder: resolution index (0..4, coarse → fine) → hours per period.
 // Fill layouts use indices 1..4; index 0 is retained for resolution-keyed codebooks — see layout.ts.

@@ -9,11 +9,13 @@ import { DEVICE_TRANSPORT, type DeviceCode } from '@weather/protocol';
 // `d:` token, and the server reads the alphabet and the reply budget straight off that — the
 // numbers live in the protocol's DEVICE_TRANSPORT so both ends agree on one table.
 //
-// Today iPhone is the only route that differs: its replies cross Apple's satellite relay, which
-// is wide enough for base32768 to pay for itself (see the protocol's devices.ts for the field
-// measurement). Everything else spends the base-85 GSM-7 alphabet and a 160-character reply, the
-// narrowest of the routes and so the safe common denominator. ZOLEO has a code reserved in the
-// protocol table — it accepts ~240 characters — but is not offered here until that is measured.
+// Two routes differ today, each because a field run said so. iPhone replies cross Apple's
+// satellite relay, which is wide enough for base32768 to pay for itself. SMS replies are capped
+// by the septet rather than the frame, so they spend the whole of GSM-7 basic (base-124) rather
+// than only its intersection with ASCII — same 160 characters, more in each one. The protocol's
+// devices.ts holds both measurements. Internet and inReach keep base-85, the safe common
+// denominator; ZOLEO has a code reserved in the protocol table — it accepts ~240 characters — but
+// is not offered here until that is measured.
 export type Device = 'internet' | 'sms' | 'inreach' | 'iphone';
 
 export const DEVICES = [

@@ -37,7 +37,12 @@ export const IPHONE_MAX_CHARS = 50;
 export const DEVICE_TRANSPORT: Record<DeviceCode, DeviceTransport> = {
   // iPhone messaging — the only route today whose pipe is wide enough to pay for base32768.
   i: { alphabet: "base32768", maxChars: IPHONE_MAX_CHARS },
-  s: { alphabet: "base85", maxChars: SMS_MAX_CHARS },
+  // SMS spends the whole of GSM-7 basic, not just its ASCII half: probe 13 carried all 39 of the
+  // non-ASCII characters byte-exact to the phone, and probe 14 put 160 of them through as ONE
+  // Twilio segment, so they cost a septet each exactly as the ASCII ones do. 6.954 bits a
+  // character against 6.409 — a 155-character body goes 993 bits to 1078. See constants.ts for
+  // the alphabet and what would be dropped if a route ever mangles it.
+  s: { alphabet: "base124", maxChars: SMS_MAX_CHARS },
   // ZOLEO accepts ~240 characters per message, but is served as SMS until that is measured the
   // way the iPhone path was; the code exists so the wire format doesn't need revisiting first.
   z: { alphabet: "base85", maxChars: SMS_MAX_CHARS },

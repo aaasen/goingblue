@@ -259,7 +259,11 @@ describe("parseRequest", () => {
     // iPhone is the only route wide enough to pay for base32768, and it buys one satellite
     // bubble's worth — see DEVICE_TRANSPORT.
     expect(parseRequest("d:i")).toMatchObject({ alphabet: "base32768", maxChars: IPHONE_MAX_CHARS });
-    for (const code of ["s", "z", "d", "g"]) {
+    // SMS spends the whole of GSM-7 basic; the routes that can't take it keep the ASCII subset.
+    // The length is the same 160 either way — a wider alphabet buys bits per character, not more
+    // characters.
+    expect(parseRequest("d:s")).toMatchObject({ alphabet: "base124", maxChars: SMS_MAX_CHARS });
+    for (const code of ["z", "d", "g"]) {
       expect(parseRequest(`d:${code}`)).toMatchObject({ alphabet: "base85", maxChars: SMS_MAX_CHARS });
     }
   });
