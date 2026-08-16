@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity, SafeAreaView,
-  ActivityIndicator, Alert, TextInput, Modal, Linking, Platform,
+  ActivityIndicator, Alert, TextInput, Modal, Linking, Platform, Switch,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
@@ -119,8 +119,8 @@ const DEVICE_INFO = [
 // forecast but a thin one, and the reader deciding between one message and two needs to know
 // that before they are out of range and stuck with the answer.
 const IPHONE_MESSAGE_NOTE =
-  'iPhone satellite messages contain less information than text messages. Send multiple messages '
-  + 'for full forecast details';
+  'iPhone satellite messages hold fewer characters than text messages. Use multiple messages '
+  + 'for more detail.';
 
 // Id of the subgroup the air-quality toggles fold under — stable across a change of scale, which
 // its heading is not, so folding it open survives switching from one index to the other.
@@ -772,12 +772,16 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
         {supportsMultiMessage(device) && (
           <>
             <Text style={styles.deviceNote}>{IPHONE_MESSAGE_NOTE}</Text>
-            <Text style={styles.subLabel}>Send two messages</Text>
-            <SegmentedControl
-              values={['On', 'Off']}
-              selectedIndex={twoMessages ? 0 : 1}
-              onChange={(e) => onTwoMessagesChange(e.nativeEvent.selectedSegmentIndex === 0)}
-            />
+            {/* A switch rather than an On/Off segment: this is one setting being turned on, not a
+                choice between two things, and it is read far more often than it is changed. */}
+            <View style={styles.switchRow}>
+              <Text style={styles.switchLabel}>Multi-message forecast</Text>
+              <Switch
+                value={twoMessages}
+                onValueChange={onTwoMessagesChange}
+                accessibilityLabel="Multi-message forecast"
+              />
+            </View>
           </>
         )}
       </Section>
@@ -1029,7 +1033,12 @@ const styles = StyleSheet.create({
 
   offlineNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, textAlign: 'center', marginTop: 10 },
   deviceNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: 12 },
-  subLabel: { fontSize: 13, color: '#1c1c1e', fontWeight: '600', marginTop: 14, marginBottom: 8 },
+  // A settings row: label left, switch right, the switch's own height setting the row's.
+  switchRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    gap: 12, marginTop: 10,
+  },
+  switchLabel: { flexShrink: 1, fontSize: 15, color: '#1c1c1e' },
 
   helpLink: { alignSelf: 'center', marginTop: 18, paddingVertical: 6, paddingHorizontal: 12 },
   helpLinkText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },

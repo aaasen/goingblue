@@ -204,7 +204,7 @@ function CollectingBox({ total, have }: Collecting) {
 // ── DecoderTab ─────────────────────────────────────────────────────────────
 
 // What the paste button says after a press, and whether it says it in green or red. The same
-// dwell as the builder's Copy Message confirmation.
+// dwell as the builder's Copy inReach Message confirmation.
 interface Outcome {
   label: string;
   failed: boolean;
@@ -311,7 +311,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
   // A reply that arrived as two messages is pasted as two messages, so a paste folds into what
   // is already here when — and only when — it is another part of the same reply (see mergeReply).
   //
-  // The button then reports what the press actually did, the way the builder's Copy Message button
+  // The button then reports what the press actually did, the way the builder's Copy inReach Message button
   // confirms a copy: the clipboard gives no sign of having been read, and the screen may not change
   // at all — a re-pasted message merges to what is already loaded, and a segment that leaves the
   // reply incomplete draws no forecast. Without a label for those, a press that did nothing and a
@@ -511,7 +511,7 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 14,
   },
-  // Same fills as the builder's Copy Message button (BuilderTab's ActionButton), so a confirmed
+  // Same fills as the builder's Copy inReach Message button (BuilderTab's ActionButton), so a confirmed
   // press looks the same on both tabs.
   pasteBtn: {
     flexDirection: 'row',

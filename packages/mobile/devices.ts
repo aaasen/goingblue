@@ -19,8 +19,8 @@ export type Device = 'internet' | 'sms' | 'inreach' | 'iphone';
 export const DEVICES = [
   { value: 'internet', label: 'Internet', code: 'd', action: 'Get Forecast', icon: 'wifi' },
   { value: 'sms', label: 'SMS', code: 's', action: 'Send SMS', icon: 'message-text' },
-  { value: 'inreach', label: 'inReach', code: 'g', action: 'Copy Message', icon: 'satellite-variant' },
-  { value: 'iphone', label: 'iPhone', code: 'i', action: 'Send Message', icon: 'cellphone-wireless' },
+  { value: 'inreach', label: 'inReach', code: 'g', action: 'Copy inReach Message', icon: 'satellite-variant' },
+  { value: 'iphone', label: 'iPhone', code: 'i', action: 'Send Satellite Message', icon: 'cellphone-wireless' },
 ] as const satisfies readonly {
   value: Device;
   label: string;
