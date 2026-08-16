@@ -134,16 +134,23 @@ function makeDeltaCodec(weights: number[], maxDelta: number): DeltaCodec {
 // The weathercode collapsed to a 4-class precipitation regime — WIRE FORMAT: the wet columns
 // (precip/snow/rain) key their codebooks on the SAME period's class, which they may do for free
 // because weathercode decodes first and is always present (the same trick the 600/700 hPa wind
-// columns play on the upper level). Indexed by WMO *symbol index* (0..27, position in WMO_CODES),
+// columns play on the upper level). Indexed by WMO *symbol index* (0..29, position in WMO_CODES),
 // never by the raw input code: the encoder maps an unrecognized input code to index 0
 // (`WMO2IDX[...] ?? 0`), so a class taken from the raw code would diverge from the one the decoder
 // derives from the symbol it actually read.
 //   0 dry (clear/cloud/fog) · 1 rain-ish (drizzle/rain/showers/thunder) ·
-//   2 freezing (freezing drizzle/rain) · 3 snow-ish (snow/snow showers)
+//   2 freezing (freezing drizzle/rain) · 3 snow-ish (snow/snow showers/mixed)
+//
+// The mixed codes 68/69 join snow-ish rather than taking a fifth class of their own: held-out,
+// a fifth class moved the three wet columns by -0.003 b/period total (analyze-wc-aggregation-
+// heldout.ts) while widening every wet-column table by 25% and dropping their minimum
+// per-context training occupancy to zero. Not a trade worth making for ~0.8% of periods.
 export const WC_CLASSES = 4;
 export const WEATHERCODE_CLASS: readonly number[] = [
   //  0  1  2  3 45 48 51 53 55 56 57 61 63 65 66 67 71 73 75 77 80 81 82 85 86 95 96 99  ← WMO code
   0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 1, 1, 1, 2, 2, 3, 3, 3, 3, 1, 1, 1, 3, 3, 1, 1, 1,
+  // 68 69  ← appended after 99, matching WMO_CODES' append-only order
+  3, 3,
 ];
 
 const NDIR = 8;

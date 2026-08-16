@@ -24,6 +24,7 @@ import { Variable } from "@openmeteo/sdk/variable.js";
 import type { VariableWithValues } from "@openmeteo/sdk/variable-with-values.js";
 import type { WeatherApiResponse } from "@openmeteo/sdk/weather-api-response.js";
 import { log } from "./log.js";
+import { aggregateWeathercode } from "./weathercode.js";
 
 // Each forecast center resolves to a pair of Open-Meteo model ids: one for surface variables and
 // one for pressure-level variables (500/600/700 hPa wind + temp). They're the same id except for
@@ -709,6 +710,15 @@ export function rowsFromWindows(
     const spd700 = pickUnk("wind_speed_700hPa");
     const dir700 = pickUnk("wind_direction_700hPa");
 
+    // The accumulations feed the weathercode below — the summary's intensity comes from how much
+    // actually fell, so the code agrees with the numbers shipped beside it instead of reporting
+    // the peak hour's own code (which could say "heavy snow" over a period totalling 0.7 cm).
+    const snowCm = sumOf(pick(h.snowfall));
+    // Liquid precipitation: open-meteo splits convective showers from stratiform rain.
+    // Some models omit one series (returns null), so sum both treating null as 0.
+    const rainMm = sumOf(pickUnk("rain")) + sumOf(pickUnk("showers"));
+    const hourlyCodes = pick(h.weather_code).filter((c): c is number => c != null);
+
     return {
       time: times[idx[0]],
       temp_c: repTemps[w],
@@ -716,12 +726,13 @@ export function rowsFromWindows(
       wind_direction_10m: dominantDirDeg(sfcSpd, sfcDir),
       wind_gusts_10m: maxOf(pick(h.wind_gusts_10m)),
       precip: maxOf(pick(h.precipitation_probability)),
-      weathercode: maxOf(pick(h.weather_code)),
+      // Not maxOf: form comes from how much of the window was wet, intensity from accumulation.
+      // See aggregateWeathercode in weathercode.ts. A window with no codes at all aggregates to
+      // null, as it did under maxOf, so toFullPeriod's own no-data substitution still applies.
+      weathercode: hourlyCodes.length > 0 ? aggregateWeathercode(hourlyCodes, snowCm, rainMm) : null,
       freezing_level_m: maxOf(pickUnk("freezing_level_height")),
-      snow_cm: sumOf(pick(h.snowfall)),
-      // Liquid precipitation: open-meteo splits convective showers from stratiform rain.
-      // Some models omit one series (returns null), so sum both treating null as 0.
-      rain_mm: sumOf(pickUnk("rain")) + sumOf(pickUnk("showers")),
+      snow_cm: snowCm,
+      rain_mm: rainMm,
       wind_speed_500hPa: maxOf(spd500),
       wind_direction_500hPa: dominantDirDeg(spd500, dir500),
       wind_speed_600hPa: maxOf(spd600),

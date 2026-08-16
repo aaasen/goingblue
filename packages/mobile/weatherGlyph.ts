@@ -56,11 +56,12 @@ const CLOUD_FRONT = '#a5a5a6';
 
 const SNOW_CODES = new Set([71, 73, 75, 85, 86]);
 const SLEET_CODES = new Set([56, 57, 66, 67]); // freezing drizzle / freezing rain
+const MIX_CODES = new Set([68, 69]);           // rain and snow together (server-synthesized)
 const GRAIN_CODES = new Set([77]);
 const DRIZZLE_CODES = new Set([51, 53, 55, 56, 57]);
 const SHOWER_CODES = new Set([80, 81, 82, 85, 86]);
 
-type Precip = 'rain' | 'snow' | 'sleet' | 'grains' | null;
+type Precip = 'rain' | 'snow' | 'sleet' | 'mix' | 'grains' | null;
 export type MoonPhase =
   | 'new'
   | 'waxing-crescent'
@@ -87,9 +88,9 @@ type Spec = {
 };
 
 function intensity(code: number): 1 | 2 | 3 {
-  if ([51, 56, 61, 66, 71, 80, 85, 96].includes(code)) return 1;
+  if ([51, 56, 61, 66, 68, 71, 80, 85, 96].includes(code)) return 1;
   if ([53, 63, 73, 81].includes(code)) return 2;
-  if ([55, 57, 65, 67, 75, 82, 86, 99].includes(code)) return 3;
+  if ([55, 57, 65, 67, 69, 75, 82, 86, 99].includes(code)) return 3;
   return 2;
 }
 
@@ -107,6 +108,7 @@ export function glyphSpec(code: number): Spec {
   let precip: Precip = 'rain';
   if (SNOW_CODES.has(code)) precip = 'snow';
   else if (SLEET_CODES.has(code)) precip = 'sleet';
+  else if (MIX_CODES.has(code)) precip = 'mix';
   else if (GRAIN_CODES.has(code)) precip = 'grains';
 
   return {
@@ -130,6 +132,7 @@ export const WMO_NAMES: Record<number, string> = {
   56: 'Freezing drizzle', 57: 'Dense freezing drizzle',
   61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
   66: 'Freezing rain', 67: 'Heavy freezing rain',
+  68: 'Rain and snow', 69: 'Heavy rain and snow',
   71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains',
   80: 'Light showers', 81: 'Showers', 82: 'Violent showers',
   85: 'Snow showers', 86: 'Heavy snow showers',
@@ -448,6 +451,44 @@ function drawPrecip(out: Prim[], cx: number, cloudBottom: number, s: Spec, night
     const largeDropX = cx + flakeOuterHalf + symbolGap / 2;
     flake(out, flakeX, cloudBottom, flakeRadius, separator);
     outlinedDrop(out, largeDropX, cloudBottom + 4 - largeDropH, largeDropW, largeDropH, separator);
+  } else if (s.precip === 'mix') {
+    // Rain and snow falling together. The flake gives up its right, bottom-right and bottom
+    // spokes and the drop nests into the wedge they vacate — the same shared footprint
+    // precipMark('mix') uses for the bare strip marks, so the two read as one set. Deliberately
+    // NOT the 'sleet' treatment (flake and drop standing side by side): freezing rain is ice on
+    // the rock and a wintry mix is slush, and they must not draw the same glyph.
+    const separator = night ? NIGHT_BACKGROUND : '#ffffff';
+    const r = s.intensity === 1 ? 6.4 : 7.6;
+    const h = r * 2;
+    // Hang the composite below the cloud the way the snow and sleet marks do. Centering the flake
+    // on cloudBottom (as a lone flake is) buries it in the cloud's lower lobe here, because the
+    // drop occupies the wedge that would otherwise balance it — so drop the whole mark and nudge
+    // it left, the flake's surviving arms all pointing up and left.
+    const markCx = cx - r * 0.18;
+    const cy = cloudBottom + r * 0.5;
+    const lineWidth = flakeLineWidth(r);
+    const halo = 0.7;
+    const segments = flakeSpokes(markCx, cy, r)
+      .filter((_, spoke) => !MIX_CUT_SPOKES.has(spoke))
+      .flat();
+    for (const segment of segments) {
+      out.push({
+        kind: 'line', ...segment, stroke: separator, width: lineWidth + halo * 2,
+        cap: 'round', role: 'symbol-separator',
+      });
+    }
+    for (const segment of segments) {
+      out.push({ kind: 'line', ...segment, stroke: FLAKE, width: lineWidth, cap: 'round' });
+    }
+    const dropH = h * MIX_DROP_H;
+    outlinedDrop(
+      out,
+      markCx + h * MIX_DROP_DX,
+      cy + h * MIX_DROP_DY - dropH / 2,
+      dropH * DROP_ASPECT,
+      dropH,
+      separator,
+    );
   } else if (s.precip === 'grains') {
     for (let i = -1; i <= 1; i++) {
       out.push({ kind: 'circle', cx: cx + i * 6, cy: cloudBottom + 4 + (i % 2 ? 2 : 0), r: 1.3, fill: FLAKE });

@@ -110,9 +110,21 @@ export const DEFAULT_VARS_MASK =
   (1 << 0) | (1 << 2) | (1 << 3) | (1 << 5) | (1 << 6) | (1 << 7);
 // precip + snow + freeze + w500 + w600 + w700
 
+// The symbol alphabet. A code's INDEX here is its wire symbol (WMO2IDX in model.ts is just this
+// list inverted), so codes are APPENDED, never inserted in numeric order — inserting renumbers
+// every symbol above it and silently reinterprets messages encoded under the old order.
+//
+// 68/69 are WMO 4677's mixed rain-and-snow codes ("rain or drizzle and snow, slight" /
+// "...moderate or heavy"). Open-Meteo never emits them; the server synthesizes them when a period
+// aggregates hours of both phases (see aggregateWeathercode in codec-server/src/weathercode.ts),
+// which it does for ~0.8% of periods at 12h — more often than 75, 82, 86, 96 or 99. Without them
+// a half-rain half-snow window resolves to pure snow 98.9% of the time.
+//
+// 30 symbols keeps WMO_BITS at 5: the fixed-width fallback stays the same width up to 32.
 export const WMO_CODES: number[] = [
   0, 1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77,
   80, 81, 82, 85, 86, 95, 96, 99,
+  68, 69,
 ];
 
 export const CARDINALS: string[] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];

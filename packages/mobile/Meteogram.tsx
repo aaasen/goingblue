@@ -182,7 +182,9 @@ const MODEL_CENTERS: Record<string, Center> = {
 
 // ── Weather code classification ──────────────────────────────────────────--
 
-const SNOW_CODES = new Set([56, 57, 66, 67, 71, 73, 75, 77, 85, 86]);
+// 68/69 (rain and snow mixed) rank with snow: they carry the same wcClass on the wire, and a
+// mixed period is the one you want treated as wintry when a day glyph has to pick one sky.
+const SNOW_CODES = new Set([56, 57, 66, 67, 68, 69, 71, 73, 75, 77, 85, 86]);
 const RAIN_CODES = new Set([51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99]);
 
 // Coverage (0–100) implied by a weather code, for the cloud glyph shading.
