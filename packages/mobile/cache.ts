@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  CODECS, decodeMessage, mergeParts, peekVersion, reassembleReply, supportedVersions,
+  CODECS, decodeMessage, mergeParts, peekVersion, readParts, reassembleReply, supportedVersions,
   type ForecastMessage, type RequestContext,
 } from '@weather/protocol';
 
@@ -95,6 +95,14 @@ function headerCharsOf(part: string): number {
 // anything else replaces, so pasting an unrelated forecast still starts clean (see mergeParts).
 export function mergeReply(existing: string, incoming: string): string {
   return mergeParts(existing.trim(), incoming.trim().replace(/^fw:\s*/i, ''), headerCharsOf);
+}
+
+// Which numbered messages a paste is carrying, for showing a reader collecting a multi-message
+// reply what has arrived and what is still out there. `total` is 0 when the text carries no part
+// labels at all, which is every single-message reply.
+export function replyParts(encoded: string): { total: number; have: number[] } {
+  const { total, parts } = readParts(encoded.trim().replace(/^fw:\s*/i, ''));
+  return { total, have: [...parts.keys()].sort((a, b) => a - b) };
 }
 
 export function decodeAny(encoded: string, token: string): ForecastMessage {

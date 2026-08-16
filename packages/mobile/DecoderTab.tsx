@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView,
+  StyleSheet, Text, View, TouchableOpacity, ScrollView,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {
   VARS_BIT, startDatetime, MODE_NAMES, DEFAULT_MODE, type ForecastMessage,
 } from '@weather/protocol';
 import {
-  decodeAny, loadStore, attachResponse, mergeReply, normalizeReply, prunePastForecasts, type Slot,
+  decodeAny, loadStore, attachResponse, mergeReply, normalizeReply, prunePastForecasts, replyParts,
+  type Slot,
 } from './cache';
 import type { TimeFormat, Units } from './settings';
 import LocationMap from './LocationMap';
@@ -164,7 +166,51 @@ function dayLabel(day: number): string {
   });
 }
 
+// ── Multi-message collection ───────────────────────────────────────────────
+
+// What a reader has pasted of a reply that arrived as several messages. Half a reply is a normal
+// in-progress state on this route, not a failure, so it gets its own state rather than an error.
+interface Collecting {
+  total: number;
+  have: number[];
+}
+
+// One small box per message of the reply — a green check for what has been pasted, an empty grey
+// box for what is still in the reader's messages — sitting directly under the paste button, since
+// what it asks for is another press of that button. The boxes are in message order and carry no
+// numbers: which one is missing is the position, and the caption says what to do about it.
+function CollectingBox({ total, have }: Collecting) {
+  return (
+    <View style={styles.collectArea}>
+      <View style={styles.segmentRow}>
+        {Array.from({ length: total }, (_, i) => i + 1).map((index) => {
+          const received = have.includes(index);
+          return (
+            <View
+              key={index}
+              style={[styles.segment, received ? styles.segmentReceived : styles.segmentMissing]}
+              accessibilityLabel={`Message ${index} of ${total} ${received ? 'received' : 'missing'}`}
+            >
+              {received && <Text style={styles.segmentCheck}>✓</Text>}
+            </View>
+          );
+        })}
+      </View>
+      <Text style={styles.collectCaption}>Paste remaining forecast segments</Text>
+    </View>
+  );
+}
+
 // ── DecoderTab ─────────────────────────────────────────────────────────────
+
+// What the paste button says after a press, and whether it says it in green or red. The same
+// dwell as the builder's Copy Message confirmation.
+interface Outcome {
+  label: string;
+  failed: boolean;
+}
+const OUTCOME_MS = 2000;
+const FAILED_LABEL = 'Error loading forecast';
 
 interface Props {
   token: string;
@@ -178,6 +224,11 @@ interface Props {
 export default function DecoderTab({ token, forecastData, onForecastDataChange, units, timeFormat, active }: Props) {
   const [decoded, setDecoded] = useState<ForecastMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [collecting, setCollecting] = useState<Collecting | null>(null);
+  // What the paste button is reporting — the outcome of the last press, or null when it is back
+  // to offering the paste (see flash).
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const outcomeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [cache, setCache] = useState<Slot[]>([]);
   // When true, the next decode came from loading a cached entry — don't re-attach it.
   const suppressNextCache = useRef(false);
@@ -186,11 +237,24 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
     prunePastForecasts(token).then(setCache);
   }, [token]);
 
+  useEffect(() => () => { if (outcomeTimer.current) clearTimeout(outcomeTimer.current); }, []);
+
+  // Puts an outcome on the paste button and takes it off again. A failure is held for the same
+  // beat as a success and no longer: the button has to go back to offering the paste, since
+  // pasting again is the whole of what a reader can do about any of these — the box below keeps
+  // saying what went wrong for as long as it applies.
+  const flash = useCallback((label: string, failed = false) => {
+    setOutcome({ label, failed });
+    if (outcomeTimer.current) clearTimeout(outcomeTimer.current);
+    outcomeTimer.current = setTimeout(() => setOutcome(null), OUTCOME_MS);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     if (!forecastData.trim()) {
       setDecoded(null);
       setError(null);
+      setCollecting(null);
       suppressNextCache.current = false;
       return;
     }
@@ -202,6 +266,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
         const msg = decodeAny(forecastData, token);
         setDecoded(msg);
         setError(null);
+        setCollecting(null);
         if (suppressNextCache.current) {
           suppressNextCache.current = false;
         } else {
@@ -210,42 +275,64 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
       } catch (e) {
         suppressNextCache.current = false;
         setDecoded(null);
+        setCollecting(null);
         const msg = String(e);
-        if (msg.includes('Unsupported protocol version')) {
-          // An old saved forecast from before an app update: past forecasts are a short-lived
-          // convenience buffer, and support for decoding retired protocol versions is dropped
-          // deliberately (VERSIONING.md), so this is expiry, not an error.
-          setError('This forecast was saved by an older version of the app and can no longer be displayed. Request a new forecast.');
-        } else if (msg.includes('Version mismatch')) {
-          const match = msg.match(/encoded v(\d+)/);
-          const encoded = match ? match[1] : '?';
-          setError(`Version mismatch: this message uses protocol v${encoded}, which this app can't decode. Update the app or request a new forecast.`);
-        } else if (msg.includes('Missing message') || msg.includes('different forecast')
-            || msg.includes('pasted twice') || msg.includes("isn't part of a numbered message")) {
-          // Reassembly failures are the reader's to fix — they say which message is missing or
-          // mismatched — so they go through as written rather than as a decode failure.
+        const parts = replyParts(forecastData);
+        if (msg.includes('Missing message') && parts.total > 0) {
+          // Not an error: the rest of a multi-message reply is still in the reader's messages,
+          // and the boxes say which. Anything else about the paste is wrong and stays an error.
+          setError(null);
+          setCollecting(parts);
+          return;
+        }
+        flash(FAILED_LABEL, true);
+        if (msg.includes('different forecast') || msg.includes('pasted twice')) {
+          // Reassembly failures that name the message at fault are the reader's to fix, so they go
+          // through as written. Stray text mixed into a paste is NOT one of them: the protocol's
+          // wording tells the reader to paste each message on its own, which is advice about a
+          // text field this tab no longer has — a paste like that is just an invalid forecast.
           setError(msg.replace(/^Error:\s*/, ''));
         } else if (msg.includes('Unknown forecast code')) {
-          setError("This forecast doesn't match a request from this device — it may have been sent elsewhere or cycled out of history. Request a new forecast.");
+          setError("This forecast doesn't match a request from this device. It may have been sent elsewhere or expired. Request a new forecast.");
         } else {
-          setError('Could not decode forecast — paste the encoded reply from your inReach.');
+          // Everything else is one message, on purpose. A version the codec doesn't know reads as
+          // a retired or future protocol, but a message's first character IS its version tag, so
+          // any text that isn't a reply lands there too — and the version-specific advice was
+          // wrong in both directions: the cache is pruned of undecodable forecasts on every load,
+          // so a stale saved forecast never reaches here, and a reader in the field can neither
+          // need an app update (the request carries the version they encoded with) nor get one.
+          setError('Invalid forecast. Request a new forecast and paste the reply from your device.');
         }
       }
     })();
     return () => { cancelled = true; };
-  }, [forecastData, token]);
+  }, [forecastData, token, flash]);
 
   // A reply that arrived as two messages is pasted as two messages, so a paste folds into what
   // is already here when — and only when — it is another part of the same reply (see mergeReply).
-  // Editing the field by hand still replaces outright: that is the reader typing, not collecting.
+  //
+  // The button then reports what the press actually did, the way the builder's Copy Message button
+  // confirms a copy: the clipboard gives no sign of having been read, and the screen may not change
+  // at all — a re-pasted message merges to what is already loaded, and a segment that leaves the
+  // reply incomplete draws no forecast. Without a label for those, a press that did nothing and a
+  // press that collected a message look identical.
   const pasteFromClipboard = useCallback(async () => {
     try {
       const text = await Clipboard.getStringAsync();
-      if (text.trim()) onForecastDataChange(mergeReply(forecastData, text));
+      if (!text.trim()) return;
+      const merged = mergeReply(forecastData, text);
+      const incoming = replyParts(text);
+      onForecastDataChange(merged);
+      flash(
+        merged.trim() === forecastData.trim() ? 'Already loaded'
+          : incoming.have.length === 1 ? `Loaded part ${incoming.have[0]}/${incoming.total}`
+            : 'Loaded forecast',
+      );
     } catch {
       setError('Could not read the clipboard.');
+      flash(FAILED_LABEL, true);
     }
-  }, [forecastData, onForecastDataChange]);
+  }, [forecastData, onForecastDataChange, flash]);
 
   const loadPast = useCallback((encoded: string) => {
     suppressNextCache.current = true;
@@ -317,46 +404,46 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
       contentContainerStyle={{ paddingBottom: 72 }}
       keyboardShouldPersistTaps="handled"
     >
-      {/* Primary action: pull the encoded reply straight off the clipboard. */}
+      {/* Primary action: pull the encoded reply straight off the clipboard. The button also carries
+          the last press's outcome for a moment — a green check for what it loaded, a red ✕ when
+          the paste wouldn't decode — then goes back to offering the paste. */}
       <View style={styles.actionArea}>
-        <TouchableOpacity style={styles.pasteBtn} onPress={pasteFromClipboard} accessibilityRole="button">
-          <Text style={styles.pasteBtnText}>Paste Forecast</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Input area (scrolls away with the rest of the page rather than staying pinned).
-          Single-line: the encoded message is one long token, so it scrolls sideways rather
-          than wrapping into a growing block. */}
-      <View style={styles.inputArea}>
-        <View style={styles.inputField}>
-          <TextInput
-            style={styles.input}
-            value={forecastData}
-            onChangeText={onForecastDataChange}
-            placeholder="Paste forecast here"
-            placeholderTextColor="#aeaeb2"
-            autoCapitalize="none"
-            autoCorrect={false}
-            spellCheck={false}
-            numberOfLines={1}
-          />
-          {forecastData.length > 0 && (
-            <TouchableOpacity
-              style={styles.clearBtn}
-              onPress={() => onForecastDataChange('')}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.clearBtnText}>✕</Text>
-            </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.pasteBtn,
+            outcome && (outcome.failed ? styles.pasteBtnFailed : styles.pasteBtnDone),
+          ]}
+          onPress={pasteFromClipboard}
+          accessibilityRole="button"
+          accessibilityLabel={outcome?.label ?? 'Paste Forecast'}
+        >
+          {outcome && (
+            <MaterialCommunityIcons
+              name={outcome.failed ? 'close' : 'check'}
+              size={19}
+              color={outcome.failed ? '#c03030' : '#2a8f5a'}
+              style={styles.pasteBtnIcon}
+            />
           )}
-        </View>
+          <Text
+            style={[
+              styles.pasteBtnText,
+              outcome && (outcome.failed ? styles.pasteBtnTextFailed : styles.pasteBtnTextDone),
+            ]}
+            numberOfLines={1}
+          >
+            {outcome?.label ?? 'Paste Forecast'}
+          </Text>
+        </TouchableOpacity>
+        {/* Both sit under the button, where what they ask for is another press of it. Only one can
+            be showing: a paste is either short of its remaining messages or wrong, never both. */}
+        {collecting && <CollectingBox {...collecting} />}
+        {error && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
       </View>
-
-      {error && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
 
       {decoded && (
         <>
@@ -402,7 +489,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
         </>
       )}
 
-      {!decoded && !error && (
+      {!decoded && !error && !collecting && (
         <View style={styles.emptyState}>
           <Text style={styles.emptyTitle}>No forecast loaded</Text>
         </View>
@@ -416,58 +503,49 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
 // ── Styles ─────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  inputArea: {
+  actionArea: {
     backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#d1d1d6',
     paddingHorizontal: 16,
-    paddingTop: 4,
+    paddingTop: 14,
     paddingBottom: 14,
   },
-  inputField: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f2f2f7',
-    borderWidth: 1,
-    borderColor: '#d1d1d6',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 44,
-  },
-  input: {
-    flex: 1,
-    fontFamily: 'Courier',
-    fontSize: 14,
-    color: '#1c1c1e',
-    padding: 0,
-  },
-  actionArea: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 10,
-  },
+  // Same fills as the builder's Copy Message button (BuilderTab's ActionButton), so a confirmed
+  // press looks the same on both tabs.
   pasteBtn: {
+    flexDirection: 'row',
     height: 50,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#2a6bb5',
   },
+  pasteBtnDone: { backgroundColor: '#e8f5ec', borderWidth: 1, borderColor: '#2a8f5a' },
+  // The error box's own colours, so the button and the reason under it read as one thing.
+  pasteBtnFailed: { backgroundColor: '#fde8e8', borderWidth: 1, borderColor: '#c03030' },
+  pasteBtnIcon: { marginRight: 8 },
   pasteBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  clearBtn: {
-    marginLeft: 8,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#aeaeb2',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clearBtnText: { color: '#fff', fontSize: 11, fontWeight: '700', lineHeight: 13 },
+  pasteBtnTextDone: { color: '#2a8f5a' },
+  pasteBtnTextFailed: { color: '#c03030' },
 
-  errorBox: { margin: 16, padding: 12, backgroundColor: '#fde8e8', borderRadius: 10 },
+  errorBox: { marginTop: 10, padding: 12, backgroundColor: '#fde8e8', borderRadius: 10 },
   errorText: { color: '#c03030', fontSize: 14, lineHeight: 20 },
+
+  collectArea: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: 10, gap: 10,
+  },
+  segmentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  segment: {
+    width: 24, height: 24,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderRadius: 6,
+  },
+  segmentReceived: { backgroundColor: '#e8f6ec', borderColor: '#34a853' },
+  segmentMissing: { backgroundColor: '#f2f2f7', borderColor: '#d1d1d6', borderStyle: 'dashed' },
+  segmentCheck: { fontSize: 13, lineHeight: 16, color: '#2e8b48', fontWeight: '700' },
+  collectCaption: { flexShrink: 1, fontSize: 12, color: '#636366', textAlign: 'right' },
 
   metaRow: {
     margin: 16,

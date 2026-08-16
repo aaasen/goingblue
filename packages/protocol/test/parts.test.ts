@@ -103,6 +103,17 @@ describe("merging a paste into what is already there", () => {
     expect(reassembleReply(merge(merge(first, second), second), headerCharsOf)).toBe(whole);
   });
 
+  it("keeps a reply already held whole when a part of it is pasted again", () => {
+    // How a collected reply is stored and reloaded: reassembled, with the labels gone. Pasting
+    // any of its bubbles again must not drop it back to that one segment.
+    expect(merge(whole, first)).toBe(whole);
+    expect(merge(whole, second)).toBe(whole);
+    expect(merge(whole, [first, second].join("\n"))).toBe(whole);
+    // A part carrying a payload this reply doesn't hold still replaces, header or no header.
+    const elsewhere = splitReply("AbCdEzyxwvutsrq", H, 8)[1];
+    expect(merge(whole, elsewhere)).toBe(elsewhere);
+  });
+
   it("starts fresh on anything that isn't the rest of this reply", () => {
     const other = splitReply("ZzZzZ9876543210", H, 8);
     expect(merge(first, other[1])).toBe(other[1]);            // different forecast

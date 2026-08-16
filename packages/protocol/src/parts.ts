@@ -96,6 +96,14 @@ export function mergeParts(
   const cur = readParts(existing);
   const usable = (p: PastedParts) =>
     p.total > 0 && p.disagreedTotal === null && !p.unlabelled.length && p.parts.size > 0;
+
+  // A part of a reply that is already held WHOLE: the reader went back to their messages and
+  // pasted a bubble again, having already collected the reply (or loaded it from somewhere that
+  // stores it reassembled and unlabelled, as a saved forecast is). Without this the part would
+  // count as unrelated text and REPLACE the complete forecast with one segment of it.
+  const held = cur.total === 0 ? cur.unlabelled.join("") : "";
+  if (usable(inc) && held && heldWhole(held, inc, headerCharsOf)) return existing;
+
   if (!usable(inc) || !usable(cur) || cur.total !== inc.total) return incoming;
 
   // Every part repeats the header, so comparing it is what tells "the rest of this reply" from
@@ -110,6 +118,20 @@ export function mergeParts(
     .sort((a, b) => a - b)
     .map((index) => partLabel(index, inc.total) + merged.get(index)!)
     .join("\n");
+}
+
+// Whether an unlabelled reply already contains every part of an incoming paste. Parts are
+// consecutive slices of one body and each repeats the header, so a part that is already in the
+// whole appears in it verbatim — matching the header rules out a same-shaped part of some other
+// forecast, and no payload wide enough to be a part collides by accident.
+function heldWhole(
+  held: string, inc: PastedParts, headerCharsOf: (part: string) => number,
+): boolean {
+  const headerChars = headerCharsOf(held);
+  const header = held.slice(0, headerChars);
+  const body = held.slice(headerChars);
+  return [...inc.parts.values()].every(
+    (part) => part.slice(0, headerChars) === header && body.includes(part.slice(headerChars)));
 }
 
 // Rebuilds the encoded reply from pasted text, which may hold one part, several, or an unlabelled
