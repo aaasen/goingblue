@@ -9,13 +9,15 @@ import { DEVICE_TRANSPORT, type DeviceCode } from '@weather/protocol';
 // `d:` token, and the server reads the alphabet and the reply budget straight off that — the
 // numbers live in the protocol's DEVICE_TRANSPORT so both ends agree on one table.
 //
-// Two routes differ today, each because a field run said so. iPhone replies cross Apple's
-// satellite relay, which is wide enough for base32768 to pay for itself. SMS replies are capped
-// by the septet rather than the frame, so they spend the whole of GSM-7 basic (base-124) rather
-// than only its intersection with ASCII — same 160 characters, more in each one. The protocol's
-// devices.ts holds both measurements. Internet and inReach keep base-85, the safe common
-// denominator; ZOLEO has a code reserved in the protocol table — it accepts ~240 characters — but
-// is not offered here until that is measured.
+// Every route now takes the widest alphabet its own unit allows, and the unit differs on each.
+// Apple's satellite relay counts UTF-16 code units, so iPhone spends base32768. SMS counts
+// septets, and a septet is a septet whether or not it is ASCII, so it spends the whole of GSM-7
+// basic (base-124) in the same 160 characters. HTTP counts bytes, where ASCII is the densest
+// thing UTF-8 carries, so internet spends every printable ASCII character (base-94) — and, having
+// no length limit at all, the whole forecast rather than a fixed budget of it. inReach must be
+// both GSM-7 and ASCII, so it keeps base-85. The protocol's devices.ts holds the measurements.
+// ZOLEO has a code reserved there — it accepts ~240 characters — but is not offered here until
+// that is measured.
 export type Device = 'internet' | 'sms' | 'inreach' | 'iphone';
 
 export const DEVICES = [

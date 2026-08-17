@@ -279,11 +279,12 @@ function buildVarTree(scale: AqiScale): VarNode[] {
 const DEFAULT_GROUPS = new Set<string>();
 
 // The request leads with the protocol version and picks a priority mode (`p:`), not a duration
-// or resolution — the server fills the max response length (`c:`, in chars) along the mode's
-// path. `z:` is the local-midnight UTC offset the period grid aligns to. `c:` is always
-// included, even at the default length. `u:` carries the account token so the server can
-// attribute the request to the user. `k:` is the message code the slim response echoes so the
-// client can recover the request context (see cache.ts).
+// or resolution — the server refines along the mode's path until the reply reaches the budget the
+// route allows, which `d:` and `n:` name and both ends derive from one table (see devices.ts).
+// On the internet route there is no budget, so it refines until the upstream data runs out.
+// `z:` is the local-midnight UTC offset the period grid aligns to. `u:` carries the account token
+// so the server can attribute the request to the user. `k:` is the message code the slim response
+// echoes so the client can recover the request context (see cache.ts).
 function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], device: Device, messages: number, code: number, startEpochHour: number): string {
   const parts: string[] = [`v${V2_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);

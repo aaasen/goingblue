@@ -14,9 +14,18 @@ export interface DeviceTransport {
   maxChars: number;
 }
 
-// One 160-character SMS segment: the reply budget every device but iPhone spends, and the
-// narrowest of them (inReach's limit), so it is the safe shared default.
+// One 160-character SMS segment: the reply budget the messaging routes spend, and the narrowest
+// of them (inReach's limit), so it is the safe shared default.
 export const SMS_MAX_CHARS = 160;
+
+// The internet route's budget, which is no budget: an HTTP response is not metered in characters,
+// so nothing about the transport says where a reply should stop. The fill search still runs — it
+// just binds on the upstream data running out rather than on the message running out, which is
+// what "the whole forecast" means in practice (see fitFillToBudget: encodeSeq returns null for a
+// seq the upstream can't cover).
+//
+// A real number rather than Infinity so it survives the JSON request log intact.
+export const UNCAPPED_MAX_CHARS = Number.MAX_SAFE_INTEGER;
 
 // One iPhone satellite bubble. Apple's relay frames a bubble at min(70 UTF-16 code units,
 // ~140 bytes of compressed UTF-8) — both caps measured in the field, see docs/private/PROBES.md.
@@ -46,7 +55,16 @@ export const DEVICE_TRANSPORT: Record<DeviceCode, DeviceTransport> = {
   // ZOLEO accepts ~240 characters per message, but is served as SMS until that is measured the
   // way the iPhone path was; the code exists so the wire format doesn't need revisiting first.
   z: { alphabet: "base85", maxChars: SMS_MAX_CHARS },
-  d: { alphabet: "base85", maxChars: SMS_MAX_CHARS },
+  // Internet. The only route that is neither GSM-7 nor length-constrained, so it takes every
+  // printable ASCII character and the whole forecast.
+  //
+  // ASCII rather than something wider, which is the reverse of the SMS argument above and comes
+  // from the same place: an alphabet should be as wide as its route's UNIT allows. SMS counts
+  // septets, so a septet that isn't ASCII is still one septet and worth spending. HTTP counts
+  // bytes, and UTF-8 spends a third of every non-ASCII byte on continuation markers — base-94
+  // carries 6.555 bits per byte where base32768 carries 5.011. Going wider here would make the
+  // reply BIGGER; see constants.ts.
+  d: { alphabet: "base94", maxChars: UNCAPPED_MAX_CHARS },
   g: { alphabet: "base85", maxChars: SMS_MAX_CHARS },
 };
 
@@ -82,6 +100,10 @@ export function widePartBodyChars(headerChars: number): number {
 export function maxCharsFor(code: DeviceCode, messages: number, headerChars: number): number {
   const transport = DEVICE_TRANSPORT[code];
   const n = Math.min(Math.max(Math.floor(messages) || 1, 1), MAX_MESSAGES);
+  // `n:` divides a budget into messages, which means nothing where there is no budget — a route
+  // that never splits has no second message to ask for. Returned unmultiplied so the number stays
+  // the one constant rather than an arbitrary multiple of it.
+  if (transport.maxChars === UNCAPPED_MAX_CHARS) return UNCAPPED_MAX_CHARS;
   if (transport.alphabet !== "base32768") return n * transport.maxChars;
   if (n === 1) return transport.maxChars;
   return headerChars + n * widePartBodyChars(headerChars);

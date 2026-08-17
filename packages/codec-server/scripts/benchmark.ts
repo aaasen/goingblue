@@ -425,7 +425,8 @@ Report options
                             training, the default), train, or all; --location bypasses this
   --request-hour <h>        local hour the request is assumed to arrive at, 0-23 (default 7)
   --max-chars <n>           message budget in characters (default 160)
-  --alphabet <name>         body alphabet: base85 (default), base124 (the SMS route), base32768
+  --alphabet <name>         body alphabet: base85 (default), base94 (internet), base124 (SMS),
+                            base32768 (iPhone)
   --include-incomplete      keep forecasts with fully-null base series
   --no-open                 don't open the HTML report in the browser
 
@@ -472,8 +473,8 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--source") args.source = argv[++i];
     else throw new Error(`Unknown argument: ${a} (--help lists the options)`);
   }
-  if (!["base85", "base124", "base32768"].includes(args.alphabet)) {
-    throw new Error(`--alphabet must be one of base85, base124, base32768`);
+  if (!["base85", "base94", "base124", "base32768"].includes(args.alphabet)) {
+    throw new Error(`--alphabet must be one of base85, base94, base124, base32768`);
   }
   if (!MODES.includes(args.mode)) {
     throw new Error(`--mode must be one of ${MODES.map(modeLabel).join(", ").toLowerCase()}`);

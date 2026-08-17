@@ -37,6 +37,23 @@ export const GSM_GREEK = "ΔΦΓΛΩΠΨΣΘΞ";
 // The version tag and packed header stay base-85 on every route (see codec.ts).
 export const SMS_ALPHABET = ALPHABET + GSM_LATIN1 + GSM_GREEK;
 
+// Every printable ASCII character except space: U+0021..U+007E, 94 of them. Built from the range
+// rather than transcribed, because the range IS the definition — the alphabet is "anything a route
+// with no character restrictions at all can carry", and a literal could only get that wrong.
+//
+// Space is the one exclusion, and not for transport reasons: whitespace separates tokens in a
+// request and readParts splits a paste on it, so a body may never contain one.
+//
+// This is the widest alphabet worth having over a byte-counted transport, which is the opposite of
+// the reasoning behind SMS_ALPHABET above. HTTP meters bytes, not characters, and UTF-8 spends a
+// third of every non-ASCII byte on continuation markers — so a body of 3-byte characters carries
+// 5.0 bits per byte where ASCII carries 6.5. Widening past ASCII would make an HTTP reply LARGER.
+// 6.555 bits a character here against base-85's 6.409, which is the whole of the available upside:
+// 7 bits/byte is the ceiling for any UTF-8 text at all, and the control characters between here
+// and there are not worth having.
+export const HTTP_ALPHABET =
+  Array.from({ length: 0x7e - 0x21 + 1 }, (_, i) => String.fromCharCode(0x21 + i)).join("");
+
 // The refinement ladder: resolution index (0..4, coarse → fine) → hours per period.
 // Fill layouts use indices 1..4; index 0 is retained for resolution-keyed codebooks — see layout.ts.
 export const RESOLUTION_HOURS: Record<number, number> = { 0: 24, 1: 12, 2: 6, 3: 3, 4: 1 };

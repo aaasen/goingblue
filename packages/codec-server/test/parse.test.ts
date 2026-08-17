@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
 import {
   MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
-  IPHONE_MAX_CHARS, SMS_MAX_CHARS, MAX_MESSAGES, V2_HEADER_CHARS, maxCharsFor,
+  IPHONE_MAX_CHARS, SMS_MAX_CHARS, UNCAPPED_MAX_CHARS, MAX_MESSAGES, V2_HEADER_CHARS, maxCharsFor,
 } from "@weather/protocol";
 import { parseRequest } from "../src/forecast.js";
 
@@ -259,11 +259,13 @@ describe("parseRequest", () => {
     // iPhone is the only route wide enough to pay for base32768, and it buys one satellite
     // bubble's worth — see DEVICE_TRANSPORT.
     expect(parseRequest("d:i")).toMatchObject({ alphabet: "base32768", maxChars: IPHONE_MAX_CHARS });
-    // SMS spends the whole of GSM-7 basic; the routes that can't take it keep the ASCII subset.
-    // The length is the same 160 either way — a wider alphabet buys bits per character, not more
-    // characters.
+    // SMS spends the whole of GSM-7 basic at the same 160 characters — a wider alphabet buys bits
+    // per character, not more characters.
     expect(parseRequest("d:s")).toMatchObject({ alphabet: "base124", maxChars: SMS_MAX_CHARS });
-    for (const code of ["z", "d", "g"]) {
+    // Internet is restricted by neither GSM-7 nor a length, so it takes every printable ASCII
+    // character and runs until the upstream data does.
+    expect(parseRequest("d:d")).toMatchObject({ alphabet: "base94", maxChars: UNCAPPED_MAX_CHARS });
+    for (const code of ["z", "g"]) {
       expect(parseRequest(`d:${code}`)).toMatchObject({ alphabet: "base85", maxChars: SMS_MAX_CHARS });
     }
   });

@@ -3,7 +3,7 @@ import {
   splitReply, reassembleReply, mergeParts, partLabel, PART_LABEL_CHARS,
   chunkLines, collectingChunks, type ReplyOracles,
 } from "../src/parts.js";
-import { maxCharsFor, widePartBodyChars, MAX_MESSAGES } from "../src/devices.js";
+import { maxCharsFor, widePartBodyChars, MAX_MESSAGES, UNCAPPED_MAX_CHARS } from "../src/devices.js";
 import { V2_HEADER_CHARS, v2Codec } from "../src/versions/v2.js";
 import type { ForecastMessage } from "../src/model.js";
 import v2Fixture from "./fixtures/v2.fixture.json";
@@ -159,11 +159,18 @@ describe("the multi-message budget", () => {
     expect(two * 15).toBeGreaterThan(160 * Math.log2(85)); // 1290 bits vs a 160-char SMS's 1025
   });
 
-  it("leaves every other device at whole SMS segments", () => {
-    for (const code of ["s", "z", "d", "g"] as const) {
+  it("leaves every messaging device at whole SMS segments", () => {
+    for (const code of ["s", "z", "g"] as const) {
       expect(maxCharsFor(code, 1, H)).toBe(160);
       expect(maxCharsFor(code, 2, H)).toBe(320);
     }
+  });
+
+  it("ignores the message count on a route with no budget to divide", () => {
+    // Internet: an HTTP response isn't metered in characters, so there is no budget for `n:` to
+    // split and no second message to ask for. The number stays the constant itself.
+    expect(maxCharsFor("d", 1, H)).toBe(UNCAPPED_MAX_CHARS);
+    expect(maxCharsFor("d", 4, H)).toBe(UNCAPPED_MAX_CHARS);
   });
 
   it("clamps a nonsense message count instead of rejecting it", () => {

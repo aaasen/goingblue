@@ -128,7 +128,7 @@ describe("the alphabet a reply is decoded in", () => {
   });
 
   it("still decodes base-85 for the routes that keep it", () => {
-    for (const code of ["z", "d", "g"] as const) {
+    for (const code of ["z", "g"] as const) {
       expect(DEVICE_TRANSPORT[code].alphabet).toBe("base85");
       expect(v2Codec.decode(encodedFor("base85"), () => ctx(code))).toEqual(d);
     }
