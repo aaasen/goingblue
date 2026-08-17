@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 
 const BRAND = "Going Blue";
-const LAST_UPDATED = "August 5, 2026";
+const LAST_UPDATED = "August 17, 2026";
 const CONTACT_EMAIL = "help@going.blue";
 const FORECAST_NUMBER = "+14254345858";
 const REPO_URL = "https://github.com/aaasen/goingblue";
@@ -420,6 +420,12 @@ use appropriate judgment and additional sources for safety-critical decisions.</
 <p>To the fullest extent permitted by law, Lane Aasen shall not be liable for any damages
 arising from your use of, or inability to use, the Service, including any reliance on
 forecast information.</p>
+
+<h2>Trademarks</h2>
+<p>Apple and iPhone are trademarks of Apple Inc., registered in the U.S. and other countries.
+Garmin, inReach, and Earthmate are trademarks of Garmin Ltd. or its subsidiaries. ${BRAND} is
+not affiliated with, endorsed by, or sponsored by either company; their names are used only to
+describe the devices and services the Service works with.</p>
 
 <h2>Changes to these terms</h2>
 <p>We may update these terms from time to time. The "Last updated" date above reflects the

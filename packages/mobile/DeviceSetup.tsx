@@ -34,7 +34,7 @@ export default function DeviceSetup() {
       <Device name="SMS/Text Message" open={open === 'SMS/Text Message'} onToggle={toggle}>
         <SmsSteps />
       </Device>
-      <Device name="iPhone (Satellite)" open={open === 'iPhone (Satellite)'} onToggle={toggle}>
+      <Device name="iPhone satellite messaging" open={open === 'iPhone satellite messaging'} onToggle={toggle}>
         <IPhoneSteps />
       </Device>
     </>
@@ -135,37 +135,37 @@ function SmsSteps() {
 
 // Same handoff as SMS — Messages, same number — so the steps differ only where satellite does.
 // The reply is the reason this is its own device: over satellite it comes back in a wider
-// alphabet, sized to land in one message rather than the three a normal reply is broken into,
-// because the satellite link never reassembles what it splits (see devices.ts).
+// alphabet, split into whole messages the reader pastes one at a time, because the satellite link
+// never reassembles what it splits (see devices.ts).
 function IPhoneSteps() {
   return (
     <>
       <Text style={styles.deviceDesc}>
-        Choose iPhone when you are out of cell range on an iPhone that can text over satellite.
+        Choose iPhone satellite messaging when you are out of service and have a compatible iPhone.
       </Text>
 
       <Step n={1} title="Add Going Blue as a contact">
         <ContactCard />
       </Step>
 
-      <Step n={2} title="Point your iPhone at the satellite">
+      <Step n={2} title="Connect to the satellite">
         <Text style={styles.para}>
-          With no cell service, open <Bold>Messages</Bold> and follow the on-screen prompt to
-          connect to a satellite. Keep facing the direction it points you while you send and wait.
+          iPhone satellite messaging is only available when there is no cell reception. Follow
+          prompts in Messages to connect to the satellite and remain connected while sending the
+          forecast.
         </Text>
       </Step>
 
       <Step n={3} title="Send the request">
         <Text style={styles.para}>
-          On the Builder tab, choose <Bold>iPhone</Bold> as your device, tap{' '}
-          <Bold>Send Satellite Message</Bold>, and send the message.
+          Choose <Bold>iPhone</Bold> as your device and tap <Bold>Send Satellite Message</Bold>.
         </Text>
       </Step>
 
       <Step n={4} title="Read the forecast">
         <Text style={styles.para}>
-          The reply arrives as a single message of unfamiliar-looking characters — that is
-          expected. Copy the whole message and paste it into the <Bold>Decoder</Bold> tab.
+          Copy each message into the <Bold>Decoder</Bold> tab to view the forecast. There may be
+          multiple messages in a single forecast.
         </Text>
       </Step>
     </>
