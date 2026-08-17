@@ -6,6 +6,11 @@ const CONTACT_EMAIL = "help@going.blue";
 const FORECAST_NUMBER = "+14254345858";
 const REPO_URL = "https://github.com/aaasen/goingblue";
 
+// No country segment and no name slug: apps.apple.com redirects an ID-only link to the visitor's
+// own storefront, and the slug is regenerated from the app's name, so a rename would rot a link
+// that carried it. The numeric ID is the only part of an App Store URL that never changes.
+const APP_STORE_URL = "https://apps.apple.com/app/id6798411927";
+
 // The landing page is headed by a full-bleed photo of Sultana in a band of its own, with the
 // masthead over it — the photo is a defined section of the page, not the backdrop behind all of
 // it. Served at two widths from /img (assets.ts); the small one is plenty for a phone and a
@@ -102,7 +107,8 @@ export const PAGE = (title: string, body: string, { showUpdated = true, subtitle
   .updated { color: #666; font-size: 0.9em; }
   .cta { background: #f0f6fc; border: 1px solid #cfe2f5; border-radius: 8px; padding: 16px 20px; margin: 1.8em 0; }
   a { color: #0b62c4; }
-  .appbtn { display: inline-block; background: #0b62c4; color: #fff; padding: 11px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 0.6em 0 1.2em; }
+  .appbtn { display: block; width: 150px; margin: 1.4em auto 0.2em; }
+  .appbtn img { display: block; width: 150px; height: 50px; }
   footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
 ${subtitle ? HERO_CSS + SHOTS_CSS : ""}${css ?? ""}</style>
 </head>
@@ -131,8 +137,17 @@ ${body}
 
 // The marketing copy is kept in step with the App Store listing's description — the two are read
 // back to back by anyone deciding whether to install, so they should not tell different stories.
-// The companion app is iOS-only and distributed through the App Store; the landing page links to
-// it once the listing is live (drop an `<a class=appbtn href="...">` back in below).
+// The companion app is iOS-only and distributed through the App Store, which the page links to
+// under the opening paragraph — before the screenshots rather than after them, so the button is
+// on screen for a reader the photo band has already sold.
+//
+// The button is Apple's own badge artwork (assets.ts), which comes with rules: at least 40px tall,
+// clear space around it of a quarter its height, and no redrawing it or setting the words beside
+// it in live text. 50px tall clears the floor, and 1.4em of margin the clear space — the bottom
+// side is short because this margin does not collapse with the screenshot strip's, so the two
+// would otherwise add up. Centering is `auto` side margins on a block of the badge's own width,
+// which is why the width is repeated here. The art is 119.66x40, so the box is drawn at 3:1 and
+// the SVG's own viewBox letterboxes the half-pixel rather than stretching it.
 //
 // The page is marketing only: the SMS consent language, the opt-out wording and the safety
 // disclaimer live on /support, /privacy and /terms, reached through the footer. If an A2P 10DLC
@@ -142,6 +157,9 @@ const LANDING_BODY = `
 Denali ski expedition with one goal: to get you all the weather information you would have at
 home, wherever you are. ${BRAND} uses a custom compression codec and decoder app to pack hundreds
 of forecast data points into a single 160-character message.</p>
+
+<a class=appbtn href="${APP_STORE_URL}"><img src="/img/appstore-badge.svg" width=150 height=50
+  alt="Download on the App Store"></a>
 
 <div class=shots>
   <figure>

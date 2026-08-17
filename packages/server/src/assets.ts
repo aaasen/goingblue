@@ -36,6 +36,12 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   "shot-wind-640.jpg": { file: "../public/shot-wind-640.jpg", type: "image/jpeg" },
   "shot-builder-640.jpg": { file: "../public/shot-builder-640.jpg", type: "image/jpeg" },
   "shot-history-640.jpg": { file: "../public/shot-history-640.jpg", type: "image/jpeg" },
+  // Apple's "Download on the App Store" badge, the black US/UK artwork, byte-for-byte as served by
+  // toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us. Apple's
+  // marketing guidelines allow no redrawing, recoloring or effects, so this file is not ours to
+  // optimize: re-download it rather than editing it, and take the white variant instead if the
+  // button ever moves onto a dark background.
+  "appstore-badge.svg": { file: "../public/appstore-badge.svg", type: "image/svg+xml" },
 };
 
 const cache = new Map<string, Buffer<ArrayBuffer>>();
