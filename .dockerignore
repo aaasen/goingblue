@@ -14,3 +14,24 @@
 .claude/
 *.har
 docs/private/
+
+# The rest mirrors .gcloudignore. Real deploys go through `gcloud run deploy --source .`, which
+# strips these before Docker ever sees them; without them here, a *local* `docker build` sends
+# the whole 30+ GB corpus as build context and never finishes.
+#
+# Benchmark data: cached Open-Meteo responses and HTML reports, never needed in the build.
+data/
+
+# Photo originals at the repo root — the pages serve the resized copies in
+# packages/server/public, so the multi-megabyte source files never need copying.
+*.jpg
+*.jpeg
+*.png
+
+# Secrets and the deployment target, both read outside the build.
+.env
+deploy.env
+
+# Native build output under the mobile package: regenerable, and ~1 GB of iOS Pods/build.
+packages/mobile/ios/
+packages/mobile/android/

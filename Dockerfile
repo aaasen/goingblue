@@ -1,6 +1,8 @@
-FROM node:22-slim
+FROM node:26-slim
 WORKDIR /app
-RUN corepack enable
+# Node 26 no longer bundles corepack, so it is installed here; the pnpm version itself still
+# comes from the root package.json "packageManager" field.
+RUN npm i -g corepack@latest && corepack enable
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/server/package.json packages/server/

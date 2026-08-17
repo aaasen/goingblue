@@ -21,7 +21,7 @@ const FILE = "../public/benchmark.html.gz";
 // keeps repeat views cheap while a fresh report still reaches visitors the same day.
 const MAX_AGE = 3600;
 
-let cached: { gz: Buffer; etag: string; raw?: Buffer } | null = null;
+let cached: { gz: Buffer<ArrayBuffer>; etag: string; raw?: Buffer<ArrayBuffer> } | null = null;
 
 async function load(): Promise<typeof cached> {
   if (cached) return cached;

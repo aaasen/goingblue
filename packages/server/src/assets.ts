@@ -38,9 +38,9 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   "shot-history-640.jpg": { file: "../public/shot-history-640.jpg", type: "image/jpeg" },
 };
 
-const cache = new Map<string, Buffer>();
+const cache = new Map<string, Buffer<ArrayBuffer>>();
 
-async function load(name: string): Promise<Buffer | null> {
+async function load(name: string): Promise<Buffer<ArrayBuffer> | null> {
   const cached = cache.get(name);
   if (cached) return cached;
   const asset = ASSETS[name];

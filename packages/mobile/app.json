@@ -51,7 +51,8 @@
           "locationAlwaysPermission": false,
           "motionUsagePermission": "Used to improve the accuracy of your current location when fetching a forecast."
         }
-      ]
+      ],
+      "expo-status-bar"
     ]
   }
 }
