@@ -70,21 +70,56 @@ const HERO_CSS = `
 // a shot cut off by the edge, so the widths also leave one mid-frame: two and a good part of the
 // third in the text column, one and half of the second on a phone.
 //
-// The negative margins cancel the wrap's 20px padding so the strip scrolls edge to edge, with the
-// padding moved inside it to keep the first shot flush with the text above. It spans the wrap's
-// border box and no more — a `100vw` full-bleed would overflow the body by the width of a desktop
-// scrollbar.
+// The strip is full-bleed: `width: 100vw` with a `calc(50% - 50vw)` left margin pulls it out of the
+// wrap to span the viewport. That calc degrades on its own — a margin `%` resolves against the
+// wrap's content box, so on a screen narrower than the max-width it collapses to the old -20px,
+// leaving the phone layout as it was.
+//
+// Centring is two mechanisms, because one does not cover the range. The figures shrink — `flex: 0
+// 1 300px` off a 200px floor — so on any desktop the five fit in a single row and the row fills the
+// strip between symmetric gutters. From about 1604px they stop shrinking at their 300px basis, and
+// from there the auto margins on the first and last figure take the slack and centre the group.
+//
+// The auto margins are deliberate, not `justify-content: center`: centring a scroll container that
+// way puts the left-hand overflow outside the scrollable region, where no amount of scrolling
+// reaches it. Auto margins resolve to zero once the content outgrows the strip, so the row centres
+// while it fits and start-aligns when it does not, with both ends reachable either way.
+//
+// Below roughly 1104px even the 200px floor stops fitting and the row goes back to scrolling, which
+// is what the floor is for — a row divided into a small laptop is illegible long before it is
+// merely cramped. The phone breakpoint skips all of this and pins a 230px scrolling strip.
+//
+// The scrollbar is hidden (`scrollbar-width` plus the WebKit pseudo-element) because the strip is
+// a glance and a permanent trough under it reads as chrome. Nothing is lost: a shot cut off by the
+// edge is what says "scroll me", and that is exactly the state the bar would have appeared in.
+//
+// `box-sizing: border-box` on the strip is load-bearing, not tidiness: the page sets no global
+// border-box, so under the default content-box a `width: 100vw` would have the side padding added
+// on top of it — on a desktop that is a strip half again as wide as the screen.
+//
+// 100vw counts the desktop scrollbar, so the strip ends up a scrollbar wider than the viewport and
+// would raise a horizontal scrollbar on the body. `overflow-x: clip` on the body is what makes the
+// full-bleed safe; `hidden` would also contain it but makes the body a scroll container, which
+// silently breaks `position: sticky` for anything added later, and `clip` does not.
+//
+// The shots carry their own captions, baked into the image by
+// packages/mobile/scripts/frame-screenshots.py — the same frames the App Store listing uses. There
+// is deliberately no figcaption under them: a second caption in the page's voice under a caption in
+// the listing's voice reads as two different pages arguing.
 //
 // `scroll-snap-type: proximity`, not `mandatory`: the strip is a glance, not a carousel, and
 // mandatory snapping fights a user who is flicking through it.
 const SHOTS_CSS = `
-  .shots { display: flex; gap: 16px; margin: 1.8em -20px; padding: 0 20px 10px;
-    overflow-x: auto; scroll-snap-type: x proximity; }
-  .shots figure { flex: 0 0 300px; margin: 0; scroll-snap-align: center; }
+  .shots { display: flex; gap: 16px; box-sizing: border-box; width: 100vw;
+    margin: 1.8em 0 1.8em calc(50% - 50vw); padding: 0 20px 10px;
+    overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; }
+  .shots::-webkit-scrollbar { display: none; }
+  .shots figure { flex: 0 1 300px; min-width: 200px; margin: 0; scroll-snap-align: center; }
+  .shots figure:first-child { margin-left: auto; }
+  .shots figure:last-child { margin-right: auto; }
   .shots img { display: block; width: 100%; height: auto; border-radius: 14px;
-    border: 1px solid #e2e6ea; box-shadow: 0 2px 10px rgba(6, 18, 36, 0.08); }
-  .shots figcaption { margin-top: 0.7em; color: #666; font-size: 0.85em; line-height: 1.45; }
-  @media (max-width: 600px) { .shots figure { flex: 0 0 230px; } }
+    box-shadow: 0 2px 10px rgba(6, 18, 36, 0.08); }
+  @media (max-width: 600px) { .shots figure { flex: 0 0 230px; min-width: 0; } }
 `;
 
 type PageOpts = { showUpdated?: boolean; subtitle?: string; css?: string };
@@ -100,7 +135,8 @@ export const PAGE = (title: string, body: string, { showUpdated = true, subtitle
 <meta name=viewport content="width=device-width, initial-scale=1">
 <title>${title === BRAND ? BRAND : `${title} — ${BRAND}`}</title>
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #1a1a1a; line-height: 1.55; }
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #1a1a1a; line-height: 1.55;
+    overflow-x: clip; }
   .wrap { max-width: 720px; margin: 40px auto; padding: 0 20px; }
   h1 { font-size: 1.6em; }
   h2 { font-size: 1.15em; margin-top: 1.8em; }
@@ -163,34 +199,30 @@ of forecast data points into a single 160-character message.</p>
 
 <div class=shots>
   <figure>
-    <img src="/img/shot-meteogram-640.jpg" width=640 height=1391 loading=lazy
-      alt="A seven-day meteogram: a temperature curve with weather icons along the top, and below it
-      hourly temperature, precipitation, wind, cloud cover and pressure-level winds.">
-    <figcaption>A week of weather, unpacked from one 160-character reply.</figcaption>
+    <img src="/img/shot-meteogram-720.jpg" width=720 height=1564 loading=lazy
+      alt="&ldquo;Detailed forecasts up to 13 days without cell reception&rdquo; — a thirteen-day
+      meteogram, with hourly weather icons, temperature, precipitation, wind and gusts below it.">
   </figure>
   <figure>
-    <img src="/img/shot-detail-640.jpg" width=640 height=1391 loading=lazy
-      alt="One hour selected in the meteogram, with a panel showing conditions, temperature, rain
-      and snow totals, wind, sunrise, sunset and moon phase.">
-    <figcaption>Tap any hour for its detail, down to the moon phase.</figcaption>
+    <img src="/img/shot-builder-720.jpg" width=720 height=1564 loading=lazy
+      alt="&ldquo;30+ weather models over SMS, inReach, or iPhone satellite&rdquo; — the Builder tab,
+      with location, priority, model and extra-variable choices above a device picker.">
   </figure>
   <figure>
-    <img src="/img/shot-wind-640.jpg" width=640 height=1391 loading=lazy
-      alt="A Denali forecast showing freezing level, cloud cover split into high, mid and low, and
-      winds at the 500, 600 and 700 hPa pressure levels.">
-    <figcaption>Freezing level, cloud by height, and winds aloft.</figcaption>
+    <img src="/img/shot-wind-720.jpg" width=720 height=1564 loading=lazy
+      alt="&ldquo;Mountain weather forecasts for climbers, skiers, and alpinists&rdquo; — a Denali
+      forecast showing freezing level and winds at the 500, 600 and 700 hPa pressure levels.">
   </figure>
   <figure>
-    <img src="/img/shot-builder-640.jpg" width=640 height=1391 loading=lazy
-      alt="The Builder tab, with location, priority, model and extra-variable choices above buttons
-      to copy the message, send it by SMS, or fetch it over the internet.">
-    <figcaption>Choose the location, model and variables, then send it whichever way you can.</figcaption>
+    <img src="/img/shot-air-720.jpg" width=720 height=1564 loading=lazy
+      alt="&ldquo;Plan around wildfire smoke with AQI forecasts&rdquo; — a forecast with an air quality
+      section listing AQI, the leading pollutant, and rows for PM2.5, PM10, ozone, nitrogen dioxide
+      and sulphur dioxide.">
   </figure>
   <figure>
-    <img src="/img/shot-history-640.jpg" width=640 height=1391 loading=lazy
-      alt="The Decoder tab's list of past forecasts, each row showing the time, model, coordinates
-      and variables, with a Load button.">
-    <figcaption>Every forecast you decode stays on your phone to compare against.</figcaption>
+    <img src="/img/shot-history-720.jpg" width=720 height=1564 loading=lazy
+      alt="&ldquo;All forecasts are saved for comparing multiple models&rdquo; — the Decoder tab's list
+      of past forecasts, each row showing the time, model, coordinates and variables.">
   </figure>
 </div>
 
@@ -205,7 +237,7 @@ of forecast data points into a single 160-character message.</p>
 <h2>Forecast details</h2>
 <ul>
   <li>Support for any satellite messenger that works over SMS. Tested with Garmin inReach and
-  ZOLEO. Also works over the internet if you are in service.</li>
+  iPhone satellite messaging. Also works over the internet if you are in service.</li>
   <li>Temperature, snow, rain, wind, and cloud cover included by default.</li>
   <li>Optional variables such as pressure-level winds, cloud cover by height, and freezing
   level.</li>
@@ -240,8 +272,8 @@ text message, or from a satellite messenger. The app is useful with nothing but 
 satellite path is there for when you are past the end of cell service.</p>
 
 <h2>Which devices work?</h2>
-<p>Any satellite messenger that can send and receive SMS. We have tested Garmin inReach and ZOLEO.
-The <strong>Setup</strong> section in the app walks through each one.</p>
+<p>Any satellite messenger that can send and receive SMS. We have tested Garmin inReach and iPhone
+satellite messaging. The <strong>Setup</strong> section in the app walks through each one.</p>
 
 <h2>How do I request a forecast?</h2>
 <ol>

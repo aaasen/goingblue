@@ -24,18 +24,26 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   // The app icon, resized from packages/mobile/assets/icon.png. Regenerate it from that source
   // (and bump the filename) whenever the app icon changes, so the two never drift apart.
   "icon-512.jpg": { file: "../public/icon-512.jpg", type: "image/jpeg" },
-  // The landing page's screenshot strip — the same shots as the App Store listing, resized from
-  // packages/mobile/screenshots (the 1320x2868 masters, already sRGB with no EXIF, so a plain
-  // Pillow resize + `save(out, "JPEG", quality=78, optimize=True, progressive=True)` is the whole
-  // job). 640px keeps them past 2x at the 300px the strip draws them. They are JPEG, not PNG,
-  // because the masters are 4x the weight for UI text nobody reads at strip size; keep the App
-  // Store listing on the PNG masters. Regenerate from the same masters and bump the width in the
-  // name if the app's screens change.
-  "shot-meteogram-640.jpg": { file: "../public/shot-meteogram-640.jpg", type: "image/jpeg" },
-  "shot-detail-640.jpg": { file: "../public/shot-detail-640.jpg", type: "image/jpeg" },
-  "shot-wind-640.jpg": { file: "../public/shot-wind-640.jpg", type: "image/jpeg" },
-  "shot-builder-640.jpg": { file: "../public/shot-builder-640.jpg", type: "image/jpeg" },
-  "shot-history-640.jpg": { file: "../public/shot-history-640.jpg", type: "image/jpeg" },
+  // The landing page's screenshot strip, listed here in the order the strip draws them, which is
+  // the App Store listing's order. These are the App Store frames themselves — sky, device and
+  // baked-in caption — resized from packages/mobile/screenshots/framed (the 1320x2868 output of
+  // mobile's scripts/frame-screenshots.py, already sRGB with no EXIF, so a plain Pillow resize +
+  // `save(out, "JPEG", quality=78, optimize=True, progressive=True)` is the whole job).
+  //
+  // Five of the listing's six: the detail shot is dropped here and kept there. The strip fits its
+  // whole set on one row at once, so every shot added costs the others width, and six left them
+  // too small to read; a store listing shows one at a time and pays no such price.
+  //
+  // 720px keeps them past 2x at the widest the strip draws them. They are JPEG, not PNG, because
+  // the masters are 4x the weight for UI text nobody reads at strip size; keep the App Store
+  // listing on the PNG masters. Regenerate from the same frames and bump the width in the name if
+  // the shots change — which is what took these from 640 to 720, since an unchanged URL would have
+  // kept serving the old ones for a year.
+  "shot-meteogram-720.jpg": { file: "../public/shot-meteogram-720.jpg", type: "image/jpeg" },
+  "shot-builder-720.jpg": { file: "../public/shot-builder-720.jpg", type: "image/jpeg" },
+  "shot-wind-720.jpg": { file: "../public/shot-wind-720.jpg", type: "image/jpeg" },
+  "shot-air-720.jpg": { file: "../public/shot-air-720.jpg", type: "image/jpeg" },
+  "shot-history-720.jpg": { file: "../public/shot-history-720.jpg", type: "image/jpeg" },
   // Apple's "Download on the App Store" badge, the black US/UK artwork, byte-for-byte as served by
   // toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us. Apple's
   // marketing guidelines allow no redrawing, recoloring or effects, so this file is not ours to

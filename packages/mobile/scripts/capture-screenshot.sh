@@ -29,14 +29,33 @@ booted_name() {
   xcrun simctl list devices booted | sed -n 's/^ *\(.*\) ([0-9A-Fa-f-]\{36\}) (Booted).*$/\1/p' | head -1
 }
 
-# Freeze the clock at 9:41 with a full battery and full bars. Apple's own marketing shots use it,
-# and without it every screenshot carries whatever time and battery level the simulator had —
-# which reads as a snapshot of someone's laptop rather than a product shot.
+# Freeze the clock at 9:41 with a full battery and no reception. Apple's own marketing shots use
+# 9:41, and without a fixed status bar every screenshot carries whatever time and battery level the
+# simulator had — which reads as a snapshot of someone's laptop rather than a product shot.
+#
+# No reception is the point of the product, not an accident: the forecast on screen was decoded on
+# the phone from a satellite message, so empty signal dots are what the app is *for*. Note this is
+# cosmetic only — simctl does not touch the simulator's real connectivity, so the app still reaches
+# the network normally while these are being shot.
+#
+# The specific flags, each of which was picked by shooting the alternatives and looking at them:
+#   cellularMode failed  — empty grey signal dots. 'searching' draws them after the battery, which
+#                          looks like a rendering bug; 'notSupported' drops them entirely and reads
+#                          as a phone with no SIM rather than one out of range.
+#   dataNetwork hide     — without it you get "no service" sitting next to a cheerful LTE badge.
+#   no --wifiMode flag   — any value draws a wifi glyph. Omitting it leaves the slot empty, which
+#                          is what a phone off the grid actually shows.
+#   batteryState discharging — 'charged' means plugged in, and draws the charging bolt.
 apply_status_bar() {
+  # Clear first: overrides accumulate across runs, so a wifi glyph set by an earlier invocation
+  # survives into this one and no flag here would unset it.
+  xcrun simctl status_bar booted clear
   xcrun simctl status_bar booted override \
     --time "9:41" \
-    --batteryState charged --batteryLevel 100 \
-    --wifiBars 3 --cellularBars 4 --cellularMode active
+    --batteryState discharging --batteryLevel 100 \
+    --dataNetwork hide \
+    --cellularMode failed --cellularBars 0 \
+    --operatorName ""
 }
 
 next_index() {
