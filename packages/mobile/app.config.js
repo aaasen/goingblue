@@ -1,16 +1,27 @@
-// Dynamic Expo config, overlaid on app.json. The development EAS profile (and any local
-// prebuild/run with APP_VARIANT=development) gets its own bundle ID and name so a dev-client
-// build can be installed alongside the TestFlight app — iOS identifies apps by bundle ID, so
-// with a shared ID one install replaces the other.
-const IS_DEV = process.env.APP_VARIANT === "development";
+// Dynamic Expo config, overlaid on app.json. The development and preview EAS profiles (and any
+// local prebuild/run with APP_VARIANT set) get their own bundle ID, Android package and name, so
+// those builds can be installed alongside the TestFlight/store app — both platforms identify apps
+// by that ID, so with a shared one install replaces the other.
+const VARIANTS = {
+  development: { suffix: ".dev", label: "Dev" },
+  preview: { suffix: ".preview", label: "Preview" },
+};
+
+const variant = VARIANTS[process.env.APP_VARIANT];
 
 module.exports = ({ config }) => ({
   ...config,
-  name: IS_DEV ? "Going Blue Dev" : config.name,
+  name: variant ? `${config.name} ${variant.label}` : config.name,
   ios: {
     ...config.ios,
-    bundleIdentifier: IS_DEV
-      ? `${config.ios.bundleIdentifier}.dev`
+    bundleIdentifier: variant
+      ? `${config.ios.bundleIdentifier}${variant.suffix}`
       : config.ios.bundleIdentifier,
+  },
+  android: {
+    ...config.android,
+    package: variant
+      ? `${config.android.package}${variant.suffix}`
+      : config.android.package,
   },
 });
