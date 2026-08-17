@@ -20,8 +20,14 @@ const REPO_URL = "https://github.com/aaasen/goingblue";
 // The app icon sits above the title. The icon file is square and unrounded (iOS applies the mask
 // itself), so the corner radius is ours to draw: 22.4% of the width is Apple's own superellipse
 // proportion, which is what makes it read as an app icon rather than a photo.
+//
+// The photo credit sits in the band's lower right, out of the masthead's way — the centered block
+// is vertically centered, so the bottom corner is empty at every width. It is positioned against
+// the band rather than placed in the flow because the band is a single centered flex item, and a
+// second child would pull the masthead off center.
 const HERO_CSS = `
   .hero {
+    position: relative;
     display: flex; align-items: center; justify-content: center;
     height: 480px; padding: 0 20px; text-align: center; color: #fff;
     background: linear-gradient(rgba(12, 34, 64, 0.15), rgba(12, 34, 64, 0.5)),
@@ -40,10 +46,14 @@ const HERO_CSS = `
     text-shadow: 0 2px 10px rgba(6, 18, 36, 0.55); }
   .appicon { display: block; width: 116px; height: 116px; margin: 0 auto; border-radius: 26px;
     box-shadow: 0 6px 22px rgba(6, 18, 36, 0.45); }
+  .herocredit { position: absolute; right: 16px; bottom: 12px; margin: 0;
+    color: #fff; font-size: 0.8em; letter-spacing: 0.01em;
+    text-shadow: 0 1px 6px rgba(6, 18, 36, 0.7); }
   @media (max-width: 600px) {
     .appicon { width: 92px; height: 92px; border-radius: 21px; }
     .hero h1 { font-size: 1.85em; }
     .hero .subtitle { font-size: 1.05em; }
+    .herocredit { font-size: 0.72em; right: 12px; bottom: 10px; }
   }
 `;
 
@@ -104,6 +114,7 @@ ${subtitle
     <h1>${title}</h1>
     <p class=subtitle>${subtitle}</p>
   </div>
+  <p class=herocredit>Sultana from Denali, May 2026</p>
 </header>`
   : ""}
 <div class=wrap>
