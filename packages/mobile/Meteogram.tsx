@@ -3,7 +3,7 @@ import { Animated, View, Text as RNText, StyleSheet, FlatList, PanResponder, Pre
 import {
   Canvas, DashPathEffect, Group, Paint, Rect, RoundedRect, Circle, Line, Path, Text,
   LinearGradient, Skia, vec, matchFont, type SkFont,
-  ImageShader, FilterMode, MipmapMode, ColorType, AlphaType,
+  FillType,
 } from '@shopify/react-native-skia';
 import {
   CARDINALS, RAIN_MAX_MM, modelsFromMask, startDatetime, predictCenter, attributeHour,
@@ -12,7 +12,7 @@ import {
 } from '@weather/protocol';
 import type { TimeFormat, Units } from './settings';
 import {
-  resampleColumn, pressureToMeters, metersToPressure,
+  resampleColumn, pressureToMeters,
   BAND_TOP_HPA, BAND_BOTTOM_HPA, GRID_ROWS,
 } from './cloudBand';
 import { precipMark, weatherGlyph, wmoName, type MoonPhase, type Prim } from './weatherGlyph';
@@ -46,9 +46,11 @@ const ROW_H = {
   // The freezing level is a graph rather than a bare number, so it needs room for the isotherm to
   // move in under its band of column labels.
   FREEZE: 66,
-  // The vertical cloud band spans 300–1000 hPa; it needs enough height for a thin layer
-  // (one 25 hPa grid row ≈ 1/28th of the band) to still read as a streak.
-  CLOUD_BAND: 132,
+  // The vertical cloud band spans 300–1000 hPa, linear in pressure. Sized so every wire level
+  // owns a visibly distinct slice: the narrowest (925→1000, 75 hPa) gets ~24px at this height,
+  // so a deck confined to one level reads as its own streak rather than blurring into its
+  // neighbors.
+  CLOUD_BAND: 220,
   // Wind speeds are a single short number on a colored ground, so they need less room than the
   // other data rows — and there are up to five of them stacked (surface, gust, three upper levels).
   WIND: 26,
@@ -882,7 +884,7 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
   // The Windy-style vertical cloud band — v3 messages carry it in place of the low/mid/high
   // trio below, so exactly one of these two cloud blocks renders for any given message.
   if (has((p) => p.cloud_band)) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Clouds by altitude (${frU})` });
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Clouds by altitude (${frU} · hPa)` });
     rows.push({ kind: 'cloud-band', height: ROW_H.CLOUD_BAND, label: '' });
   }
 
@@ -1383,28 +1385,121 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
 
 // ── Meteogram canvas (one per model) ─────────────────────────────────────--
 
-// The vertical cloud band as one tiny Skia image: width = periods, height = the uniform
-// pressure grid, alpha = coverage. Periods are equal-width columns whatever their duration, so
-// one period per texel IS the meteogram's x axis, and the GPU's bilinear stretch of this bitmap
-// into the row is what produces the smooth Windy-style shading; nothing is contoured.
-const CLOUD_BAND_INK = [100, 106, 118] as const;
-function makeCloudBandImage(periods: Period[]) {
+// The vertical cloud band, contoured the way Windy actually draws it: filled iso-coverage
+// bands. Marching squares runs over the (periods × pressure-grid) field once per threshold,
+// the per-cell segments are stitched into closed loops, and each loop is smoothed with the
+// same midpoint-quad curve the freeze isotherm uses. The fills stack — a point above the k-th
+// threshold is painted k times — so coverage still reads as a ramp, but with the banded,
+// blobbed geometry of a real contour plot instead of a texture gradient.
+const CLOUD_BAND_INK: [number, number, number] = [100, 106, 118];
+// Coverage thresholds and each band's fill opacity. The wire quantizes coverage to the 3-bit
+// ladder (0/14/29/43/57/71/86/100), and there is one threshold per ladder gap so the display
+// distinguishes all 8 transmitted steps — fewer bands would merge values the message paid bits
+// to separate. Each threshold sits mid-gap: a threshold one step off a ladder value makes
+// contours cross a few percent into a cell, and those sub-cell slivers render as specks
+// (half-integer endings keep them off the resampler's integer rounding too). Fills stack under
+// source-over, so the alphas are solved to make the CUMULATIVE ink ramp linearly to ~0.7:
+// aₖ = 0.1 / (1 − 0.1(k−1)).
+const CLOUD_BAND_STEPS: [threshold: number, alpha: number][] = [
+  [7.5, 0.10], [21.5, 0.11], [36.5, 0.125], [50.5, 0.14],
+  [64.5, 0.17], [78.5, 0.20], [93.5, 0.25],
+];
+
+// Coverage 0..100 at every (grid row, period): row-major, GRID_ROWS × n.
+function buildCloudField(periods: Period[]): Uint8Array {
   const n = periods.length;
-  if (n === 0) return null;
-  const cover = new Uint8Array(GRID_ROWS * n);
-  for (let i = 0; i < n; i++) resampleColumn(periods[i].cloud_band, cover, i, n);
-  const bytes = new Uint8Array(GRID_ROWS * n * 4);
-  for (let px = 0; px < cover.length; px++) {
-    const o = px * 4;
-    bytes[o] = CLOUD_BAND_INK[0];
-    bytes[o + 1] = CLOUD_BAND_INK[1];
-    bytes[o + 2] = CLOUD_BAND_INK[2];
-    bytes[o + 3] = Math.min(220, Math.round(cover[px] * 2.2));
+  const field = new Uint8Array(GRID_ROWS * n);
+  for (let i = 0; i < n; i++) resampleColumn(periods[i].cloud_band, field, i, n);
+  return field;
+}
+
+// Marching squares over a W×H point grid (v(i,j) is the sampled value; the caller pads the
+// border with a below-every-threshold sentinel so every contour is a closed loop). Returns
+// loops in fractional grid coordinates. Crossing points are keyed by the grid edge they sit
+// on, so segments from neighboring cells stitch exactly — each key has degree 2 by
+// construction, which is what makes the chain walk below terminate in loops.
+type IsoPt = { x: number; y: number; key: string };
+function isoLoops(
+  v: (i: number, j: number) => number, W: number, H: number, t: number,
+): { x: number; y: number }[][] {
+  const segments: [IsoPt, IsoPt][] = [];
+  const above = (i: number, j: number) => v(i, j) >= t;
+  const hCross = (i: number, j: number): IsoPt => {
+    const a = v(i, j), b = v(i + 1, j);
+    return { x: i + (t - a) / (b - a), y: j, key: `h${i},${j}` };
+  };
+  const vCross = (i: number, j: number): IsoPt => {
+    const a = v(i, j), b = v(i, j + 1);
+    return { x: i, y: j + (t - a) / (b - a), key: `v${i},${j}` };
+  };
+  for (let j = 0; j < H - 1; j++) {
+    for (let i = 0; i < W - 1; i++) {
+      const c = (above(i, j) ? 1 : 0) | (above(i + 1, j) ? 2 : 0)
+        | (above(i + 1, j + 1) ? 4 : 0) | (above(i, j + 1) ? 8 : 0);
+      if (c === 0 || c === 15) continue;
+      const T = () => hCross(i, j), B = () => hCross(i, j + 1);
+      const L = () => vCross(i, j), R = () => vCross(i + 1, j);
+      const add = (p: IsoPt, q: IsoPt) => segments.push([p, q]);
+      switch (c) {
+        case 1: case 14: add(L(), T()); break;
+        case 2: case 13: add(T(), R()); break;
+        case 3: case 12: add(L(), R()); break;
+        case 4: case 11: add(R(), B()); break;
+        case 6: case 9: add(T(), B()); break;
+        case 7: case 8: add(L(), B()); break;
+        // The two saddles: resolved by the cell-center average, matching the bilinear surface.
+        case 5: case 10: {
+          const joined = (v(i, j) + v(i + 1, j) + v(i, j + 1) + v(i + 1, j + 1)) / 4 >= t;
+          if ((c === 5) === joined) { add(T(), R()); add(B(), L()); }
+          else { add(L(), T()); add(R(), B()); }
+          break;
+        }
+      }
+    }
   }
-  return Skia.Image.MakeImage(
-    { width: n, height: GRID_ROWS, colorType: ColorType.RGBA_8888, alphaType: AlphaType.Unpremul },
-    Skia.Data.fromBytes(bytes), n * 4,
-  );
+  const byKey = new Map<string, number[]>();
+  segments.forEach(([p, q], si) => {
+    for (const k of [p.key, q.key]) {
+      const list = byKey.get(k);
+      if (list) list.push(si); else byKey.set(k, [si]);
+    }
+  });
+  const used = new Array<boolean>(segments.length).fill(false);
+  const loops: { x: number; y: number }[][] = [];
+  for (let s = 0; s < segments.length; s++) {
+    if (used[s]) continue;
+    used[s] = true;
+    const [p0, q0] = segments[s];
+    const loop: IsoPt[] = [p0, q0];
+    let curKey = q0.key;
+    while (curKey !== p0.key) {
+      const nextIdx = byKey.get(curKey)?.find((x) => !used[x]);
+      if (nextIdx === undefined) break; // open chain — can't happen with the sentinel border
+      used[nextIdx] = true;
+      const [a, b] = segments[nextIdx];
+      const nxt = a.key === curKey ? b : a;
+      loop.push(nxt);
+      curKey = nxt.key;
+    }
+    if (loop[loop.length - 1].key === p0.key) loop.pop(); // closing point duplicates the start
+    if (loop.length >= 3) loops.push(loop);
+  }
+  return loops;
+}
+
+// Closed midpoint-quad smoothing — the loop analog of smoothTo: the curve starts at an edge
+// midpoint, treats every vertex as a quad control point, and closes on itself. Quads stay in
+// their control points' hull, so a loop hugging the band's edge never overshoots it.
+function smoothClosed(path: ReturnType<typeof Skia.Path.Make>, pts: { x: number; y: number }[]) {
+  const nPts = pts.length;
+  if (nPts < 3) return;
+  const start = { x: (pts[nPts - 1].x + pts[0].x) / 2, y: (pts[nPts - 1].y + pts[0].y) / 2 };
+  path.moveTo(start.x, start.y);
+  for (let i = 0; i < nPts; i++) {
+    const nxt = pts[(i + 1) % nPts];
+    path.quadTo(pts[i].x, pts[i].y, (pts[i].x + nxt.x) / 2, (pts[i].y + nxt.y) / 2);
+  }
+  path.close();
 }
 
 // Full Skia scene for one model. Pure, and called through useMemo: overlay-only state like the
@@ -1744,40 +1839,73 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
       }
 
       case 'cloud-band': {
-        // Windy-style cloud cross-section from the message's cloud_band stacks. The y axis is
-        // linear in pressure from 300 hPa (top) to 1000 hPa (bottom), which compresses altitude
-        // aloft roughly the way Windy's axis does. One image texel per period — columns are
-        // equal-width whatever their duration, so a single bilinear stretch spans the row.
+        // Windy-style cloud cross-section from the message's cloud_band stacks, as real filled
+        // contours (see isoLoops above). The y axis is linear in pressure from 300 hPa (top) to
+        // 1000 hPa (bottom), which compresses altitude aloft roughly the way Windy's axis does.
+        // Grid points sit at column centers; a sentinel ring pads the field so every contour
+        // closes, with the ring's coordinates clamped onto the band's edges so loops hug them.
         const yOfHpa = (hpa: number) =>
           top + ((hpa - BAND_TOP_HPA) / (BAND_BOTTOM_HPA - BAND_TOP_HPA)) * row.height;
-        const img = makeCloudBandImage(periods);
-        if (img) {
-          const dst = { x: colLeft(0), y: top, width: n * CELL_W, height: row.height };
-          els.push(
-            <Rect key={`cb${ri}`} x={dst.x} y={dst.y} width={dst.width} height={dst.height}>
-              <ImageShader image={img} fit="fill" rect={dst} tx="clamp" ty="clamp"
-                sampling={{ filter: FilterMode.Linear, mipmap: MipmapMode.None }} />
-            </Rect>,
-          );
+        const field = buildCloudField(periods);
+        const W = n + 2, H = GRID_ROWS + 2;
+        const val = (i: number, j: number) =>
+          i === 0 || j === 0 || i === W - 1 || j === H - 1 ? -1 : field[(j - 1) * n + (i - 1)];
+        const xs = [colLeft(0), ...periods.map((_, i) => colCenter(i)), colLeft(0) + n * CELL_W];
+        const ys = [top, ...Array.from({ length: GRID_ROWS }, (_, j) =>
+          top + (j * row.height) / (GRID_ROWS - 1)), top + row.height];
+        const px = (g: number) => {
+          const f = Math.floor(g);
+          return lerp(xs[f], xs[Math.min(f + 1, xs.length - 1)], g - f);
+        };
+        const py = (g: number) => {
+          const f = Math.floor(g);
+          return lerp(ys[f], ys[Math.min(f + 1, ys.length - 1)], g - f);
+        };
+        // Loops smaller than half a grid cell are quantization noise, not weather — a lone
+        // point one ladder step over a threshold, or the resampler's integer rounding — and a
+        // filled contour would render them as crisp specks. Shoelace area, in pixels.
+        const minLoopArea = 0.5 * CELL_W * (row.height / (GRID_ROWS - 1));
+        const loopArea = (pts: { x: number; y: number }[]) => {
+          let a = 0;
+          for (let i = 0; i < pts.length; i++) {
+            const q = pts[(i + 1) % pts.length];
+            a += pts[i].x * q.y - q.x * pts[i].y;
+          }
+          return Math.abs(a) / 2;
+        };
+        for (const [threshold, alpha] of CLOUD_BAND_STEPS) {
+          const loops = isoLoops(val, W, H, threshold);
+          if (!loops.length) continue;
+          const path = Skia.Path.Make();
+          path.setFillType(FillType.EvenOdd); // an inner loop is a hole in its surrounding band
+          for (const loop of loops) {
+            const mapped = loop.map((p) => ({ x: px(p.x), y: py(p.y) }));
+            if (loopArea(mapped) < minLoopArea) continue;
+            smoothClosed(path, mapped);
+          }
+          els.push(<Path key={`cb${ri}-${threshold}`} path={path}
+            color={rgb(CLOUD_BAND_INK, alpha)} />);
         }
 
-        // Altitude gridlines with their labels in the key column, on round numbers of the
-        // display unit. Placement via the standard atmosphere — a band this coarse doesn't
-        // earn transmitted geopotential heights.
-        const gridMeters = units === 'imperial'
-          ? [5000, 10000, 15000, 20000, 30000].map((ft) => ft / 3.28084)
-          : [1500, 3000, 4500, 6000, 9000];
-        for (const m of gridMeters) {
-          const gy = yOfHpa(metersToPressure(m));
-          if (gy < top + 6 || gy > top + row.height - 6) continue; // off the band
-          els.push(
-            <Line key={`cbg${ri}-${m}`} p1={vec(NAME_W, gy)} p2={vec(width, gy)}
-              color={C.grid} strokeWidth={1}>
-              <DashPathEffect intervals={[3, 4]} />
-            </Line>,
-          );
-          els.push(<Text key={`cbgl${ri}-${m}`} x={12} y={baseline(gy, fonts.small.getSize())}
-            text={fmtFreeze(m, units)} font={fonts.small} color={C.label} />);
+        // One gridline per wire level — the axis lists exactly what the message carries.
+        // Labels pair the level's standard-atmosphere altitude (the header names the unit)
+        // with its pressure; the transmitted coordinate is pressure, altitude is the
+        // translation a reader in the mountains actually thinks in.
+        for (const hpa of CLOUD_BAND_LEVELS_HPA) {
+          const gy = yOfHpa(hpa);
+          // 300 and 1000 hPa coincide with the row's own edges — label them, skip the line.
+          if (hpa !== BAND_TOP_HPA && hpa !== BAND_BOTTOM_HPA) {
+            els.push(
+              <Line key={`cbg${ri}-${hpa}`} p1={vec(NAME_W, gy)} p2={vec(width, gy)}
+                color={C.grid} strokeWidth={1}>
+                <DashPathEffect intervals={[3, 4]} />
+              </Line>,
+            );
+          }
+          const ty = Math.min(Math.max(gy, top + 7), top + row.height - 7);
+          els.push(<Text key={`cbgl${ri}-${hpa}`} x={12} y={baseline(ty, fonts.small.getSize())}
+            text={`${fmtFreeze(pressureToMeters(hpa), units)} · ${hpa}`}
+            font={fonts.small} color={C.label} />);
         }
         break;
       }
