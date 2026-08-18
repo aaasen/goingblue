@@ -51,7 +51,7 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux split-window -t "$SESSION:servers" -v \
     "PORT=$CODEC_PORT node --watch packages/codec-server/dist/index.js"
   tmux split-window -t "$SESSION:servers" -v \
-    "$DB_ENV PORT=$GATEWAY_PORT CODEC_URL_V2=http://localhost:$CODEC_PORT node --watch packages/server/dist/index.js"
+    "$DB_ENV PORT=$GATEWAY_PORT CODEC_URL_V3=http://localhost:$CODEC_PORT node --watch packages/server/dist/index.js"
   tmux select-layout -t "$SESSION:servers" even-vertical
 
   tmux new-window -t "$SESSION" -n expo "cd packages/mobile && npx expo start -c"
