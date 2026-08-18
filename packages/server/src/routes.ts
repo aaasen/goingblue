@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { dispatchForecast, extractUserToken, extractVersion, type DispatchResult } from "./dispatch.js";
+import { dispatchForecast, extractDevice, extractUserToken, extractVersion, type DispatchResult } from "./dispatch.js";
 import { ping } from "./db.js";
 import { createAccount, accountExists, deleteAccount, recordRequest } from "./accounts.js";
 import { isValidToken, normalizeToken } from "@weather/protocol";
@@ -71,6 +71,7 @@ async function buildForecast(body: string, phone: string | null): Promise<Dispat
     chars: result.kind === "ok" ? result.encoded.split("\n").join("").length : null,
     version,
     outcome: result.kind,
+    device: extractDevice(body),
     shape: result.kind === "ok" ? result.shape : null,
   });
   return result;
@@ -120,7 +121,7 @@ export async function sms(c: Context) {
   // question they answer is "how many distinct numbers reach us", which a forecast-only record
   // would under-report.
   if (HELP_KEYWORDS.has(body.trim().toLowerCase())) {
-    await logRequest({ token: null, phone: sender, chars: null, version: null, outcome: "help", shape: null });
+    await logRequest({ token: null, phone: sender, chars: null, version: null, outcome: "help", device: null, shape: null });
     return c.text(twiml(HELP_REPLY), 200, { "Content-Type": "text/xml" });
   }
 
@@ -129,7 +130,7 @@ export async function sms(c: Context) {
   if (probe !== null) {
     const parts = Array.isArray(probe) ? probe : [probe];
     log.info("sms.probe_reply", { messages: parts.length, len: parts.join("").length, reply: parts });
-    await logRequest({ token: null, phone: sender, chars: null, version: null, outcome: "probe", shape: null });
+    await logRequest({ token: null, phone: sender, chars: null, version: null, outcome: "probe", device: null, shape: null });
     return c.text(twiml(probe), 200, { "Content-Type": "text/xml" });
   }
 

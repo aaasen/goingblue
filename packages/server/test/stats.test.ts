@@ -23,12 +23,28 @@ const sum = (rows: StatsRow[], key: keyof StatsRow): number =>
 
 const data = (
   rows: StatsRow[],
-  { days = rows.length, shared = [] as SharedRow[], sharedNumbers = 0 } = {},
+  {
+    days = rows.length,
+    shared = [] as SharedRow[],
+    sharedNumbers = 0,
+    devices = [] as StatsData["devices"],
+    modes = [] as StatsData["modes"],
+    messages = [] as StatsData["messages"],
+    models = [] as StatsData["models"],
+    vars = [] as StatsData["vars"],
+    locations = [] as StatsData["locations"],
+  } = {},
 ): StatsData => ({
   rows,
   days,
   shared,
   sharedNumbers,
+  devices,
+  modes,
+  messages,
+  models,
+  vars,
+  locations,
   totals: {
     requests: sum(rows, "requests"),
     anon: sum(rows, "anon"),
@@ -196,5 +212,62 @@ describe("renderStats — shared accounts", () => {
 
     const many = renderStats(data([row("2026-08-07", 9, 4, 0, { senders: 2 })], { shared, sharedNumbers: 2 }));
     expect(many).toContain("2 numbers have used more than one account");
+  });
+});
+
+describe("renderStats — devices and request shapes", () => {
+  const rows = [row("2026-08-07", 12, 3, 1, { senders: 4 })];
+
+  it("names each device code and keeps null as its own row", () => {
+    const html = renderStats(data(rows, {
+      devices: [
+        { device: "i", requests: 8, users: 2 },
+        { device: null, requests: 4, users: 1 },
+      ],
+    }));
+    expect(html).toContain("<td>iPhone satellite</td><td>8</td><td>2</td>");
+    expect(html).toContain("<td>Not stated</td><td>4</td><td>1</td>");
+  });
+
+  it("lists the shape facets — priority, messages, models, variables", () => {
+    const html = renderStats(data(rows, {
+      modes: [{ value: "auto", count: 9 }, { value: "range", count: 3 }],
+      messages: [{ value: "1", count: 10 }, { value: "2", count: 2 }],
+      models: [{ value: "best", count: 11 }, { value: "eu", count: 1 }],
+      vars: [{ value: "temp", count: 12 }, { value: "freeze", count: 5 }],
+    }));
+    expect(html).toContain("<td>auto</td><td>9</td>");
+    expect(html).toContain("<th>Messages</th>");
+    expect(html).toContain("<td>2</td><td>2</td>");
+    expect(html).toContain("<td>eu</td><td>1</td>");
+    expect(html).toContain("<td>freeze</td><td>5</td>");
+  });
+
+  it("shows a named location by name and coordinates at their stored rounding", () => {
+    const html = renderStats(data(rows, {
+      locations: [
+        { loc: "summit", lat: "63.07", lon: "-151.00", count: 7 },
+        { loc: "current", lat: "63.06", lon: "-151.08", count: 3 },
+      ],
+    }));
+    expect(html).toContain("<td>summit</td><td>7</td>");
+    expect(html).toContain("<td>63.06, -151.08</td><td>3</td>");
+  });
+
+  // The shape header is untrusted input (dispatch.ts); a compromised codec must not be able to
+  // put markup on this page.
+  it("escapes shape strings on the way into the markup", () => {
+    const html = renderStats(data(rows, {
+      modes: [{ value: '<script>alert(1)</script>', count: 1 }],
+    }));
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("says when nothing has been recorded rather than dropping the sections", () => {
+    const html = renderStats(data(rows));
+    expect(html).toContain("No devices recorded");
+    expect(html).toContain("No request shapes recorded");
+    expect(html).toContain("No locations recorded");
   });
 });

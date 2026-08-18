@@ -120,6 +120,12 @@ export async function migrate(): Promise<void> {
   await query(`
     alter table requests add column if not exists outcome text
   `);
+  // The device code the request named for itself (`d:` — iPhone, generic SMS, Zoleo, inReach,
+  // Garmin email), extracted by the gateway from its frozen sliver of the grammar
+  // (dispatch.ts). Null when the request named none: hand-typed messages and pre-`d:` clients.
+  await query(`
+    alter table requests add column if not exists device text
+  `);
   // One-time backfill for rows written before account_id existed. Rows whose token was already
   // nulled by an earlier deletion cannot be recovered: the token that linked them is gone.
   await query(`
@@ -151,6 +157,11 @@ export async function migrate(): Promise<void> {
       max_chars  int,
       chars      int
     )
+  `);
+  // How many messages the reply was allowed to spread over (`n:`, default 1) — part of what was
+  // asked for, alongside max_chars, which is derived from it.
+  await query(`
+    alter table request_shapes add column if not exists messages int
   `);
   await query(`
     create index if not exists request_shapes_day_idx on request_shapes (day)

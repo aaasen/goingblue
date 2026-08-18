@@ -1,4 +1,4 @@
-import { isValidToken, normalizeToken } from "@weather/protocol";
+import { isDeviceCode, isValidToken, normalizeToken, type DeviceCode } from "@weather/protocol";
 import { log } from "./log.js";
 
 // Routes a forecast request to the codec server for its protocol version. The gateway's
@@ -19,6 +19,7 @@ export interface RequestShape {
   models: string[];
   vars: string[];
   maxChars: number | null;
+  messages: number | null;
 }
 
 export type DispatchResult =
@@ -43,6 +44,20 @@ export function extractUserToken(body: string): string | null {
   for (const word of body.toLowerCase().trim().split(/\s+/)) {
     if (word.startsWith("u:") && isValidToken(word.slice(2))) {
       return normalizeToken(word.slice(2));
+    }
+  }
+  return null;
+}
+
+// Device code from the first valid `d:` word, or null when the request names none (hand-typed
+// messages, pre-`d:` clients). Like `vN` and `u:`, `d:` is part of the tiny frozen sliver of
+// the grammar the gateway may read: its codes are version-independent route names, and reading
+// it here means the device is recorded for every inbound message — including ones whose
+// dispatch fails, which no codec-reported value could cover.
+export function extractDevice(body: string): DeviceCode | null {
+  for (const word of body.toLowerCase().trim().split(/\s+/)) {
+    if (word.startsWith("d:") && isDeviceCode(word.slice(2))) {
+      return word.slice(2) as DeviceCode;
     }
   }
   return null;
@@ -93,7 +108,8 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  const maxChars = o["maxChars"];
+  const shapeInt = (v: unknown): number | null =>
+    typeof v === "number" && Number.isInteger(v) ? v : null;
   return {
     lat: coord(o["lat"], 90),
     lon: coord(o["lon"], 180),
@@ -101,7 +117,10 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
     mode: shapeString(o["mode"]),
     models: shapeList(o["models"]),
     vars: shapeList(o["vars"]),
-    maxChars: typeof maxChars === "number" && Number.isInteger(maxChars) ? maxChars : null,
+    maxChars: shapeInt(o["maxChars"]),
+    // Absent from codec images frozen before message counts existed; those replies were all
+    // single messages, but null records "not reported" rather than guessing.
+    messages: shapeInt(o["messages"]),
   };
 }
 

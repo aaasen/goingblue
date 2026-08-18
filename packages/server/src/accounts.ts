@@ -78,6 +78,9 @@ export interface RequestRecord {
   // 'ok' for a served forecast, a DispatchResult failure kind, or 'help' / 'probe' for the
   // messages that are answered without a forecast.
   outcome: string;
+  // The `d:` device code the request named, or null when it named none (dispatch.ts,
+  // extractDevice).
+  device: string | null;
   shape: RequestShape | null;
 }
 
@@ -96,9 +99,10 @@ export async function recordRequest(r: RequestRecord): Promise<void> {
     ? (await query<{ id: string }>("select id from accounts where token = $1", [r.token])).rows[0]
     : undefined;
   await query(
-    `insert into requests (token, account_id, phone_hash, chars, version, outcome)
-     values ($1, $2, $3, $4, $5, $6)`,
-    [account ? r.token : null, account?.id ?? null, hashPhone(r.phone), r.chars, r.version, r.outcome],
+    `insert into requests (token, account_id, phone_hash, chars, version, outcome, device)
+     values ($1, $2, $3, $4, $5, $6, $7)`,
+    [account ? r.token : null, account?.id ?? null, hashPhone(r.phone), r.chars, r.version,
+     r.outcome, r.device],
   );
 
   // Deliberately a second, independent statement rather than part of a transaction: a shared
@@ -106,9 +110,9 @@ export async function recordRequest(r: RequestRecord): Promise<void> {
   // usage record should still stand.
   if (!r.shape) return;
   await query(
-    `insert into request_shapes (day, version, lat, lon, loc, mode, models, vars, max_chars, chars)
-     values ((now() at time zone $1)::date, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    `insert into request_shapes (day, version, lat, lon, loc, mode, models, vars, max_chars, chars, messages)
+     values ((now() at time zone $1)::date, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [DAY_TZ, r.version, r.shape.lat, r.shape.lon, r.shape.loc, r.shape.mode,
-     r.shape.models, r.shape.vars, r.shape.maxChars, r.chars],
+     r.shape.models, r.shape.vars, r.shape.maxChars, r.chars, r.shape.messages],
   );
 }

@@ -35,6 +35,16 @@ export type StatsRow = {
 export type StatsTotals = Omit<StatsRow, "day">;
 // One account seen from more than one number — the token-sharing signal.
 export type SharedRow = { account: number; numbers: number; requests: number; lastDay: string };
+// One value of one request facet (a priority mode, a model, a variable, …) and how many
+// requests carried it.
+export type FacetRow = { value: string; count: number };
+// One device code's share of the window. `users` rides along because the device is the one
+// request property recorded next to the account: "how many people reach us over each route" is
+// a different question from "how many requests does each route carry".
+export type DeviceRow = { device: string | null; requests: number; users: number };
+// One place forecasts were requested for: a named location, or coordinates at the stored ~1 km
+// rounding. lat/lon arrive as strings because `numeric` comes back from node-postgres as text.
+export type LocationRow = { loc: string | null; lat: string | null; lon: string | null; count: number };
 export type StatsData = {
   rows: StatsRow[];
   totals: StatsTotals;
@@ -42,6 +52,14 @@ export type StatsData = {
   shared: SharedRow[];
   // Numbers seen using more than one account: the same question from the other end.
   sharedNumbers: number;
+  devices: DeviceRow[];
+  // The shape facets, each over the same window. These read `request_shapes`, which shares no
+  // key with `requests` — so they describe the same traffic without being joinable to anyone.
+  modes: FacetRow[];
+  messages: FacetRow[];
+  models: FacetRow[];
+  vars: FacetRow[];
+  locations: LocationRow[];
 };
 
 // Every counted quantity, as one SQL fragment shared by the daily and window queries so the two
@@ -89,11 +107,63 @@ const DAILY_SQL = `
    order by d.day
 `;
 
+// The window clause the totals and facet queries share, in both tables' vocabularies: requests
+// are windowed by timestamp, shapes by their date column — which is all they have, by design.
+const REQUESTS_WINDOW = `r.created_at >= ((now() at time zone $1)::date - ($2::int - 1))::timestamp at time zone $1`;
+const SHAPES_WINDOW = `s.day >= (now() at time zone $1)::date - ($2::int - 1)`;
+
 // Window totals are their own query because they cannot be derived from the daily rows: summing
 // per-day distinct users would count somebody who texted on Monday and Friday twice.
 const TOTALS_SQL = `
   select ${COUNTS} from requests r
-   where r.created_at >= ((now() at time zone $1)::date - ($2::int - 1))::timestamp at time zone $1
+   where ${REQUESTS_WINDOW}
+`;
+
+// Requests and people by device code. Grouped over every outcome, not just served forecasts:
+// which routes a failure arrives over is part of what the column is for (a burst of
+// unsupported-version failures from one device names the client that needs sunsetting last).
+const DEVICES_SQL = `
+  select r.device                                                                   as device,
+         count(r.id) filter (where coalesce(r.outcome, 'ok') = 'ok')                as requests,
+         count(distinct r.account_id)                                               as users
+    from requests r
+   where ${REQUESTS_WINDOW}
+   group by r.device
+   order by requests desc, device
+`;
+
+// The shape facets: what the window's requests asked for, one query per facet because they
+// aggregate along different axes (a request has one mode but several models and variables).
+const MODES_SQL = `
+  select coalesce(s.mode, '?') as value, count(*) as count
+    from request_shapes s where ${SHAPES_WINDOW}
+   group by 1 order by count desc, value
+`;
+const MESSAGES_SQL = `
+  select coalesce(s.messages::text, '?') as value, count(*) as count
+    from request_shapes s where ${SHAPES_WINDOW}
+   group by s.messages order by min(s.messages) nulls last
+`;
+const MODELS_SQL = `
+  select m as value, count(*) as count
+    from request_shapes s, unnest(s.models) m where ${SHAPES_WINDOW}
+   group by m order by count desc, m
+`;
+const VARS_SQL = `
+  select v as value, count(*) as count
+    from request_shapes s, unnest(s.vars) v where ${SHAPES_WINDOW}
+   group by v order by count desc, v
+`;
+
+// The most-asked-for places in the window. A named location groups on its name; coordinates
+// group at the stored ~1 km rounding, which is the only precision that exists to group by.
+const LOCATIONS_LIMIT = 15;
+const LOCATIONS_SQL = `
+  select s.loc, s.lat::text as lat, s.lon::text as lon, count(*) as count
+    from request_shapes s where ${SHAPES_WINDOW}
+   group by s.loc, s.lat, s.lon
+   order by count desc, s.loc
+   limit ${LOCATIONS_LIMIT}
 `;
 
 // Accounts that have been used from more than one number. Deliberately not windowed: sharing is
@@ -137,13 +207,24 @@ const counts = (r: Record<string, unknown> | undefined): StatsTotals => ({
   failed: num(r?.["failed"]),
 });
 
+const facets = (rows: Record<string, unknown>[]): FacetRow[] =>
+  rows.map((r) => ({ value: String(r["value"]), count: num(r["count"]) }));
+
 export async function dailyStats(days: number = WINDOW_DAYS): Promise<StatsData> {
-  const [daily, totals, shared, sharedNumbers] = await Promise.all([
-    query(DAILY_SQL, [TZ, days]),
-    query(TOTALS_SQL, [TZ, days]),
-    query(SHARED_SQL, [TZ]),
-    query(SHARED_NUMBERS_SQL),
-  ]);
+  const win = [TZ, days];
+  const [daily, totals, shared, sharedNumbers, devices, modes, messages, models, vars, locations] =
+    await Promise.all([
+      query(DAILY_SQL, win),
+      query(TOTALS_SQL, win),
+      query(SHARED_SQL, [TZ]),
+      query(SHARED_NUMBERS_SQL),
+      query(DEVICES_SQL, win),
+      query(MODES_SQL, win),
+      query(MESSAGES_SQL, win),
+      query(MODELS_SQL, win),
+      query(VARS_SQL, win),
+      query(LOCATIONS_SQL, win),
+    ]);
   return {
     days,
     rows: daily.rows.map((r) => ({ day: String(r["day"]), ...counts(r) })),
@@ -155,6 +236,21 @@ export async function dailyStats(days: number = WINDOW_DAYS): Promise<StatsData>
       lastDay: String(r["last_day"]),
     })),
     sharedNumbers: num(sharedNumbers.rows[0]?.["numbers"]),
+    devices: devices.rows.map((r) => ({
+      device: r["device"] == null ? null : String(r["device"]),
+      requests: num(r["requests"]),
+      users: num(r["users"]),
+    })),
+    modes: facets(modes.rows),
+    messages: facets(messages.rows),
+    models: facets(models.rows),
+    vars: facets(vars.rows),
+    locations: locations.rows.map((r) => ({
+      loc: r["loc"] == null ? null : String(r["loc"]),
+      lat: r["lat"] == null ? null : String(r["lat"]),
+      lon: r["lon"] == null ? null : String(r["lon"]),
+      count: num(r["count"]),
+    })),
   };
 }
 
@@ -319,6 +415,9 @@ const CSS = `
   .legend { display: flex; gap: 16px; margin: 0.2em 0 0.6em; font-size: 0.85em; color: #52514e; }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   .legend i { width: 10px; height: 10px; border-radius: 2px; }
+  /* Facet tables sit side by side and wrap on a phone; each is only as wide as its words. */
+  .facets { display: flex; gap: 32px; flex-wrap: wrap; align-items: flex-start; }
+  .facets table { width: auto; min-width: 140px; }
   /* The four columns have a min-content width wider than a phone. Left alone, the table widens
      the whole page, and the charts — sized at 100% of that wider block — get cut off at the
      viewport edge. Scrolling the table inside its own box keeps the overflow local to it. */
@@ -340,10 +439,35 @@ const CSS = `
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-// Every value on this page is a number or a date this module formats itself — nothing from the
-// request reaches the markup — so there is deliberately no escaping helper here.
+// What each `d:` code is, for the devices table. The codes are the identifiers the protocol
+// defines (DEVICE_TRANSPORT); the words are only for this page.
+const DEVICE_LABELS: Record<string, string> = {
+  i: "iPhone satellite",
+  s: "SMS",
+  z: "ZOLEO",
+  d: "Internet",
+  g: "inReach",
+};
+
+// The numbers and dates on this page are formatted by this module and need no escaping. The
+// shape facets are different: their strings arrive through the codec's shape header, which
+// dispatch.ts explicitly treats as untrusted input, so everything from it is escaped on the way
+// into the markup.
+const esc = (s: string): string =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+// One facet as a compact two-column table, or nothing when the facet has no rows — the section
+// around these carries the "no shape record" state so an empty facet doesn't have to.
+function facetTable(header: string, rows: FacetRow[]): string {
+  if (!rows.length) return "";
+  const body = rows
+    .map((f) => `<tr><td>${esc(f.value)}</td><td>${f.count}</td></tr>`)
+    .join("");
+  return `<table><thead><tr><th>${header}</th><th>Requests</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
 export function renderStats(data: StatsData): string {
-  const { rows, totals, days, shared, sharedNumbers } = data;
+  const { rows, totals, days, shared, sharedNumbers, devices, locations } = data;
 
   if (totals.requests === 0 && totals.failed === 0 && totals.senders === 0) {
     return PAGE(
@@ -417,6 +541,55 @@ export function renderStats(data: StatsData): string {
 <p class=note>Accounts used from more than one number, over all time rather than the window above. ${converse}</p>`
     : `<p class=note>No account has been used from more than one number. ${converse}</p>`;
 
+  // Requests and people per device. Null is a real category, not missing data: a hand-typed
+  // message or a pre-`d:` client names no device, and both are still served.
+  const deviceRows = devices
+    .map(
+      (d) =>
+        `<tr><td>${d.device === null ? "Not stated" : (DEVICE_LABELS[d.device] ?? esc(d.device))}</td>` +
+        `<td>${d.requests}</td><td>${d.users}</td></tr>`,
+    )
+    .join("");
+  const deviceSection = devices.length
+    ? `<div class=tablewrap>
+<table>
+<thead><tr><th>Device</th><th>Requests</th><th>Accounts</th></tr></thead>
+<tbody>${deviceRows}</tbody>
+</table>
+</div>`
+    : `<p class=note>No devices recorded in the window.</p>`;
+
+  // The shape facets. These read the unlinked shape record, so they can be shown right next to
+  // the identity numbers above without the two becoming joinable — that separation is the schema,
+  // not this page's discretion (db.ts).
+  const facetTables = [
+    facetTable("Priority", data.modes),
+    facetTable("Messages", data.messages),
+    facetTable("Model", data.models),
+    facetTable("Variable", data.vars),
+  ].filter((t) => t.length > 0);
+  const shapeSection = facetTables.length
+    ? `<div class="facets tablewrap">${facetTables.join("")}</div>`
+    : `<p class=note>No request shapes recorded in the window.</p>`;
+
+  const locationRows = locations
+    .map((l) => {
+      const isNamed = l.loc !== null && l.loc !== "current";
+      const place = isNamed ? esc(l.loc ?? "") : l.lat != null && l.lon != null ? `${esc(l.lat)}, ${esc(l.lon)}` : "?";
+      return `<tr><td>${place}</td><td>${l.count}</td></tr>`;
+    })
+    .join("");
+  const locationSection = locations.length
+    ? `<div class=tablewrap>
+<table>
+<thead><tr><th>Location</th><th>Requests</th></tr></thead>
+<tbody>${locationRows}</tbody>
+</table>
+</div>
+<p class=note>The ${locations.length === LOCATIONS_LIMIT ? `${LOCATIONS_LIMIT} ` : ""}most requested places
+in the window, at the stored ~1&nbsp;km rounding. Named locations group under their names.</p>`
+    : `<p class=note>No locations recorded in the window.</p>`;
+
   // The number is read first and the label second, so the label agrees with it: "1 request",
   // not "1 requests". `word` is the singular; the caller's adjectives come before it.
   const tile = (n: number, word: string, adjective = ""): string =>
@@ -445,6 +618,15 @@ ${requestsChart}
 </div>
 ${peopleChart}
 
+<h2>Devices</h2>
+${deviceSection}
+
+<h2>What was asked for</h2>
+${shapeSection}
+
+<h2>Locations</h2>
+${locationSection}
+
 <h2>By day</h2>
 <div class=tablewrap>
 <table>
@@ -464,7 +646,10 @@ with an error, and HELP and probe messages are counted in &ldquo;Numbers&rdquo; 
 past counts as an opaque number &mdash; but a request still arrives anonymous when it carries no
 <code>u:</code> token or carries one from another environment. &ldquo;Numbers&rdquo; counts
 distinct senders by a keyed hash of the number, so it covers text messages only; requests the app
-sends over the internet carry no number.</p>
+sends over the internet carry no number. &ldquo;What was asked for&rdquo; and
+&ldquo;Locations&rdquo; read the shape record, which is kept apart from accounts and numbers and
+is written only for served forecasts, so its counts can run a little behind
+&ldquo;Requests&rdquo;.</p>
 </div>`;
 
   return PAGE("Stats", body, { showUpdated: false, css: CSS });

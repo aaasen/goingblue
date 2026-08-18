@@ -989,6 +989,7 @@ export interface RequestShape {
   models: string[];
   vars: string[];
   maxChars: number;
+  messages: number;
 }
 
 const IDX_TO_LOCATION_NAME: Record<number, string> = Object.fromEntries(
@@ -1024,6 +1025,7 @@ export function describeRequest(params: ForecastParams): RequestShape {
       .sort((a, b) => a[1] - b[1])
       .map(([name]) => name),
     maxChars: params.maxChars,
+    messages: params.messages,
   };
 }
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateToken } from "@weather/protocol";
-import { codecUrlFor, dispatchForecast, extractUserToken, extractVersion, parseShapeHeader } from "../src/dispatch.js";
+import { codecUrlFor, dispatchForecast, extractDevice, extractUserToken, extractVersion, parseShapeHeader } from "../src/dispatch.js";
 
 // A real token so extraction exercises the same validity check parseRequest applies.
 const TOKEN = generateToken((n) => Uint8Array.from({ length: n }, (_, i) => i * 7 + 3));
@@ -37,6 +37,19 @@ describe("extractUserToken", () => {
   });
 });
 
+describe("extractDevice", () => {
+  it("finds the d: word anywhere in the body, case-insensitively", () => {
+    expect(extractDevice("v2 d:i n:2 p:a")).toBe("i");
+    expect(extractDevice("63.0630,-151.0810 D:G v2")).toBe("g");
+  });
+
+  it("is null when absent or not a device code — hand-typed and pre-d: requests name none", () => {
+    expect(extractDevice("v2 p:a")).toBeNull();
+    expect(extractDevice("v2 d:x")).toBeNull();
+    expect(extractDevice("v2 d:")).toBeNull();
+  });
+});
+
 describe("dispatchForecast", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -67,7 +80,7 @@ describe("dispatchForecast", () => {
   it("picks up the shape header when the codec sends one", async () => {
     process.env["CODEC_URL_V1"] = "http://codec-v1";
     const shape = { lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
-                    models: ["best"], vars: ["temp"], maxChars: 160 };
+                    models: ["best"], vars: ["temp"], maxChars: 160, messages: 1 };
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response("ENCODED", { status: 200, headers: { "X-Request-Shape": JSON.stringify(shape) } })));
 
@@ -87,13 +100,13 @@ describe("dispatchForecast", () => {
 describe("parseShapeHeader", () => {
   const shape = (over: Record<string, unknown> = {}) => JSON.stringify({
     lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
-    models: ["best"], vars: ["temp", "wind"], maxChars: 160, ...over,
+    models: ["best"], vars: ["temp", "wind"], maxChars: 160, messages: 2, ...over,
   });
 
   it("keeps exactly the fields we store", () => {
     expect(parseShapeHeader(shape())).toEqual({
       lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
-      models: ["best"], vars: ["temp", "wind"], maxChars: 160,
+      models: ["best"], vars: ["temp", "wind"], maxChars: 160, messages: 2,
     });
   });
 
@@ -113,9 +126,9 @@ describe("parseShapeHeader", () => {
   });
 
   it("nulls individual fields of the wrong type or range", () => {
-    expect(parseShapeHeader(shape({ lat: "63.06", lon: 999, mode: 7, maxChars: 1.5 }))).toEqual({
+    expect(parseShapeHeader(shape({ lat: "63.06", lon: 999, mode: 7, maxChars: 1.5, messages: "2" }))).toEqual({
       lat: null, lon: null, loc: "current", mode: null,
-      models: ["best"], vars: ["temp", "wind"], maxChars: null,
+      models: ["best"], vars: ["temp", "wind"], maxChars: null, messages: null,
     });
     expect(parseShapeHeader(shape({ models: "best", vars: [1, "temp", null] }))).toMatchObject({
       models: [], vars: ["temp"],
