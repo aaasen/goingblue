@@ -18,7 +18,6 @@ import { CODECS, supportedVersions } from "@weather/protocol";
 import { fetchForecast, parseRequest } from "../src/forecast.ts";
 
 const OUT_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "golden", "goldens.json");
-const OPEN_METEO_ORIGIN = "https://api.open-meteo.com";
 
 // Sites spanning the codec's operating envelope: named-location and GPS parsing, hemispheres,
 // seasons-at-record-time, maritime vs. continental vs. high-altitude regimes.
@@ -57,8 +56,10 @@ interface GoldenCase {
   encoded: string;
 }
 
+// Strip whichever origin the request went to (weather and air quality live on different
+// hosts), matching how golden.test.ts and verify-container key their lookups.
 function keyOf(url: string): string {
-  return url.replace(OPEN_METEO_ORIGIN, "");
+  return url.replace(/^https?:\/\/[^/]+/, "");
 }
 
 const version = Math.max(...supportedVersions());
