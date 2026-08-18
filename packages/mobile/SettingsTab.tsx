@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity, Alert } from 'react-native';
-import UnitsToggle from './UnitsToggle';
-import { AQI_SCALES, type AqiScale, type TimeFormat, type Units } from './settings';
+import PreferenceRows from './PreferenceRows';
+import type { AqiScale, TimeFormat, Units } from './settings';
 
 const TERMS_URL = 'https://going.blue/terms';
 const PRIVACY_URL = 'https://going.blue/privacy';
@@ -127,45 +127,14 @@ export default function SettingsTab({
       {/* Preferences */}
       <Text style={styles.heading}>Preferences</Text>
       <View style={styles.card}>
-        <View style={styles.preferenceRow}>
-          <Text style={styles.controlLabel}>Units</Text>
-          <UnitsToggle units={units} onChange={onUnitsChange} />
-        </View>
-        <View style={[styles.preferenceRow, styles.preferenceRowSpacing]}>
-          <Text style={styles.controlLabel}>Time format</Text>
-          <View style={styles.toggle}>
-            {(['12h', '24h'] as const).map((format) => (
-              <TouchableOpacity
-                key={format}
-                style={[styles.toggleBtn, timeFormat === format && styles.toggleBtnActive]}
-                onPress={() => onTimeFormatChange(format)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.toggleText, timeFormat === format && styles.toggleTextActive]}>{format}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-        {/* Which scale the air-quality variables are requested and drawn on. A preference rather
-            than a builder option: the two indices aren't convertible, so this is the scale the
-            reader reads in, and the builder offers only that one's variables. */}
-        <View style={[styles.preferenceRow, styles.preferenceRowSpacing]}>
-          <Text style={styles.controlLabel}>Air quality</Text>
-          <View style={styles.toggle}>
-            {AQI_SCALES.map((scale) => (
-              <TouchableOpacity
-                key={scale.value}
-                style={[styles.toggleBtn, aqiScale === scale.value && styles.toggleBtnActive]}
-                onPress={() => onAqiScaleChange(scale.value)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.toggleText, aqiScale === scale.value && styles.toggleTextActive]}>
-                  {scale.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
+        <PreferenceRows
+          units={units}
+          onUnitsChange={onUnitsChange}
+          timeFormat={timeFormat}
+          onTimeFormatChange={onTimeFormatChange}
+          aqiScale={aqiScale}
+          onAqiScaleChange={onAqiScaleChange}
+        />
       </View>
 
       {/* Model details */}
@@ -263,14 +232,6 @@ const styles = StyleSheet.create({
   link: { color: '#2a6bb5', textDecorationLine: 'underline' },
 
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12 },
-  preferenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  preferenceRowSpacing: { marginTop: 14 },
-  controlLabel: { fontSize: 13, fontWeight: '600', color: '#3a3a3c' },
-  toggle: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: '#e5e5ea', borderRadius: 8, padding: 2 },
-  toggleBtn: { paddingHorizontal: 20, paddingVertical: 6, borderRadius: 6 },
-  toggleBtnActive: { backgroundColor: '#fff' },
-  toggleText: { fontSize: 13, color: '#6e6e73', fontWeight: '500' },
-  toggleTextActive: { color: '#1c1c1e' },
   // Full-width destructive action, sitting on its own below the reference sections. Height is
   // fixed so swapping the label for a spinner mid-delete doesn't make the row jump.
   resetBtn: { backgroundColor: '#fff', borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center', marginTop: 4 },

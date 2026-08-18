@@ -4,8 +4,8 @@ import {
 } from 'react-native';
 import { createAccount } from './account';
 import GettingStarted from './GettingStarted';
-import UnitsToggle from './UnitsToggle';
-import type { TimeFormat, Units } from './settings';
+import PreferenceRows from './PreferenceRows';
+import type { AqiScale, TimeFormat, Units } from './settings';
 
 const TERMS_URL = 'https://going.blue/terms';
 const PRIVACY_URL = 'https://going.blue/privacy';
@@ -17,11 +17,15 @@ interface Props {
   onUnitsChange: (u: Units) => void;
   timeFormat: TimeFormat;
   onTimeFormatChange: (format: TimeFormat) => void;
+  aqiScale: AqiScale;
+  onAqiScaleChange: (scale: AqiScale) => void;
 }
 
 // First-run gate. The account token identifies the user for usage limits and is created once,
 // here, over normal internet — not over satellite.
-export default function SetupScreen({ onReady, units, onUnitsChange, timeFormat, onTimeFormatChange }: Props) {
+export default function SetupScreen({
+  onReady, units, onUnitsChange, timeFormat, onTimeFormatChange, aqiScale, onAqiScaleChange,
+}: Props) {
   const [busy, setBusy] = useState(false);
 
   async function handleStart() {
@@ -48,25 +52,14 @@ export default function SetupScreen({ onReady, units, onUnitsChange, timeFormat,
 
       <Text style={styles.label}>Preferences</Text>
       <View style={styles.preferencesCard}>
-        <View style={styles.preferenceRow}>
-          <Text style={styles.preferenceLabel}>Units</Text>
-          <UnitsToggle units={units} onChange={onUnitsChange} />
-        </View>
-        <View style={[styles.preferenceRow, styles.preferenceRowSpacing]}>
-          <Text style={styles.preferenceLabel}>Time format</Text>
-          <View style={styles.toggle}>
-            {(['12h', '24h'] as const).map((format) => (
-              <TouchableOpacity
-                key={format}
-                style={[styles.toggleBtn, timeFormat === format && styles.toggleBtnActive]}
-                onPress={() => onTimeFormatChange(format)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.toggleText, timeFormat === format && styles.toggleTextActive]}>{format}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
+        <PreferenceRows
+          units={units}
+          onUnitsChange={onUnitsChange}
+          timeFormat={timeFormat}
+          onTimeFormatChange={onTimeFormatChange}
+          aqiScale={aqiScale}
+          onAqiScaleChange={onAqiScaleChange}
+        />
       </View>
 
       <TouchableOpacity
@@ -103,13 +96,4 @@ const styles = StyleSheet.create({
   btnPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 
   preferencesCard: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 20 },
-  preferenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  preferenceRowSpacing: { marginTop: 14 },
-  preferenceLabel: { fontSize: 13, fontWeight: '600', color: '#3a3a3c' },
-  toggle: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: '#e5e5ea', borderRadius: 8, padding: 2 },
-  toggleBtn: { paddingHorizontal: 20, paddingVertical: 6, borderRadius: 6 },
-  toggleBtnActive: { backgroundColor: '#fff' },
-  toggleText: { fontSize: 13, color: '#6e6e73', fontWeight: '500' },
-  toggleTextActive: { color: '#1c1c1e' },
-
 });

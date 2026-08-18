@@ -128,6 +128,8 @@ export default function App() {
           onUnitsChange={setUnits}
           timeFormat={timeFormat}
           onTimeFormatChange={setTimeFormat}
+          aqiScale={aqiScale}
+          onAqiScaleChange={setAqiScale}
         />
       </View>
     );
