@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDay, renderStats, type StatsData, type StatsRow } from "../src/stats.js";
+import { formatDay, renderStats, type StatsData, type StatsRow } from "../src/pages/stats.js";
 
 // Rendering is pure, so every case here feeds rows straight in — no Postgres, matching the rest
 // of the server tests. Assertions are on structure and numbers rather than exact markup, so

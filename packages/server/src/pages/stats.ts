@@ -1,7 +1,7 @@
 import type { Context } from "hono";
-import { query } from "./db.js";
-import { PAGE } from "./legal.js";
-import { log } from "./log.js";
+import { query } from "../db.js";
+import { PAGE } from "./shell.js";
+import { log } from "../log.js";
 
 // GET /stats — the forecast usage dashboard, behind basic auth (wired in index.ts, which only
 // registers the route when STATS_PASS is set). It reads `requests`, which has held one row per

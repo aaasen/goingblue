@@ -3,10 +3,14 @@ import { Hono } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import { cors } from "hono/cors";
 import { forecast, health, sms, createAccountRoute, verifyAccountRoute, deleteAccountRoute } from "./routes.js";
-import { landing, support, privacy, terms, contactCard } from "./legal.js";
+import { landing } from "./pages/landing.js";
+import { support } from "./pages/support.js";
+import { privacy } from "./pages/privacy.js";
+import { terms } from "./pages/terms.js";
+import { contactCard } from "./pages/contact-card.js";
 import { image } from "./assets.js";
 import { benchmark } from "./benchmark.js";
-import { stats } from "./stats.js";
+import { stats } from "./pages/stats.js";
 import { migrate } from "./db.js";
 import { log } from "./log.js";
 
