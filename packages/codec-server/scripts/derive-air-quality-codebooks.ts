@@ -93,13 +93,13 @@ const ctxCount = (c: Column) => NPREV * (c.tod ? NTOD : 1);
 
 // Each headline's residual tables: the count-table name, the generated constant, the headline's
 // own column, and the three constituents that key it — in AQI_BASE_* bit order (pm2.5, ozone,
-// pm10), which is what makes `mask` here the same mask v2.ts derives from vars_mask.
+// pm10), which is what makes `mask` here the same mask v3.ts derives from vars_mask.
 // `masks` is the set the codec actually codes as residuals (AQI_*_RESIDUAL_MASKS in entropy.ts).
 // The other presence masks fall back to the headline's own deltas, so their table rows are never
 // looked up — counting them was ~9 of every 14 residual increments spent on rows nothing reads.
 // The rows still exist in the shipped table, uniform, because the mask indexes it directly; a
 // mode set that grew without a regeneration would ship a uniform row, which the codebook digest
-// catches (V2_CODEBOOKS carries the mode sets alongside the weights).
+// catches (V3_CODEBOOKS carries the mode sets alongside the weights).
 const RESIDUALS: {
   name: string; table: string; head: string;
   base: [string, string, string]; masks: ReadonlySet<number>;
@@ -159,7 +159,7 @@ export function counter(): CellCounter {
     // Each headline's residual against the max of its carried constituents, keyed by the 3-bit
     // presence mask and the resolution — within a mask the residual is a spike at zero, so a
     // richer context would only split it. Every mask is counted from the same periods; which of
-    // them the wire actually uses is v2.ts's call (AQI_*_RESIDUAL_MASKS).
+    // them the wire actually uses is v3.ts's call (AQI_*_RESIDUAL_MASKS).
     ...RESIDUALS.map((r) => ({ name: r.name, dims: [NMASK, NRES, NRESID] })),
     // [prev + 1][sym]: row 0 is the bootstrap (no predecessor), rows 1.. are order-1.
     ...DOMINANT.map((d) => ({ name: d.name, dims: [d.of.length + 2, d.of.length + 1] })),
@@ -197,7 +197,7 @@ export function counter(): CellCounter {
         const slice = ctx.atMidnight(res);
         if (!slice) continue;
         // Clamped to the horizon the WIRE encodes. Production stops every air-quality column at
-        // AQ_HORIZON_HOURS (aqPeriodCount in v2.ts), so periods past it are never emitted — and
+        // AQ_HORIZON_HOURS (aqPeriodCount in v3.ts), so periods past it are never emitted — and
         // at fine resolutions they were most of what got counted, a 12-day window being three
         // times the horizon. Training on them diluted the tables with lead times the encoder
         // never carries, and cost the scan the same 3x.
@@ -255,14 +255,14 @@ export function counter(): CellCounter {
           const [b0, b1, b2] = r.base.map((b) => quantized[b]);
           for (let p = 0; p < n; p++) {
             if (a[p] === AQI_NO_DATA) continue;
-            const v0 = b0[p], v1 = b1[p], v2 = b2[p];
+            const v0 = b0[p], v1 = b1[p], v3 = b2[p];
             for (const mask of r.masks) {
               // The subset maxima, written out rather than re-scanned per mask: the shipped mode
               // sets only ever ask for pm2.5+ozone, ozone+pm10 and all three.
               let m = 0, ok = true;
               if (mask & 1) { if (v0 === AQI_NO_DATA) ok = false; else m = v0; }
               if (ok && (mask & 2)) { if (v1 === AQI_NO_DATA) ok = false; else if (v1 > m) m = v1; }
-              if (ok && (mask & 4)) { if (v2 === AQI_NO_DATA) ok = false; else if (v2 > m) m = v2; }
+              if (ok && (mask & 4)) { if (v3 === AQI_NO_DATA) ok = false; else if (v3 > m) m = v3; }
               if (!ok) continue;
               // Clamped, not skipped: the headline is the max over sub-indices this mask may not
               // carry, so it is ≥ that max by construction — a negative here would be a

@@ -54,7 +54,7 @@ export interface Period {
   // US EPA index runs 0–500 with 50/100/150/200/300 category edges, the European index runs
   // 0–100+ with edges every 20. A 40 is "good" on one and "moderate" on the other, so they must
   // never share a palette or a threshold. Each is present only when its own vars_mask bit is set
-  // AND the period falls inside the CAMS horizon (AQ_HORIZON_HOURS in v2.ts) — periods past it
+  // AND the period falls inside the CAMS horizon (AQ_HORIZON_HOURS in v3.ts) — periods past it
   // carry no air-quality data at all, so `undefined` here means "not forecast", not "clean".
   // Each headline is EXACTLY the max over its own scale's sub-indices — measured over 52M corpus
   // periods, it exceeds that max in 0.00% of them — which is what lets it code as a residual.

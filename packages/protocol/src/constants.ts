@@ -87,7 +87,7 @@ export const VARS_BIT: Record<string, number> = {
   rain: 12,  // liquid precipitation (rain + showers), mm
   // Air quality (CAMS), on two incompatible index scales — see the AQI ladders in entropy.ts.
   // Every one of these is model-independent: the `m:` center selection does not apply, and they
-  // reach only ~4 days (AQ_HORIZON_HOURS in v2.ts). Bit 13 is the slot tmin left when temp
+  // reach only ~4 days (AQ_HORIZON_HOURS in v3.ts). Bit 13 is the slot tmin left when temp
   // became a single representative sample per period.
   aq_pm25: 13,     // US AQI PM2.5 sub-index — the smoke column
   aq_o3: 14,       // US AQI ozone sub-index

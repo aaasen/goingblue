@@ -1,18 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { encodeBodyLE, decodeBodyLE } from "../src/codec.js";
 import { ALPHABET, HTTP_ALPHABET, SMS_ALPHABET } from "../src/constants.js";
-import { v2Codec, v2MessageToString } from "../src/versions/v2.js";
+import { v3Codec, v3MessageToString } from "../src/versions/v3.js";
 import { DEVICE_TRANSPORT, UNCAPPED_MAX_CHARS, maxCharsFor } from "../src/devices.js";
-import { V2_HEADER_CHARS } from "../src/versions/v2.js";
+import { V3_HEADER_CHARS } from "../src/versions/v3.js";
 import type { ForecastMessage, RequestContext } from "../src/model.js";
-import v2Fixture from "./fixtures/v2.fixture.json";
+import v3Fixture from "./fixtures/v3.fixture.json";
 
 // The internet route: the only one restricted by neither GSM-7 nor a character count, so it takes
 // every printable ASCII character and the whole forecast. See constants.ts for why the answer is
 // ASCII rather than something wider — over a byte-counted transport, wider is bigger.
 
-const d = v2Fixture.decoded as ForecastMessage;
-const req = v2Fixture.request;
+const d = v3Fixture.decoded as ForecastMessage;
+const req = v3Fixture.request;
 const ctx = (device?: RequestContext["device"]): RequestContext => ({
   model: 31 - Math.clz32(d.models_mask & -d.models_mask),
   vars_mask: d.vars_mask,
@@ -107,19 +107,19 @@ describe("the internet route", () => {
     expect(DEVICE_TRANSPORT.d.maxChars).toBe(UNCAPPED_MAX_CHARS);
     // Big enough that no reply can reach it, and a real number, so it survives a JSON log.
     expect(Number.isSafeInteger(UNCAPPED_MAX_CHARS)).toBe(true);
-    expect(maxCharsFor("d", 1, V2_HEADER_CHARS)).toBe(UNCAPPED_MAX_CHARS);
+    expect(maxCharsFor("d", 1, V3_HEADER_CHARS)).toBe(UNCAPPED_MAX_CHARS);
   });
 
   it("decodes its replies from the route, the same as every other alphabet", () => {
-    expect(v2Codec.decode(v2MessageToString(d, "base94"), () => ctx("d"))).toEqual(d);
+    expect(v3Codec.decode(v3MessageToString(d, "base94"), () => ctx("d"))).toEqual(d);
   });
 
   it("refuses a base-94 body handed the wrong route rather than inventing a forecast", () => {
     // base-94 is a superset of base-85, so the same characters mean different numbers. This is
     // why the alphabet is read off the stored route and never guessed from the body: both are
     // ASCII, so nothing in the text could tell them apart.
-    const encoded = v2MessageToString(d, "base94");
-    expect(() => v2Codec.decode(encoded, () => ctx("g"))).toThrow();
-    expect(() => v2Codec.decode(encoded, () => ctx(undefined))).toThrow();
+    const encoded = v3MessageToString(d, "base94");
+    expect(() => v3Codec.decode(encoded, () => ctx("g"))).toThrow();
+    expect(() => v3Codec.decode(encoded, () => ctx(undefined))).toThrow();
   });
 });

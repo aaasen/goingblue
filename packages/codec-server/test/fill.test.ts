@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  CODECS, V2_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
+  CODECS, V3_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, MODEL_BIT, IPHONE_MAX_CHARS,
-  V2_HEADER_CHARS, maxCharsFor, reassembleReply,
+  V3_HEADER_CHARS, maxCharsFor, reassembleReply,
   type RequestContext,
 } from "@weather/protocol";
 import {
@@ -71,7 +71,7 @@ function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
     varsMask: TEST_VARS,
     maxChars: 160,
     messages: 1,
-    decoderVersion: V2_VERSION,
+    decoderVersion: V3_VERSION,
     code: 7,
     startEpochHour: REQ_UTC_HOUR,
     userToken: null,
@@ -79,7 +79,7 @@ function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
   };
 }
 
-const codec = CODECS[V2_VERSION];
+const codec = CODECS[V3_VERSION];
 
 function encodeSeq(p: ForecastParams, h = HOURLY, times = TIMES) {
   return (seq: number) =>
@@ -157,26 +157,26 @@ describe("encodeFillSeq", () => {
       const wide = (bodyChars: number) => "#abcd" + "㐀".repeat(bodyChars);
 
       it("keeps the single-message fill unlabelled", () => {
-        expect(splitReplyFor(iphone, reply, V2_HEADER_CHARS)).toEqual([reply]);
+        expect(splitReplyFor(iphone, reply, V3_HEADER_CHARS)).toEqual([reply]);
       });
 
       it("keeps the full 45-character single-message body unlabelled", () => {
         const whole = wide(45);
-        expect(splitReplyFor(iphone, whole, V2_HEADER_CHARS)).toEqual([whole]);
+        expect(splitReplyFor(iphone, whole, V3_HEADER_CHARS)).toEqual([whole]);
       });
 
       it("collapses a two-message request whose content ran short to one plain bubble", () => {
         const p = params({
           alphabet: "base32768",
           messages: 2,
-          maxChars: maxCharsFor("i", 2, V2_HEADER_CHARS),
+          maxChars: maxCharsFor("i", 2, V3_HEADER_CHARS),
         });
         const short = wide(45);
-        expect(splitReplyFor(p, short, V2_HEADER_CHARS)).toEqual([short]);
+        expect(splitReplyFor(p, short, V3_HEADER_CHARS)).toEqual([short]);
       });
 
       it("still splits what one bubble cannot hold", () => {
-        const parts = splitReplyFor(iphone, wide(46), V2_HEADER_CHARS);
+        const parts = splitReplyFor(iphone, wide(46), V3_HEADER_CHARS);
         expect(parts).toHaveLength(2);
         expect(parts[0].startsWith("1/2 ")).toBe(true);
       });
@@ -188,11 +188,11 @@ describe("encodeFillSeq", () => {
       const p = params({
         alphabet: "base32768",
         messages: 2,
-        maxChars: maxCharsFor("i", 2, V2_HEADER_CHARS),
+        maxChars: maxCharsFor("i", 2, V3_HEADER_CHARS),
       });
       const encoded = fitFillToBudget(
         encodeSeq(p), (e) => e.length, maxFillSeq(MODE_AUTO), p.maxChars)!;
-      const parts = splitReplyFor(p, encoded, V2_HEADER_CHARS);
+      const parts = splitReplyFor(p, encoded, V3_HEADER_CHARS);
 
       it("sends exactly two, each inside a bubble", () => {
         expect(parts).toHaveLength(2);
@@ -205,15 +205,15 @@ describe("encodeFillSeq", () => {
       it("labels them and repeats the header", () => {
         expect(parts[0].startsWith("1/2 ")).toBe(true);
         expect(parts[1].startsWith("2/2 ")).toBe(true);
-        const header = (s: string) => s.slice(4, 4 + V2_HEADER_CHARS);
+        const header = (s: string) => s.slice(4, 4 + V3_HEADER_CHARS);
         expect(header(parts[0])).toBe(header(parts[1]));
       });
 
       it("decodes to a fuller forecast than one message, in any paste order", () => {
-        const whole = reassembleReply(parts.join("\n"), () => V2_HEADER_CHARS);
+        const whole = reassembleReply(parts.join("\n"), () => V3_HEADER_CHARS);
         expect(whole).toBe(encoded);
         const decoded = decodeMessage(whole, () => ctx);
-        const reversed = reassembleReply([...parts].reverse().join(" "), () => V2_HEADER_CHARS);
+        const reversed = reassembleReply([...parts].reverse().join(" "), () => V3_HEADER_CHARS);
         expect(decodeMessage(reversed, () => ctx)).toEqual(decoded);
         expect(decoded.periodHours!.length)
           .toBeGreaterThan(decodeMessage(reply, () => ctx).periodHours!.length);

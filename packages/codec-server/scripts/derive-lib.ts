@@ -63,7 +63,7 @@ export const EXTRA_SOURCE_VARS: Record<string, readonly string[]> = {
 };
 const EXTRA_SOURCE_VAR_SET = new Set(Object.values(EXTRA_SOURCE_VARS).flat());
 
-// ── Wind quantization (must match v2.ts) ────────────────────────────────────────
+// ── Wind quantization (must match v3.ts) ────────────────────────────────────────
 // Every wind speed column quantizes to the extended Beaufort scale (forces 0..17): band lower
 // bounds in km/h — the standard 13 forces plus the force 13..17 extension so hurricane-force
 // gusts and jet winds don't clip (corpus maxima: gust 225, 500 hPa 293 kph). Chosen 2026-07-31:

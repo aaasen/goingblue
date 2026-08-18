@@ -3,7 +3,7 @@
 // EM in code-length space over the train corpus (alpha=200, held-out eval -2.17% body bits vs the single
 // global table set). Class 0 is the base set in codebooks.gen.ts and is NOT repeated here;
 // classes 1..7 below are selected per message by the encoder's try-all-pick-best and carried
-// in the v2 header's 3-bit selector. These tables are v2 wire format (digest-pinned alongside
+// in the v3 header's 3-bit selector. These tables are v3 wire format (digest-pinned alongside
 // the base set in test/codebooks.test.ts) and must be regenerated IN SYNC with codebooks.gen.ts:
 // pnpm generate → extract-cell-counts.ts → derive-class-ladder.ts → derive-class-ladder.ts --emit.
 

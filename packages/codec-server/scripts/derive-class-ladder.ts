@@ -8,7 +8,7 @@
  * The unit is one forecast cell (location × window, message-shaped — a location's winter and
  * summer can land in different classes). Cost(cell, class) = Σ counts · costBits(class tables) —
  * the exact model cost the encoder's try-all-pick-best would compare, so the E-step IS
- * production's selector. The selector itself is free on the wire up to 3 bits (V2_HEADER_BITS
+ * production's selector. The selector itself is free on the wire up to 3 bits (V3_HEADER_BITS
  * 22 → 25 still fits the 4 base-85 header chars).
  *
  *   - Class 0 is PINNED to the global (train-corpus-wide) tables: the fallback that guarantees
@@ -205,7 +205,7 @@ async function main(): Promise<void> {
       (100 * (last - base) / base).toFixed(2)}% body bits vs the single
 // global table set). Class 0 is the base set in codebooks.gen.ts and is NOT repeated here;
 // classes 1..${K - 1} below are selected per message by the encoder's try-all-pick-best and carried
-// in the v2 header's 3-bit selector. These tables are v2 wire format (digest-pinned alongside
+// in the v3 header's 3-bit selector. These tables are v3 wire format (digest-pinned alongside
 // the base set in test/codebooks.test.ts) and must be regenerated IN SYNC with codebooks.gen.ts:
 // pnpm generate → extract-cell-counts.ts → derive-class-ladder.ts → derive-class-ladder.ts --emit.
 `;

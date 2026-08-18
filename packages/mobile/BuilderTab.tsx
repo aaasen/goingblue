@@ -9,7 +9,7 @@ import * as Network from 'expo-network';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
-  VARS_BIT, V2_VERSION,
+  VARS_BIT, V3_VERSION,
   ALWAYS_VARS_MASK, CONFIGURABLE_VAR_GROUPS, MODEL_BIT,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE, predictCenter, estimatedLastFullRunMs, FILL_SLOTS,
   type RequestContext, type Center,
@@ -291,7 +291,7 @@ const DEFAULT_GROUPS = new Set<string>();
 // so the server can attribute the request to the user. `k:` is the message code the slim response
 // echoes so the client can recover the request context (see cache.ts).
 function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], device: Device, messages: number, code: number, startEpochHour: number): string {
-  const parts: string[] = [`v${V2_VERSION}`];
+  const parts: string[] = [`v${V3_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   parts.push(`p:${PRIORITIES.find((m) => m.value === mode)!.token}`);
   parts.push(`z:${requestOffsetHours(coords, startEpochHour)}`);

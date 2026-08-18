@@ -2,14 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   encodeBodyLE, decodeBodyLE, encodeBodyWide, decodeBodyWide, bodyAlphabet, decodeBodyAuto,
 } from "../src/codec.js";
-import { v2Codec, V2_HEADER_CHARS } from "../src/versions/v2.js";
+import { v3Codec, V3_HEADER_CHARS } from "../src/versions/v3.js";
 import { decodeMessage } from "../src/registry.js";
 import { IPHONE_MAX_CHARS, DEVICE_TRANSPORT } from "../src/devices.js";
 import type { ForecastMessage } from "../src/model.js";
-import v2Fixture from "./fixtures/v2.fixture.json";
+import v3Fixture from "./fixtures/v3.fixture.json";
 
-const d = v2Fixture.decoded as ForecastMessage;
-const req = v2Fixture.request;
+const d = v3Fixture.decoded as ForecastMessage;
+const req = v3Fixture.request;
 const ctx = () => ({
   model: 31 - Math.clz32(d.models_mask & -d.models_mask),
   vars_mask: d.vars_mask,
@@ -90,31 +90,31 @@ describe("alphabet detection", () => {
   });
 });
 
-describe("v2 messages in base32768", () => {
+describe("v3 messages in base32768", () => {
   it("decodes to the same message the base-85 encoding does", () => {
-    const wide = v2Codec.encode(d, "base32768");
-    expect(wide).not.toBe(v2Fixture.encoded);
-    expect(v2Codec.decode(wide, ctx)).toEqual(v2Fixture.decoded);
+    const wide = v3Codec.encode(d, "base32768");
+    expect(wide).not.toBe(v3Fixture.encoded);
+    expect(v3Codec.decode(wide, ctx)).toEqual(v3Fixture.decoded);
   });
 
   it("dispatches by version tag with no knowledge of the alphabet", () => {
-    expect(decodeMessage(v2Codec.encode(d, "base32768"), ctx)).toEqual(v2Fixture.decoded);
+    expect(decodeMessage(v3Codec.encode(d, "base32768"), ctx)).toEqual(v3Fixture.decoded);
   });
 
   it("defaults to base-85, so an unmarked request is unaffected", () => {
-    expect(v2Codec.encode(d)).toBe(v2Fixture.encoded);
-    expect(v2Codec.encode(d, "base85")).toBe(v2Fixture.encoded);
+    expect(v3Codec.encode(d)).toBe(v3Fixture.encoded);
+    expect(v3Codec.encode(d, "base85")).toBe(v3Fixture.encoded);
   });
 
   it("keeps the version tag and packed header in ASCII", () => {
-    const wide = v2Codec.encode(d, "base32768");
-    expect(wide.slice(0, V2_HEADER_CHARS)).toBe(v2Fixture.encoded.slice(0, V2_HEADER_CHARS));
-    expect([...wide.slice(0, V2_HEADER_CHARS)].every((c) => c.codePointAt(0)! < 0x80)).toBe(true);
-    expect(wide.codePointAt(V2_HEADER_CHARS)!).toBeGreaterThan(0x7f);
+    const wide = v3Codec.encode(d, "base32768");
+    expect(wide.slice(0, V3_HEADER_CHARS)).toBe(v3Fixture.encoded.slice(0, V3_HEADER_CHARS));
+    expect([...wide.slice(0, V3_HEADER_CHARS)].every((c) => c.codePointAt(0)! < 0x80)).toBe(true);
+    expect(wide.codePointAt(V3_HEADER_CHARS)!).toBeGreaterThan(0x7f);
   });
 
   it("carries the same forecast in fewer characters", () => {
-    expect(v2Codec.encode(d, "base32768").length).toBeLessThan(v2Fixture.encoded.length);
+    expect(v3Codec.encode(d, "base32768").length).toBeLessThan(v3Fixture.encoded.length);
   });
 });
 
@@ -126,7 +126,7 @@ describe("the iPhone one-bubble budget", () => {
   const BUBBLE_BYTES = 140;
   // Worst case: every body character costs 3 UTF-8 bytes. base32768 spends 2 on its tail
   // character when the bit count doesn't fill it, so this is an upper bound on any real reply.
-  const replyBytes = (chars: number) => V2_HEADER_CHARS + (chars - V2_HEADER_CHARS) * 3;
+  const replyBytes = (chars: number) => V3_HEADER_CHARS + (chars - V3_HEADER_CHARS) * 3;
 
   it("fits a bubble at the cap", () => {
     expect(IPHONE_MAX_CHARS).toBeLessThanOrEqual(BUBBLE_UNITS);

@@ -2,17 +2,17 @@ import { describe, it, expect } from "vitest";
 import { decode as wideDecode } from "base32768";
 import { encodeBodyLE, decodeBodyLE, decodeBodyAuto, bodyAlphabet } from "../src/codec.js";
 import { ALPHABET, GSM_LATIN1, GSM_GREEK, SMS_ALPHABET } from "../src/constants.js";
-import { v2Codec, v2MessageToString, V2_HEADER_CHARS } from "../src/versions/v2.js";
+import { v3Codec, v3MessageToString, V3_HEADER_CHARS } from "../src/versions/v3.js";
 import { DEVICE_TRANSPORT } from "../src/devices.js";
 import type { ForecastMessage, RequestContext } from "../src/model.js";
-import v2Fixture from "./fixtures/v2.fixture.json";
+import v3Fixture from "./fixtures/v3.fixture.json";
 
 // The SMS route's alphabet — GSM-7 basic in full rather than its intersection with ASCII. See
 // constants.ts for what each half survives and docs/private/PROBES.md round 3 for the field run
 // that decided it.
 
-const d = v2Fixture.decoded as ForecastMessage;
-const req = v2Fixture.request;
+const d = v3Fixture.decoded as ForecastMessage;
+const req = v3Fixture.request;
 const ctx = (device?: RequestContext["device"]): RequestContext => ({
   model: 31 - Math.clz32(d.models_mask & -d.models_mask),
   vars_mask: d.vars_mask,
@@ -114,11 +114,11 @@ describe("base-124 body codec", () => {
 });
 
 describe("the alphabet a reply is decoded in", () => {
-  const encodedFor = (alphabet: "base85" | "base124") => v2MessageToString(d, alphabet);
+  const encodedFor = (alphabet: "base85" | "base124") => v3MessageToString(d, alphabet);
 
   it("comes from the request's route, not from inspecting the body", () => {
     const encoded = encodedFor("base124");
-    expect(v2Codec.decode(encoded, () => ctx("s"))).toEqual(d);
+    expect(v3Codec.decode(encoded, () => ctx("s"))).toEqual(d);
   });
 
   it("carries more of the forecast in the same 160 characters", () => {
@@ -130,25 +130,25 @@ describe("the alphabet a reply is decoded in", () => {
   it("still decodes base-85 for the routes that keep it", () => {
     for (const code of ["z", "g"] as const) {
       expect(DEVICE_TRANSPORT[code].alphabet).toBe("base85");
-      expect(v2Codec.decode(encodedFor("base85"), () => ctx(code))).toEqual(d);
+      expect(v3Codec.decode(encodedFor("base85"), () => ctx(code))).toEqual(d);
     }
   });
 
   it("falls back to guessing when the context predates the device field", () => {
     // A stored context with no route can only be base-85 or base32768, and bodyAlphabet tells
     // those apart exactly — every base-124 reply comes from a context that records the route.
-    expect(v2Codec.decode(encodedFor("base85"), () => ctx(undefined))).toEqual(d);
-    expect(bodyAlphabet(encodedFor("base85").slice(V2_HEADER_CHARS))).toBe("base85");
+    expect(v3Codec.decode(encodedFor("base85"), () => ctx(undefined))).toEqual(d);
+    expect(bodyAlphabet(encodedFor("base85").slice(V3_HEADER_CHARS))).toBe("base85");
   });
 
   it("refuses a base-124 body handed the wrong route, rather than inventing a forecast", () => {
     // The failure this protects: base-124 is a superset of base-85, so the same characters mean
     // different numbers. Reading one as the other must not quietly produce weather.
     const encoded = encodedFor("base124");
-    expect(() => v2Codec.decode(encoded, () => ctx("g"))).toThrow();
+    expect(() => v3Codec.decode(encoded, () => ctx("g"))).toThrow();
     // And with no route at all the guess is wrong too — the extras read as non-ASCII, so it
     // reaches for base32768 and that codec refuses them. Loud either way, never a forecast.
-    expect(() => v2Codec.decode(encoded, () => ctx(undefined))).toThrow();
+    expect(() => v3Codec.decode(encoded, () => ctx(undefined))).toThrow();
   });
 
   it("hands decodeBodyAuto an explicit alphabet in preference to the guess", () => {

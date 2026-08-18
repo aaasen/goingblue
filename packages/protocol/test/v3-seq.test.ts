@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { v2Codec, V2_VERSION, V2_HEADER_CHARS } from "../src/versions/v2.js";
+import { v3Codec, V3_VERSION, V3_HEADER_CHARS } from "../src/versions/v3.js";
 import { layoutFor, maxFillSeq, MODE_AUTO, MODE_DETAIL, MODE_RANGE } from "../src/layout.js";
 import { DEFAULT_VARS_MASK, MODEL_BIT } from "../src/constants.js";
 import type { ForecastMessage, Period, RequestContext } from "../src/model.js";
@@ -19,7 +19,7 @@ function msgFor(mode: number, seq: number): ForecastMessage {
   // codebooks off it, and the decoder derives the same value from the layout.
   const first = new Date(layout.periodStartUtcHour[0] * 3600000);
   return {
-    version: V2_VERSION,
+    version: V3_VERSION,
     code: 0,
     days: layout.days,
     models_mask: 0b0001,
@@ -43,13 +43,13 @@ const ctxOf = (m: ForecastMessage): RequestContext => ({
 });
 
 function dec(m: ForecastMessage): ForecastMessage {
-  return v2Codec.decode(v2Codec.encode(m), () => ctxOf(m));
+  return v3Codec.decode(v3Codec.encode(m), () => ctxOf(m));
 }
 
-describe("v2 seq header", () => {
+describe("v3 seq header", () => {
   it("uses a 5-char header", () => {
-    expect(V2_HEADER_CHARS).toBe(5);
-    expect(v2Codec.encode(msgFor(MODE_RANGE, 1)).length).toBeGreaterThanOrEqual(V2_HEADER_CHARS);
+    expect(V3_HEADER_CHARS).toBe(5);
+    expect(v3Codec.encode(msgFor(MODE_RANGE, 1)).length).toBeGreaterThanOrEqual(V3_HEADER_CHARS);
   });
 
   it("round-trips the smallest layout (seq 1: one 12h day, two periods)", () => {
@@ -72,9 +72,9 @@ describe("v2 seq header", () => {
     // The header field is 8 bits (1..256); encode enforces only the field range — the
     // path-length check belongs to decode, where the mode is known.
     const m = msgFor(MODE_RANGE, 2);
-    expect(() => v2Codec.encode({ ...m, seq: 0 })).toThrow(/seq/);
-    expect(() => v2Codec.encode({ ...m, seq: 257 })).toThrow(/seq/);
-    expect(() => v2Codec.encode({ ...m, seq: undefined as unknown as number })).toThrow(/seq/);
+    expect(() => v3Codec.encode({ ...m, seq: 0 })).toThrow(/seq/);
+    expect(() => v3Codec.encode({ ...m, seq: 257 })).toThrow(/seq/);
+    expect(() => v3Codec.encode({ ...m, seq: undefined as unknown as number })).toThrow(/seq/);
   });
 
   // The server encodes a Canadian Range request under Auto (see effectiveMode). The mode isn't
@@ -85,7 +85,7 @@ describe("v2 seq header", () => {
     const stored: RequestContext = {
       ...ctxOf(built), model: MODEL_BIT.CA, mode: MODE_RANGE, // what the client asked for
     };
-    const decoded = v2Codec.decode(v2Codec.encode(built), () => stored);
+    const decoded = v3Codec.decode(v3Codec.encode(built), () => stored);
     expect(decoded.periodHours).toEqual(built.periodHours); // laid out along Auto's path
     expect(decoded.periods[0]).toHaveLength(built.periods[0].length);
     expect(decoded.mode).toBe(MODE_RANGE); // but still labelled as what was asked for
@@ -93,14 +93,14 @@ describe("v2 seq header", () => {
     // And a context that happens to hold the substituted mode already lands in the same place,
     // so the rule is safe to apply anywhere on the read path.
     const storedEffective = { ...stored, mode: MODE_AUTO };
-    expect(v2Codec.decode(v2Codec.encode(built), () => storedEffective).periodHours)
+    expect(v3Codec.decode(v3Codec.encode(built), () => storedEffective).periodHours)
       .toEqual(decoded.periodHours);
   });
 
   it("leaves a Range request on an unsubstituted model alone", () => {
     const m = msgFor(MODE_RANGE, 20);
     const usCtx: RequestContext = { ...ctxOf(m), model: MODEL_BIT.US, mode: MODE_RANGE };
-    const decoded = v2Codec.decode(v2Codec.encode(m), () => usCtx);
+    const decoded = v3Codec.decode(v3Codec.encode(m), () => usCtx);
     expect(decoded.mode).toBe(MODE_RANGE);
     expect(decoded.periodHours).toEqual(m.periodHours); // Range's own layout, not Auto's
     expect(decoded.periodHours).not.toEqual(
@@ -112,6 +112,6 @@ describe("v2 seq header", () => {
     const m = msgFor(MODE_DETAIL, maxFillSeq(MODE_DETAIL));
     expect(maxFillSeq(MODE_DETAIL)).toBeGreaterThan(maxFillSeq(MODE_RANGE));
     const rangeCtx = { ...ctxOf(m), mode: MODE_RANGE };
-    expect(() => v2Codec.decode(v2Codec.encode(m), () => rangeCtx)).toThrow(/fill sequence/);
+    expect(() => v3Codec.decode(v3Codec.encode(m), () => rangeCtx)).toThrow(/fill sequence/);
   });
 });

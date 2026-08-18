@@ -2,11 +2,11 @@ import { writeFileSync, mkdirSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 // Imports the built codec, so build the protocol first: `pnpm --filter @weather/protocol build`.
-import { v2Codec, V2_VERSION, layoutFor, type ForecastMessage } from "../dist/index.js";
+import { v3Codec, V3_VERSION, layoutFor, type ForecastMessage } from "../dist/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Every v2 variable bit, so the fixture exercises — and freezes — every column's encoding
+// Every v3 variable bit, so the fixture exercises — and freezes — every column's encoding
 // (precip, temp, snow, rain, freeze, surface + 500/600/700 hPa winds, gust, high/mid/low cloud,
 // and all twelve air-quality indices). Bit 8 = gust (always-on since 2026-07-30). Bits 0..24 are
 // every allocated bit; 25 is free (the US carbon monoxide sub-index, dropped so the two scales
@@ -27,7 +27,7 @@ const layout = layoutFor(request.mode, startMs / 3600000, request.utcOffsetHours
 const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
 
 const input: ForecastMessage = {
-  version: V2_VERSION,
+  version: V3_VERSION,
   code: 0,
   days: layout.days,
   models_mask: 0b0001, // Best Match only (bit 0)
@@ -71,9 +71,9 @@ const ctx = () => ({
   utcOffsetHours: request.utcOffsetHours,
 });
 
-const encoded = v2Codec.encode(input);
+const encoded = v3Codec.encode(input);
 // Round-trip to capture quantization so fixture.decoded is exactly what decode produces.
-const decoded = v2Codec.decode(encoded, ctx);
+const decoded = v3Codec.decode(encoded, ctx);
 
 const fixture = {
   description: "Detail-mode fill (seq 4: 6h/12h/12h), all variables, Denali 14k camp",
@@ -84,7 +84,7 @@ const fixture = {
 
 const outDir = join(__dirname, "../test/fixtures");
 mkdirSync(outDir, { recursive: true });
-const outPath = join(outDir, "v2.fixture.json");
+const outPath = join(outDir, "v3.fixture.json");
 writeFileSync(outPath, JSON.stringify(fixture, null, 2) + "\n");
 console.log(`Written: ${outPath}`);
 console.log(`Encoded: ${encoded}`);

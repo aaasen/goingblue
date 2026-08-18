@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
-  v2MessageToString,
-  v2MessageFromString,
-  v2EncodeBreakdown,
-  V2_VERSION,
+  v3MessageToString,
+  v3MessageFromString,
+  v3EncodeBreakdown,
+  V3_VERSION,
   layoutFor,
   maxFillSeq,
   FILL_SLOTS,
@@ -77,7 +77,7 @@ function periodAt(i: number): Period {
 function msgFor(layout: FillLayout, overrides: Partial<ForecastMessage> = {}): ForecastMessage {
   const first = new Date(layout.periodStartUtcHour[0] * 3600000);
   return {
-    version: V2_VERSION,
+    version: V3_VERSION,
     code: 42,
     days: layout.days,
     models_mask: 0b001,
@@ -111,7 +111,7 @@ const ctx = ctxFor(MODE);
 function roundTrip(seq: number, mode = MODE): { original: ForecastMessage; decoded: ForecastMessage } {
   const layout = layoutFor(mode, REQ_UTC_HOUR, UTC_OFFSET, seq);
   const original = msgFor(layout);
-  const decoded = v2MessageFromString(v2MessageToString(original), () => ctxFor(mode));
+  const decoded = v3MessageFromString(v3MessageToString(original), () => ctxFor(mode));
   return { original, decoded };
 }
 
@@ -120,7 +120,7 @@ describe("mixed-layout round-trip encoding", () => {
     // Detail seq 7 = |1h|6h|12h|: three resolutions in one message.
     const seq = 7;
     const { original, decoded } = roundTrip(seq);
-    expect(decoded.version).toBe(V2_VERSION);
+    expect(decoded.version).toBe(V3_VERSION);
     expect(decoded.code).toBe(42);
     expect(decoded.seq).toBe(seq);
     expect(decoded.mode).toBe(MODE);
@@ -200,29 +200,29 @@ describe("mixed-layout round-trip encoding", () => {
 
   it("dispatches through the version registry", () => {
     const layout = layoutFor(MODE, REQ_UTC_HOUR, UTC_OFFSET, 15);
-    const encoded = v2MessageToString(msgFor(layout));
+    const encoded = v3MessageToString(msgFor(layout));
     const decoded = decodeMessage(encoded, () => ctx);
-    expect(decoded.version).toBe(V2_VERSION);
+    expect(decoded.version).toBe(V3_VERSION);
     expect(decoded.seq).toBe(15);
   });
 
   it("rejects a context without mode fields (e.g. a stale store entry)", () => {
     const layout = layoutFor(MODE, REQ_UTC_HOUR, UTC_OFFSET, 10);
-    const encoded = v2MessageToString(msgFor(layout));
+    const encoded = v3MessageToString(msgFor(layout));
     const staleCtx = { ...ctx, mode: undefined, utcOffsetHours: undefined } as unknown as RequestContext;
-    expect(() => v2MessageFromString(encoded, () => staleCtx)).toThrow(/priority mode/);
+    expect(() => v3MessageFromString(encoded, () => staleCtx)).toThrow(/priority mode/);
   });
 
   it("rejects a message without a seq", () => {
     const layout = layoutFor(MODE, REQ_UTC_HOUR, UTC_OFFSET, 10);
-    expect(() => v2MessageToString(msgFor(layout, { seq: undefined }))).toThrow(/seq/);
+    expect(() => v3MessageToString(msgFor(layout, { seq: undefined }))).toThrow(/seq/);
   });
 
   it("breakdown produces the identical encoding and accounts every column", () => {
     const layout = layoutFor(MODE, REQ_UTC_HOUR, UTC_OFFSET, 29); // the full-coverage taper
     const m = msgFor(layout);
-    const b = v2EncodeBreakdown(m);
-    expect(b.encoded).toBe(v2MessageToString(m));
+    const b = v3EncodeBreakdown(m);
+    expect(b.encoded).toBe(v3MessageToString(m));
     expect(b.chars).toBe(b.encoded.length);
     expect(b.bodyBits).toBeGreaterThan(0);
     const names = b.columns.map((c) => c.name);

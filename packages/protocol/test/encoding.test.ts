@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
-  v2MessageToString,
-  v2MessageFromString,
-  v2EncodeBreakdown,
-  V2_VERSION,
+  v3MessageToString,
+  v3MessageFromString,
+  v3EncodeBreakdown,
+  V3_VERSION,
   encodeVersion,
   decodeMessage,
   type ForecastMessage,
@@ -27,7 +27,7 @@ import {
   AQI_US_LOWER,
   AQI_EU_LOWER,
   ALPHABET,
-  V2_HEADER_CHARS,
+  V3_HEADER_CHARS,
 } from "../src/index.js";
 
 // Wind speeds quantize to extended Beaufort forces; tests express speeds as forces and expect
@@ -39,7 +39,7 @@ const bmid = beaufortMidKph;
 const qSnow = (cm: number) => expandSqrt(compandSqrt(cm, SNOW_K, ACCUM_BITS), SNOW_K);
 const qRain = (mm: number) => expandSqrt(compandSqrt(mm, RAIN_K, ACCUM_BITS), RAIN_K);
 
-// Every v2 variable: bits 0..12 weather, 13..25 air quality (both indices in full).
+// Every v3 variable: bits 0..12 weather, 13..25 air quality (both indices in full).
 const ALL_VARS = Object.values(VARS_BIT).reduce((m, b) => m | (1 << b), 0);
 // Every air-quality column: its VARS_BIT name, its Period field, and which ladder it decodes on.
 const AQ_CASES: [bit: string, field: keyof Period, scale: "us" | "eu"][] = [
@@ -140,7 +140,7 @@ function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean 
     ? { mode: MODE_RANGE, days: 1, seq: overrides.seq, hourOfDay: 0, stepHours: 12 }
     : uniformLayout(n, opts.hourly ?? false);
   return {
-    version: V2_VERSION,
+    version: V3_VERSION,
     code: 0,
     days,
     models_mask,
@@ -175,15 +175,15 @@ const ctxOf = (m: ForecastMessage): RequestContext => ({
 const noCtx = (): RequestContext | undefined => undefined;
 
 function roundTrip(m: ForecastMessage): ForecastMessage {
-  return v2MessageFromString(v2MessageToString(m), () => ctxOf(m));
+  return v3MessageFromString(v3MessageToString(m), () => ctxOf(m));
 }
 
-describe("v2 round-trip encoding", () => {
+describe("v3 round-trip encoding", () => {
   it("preserves header fields", () => {
     // Three 12h periods → two slots of Range's ramp at seq 2; single model
     const original = msg({ models_mask: 0b001, month: 1, day: 31 });
     const decoded = roundTrip(original);
-    expect(decoded.version).toBe(V2_VERSION);
+    expect(decoded.version).toBe(V3_VERSION);
     expect(decoded.days).toBe(2);
     expect(decoded.seq).toBe(2);
     expect(decoded.mode).toBe(MODE_RANGE);
@@ -261,7 +261,7 @@ describe("v2 round-trip encoding", () => {
     // (PERIOD itself sits one band above, so the round-trip tests cover a nonzero residual.)
     const led: Period = { ...PERIOD, aqi: PERIOD.aqi_pm25, aqi_eu: PERIOD.aqi_eu_o3 };
     const colBits = (name: string, varsMask: number) =>
-      v2EncodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
+      v3EncodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
         .columns.find((c) => c.name === name)!.bits;
 
     // Only PM2.5, ozone and PM10 key the residual; the other constituents are never context, so
@@ -329,7 +329,7 @@ describe("v2 round-trip encoding", () => {
     // they are deliberately not part of the residual key.
     const led: Period = { ...PERIOD, aqi: PERIOD.aqi_pm25 };
     const aqiBits = (varsMask: number) =>
-      v2EncodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
+      v3EncodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
         .columns.find((c) => c.name === "aqi")!.bits;
     const keyed = (1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25) | (1 << VARS_BIT.aq_o3);
     const plusUnkeyed = keyed | (1 << VARS_BIT.aq_no2) | (1 << VARS_BIT.aq_so2);
@@ -378,8 +378,8 @@ describe("v2 round-trip encoding", () => {
   it("charges nothing for the periods past the air-quality horizon", () => {
     // The clamp is derived from the layout on both sides, so it costs no header bits and emits
     // no symbols: a 13-day message pays for the same eight periods a 4-day one does.
-    const short = v2EncodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(8).fill(PERIOD)] }));
-    const long = v2EncodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(26).fill(PERIOD)] }));
+    const short = v3EncodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(8).fill(PERIOD)] }));
+    const long = v3EncodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(26).fill(PERIOD)] }));
     const aqBits = (b: typeof short) =>
       b.columns.filter((c) => c.name.startsWith("aq")).reduce((s, c) => s + c.bits, 0);
     expect(aqBits(long)).toBeCloseTo(aqBits(short), 6);
@@ -525,8 +525,8 @@ describe("v2 round-trip encoding", () => {
     const vars_mask = 1 << VARS_BIT.freeze;
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, freeze_m: 6 * 304.8 }));
     const swings = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, freeze_m: (i % 2 === 0 ? 2 : 13) * 304.8 }));
-    const flatLen = v2MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const swingsLen = v2MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
+    const flatLen = v3MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
+    const swingsLen = v3MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(swingsLen);
   });
 
@@ -540,8 +540,8 @@ describe("v2 round-trip encoding", () => {
     const vars_mask = 1 << bit;
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, [field]: 40 }));
     const swings = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, [field]: i % 2 === 0 ? 0 : 100 }));
-    const flatLen = v2MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const swingsLen = v2MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
+    const flatLen = v3MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
+    const swingsLen = v3MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(swingsLen);
   });
 
@@ -556,26 +556,26 @@ describe("v2 round-trip encoding", () => {
   });
 
   it("throws when decoding a different version's tag", () => {
-    // Swap the self-describing version prefix to v3; the v2 codec must reject it.
-    const encoded = v2MessageToString(msg());
-    const reTagged = encodeVersion(3) + encoded.slice(1);
-    expect(() => v2MessageFromString(reTagged, noCtx)).toThrow(/Version mismatch.*v3/);
+    // Swap the self-describing version prefix to v4; the v3 codec must reject it.
+    const encoded = v3MessageToString(msg());
+    const reTagged = encodeVersion(4) + encoded.slice(1);
+    expect(() => v3MessageFromString(reTagged, noCtx)).toThrow(/Version mismatch.*v4/);
   });
 
   it("dispatches an unknown version to a clear error", () => {
-    const encoded = v2MessageToString(msg());
+    const encoded = v3MessageToString(msg());
     const reTagged = encodeVersion(7) + encoded.slice(1);
     expect(() => decodeMessage(reTagged, noCtx)).toThrow(/Unsupported protocol version: v7/);
   });
 
   it("throws on short message", () => {
-    // Valid v2 tag but no room for the header.
-    expect(() => v2MessageFromString(encodeVersion(V2_VERSION) + "abc", noCtx)).toThrow("Unexpected message length");
+    // Valid v3 tag but no room for the header.
+    expect(() => v3MessageFromString(encodeVersion(V3_VERSION) + "abc", noCtx)).toThrow("Unexpected message length");
   });
 
   it("throws when the message code can't be resolved", () => {
-    const encoded = v2MessageToString(msg({ code: 5 }));
-    expect(() => v2MessageFromString(encoded, () => undefined)).toThrow(/Unknown forecast code 5/);
+    const encoded = v3MessageToString(msg({ code: 5 }));
+    expect(() => v3MessageFromString(encoded, () => undefined)).toThrow(/Unknown forecast code 5/);
   });
 
   it("round-trips the message code", () => {
@@ -621,8 +621,8 @@ describe("v2 round-trip encoding", () => {
   it("encodes a near-constant surface wind speed column smaller than a wide-swinging one", () => {
     const flat = Array.from({ length: 64 }, () => ({ weathercode: 0, wind_sfc_kph: bmid(7), wind_sfc_dir: 0 }));
     const swings = Array.from({ length: 64 }, (_, i) => ({ weathercode: 0, wind_sfc_kph: bmid(i % 2 === 0 ? 2 : 13), wind_sfc_dir: 0 }));
-    expect(v2MessageToString(windMsg(flat, { hourly: true })).length)
-      .toBeLessThan(v2MessageToString(windMsg(swings, { hourly: true })).length);
+    expect(v3MessageToString(windMsg(flat, { hourly: true })).length)
+      .toBeLessThan(v3MessageToString(windMsg(swings, { hourly: true })).length);
   });
 
   it("round-trips surface wind at 1h resolution (the resolution-keyed direction codebook)", () => {
@@ -665,7 +665,7 @@ describe("v2 round-trip encoding", () => {
     const forces = [4, 1, 0, 1, 6]; // force ≤ 1 (< 6 kph) is calm for direction purposes
     const build = (dirs: number[]) =>
       windMsg(forces.map((f, i) => ({ weathercode: 0, wind_sfc_kph: bmid(f), wind_sfc_dir: dirs[i] })));
-    expect(v2MessageToString(build(dirsA))).toBe(v2MessageToString(build(dirsB)));
+    expect(v3MessageToString(build(dirsA))).toBe(v3MessageToString(build(dirsB)));
   });
 
   it("calm periods display the last decoded direction (0 before any)", () => {
@@ -702,7 +702,7 @@ describe("v2 round-trip encoding", () => {
     const alone = msg({ ...sixHourly, vars_mask: 1 << VARS_BIT.w600,
       periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_600_kph: bmid(6), wind_600_dir: 6 }))] });
     const w600Bits = (m: ForecastMessage) =>
-      v2EncodeBreakdown(m).columns.find((c) => c.name === "w600")!.bits;
+      v3EncodeBreakdown(m).columns.find((c) => c.name === "w600")!.bits;
     expect(w600Bits(both)).toBeLessThan(w600Bits(alone));
   });
 
@@ -762,7 +762,7 @@ describe("v2 round-trip encoding", () => {
       periods: [Array.from({ length: n }, (_, i) => ({ weathercode: 0,
         wind_sfc_kph: bmid(rising(i) + 2), wind_sfc_dir: 6 }))] });
     const windBits = (m: ForecastMessage) =>
-      v2EncodeBreakdown(m).columns.find((c) => c.name === "wind")!.bits;
+      v3EncodeBreakdown(m).columns.find((c) => c.name === "wind")!.bits;
     expect(windBits(both)).toBeLessThan(windBits(alone));
   });
 
@@ -790,8 +790,8 @@ describe("delta temperature encoding", () => {
     const vars_mask = 1 << VARS_BIT.temp;
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, temp_c: 5 }));
     const spread = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, temp_c: i - 20 }));
-    const flatLen = v2MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const spreadLen = v2MessageToString(msg({ vars_mask, periods: [spread] }, { hourly: true })).length;
+    const flatLen = v3MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
+    const spreadLen = v3MessageToString(msg({ vars_mask, periods: [spread] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(spreadLen);
   });
 
@@ -847,14 +847,14 @@ describe("body decode desync detection", () => {
       { ...PERIOD, wind_700_dir: 7 },
     ]];
     const m = msg({ periods });
-    const encoded = v2MessageToString(m);
+    const encoded = v3MessageToString(m);
     // Resolve with a vars_mask missing that final column: the decoder reads every earlier column
     // identically, then stops with the wind-700 bits unread — the shape of codebook or
     // request-store drift, which would otherwise return garbage values silently.
     const drifted = { ...ctxOf(m), vars_mask: m.vars_mask & ~(1 << VARS_BIT.w700) };
-    expect(() => v2MessageFromString(encoded, () => drifted)).toThrow(/desynced/);
+    expect(() => v3MessageFromString(encoded, () => drifted)).toThrow(/desynced/);
     // The same message with the true context still decodes.
-    expect(() => v2MessageFromString(encoded, () => ctxOf(m))).not.toThrow();
+    expect(() => v3MessageFromString(encoded, () => ctxOf(m))).not.toThrow();
   });
 });
 
@@ -866,21 +866,21 @@ describe("corrupt character rejection", () => {
 
   it("throws instead of decoding when a body character is not in the alphabet", () => {
     const m = msg({});
-    const encoded = v2MessageToString(m);
-    expect(() => v2MessageFromString(encoded, () => ctxOf(m))).not.toThrow();
+    const encoded = v3MessageToString(m);
+    expect(() => v3MessageFromString(encoded, () => ctxOf(m))).not.toThrow();
 
     // A body character, well past the header.
     const at = encoded.length - 3;
     for (const [ch, label] of CORRUPTIONS) {
       const damaged = encoded.slice(0, at) + ch + encoded.slice(at + 1);
-      expect(() => v2MessageFromString(damaged, () => ctxOf(m))).toThrow(
+      expect(() => v3MessageFromString(damaged, () => ctxOf(m))).toThrow(
         /is not a base-85 character/,
       );
       // The message names the character, its code point and where it sits — a corruption
       // reported from the field has to be diagnosable from one pasted reply.
-      expect(() => v2MessageFromString(damaged, () => ctxOf(m))).toThrow(
+      expect(() => v3MessageFromString(damaged, () => ctxOf(m))).toThrow(
         // The index counts from the body, which starts after the version tag and header.
-        new RegExp(`${label}\\) at ${at - V2_HEADER_CHARS} of the body`),
+        new RegExp(`${label}\\) at ${at - V3_HEADER_CHARS} of the body`),
       );
     }
   });
@@ -889,10 +889,10 @@ describe("corrupt character rejection", () => {
     // The header is the worse of the two: it is read MSB-first, so skipping a character used to
     // shift every later digit down a place and silently produce a different code and seq.
     const m = msg({});
-    const encoded = v2MessageToString(m);
+    const encoded = v3MessageToString(m);
     for (const [ch] of CORRUPTIONS) {
       const damaged = encoded.slice(0, 2) + ch + encoded.slice(3);
-      expect(() => v2MessageFromString(damaged, () => ctxOf(m))).toThrow(
+      expect(() => v3MessageFromString(damaged, () => ctxOf(m))).toThrow(
         /is not a base-85 character/,
       );
     }
@@ -902,7 +902,7 @@ describe("corrupt character rejection", () => {
     // The guard must not fire on the alphabet's own edges — the first and last characters of
     // ALPHABET are the ones an off-by-one in the lookup would drop.
     const m = msg({});
-    expect(() => v2MessageFromString(v2MessageToString(m), () => ctxOf(m))).not.toThrow();
+    expect(() => v3MessageFromString(v3MessageToString(m), () => ctxOf(m))).not.toThrow();
     expect(ALPHABET).toContain("!");
     expect(ALPHABET).toContain("z");
   });
@@ -924,8 +924,8 @@ describe("order-1 precipitation encoding", () => {
     // base-85 encoded char length) since a few bits of savings can land on either side of a char
     // boundary and not move the visible string length.
     const snowy = Array.from({ length: 72 }, () => snowPeriod(20));
-    const dryBits = v2EncodeBreakdown(msg({ vars_mask, periods: [dry] }, { hourly: true })).bodyBits;
-    const snowyBits = v2EncodeBreakdown(msg({ vars_mask, periods: [snowy] }, { hourly: true })).bodyBits;
+    const dryBits = v3EncodeBreakdown(msg({ vars_mask, periods: [dry] }, { hourly: true })).bodyBits;
+    const snowyBits = v3EncodeBreakdown(msg({ vars_mask, periods: [snowy] }, { hourly: true })).bodyBits;
     expect(dryBits).toBeLessThan(snowyBits);
   });
 
@@ -936,8 +936,8 @@ describe("order-1 precipitation encoding", () => {
     decoded.periods[0].forEach((p, i) => expect(p.snow_cm).toBeCloseTo(qSnow(vals[i]), 5));
     // Mostly-dry beats a column where every cell is nonzero and widely spread.
     const dense = Array.from({ length: 72 }, (_, i) => snowPeriod(3 * (i + 1)));
-    const sparseBits = v2EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true })).bodyBits;
-    const denseBits = v2EncodeBreakdown(msg({ vars_mask, periods: [dense] }, { hourly: true })).bodyBits;
+    const sparseBits = v3EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true })).bodyBits;
+    const denseBits = v3EncodeBreakdown(msg({ vars_mask, periods: [dense] }, { hourly: true })).bodyBits;
     expect(sparseBits).toBeLessThan(denseBits);
   });
 
@@ -949,7 +949,7 @@ describe("order-1 precipitation encoding", () => {
     const snowing = Array.from({ length: 72 }, () => ({ ...PERIOD, weathercode: 71, snow_cm: 6 }));
     const clear = snowing.map((p) => ({ ...p, weathercode: 0 }));
     const snowBits = (periods: Period[]) =>
-      v2EncodeBreakdown(msg({ vars_mask, periods: [periods] }, { hourly: true }))
+      v3EncodeBreakdown(msg({ vars_mask, periods: [periods] }, { hourly: true }))
         .columns.find((c) => c.name === "snow")!.bits;
     expect(snowBits(snowing)).toBeLessThan(snowBits(clear));
   });

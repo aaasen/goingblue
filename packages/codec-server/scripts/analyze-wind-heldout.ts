@@ -21,7 +21,7 @@ import { eachForecast, foldOf, N_FOLDS, scaledWeights } from "./derive-lib.ts";
 import { quantizeFreqs, RANS_PROB_BITS, VARS_BIT, type Period } from "@weather/protocol";
 
 const WIND_MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
-// STALE (2026-07-31): this scan predates the extended-Beaufort wire (quantWind in v2.ts) and
+// STALE (2026-07-31): this scan predates the extended-Beaufort wire (quantWind in v3.ts) and
 // still quantizes linearly — its recorded conclusions stand, but re-derive the chains against
 // quantWind before trusting fresh numbers. See analyze-wind-scale-heldout.ts for the scale scan.
 const STEP_OF = [5, 5 * 1.609344, 5 * 1.609344, 5 * 1.609344];

@@ -783,7 +783,7 @@ type CloudKind = keyof typeof CLOUD_KEYS;
 // Order runs headline first, then its components, US before Europe. The two particulate rows sit
 // together (PM2.5 then PM10, fine before coarse) because a reader comparing them is reading one
 // thing — how much of what is in the air — and splitting them around ozone made that a scroll.
-// This is DISPLAY order only; the wire encodes PM2.5, ozone, PM10 (see AQ_DELTA_COLUMNS in v2.ts,
+// This is DISPLAY order only; the wire encodes PM2.5, ozone, PM10 (see AQ_DELTA_COLUMNS in v3.ts,
 // where the three residual-keyable constituents lead so both headlines can read them).
 const AQ_KEYS = {
   'aqi': { field: 'aqi', label: 'AQI', scale: 'us' },

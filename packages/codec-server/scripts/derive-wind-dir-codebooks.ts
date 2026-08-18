@@ -17,7 +17,7 @@
  * value are context both sides already have, so none of this costs wire bits.
  *
  * Sequences are collected under calm gating (no direction symbol when the quantized speed is 0;
- * the context chain carries the last encoded direction), matching the wire behavior in v2.ts.
+ * the context chain carries the last encoded direction), matching the wire behavior in v3.ts.
  * The bootstrap table (a column's first encoded direction, no predecessor) is shared across
  * resolutions and levels — it fires once per column, so keying it isn't worth the tables.
  *
@@ -45,7 +45,7 @@ const NRES = 5; // resolution indices 0..4 (24h/12h/6h/3h/1h)
 const WIND_MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
 const SPEED_FIELDS = ["wind_sfc_kph", "wind_500_kph", "wind_600_kph", "wind_700_kph"] as const;
 const DIR_FIELDS = ["wind_sfc_dir", "wind_500_dir", "wind_600_dir", "wind_700_dir"] as const;
-// level -> the level it conditions on when present (already decoded), or -1 (see v2.ts)
+// level -> the level it conditions on when present (already decoded), or -1 (see v3.ts)
 const UPPER_OF = [-1, -1, 1, 2];
 // Speeds only feed the calm gate here (force ≤ CALM_MAX_FORCE ⇒ no direction symbol), but the
 // gate must mirror the wire's own quantization (extended Beaufort, quantWind) or the trained
@@ -89,7 +89,7 @@ export function counter(): CellCounter {
         const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US", resIdx));
         const sp = SPEED_FIELDS.map((f, L) => periods.map((p) => qSpeed((p as any)[f], L)));
         const dr = DIR_FIELDS.map((f) => periods.map((p) => (((p as any)[f] as number) ?? 0) % 8));
-        // Displayed dir under calm gating: last encoded dir, 0 before any (mirrors v2.ts).
+        // Displayed dir under calm gating: last encoded dir, 0 before any (mirrors v3.ts).
         const disp = SPEED_FIELDS.map((_, L) => {
           let eff = 0;
           return periods.map((_, p) => (sp[L][p] > CALM_MAX_FORCE ? (eff = dr[L][p]) : eff));

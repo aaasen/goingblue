@@ -4,11 +4,11 @@ import {
   chunkLines, collectingChunks, type ReplyOracles,
 } from "../src/parts.js";
 import { maxCharsFor, widePartBodyChars, MAX_MESSAGES, UNCAPPED_MAX_CHARS } from "../src/devices.js";
-import { V2_HEADER_CHARS, v2Codec } from "../src/versions/v2.js";
+import { V3_HEADER_CHARS, v3Codec } from "../src/versions/v3.js";
 import type { ForecastMessage } from "../src/model.js";
-import v2Fixture from "./fixtures/v2.fixture.json";
+import v3Fixture from "./fixtures/v3.fixture.json";
 
-const H = V2_HEADER_CHARS;
+const H = V3_HEADER_CHARS;
 const headerCharsOf = () => H;
 const round = (parts: string[]) => reassembleReply(parts.join("\n"), headerCharsOf);
 
@@ -185,8 +185,8 @@ describe("the multi-message budget", () => {
 // relay says is impossible, on purpose: this path is what a wrong model falls back to, so it must
 // not contain one.
 describe("a reply the transport broke up", () => {
-  const d = v2Fixture.decoded as ForecastMessage;
-  const req = v2Fixture.request;
+  const d = v3Fixture.decoded as ForecastMessage;
+  const req = v3Fixture.request;
   const ctx = () => ({
     model: 31 - Math.clz32(d.models_mask & -d.models_mask),
     vars_mask: d.vars_mask,
@@ -197,7 +197,7 @@ describe("a reply the transport broke up", () => {
     utcOffsetHours: req.utcOffsetHours,
   });
 
-  const encoded = v2Codec.encode(d, "base85");
+  const encoded = v3Codec.encode(d, "base85");
   // A reader with two requests outstanding, which is what makes "a different reply" a case worth
   // having: both codes resolve, so both first messages are heads.
   const OTHER_CODE = (d.code + 1) % 128;
@@ -207,11 +207,11 @@ describe("a reply the transport broke up", () => {
   const oracles: ReplyOracles = {
     headerCharsOf,
     decodes: (reply) => {
-      try { v2Codec.decode(reassembleReply(reply, headerCharsOf), ctx); return true; }
+      try { v3Codec.decode(reassembleReply(reply, headerCharsOf), ctx); return true; }
       catch { return false; }
     },
     isHead: (chunk) => {
-      try { return requested.has(v2Codec.header(chunk).code); } catch { return false; }
+      try { return requested.has(v3Codec.header(chunk).code); } catch { return false; }
     },
   };
   const merge = (a: string, b: string) => mergeParts(a, b, oracles);
@@ -242,7 +242,7 @@ describe("a reply the transport broke up", () => {
       expect(collecting(held)).toBe(true);
     }
     held = merge(held, chunks[chunks.length - 1]);
-    expect(v2Codec.decode(reassembleReply(held, headerCharsOf), ctx)).toEqual(v2Fixture.decoded);
+    expect(v3Codec.decode(reassembleReply(held, headerCharsOf), ctx)).toEqual(v3Fixture.decoded);
     // Finished, so no longer a collection — which is what takes the boxes off the screen.
     expect(collecting(held)).toBe(false);
   });
@@ -260,7 +260,7 @@ describe("a reply the transport broke up", () => {
   });
 
   it("starts over on the first message of a different reply", () => {
-    const otherHead = v2Codec
+    const otherHead = v3Codec
       .encode({ ...d, code: OTHER_CODE } as ForecastMessage, "base85").slice(0, 23);
     const held = merge(chunks[0], chunks[1]);
     // A head is only ever a first message, so it opens a collection rather than joining one.
@@ -274,7 +274,7 @@ describe("a reply the transport broke up", () => {
     // of the two mistakes available here: the alternative test, "does this look like a header",
     // would reset a collection on roughly one continuation message in eighty-five, always the
     // same one, putting that forecast permanently out of reach. See mergeChunks.
-    const strayHead = v2Codec
+    const strayHead = v3Codec
       .encode({ ...d, code: (d.code + 64) % 128 } as ForecastMessage, "base85").slice(0, 23);
     expect(oracles.isHead(strayHead)).toBe(false);
     expect(chunkLines(merge(chunks[0], strayHead))).toEqual([chunks[0], strayHead]);
@@ -313,8 +313,8 @@ describe("a reply the transport broke up", () => {
 });
 
 describe("a real message split in two", () => {
-  const d = v2Fixture.decoded as ForecastMessage;
-  const req = v2Fixture.request;
+  const d = v3Fixture.decoded as ForecastMessage;
+  const req = v3Fixture.request;
   const ctx = () => ({
     model: 31 - Math.clz32(d.models_mask & -d.models_mask),
     vars_mask: d.vars_mask,
@@ -325,7 +325,7 @@ describe("a real message split in two", () => {
     utcOffsetHours: req.utcOffsetHours,
   });
 
-  const encoded = v2Codec.encode(d, "base32768");
+  const encoded = v3Codec.encode(d, "base32768");
   const parts = splitReply(encoded, H, widePartBodyChars(H));
 
   it("gives every part a bubble's worth of bytes and code units", () => {
@@ -337,7 +337,7 @@ describe("a real message split in two", () => {
   });
 
   it("decodes after reassembly, in any order", () => {
-    expect(v2Codec.decode(round(parts), ctx)).toEqual(v2Fixture.decoded);
-    expect(v2Codec.decode(round([...parts].reverse()), ctx)).toEqual(v2Fixture.decoded);
+    expect(v3Codec.decode(round(parts), ctx)).toEqual(v3Fixture.decoded);
+    expect(v3Codec.decode(round([...parts].reverse()), ctx)).toEqual(v3Fixture.decoded);
   });
 });

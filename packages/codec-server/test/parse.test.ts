@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
 import {
   MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
-  IPHONE_MAX_CHARS, SMS_MAX_CHARS, UNCAPPED_MAX_CHARS, MAX_MESSAGES, V2_HEADER_CHARS, maxCharsFor,
+  IPHONE_MAX_CHARS, SMS_MAX_CHARS, UNCAPPED_MAX_CHARS, MAX_MESSAGES, V3_HEADER_CHARS, maxCharsFor,
 } from "@weather/protocol";
 import { describeRequest, parseRequest } from "../src/forecast.js";
 
@@ -282,15 +282,15 @@ describe("parseRequest", () => {
   // route it names can carry.
   it("ignores a length the request tries to state for itself", () => {
     expect(parseRequest("d:i c:320")).toMatchObject({
-      alphabet: "base32768", maxChars: maxCharsFor("i", 1, V2_HEADER_CHARS),
+      alphabet: "base32768", maxChars: maxCharsFor("i", 1, V3_HEADER_CHARS),
     });
     expect(parseRequest("c:40 d:g").maxChars).toBe(SMS_MAX_CHARS);
   });
 
   it("n: spreads the reply over more messages", () => {
     // Two messages buy less than twice one, because each labelled part repeats the header.
-    expect(parseRequest("d:i").maxChars).toBe(maxCharsFor("i", 1, V2_HEADER_CHARS));
-    expect(parseRequest("d:i n:2").maxChars).toBe(maxCharsFor("i", 2, V2_HEADER_CHARS));
+    expect(parseRequest("d:i").maxChars).toBe(maxCharsFor("i", 1, V3_HEADER_CHARS));
+    expect(parseRequest("d:i n:2").maxChars).toBe(maxCharsFor("i", 2, V3_HEADER_CHARS));
     expect(parseRequest("d:i n:2").maxChars).toBeLessThan(2 * parseRequest("d:i").maxChars);
     expect(parseRequest("d:i n:2").messages).toBe(2);
   });
@@ -353,7 +353,7 @@ describe("describeRequest", () => {
   it("carries the response budget but never the account token", () => {
     const token = newToken();
     const shape = describe_(`d:i n:2 u:${token}`);
-    expect(shape.maxChars).toBe(maxCharsFor("i", 2, V2_HEADER_CHARS));
+    expect(shape.maxChars).toBe(maxCharsFor("i", 2, V3_HEADER_CHARS));
     expect(JSON.stringify(shape)).not.toContain(token);
   });
 });

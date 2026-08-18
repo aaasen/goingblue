@@ -24,8 +24,8 @@ import {
   makeBitSink, makeBitSource, type CodeBook, type DeltaCodec,
 } from "../entropy.js";
 
-export const V2_VERSION = 2;
-const VERSION = V2_VERSION;
+export const V3_VERSION = 3;
+const VERSION = V3_VERSION;
 
 // Duration-first fill: the user requests a duration in days and the server fills the message
 // budget by refining days from the front of the window (see layout.ts).
@@ -50,7 +50,7 @@ const VERSION = V2_VERSION;
 // symbols the encoder wrote (see encodeBodyLE/decodeBodyLE and SymSource.assertDone).
 // The columns have no per-column selectors: within a class, each symbol's codebook is keyed by
 // context both sides already have (see entropy.ts).
-export const V2_SEQ_BITS = 8;
+export const V3_SEQ_BITS = 8;
 
 // Message code: client-assigned key the response echoes; see RequestContext / model.ts.
 const CODE_BITS = 7;
@@ -62,12 +62,12 @@ const ELEV_STEP_M = 100;
 // field width is wire format and stays fixed).
 const CLASS_BITS = 3;
 
-export const V2_HEADER_BITS =
-  CODE_BITS + V2_SEQ_BITS + ELEV_BITS + CLASS_BITS; // 25
+export const V3_HEADER_BITS =
+  CODE_BITS + V3_SEQ_BITS + ELEV_BITS + CLASS_BITS; // 25
 // Total chars before the body: the shared version prefix plus this version's packed header.
-export const V2_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V2_HEADER_BITS); // 1 + 4 = 5
-const HEADER_BITS = V2_HEADER_BITS;
-const HEADER_CHARS = nCharsForBits(V2_HEADER_BITS); // packed-header chars (excludes version prefix)
+export const V3_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V3_HEADER_BITS); // 1 + 4 = 5
+const HEADER_BITS = V3_HEADER_BITS;
+const HEADER_CHARS = nCharsForBits(V3_HEADER_BITS); // packed-header chars (excludes version prefix)
 
 // temp: 8 bits, 1°C steps, offset -100°C → -100°C to +155°C
 // snow/rain: 6 bits each, sqrt-companded (see ACCUM_* below). rain is bit 12, the slot
@@ -76,7 +76,7 @@ const HEADER_CHARS = nCharsForBits(V2_HEADER_BITS); // packed-header chars (excl
 // equivalent; both entropy-coded).
 // gust: 5 = speed only, no direction (bit 8, formerly cloud_total).
 // air quality: 5 bits each — a 26-symbol ladder (0 = no data, 1..25 bands), both scales.
-export const VAR_BITS_V2 = [3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5];
+export const VAR_BITS_V3 = [3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5];
 //                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^g ^cch ^ccm ^ccl ^rain
 //                                                    ^aq_pm25 ^aq_o3 ^aqi ^aqi_eu ^aqi_eu_pm25
 //                                     ^aqi_eu_pm10 ^aqi_eu_no2 ^aqi_eu_o3 ^aqi_eu_so2
@@ -105,7 +105,7 @@ function clampInt(v: number, width: number): number {
 
 // temp: entropy-coded period-over-period deltas (see TEMP_DELTA_* in entropy.ts), not a plain
 // scalar column — each model's first period is an anchor at full width, quantized the same way.
-const TEMP_ANCHOR_BITS = VAR_BITS_V2[VARS_BIT.temp];
+const TEMP_ANCHOR_BITS = VAR_BITS_V3[VARS_BIT.temp];
 const quantTemp = (p: Period, field: "temp_c"): number =>
   clampInt(Math.round((p[field] ?? 0) + TEMP_OFFSET), TEMP_ANCHOR_BITS);
 const TEMP_DELTA_COLUMNS: [bit: number, field: "temp_c", name: string][] = [
@@ -122,7 +122,7 @@ const TEMP_DELTA_COLUMNS: [bit: number, field: "temp_c", name: string][] = [
 // 15000 ft nearly year-round, and the corpus tops out at 21200 ft, so the domain has to reach
 // well past that to stop clipping.
 const FREEZE_STEP_M = 304.8;
-const FREEZE_ANCHOR_BITS = VAR_BITS_V2[VARS_BIT.freeze];
+const FREEZE_ANCHOR_BITS = VAR_BITS_V3[VARS_BIT.freeze];
 // The 1e-9 rescues float dust only (14 × 304.8 / 304.8 = 13.999999999999998 → 13 without it, so
 // a decoded value would re-quantize one step down); genuine sub-step values still floor down.
 const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0) / FREEZE_STEP_M + 1e-9), FREEZE_ANCHOR_BITS);
@@ -131,7 +131,7 @@ const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0)
 // entropy.ts) — same anchor+delta shape as freeze, each level under its own single shared table
 // (not pooled across levels) since low/mid/high cloud persistence differs meaningfully by
 // altitude.
-const CLOUD_ANCHOR_BITS = VAR_BITS_V2[VARS_BIT.cch]; // 3; ccm/ccl share the same width
+const CLOUD_ANCHOR_BITS = VAR_BITS_V3[VARS_BIT.cch]; // 3; ccm/ccl share the same width
 const quantCloud = (p: Period, field: "cloud_high" | "cloud_mid" | "cloud_low"): number =>
   clampInt(Math.round((p[field] ?? 0) * 7 / 100), CLOUD_ANCHOR_BITS);
 const CLOUD_DELTA_COLUMNS: {
@@ -158,7 +158,7 @@ const CLOUD_DELTA_COLUMNS: {
 // on. Periods past the clamp carry no AQ symbols at all and decode with the fields absent —
 // "not forecast", which is what the app draws as an empty cell.
 export const AQ_HORIZON_HOURS = 96;
-const AQ_ANCHOR_BITS = VAR_BITS_V2[VARS_BIT.aqi]; // 5; every AQ column shares the width
+const AQ_ANCHOR_BITS = VAR_BITS_V3[VARS_BIT.aqi]; // 5; every AQ column shares the width
 
 // How many leading periods an AQ column covers. Always ≥ 1 (the first period starts at offset 0).
 export function aqPeriodCount(periodHours: number[]): number {
@@ -652,11 +652,11 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
 // encoder policy (cheapest of CLASS_BOOKS), never taken from the message.
 function buildHeader(msg: ForecastMessage, cls: number): number[] {
   const seq = msg.seq;
-  if (!Number.isInteger(seq) || seq < 1 || seq > 1 << V2_SEQ_BITS)
-    throw new Error(`v2: message has no valid fill-sequence number (seq=${seq})`);
+  if (!Number.isInteger(seq) || seq < 1 || seq > 1 << V3_SEQ_BITS)
+    throw new Error(`v3: message has no valid fill-sequence number (seq=${seq})`);
   const headerBits: number[] = [];
   putInt(headerBits, msg.code, CODE_BITS);
-  putInt(headerBits, seq - 1, V2_SEQ_BITS);
+  putInt(headerBits, seq - 1, V3_SEQ_BITS);
   putInt(headerBits, Math.min(Math.max(Math.round(msg.elevation / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1), ELEV_BITS);
   putInt(headerBits, cls, CLASS_BITS);
   return headerBits;
@@ -684,7 +684,7 @@ function encodeBodyIn(alphabet: Alphabet, bits: number[]): string {
   return alphabet === "base32768" ? encodeBodyWide(bits) : encodeBodyLE(bits, alphabet);
 }
 
-export function v2MessageToString(msg: ForecastMessage, alphabet: Alphabet = "base85"): string {
+export function v3MessageToString(msg: ForecastMessage, alphabet: Alphabet = "base85"): string {
   const { em, cls } = buildBestBody(msg);
   return encodeVersion(VERSION) + encode(buildHeader(msg, cls)) + encodeBodyIn(alphabet, em.bits);
 }
@@ -693,9 +693,9 @@ export function v2MessageToString(msg: ForecastMessage, alphabet: Alphabet = "ba
 export interface ColumnBreakdown { name: string; bits: number }
 
 // Per-column bit accounting for a message, for encoding experiments. Produces the identical string
-// as v2MessageToString (via the same buildBestBody), plus the bit cost of the version prefix,
+// as v3MessageToString (via the same buildBestBody), plus the bit cost of the version prefix,
 // packed header, weathercode, and every present variable column.
-export interface V2Breakdown {
+export interface V3Breakdown {
   encoded: string;
   chars: number;
   versionBits: number;   // self-describing version prefix
@@ -706,7 +706,7 @@ export interface V2Breakdown {
   columns: ColumnBreakdown[];
 }
 
-export function v2EncodeBreakdown(msg: ForecastMessage, alphabet: Alphabet = "base85"): V2Breakdown {
+export function v3EncodeBreakdown(msg: ForecastMessage, alphabet: Alphabet = "base85"): V3Breakdown {
   const columns: ColumnBreakdown[] = [];
   const { em, cls } = buildBestBody(msg, (name, bits) => columns.push({ name, bits }));
   const body = em.bits;
@@ -731,7 +731,7 @@ export function v2EncodeBreakdown(msg: ForecastMessage, alphabet: Alphabet = "ba
 // needs its every last character. That is what lets a reader who was handed a reply in pieces be
 // told which forecast the first piece belongs to, before there is enough of it to decode (see
 // parts.ts). Throws on anything that isn't this version's prefix.
-export function v2HeaderFromString(s: string): MessageHeader {
+export function v3HeaderFromString(s: string): MessageHeader {
   const [version, rest] = takeVersion(s);
   if (version !== VERSION)
     throw new Error(`Version mismatch: encoded v${version}, expected v${VERSION}`);
@@ -741,17 +741,17 @@ export function v2HeaderFromString(s: string): MessageHeader {
 
   const hr = headerReader(decode(rest.slice(0, HEADER_CHARS), HEADER_BITS));
   const code = hr.int(CODE_BITS);
-  const seq = hr.int(V2_SEQ_BITS) + 1;
+  const seq = hr.int(V3_SEQ_BITS) + 1;
   const elevation = hr.int(ELEV_BITS) * ELEV_STEP_M;
   const codebookClass = hr.int(CLASS_BITS);
   if (codebookClass >= CODEBOOK_CLASSES)
-    throw new Error(`v2: unknown codebook class ${codebookClass} (this build has ${CODEBOOK_CLASSES})`);
+    throw new Error(`v3: unknown codebook class ${codebookClass} (this build has ${CODEBOOK_CLASSES})`);
 
   return { version, code, seq, elevation, codebookClass };
 }
 
-export function v2MessageFromString(s: string, resolve: ContextResolver): ForecastMessage {
-  const { version, code, seq, elevation, codebookClass } = v2HeaderFromString(s);
+export function v3MessageFromString(s: string, resolve: ContextResolver): ForecastMessage {
+  const { version, code, seq, elevation, codebookClass } = v3HeaderFromString(s);
   const rest = s.slice(VERSION_PREFIX_CHARS);
 
   // Recover the request-echo fields the slim header omits.
@@ -767,7 +767,7 @@ export function v2MessageFromString(s: string, resolve: ContextResolver): Foreca
   // requested mode, since that's what the reader chose and what the reply answers.
   const layoutMode = effectiveMode(mode, model);
   if (seq > maxFillSeq(layoutMode))
-    throw new Error(`v2: seq ${seq} exceeds mode ${layoutMode}'s fill sequence`);
+    throw new Error(`v3: seq ${seq} exceeds mode ${layoutMode}'s fill sequence`);
   const models_mask = 1 << model; // a response carries exactly one model
 
   // The period layout is derived, not decoded: both sides compute it from the stored request.
@@ -1032,10 +1032,10 @@ function decodeBody(
   return periods;
 }
 
-export const v2Codec: VersionedCodec = {
-  headerChars: V2_HEADER_CHARS,
-  header: v2HeaderFromString,
-  encode: v2MessageToString,
-  decode: v2MessageFromString,
+export const v3Codec: VersionedCodec = {
+  headerChars: V3_HEADER_CHARS,
+  header: v3HeaderFromString,
+  encode: v3MessageToString,
+  decode: v3MessageFromString,
 };
 

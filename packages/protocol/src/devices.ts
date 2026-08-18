@@ -84,7 +84,7 @@ const WIDE_CHAR_BYTES = 3;
 export const MAX_MESSAGES = 4;
 
 // Body characters that fit in ONE labelled part: the bubble's bytes, less the "i/N " label and the
-// repeated header, divided among three-byte characters. With v2's 5-character header that is 43,
+// repeated header, divided among three-byte characters. With v3's 5-character header that is 43,
 // so a part is 52 code units — well inside the 70-unit cap, which never binds here.
 export function widePartBodyChars(headerChars: number): number {
   return Math.floor((BUBBLE_BYTES - PART_LABEL_CHARS - headerChars) / WIDE_CHAR_BYTES);
