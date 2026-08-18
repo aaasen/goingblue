@@ -22,15 +22,43 @@ import { PAGE } from "./shell.js";
 // the band rather than placed in the flow because the band is a single centered flex item, and a
 // second child would pull the masthead off center.
 //
+// The source button stands beside the App Store badge, drawn to match it: the page already links
+// the repo from the Open source section, but that is prose at the bottom of the listing, and
+// someone who came to read the code rather than to read about the app should not have to scroll the
+// whole pitch to find it.
+//
+// Matching Apple's badge means measuring it rather than guessing at it. The white variant is a
+// white fill with black artwork and a 1px black edge — not, as it reads at a glance over the photo,
+// a dark button — and rasterizing it at its drawn size puts the corner radius at 6.5px on a 50px
+// box. So the source button is white too, 150x50 like the badge, with the same radius and edge. The
+// point is a pair that looks issued together rather than a button someone added next to a badge.
+//
+// The mark is GitHub's own, the 16px `mark-github` octicon copied byte for byte from
+// @primer/octicons, which is the size of the set drawn for small rendering — this is a 20px icon,
+// not a logo scaled down to one. GitHub's guidelines allow the mark for linking to GitHub, in black
+// or white, but not redrawn, not with effects like shadows, and not over a busy background. The
+// white button satisfies the last two by construction, which the earlier corner placement did not:
+// a mark laid on the photo needed a drop shadow to hold it off the sky, and that shadow was itself
+// the prohibited thing. The words beside it are ours, not GitHub's wordmark set in our type — that
+// lockup is theirs to draw, and "View source" says what the button does anyway.
+//
+// The mark is inline rather than a file under /img like Apple's badge, for two reasons the badge
+// does not share: it has to take its color from the button (an <img> cannot, and the shell's link
+// blue would otherwise win), and at a few hundred bytes a second request would cost more than the
+// markup. Being artwork with live text beside it, it is hidden from the accessibility tree, and the
+// link carries the fuller name in aria-label — which contains the visible words, so the two agree
+// for anyone driving the page by voice.
+//
 // The App Store button closes the masthead, under the subtitle: the band is what sells the app, so
 // the one thing to do about it belongs inside the band rather than a scroll below it. It is Apple's
 // own badge artwork (assets.ts) — the white variant, because the band is a dark background — and
 // the artwork comes with rules: at least 40px tall, clear space around it of a quarter its height,
 // and no redrawing it, recoloring it, adding effects to it, or setting the words beside it in live
-// text. 50px tall clears the floor and 1.1em of margin the clear space; nothing here may grow into
-// a text-shadow like the type above it. Centering is `auto` side margins on a block of the badge's
-// own width, which is why the width is repeated here. The art is 119.66x40, so the box is drawn at
-// 3:1 and the SVG's own viewBox letterboxes the half-pixel rather than stretching it.
+// text. 50px tall clears the floor, and the 16px gap to the source button clears the 12.5px of
+// space a 50px badge is owed; nothing here may grow into a text-shadow like the type above it. The
+// art is 119.66x40, so the box is drawn at 3:1 and the SVG's own viewBox letterboxes the half-pixel
+// rather than stretching it. The row centers the pair and wraps it to a column if a phone is too
+// narrow to hold both, which keeps the badge at its full size rather than shrinking it to fit.
 const HERO_CSS = `
   .hero {
     position: relative;
@@ -55,8 +83,13 @@ const HERO_CSS = `
   .herocredit { position: absolute; right: 16px; bottom: 12px; margin: 0;
     color: #fff; font-size: 0.8em; letter-spacing: 0.01em;
     text-shadow: 0 1px 6px rgba(6, 18, 36, 0.7); }
-  .appbtn { display: block; width: 150px; margin: 1.1em auto 0; }
+  .badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; margin-top: 1.1em; }
+  .appbtn { display: block; width: 150px; }
   .appbtn img { display: block; width: 150px; height: 50px; }
+  .srcbtn { box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+    gap: 8px; width: 150px; height: 50px; border: 1px solid #000; border-radius: 6.5px;
+    background: #fff; color: #000; font-size: 17px; font-weight: 500; text-decoration: none; }
+  .srcbtn svg { width: 20px; height: 20px; fill: currentColor; }
   @media (max-width: 600px) {
     .appicon { width: 92px; height: 92px; border-radius: 21px; }
     .hero h1 { font-size: 1.85em; }
@@ -131,6 +164,10 @@ const SHOTS_CSS = `
   @media (max-width: 600px) { .shots figure { flex: 0 0 230px; min-width: 0; } }
 `;
 
+// GitHub's `mark-github` octicon at 16px, as distributed. The fill is left to CSS (currentColor)
+// and the drawing is hidden from screen readers, which read the link's aria-label instead.
+const GITHUB_MARK = `<svg viewBox="0 0 16 16" aria-hidden=true><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>`;
+
 // The masthead the shell hangs above the wrap. It carries the <h1> itself, which is why the shell
 // draws none of its own for a page that brings a header.
 const HERO = `<header class=hero>
@@ -138,8 +175,12 @@ const HERO = `<header class=hero>
     <img class=appicon src="/img/icon-512.jpg" width=116 height=116 alt="">
     <h1>${BRAND}</h1>
     <p class=subtitle>Weather forecasts over satellite</p>
-    <a class=appbtn href="${APP_STORE_URL}"><img src="/img/appstore-badge-white.svg" width=150
-      height=50 alt="Download on the App Store"></a>
+    <div class=badges>
+      <a class=appbtn href="${APP_STORE_URL}"><img src="/img/appstore-badge-white.svg" width=150
+        height=50 alt="Download on the App Store"></a>
+      <a class=srcbtn href="${REPO_URL}" aria-label="View source on GitHub">${GITHUB_MARK}<span>View
+        source</span></a>
+    </div>
   </div>
   <p class=herocredit>Sultana from Denali, May 2026</p>
 </header>`;
