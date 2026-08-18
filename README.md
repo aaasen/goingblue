@@ -134,19 +134,33 @@ Each variable has a different quantization method and codebook strategy. The var
 | wind speed           | delta | Δ −17…+17                                               | resolution × level; surface by the gust column's Δ bucket; 600/700 hPa by the upper level's Δ bucket | extended Beaufort force 0…17, km/h bands (midpoint decode); 5-bit anchor |
 | wind direction       | value | 8 cardinals                                             | resolution × previous direction (× upper direction for 600/700 hPa); calm periods emit no symbol | 45° points |
 
-### Alphabet
+### Alphabet and Message Length
 
-Going Blue transmits messages over SMS. Satellite messengers like Garmin inReach and ZOLEO can send messages to the number over SMS. The path a message takes from a satellite messenger like inReach looks something like this:
-
-```
-inReach -iridium-> garmin -sms-> twilio -http-> going blue
-```
-
-Each layer of the transport uses a different encoding that can transform or split a message. SMS uses a [GSM-7](https://en.wikipedia.org/wiki/GSM_03.38) alphabet with 7 bits per character. Garmin apps only support printable ASCII. Going Blue uses the intersection of printable ASCII and GSM-7 basic minus the space character for a base-85 alphabet. This provides log₂(85) ≈ 6.409 bits per character.
+SMS is the transport layer for Going Blue. Satellite messengers like Garmin inReach, iPhone, and ZOLEO can all send and receive messages via SMS. To reach Going Blue, a message travels through several intermediaries. For example, the path an inReach message takes looks something like this:
 
 ```
-!"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz
+inReach -Iridium Short Burst Data (SBD)-> Garmin -SMS-> Twilio -HTTP-> Going Blue server
 ```
+
+Each part of the chain has a different character set and message length limit. In the case of Garmin, these are:
+ - Iridium SBD: 270-340 bytes
+ - SMS: 160 GSM-7 basic septets
+ - Garmin: 160 characters of printable ASCII
+
+The alphabet that Going Blue can use is the intersection of all of these: 160 characters of GSM-7 basic ∩ printable ASCII (minus space), or base-85. This provides log₂(85) ≈ 6.409 bits per character and approximately 1025 bits per message.
+
+Each device has a different character set and message length. Going Blue chooses how to encode a message based on the device:
+
+| Device | Network | Alphabet[^1] | Message length | Bits per message |
+|---|---|---|---|---|
+| SMS | Cellular | base-124 (GSM-7 basic) | 160 chars | ~1110 |
+| Garmin inReach | Iridium Short Burst Data | base-85 (GSM-7 basic ∩ printable ASCII) | 160 chars | ~1025 |
+| ZOLEO | Iridium Short Burst Data | base-85 (GSM-7 basic ∩ printable ASCII) | 240 chars | ~1538 |
+| iPhone satellite messaging | Globalstar | base-32768 | 50 chars[^2] | ~707 |
+| Internet | Internet | base-94 (printable ASCII) | — | — |
+
+[^1]: Space is not included in any alphabet.
+[^2]: iPhone satellite messages are capped at the minimum of 70 UTF-16 code units or 140 bytes of compressed UTF-8. In practice, the header is 5 ASCII characters and the remaining budget is 45 base-32768 characters (3 bytes each), which is 50 characters total.
 
 ### Data Source
 
