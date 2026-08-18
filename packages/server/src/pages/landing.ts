@@ -192,23 +192,33 @@ satellite, or any other device that supports SMS.</p>
 <ol>
   <li>Build a forecast request in the app. Choose the location, model, and variables that you
   care about.</li>
-  <li>Send it from your satellite messenger, as a text message, or over the internet.</li>
-  <li>Paste the reply back into the app's decoder to see a detailed meteogram.</li>
+  <li>Send the forecast request to ${BRAND} via the internet, SMS, Garmin inReach, or iPhone
+  satellite.</li>
+  <li>Receive an encoded forecast from ${BRAND}. Paste it into the decoder app to see a detailed
+  meteogram.</li>
 </ol>
 
-<h2>Forecast details</h2>
+<h2>Features</h2>
 <ul>
   <li>Support for any satellite messenger that works over SMS. Tested with Garmin inReach and
-  iPhone satellite messaging. Also works over the internet if you are in service.</li>
-  <li>Temperature, snow, rain, wind, and cloud cover included by default.</li>
-  <li>Optional variables such as pressure-level winds, cloud cover by height, and freezing
-  level.</li>
-  <li>Over 30 high-resolution regional models from American, Canadian, and European forecast
-  centers. Automatically use the highest resolution model for your location or pull multiple
-  models to compare.</li>
-  <li>Hourly detail or extended range up to 13 days.</li>
-  <li>Past forecasts are saved on your device so that you can easily compare multiple forecasts
-  and see trends without requesting a new forecast.</li>
+  iPhone satellite messaging.</li>
+  <li>Custom compression codec optimized for weather data. A typical forecast contains 13 days of
+  data with the following resolution: 2 days at 1h, 5 days at 3h, 3 days at 6h, 3 days at 12h.</li>
+  <li>Temperature, snow, rain, wind, and cloud cover included by default. Optional variables for
+  advanced users:
+    <ul>
+      <li>Pressure-level winds for high-altitude mountaineering.</li>
+      <li>Cloud cover by height (low/mid/high).</li>
+      <li>Freezing level.</li>
+      <li>AQI and all component parts (PM2.5, PM10, ozone, NO₂, SO₂) for planning around
+      wildfire smoke.</li>
+    </ul>
+  </li>
+  <li>Automatically chooses the highest resolution weather model from 30+ regional models.</li>
+  <li>Compare forecasts from American, Canadian, and European forecast centers.</li>
+  <li>Choose between hourly detail or extended range up to 13 days.</li>
+  <li>Past forecasts are saved on your device so that you can easily compare between models and
+  previous forecasts.</li>
 </ul>
 
 <h2>Open source</h2>
