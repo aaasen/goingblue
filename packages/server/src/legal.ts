@@ -30,6 +30,16 @@ const APP_STORE_URL = "https://apps.apple.com/app/id6798411927";
 // is vertically centered, so the bottom corner is empty at every width. It is positioned against
 // the band rather than placed in the flow because the band is a single centered flex item, and a
 // second child would pull the masthead off center.
+//
+// The App Store button closes the masthead, under the subtitle: the band is what sells the app, so
+// the one thing to do about it belongs inside the band rather than a scroll below it. It is Apple's
+// own badge artwork (assets.ts) — the white variant, because the band is a dark background — and
+// the artwork comes with rules: at least 40px tall, clear space around it of a quarter its height,
+// and no redrawing it, recoloring it, adding effects to it, or setting the words beside it in live
+// text. 50px tall clears the floor and 1.1em of margin the clear space; nothing here may grow into
+// a text-shadow like the type above it. Centering is `auto` side margins on a block of the badge's
+// own width, which is why the width is repeated here. The art is 119.66x40, so the box is drawn at
+// 3:1 and the SVG's own viewBox letterboxes the half-pixel rather than stretching it.
 const HERO_CSS = `
   .hero {
     position: relative;
@@ -54,6 +64,8 @@ const HERO_CSS = `
   .herocredit { position: absolute; right: 16px; bottom: 12px; margin: 0;
     color: #fff; font-size: 0.8em; letter-spacing: 0.01em;
     text-shadow: 0 1px 6px rgba(6, 18, 36, 0.7); }
+  .appbtn { display: block; width: 150px; margin: 1.1em auto 0; }
+  .appbtn img { display: block; width: 150px; height: 50px; }
   @media (max-width: 600px) {
     .appicon { width: 92px; height: 92px; border-radius: 21px; }
     .hero h1 { font-size: 1.85em; }
@@ -109,9 +121,15 @@ const HERO_CSS = `
 //
 // `scroll-snap-type: proximity`, not `mandatory`: the strip is a glance, not a carousel, and
 // mandatory snapping fights a user who is flicking through it.
+//
+// The top margin is 40px, not the 1.8em the bottom one is, so that the opening paragraph is framed
+// evenly: the gap above it is the wrap's own 40px (the paragraph's 1em collapses through it), and
+// this margin collapses with the paragraph's 1em to set the gap below. 40px in px rather than 2.5em
+// because the number it has to match is the wrap's, which is in px and does not scale with the
+// reader's font size.
 const SHOTS_CSS = `
   .shots { display: flex; gap: 16px; box-sizing: border-box; width: 100vw;
-    margin: 1.8em 0 1.8em calc(50% - 50vw); padding: 0 20px 10px;
+    margin: 40px 0 1.8em calc(50% - 50vw); padding: 0 20px 10px;
     overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; }
   .shots::-webkit-scrollbar { display: none; }
   .shots figure { flex: 0 1 300px; min-width: 200px; margin: 0; scroll-snap-align: center; }
@@ -143,8 +161,6 @@ export const PAGE = (title: string, body: string, { showUpdated = true, subtitle
   .updated { color: #666; font-size: 0.9em; }
   .cta { background: #f0f6fc; border: 1px solid #cfe2f5; border-radius: 8px; padding: 16px 20px; margin: 1.8em 0; }
   a { color: #0b62c4; }
-  .appbtn { display: block; width: 150px; margin: 1.4em auto 0.2em; }
-  .appbtn img { display: block; width: 150px; height: 50px; }
   footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
 ${subtitle ? HERO_CSS + SHOTS_CSS : ""}${css ?? ""}</style>
 </head>
@@ -155,6 +171,8 @@ ${subtitle
     <img class=appicon src="/img/icon-512.jpg" width=116 height=116 alt="">
     <h1>${title}</h1>
     <p class=subtitle>${subtitle}</p>
+    <a class=appbtn href="${APP_STORE_URL}"><img src="/img/appstore-badge-white.svg" width=150
+      height=50 alt="Download on the App Store"></a>
   </div>
   <p class=herocredit>Sultana from Denali, May 2026</p>
 </header>`
@@ -174,16 +192,7 @@ ${body}
 // The marketing copy is kept in step with the App Store listing's description — the two are read
 // back to back by anyone deciding whether to install, so they should not tell different stories.
 // The companion app is iOS-only and distributed through the App Store, which the page links to
-// under the opening paragraph — before the screenshots rather than after them, so the button is
-// on screen for a reader the photo band has already sold.
-//
-// The button is Apple's own badge artwork (assets.ts), which comes with rules: at least 40px tall,
-// clear space around it of a quarter its height, and no redrawing it or setting the words beside
-// it in live text. 50px tall clears the floor, and 1.4em of margin the clear space — the bottom
-// side is short because this margin does not collapse with the screenshot strip's, so the two
-// would otherwise add up. Centering is `auto` side margins on a block of the badge's own width,
-// which is why the width is repeated here. The art is 119.66x40, so the box is drawn at 3:1 and
-// the SVG's own viewBox letterboxes the half-pixel rather than stretching it.
+// from the masthead itself (HERO_CSS), above everything here.
 //
 // The page is marketing only: the SMS consent language, the opt-out wording and the safety
 // disclaimer live on /support, /privacy and /terms, reached through the footer. If an A2P 10DLC
@@ -192,10 +201,8 @@ const LANDING_BODY = `
 <p>${BRAND} is a weather app designed specifically for satellite messengers. It was built for a
 Denali ski expedition with one goal: to get you all the weather information you would have at
 home, wherever you are. ${BRAND} uses a custom compression codec and decoder app to pack hundreds
-of forecast data points into a single 160-character message.</p>
-
-<a class=appbtn href="${APP_STORE_URL}"><img src="/img/appstore-badge.svg" width=150 height=50
-  alt="Download on the App Store"></a>
+of forecast data points into a single message that can be sent over SMS, Garmin inReach, iPhone
+satellite, or any other device that supports SMS.</p>
 
 <div class=shots>
   <figure>

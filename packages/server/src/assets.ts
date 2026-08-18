@@ -44,12 +44,13 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   "shot-wind-720.jpg": { file: "../public/shot-wind-720.jpg", type: "image/jpeg" },
   "shot-air-720.jpg": { file: "../public/shot-air-720.jpg", type: "image/jpeg" },
   "shot-history-720.jpg": { file: "../public/shot-history-720.jpg", type: "image/jpeg" },
-  // Apple's "Download on the App Store" badge, the black US/UK artwork, byte-for-byte as served by
-  // toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us. Apple's
-  // marketing guidelines allow no redrawing, recoloring or effects, so this file is not ours to
-  // optimize: re-download it rather than editing it, and take the white variant instead if the
-  // button ever moves onto a dark background.
-  "appstore-badge.svg": { file: "../public/appstore-badge.svg", type: "image/svg+xml" },
+  // Apple's "Download on the App Store" badge, the white US/UK artwork, byte-for-byte as served by
+  // toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/white/en-us. White
+  // because the button sits in the photo band, which Apple's guidelines count as a dark background;
+  // take the black variant back if it ever moves down onto the page. Those same guidelines allow no
+  // redrawing, recoloring or effects, so this file is not ours to optimize: re-download it rather
+  // than editing it.
+  "appstore-badge-white.svg": { file: "../public/appstore-badge-white.svg", type: "image/svg+xml" },
 };
 
 const cache = new Map<string, Buffer<ArrayBuffer>>();
