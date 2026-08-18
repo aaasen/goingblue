@@ -29,8 +29,8 @@ export default function App() {
   const [forecastData, setForecastData] = useState('');
   // undefined = still loading from storage; null = no account yet (show setup); string = ready.
   const [token, setToken] = useState<string | null | undefined>(undefined);
-  const [units, setUnitsState] = useState<Units>('metric');
-  const [timeFormat, setTimeFormatState] = useState<TimeFormat>('24h');
+  const [units, setUnitsState] = useState<Units>('imperial');
+  const [timeFormat, setTimeFormatState] = useState<TimeFormat>('12h');
   const [aqiScale, setAqiScaleState] = useState<AqiScale>('us');
   // Builder-only, but loaded here with the rest: the builder is the tab that comes up first, so
   // reading it inside that tab would draw the action button as Get Forecast and rename it a frame

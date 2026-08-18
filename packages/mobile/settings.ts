@@ -25,8 +25,8 @@ const AQI_SCALE_KEY = 'aqi_scale';
 const DEVICE_KEY = 'builder_device';
 const TWO_MESSAGES_KEY = 'builder_two_messages';
 const DEFAULT_TWO_MESSAGES = true;
-const DEFAULT_UNITS: Units = 'metric';
-const DEFAULT_TIME_FORMAT: TimeFormat = '24h';
+const DEFAULT_UNITS: Units = 'imperial';
+const DEFAULT_TIME_FORMAT: TimeFormat = '12h';
 // The US index is the default because it's the one this app's readers are most likely to know:
 // the forecast number is a US number and the air-quality question that drives the feature is
 // wildfire smoke over the western US.
