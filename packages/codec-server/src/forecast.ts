@@ -22,6 +22,7 @@ import {
   type DeviceCode,
   CODECS,
   DEVICE_TRANSPORT,
+  IPHONE_MAX_CHARS,
   MAX_MESSAGES,
   isDeviceCode,
   maxCharsFor,
@@ -1083,6 +1084,12 @@ export function buildLayoutMessage(
 // concatenates its own segments as it always has.
 export function splitReplyFor(params: ForecastParams, encoded: string, headerChars: number): string[] {
   if (params.alphabet !== "base32768") return [encoded];
+  // Whole-reply test first, against the BUBBLE's cap rather than a part's: an unlabelled single
+  // message fits 45 body characters where a labelled part fits 43, and the single-message fill
+  // targets exactly that 45 — split at the part size alone and every such reply goes out as a
+  // full part plus a one-or-two-character tail (seen in the field 2026-08-17). This is also what
+  // lets a multi-message request whose content ran short collapse back to one plain bubble.
+  if (encoded.length <= IPHONE_MAX_CHARS) return [encoded];
   return splitReply(encoded, headerChars, widePartBodyChars(headerChars));
 }
 

@@ -148,6 +148,40 @@ describe("encodeFillSeq", () => {
       expect(decoded.mode).toBe(MODE_AUTO);
     });
 
+    // The field bug of 2026-08-17: a real single-message fill lands at 44-45 body characters
+    // (this suite's synthetic data stops at 43, which is why the fill tests alone never caught
+    // it), and the splitter compared against the 43-character PART size — so every such reply
+    // went out as a full labelled part plus a one-or-two-character tail. The whole-bubble cap is
+    // the right test for staying unsplit.
+    describe("goes out whole, not as parts", () => {
+      const wide = (bodyChars: number) => "#abcd" + "㐀".repeat(bodyChars);
+
+      it("keeps the single-message fill unlabelled", () => {
+        expect(splitReplyFor(iphone, reply, V2_HEADER_CHARS)).toEqual([reply]);
+      });
+
+      it("keeps the full 45-character single-message body unlabelled", () => {
+        const whole = wide(45);
+        expect(splitReplyFor(iphone, whole, V2_HEADER_CHARS)).toEqual([whole]);
+      });
+
+      it("collapses a two-message request whose content ran short to one plain bubble", () => {
+        const p = params({
+          alphabet: "base32768",
+          messages: 2,
+          maxChars: maxCharsFor("i", 2, V2_HEADER_CHARS),
+        });
+        const short = wide(45);
+        expect(splitReplyFor(p, short, V2_HEADER_CHARS)).toEqual([short]);
+      });
+
+      it("still splits what one bubble cannot hold", () => {
+        const parts = splitReplyFor(iphone, wide(46), V2_HEADER_CHARS);
+        expect(parts).toHaveLength(2);
+        expect(parts[0].startsWith("1/2 ")).toBe(true);
+      });
+    });
+
     // Two messages, each its own bubble. This is the mode the builder defaults to, because one
     // bubble is a real forecast but a thin one.
     describe("spread over two messages", () => {
