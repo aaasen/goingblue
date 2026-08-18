@@ -1,28 +1,23 @@
 # Going Blue
 
-Going Blue is a weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom compression codec and decoder app to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, iPhone satellite, or any other device that supports SMS. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
+Going Blue is a weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom compression codec and decoder app to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, or iPhone satellite messaging. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
 
 <img src="packages/mobile/screenshots/readme.png" width="100%" alt="Four screenshots: a 13-day meteogram for Mont Blanc, the Builder tab's location, model and variable options, a Denali forecast with freezing level and pressure-level winds, and a forecast with air quality">
 
 ## How it works
 
 1. Build a forecast request in the app. Choose the location, model, and variables that you care about.
-2. Send the forecast request to Going Blue via the internet, SMS, Garmin inReach, or iPhone satellite.
-3. Receive an encoded forecast from Going Blue. Paste it into the decoder app to see a detailed meteogram.
+2. Send the forecast request to Going Blue via the internet, SMS, Garmin inReach, or iPhone satellite messaging.
+3. Receive an encoded message from Going Blue. Paste it into the app to see a detailed forecast.
 
 ## Features
 
-- Support for any satellite messenger that works over SMS. Tested with Garmin inReach and iPhone satellite messaging.
-- Custom compression codec optimized for weather data. A typical forecast contains 13 days of data with the following resolution: 2 days at 1h, 5 days at 3h, 3 days at 6h, 3 days at 12h. 
-- Temperature, snow, rain, wind, and cloud cover included by default. Optional variables for advanced users:
-  - Pressure-level winds for high-altitude mountaineering. 
-  - Cloud cover by height (low/mid/high).
-  - Freezing level.
-  - AQI and all component parts (PM2.5, PM10, ozone, NO₂, SO₂) for planning around wildfire smoke. 
-- Automatically chooses the highest resolution weather model from 30+ regional models.
+- Works via the internet, SMS, Garmin inReach, and iPhone satellite messaging. 
+- Uses a custom compression codec optimized for weather data that packs hundreds of data points into a single message. Choose between hourly detail and extended range up to 13 days.
+- Temperature, snow, rain, wind, and cloud cover included by default. Optional variables include pressure-level winds for high-altitude mountaineering, AQI for planning around wildfire smoke, low/mid/high cloud cover, and freezing level.
+- Weather forecasts from over 30 models including HRRR (3km), HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for your location.
 - Compare forecasts from American, Canadian, and European forecast centers.
-- Choose between hourly detail or extended range up to 13 days.
-- Past forecasts are saved on your device so that you can easily compare between models and previous forecasts.
+- All forecasts are saved on your device for comparing multiple models and past forecasts.
 
 ## Architecture
 
@@ -246,10 +241,14 @@ pnpm test
 
 The Going Blue codec relies on the client and server having identical codebooks. Since clients may be out of service and unable to update for long periods of time, the service maintains support for old versions. Each forecast request starts with a version number e.g. `v1`. The gateway server routes each message to the appropriate codec service. Each version of the codec is a separate container running from `main` tagged at a specific version. Golden messages are kept for each codec version so that changes to the codec service can be made (for example patching security vulnerabilities) while ensuring that the message format does not change. This approach allows the codec to evolve quickly without sacrificing support for older clients in the field.
 
-#### v1 -> v2 (in development)
+#### Codec v2 (App version 1.1.0)
 
- - Adds elevation correction for precipitation type. Open-Meteo already adjusts temperature from grid cell elevation to forecast elevation using a temperature lapse rate formula. This change also remaps rain to snow when the forecast elevation is above the freezing level or the temperature is less than 2°C. Uses a 7:1 snow:liquid ratio. Weathercode is also remapped.
- - Adds support for air quality variables: AQI, pm2.5, pm10, ozone, nitrogen dioxide, sulfur dioxide. Supports both American and European scales. 
+ - Added air quality variables: AQI, pm2.5, pm10, ozone, nitrogen dioxide, sulfur dioxide. Supports both American and European scales. 
+ - Added support for iPhone satellite messaging with multi-part messages.
+ - Corrected precipitation type for elevation. Open-Meteo already adjusts temperature from grid cell elevation to forecast elevation using a temperature lapse rate formula. This change also remaps rain to snow when the forecast elevation is above the freezing level or the temperature is less than 2°C. Uses a 7:1 snow:liquid ratio. Weathercode is also remapped.
+ - Improved weathercode aggregation to better summarize mixed conditions. 
+ - Added model attribution to the meteogram so that the switch between a high-resolution local model and a low-resolution global model is clear.
+ - Expanded SMS alphabet from 85 to 124 characters by using almost all of GSM-7 instead of the intersection of GSM-7 and ASCII.
 
 ## License
 
