@@ -2,9 +2,9 @@ import { BRAND, LAST_UPDATED } from "../constants.js";
 
 type PageOpts = { showUpdated?: boolean; header?: string; css?: string };
 
-// The shell every public page is served in: the document, the typographic defaults, the centered
-// wrap, and the footer that carries the operator's name and the links between the pages. It knows
-// nothing about any particular page — a page that wants more than prose brings it itself.
+// The shell every public page is served in: the document, the icons, the typographic defaults, the
+// centered wrap, and the footer that carries the operator's name and the links between the pages.
+// It knows nothing about any particular page — a page that wants more than prose brings it itself.
 //
 // `header` is raw HTML placed above the wrap, for a page whose heading is more than a line of type
 // (the landing page's photo band). Passing one replaces the plain <h1>, which the page's own header
@@ -16,6 +16,8 @@ export const PAGE = (title: string, body: string, { showUpdated = true, header, 
 <head>
 <meta charset=utf-8>
 <meta name=viewport content="width=device-width, initial-scale=1">
+<link rel=icon href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel=apple-touch-icon href="/img/icon-512.jpg">
 <title>${title === BRAND ? BRAND : `${title} — ${BRAND}`}</title>
 <style>
   body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #1a1a1a; line-height: 1.55;

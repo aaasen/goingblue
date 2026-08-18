@@ -22,7 +22,10 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   "sultana-2400.jpg": { file: "../public/sultana-2400.jpg", type: "image/jpeg" },
   "sultana-1200.jpg": { file: "../public/sultana-1200.jpg", type: "image/jpeg" },
   // The app icon, resized from packages/mobile/assets/icon.png. Regenerate it from that source
-  // (and bump the filename) whenever the app icon changes, so the two never drift apart.
+  // (and bump the filename) whenever the app icon changes, so the two never drift apart. It is
+  // drawn on the landing page and is also the apple-touch-icon every page links, which is why it
+  // stays a square of the icon alone: it is rendered as a home-screen tile, not just as a picture,
+  // and iOS rounds the corners itself — unlike favicon.ico, which has to bring its own.
   "icon-512.jpg": { file: "../public/icon-512.jpg", type: "image/jpeg" },
   // The landing page's screenshot strip, listed here in the order the strip draws them, which is
   // the App Store listing's order. These are the App Store frames themselves — sky, device and
@@ -53,19 +56,39 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   "appstore-badge-white.svg": { file: "../public/appstore-badge-white.svg", type: "image/svg+xml" },
 };
 
+// The browser-tab icon, the app icon rendered down to the three sizes a tab, a bookmark bar and a
+// Windows shortcut ask for, in one .ico. Corners are rounded here rather than left square: nothing
+// masks a favicon the way a home screen masks an app icon, so the rounding has to be baked in for
+// the tab to show the icon as the phone shows it. The shape is the n=5 superellipse, which is the
+// usual approximation of the continuous-curvature corner iOS draws — a plain rounded rectangle of
+// the same radius differs by up to a third of the alpha range along the corner arcs, which is
+// visible at 48px. Regenerate alongside icon-512.jpg whenever the app icon changes, from the same
+// source, with Pillow and numpy —
+//   N, SS, n = 1024, 4, 5
+//   g = (np.arange(N * SS) + 0.5) / (N * SS) * 2 - 1
+//   mask = Image.fromarray(
+//       (((np.abs(g)[:, None] ** n + np.abs(g)[None, :] ** n) <= 1) * 255).astype("uint8")
+//   ).resize((N, N), Image.LANCZOS)
+//   im = Image.open("packages/mobile/assets/icon.png").convert("RGBA")
+//   im.putalpha(mask)
+//   im.save(out, format="ICO", sizes=[(16, 16), (32, 32), (48, 48)])
+// — supersampling the mask for a clean edge, touching only alpha so the resize has no matte to
+// bleed, and downsampling each frame from the 1024px master rather than from one another. It is the
+// one image whose URL is fixed by convention instead of by us, so it cannot be content-versioned the
+// way the rest are; it is cached by the day instead of by the year so a new one can actually land.
+const FAVICON = "../public/favicon.ico";
+
 const cache = new Map<string, Buffer<ArrayBuffer>>();
 
-async function load(name: string): Promise<Buffer<ArrayBuffer> | null> {
-  const cached = cache.get(name);
+async function load(file: string): Promise<Buffer<ArrayBuffer> | null> {
+  const cached = cache.get(file);
   if (cached) return cached;
-  const asset = ASSETS[name];
-  if (!asset) return null;
   try {
-    const bytes = await readFile(new URL(asset.file, import.meta.url));
-    cache.set(name, bytes);
+    const bytes = await readFile(new URL(file, import.meta.url));
+    cache.set(file, bytes);
     return bytes;
   } catch (e) {
-    log.error("asset.read_failed", { name, err: e });
+    log.error("asset.read_failed", { file, err: e });
     return null;
   }
 }
@@ -75,10 +98,20 @@ async function load(name: string): Promise<Buffer<ArrayBuffer> | null> {
 export async function image(c: Context) {
   const name = c.req.param("name") ?? "";
   const asset = ASSETS[name];
-  const bytes = asset ? await load(name) : null;
+  const bytes = asset ? await load(asset.file) : null;
   if (!asset || !bytes) return c.text("Not found", 404);
   return c.body(bytes, 200, {
     "Content-Type": asset.type,
     "Cache-Control": "public, max-age=31536000, immutable",
+  });
+}
+
+// GET /favicon.ico — the path browsers ask for on their own, whether or not a page links it.
+export async function favicon(c: Context) {
+  const bytes = await load(FAVICON);
+  if (!bytes) return c.text("Not found", 404);
+  return c.body(bytes, 200, {
+    "Content-Type": "image/x-icon",
+    "Cache-Control": "public, max-age=86400",
   });
 }
