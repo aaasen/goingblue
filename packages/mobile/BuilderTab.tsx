@@ -67,6 +67,11 @@ const LOCATION_BLOCKED =
   'on the map.';
 const LOCATION_FAILED = `Couldn’t get your current location. ${LOCATION_FALLBACK}`;
 
+// A fix taken when the builder was opened can be hours old by the time a request goes out, and a
+// forecast for where the phone used to be reads exactly like the right one. Sends re-fix beyond
+// this age; under it, a burst of copies and sends stays instant.
+const GPS_FIX_MAX_AGE_MS = 60_000;
+
 // Variables a forecast center can't supply. Only the freezing level varies now — GEM and ECMWF
 // have no freezing-level product (Europe's pressure winds are filled from IFS 0.25°). The
 // air-quality variables never appear here: they come from CAMS, not from the weather center, so
@@ -413,6 +418,9 @@ interface Props {
 export default function BuilderTab({ token, onForecastReceived, active, device, onDeviceChange, twoMessages, onTwoMessagesChange, aqiScale }: Props) {
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
+  // When the fix in gpsCoords was taken (ms epoch, 0 = never). The OS's own timestamp, not ours:
+  // getCurrentPositionAsync may hand back a cached fix, and its age is the fix's, not the call's.
+  const gpsFixedAt = useRef(0);
   const [customCoords, setCustomCoords] = useState('');
   const [mode, setMode] = useState(MODE_AUTO);
   const [model, setModel] = useState('best');
@@ -504,6 +512,7 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       setGpsCoords(coords);
+      gpsFixedAt.current = pos.timestamp;
       return coords;
     } catch {
       return null;
@@ -562,7 +571,11 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
   // gets this far.
   async function prepareMessage(): Promise<string | null> {
     let coords = resolvedCoords;
-    if (locationMode === 'current' && !coordsValid) {
+    // A stale fix takes the same on-demand path as a missing one: a send is the moment the
+    // location has to be right, and refreshing through requestCurrentLocation means a failed
+    // re-fix aborts with the same alert instead of quietly sending where the phone used to be.
+    if (locationMode === 'current'
+      && (!coordsValid || Date.now() - gpsFixedAt.current > GPS_FIX_MAX_AGE_MS)) {
       coords = await requestCurrentLocation();
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return null;
