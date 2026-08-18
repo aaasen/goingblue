@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  StyleSheet, Text, View, TouchableOpacity, ScrollView,
+  StyleSheet, Text, View, TouchableOpacity, ScrollView, Linking,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -542,6 +542,15 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
           {/* `active` is not for hiding anything — the meteogram's canvases lose their drawables
               while this tab is hidden, so they need to know when to come back. */}
           <Meteogram msg={decoded} units={units} timeFormat={timeFormat} active={active} />
+
+          {/* Open-Meteo's data is CC BY 4.0, which asks for credit where the data is shown —
+              the Settings footer alone doesn't satisfy that. Same wording as there. */}
+          <Text style={styles.attribution}>
+            Weather data provided by{' '}
+            <Text style={styles.attributionLink} onPress={() => Linking.openURL('https://open-meteo.com/')}>
+              Open-Meteo
+            </Text>.
+          </Text>
         </>
       )}
 
@@ -625,6 +634,9 @@ const styles = StyleSheet.create({
   metaText: { flexShrink: 1, fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
   variableRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   variableLabel: { fontSize: 12, color: '#636366' },
+
+  attribution: { fontSize: 12, color: '#8e8e93', marginTop: 8, marginHorizontal: 16 },
+  attributionLink: { color: '#2a6bb5', textDecorationLine: 'underline' },
 
   emptyState: { alignItems: 'center', justifyContent: 'center', padding: 40 },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: '#3a3a3c', textAlign: 'center' },
