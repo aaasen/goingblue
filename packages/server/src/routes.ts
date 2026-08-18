@@ -40,20 +40,22 @@ function replyFor(result: DispatchResult): string | string[] {
   }
 }
 
-// Record a served request without ever failing the response: the forecast is already built
-// by the time we get here, so a DB hiccup must not turn a successful reply into an error.
-async function logRequest(token: string | null, chars: number, version: number | null): Promise<void> {
+// Record an inbound message without ever failing the response: the reply is already built by
+// the time we get here, so a DB hiccup must not turn a served forecast into an error.
+async function logRequest(record: Parameters<typeof recordRequest>[0]): Promise<void> {
   try {
-    await recordRequest(token, chars, version);
+    await recordRequest(record);
   } catch (e) {
     log.error("request.record_failed", { err: e });
   }
 }
 
-// Dispatch a request body to its version's codec server and record a served forecast. The
-// per-version request counts are the sunset metric: a frozen codec container is retired only
-// once its version has gone quiet (VERSIONING.md).
-async function buildForecast(body: string): Promise<DispatchResult> {
+// Dispatch a request body to its version's codec server and record the attempt. Every outcome
+// is recorded, not just the served ones: a number that asked and got "please update the app" is
+// still a person using the service, and the failures are the only signal that a version has
+// clients it can no longer answer. The per-version counts are also the sunset metric — a frozen
+// codec container is retired only once its version has gone quiet (VERSIONING.md).
+async function buildForecast(body: string, phone: string | null): Promise<DispatchResult> {
   const version = extractVersion(body);
   const result = await dispatchForecast(body);
   log.info("forecast.dispatch", {
@@ -61,14 +63,23 @@ async function buildForecast(body: string): Promise<DispatchResult> {
     kind: result.kind,
     chars: result.kind === "ok" ? result.encoded.length : undefined,
   });
-  if (result.kind === "ok") {
-    await logRequest(extractUserToken(body), result.encoded.length, version);
-  }
+  await logRequest({
+    token: extractUserToken(body),
+    phone,
+    // A multi-message reply arrives one message per line; the newlines are gateway framing, not
+    // reply characters, so they don't count.
+    chars: result.kind === "ok" ? result.encoded.split("\n").join("").length : null,
+    version,
+    outcome: result.kind,
+    shape: result.kind === "ok" ? result.shape : null,
+  });
   return result;
 }
 
+// Requests over the internet carry no sending address — the app posts them directly — so the
+// phone is always null here.
 export async function forecast(c: Context) {
-  const result = await buildForecast((await c.req.text()).trim());
+  const result = await buildForecast((await c.req.text()).trim(), null);
   switch (result.kind) {
     case "ok": return c.text(result.encoded, 200);
     case "missing_version": return c.text(REPLY_MISSING_VERSION, 400);
@@ -104,20 +115,25 @@ export async function sms(c: Context) {
   const sender = params["From"] ?? "";
   log.info("sms.inbound", { from: sender, len: body.length, text: body });
 
+  // HELP and the field probes are answered without a forecast, but they are still someone
+  // texting the service, so they are recorded too — with no version, no size and no shape. The
+  // question they answer is "how many distinct numbers reach us", which a forecast-only record
+  // would under-report.
   if (HELP_KEYWORDS.has(body.trim().toLowerCase())) {
+    await logRequest({ token: null, phone: sender, chars: null, version: null, outcome: "help", shape: null });
     return c.text(twiml(HELP_REPLY), 200, { "Content-Type": "text/xml" });
   }
 
-  // Character-set field probes ("probe N") — see probes.ts. Handled before forecast dispatch
-  // and never recorded as a served request.
+  // Character-set field probes ("probe N") — see probes.ts. Handled before forecast dispatch.
   const probe = probeReply(body);
   if (probe !== null) {
     const parts = Array.isArray(probe) ? probe : [probe];
     log.info("sms.probe_reply", { messages: parts.length, len: parts.join("").length, reply: parts });
+    await logRequest({ token: null, phone: sender, chars: null, version: null, outcome: "probe", shape: null });
     return c.text(twiml(probe), 200, { "Content-Type": "text/xml" });
   }
 
-  const result = await buildForecast(body.trim());
+  const result = await buildForecast(body.trim(), sender);
   return c.text(twiml(replyFor(result)), 200, { "Content-Type": "text/xml" });
 }
 

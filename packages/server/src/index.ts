@@ -12,6 +12,7 @@ import { image, favicon } from "./assets.js";
 import { benchmark } from "./benchmark.js";
 import { stats } from "./pages/stats.js";
 import { migrate } from "./db.js";
+import { hasPepper } from "./phone.js";
 import { log } from "./log.js";
 
 const app = new Hono();
@@ -63,6 +64,11 @@ const port = parseInt(process.env["PORT"] ?? "8080");
 migrate()
   .then(() => log.info("db.schema_ready"))
   .catch((e) => log.error("db.migrate_failed", { err: e }));
+
+// Without PHONE_PEPPER no sender is recorded at all (phone.ts fails safe rather than storing a
+// reversible digest), so the distinct-sender count silently reads zero. That is the right
+// behaviour in local dev and a misconfiguration in production — say so at startup either way.
+if (!hasPepper()) log.info("phone.no_pepper", { effect: "senders not recorded" });
 
 serve({ fetch: app.fetch, port }, () => {
   log.info("server.listening", { port, stats: statsPass ? "enabled" : "disabled_no_secret" });

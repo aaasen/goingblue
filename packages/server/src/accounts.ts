@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { generateToken } from "@weather/protocol";
-import { getPool, query } from "./db.js";
+import { DAY_TZ, getPool, query } from "./db.js";
+import type { RequestShape } from "./dispatch.js";
+import { hashPhone } from "./phone.js";
 
 // CSPRNG for token minting, supplied to the shared generator (which is platform-neutral and
 // takes its randomness as a parameter).
@@ -30,13 +32,23 @@ export async function accountExists(token: string): Promise<boolean> {
   return (r.rowCount ?? 0) > 0;
 }
 
-// Erase an account. The token is the only thing we store about a user, so dropping the row is a
-// complete deletion. The `requests` rows survive with a null token: they hold no location and no
-// message content — only a timestamp, a character count and a protocol version — and the
-// per-version counts are the sunset metric for frozen codec containers (VERSIONING.md). Nulling
-// the column severs every link back to the user while leaving that metric intact. Both statements
-// run in one transaction so a failure can't leave requests pointing at a deleted account (the
-// foreign key would reject that anyway) or orphan the rows from an account that still exists.
+// Erase an account. The token is the only thing we store that identifies a user, so dropping the
+// row is a complete deletion of the link between them and us.
+//
+// The `requests` rows survive with a null token. They keep two things that outlive the account:
+// `account_id`, an opaque number, and `phone_hash`, an unkeyed-lookup HMAC. Neither can be turned
+// back into a person — the token is gone, and the hash is only matchable by someone who already
+// knows the number — but keeping them is what makes the usage record stay true: nulling
+// everything would retroactively erase this user from every past day's count, so the dashboard
+// would report fewer people using the service last March than actually did. The per-version
+// counts are the sunset metric for frozen codec containers (VERSIONING.md) and need the rows for
+// the same reason.
+//
+// Locations are not a consideration here: they were never written to this table (see db.ts).
+//
+// Both statements run in one transaction so a failure can't leave requests pointing at a deleted
+// account (the foreign key would reject that anyway) or orphan the rows from an account that
+// still exists.
 //
 // Returns false when the token names no account, so a repeat delete reports honestly instead of
 // claiming a fresh success.
@@ -56,11 +68,47 @@ export async function deleteAccount(token: string): Promise<boolean> {
   }
 }
 
-// Record one forecast request. A token is stored only when it references a real account
-// (the column has a foreign key); anything else — anonymous or an unregistered token — is
-// recorded with a null token so the row still counts toward overall volume. Phase 1 is
+// One inbound message, as recorded. `phone` is the raw sending address and is hashed on the way
+// into the database — it is never stored, and never leaves this function.
+export interface RequestRecord {
+  token: string | null;
+  phone: string | null;
+  chars: number | null;
+  version: number | null;
+  // 'ok' for a served forecast, a DispatchResult failure kind, or 'help' / 'probe' for the
+  // messages that are answered without a forecast.
+  outcome: string;
+  shape: RequestShape | null;
+}
+
+// Record one inbound message, as two rows in two tables that cannot be joined to each other:
+// who asked (`requests`) and what was asked for (`request_shapes`). See the header comment in
+// db.ts for why they are kept apart.
+//
+// A token is stored only when it references a real account (the column has a foreign key);
+// anything else — anonymous, or a token from another environment — is recorded with a null
+// token and null account so the row still counts toward overall volume. Phase 1 is
 // observe-only; quotas will later read these rows.
-export async function recordRequest(token: string | null, chars: number, version: number | null): Promise<void> {
-  const known = token && (await accountExists(token)) ? token : null;
-  await query("insert into requests (token, chars, version) values ($1, $2, $3)", [known, chars, version]);
+export async function recordRequest(r: RequestRecord): Promise<void> {
+  // One lookup resolves both columns, replacing the accountExists round-trip: an unknown token
+  // simply yields no row and the request is recorded as anonymous.
+  const account = r.token
+    ? (await query<{ id: string }>("select id from accounts where token = $1", [r.token])).rows[0]
+    : undefined;
+  await query(
+    `insert into requests (token, account_id, phone_hash, chars, version, outcome)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [account ? r.token : null, account?.id ?? null, hashPhone(r.phone), r.chars, r.version, r.outcome],
+  );
+
+  // Deliberately a second, independent statement rather than part of a transaction: a shared
+  // transaction is one more thing tying the two rows together, and if this insert fails the
+  // usage record should still stand.
+  if (!r.shape) return;
+  await query(
+    `insert into request_shapes (day, version, lat, lon, loc, mode, models, vars, max_chars, chars)
+     values ((now() at time zone $1)::date, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [DAY_TZ, r.version, r.shape.lat, r.shape.lon, r.shape.loc, r.shape.mode,
+     r.shape.models, r.shape.vars, r.shape.maxChars, r.chars],
+  );
 }

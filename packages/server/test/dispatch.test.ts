@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateToken } from "@weather/protocol";
-import { codecUrlFor, dispatchForecast, extractUserToken, extractVersion } from "../src/dispatch.js";
+import { codecUrlFor, dispatchForecast, extractUserToken, extractVersion, parseShapeHeader } from "../src/dispatch.js";
 
 // A real token so extraction exercises the same validity check parseRequest applies.
 const TOKEN = generateToken((n) => Uint8Array.from({ length: n }, (_, i) => i * 7 + 3));
@@ -60,8 +60,18 @@ describe("dispatchForecast", () => {
     const fetchSpy = vi.fn(async () => new Response("ENCODED", { status: 200 }));
     vi.stubGlobal("fetch", fetchSpy);
 
-    expect(await dispatchForecast(body)).toEqual({ kind: "ok", encoded: "ENCODED" });
+    expect(await dispatchForecast(body)).toEqual({ kind: "ok", encoded: "ENCODED", shape: null });
     expect(fetchSpy).toHaveBeenCalledWith("http://codec-v1/encode", { method: "POST", body });
+  });
+
+  it("picks up the shape header when the codec sends one", async () => {
+    process.env["CODEC_URL_V1"] = "http://codec-v1";
+    const shape = { lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
+                    models: ["best"], vars: ["temp"], maxChars: 160 };
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response("ENCODED", { status: 200, headers: { "X-Request-Shape": JSON.stringify(shape) } })));
+
+    expect(await dispatchForecast("v1 p:d")).toEqual({ kind: "ok", encoded: "ENCODED", shape });
   });
 
   it("maps codec errors and unreachable codecs to unavailable", async () => {
@@ -71,6 +81,52 @@ describe("dispatchForecast", () => {
 
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("ECONNREFUSED"); }));
     expect(await dispatchForecast("v1 p:a")).toEqual({ kind: "unavailable" });
+  });
+});
+
+describe("parseShapeHeader", () => {
+  const shape = (over: Record<string, unknown> = {}) => JSON.stringify({
+    lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
+    models: ["best"], vars: ["temp", "wind"], maxChars: 160, ...over,
+  });
+
+  it("keeps exactly the fields we store", () => {
+    expect(parseShapeHeader(shape())).toEqual({
+      lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
+      models: ["best"], vars: ["temp", "wind"], maxChars: 160,
+    });
+  });
+
+  it("drops fields the codec invented rather than storing them", () => {
+    expect(parseShapeHeader(shape({ userToken: "SECRET", note: "hi" }))).not.toHaveProperty("userToken");
+  });
+
+  // Every one of these is a codec that is broken, old, or lying. None may cost the user a
+  // forecast — the dispatcher has already produced one by the time this runs.
+  it("degrades to null rather than throwing", () => {
+    expect(parseShapeHeader(null)).toBeNull();
+    expect(parseShapeHeader("")).toBeNull();
+    expect(parseShapeHeader("not json")).toBeNull();
+    expect(parseShapeHeader("[1,2,3]")).toBeNull();
+    expect(parseShapeHeader('"a string"')).toBeNull();
+    expect(parseShapeHeader(JSON.stringify({ pad: "x".repeat(4096) }))).toBeNull();
+  });
+
+  it("nulls individual fields of the wrong type or range", () => {
+    expect(parseShapeHeader(shape({ lat: "63.06", lon: 999, mode: 7, maxChars: 1.5 }))).toEqual({
+      lat: null, lon: null, loc: "current", mode: null,
+      models: ["best"], vars: ["temp", "wind"], maxChars: null,
+    });
+    expect(parseShapeHeader(shape({ models: "best", vars: [1, "temp", null] }))).toMatchObject({
+      models: [], vars: ["temp"],
+    });
+  });
+
+  // The codec already rounds, but this is the last point before the value is stored, so the
+  // promise to keep only an approximate location can't rest on the codec having behaved.
+  it("re-rounds coordinates to ~1km, whatever the codec sent", () => {
+    expect(parseShapeHeader(shape({ lat: 63.0630419, lon: -151.0810871 })))
+      .toMatchObject({ lat: 63.06, lon: -151.08 });
   });
 });
 

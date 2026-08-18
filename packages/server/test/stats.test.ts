@@ -1,22 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { formatDay, renderStats, type StatsData, type StatsRow } from "../src/pages/stats.js";
+import { formatDay, renderStats, type SharedRow, type StatsData, type StatsRow } from "../src/pages/stats.js";
 
 // Rendering is pure, so every case here feeds rows straight in — no Postgres, matching the rest
 // of the server tests. Assertions are on structure and numbers rather than exact markup, so
 // restyling the page doesn't break them.
 
-const row = (day: string, requests: number, users: number, anon: number): StatsRow =>
-  ({ day, requests, users, anon });
+const row = (
+  day: string,
+  requests: number,
+  users: number,
+  anon: number,
+  extra: Partial<StatsRow> = {},
+): StatsRow => ({ day, requests, users, anon, senders: 0, unlinked: 0, failed: 0, ...extra });
 
-const data = (rows: StatsRow[], days = rows.length): StatsData => ({
+// Distinct measures (users, senders) are the largest day rather than a sum: over a real window
+// the query counts each account or number once however many days it appears on. Additive ones
+// are summed.
+const peak = (rows: StatsRow[], key: keyof StatsRow): number =>
+  Math.max(0, ...rows.map((r) => Number(r[key])));
+const sum = (rows: StatsRow[], key: keyof StatsRow): number =>
+  rows.reduce((n, r) => n + Number(r[key]), 0);
+
+const data = (
+  rows: StatsRow[],
+  { days = rows.length, shared = [] as SharedRow[], sharedNumbers = 0 } = {},
+): StatsData => ({
   rows,
   days,
+  shared,
+  sharedNumbers,
   totals: {
-    requests: rows.reduce((n, r) => n + r.requests, 0),
-    // Deliberately not the sum of daily users: over a real window the query counts distinct
-    // tokens once. The fixture keeps it simple by using the largest day.
-    users: Math.max(0, ...rows.map((r) => r.users)),
-    anon: rows.reduce((n, r) => n + r.anon, 0),
+    requests: sum(rows, "requests"),
+    anon: sum(rows, "anon"),
+    failed: sum(rows, "failed"),
+    users: peak(rows, "users"),
+    senders: peak(rows, "senders"),
+    unlinked: peak(rows, "unlinked"),
   },
 });
 
@@ -48,12 +67,14 @@ describe("renderStats", () => {
     // Two days with traffic, so two bars per series — the quiet day contributes none.
     expect(countFill(html, ANON)).toBe(2);
     // ...and it is still a row, so the gap is visible as a zero rather than missing.
-    expect(html).toContain("<td>Aug 6</td><td>0</td><td>0</td><td>0</td>");
+    expect(html).toContain("<td>Aug 6</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td>");
   });
 
-  it("puts requests, accounts and anonymous in their own columns", () => {
-    const html = renderStats(data([row("2026-08-07", 21, 5, 16)]));
-    expect(html).toContain("<td>Aug 7</td><td>21</td><td>5</td><td>16</td>");
+  it("puts each measure in its own column", () => {
+    const html = renderStats(data([
+      row("2026-08-07", 21, 5, 16, { senders: 4, failed: 2 }),
+    ]));
+    expect(html).toContain("<td>Aug 7</td><td>21</td><td>2</td><td>5</td><td>4</td><td>16</td>");
   });
 
   it("lists days newest first", () => {
@@ -89,22 +110,45 @@ describe("renderStats", () => {
   });
 
   it("describes each column in a hover title covering both parts of the stack", () => {
-    const html = renderStats(data([row("2026-08-07", 21, 5, 16)]));
+    const html = renderStats(data([row("2026-08-07", 21, 5, 16, { unlinked: 3 })]));
     expect(html).toContain("<title>Aug 7 — 21 requests (5 from accounts, 16 anonymous)</title>");
-    expect(html).toContain("<title>Aug 7 — 5 accounts</title>");
+    expect(html).toContain("<title>Aug 7 — 5 accounts, 3 numbers with no account</title>");
   });
 
   it("singularises counts in the tooltips", () => {
-    const html = renderStats(data([row("2026-08-07", 1, 1, 0)]));
+    const html = renderStats(data([row("2026-08-07", 1, 1, 0, { unlinked: 1 })]));
     expect(html).toContain("1 request (1 from accounts, 0 anonymous)");
-    expect(html).toContain("1 account<");
+    expect(html).toContain("1 account, 1 number with no account");
   });
 
   it("shows window totals rather than a sum of daily distinct users", () => {
-    const html = renderStats(data([row("2026-08-06", 4, 3, 1), row("2026-08-07", 6, 3, 2)]));
+    const html = renderStats(data([
+      row("2026-08-06", 4, 3, 1, { senders: 2, failed: 1 }),
+      row("2026-08-07", 6, 3, 2, { senders: 2 }),
+    ]));
     expect(html).toContain("<b>10</b><span>requests</span>");
     expect(html).toContain("<b>3</b><span>distinct accounts</span>");
+    expect(html).toContain("<b>2</b><span>distinct numbers</span>");
     expect(html).toContain("<b>3</b><span>anonymous requests</span>");
+    // Singular, because the label is read together with the number beside it.
+    expect(html).toContain("<b>1</b><span>failed request</span>");
+  });
+
+  // The count of people is the whole point of the second chart: an account and the number it
+  // texts from are one person, so only numbers we cannot tie to an account are added on top.
+  it("stacks numbers with no account above accounts in the people chart", () => {
+    const html = renderStats(data([row("2026-08-07", 8, 2, 3, { senders: 5, unlinked: 3 })]));
+    expect(html).toContain("Numbers with no account");
+    expect(html).toContain("<title>Aug 7 — 2 accounts, 3 numbers with no account</title>");
+  });
+
+  // A day that served nothing but failed and was texted is still a day with traffic; the empty
+  // state must not claim otherwise.
+  it("reports an empty window only when nothing at all happened", () => {
+    const failedOnly = renderStats(data([row("2026-08-07", 0, 0, 0, { senders: 1, failed: 2 })]));
+    expect(failedOnly).not.toContain("No forecast requests");
+    expect(failedOnly).toContain("<b>2</b><span>failed requests</span>");
+    expect(failedOnly).toContain("<b>1</b><span>distinct number</span>");
   });
 
   it("keeps gridlines on whole numbers — these are counts, not measurements", () => {
@@ -123,5 +167,34 @@ describe("renderStats", () => {
     );
     const html = renderStats(data(rows));
     expect(html).toContain(">Jul 30<");
+  });
+});
+
+describe("renderStats — shared accounts", () => {
+  const shared: SharedRow[] = [
+    { account: 412, numbers: 3, requests: 27, lastDay: "2026-08-07" },
+    { account: 77, numbers: 2, requests: 4, lastDay: "2026-07-19" },
+  ];
+
+  it("lists accounts seen from more than one number", () => {
+    const html = renderStats(data([row("2026-08-07", 31, 2, 0, { senders: 5 })], { shared }));
+    expect(html).toContain("<td>#412</td><td>3</td><td>27</td><td>Aug 7</td>");
+    expect(html).toContain("<td>#77</td><td>2</td><td>4</td><td>Jul 19</td>");
+  });
+
+  // Empty is the expected state and has to say so: a table that vanishes reads as "not measured"
+  // rather than "nothing to report".
+  it("says nothing is shared rather than dropping the section", () => {
+    const html = renderStats(data([row("2026-08-07", 3, 1, 0, { senders: 1 })]));
+    expect(html).toContain("Shared accounts");
+    expect(html).toContain("No account has been used from more than one number");
+  });
+
+  it("reports the converse — a number carrying several accounts", () => {
+    const one = renderStats(data([row("2026-08-07", 3, 2, 0, { senders: 1 })], { sharedNumbers: 1 }));
+    expect(one).toContain("1 number has used more than one account");
+
+    const many = renderStats(data([row("2026-08-07", 9, 4, 0, { senders: 2 })], { shared, sharedNumbers: 2 }));
+    expect(many).toContain("2 numbers have used more than one account");
   });
 });

@@ -7,8 +7,22 @@ import { log } from "./log.js";
 // deployed client, however old, must be parseable by the current gateway (VERSIONING.md).
 // Everything else in the body is opaque here; it belongs to the versioned codec server.
 
+// What the request asked for, as reported by the codec server in `X-Request-Shape`. The gateway
+// treats this as untrusted input it merely relays to the database: it never parses the message
+// grammar itself, because the grammar is version-specific and only the codec for that version
+// knows what a mask or a token means (VERSIONING.md).
+export interface RequestShape {
+  lat: number | null;
+  lon: number | null;
+  loc: string | null;
+  mode: string | null;
+  models: string[];
+  vars: string[];
+  maxChars: number | null;
+}
+
 export type DispatchResult =
-  | { kind: "ok"; encoded: string }
+  | { kind: "ok"; encoded: string; shape: RequestShape | null }
   | { kind: "missing_version" }
   | { kind: "unsupported_version"; version: number }
   | { kind: "unavailable" };
@@ -41,6 +55,56 @@ export function codecUrlFor(version: number): string | null {
   return process.env[`CODEC_URL_V${version}`] || null;
 }
 
+// Longest header we will parse. A shape is a few dozen bytes; anything approaching this is a
+// misbehaving or compromised codec, and the cost of ignoring it is one row with no shape.
+const MAX_SHAPE_BYTES = 2048;
+const SHAPE_STRING_MAX = 32; // longest plausible mode/location/variable name
+const SHAPE_LIST_MAX = 32;   // more entries than there are models or variables
+
+// Coordinates are rounded to 0.01° by the codec (describeRequest). Re-round here rather than
+// trusting it: this is the last point before the value is stored, and the promise that we keep
+// only an approximate location should not depend on a remote service behaving.
+function coord(v: unknown, limit: number): number | null {
+  return typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= limit
+    ? Math.round(v * 100) / 100
+    : null;
+}
+
+function shapeString(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 && v.length <= SHAPE_STRING_MAX ? v : null;
+}
+
+function shapeList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.slice(0, SHAPE_LIST_MAX).map(shapeString).filter((s): s is string => s !== null);
+}
+
+// Parse the codec's shape header into exactly the fields we store, dropping anything else.
+// Every failure mode — absent, oversized, malformed, wrong types — lands on null or an empty
+// field rather than an error: the forecast has already been produced by this point, and no
+// amount of bad telemetry should turn a served reply into a failure.
+export function parseShapeHeader(header: string | null): RequestShape | null {
+  if (!header || header.length > MAX_SHAPE_BYTES) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(header);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const maxChars = o["maxChars"];
+  return {
+    lat: coord(o["lat"], 90),
+    lon: coord(o["lon"], 180),
+    loc: shapeString(o["loc"]),
+    mode: shapeString(o["mode"]),
+    models: shapeList(o["models"]),
+    vars: shapeList(o["vars"]),
+    maxChars: typeof maxChars === "number" && Number.isInteger(maxChars) ? maxChars : null,
+  };
+}
+
 export async function dispatchForecast(body: string): Promise<DispatchResult> {
   const version = extractVersion(body);
   if (version === null) return { kind: "missing_version" };
@@ -50,7 +114,13 @@ export async function dispatchForecast(body: string): Promise<DispatchResult> {
 
   try {
     const resp = await fetch(`${url}/encode`, { method: "POST", body });
-    if (resp.ok) return { kind: "ok", encoded: await resp.text() };
+    if (resp.ok) {
+      return {
+        kind: "ok",
+        encoded: await resp.text(),
+        shape: parseShapeHeader(resp.headers.get("X-Request-Shape")),
+      };
+    }
     log.error("codec.error_response", { version, status: resp.status, body: await resp.text() });
     return { kind: "unavailable" };
   } catch (e) {

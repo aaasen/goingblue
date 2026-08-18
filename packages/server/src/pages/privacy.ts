@@ -31,11 +31,16 @@ as much as possible on your device, and it does:</p>
 
 <h2>Your account</h2>
 <p>The app creates an account for you automatically. That account is a randomly generated token
-and nothing else — it is not tied to your name, email address, phone number, or device
-identifiers, and we use it only to count requests for usage limits. You can erase it at any time
-from <strong>Settings &rarr; Delete account</strong> in the app, which deletes it from our servers
-along with every link between it and any request it made. That deletion is immediate and
-permanent.</p>
+and nothing else — it is not tied to your name, email address, or device identifiers, and we use
+it only to count requests for usage limits. You can erase it at any time from
+<strong>Settings &rarr; Delete account</strong> in the app, which deletes the token from our
+servers. That deletion is immediate and permanent, and once it is done nothing we hold can be
+traced back to you.</p>
+<p>Our record of past requests survives that deletion, with the token removed and replaced by a
+meaningless number. We keep it so that counts of how many people used the Service on a past day
+stay accurate — erasing those rows would rewrite our own history — and because that number
+identifies nobody: it is not derived from your token, and there is nothing left to match it
+against.</p>
 
 <h2>SMS text messaging</h2>
 <p>${BRAND} sends SMS/text-message forecasts only in reply to a request you send first.
@@ -57,14 +62,33 @@ including marketing.</strong></p>
   request carries one, used to count requests against usage limits.</li>
   <li><strong>Your messaging address or phone number</strong> — <em>only</em> when you request a
   forecast by text message, in which case the satellite-messenger or mobile address that sent the
-  request is used solely to deliver the forecast back to you. Requests the app sends over the
-  internet carry no phone number or messaging address.</li>
+  request is used to deliver the forecast back to you. Requests the app sends over the internet
+  carry no phone number or messaging address.</li>
+</ul>
+<p>Of those, two things are written down after your forecast has been sent:</p>
+<ul>
+  <li><strong>A record of the request</strong> — the time, the size of the reply, the protocol
+  version, the kind of device it named (an iPhone, a satellite messenger, and so on), your
+  account token if the request carried one, and a one-way scrambled form of your number if it
+  arrived by text message. We keep the scrambled form, and not the number itself, so that we can
+  count how many different people use the Service and notice a single account being used from
+  several handsets. It cannot be turned back into your number, and we cannot contact you with
+  it.</li>
+  <li><strong>An approximate location</strong> — the coordinates you asked about, rounded to
+  about a kilometre, stored with the date and the forecast options you chose. We use it to see
+  where the Service is being used and to build realistic test cases for the forecast encoding.
+  It is kept <em>separately</em>, with no link to your account, your number, or the record above,
+  and with no time of day attached — so it cannot be matched back to you or assembled into a
+  history of where you have been.</li>
 </ul>
 
 <h2>How we use it</h2>
-<p>We use this information for one purpose: to generate the weather forecast you requested
-and send it back to you. We do not build advertising or marketing profiles, and we do not
-use your information for any purpose unrelated to fulfilling your forecast requests.</p>
+<p>First and foremost, to generate the weather forecast you requested and send it back to you.
+Beyond that we use the two records described above to run the Service itself: to count usage
+against limits and to see how many people the Service has, and to improve how much forecast we
+can fit into a single message. We do not build advertising or marketing profiles, we do not
+profile you individually, and we do not use your information for any purpose unrelated to
+operating and improving the Service.</p>
 
 <h2>How we share it</h2>
 <p><strong>We do not sell, rent, or share your phone number, messaging address, or any
@@ -83,9 +107,13 @@ Service:</p>
 </ul>
 
 <h2>Data retention</h2>
-<p>We retain request and message data only as long as needed to operate and troubleshoot
-the Service. Operational logs are kept for a limited period and then deleted. Deleting your
-account removes the account record and unlinks it from any record of the requests it made.</p>
+<p>The two records described above — the request record and the approximate location — are kept
+for as long as we operate the Service, because both are cumulative measures: usage counts and
+encoding test cases lose their meaning if the older half is thrown away. Neither contains your
+name, your number, or a precise position, and the two cannot be matched to each other.
+Operational logs, which do briefly contain the full contents of a message, are kept for a limited
+period and then deleted. Deleting your account removes the account token; the request record
+stays, with nothing in it that points to you.</p>
 
 <h2>Your choices</h2>
 <ul>

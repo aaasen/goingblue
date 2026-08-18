@@ -4,7 +4,7 @@ import {
   MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   IPHONE_MAX_CHARS, SMS_MAX_CHARS, UNCAPPED_MAX_CHARS, MAX_MESSAGES, V2_HEADER_CHARS, maxCharsFor,
 } from "@weather/protocol";
-import { parseRequest } from "../src/forecast.js";
+import { describeRequest, parseRequest } from "../src/forecast.js";
 
 const newToken = () => generateToken((n) => Uint8Array.from(randomBytes(n)));
 
@@ -306,5 +306,54 @@ describe("parseRequest", () => {
   it("n: is independent of the device, so token order never matters", () => {
     expect(parseRequest("n:2 d:i").maxChars).toBe(parseRequest("d:i n:2").maxChars);
     expect(parseRequest("n:2 d:g").maxChars).toBe(2 * SMS_MAX_CHARS);
+  });
+});
+
+// What the gateway records about a request (the X-Request-Shape header). The masks are
+// deliberately not part of it: their bit assignments belong to this protocol version, so a
+// recorded mask would be misread once the next version reassigns a bit.
+const describe_ = (body: string) => describeRequest(parseRequest(body));
+
+describe("describeRequest", () => {
+  it("names the priority mode", () => {
+    expect(describe_("p:d").mode).toBe("detail");
+    expect(describe_("p:a").mode).toBe("auto");
+    expect(describe_("p:r").mode).toBe("range");
+    expect(describe_("").mode).toBe("auto"); // the default, not an absent value
+  });
+
+  it("names the requested models", () => {
+    expect(describe_("").models).toEqual(["best"]);
+    expect(describe_("m:us,eu").models).toEqual(["us", "eu"]);
+  });
+
+  it("names the variables, always-on ones included", () => {
+    // v: carries only the configurable additions; the core set is implicit in every request, and
+    // the record should show what was actually asked for rather than what was typed.
+    expect(describe_("").vars).toEqual(["temp", "snow", "wind", "gust", "rain"]);
+    expect(describe_("v:pf").vars).toContain("precip");
+    expect(describe_("v:pf").vars).toContain("freeze");
+    expect(describe_("v:w").vars).toEqual(expect.arrayContaining(["w500", "w600", "w700"]));
+  });
+
+  // The rounding lives here, in the stateless service, so a position precise enough to place
+  // somebody's camp is never sent to the part of the system that has a database.
+  it("rounds coordinates to ~1km", () => {
+    expect(describe_("63.0630419,-151.0810871")).toMatchObject({ lat: 63.06, lon: -151.08, loc: "current" });
+  });
+
+  it("resolves a named location to its own coordinates", () => {
+    expect(describe_("l:summit")).toMatchObject({ lat: 63.07, lon: -151, loc: "summit" });
+  });
+
+  it("omits coordinates when the request carried none", () => {
+    expect(describe_("p:a")).not.toHaveProperty("lat");
+  });
+
+  it("carries the response budget but never the account token", () => {
+    const token = newToken();
+    const shape = describe_(`d:i n:2 u:${token}`);
+    expect(shape.maxChars).toBe(maxCharsFor("i", 2, V2_HEADER_CHARS));
+    expect(JSON.stringify(shape)).not.toContain(token);
   });
 });

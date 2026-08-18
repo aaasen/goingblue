@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { query } from "../db.js";
+import { DAY_TZ, query } from "../db.js";
 import { PAGE } from "./shell.js";
 import { log } from "../log.js";
 
@@ -12,24 +12,63 @@ import { log } from "../log.js";
 // no external requests, matching every other page here. `renderStats` is pure so the whole
 // rendering path is testable without a database.
 
-// Day boundaries are Pacific, not UTC: an evening request should count on the evening it
-// happened, and UTC would push everything after 5pm into tomorrow. The named zone (rather than
-// a fixed offset) is what makes the boundary follow DST.
-const TZ = "America/Los_Angeles";
+// Day boundaries are Pacific, not UTC — see DAY_TZ in db.ts, which the shape table's date column
+// is also bounded by, so the two records agree on what "a day" is.
+const TZ = DAY_TZ;
 const WINDOW_DAYS = 90;
+// Accounts listed on the sharing table. A long tail here would mean something has gone wrong
+// with token distribution, and the top of the list is what says so.
+const SHARED_LIMIT = 20;
 
-export type StatsRow = { day: string; requests: number; users: number; anon: number };
-export type StatsTotals = { requests: number; users: number; anon: number };
-export type StatsData = { rows: StatsRow[]; totals: StatsTotals; days: number };
+export type StatsRow = {
+  day: string;
+  requests: number;
+  users: number;
+  anon: number;
+  senders: number;
+  // Distinct numbers that texted without a recognised account. Added to `users` these are the
+  // people who used the service that day: an account and a number from the same person are one
+  // person, but a number we can't tie to an account is somebody the account count never sees.
+  unlinked: number;
+  failed: number;
+};
+export type StatsTotals = Omit<StatsRow, "day">;
+// One account seen from more than one number — the token-sharing signal.
+export type SharedRow = { account: number; numbers: number; requests: number; lastDay: string };
+export type StatsData = {
+  rows: StatsRow[];
+  totals: StatsTotals;
+  days: number;
+  shared: SharedRow[];
+  // Numbers seen using more than one account: the same question from the other end.
+  sharedNumbers: number;
+};
+
+// Every counted quantity, as one SQL fragment shared by the daily and window queries so the two
+// can never drift apart. `r` is the requests row in both.
+//
+// `users` counts `account_id`, not `token`: the token is nulled when an account is deleted, so
+// counting it made a past day's user count fall every time somebody deleted their account. The
+// opaque id survives deletion for exactly this reason (accounts.ts, deleteAccount).
+//
+// `requests` counts served forecasts only. The table also holds failures and the messages
+// answered without a forecast (HELP, probes), which belong in `failed` and in the distinct-sender
+// counts but would inflate a bar labelled "forecasts". A null outcome is a row written before the
+// column existed, when only successes were recorded.
+const COUNTS = `
+  count(r.id) filter (where coalesce(r.outcome, 'ok') = 'ok')                      as requests,
+  count(distinct r.account_id)                                                     as users,
+  count(r.id) filter (where coalesce(r.outcome, 'ok') = 'ok'
+                        and r.account_id is null)                                  as anon,
+  count(distinct r.phone_hash)                                                     as senders,
+  count(distinct r.phone_hash) filter (where r.account_id is null)                 as unlinked,
+  count(r.id) filter (where r.outcome in
+    ('missing_version', 'unsupported_version', 'unavailable'))                     as failed
+`;
 
 // One row per day in the window, including days with no traffic. The `generate_series` spine is
 // what produces those zeros: grouping `requests` alone would simply omit a quiet day, and a
 // missing bar reads as "no data" rather than "nobody asked".
-//
-// `count(distinct token)` ignores nulls, so `users` counts known accounts only. That is not the
-// whole story — a null token means the request carried no `u:` word, carried one from another
-// environment, or belonged to an account since deleted (accounts.ts nulls the column on
-// deletion) — so `anon` is reported beside it rather than folded in and lost.
 //
 // The day is returned as text: node-postgres would otherwise parse a `date` into a JS Date at
 // the *server's* local midnight, which is exactly the timezone bug this query is avoiding.
@@ -41,10 +80,7 @@ const DAILY_SQL = `
   days as (
     select generate_series(s.first_day, s.last_day, interval '1 day')::date as day from span s
   )
-  select to_char(d.day, 'YYYY-MM-DD')              as day,
-         count(r.id)                               as requests,
-         count(distinct r.token)                   as users,
-         count(r.id) filter (where r.token is null) as anon
+  select to_char(d.day, 'YYYY-MM-DD') as day, ${COUNTS}
     from days d
     left join requests r
       on (r.created_at at time zone $1)::date = d.day
@@ -56,11 +92,35 @@ const DAILY_SQL = `
 // Window totals are their own query because they cannot be derived from the daily rows: summing
 // per-day distinct users would count somebody who texted on Monday and Friday twice.
 const TOTALS_SQL = `
-  select count(*)                                as requests,
-         count(distinct token)                   as users,
-         count(*) filter (where token is null)   as anon
-    from requests
-   where created_at >= ((now() at time zone $1)::date - ($2::int - 1))::timestamp at time zone $1
+  select ${COUNTS} from requests r
+   where r.created_at >= ((now() at time zone $1)::date - ($2::int - 1))::timestamp at time zone $1
+`;
+
+// Accounts that have been used from more than one number. Deliberately not windowed: sharing is
+// a property of the account's whole life, and a token passed to a second handset last spring is
+// still a shared token today.
+const SHARED_SQL = `
+  select r.account_id                                                as account,
+         count(distinct r.phone_hash)                                as numbers,
+         count(*)                                                    as requests,
+         to_char(max(r.created_at at time zone $1)::date, 'YYYY-MM-DD') as last_day
+    from requests r
+   where r.account_id is not null and r.phone_hash is not null
+   group by r.account_id
+  having count(distinct r.phone_hash) > 1
+   order by numbers desc, requests desc
+   limit ${SHARED_LIMIT}
+`;
+
+// The same question from the other end: one handset carrying several accounts, which is what a
+// reinstall-loop or a shared device looks like rather than a shared token.
+const SHARED_NUMBERS_SQL = `
+  select count(*) as numbers from (
+    select r.phone_hash from requests r
+     where r.phone_hash is not null and r.account_id is not null
+     group by r.phone_hash
+    having count(distinct r.account_id) > 1
+  ) t
 `;
 
 // Postgres returns count() as bigint, which node-postgres hands back as a string to avoid
@@ -68,21 +128,33 @@ const TOTALS_SQL = `
 // the rest of the module work in numbers.
 const num = (v: unknown): number => Number(v ?? 0);
 
+const counts = (r: Record<string, unknown> | undefined): StatsTotals => ({
+  requests: num(r?.["requests"]),
+  users: num(r?.["users"]),
+  anon: num(r?.["anon"]),
+  senders: num(r?.["senders"]),
+  unlinked: num(r?.["unlinked"]),
+  failed: num(r?.["failed"]),
+});
+
 export async function dailyStats(days: number = WINDOW_DAYS): Promise<StatsData> {
-  const [daily, totals] = await Promise.all([
+  const [daily, totals, shared, sharedNumbers] = await Promise.all([
     query(DAILY_SQL, [TZ, days]),
     query(TOTALS_SQL, [TZ, days]),
+    query(SHARED_SQL, [TZ]),
+    query(SHARED_NUMBERS_SQL),
   ]);
-  const t = totals.rows[0];
   return {
     days,
-    rows: daily.rows.map((r) => ({
-      day: String(r["day"]),
+    rows: daily.rows.map((r) => ({ day: String(r["day"]), ...counts(r) })),
+    totals: counts(totals.rows[0]),
+    shared: shared.rows.map((r) => ({
+      account: num(r["account"]),
+      numbers: num(r["numbers"]),
       requests: num(r["requests"]),
-      users: num(r["users"]),
-      anon: num(r["anon"]),
+      lastDay: String(r["last_day"]),
     })),
-    totals: { requests: num(t?.["requests"]), users: num(t?.["users"]), anon: num(t?.["anon"]) },
+    sharedNumbers: num(sharedNumbers.rows[0]?.["numbers"]),
   };
 }
 
@@ -149,13 +221,14 @@ function barPath(x: number, y: number, w: number, h: number, radius: number): st
   );
 }
 
-type Segment = { key: "known" | "anon" | "users"; color: string };
+type Segment = { key: "known" | "anon" | "users" | "unlinked"; color: string };
 
 // Value of one segment for a row. `known` is derived rather than stored: it is every request
 // that carried a token we recognised.
 function segValue(row: StatsRow, key: Segment["key"]): number {
   if (key === "known") return row.requests - row.anon;
   if (key === "anon") return row.anon;
+  if (key === "unlinked") return row.unlinked;
   return row.users;
 }
 
@@ -270,9 +343,9 @@ const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" 
 // Every value on this page is a number or a date this module formats itself — nothing from the
 // request reaches the markup — so there is deliberately no escaping helper here.
 export function renderStats(data: StatsData): string {
-  const { rows, totals, days } = data;
+  const { rows, totals, days, shared, sharedNumbers } = data;
 
-  if (totals.requests === 0) {
+  if (totals.requests === 0 && totals.failed === 0 && totals.senders === 0) {
     return PAGE(
       "Stats",
       `<div class=stats><p>No forecast requests in the last ${plural(days, "day")}.</p></div>`,
@@ -290,15 +363,22 @@ export function renderStats(data: StatsData): string {
       (r.requests > 0 ? ` (${r.requests - r.anon} from accounts, ${r.anon} anonymous)` : ""),
   );
 
-  // Users gets its own plot rather than a second line over the requests chart: the two measures
-  // differ by an order of magnitude, and putting them on one frame would mean either flattening
-  // users into the axis or inventing a second y-scale.
-  const usersChart = barChart(
+  // People gets its own plot rather than a second series over the requests chart: the two
+  // measures differ by an order of magnitude, and putting them on one frame would mean either
+  // flattening people into the axis or inventing a second y-scale.
+  //
+  // The two segments are the two ways we can tell one person from another, and they don't
+  // overlap: an account, or — for someone texting with no account we recognise — the number they
+  // texted from. Stacked, they are the closest thing to a count of people that anonymous
+  // identifiers allow.
+  const peopleChart = barChart(
     rows,
-    [{ key: "users", color: C_KNOWN }],
+    [{ key: "users", color: C_KNOWN }, { key: "unlinked", color: C_ANON }],
     90,
-    "Distinct accounts per day",
-    (r) => `${formatDay(r.day)} — ${plural(r.users, "account")}`,
+    "People per day",
+    (r) =>
+      `${formatDay(r.day)} — ${plural(r.users, "account")}, ` +
+      `${plural(r.unlinked, "number")} with no account`,
   );
 
   const tableRows = rows
@@ -306,16 +386,49 @@ export function renderStats(data: StatsData): string {
     .reverse()
     .map(
       (r) =>
-        `<tr${r.requests === 0 ? " class=quiet" : ""}><td>${formatDay(r.day)}</td>` +
-        `<td>${r.requests}</td><td>${r.users}</td><td>${r.anon}</td></tr>`,
+        `<tr${r.requests + r.failed === 0 ? " class=quiet" : ""}><td>${formatDay(r.day)}</td>` +
+        `<td>${r.requests}</td><td>${r.failed}</td><td>${r.users}</td>` +
+        `<td>${r.senders}</td><td>${r.anon}</td></tr>`,
     )
     .join("");
 
+  // Goal of this table: notice a token being passed around. Empty is the expected state, and it
+  // says so rather than disappearing — an absent table reads as "not measured".
+  const sharedRows = shared
+    .map(
+      (s) =>
+        `<tr><td>#${s.account}</td><td>${s.numbers}</td><td>${s.requests}</td>` +
+        `<td>${formatDay(s.lastDay)}</td></tr>`,
+    )
+    .join("");
+  // The converse sentence, kept on one line: these strings are asserted on, and a template
+  // literal wrapped for the 100-column margin would put a newline inside the phrase.
+  const converse =
+    sharedNumbers === 0
+      ? "No number has used more than one account."
+      : `${plural(sharedNumbers, "number")} ${sharedNumbers === 1 ? "has" : "have"} used more than one account, which looks like a reinstall or a shared handset rather than a shared token.`;
+  const sharedSection = shared.length
+    ? `<div class=tablewrap>
+<table>
+<thead><tr><th>Account</th><th>Numbers</th><th>Requests</th><th>Last seen</th></tr></thead>
+<tbody>${sharedRows}</tbody>
+</table>
+</div>
+<p class=note>Accounts used from more than one number, over all time rather than the window above. ${converse}</p>`
+    : `<p class=note>No account has been used from more than one number. ${converse}</p>`;
+
+  // The number is read first and the label second, so the label agrees with it: "1 request",
+  // not "1 requests". `word` is the singular; the caller's adjectives come before it.
+  const tile = (n: number, word: string, adjective = ""): string =>
+    `<div><b>${n}</b><span>${adjective}${adjective ? " " : ""}${word}${n === 1 ? "" : "s"}</span></div>`;
+
   const body = `<div class=stats>
 <div class=summary>
-  <div><b>${totals.requests}</b><span>requests</span></div>
-  <div><b>${totals.users}</b><span>distinct accounts</span></div>
-  <div><b>${totals.anon}</b><span>anonymous requests</span></div>
+  ${tile(totals.requests, "request")}
+  ${tile(totals.users, "account", "distinct")}
+  ${tile(totals.senders, "number", "distinct")}
+  ${tile(totals.anon, "request", "anonymous")}
+  ${tile(totals.failed, "request", "failed")}
 </div>
 
 <h2>Requests per day</h2>
@@ -325,22 +438,33 @@ export function renderStats(data: StatsData): string {
 </div>
 ${requestsChart}
 
-<h2>Distinct accounts per day</h2>
-${usersChart}
+<h2>People per day</h2>
+<div class=legend>
+  <span><i style="background:${C_KNOWN}"></i>Accounts</span>
+  <span><i style="background:${C_ANON}"></i>Numbers with no account</span>
+</div>
+${peopleChart}
 
 <h2>By day</h2>
 <div class=tablewrap>
 <table>
-<thead><tr><th>Day</th><th>Requests</th><th>Accounts</th><th>Anonymous</th></tr></thead>
+<thead><tr><th>Day</th><th>Requests</th><th>Failed</th><th>Accounts</th><th>Numbers</th>
+<th>Anonymous</th></tr></thead>
 <tbody>${tableRows}</tbody>
 </table>
 </div>
 
-<p class=note>Last ${plural(days, "day")}, days bounded in Pacific time. &ldquo;Accounts&rdquo;
-counts distinct account tokens, so it excludes anonymous requests &mdash; a request arrives
-anonymous when it carries no <code>u:</code> token, carries one from another environment, or
-belongs to an account since deleted. Only successfully served forecasts are recorded, so failed
-and unsupported-version requests do not appear here.</p>
+<h2>Shared accounts</h2>
+${sharedSection}
+
+<p class=note>Last ${plural(days, "day")}, days bounded in Pacific time.
+&ldquo;Requests&rdquo; counts served forecasts; &ldquo;Failed&rdquo; counts requests answered
+with an error, and HELP and probe messages are counted in &ldquo;Numbers&rdquo; but in neither.
+&ldquo;Accounts&rdquo; survives account deletion &mdash; a deleted account keeps its place in
+past counts as an opaque number &mdash; but a request still arrives anonymous when it carries no
+<code>u:</code> token or carries one from another environment. &ldquo;Numbers&rdquo; counts
+distinct senders by a keyed hash of the number, so it covers text messages only; requests the app
+sends over the internet carry no number.</p>
 </div>`;
 
   return PAGE("Stats", body, { showUpdated: false, css: CSS });

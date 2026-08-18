@@ -976,6 +976,57 @@ export function parseRequest(body: string): ForecastParams {
   return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, alphabet, messages, decoderVersion, userToken, code, startEpochHour };
 }
 
+// What a request asked for, in names rather than bits, for the gateway to record (see
+// `X-Request-Shape` in index.ts). This is the only description of the message grammar that
+// leaves a codec container, and it exists because the gateway must not learn the grammar: bit
+// assignments in `varsMask` and `modelsMask` belong to one protocol version, so a mask recorded
+// today would be silently misread after the next version bump. Names survive that.
+export interface RequestShape {
+  lat?: number;
+  lon?: number;
+  loc: string;
+  mode: string;
+  models: string[];
+  vars: string[];
+  maxChars: number;
+}
+
+const IDX_TO_LOCATION_NAME: Record<number, string> = Object.fromEntries(
+  Object.entries(LOCATION_NAME_TO_IDX).map(([name, idx]) => [idx, name]),
+);
+const BIT_TO_MODEL_NAME: Record<number, string> = Object.fromEntries(
+  Object.entries(MODEL_NAME_TO_BIT).map(([name, bit]) => [bit, name]),
+);
+const MODE_NAMES: Record<number, string> = {
+  [MODE_DETAIL]: "detail", [MODE_AUTO]: "auto", [MODE_RANGE]: "range",
+};
+
+// Coordinates are reported at 0.01° (~1 km), and rounded here rather than by the caller so a
+// position precise enough to identify a campsite never leaves this stateless process — the
+// gateway, which is the part with a database, is never told one.
+const coarse = (v: number): number => Math.round(v * 100) / 100;
+
+export function describeRequest(params: ForecastParams): RequestShape {
+  const named = NAMED_LOCATIONS[params.locationIdx];
+  const lat = params.locationIdx === 0 ? params.lat : named?.lat;
+  const lon = params.locationIdx === 0 ? params.lon : named?.lon;
+  return {
+    ...(lat != null ? { lat: coarse(lat) } : {}),
+    ...(lon != null ? { lon: coarse(lon) } : {}),
+    loc: IDX_TO_LOCATION_NAME[params.locationIdx] ?? "current",
+    mode: MODE_NAMES[params.mode] ?? "auto",
+    models: Object.keys(BIT_TO_MODEL_NAME)
+      .map(Number)
+      .filter((bit) => params.modelsMask & (1 << bit))
+      .map((bit) => BIT_TO_MODEL_NAME[bit]),
+    vars: Object.entries(VARS_BIT)
+      .filter(([, bit]) => params.varsMask & (1 << bit))
+      .sort((a, b) => a[1] - b[1])
+      .map(([name]) => name),
+    maxChars: params.maxChars,
+  };
+}
+
 function resolveLocation(params: ForecastParams): { lat: number; lon: number; elev_m?: number } {
   if (params.locationIdx === 0) {
     if (params.lat == null || params.lon == null)
