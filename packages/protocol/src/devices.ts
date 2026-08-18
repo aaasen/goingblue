@@ -18,6 +18,10 @@ export interface DeviceTransport {
 // of them (inReach's limit), so it is the safe shared default.
 export const SMS_MAX_CHARS = 160;
 
+// One ZOLEO message: the gateway truncates at exactly 240 raw UTF-8 bytes (measured 2026-08-18,
+// probes 15-17 — see docs/private/PROBES.md), which in an ASCII alphabet is 240 characters.
+export const ZOLEO_MAX_CHARS = 240;
+
 // The internet route's budget, which is no budget: an HTTP response is not metered in characters,
 // so nothing about the transport says where a reply should stop. The fill search still runs — it
 // just binds on the upstream data running out rather than on the message running out, which is
@@ -52,9 +56,14 @@ export const DEVICE_TRANSPORT: Record<DeviceCode, DeviceTransport> = {
   // character against 6.409 — a 155-character body goes 993 bits to 1078. See constants.ts for
   // the alphabet and what would be dropped if a route ever mangles it.
   s: { alphabet: "base124", maxChars: SMS_MAX_CHARS },
-  // ZOLEO accepts ~240 characters per message, but is served as SMS until that is measured the
-  // way the iPhone path was; the code exists so the wire format doesn't need revisiting first.
-  z: { alphabet: "base85", maxChars: SMS_MAX_CHARS },
+  // ZOLEO's cap is raw UTF-8 BYTES, not septets or code units: probes 15-17 cut a compressible
+  // ruler and incompressible random at the same 240, and cut 240 wide characters at 80 (3 bytes
+  // each). Silently — the extra just never arrives. A byte-counted pipe wants ASCII for the same
+  // reason HTTP does (see `d` below), and it prices GSM-7's 39 non-ASCII characters at two bytes
+  // apiece, so base-124 would LOSE here despite the gateway being Unicode-transparent. base-85
+  // rather than base-94 because the nine printable-ASCII characters outside GSM-7 basic are the
+  // one thing the probes never put through this gateway.
+  z: { alphabet: "base85", maxChars: ZOLEO_MAX_CHARS },
   // Internet. The only route that is neither GSM-7 nor length-constrained, so it takes every
   // printable ASCII character and the whole forecast.
   //
@@ -104,6 +113,12 @@ export function maxCharsFor(code: DeviceCode, messages: number, headerChars: num
   // that never splits has no second message to ask for. Returned unmultiplied so the number stays
   // the one constant rather than an arbitrary multiple of it.
   if (transport.maxChars === UNCAPPED_MAX_CHARS) return UNCAPPED_MAX_CHARS;
+  // ZOLEO ignores `n:`. Its reply leaves as ONE string (see splitReplyFor) on the bet that the
+  // transport concatenates its own segments — but ZOLEO's gateway reassembles them and then
+  // TRUNCATES at its 240-byte cap (probe 15's 480-character ruler arrived as one message cut at
+  // 240). A multiplied budget here wouldn't be more messages, it would be a reply the device can
+  // never decode: no prefix of an encoded forecast decodes.
+  if (code === "z") return transport.maxChars;
   if (transport.alphabet !== "base32768") return n * transport.maxChars;
   if (n === 1) return transport.maxChars;
   return headerChars + n * widePartBodyChars(headerChars);

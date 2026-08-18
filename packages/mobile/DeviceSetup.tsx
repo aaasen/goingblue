@@ -7,7 +7,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 const FORECAST_NUMBER = '(425) 434-5858';
 // Opening the hosted vCard hands the user off to the system's own "add contact" flow, so the app
-// needs no Contacts permission. Only the SMS route uses it — Earthmate keeps its own contact list.
+// needs no Contacts permission. Earthmate keeps its own contact list, so only its steps go
+// without — every other route (SMS, iPhone, the ZOLEO app) reads the phone's contacts.
 const CONTACT_VCF_URL = 'https://going.blue/contact.vcf';
 
 // Android needs this opted into before LayoutAnimation does anything; on iOS it's already on.
@@ -33,6 +34,9 @@ export default function DeviceSetup() {
       </Device>
       <Device name="SMS/Text Message" open={open === 'SMS/Text Message'} onToggle={toggle}>
         <SmsSteps />
+      </Device>
+      <Device name="ZOLEO" open={open === 'ZOLEO'} onToggle={toggle}>
+        <ZoleoSteps />
       </Device>
       <Device name="iPhone satellite messaging" open={open === 'iPhone satellite messaging'} onToggle={toggle}>
         <IPhoneSteps />
@@ -121,6 +125,37 @@ function SmsSteps() {
         <Text style={styles.para}>
           On the Builder tab, choose <Bold>SMS</Bold> as your device, tap <Bold>Send SMS</Bold>, and
           send the message.
+        </Text>
+      </Step>
+
+      <Step n={3} title="Read the forecast">
+        <Text style={styles.para}>
+          Copy the reply and paste it into the <Bold>Decoder</Bold> tab to visualize the forecast.
+        </Text>
+      </Step>
+    </>
+  );
+}
+
+// Same copy-across handoff as Earthmate: the ZOLEO app sends the message, the builder's button
+// only copies it. Choosing ZOLEO on the Builder tab is what earns the longer reply — the request's
+// d: token tells the server this route carries 240 characters to SMS's 160 (see devices.ts).
+function ZoleoSteps() {
+  return (
+    <>
+      <Text style={styles.deviceDesc}>
+        Use the ZOLEO app paired with a ZOLEO satellite communicator.
+      </Text>
+
+      <Step n={1} title="Add Going Blue as a contact">
+        <ContactCard />
+      </Step>
+
+      <Step n={2} title="Send the request">
+        <Text style={styles.para}>
+          On the Builder tab, choose <Bold>ZOLEO</Bold> as your device and tap{' '}
+          <Bold>Copy ZOLEO Message</Bold>, then paste the message into a new message to Going Blue
+          in the ZOLEO app and send it.
         </Text>
       </Step>
 

@@ -147,10 +147,12 @@ describe("the iPhone one-bubble budget", () => {
     for (const code of ["z", "g"] as const) {
       expect(DEVICE_TRANSPORT[code].alphabet).toBe("base85");
     }
-    // The messaging routes are all a single 160-character segment — the alphabet changes what a
-    // character carries, not how many there are.
-    for (const code of ["s", "z", "g"] as const) {
+    // The SMS-segment routes are a single 160-character segment — the alphabet changes what a
+    // character carries, not how many there are. ZOLEO's gateway carries 240: its cap is raw
+    // UTF-8 bytes (probes 15-17), which an ASCII alphabet spends one per character.
+    for (const code of ["s", "g"] as const) {
       expect(DEVICE_TRANSPORT[code].maxChars).toBe(160);
     }
+    expect(DEVICE_TRANSPORT.z.maxChars).toBe(240);
   });
 });

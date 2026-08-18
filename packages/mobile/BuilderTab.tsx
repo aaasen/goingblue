@@ -117,6 +117,7 @@ const DEVICE_INFO = [
   { name: 'Internet', desc: 'Fetches the forecast over a WiFi or cellular data connection.' },
   { name: 'SMS', desc: 'Sends the forecast over a text message for weak cell reception without data.' },
   { name: 'inReach', desc: 'Copies the message so that it can be pasted into the Garmin Earthmate app and sent over inReach.' },
+  { name: 'ZOLEO', desc: 'Copies the message so that it can be pasted into the ZOLEO app and sent over satellite.' },
   { name: 'iPhone', desc: 'Sends the forecast over a text message, and asks for the reply in a form that fits a single message over satellite. Choose this on an iPhone that can text without cell service.' },
 ];
 
@@ -672,15 +673,16 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
     internet: { onPress: handleFetch, disabled: fetchDisabled, busy: fetching || locating },
     sms: { onPress: handleSendSms, disabled: sendDisabled, busy: locating },
     inreach: { onPress: handleCopy, disabled: sendDisabled, busy: locating },
+    zoleo: { onPress: handleCopy, disabled: sendDisabled, busy: locating },
     // iPhone hands off to Messages exactly as SMS does — same text, same recipient. What differs
     // is the reply, which comes back in the wide alphabet so it lands in a single bubble.
     iphone: { onPress: handleSendSms, disabled: sendDisabled, busy: locating },
   };
   const deviceSpec = DEVICES.find((d) => d.value === device)!;
   const action = ACTIONS[device];
-  // Copy is the only action with something to confirm — the other two hand off to another app,
+  // Copy is the only action with something to confirm — the others hand off to another app,
   // which is its own confirmation.
-  const copied = device === 'inreach' && messageCopied;
+  const copied = (device === 'inreach' || device === 'zoleo') && messageCopied;
 
   // The list to draw, under the scale the reader has chosen. Cheap enough to rebuild each render,
   // like the model chain above it.

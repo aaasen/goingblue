@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
 import {
   MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
-  IPHONE_MAX_CHARS, SMS_MAX_CHARS, UNCAPPED_MAX_CHARS, MAX_MESSAGES, V3_HEADER_CHARS, maxCharsFor,
+  IPHONE_MAX_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, UNCAPPED_MAX_CHARS, MAX_MESSAGES, V3_HEADER_CHARS, maxCharsFor,
 } from "@weather/protocol";
 import { describeRequest, parseRequest } from "../src/forecast.js";
 
@@ -265,9 +265,10 @@ describe("parseRequest", () => {
     // Internet is restricted by neither GSM-7 nor a length, so it takes every printable ASCII
     // character and runs until the upstream data does.
     expect(parseRequest("d:d")).toMatchObject({ alphabet: "base94", maxChars: UNCAPPED_MAX_CHARS });
-    for (const code of ["z", "g"]) {
-      expect(parseRequest(`d:${code}`)).toMatchObject({ alphabet: "base85", maxChars: SMS_MAX_CHARS });
-    }
+    expect(parseRequest("d:g")).toMatchObject({ alphabet: "base85", maxChars: SMS_MAX_CHARS });
+    // Same alphabet, different pipe: ZOLEO's gateway carries 240 bytes to a message, and base-85
+    // spends one of them per character.
+    expect(parseRequest("d:z")).toMatchObject({ alphabet: "base85", maxChars: ZOLEO_MAX_CHARS });
   });
 
   it("d: absent or unknown keeps the base-85 SMS defaults", () => {

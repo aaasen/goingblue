@@ -159,11 +159,20 @@ describe("the multi-message budget", () => {
     expect(two * 15).toBeGreaterThan(160 * Math.log2(85)); // 1290 bits vs a 160-char SMS's 1025
   });
 
-  it("leaves every messaging device at whole SMS segments", () => {
-    for (const code of ["s", "z", "g"] as const) {
+  it("leaves the SMS-segment devices at whole SMS segments", () => {
+    for (const code of ["s", "g"] as const) {
       expect(maxCharsFor(code, 1, H)).toBe(160);
       expect(maxCharsFor(code, 2, H)).toBe(320);
     }
+  });
+
+  it("gives ZOLEO its 240-byte message and ignores the message count", () => {
+    // The reply leaves as one string, and ZOLEO's gateway reassembles concatenated segments and
+    // then truncates at 240 bytes (probe 15) — a multiplied budget would be an undecodable reply,
+    // not a second message.
+    expect(maxCharsFor("z", 1, H)).toBe(240);
+    expect(maxCharsFor("z", 2, H)).toBe(240);
+    expect(maxCharsFor("z", MAX_MESSAGES, H)).toBe(240);
   });
 
   it("ignores the message count on a route with no budget to divide", () => {
