@@ -6,11 +6,9 @@ Going Blue is a weather app designed specifically for satellite messengers. It w
 
 ## How it works
 
-To use Going Blue, a user:
-1. Creates a forecast request in the app, specifying location, weather model, and weather variables.
-1. Sends the forecast request to Going Blue over the internet, SMS, or satellite messenger like Garmin inReach or ZOLEO.
-1. Receives an encoded forecast.
-1. Pastes the encoded forecast into the app to visualize the forecast.
+1. Build a forecast request in the app. Choose the location, model, and variables that you care about.
+2. Send the forecast request to Going Blue via the internet, SMS, Garmin inReach, or iPhone satellite.
+3. Receive an encoded forecast from Going Blue. Paste it into the decoder app to a see a detailed meteogram.
 
 ## Architecture
 
