@@ -52,9 +52,8 @@ function periodAt(i: number): Period {
     wind_600_dir: (i + 4) % 8,
     wind_700_kph: beaufortMidKph((i % 3) + 2),
     wind_700_dir: (i + 6) % 8,
-    cloud_high: Math.round((i % 8) * 100 / 7),
-    cloud_mid: Math.round(((i + 3) % 8) * 100 / 7),
-    cloud_low: Math.round(((i + 5) % 8) * 100 / 7),
+    // Step-aligned so the 3-bit quantization round-trips exactly, one moving value per level.
+    cloud_band: Array.from({ length: 8 }, (_, li) => Math.round(((i + li) % 8) * 100 / 7)),
     // Air quality, as ladder band representatives so they round-trip exactly. Each headline stays
     // at or above every sub-index on its own scale, the relationship its residual coding assumes.
     aqi: aqiMid(9 + (i % 6), AQI_US_LOWER),
@@ -151,8 +150,7 @@ describe("mixed-layout round-trip encoding", () => {
       expect(d.freeze_m).toBeCloseTo(p.freeze_m!, 5);
       expect(d.wind_sfc_kph).toBeCloseTo(p.wind_sfc_kph!, 5);
       expect(d.wind_sfc_dir).toBe(p.wind_sfc_dir);
-      expect(d.cloud_high).toBe(p.cloud_high);
-      expect(d.cloud_low).toBe(p.cloud_low);
+      expect(d.cloud_band).toEqual(p.cloud_band);
     });
   });
 

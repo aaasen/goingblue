@@ -29,6 +29,7 @@ import {
   splitReply,
   supportedVersions,
   widePartBodyChars,
+  CLOUD_BAND_LEVELS_HPA,
 } from "@weather/protocol";
 import { fetchWeatherApi } from "openmeteo";
 import { Variable } from "@openmeteo/sdk/variable.js";
@@ -104,6 +105,9 @@ const SURFACE_VARS = [
 ];
 const PRESSURE_LEVELS = [500, 600, 700];
 const PRESSURE_VAR_NAMES = ["temperature", "wind_speed", "wind_direction"];
+// The cloud band's levels ride the pressure-level request (for Europe that's the 0.25° IFS,
+// which lacks 600/400 — those come back null and repairCloudBand interpolates them in).
+const CLOUD_BAND_VARS = CLOUD_BAND_LEVELS_HPA.map((l) => `cloud_cover_${l}hPa`);
 
 // Matches a `v:` value written as bare group codes rather than variable names. Built from the
 // group table so it stays in step with it; the codes are all regex-safe single characters.
@@ -189,6 +193,9 @@ export interface Row {
   cloud_cover_high: number | null;
   cloud_cover_mid: number | null;
   cloud_cover_low: number | null;
+  // Coverage per CLOUD_BAND_LEVELS_HPA entry (300 hPa first). Null where the source served
+  // nothing for that level in the window; toFullPeriod interpolates the holes.
+  cloud_band: (number | null)[];
   // Air quality (CAMS, fetched from a different Open-Meteo API — see fetchAirQuality). Null both
   // where the request didn't ask for air quality and past the CAMS horizon.
   us_aqi: number | null;
@@ -503,9 +510,10 @@ async function fetchHourly(
   airQualityVars: string[] = [],
 ): Promise<[HourlyData, string[], number]> {
   const center = CENTERS[modelKey];
-  const pressureVars = PRESSURE_VAR_NAMES.flatMap((v) =>
-    PRESSURE_LEVELS.map((l) => `${v}_${l}hPa`),
-  );
+  const pressureVars = [
+    ...PRESSURE_VAR_NAMES.flatMap((v) => PRESSURE_LEVELS.map((l) => `${v}_${l}hPa`)),
+    ...CLOUD_BAND_VARS,
+  ];
   // Drop freezing_level_height from the request for centers that don't provide it (GEM, ECMWF);
   // toFullPeriod also clears the freeze vars_mask bit so it never reaches the wire.
   const surfaceVars = center.freeze
@@ -754,12 +762,36 @@ export function rowsFromWindows(
       cloud_cover_high: maxOf(pick(h.cloud_cover_high)),
       cloud_cover_mid: maxOf(pick(h.cloud_cover_mid)),
       cloud_cover_low: maxOf(pick(h.cloud_cover_low)),
+      // Same worst-hour semantics as the three bands above, per pressure level.
+      cloud_band: CLOUD_BAND_VARS.map((v) => maxOf(pickUnk(v))),
       // Worst air in the window, the same semantics gusts get: a period that contains an hour of
       // unhealthy smoke is an unhealthy period, however clean its other hours were.
       ...Object.fromEntries(AIR_QUALITY_VARS.map((cams) => [cams, maxOf(pickUnk(cams))])),
     } as Row;
   });
   return rows;
+}
+
+// The wire always carries the full CLOUD_BAND_LEVELS_HPA stack, so holes a center leaves
+// (ECMWF's 600/400, ragged model horizons) are bridged here by linear interpolation in pressure
+// between the nearest served levels, clamped at the ends. A window with no level data at all
+// encodes as clear — the same ?? 0 coalescing every non-AQ variable gets.
+export function repairCloudBand(vals: (number | null)[]): number[] {
+  // Always the full stack, whatever the caller had — a short or empty array pads with nulls.
+  const out: (number | null)[] = CLOUD_BAND_LEVELS_HPA.map((_, i) => vals[i] ?? null);
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] != null) continue;
+    let lo = i - 1; while (lo >= 0 && out[lo] == null) lo--;
+    let hi = i + 1; while (hi < out.length && out[hi] == null) hi++;
+    const above = lo >= 0 ? out[lo] as number : null;
+    const below = hi < out.length ? out[hi] as number : null;
+    if (above != null && below != null) {
+      const t = (CLOUD_BAND_LEVELS_HPA[i] - CLOUD_BAND_LEVELS_HPA[lo])
+        / (CLOUD_BAND_LEVELS_HPA[hi] - CLOUD_BAND_LEVELS_HPA[lo]);
+      out[i] = above * (1 - t) + below * t;
+    } else out[i] = above ?? below ?? 0;
+  }
+  return (out as number[]).map((v) => Math.round(v));
 }
 
 export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period {
@@ -788,7 +820,12 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period
     p.wind_700_kph = r.wind_speed_700hPa ?? 0;
     p.wind_700_dir = degToDirIdx(r.wind_direction_700hPa);
   }
-  if (varsMask & (1 << VARS_BIT.cch)) p.cloud_high  = Math.round(r.cloud_cover_high ?? 0);
+  // The v3 wire reads cloud_band; the low/mid/high fields stay filled because the derive
+  // scripts (and any v2-era tooling) read Periods through this same function.
+  if (varsMask & (1 << VARS_BIT.cch)) {
+    p.cloud_high = Math.round(r.cloud_cover_high ?? 0);
+    p.cloud_band = repairCloudBand(r.cloud_band ?? []);
+  }
   if (varsMask & (1 << VARS_BIT.ccm)) p.cloud_mid   = Math.round(r.cloud_cover_mid  ?? 0);
   if (varsMask & (1 << VARS_BIT.ccl)) p.cloud_low   = Math.round(r.cloud_cover_low  ?? 0);
   // Air quality, left UNDEFINED rather than coalesced to 0 where the value is missing: 0 is the

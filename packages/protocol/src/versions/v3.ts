@@ -1,5 +1,5 @@
 import {
-  WMO_CODES, VARS_BIT,
+  WMO_CODES, VARS_BIT, CLOUD_BAND_LEVELS_HPA,
 } from "../constants.js";
 import { layoutFor, maxFillSeq, effectiveMode } from "../layout.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "../bits.js";
@@ -75,9 +75,12 @@ const HEADER_CHARS = nCharsForBits(V3_HEADER_BITS); // packed-header chars (excl
 // wind: 8 = 5-bit speed (extended Beaufort force 0..17) + 3-bit direction (raw-width
 // equivalent; both entropy-coded).
 // gust: 5 = speed only, no direction (bit 8, formerly cloud_total).
+// cloud band: bit 9 (v2's cch) carries the whole CLOUD_BAND_LEVELS_HPA stack at 3 bits per
+// level anchor; bits 10/11 (v2's ccm/ccl) carry nothing in v3 but stay in the table so the
+// `c` toggle's mask decodes identically.
 // air quality: 5 bits each — a 26-symbol ladder (0 = no data, 1..25 bands), both scales.
 export const VAR_BITS_V3 = [3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5];
-//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^g ^cch ^ccm ^ccl ^rain
+//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^g ^cband ^(10/11 unused) ^rain
 //                                                    ^aq_pm25 ^aq_o3 ^aqi ^aqi_eu ^aqi_eu_pm25
 //                                     ^aqi_eu_pm10 ^aqi_eu_no2 ^aqi_eu_o3 ^aqi_eu_so2
 //                                                  ^aq_pm10 ^aq_no2 ^aq_so2
@@ -127,22 +130,19 @@ const FREEZE_ANCHOR_BITS = VAR_BITS_V3[VARS_BIT.freeze];
 // a decoded value would re-quantize one step down); genuine sub-step values still floor down.
 const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0) / FREEZE_STEP_M + 1e-9), FREEZE_ANCHOR_BITS);
 
-// cloud cover (low/mid/high): entropy-coded period-over-period deltas (see CLOUD_*_DELTA in
-// entropy.ts) — same anchor+delta shape as freeze, each level under its own single shared table
-// (not pooled across levels) since low/mid/high cloud persistence differs meaningfully by
-// altitude.
-const CLOUD_ANCHOR_BITS = VAR_BITS_V3[VARS_BIT.cch]; // 3; ccm/ccl share the same width
-const quantCloud = (p: Period, field: "cloud_high" | "cloud_mid" | "cloud_low"): number =>
-  clampInt(Math.round((p[field] ?? 0) * 7 / 100), CLOUD_ANCHOR_BITS);
-const CLOUD_DELTA_COLUMNS: {
-  bit: number;
-  field: "cloud_high" | "cloud_mid" | "cloud_low";
-  codecOf(bk: ClassBooks): DeltaCodec;
-}[] = [
-  { bit: VARS_BIT.cch, field: "cloud_high", codecOf: (bk) => bk.cloudHighDelta },
-  { bit: VARS_BIT.ccm, field: "cloud_mid", codecOf: (bk) => bk.cloudMidDelta },
-  { bit: VARS_BIT.ccl, field: "cloud_low", codecOf: (bk) => bk.cloudLowDelta },
-];
+// cloud band: coverage at each CLOUD_BAND_LEVELS_HPA pressure level, all riding the single cch
+// bit — v3's replacement for the v2 low/mid/high trio. Same anchor+delta shape as freeze: per
+// level, a 3-bit anchor then entropy-coded period-over-period deltas. Conditioning is
+// deliberately just the previous value for now (internet-route testing; the vertical-neighbor
+// chain is a later derive), and the tables are the v2-era low/mid/high tables mapped by each
+// level's altitude — untrained for this exact use but alphabet-compatible (deltas −7..7), and
+// cloud persistence is what they measure. 300 hPa (9.2 km) reads the high table, 400–700
+// (7.2–3.0 km) the mid, 850–1000 (1.5–0.1 km) the low.
+const CLOUD_ANCHOR_BITS = VAR_BITS_V3[VARS_BIT.cch]; // 3
+const quantCover = (pct: number | undefined): number =>
+  clampInt(Math.round((pct ?? 0) * 7 / 100), CLOUD_ANCHOR_BITS);
+const cloudBandCodec = (bk: ClassBooks, hpa: number): DeltaCodec =>
+  hpa <= 300 ? bk.cloudHighDelta : hpa <= 700 ? bk.cloudMidDelta : bk.cloudLowDelta;
 
 // ── Air quality ────────────────────────────────────────────────────────────────
 // Five columns over two incompatible index scales (see the AQI ladders in entropy.ts), all from
@@ -270,8 +270,7 @@ const aqBaseMask = (h: AqHeadline, varsMask: number): number => {
 // carry, and a delta of 0 would conflate it with "steady heavy snowfall". This replaced the
 // adaptive best-of (raw / FOR / sparse / empty + 2-bit selector) scheme — sparse charged a full
 // bit per dry period where the order-1 tables charge a small fraction of one. temp (bit 1),
-// freeze (bit 3) and cloud_high/mid/low (bits 9/10/11) are handled separately in
-// buildBody/decode below.
+// freeze (bit 3) and the cloud band (bit 9) are handled separately in buildBody/decode below.
 const VALUE_COLUMNS: {
   bit: number;
   bookOf(bk: ClassBooks): (res: number, wcClass: number, prev: number | null) => CodeBook;
@@ -458,20 +457,22 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
     mark("freeze", before);
   }
 
-  // cloud cover (low/mid/high): per model, an anchor (first period, full width) followed by
-  // entropy-coded period-over-period deltas, each level under its own single shared table (see
-  // CLOUD_*_DELTA in entropy.ts — no per-message selector).
-  for (const col of CLOUD_DELTA_COLUMNS) {
-    if (!(msg.vars_mask & (1 << col.bit))) continue;
+  // cloud band: level-major — for each pressure level, per model, an anchor (first period, full
+  // width) followed by entropy-coded period-over-period deltas under the altitude-mapped table
+  // (see cloudBandCodec above — no per-message selector).
+  if (msg.vars_mask & (1 << VARS_BIT.cch)) {
     before = em.cost;
-    const codec = col.codecOf(books);
-    for (let m = 0; m < nModels; m++) {
-      em.raw(quantCloud(msg.periods[m][0], col.field), CLOUD_ANCHOR_BITS);
-      for (let p = 1; p < nPeriods; p++) {
-        codec.encode(em, quantCloud(msg.periods[m][p], col.field) - quantCloud(msg.periods[m][p - 1], col.field));
+    for (let li = 0; li < CLOUD_BAND_LEVELS_HPA.length; li++) {
+      const codec = cloudBandCodec(books, CLOUD_BAND_LEVELS_HPA[li]);
+      for (let m = 0; m < nModels; m++) {
+        em.raw(quantCover(msg.periods[m][0].cloud_band?.[li]), CLOUD_ANCHOR_BITS);
+        for (let p = 1; p < nPeriods; p++) {
+          codec.encode(em, quantCover(msg.periods[m][p].cloud_band?.[li])
+            - quantCover(msg.periods[m][p - 1].cloud_band?.[li]));
+        }
       }
     }
-    mark(BIT_NAME[col.bit], before);
+    mark("cband", before);
   }
 
   // Air quality: per model, a ladder anchor on the first period then period-over-period deltas,
@@ -879,15 +880,17 @@ function decodeBody(
     }
   }
 
-  for (const col of CLOUD_DELTA_COLUMNS) {
-    if (!(vars_mask & (1 << col.bit))) continue;
-    const codec = col.codecOf(books);
-    for (let m = 0; m < nModels; m++) {
-      let quant = rd.int(CLOUD_ANCHOR_BITS);
-      periods[m][0][col.field] = Math.round((quant * 100) / 7);
-      for (let p = 1; p < nPeriods; p++) {
-        quant += rd.delta(codec);
-        periods[m][p][col.field] = Math.round((quant * 100) / 7);
+  if (vars_mask & (1 << VARS_BIT.cch)) {
+    const nLevels = CLOUD_BAND_LEVELS_HPA.length;
+    for (let li = 0; li < nLevels; li++) {
+      const codec = cloudBandCodec(books, CLOUD_BAND_LEVELS_HPA[li]);
+      for (let m = 0; m < nModels; m++) {
+        let quant = rd.int(CLOUD_ANCHOR_BITS);
+        (periods[m][0].cloud_band ??= new Array<number>(nLevels).fill(0))[li] = Math.round((quant * 100) / 7);
+        for (let p = 1; p < nPeriods; p++) {
+          quant += rd.delta(codec);
+          (periods[m][p].cloud_band ??= new Array<number>(nLevels).fill(0))[li] = Math.round((quant * 100) / 7);
+        }
       }
     }
   }

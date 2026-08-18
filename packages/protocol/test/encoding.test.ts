@@ -74,9 +74,7 @@ const PERIOD: Period = {
   wind_600_dir: 3,
   wind_700_kph: 24.5,      // force 4
   wind_700_dir: 2,
-  cloud_high: 60,
-  cloud_mid: 40,
-  cloud_low: 20,
+  cloud_band: [60, 55, 40, 35, 30, 20, 15, 10],
   // Air quality. Each headline sits at or above every one of its own scale's sub-index bands,
   // which is what the wire assumes when it codes the headline as a residual against their max.
   aqi: 118,
@@ -231,10 +229,9 @@ describe("v3 round-trip encoding", () => {
     expect(p.wind_600_dir).toBe(PERIOD.wind_600_dir);
     expect(p.wind_700_kph).toBeCloseTo(PERIOD.wind_700_kph!, 3);
     expect(p.wind_700_dir).toBe(PERIOD.wind_700_dir);
-    // cloud cover is quantized to 3 bits (0–7 steps), decoded back to nearest %
-    expect(p.cloud_high).toBe(Math.round(Math.round((PERIOD.cloud_high   ?? 0) * 7 / 100) * 100 / 7));
-    expect(p.cloud_mid).toBe(Math.round(Math.round((PERIOD.cloud_mid     ?? 0) * 7 / 100) * 100 / 7));
-    expect(p.cloud_low).toBe(Math.round(Math.round((PERIOD.cloud_low     ?? 0) * 7 / 100) * 100 / 7));
+    // the cloud band is quantized to 3 bits per level (0–7 steps), decoded back to nearest %
+    expect(p.cloud_band).toEqual(
+      PERIOD.cloud_band!.map((v) => Math.round(Math.round(v * 7 / 100) * 100 / 7)));
   });
 
   it("round-trips every air-quality column on its own scale", () => {
@@ -398,7 +395,7 @@ describe("v3 round-trip encoding", () => {
     expect(p.wind_sfc_kph).toBeUndefined();
     expect(p.wind_gust_kph).toBeUndefined();
     expect(p.wind_500_kph).toBeUndefined();
-    expect(p.cloud_high).toBeUndefined();
+    expect(p.cloud_band).toBeUndefined();
   });
 
   it("only includes selected vars", () => {
@@ -530,16 +527,12 @@ describe("v3 round-trip encoding", () => {
     expect(flatLen).toBeLessThan(swingsLen);
   });
 
-  const CLOUD_LEVELS = [
-    { field: "cloud_high" as const, bit: VARS_BIT.cch, name: "cch" },
-    { field: "cloud_mid" as const, bit: VARS_BIT.ccm, name: "ccm" },
-    { field: "cloud_low" as const, bit: VARS_BIT.ccl, name: "ccl" },
-  ];
-
-  it.each(CLOUD_LEVELS)("encodes a near-constant $field column smaller than a wide-swinging one (Huffman-coded deltas)", ({ field, bit }) => {
-    const vars_mask = 1 << bit;
-    const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, [field]: 40 }));
-    const swings = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, [field]: i % 2 === 0 ? 0 : 100 }));
+  it("encodes a near-constant cloud band smaller than a wide-swinging one (Huffman-coded deltas)", () => {
+    const vars_mask = 1 << VARS_BIT.cch;
+    const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, cloud_band: [40, 40, 40, 40, 40, 40, 40, 40] }));
+    const swings = Array.from({ length: 64 }, (_, i) => ({
+      ...PERIOD, cloud_band: Array.from({ length: 8 }, () => (i % 2 === 0 ? 0 : 100)),
+    }));
     const flatLen = v3MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
     const swingsLen = v3MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(swingsLen);

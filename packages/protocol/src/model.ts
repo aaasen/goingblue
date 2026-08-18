@@ -43,9 +43,14 @@ export interface Period {
   wind_700_dir?: number;
 
   // Cloud cover percentages.
-  cloud_high?: number;    // 8km+
+  cloud_high?: number;    // 8km+   (v2 and earlier; v3 carries the band below instead)
   cloud_mid?: number;     // 3-8km
   cloud_low?: number;     // <3km
+
+  // Cloud cover by pressure level (v3): one percentage per entry of CLOUD_BAND_LEVELS_HPA in
+  // constants.ts, highest level (300 hPa) first. Always the full stack when present — levels a
+  // center doesn't serve are interpolated server-side before encoding, never left out.
+  cloud_band?: number[];
 
   // Visibility in kilometers.
   vis_km?: number;        // 0–15 km

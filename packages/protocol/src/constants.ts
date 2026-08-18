@@ -70,6 +70,13 @@ export const MODEL_NAMES: string[] = [
   "European (ECMWF)",
 ];
 
+// The cloud band's pressure levels, highest first — the order Period.cloud_band and the v3
+// cloud-band column both use. These are the eight levels every center's pressure product can
+// serve or bracket (ECMWF lacks 600/400; the server interpolates them in). 750/800 hPa are
+// deliberately absent for now: best_match zero-fills 750 where the serving model doesn't carry
+// it, which reads as clear sky, and neither is in the training corpus.
+export const CLOUD_BAND_LEVELS_HPA = [300, 400, 500, 600, 700, 850, 925, 1000] as const;
+
 // vars_mask bit indices
 export const VARS_BIT: Record<string, number> = {
   precip: 0,
@@ -81,9 +88,10 @@ export const VARS_BIT: Record<string, number> = {
   w600: 6,
   w700: 7,
   gust: 8,   // surface (10m) wind gusts, speed only (bit formerly carried cc, total cloud cover)
-  cch: 9,    // high cloud cover
-  ccm: 10,   // mid cloud cover
-  ccl: 11,   // low cloud cover
+  cch: 9,    // v2: high cloud cover. v3: the whole cloud band (CLOUD_BAND_LEVELS_HPA) rides
+             // this one bit; 10/11 still arrive set by the `c` toggle but carry no v3 column.
+  ccm: 10,   // mid cloud cover (v2 only)
+  ccl: 11,   // low cloud cover (v2 only)
   rain: 12,  // liquid precipitation (rain + showers), mm
   // Air quality (CAMS), on two incompatible index scales — see the AQI ladders in entropy.ts.
   // Every one of these is model-independent: the `m:` center selection does not apply, and they

@@ -3,13 +3,18 @@ import { Animated, View, Text as RNText, StyleSheet, FlatList, PanResponder, Pre
 import {
   Canvas, DashPathEffect, Group, Paint, Rect, RoundedRect, Circle, Line, Path, Text,
   LinearGradient, Skia, vec, matchFont, type SkFont,
+  ImageShader, FilterMode, MipmapMode, ColorType, AlphaType,
 } from '@shopify/react-native-skia';
 import {
   CARDINALS, RAIN_MAX_MM, modelsFromMask, startDatetime, predictCenter, attributeHour,
-  AQ_DOMINANT_US, AQ_DOMINANT_EU,
+  AQ_DOMINANT_US, AQ_DOMINANT_EU, CLOUD_BAND_LEVELS_HPA,
   type Center, type ForecastMessage, type ModelSpec, type Period,
 } from '@weather/protocol';
 import type { TimeFormat, Units } from './settings';
+import {
+  resampleColumn, pressureToMeters, metersToPressure,
+  BAND_TOP_HPA, BAND_BOTTOM_HPA, GRID_ROWS,
+} from './cloudBand';
 import { precipMark, weatherGlyph, wmoName, type MoonPhase, type Prim } from './weatherGlyph';
 
 // ── Layout constants ───────────────────────────────────────────────────────
@@ -41,6 +46,9 @@ const ROW_H = {
   // The freezing level is a graph rather than a bare number, so it needs room for the isotherm to
   // move in under its band of column labels.
   FREEZE: 66,
+  // The vertical cloud band spans 300–1000 hPa; it needs enough height for a thin layer
+  // (one 25 hPa grid row ≈ 1/28th of the band) to still read as a streak.
+  CLOUD_BAND: 132,
   // Wind speeds are a single short number on a colored ground, so they need less room than the
   // other data rows — and there are up to five of them stacked (surface, gust, three upper levels).
   WIND: 26,
@@ -759,7 +767,7 @@ type RowKind =
   | 'aqi' | 'aqi-pm25' | 'aqi-o3' | 'aqi-pm10' | 'aqi-no2' | 'aqi-so2'
   | 'aqi-dominant' | 'aqi-eu-dominant'
   | 'aqi-eu' | 'aqi-eu-pm25' | 'aqi-eu-o3' | 'aqi-eu-pm10' | 'aqi-eu-no2' | 'aqi-eu-so2'
-  | 'wind-500' | 'wind-600' | 'wind-700' | 'model' | 'section';
+  | 'wind-500' | 'wind-600' | 'wind-700' | 'model' | 'section' | 'cloud-band';
 
 interface Row {
   kind: RowKind;
@@ -869,6 +877,13 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
   if (has((p) => p.freeze_m)) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Freezing level (${frU})` });
     rows.push({ kind: 'freeze', height: ROW_H.FREEZE, label: '' });
+  }
+
+  // The Windy-style vertical cloud band — v3 messages carry it in place of the low/mid/high
+  // trio below, so exactly one of these two cloud blocks renders for any given message.
+  if (has((p) => p.cloud_band)) {
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Clouds by altitude (${frU})` });
+    rows.push({ kind: 'cloud-band', height: ROW_H.CLOUD_BAND, label: '' });
   }
 
   const hasCloud = has((p) => p.cloud_high) || has((p) => p.cloud_mid) || has((p) => p.cloud_low);
@@ -1368,6 +1383,30 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
 
 // ── Meteogram canvas (one per model) ─────────────────────────────────────--
 
+// The vertical cloud band as one tiny Skia image: width = periods, height = the uniform
+// pressure grid, alpha = coverage. Periods are equal-width columns whatever their duration, so
+// one period per texel IS the meteogram's x axis, and the GPU's bilinear stretch of this bitmap
+// into the row is what produces the smooth Windy-style shading; nothing is contoured.
+const CLOUD_BAND_INK = [100, 106, 118] as const;
+function makeCloudBandImage(periods: Period[]) {
+  const n = periods.length;
+  if (n === 0) return null;
+  const cover = new Uint8Array(GRID_ROWS * n);
+  for (let i = 0; i < n; i++) resampleColumn(periods[i].cloud_band, cover, i, n);
+  const bytes = new Uint8Array(GRID_ROWS * n * 4);
+  for (let px = 0; px < cover.length; px++) {
+    const o = px * 4;
+    bytes[o] = CLOUD_BAND_INK[0];
+    bytes[o + 1] = CLOUD_BAND_INK[1];
+    bytes[o + 2] = CLOUD_BAND_INK[2];
+    bytes[o + 3] = Math.min(220, Math.round(cover[px] * 2.2));
+  }
+  return Skia.Image.MakeImage(
+    { width: n, height: GRID_ROWS, colorType: ColorType.RGBA_8888, alphaType: AlphaType.Unpremul },
+    Skia.Data.fromBytes(bytes), n * 4,
+  );
+}
+
 // Full Skia scene for one model. Pure, and called through useMemo: overlay-only state like the
 // selected column must not rebuild the elements, since any rebuild repaints every mounted tile.
 function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups, modelBands }: {
@@ -1393,7 +1432,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
   // a tinted backdrop would make identical speeds or percentages look different by night than by
   // day. Everything above reads as text or glyphs and is unharmed by the tint.
   const TINTABLE_STOP = new Set<RowKind>([
-    'wind-sfc', 'wind-gust', 'wind-dir', 'freeze', 'cloud-high', 'cloud-mid', 'cloud-low',
+    'wind-sfc', 'wind-gust', 'wind-dir', 'freeze', 'cloud-band', 'cloud-high', 'cloud-mid', 'cloud-low',
     ...AQ_KINDS, // air-quality cells carry their category as a fill, same as the wind ribbon
     ...AQ_DOMINANT_KINDS, // and the dominant row is painted with its headline's fill
     'wind-500', 'wind-600', 'wind-700', 'model',
@@ -1701,6 +1740,45 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
           els.push(centerText(`fz${i}`, txt || '—', colCenter(i), mid, fonts.data,
             txt ? '#1c1c1e' : C.nil));
         });
+        break;
+      }
+
+      case 'cloud-band': {
+        // Windy-style cloud cross-section from the message's cloud_band stacks. The y axis is
+        // linear in pressure from 300 hPa (top) to 1000 hPa (bottom), which compresses altitude
+        // aloft roughly the way Windy's axis does. One image texel per period — columns are
+        // equal-width whatever their duration, so a single bilinear stretch spans the row.
+        const yOfHpa = (hpa: number) =>
+          top + ((hpa - BAND_TOP_HPA) / (BAND_BOTTOM_HPA - BAND_TOP_HPA)) * row.height;
+        const img = makeCloudBandImage(periods);
+        if (img) {
+          const dst = { x: colLeft(0), y: top, width: n * CELL_W, height: row.height };
+          els.push(
+            <Rect key={`cb${ri}`} x={dst.x} y={dst.y} width={dst.width} height={dst.height}>
+              <ImageShader image={img} fit="fill" rect={dst} tx="clamp" ty="clamp"
+                sampling={{ filter: FilterMode.Linear, mipmap: MipmapMode.None }} />
+            </Rect>,
+          );
+        }
+
+        // Altitude gridlines with their labels in the key column, on round numbers of the
+        // display unit. Placement via the standard atmosphere — a band this coarse doesn't
+        // earn transmitted geopotential heights.
+        const gridMeters = units === 'imperial'
+          ? [5000, 10000, 15000, 20000, 30000].map((ft) => ft / 3.28084)
+          : [1500, 3000, 4500, 6000, 9000];
+        for (const m of gridMeters) {
+          const gy = yOfHpa(metersToPressure(m));
+          if (gy < top + 6 || gy > top + row.height - 6) continue; // off the band
+          els.push(
+            <Line key={`cbg${ri}-${m}`} p1={vec(NAME_W, gy)} p2={vec(width, gy)}
+              color={C.grid} strokeWidth={1}>
+              <DashPathEffect intervals={[3, 4]} />
+            </Line>,
+          );
+          els.push(<Text key={`cbgl${ri}-${m}`} x={12} y={baseline(gy, fonts.small.getSize())}
+            text={fmtFreeze(m, units)} font={fonts.small} color={C.label} />);
+        }
         break;
       }
 
@@ -2471,6 +2549,12 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
   if (has((q) => q.wind_500_kph)) rows.push([upperWindLabel(500), fmtWindFull(p.wind_500_kph, p.wind_500_dir, units)]);
   if (has((q) => q.wind_600_kph)) rows.push([upperWindLabel(600), fmtWindFull(p.wind_600_kph, p.wind_600_dir, units)]);
   if (has((q) => q.wind_700_kph)) rows.push([upperWindLabel(700), fmtWindFull(p.wind_700_kph, p.wind_700_dir, units)]);
+  if (has((q) => q.cloud_band)) {
+    CLOUD_BAND_LEVELS_HPA.forEach((hpa, li) => {
+      const v = p.cloud_band?.[li];
+      rows.push([`Clouds ${fmtFreezeFull(pressureToMeters(hpa), units)}`, v != null ? `${v}%` : '—']);
+    });
+  }
   if (has((q) => q.cloud_high)) rows.push(['Cloud high (>8km)', p.cloud_high != null ? `${p.cloud_high}%` : '—']);
   if (has((q) => q.cloud_mid)) rows.push(['Cloud mid (3–8km)', p.cloud_mid != null ? `${p.cloud_mid}%` : '—']);
   if (has((q) => q.cloud_low)) rows.push(['Cloud low (<3km)', p.cloud_low != null ? `${p.cloud_low}%` : '—']);
