@@ -10,6 +10,20 @@ Going Blue is a weather app designed specifically for satellite messengers. It w
 2. Send the forecast request to Going Blue via the internet, SMS, Garmin inReach, or iPhone satellite.
 3. Receive an encoded forecast from Going Blue. Paste it into the decoder app to a see a detailed meteogram.
 
+## Features
+
+- Support for any satellite messenger that works over SMS. Tested with Garmin inReach and iPhone satellite messaging.
+- Custom compression codec optimized for weather data. A typical forecast contains 13 days of data with the following resolution: 2 days at 1h, 5 days at 3h, 3 days at 6h, 3 days at 12h. 
+- Temperature, snow, rain, wind, and cloud cover included by default. Optional variables for advanced users:
+  - Pressure-level winds for high-altitude mountaineering. 
+  - Cloud cover by height (low/mid/high).
+  - Freezing level.
+  - AQI and all component parts (PM2.5, PM10, ozone, NO₂, SO₂) for planning around wildfire smoke. 
+- Automatically chooses the highest resolution weather model from 30+ regional models.
+- Compare forecasts from American, Canadian, and European forecast centers.
+- Choose between hourly detail or extended range up to 13 days.
+- Past forecasts are saved on your device so that you can easily compare between models and previous forecasts.
+
 ## Architecture
 
 There are a few components to the system:
