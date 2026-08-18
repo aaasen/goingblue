@@ -197,8 +197,8 @@ const LANDING_BODY = `
 <p>${BRAND} is a weather app designed specifically for satellite messengers. It was built for a
 Denali ski expedition with one goal: to get you all the weather information you would have at
 home, wherever you are. ${BRAND} uses a custom compression codec and decoder app to pack hundreds
-of forecast data points into a single message that can be sent over SMS, Garmin inReach, iPhone
-satellite, or any other device that supports SMS.</p>
+of forecast data points into a single message that can be sent over SMS, Garmin inReach, or
+iPhone satellite messaging.</p>
 
 <div class=shots>
   <figure>
@@ -234,32 +234,25 @@ satellite, or any other device that supports SMS.</p>
   <li>Build a forecast request in the app. Choose the location, model, and variables that you
   care about.</li>
   <li>Send the forecast request to ${BRAND} via the internet, SMS, Garmin inReach, or iPhone
-  satellite.</li>
-  <li>Receive an encoded forecast from ${BRAND}. Paste it into the decoder app to see a detailed
-  meteogram.</li>
+  satellite messaging.</li>
+  <li>Receive an encoded message from ${BRAND}. Paste it into the app to see a detailed
+  forecast.</li>
 </ol>
 
 <h2>Features</h2>
 <ul>
-  <li>Support for any satellite messenger that works over SMS. Tested with Garmin inReach and
-  iPhone satellite messaging.</li>
-  <li>Custom compression codec optimized for weather data. A typical forecast contains 13 days of
-  data with the following resolution: 2 days at 1h, 5 days at 3h, 3 days at 6h, 3 days at 12h.</li>
-  <li>Temperature, snow, rain, wind, and cloud cover included by default. Optional variables for
-  advanced users:
-    <ul>
-      <li>Pressure-level winds for high-altitude mountaineering.</li>
-      <li>Cloud cover by height (low/mid/high).</li>
-      <li>Freezing level.</li>
-      <li>AQI and all component parts (PM2.5, PM10, ozone, NO₂, SO₂) for planning around
-      wildfire smoke.</li>
-    </ul>
-  </li>
-  <li>Automatically chooses the highest resolution weather model from 30+ regional models.</li>
+  <li>Works via the internet, SMS, Garmin inReach, and iPhone satellite messaging.</li>
+  <li>Uses a custom compression codec optimized for weather data that packs hundreds of data
+  points into a single message. Choose between hourly detail and extended range up to 13
+  days.</li>
+  <li>Temperature, snow, rain, wind, and cloud cover included by default. Optional variables
+  include pressure-level winds for high-altitude mountaineering, AQI for planning around wildfire
+  smoke, low/mid/high cloud cover, and freezing level.</li>
+  <li>Weather forecasts from over 30 models including HRRR (3km), HRDPS (2.5km), ICON-D2 (2km),
+  and MET Norway (1km). Automatically chooses the best model for your location.</li>
   <li>Compare forecasts from American, Canadian, and European forecast centers.</li>
-  <li>Choose between hourly detail or extended range up to 13 days.</li>
-  <li>Past forecasts are saved on your device so that you can easily compare between models and
-  previous forecasts.</li>
+  <li>All forecasts are saved on your device for comparing multiple models and past
+  forecasts.</li>
 </ul>
 
 <h2>Open source</h2>
