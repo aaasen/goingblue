@@ -11,15 +11,14 @@ export const BAND_BOTTOM_HPA = CLOUD_BAND_LEVELS_HPA[CLOUD_BAND_LEVELS_HPA.lengt
 export const GRID_STEP_HPA = 25;
 export const GRID_ROWS = (BAND_BOTTOM_HPA - BAND_TOP_HPA) / GRID_STEP_HPA + 1; // 29
 
-// Clear air above the top level, as a share of one slice. 300 hPa is the ceiling of what the
-// MESSAGE carries, not the ceiling of the sky — the tropopause is nearer 36k, and cirrus lives
-// up there — so the top level is read as "30k AND ABOVE" (the rail writes it "30k+") and the
-// band ends hard on it. The headroom is what makes that edge legible: it lifts the boundary off
-// the row border onto a gridline of its own, with the label beside it, so the flat top reads as
-// the top of the SCALE rather than as cloud clipped by the section header. Nothing is padded at
-// the bottom: 1000 hPa IS the ground, and cloud should reach it.
-const TOP_PAD_SLICES = 0.5;
-const BAND_SLICES = CLOUD_BAND_LEVELS_HPA.length - 1 + TOP_PAD_SLICES;
+// The band spans exactly the levels the message carries: 300 hPa on the row's top edge, 1000 on
+// its bottom, one slice per level-to-level gap and nothing padded outside them. 300 hPa is the
+// ceiling of what the MESSAGE carries, not the ceiling of the sky — the tropopause is nearer 36k,
+// and cirrus lives up there — so the top level is read as "30k AND ABOVE" (the rail writes it
+// "30k+"), and the "+" is what says so. Headroom above it would spend the band's height on air the
+// scale makes no claim about; the axis stops where the data stops, the same way it does at the
+// ground, where 1000 hPa IS the ground and cloud should reach it.
+const BAND_SLICES = CLOUD_BAND_LEVELS_HPA.length - 1;
 
 // Where a pressure sits on the band, 0 (top) to 1 (bottom): one equal slice per LEVEL-TO-LEVEL
 // gap, not linear in pressure or in altitude. The wire's levels are unevenly spaced — 100 hPa
@@ -34,7 +33,7 @@ export function hpaToFrac(hpa: number): number {
   while (seg < CLOUD_BAND_LEVELS_HPA.length - 2 && CLOUD_BAND_LEVELS_HPA[seg + 1] < hpa) seg++;
   const p0 = CLOUD_BAND_LEVELS_HPA[seg], p1 = CLOUD_BAND_LEVELS_HPA[seg + 1];
   const t = Math.min(1, Math.max(0, (hpa - p0) / (p1 - p0)));
-  return (TOP_PAD_SLICES + seg + t) / BAND_SLICES;
+  return (seg + t) / BAND_SLICES;
 }
 
 // International Standard Atmosphere, troposphere leg. Good to a few tens of meters at the

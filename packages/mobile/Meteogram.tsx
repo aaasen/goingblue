@@ -30,8 +30,8 @@ const LEGEND_W = 44;
 // Line box for one rail token, and for one cloud-band altitude label. Both are centered by
 // placing this box on the row's midline rather than by stretching lineHeight to the row height:
 // where a tall line box puts its glyphs is a platform question, and the rail's rows run from 26px
-// to 220px. The level box is the tighter of the two because the band's levels are ~29px apart
-// (ROW_H.CLOUD_BAND split evenly between them, plus its headroom).
+// to 175px. The level box is the tighter of the two because the band's levels are 25px apart
+// (ROW_H.CLOUD_BAND split evenly between them).
 const LEGEND_LINE_H = 13;
 const LEGEND_LEVEL_H = 11;
 // Rail symbols, and the line box they occupy when stacked over a unit.
@@ -84,10 +84,12 @@ const ROW_H = {
   // move in under its band of column labels.
   FREEZE: 66,
   // The vertical cloud band spans 300–1000 hPa on an even ladder — one equal slice per wire
-  // level, plus a half-slice of headroom above the top one (hpaToFrac), so this height divides
-  // into 7.5 ~29px slices. Sized so a deck confined to a single level reads as its own streak
-  // rather than blurring into its neighbors.
-  CLOUD_BAND: 220,
+  // level, edge to edge with nothing padded outside them (hpaToFrac) — so this height divides
+  // into 7 25px slices. A slice is what a deck confined to a single level is drawn in, and 25px
+  // still reads as its own streak rather than blurring into its neighbors; the band is the
+  // tallest row in the drawing either way, and every slice spent above it is one the reader
+  // scrolls past to reach the rows below.
+  CLOUD_BAND: 175,
   // Wind speeds are a single short number on a colored ground, so they need less room than the
   // other data rows — and there are up to five of them stacked (surface, gust, three upper levels).
   WIND: 26,
@@ -1793,7 +1795,7 @@ function buildSceneStatics({ periods, rows, steps }: {
     // pixels back through these tables, so the ladder bends the loops with it. Both sentinel
     // rows sit ON the outermost data rows: cloud meets the ground squarely at the bottom, and
     // stops dead at 300 hPa on top. A ring standing off either edge would have every contour
-    // interpolate into the gap, painting cloud through the headroom the axis keeps clear.
+    // interpolate into the gap, painting cloud past the levels the message carries.
     const gridYs = Array.from({ length: GRID_ROWS }, (_, j) =>
       top + hpaToFrac(BAND_TOP_HPA + j * GRID_STEP_HPA) * row.height);
     const ys = [gridYs[0], ...gridYs, gridYs[GRID_ROWS - 1]];
@@ -1841,11 +1843,11 @@ function buildSceneStatics({ periods, rows, steps }: {
     // here: they are the scale of a 220px plot, and drawn into the scene they scrolled off
     // with the first day.
     for (const hpa of CLOUD_BAND_LEVELS_HPA) {
-      // 1000 hPa sits on the row's own bottom edge, where a line would only redraw the row
-      // boundary — and the rail leaves that rung unlabelled anyway. 300 hPa hangs a half-slice
-      // clear of the top edge (TOP_PAD_SLICES), so it does get a line, and its label something
-      // to read against.
-      if (hpa === BAND_BOTTOM_HPA) continue;
+      // Both end levels sit on the row's own edges, where a line would only redraw a boundary
+      // the section header above and the row below already draw — 300 hPa against the header's
+      // ground, 1000 hPa against the row under it. The edges ARE those two rungs; the rail's
+      // labels land on them, and the five rungs between them are what needs a line of its own.
+      if (hpa === BAND_TOP_HPA || hpa === BAND_BOTTOM_HPA) continue;
       cloudBandEls.push(
         <Line key={`cbg${ri}-${hpa}`} p1={vec(0, yOfHpa(hpa))} p2={vec(width, yOfHpa(hpa))}
           color={C.grid} strokeWidth={1}>
@@ -2524,9 +2526,11 @@ const RowLegend = memo(function RowLegend({ rows, units, paint }: {
       for (const hpa of CLOUD_BAND_LEVELS_HPA) {
         if (hpa === BAND_BOTTOM_HPA) continue;
         const gy = top + hpaToFrac(hpa) * row.height;
-        // Every labelled rung now hangs clear of the row's edges — the top one by the band's
-        // headroom, the rest by a full slice — so this only guards the arithmetic: a rung's
-        // line box never leaves the row it belongs to.
+        // Rungs are centered on their own altitude, except at the top: 300 hPa IS the row's top
+        // edge, so centering would hang half the "30k+" over the section header above it. The
+        // clamp drops it flush inside the band instead — still the topmost number in the rail,
+        // and reading against the edge it names. The inner rungs clear both edges by a full
+        // slice, so for them the clamp only guards the arithmetic.
         const ty = Math.min(Math.max(gy - LEGEND_LEVEL_H / 2, top), top + row.height - LEGEND_LEVEL_H);
         els.push(
           <RNText key={`cb${ri}-${hpa}`} numberOfLines={1} style={[styles.legendLevel, { top: ty }]}>
