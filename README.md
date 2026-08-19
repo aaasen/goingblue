@@ -188,7 +188,14 @@ Some interesting findings from the evaluation:
 1. Wind is the most expensive variable (steady, gust, direction combined) taking an average of 40.1% of the message. Temperature is the second most expensive at 24.6% followed by weathercode at 19%. Since snow and rain are sparse, they only take up an average of 10.8% combined. 
 1. A 1st-percentile forecast containing all optional variables (detailed clouds, high altitude winds, freezing level, and precip chance) still delivers 7 days of forecast data at 6h resolution for 3 days and 12h resolution for the next 4 days.
 
-### Elevation Correction
+### Weather Data Transformation
+
+ - Rain -> snow remapping based on temperature. Temperature is already adjusted for elevation by Open-Meteo. The rain -> snow remapping makes precip type consistent with temperature.
+ - Mixed rain/snow weathercodes during mixed precip periods.
+ - Pressure-level cloud extrapolation from low/mid/high clouds based on relative humidity.
+ - Weathercode summarization. Weathercodes are aggregated from hourly data for longer periods. Showery codes are used to indicate mixed conditions. 
+
+#### Elevation Correction
 
 Open-Meteo accepts an elevation parameter for forecasts and adjusts temperature from the model's grid cell elevation using temperature lapse rate. It does not adjust other variables like precipitation type. This can lead to contradictory forecasts in the mountains. For example, a forecast for the summit of Denali may show very low temperatures and rain if it is raining at the grid cell elevation (~3000m for GFS). 
 
@@ -264,10 +271,14 @@ The Going Blue codec relies on the client and server having identical codebooks.
  - Added model attribution to the meteogram so that the switch between a high-resolution local model and a low-resolution global model is clear.
  - Expanded SMS alphabet from 85 to 124 characters by using almost all of GSM-7 instead of the intersection of GSM-7 and ASCII.
 
-#### Codec v3 (App version 1.2.0)
- - Detailed cloud cover
- - Add legend to meteogram
- - Improve legibility of rain, snow, and precip chance
+#### In development: Codec v3 (App version 1.2.0)
+
+ - Added ZOLEO support with 240 character messages.
+ - Expanded detailed cloud cover with several more cloud levels and better cloud rendering.
+ - Added a legend to the meteogram.
+ - Split out rain, snow, and precip chance in the meteogram to improve legibility.
+ - Report mixed rain/snow weathercode when there is a substantial amount of each precip type.
+ - Optimized meteogram rendering.
 
 ## License
 
