@@ -1657,35 +1657,238 @@ function smoothClosed(path: ReturnType<typeof Skia.Path.Make>, pts: { x: number;
   path.close();
 }
 
-// Full Skia scene for one model. Pure, and called through useMemo: overlay-only state like the
-// selected column must not rebuild the elements, since any rebuild repaints every mounted tile.
-function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups, modelBands }: {
-  // `dates` are absolute instants — what the sun and the now marker answer to. `zoned` is the same
-  // series on the forecast point's wall clock, which is what the hour and day labels read.
+// The visible part of a smooth polyline, for a tile spanning [xLo, xHi]. smoothTo's curve is
+// local — the segment around point k is a quad controlled by k and bounded by its midpoints with
+// k−1 and k+1 — so keeping one point past the last midpoint outside the range on either side
+// reproduces the full curve exactly across [xLo, xHi]; everything the trim changes (the
+// degenerate first and last segments, an area's closing edge) lands outside the range, where the
+// tile clips. Points must be in ascending x, which every caller's column walk already yields.
+function slicePoints<T extends { x: number }>(pts: T[], xLo: number, xHi: number): T[] {
+  let s = 0;
+  while (s + 1 < pts.length && pts[s + 1].x <= xLo) s++;
+  let e = pts.length - 1;
+  while (e - 1 > 0 && pts[e - 1].x >= xHi) e--;
+  return pts.slice(Math.max(0, s - 1), Math.min(pts.length, e + 2));
+}
+
+// The night shading stops at the first row that encodes its value as a fill — wind ribbons and
+// cloud-cover alpha — since a tinted backdrop would make identical speeds or percentages look
+// different by night than by day. Everything above reads as text or glyphs and is unharmed by
+// the tint.
+const TINTABLE_STOP = new Set<RowKind>([
+  'wind-sfc', 'wind-gust', 'wind-dir', 'freeze', 'cloud-band', 'cloud-high', 'cloud-mid', 'cloud-low',
+  ...AQ_KINDS, // air-quality cells carry their category as a fill, same as the wind ribbon
+  ...AQ_DOMINANT_KINDS, // and the dominant row is painted with its headline's fill
+  'wind-500', 'wind-600', 'wind-700', 'model',
+]);
+
+// The rows the current-time marker runs through: the date/time header and visual weather rows
+// down to precip, excluding wind and the sections below it.
+const MARKER_ROWS = new Set<RowKind>(['clouds', 'temp', 'precip-chance', 'snow', 'rain']);
+
+// Scene quantities computed over the WHOLE forecast, whatever slice of it a tile draws: the
+// domains and scales that keep columns comparable across the window — a tile that fit its own
+// temperature range would disagree with its neighbor at the seam — plus the one piece of
+// geometry that is genuinely global, the cloud-band contours, a handful of path elements every
+// tile shares as-is (each tile's canvas clips them to its own bounds).
+interface SceneStatics {
+  tMin: number; tMax: number; tempRowBottom: number;
+  maxSnow: number; maxRain: number;
+  snowNorm: number[]; rainNorm: number[]; precipScale: number;
+  freezeValues: (number | undefined)[]; freezeBase: number; freezeSpan: number;
+  // The current-time marker's row span. The marker itself is in no slice — it moves with the
+  // clock, so ModelCanvas splices it into the one tile it crosses (see markerIndex), and the
+  // minute tick re-renders that tile alone.
+  markerTop: number | undefined; markerBottom: number | undefined;
+  cloudBandEls: ReactNode[];
+  dominantSegs: Partial<Record<AqDominantKind, DominantSegment[]>>;
+}
+
+function buildSceneStatics({ periods, rows, steps }: {
+  periods: Period[]; rows: Row[]; steps: number[];
+}): SceneStatics {
+  const n = periods.length;
+  const width = n * CELL_W;
+  const colLeft = (i: number) => i * CELL_W;
+  const colCenter = (i: number) => i * CELL_W + CELL_W / 2;
+
+  // Temperature domain across all periods.
+  const temps: number[] = [];
+  periods.forEach((p) => { if (p.temp_c != null) temps.push(p.temp_c); });
+  const tMin = temps.length ? Math.min(...temps) - 1 : 0;
+  const tMax = temps.length ? Math.max(...temps) + 1 : 1;
+  let tempRowBottom = ROW_H.DATE;
+  for (const row of rows) {
+    tempRowBottom += row.height;
+    if (row.kind === 'temp') break;
+  }
+
+  // The shared precip scale — see the area builder in buildScene for why it is ONE scale over
+  // both rows. Each period is normalized by its OWN step first (precipNorm), so a window that
+  // drops from 6h to 12h partway through doesn't step up an area that is only carrying twice as
+  // many hours of the same weather.
+  const maxSnow = Math.max(0, ...periods.map((p) => p.snow_cm ?? 0));
+  const maxRain = Math.max(0, ...periods.map((p) => p.rain_mm ?? 0));
+  const snowNorm = periods.map((period, i) => precipNorm(period.snow_cm ?? 0, steps[i]));
+  const rainNorm = periods.map((period, i) => precipNorm(period.rain_mm ?? 0, steps[i]));
+  const precipScale = precipScaleOf(Math.max(0, ...snowNorm, ...rainNorm));
+
+  // Freezing-level domain, shared by the isotherm curve and the two washes either side of it.
+  // The bottom is pinned to ground level once the level comes near it, so a freezing level at
+  // the surface reads as one with no above-freezing air under it rather than as one floating a
+  // row's worth of red above the ground.
+  const freezeValues = periods.map((p) => p.freeze_m);
+  const freezePresent = freezeValues.filter((m): m is number => m != null);
+  let freezeBase = 0;
+  let freezeSpan = FREEZE_MIN_SPAN_M;
+  if (freezePresent.length) {
+    const lo = Math.min(...freezePresent);
+    const hi = Math.max(...freezePresent);
+    freezeSpan = Math.max((hi - lo) * FREEZE_HEADROOM, FREEZE_MIN_SPAN_M);
+    freezeBase = Math.max(0, (lo + hi) / 2 - freezeSpan / 2);
+  }
+
+  let markerTop: number | undefined;
+  let markerBottom: number | undefined;
+  let markerY = ROW_H.DATE;
+  rows.forEach((row) => {
+    if (MARKER_ROWS.has(row.kind)) {
+      markerTop ??= markerY;
+      markerBottom = markerY + row.height;
+    }
+    markerY += row.height;
+  });
+
+  // Runs of one dominant pollutant, shared by every tile's bracket pass and computed once —
+  // the runs are a property of the whole window, not of a slice of it.
+  const dominantSegs: Partial<Record<AqDominantKind, DominantSegment[]>> = {};
+  for (const row of rows) {
+    if (row.kind === 'aqi-dominant' || row.kind === 'aqi-eu-dominant')
+      dominantSegs[row.kind] = dominantSegments(periods, row.kind);
+  }
+
+  // The vertical cloud band: Windy-style cloud cross-section from the message's cloud_band
+  // stacks, as real filled contours (see isoLoops above). The y axis is linear in pressure from
+  // 300 hPa (top) to 1000 hPa (bottom), which compresses altitude aloft roughly the way Windy's
+  // axis does. Grid points sit at column centers; a sentinel ring pads the field so every
+  // contour closes, with the ring's coordinates clamped onto the band's edges so loops hug them.
+  //
+  // Marching squares runs over the whole field, and its loops cross tiles freely — so the band
+  // is built HERE, once, into elements every tile includes and clips for itself.
+  const cloudBandEls: ReactNode[] = [];
+  let bandY = ROW_H.DATE;
+  rows.forEach((row, ri) => {
+    const top = bandY;
+    bandY += row.height;
+    if (row.kind !== 'cloud-band') return;
+    const yOfHpa = (hpa: number) =>
+      top + ((hpa - BAND_TOP_HPA) / (BAND_BOTTOM_HPA - BAND_TOP_HPA)) * row.height;
+    const field = buildCloudField(periods);
+    const W = n + 2, H = GRID_ROWS + 2;
+    const val = (i: number, j: number) =>
+      i === 0 || j === 0 || i === W - 1 || j === H - 1 ? -1 : field[(j - 1) * n + (i - 1)];
+    const xs = [colLeft(0), ...periods.map((_, i) => colCenter(i)), colLeft(0) + n * CELL_W];
+    const ys = [top, ...Array.from({ length: GRID_ROWS }, (_, j) =>
+      top + (j * row.height) / (GRID_ROWS - 1)), top + row.height];
+    const px = (g: number) => {
+      const f = Math.floor(g);
+      return lerp(xs[f], xs[Math.min(f + 1, xs.length - 1)], g - f);
+    };
+    const py = (g: number) => {
+      const f = Math.floor(g);
+      return lerp(ys[f], ys[Math.min(f + 1, ys.length - 1)], g - f);
+    };
+    // Loops smaller than half a grid cell are quantization noise, not weather — a lone
+    // point one ladder step over a threshold, or the resampler's integer rounding — and a
+    // filled contour would render them as crisp specks. Shoelace area, in pixels.
+    const minLoopArea = 0.5 * CELL_W * (row.height / (GRID_ROWS - 1));
+    const loopArea = (pts: { x: number; y: number }[]) => {
+      let a = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const q = pts[(i + 1) % pts.length];
+        a += pts[i].x * q.y - q.x * pts[i].y;
+      }
+      return Math.abs(a) / 2;
+    };
+    for (const [threshold, alpha] of CLOUD_BAND_STEPS) {
+      const loops = isoLoops(val, W, H, threshold);
+      if (!loops.length) continue;
+      const path = Skia.Path.Make();
+      path.setFillType(FillType.EvenOdd); // an inner loop is a hole in its surrounding band
+      for (const loop of loops) {
+        const mapped = loop.map((p) => ({ x: px(p.x), y: py(p.y) }));
+        if (loopArea(mapped) < minLoopArea) continue;
+        smoothClosed(path, mapped);
+      }
+      cloudBandEls.push(<Path key={`cb${ri}-${threshold}`} path={path}
+        color={rgb(CLOUD_BAND_INK, alpha)} />);
+    }
+
+    // One gridline per wire level — the axis lists exactly what the message carries. The
+    // altitudes those lines stand for are written in the fixed rail (see RowLegend), not
+    // here: they are the scale of a 220px plot, and drawn into the scene they scrolled off
+    // with the first day.
+    for (const hpa of CLOUD_BAND_LEVELS_HPA) {
+      // 300 and 1000 hPa coincide with the row's own edges — the rail labels them, and a
+      // line on the edge would only redraw the row boundary.
+      if (hpa === BAND_TOP_HPA || hpa === BAND_BOTTOM_HPA) continue;
+      cloudBandEls.push(
+        <Line key={`cbg${ri}-${hpa}`} p1={vec(0, yOfHpa(hpa))} p2={vec(width, yOfHpa(hpa))}
+          color={C.grid} strokeWidth={1}>
+          <DashPathEffect intervals={[3, 4]} />
+        </Line>,
+      );
+    }
+  });
+
+  return {
+    tMin, tMax, tempRowBottom, maxSnow, maxRain, snowNorm, rainNorm, precipScale,
+    freezeValues, freezeBase, freezeSpan, markerTop, markerBottom, cloudBandEls, dominantSegs,
+  };
+}
+
+// Skia scene for one TILE of a model's drawing: columns [from, to), in the drawing's own
+// absolute coordinates — the tile translates, it doesn't re-project. Building per tile is what
+// keeps a tile mount affordable: the full scene at maximum fill is tens of thousands of
+// elements, and a tile that mounts all of them to show its own sixteen columns pays for the
+// whole forecast on every mount — which is what made the first paint slow and left blank tiles
+// trailing a fast scroll.
+//
+// A slice carries its columns plus a margin: one column of per-column elements either side
+// (nothing a column draws reaches past its neighbor), one further POINT on every smooth curve
+// (slicePoints), and one gradient stop past each ribbon edge — each exactly what pins the
+// visible pixels to what the full-scene build drew there. Range geometry that is cheap and
+// awkward to split — full-width rules, section grounds, the shared cloud-band contours — is
+// included whole and clipped by the canvas.
+//
+// Pure, and called through useMemo: overlay-only state like the selected column must not
+// rebuild the elements, since any rebuild repaints every mounted tile.
+function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics, from, to }: {
+  // `dates` are absolute instants — what the sun answers to. `zoned` is the same series on the
+  // forecast point's wall clock, which is what the hour and day labels read.
   periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat;
-  now: number; lat: number; lon: number; fonts: Fonts; dayGroups: DayGroup[];
+  lat: number; lon: number; fonts: Fonts; dayGroups: DayGroup[];
   // The model row's bands. Their labels are not drawn here — they stick to the viewport's left
   // edge, like the day labels, so they live in the overlay above the canvas.
   modelBands: ModelSegment[];
-}): ReactNode[] {
+  statics: SceneStatics;
+  from: number; to: number;
+}): { els: ReactNode[]; markerIndex: number } {
   const n = periods.length;
   const width = n * CELL_W;
-  const totalH = ROW_H.DATE + rows.reduce((s, r) => s + r.height, 0);
   const colLeft = (i: number) => i * CELL_W;
   const colCenter = (i: number) => i * CELL_W + CELL_W / 2;
   const els: ReactNode[] = [];
+  // The slice's column range with its one-column margin, and the x-range strokes are kept for —
+  // a hairline on the tile's very edge bleeds half a pixel in from the neighboring column.
+  const c0 = Math.max(0, from - 1);
+  const c1 = Math.min(n, to + 1);
+  const xLo = from * CELL_W - 1;
+  const xHi = to * CELL_W + 1;
 
   // 1. Location-aware astronomical night shading. Partial rectangles place sunrise and sunset
-  // within a column rather than rounding them to the forecast period boundary. The shading stops
-  // at the first row that encodes its value as a fill — wind ribbons and cloud-cover alpha — since
-  // a tinted backdrop would make identical speeds or percentages look different by night than by
-  // day. Everything above reads as text or glyphs and is unharmed by the tint.
-  const TINTABLE_STOP = new Set<RowKind>([
-    'wind-sfc', 'wind-gust', 'wind-dir', 'freeze', 'cloud-band', 'cloud-high', 'cloud-mid', 'cloud-low',
-    ...AQ_KINDS, // air-quality cells carry their category as a fill, same as the wind ribbon
-    ...AQ_DOMINANT_KINDS, // and the dominant row is painted with its headline's fill
-    'wind-500', 'wind-600', 'wind-700', 'model',
-  ]);
+  // within a column rather than rounding them to the forecast period boundary (the stop row is
+  // TINTABLE_STOP's business).
   const nightBottom = (() => {
     let y = ROW_H.DATE;
     let headerTop: number | undefined; // top of the section label immediately above this row
@@ -1694,58 +1897,89 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
       headerTop = row.kind === 'section' ? y : undefined;
       y += row.height;
     }
-    return totalH;
+    return ROW_H.DATE + rows.reduce((s, r) => s + r.height, 0);
   })();
-  dates.forEach((d, i) => {
-    const start = d.getTime();
+  for (let i = c0; i < c1; i++) {
+    const start = dates[i].getTime();
     const end = start + steps[i] * 3600000;
-    nightSegments(start, end, lat, lon).forEach(([from, to], segment) => {
-      els.push(<Rect key={`night${i}-${segment}`} x={colLeft(i) + from * CELL_W} y={31} width={(to - from) * CELL_W} height={nightBottom - 31} color={C.night} />);
+    nightSegments(start, end, lat, lon).forEach(([fromFrac, toFrac], segment) => {
+      els.push(<Rect key={`night${i}-${segment}`} x={colLeft(i) + fromFrac * CELL_W} y={31} width={(toFrac - fromFrac) * CELL_W} height={nightBottom - 31} color={C.night} />);
     });
-  });
-  const headerInsertIndex = els.length;
+  }
 
-  // 2. Date header. Hours occupy their own row. Each day label sticks to the visible left
-  // edge while its columns are being scrolled, then yields to the following day.
-  zoned.forEach((d, i) => {
-    els.push(centerHour(`hour${i}`, hourParts(d, steps[i], timeFormat), colCenter(i), HOUR_LABEL_Y, fonts.hour, fonts.hourSuffix, C.hour));
+  // 2. The fills that lie under the header text and the row content, in the stacking order the
+  // full scene always painted them: rain, then snow, then the temperature area.
+  //
+  // One smooth area per precip row, each rising from its own row's baseline. Snow is plotted at
+  // liquid equivalent (1 cm ≈ 1 mm of water, so the cm number is already the mm-equivalent one),
+  // which is what lets the two rows be read against each other: at equal duration, equal heights
+  // are equal water, whatever the numbers printed on them say. That is also why ONE scale is taken
+  // over both rows rather than each row fitting its own peak (statics.precipScale) — a row scaled
+  // to itself would draw a dusting of snow as tall as the storm of rain beside it.
+  const precipSpans = new Map<RowKind, { top: number; bottom: number }>();
+  let precipRowY = ROW_H.DATE;
+  rows.forEach((row) => {
+    if (row.kind === 'snow' || row.kind === 'rain')
+      precipSpans.set(row.kind, { top: precipRowY, bottom: precipRowY + row.height });
+    precipRowY += row.height;
   });
-  els.push(<Line key="date-row-rule" p1={vec(0, 31)} p2={vec(width, 31)} color={C.grid} strokeWidth={1} />);
-
-  // Temperature domain across all periods.
-  const temps: number[] = [];
-  periods.forEach((p) => { if (p.temp_c != null) temps.push(p.temp_c); });
-  const tMin = temps.length ? Math.min(...temps) - 1 : 0;
-  const tMax = temps.length ? Math.max(...temps) + 1 : 1;
+  ([
+    ['rain', statics.rainNorm, statics.maxRain, C.rainArea, C.rainEdge],
+    ['snow', statics.snowNorm, statics.maxSnow, C.snowArea, C.snowEdge],
+  ] as const).forEach(([kind, values, max, color, edgeColor]) => {
+    const span = precipSpans.get(kind);
+    if (!span || max <= 0) return;
+    const plotTop = span.top + PRECIP_PLOT_PAD;
+    const valueY = (norm: number) =>
+      span.bottom - accumFrac(norm, statics.precipScale) * (span.bottom - plotTop);
+    const points = slicePoints([
+      { x: colLeft(0), y: valueY(values[0]) },
+      ...values.map((value, i) => ({ x: colCenter(i), y: valueY(value) })),
+      { x: colLeft(n), y: valueY(values[values.length - 1]) },
+    ], xLo, xHi);
+    const area = Skia.Path.Make();
+    smoothTo(area, points);
+    area.lineTo(points[points.length - 1].x, span.bottom);
+    area.lineTo(points[0].x, span.bottom);
+    area.close();
+    // The top boundary again as its own open path, so only the curve is stroked: stroking the
+    // closed area would draw the outline along the row's bottom edge too, a second rule beside
+    // the seam. The edge is what carries the shape once the ground under it moves — snow's wash
+    // against the night tint is a 1.01:1 difference, which is to say none at all.
+    const edge = Skia.Path.Make();
+    smoothTo(edge, points);
+    els.push(
+      <Group key={`${kind}-area`}>
+        <Path path={area} color={color} />
+        <Path path={edge} style="stroke" strokeWidth={PRECIP_EDGE_W} color={edgeColor} />
+      </Group>,
+    );
+  });
 
   // Temperature is a background area behind the time, weather-code, and temperature rows. Its
   // vertical shape is normalized to this forecast's range, while the gradient colors are chosen
   // from absolute temperatures and fade to white beneath the plotted range.
-  let tempRowBottom = ROW_H.DATE;
-  for (const row of rows) {
-    tempRowBottom += row.height;
-    if (row.kind === 'temp') break;
-  }
   const plottedTemps = periods.map((p) => p.temp_c);
-  if (temps.length && plottedTemps.some((temperature) => temperature != null)) {
+  if (plottedTemps.some((temperature) => temperature != null)) {
+    const { tMin, tMax, tempRowBottom } = statics;
     const plotTop = 39;
     const plotBottom = tempRowBottom - 18;
     const scaleTempY = (temperature: number) =>
       plotTop + ((tMax - temperature) / (tMax - tMin)) * (plotBottom - plotTop);
     const first = plottedTemps.find((temperature): temperature is number => temperature != null)!;
     const last = [...plottedTemps].reverse().find((temperature): temperature is number => temperature != null)!;
-    const points = [
+    const points = slicePoints([
       { x: colLeft(0), y: scaleTempY(first) },
       ...plottedTemps.flatMap((temperature, i) => temperature == null ? [] : [{ x: colCenter(i), y: scaleTempY(temperature) }]),
       { x: colLeft(n), y: scaleTempY(last) },
-    ];
+    ], xLo, xHi);
     const area = Skia.Path.Make();
     smoothTo(area, points);
-    area.lineTo(colLeft(n), tempRowBottom);
-    area.lineTo(colLeft(0), tempRowBottom);
+    area.lineTo(points[points.length - 1].x, tempRowBottom);
+    area.lineTo(points[0].x, tempRowBottom);
     area.close();
     const rangeEnd = Math.max(0, Math.min(1, (plotBottom - plotTop) / (tempRowBottom - plotTop)));
-    els.splice(headerInsertIndex, 0,
+    els.push(
       <Path key="temperature-area" path={area}>
         <LinearGradient
           start={vec(0, plotTop)}
@@ -1757,106 +1991,20 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
     );
   }
 
-  // One smooth area per precip row, each rising from its own row's baseline. Snow is plotted at
-  // liquid equivalent (1 cm ≈ 1 mm of water, so the cm number is already the mm-equivalent one),
-  // which is what lets the two rows be read against each other: at equal duration, equal heights
-  // are equal water, whatever the numbers printed on them say. That is also why ONE scale is taken
-  // over both rows rather than each row fitting its own peak — a row scaled to itself would draw a
-  // dusting of snow as tall as the storm of rain beside it. Each period is normalized by its OWN
-  // step first (precipNorm), so a window that drops from 6h to 12h partway through doesn't step up
-  // an area that is only carrying twice as many hours of the same weather.
-  const maxSnow = Math.max(0, ...periods.map((p) => p.snow_cm ?? 0));
-  const maxRain = Math.max(0, ...periods.map((p) => p.rain_mm ?? 0));
-  const snowNorm = periods.map((period, i) => precipNorm(period.snow_cm ?? 0, steps[i]));
-  const rainNorm = periods.map((period, i) => precipNorm(period.rain_mm ?? 0, steps[i]));
-  const precipScale = precipScaleOf(Math.max(0, ...snowNorm, ...rainNorm));
-  const precipSpans = new Map<RowKind, { top: number; bottom: number }>();
-  let precipRowY = ROW_H.DATE;
-  rows.forEach((row) => {
-    if (row.kind === 'snow' || row.kind === 'rain')
-      precipSpans.set(row.kind, { top: precipRowY, bottom: precipRowY + row.height });
-    precipRowY += row.height;
-  });
-  ([
-    ['snow', snowNorm, maxSnow, C.snowArea, C.snowEdge],
-    ['rain', rainNorm, maxRain, C.rainArea, C.rainEdge],
-  ] as const).forEach(([kind, values, max, color, edgeColor]) => {
-    const span = precipSpans.get(kind);
-    if (!span || max <= 0) return;
-    const plotTop = span.top + PRECIP_PLOT_PAD;
-    const valueY = (norm: number) =>
-      span.bottom - accumFrac(norm, precipScale) * (span.bottom - plotTop);
-    const points = [
-      { x: colLeft(0), y: valueY(values[0]) },
-      ...values.map((value, i) => ({ x: colCenter(i), y: valueY(value) })),
-      { x: colLeft(n), y: valueY(values[values.length - 1]) },
-    ];
-    const area = Skia.Path.Make();
-    smoothTo(area, points);
-    area.lineTo(colLeft(n), span.bottom);
-    area.lineTo(colLeft(0), span.bottom);
-    area.close();
-    // The top boundary again as its own open path, so only the curve is stroked: stroking the
-    // closed area would draw the outline along the row's bottom edge too, a second rule beside
-    // the seam. The edge is what carries the shape once the ground under it moves — snow's wash
-    // against the night tint is a 1.01:1 difference, which is to say none at all.
-    const edge = Skia.Path.Make();
-    smoothTo(edge, points);
-    els.splice(headerInsertIndex, 0,
-      <Group key={`${kind}-area`}>
-        <Path path={area} color={color} />
-        <Path path={edge} style="stroke" strokeWidth={PRECIP_EDGE_W} color={edgeColor} />
-      </Group>,
-    );
-  });
-
-  // Current time, positioned proportionally within its period. Run it through the date/time
-  // header and visual weather rows down to precip, excluding wind and the sections below it.
-  const markerRows = new Set<RowKind>(['clouds', 'temp', 'precip-chance', 'snow', 'rain']);
-  let markerTop: number | undefined;
-  let markerBottom: number | undefined;
-  let markerY = ROW_H.DATE;
-  rows.forEach((row) => {
-    if (markerRows.has(row.kind)) {
-      markerTop ??= markerY;
-      markerBottom = markerY + row.height;
-    }
-    markerY += row.height;
-  });
-  const currentPeriod = dates.findIndex((date, i) =>
-    now >= date.getTime() && now < date.getTime() + steps[i] * 3600000,
-  );
-  if (currentPeriod >= 0 && markerTop != null && markerBottom != null) {
-    const periodStart = dates[currentPeriod].getTime();
-    const fraction = (now - periodStart) / (steps[currentPeriod] * 3600000);
-    const x = colLeft(currentPeriod) + fraction * CELL_W;
-    els.push(
-      <Line
-        key="current-time"
-        p1={vec(x, 0)}
-        p2={vec(x, markerBottom)}
-        color="rgba(255,59,48,0.5)"
-        strokeWidth={1}
-      >
-        <DashPathEffect intervals={[5, 4]} />
-      </Line>,
-    );
+  // 3. Date header. Hours occupy their own row. Each day label sticks to the visible left
+  // edge while its columns are being scrolled, then yields to the following day.
+  for (let i = c0; i < c1; i++) {
+    els.push(centerHour(`hour${i}`, hourParts(zoned[i], steps[i], timeFormat), colCenter(i), HOUR_LABEL_Y, fonts.hour, fonts.hourSuffix, C.hour));
   }
+  els.push(<Line key="date-row-rule" p1={vec(0, 31)} p2={vec(width, 31)} color={C.grid} strokeWidth={1} />);
 
-  // Freezing-level domain, shared by the isotherm curve and the two washes either side of it. The
-  // bottom is pinned to ground level once the level comes near it, so a freezing level at the
-  // surface reads as one with no above-freezing air under it rather than as one floating a row's
-  // worth of red above the ground.
-  const freezeValues = periods.map((p) => p.freeze_m);
-  const freezePresent = freezeValues.filter((m): m is number => m != null);
-  let freezeBase = 0;
-  let freezeSpan = FREEZE_MIN_SPAN_M;
-  if (freezePresent.length) {
-    const lo = Math.min(...freezePresent);
-    const hi = Math.max(...freezePresent);
-    freezeSpan = Math.max((hi - lo) * FREEZE_HEADROOM, FREEZE_MIN_SPAN_M);
-    freezeBase = Math.max(0, (lo + hi) / 2 - freezeSpan / 2);
-  }
+  // Where ModelCanvas splices the current-time marker into the one tile it crosses: over the
+  // areas and header, under the row content — the digits read over the line, as they always
+  // have. The marker is kept out of the slice so the minute tick re-renders one tile, not every
+  // mounted one.
+  const markerIndex = els.length;
+
+  const { freezeValues, freezeBase, freezeSpan } = statics;
 
   // 4. Rows.
   let y = ROW_H.DATE;
@@ -1876,7 +2024,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
 
     switch (row.kind) {
       case 'clouds':
-        periods.forEach((p, i) => {
+        for (let i = c0; i < c1; i++) {
           const midpoint = dates[i].getTime() + steps[i] * 1800000;
           const night = isNight(midpoint, lat, lon);
           els.push(
@@ -1886,22 +2034,21 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
                 colCenter(i),
                 top,
                 row.height,
-                p.weathercode,
+                periods[i].weathercode,
                 night,
                 moonPhaseAt(midpoint),
               )}
             </Group>,
           );
-        });
+        }
         break;
 
       case 'temp': {
-        periods.forEach((p, i) => {
-          const cx = colCenter(i);
-          if (p.temp_c != null) {
-            els.push(centerText(`th${i}`, fmtTemp(p.temp_c, units), cx, top + TEMP_VALUE_Y, fonts.data, '#1c1c1e'));
+        for (let i = c0; i < c1; i++) {
+          if (periods[i].temp_c != null) {
+            els.push(centerText(`th${i}`, fmtTemp(periods[i].temp_c, units), colCenter(i), top + TEMP_VALUE_Y, fonts.data, '#1c1c1e'));
           }
-        });
+        }
         break;
       }
 
@@ -1918,6 +2065,10 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         valueRuns(n, (i) => periods[i].precip != null).forEach((run) => {
           const x0 = colLeft(run[0]);
           const x1 = colLeft(run[run.length - 1]) + CELL_W;
+          if (x1 < xLo || x0 > xHi) return;
+          // The whole run, not a slice of it: the dashes' phase runs from the path's start, so a
+          // trimmed curve would break pattern at every tile seam. One stroked path per run is
+          // cheap; it is the per-column element walls this builder exists to avoid.
           const points = [
             { x: x0, y: chanceY(periods[run[0]].precip!) },
             ...run.map((i) => ({ x: colCenter(i), y: chanceY(periods[i].precip!) })),
@@ -1940,18 +2091,18 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
       // forecast whose every period rounds to nothing draws neither.
       case 'snow':
       case 'rain':
-        periods.forEach((p, i) => {
+        for (let i = c0; i < c1; i++) {
           const snow = row.kind === 'snow';
-          const value = (snow ? p.snow_cm : p.rain_mm) ?? 0;
-          const max = snow ? maxSnow : maxRain;
-          if (!(value > 0 && max > 0)) return;
+          const value = (snow ? periods[i].snow_cm : periods[i].rain_mm) ?? 0;
+          const max = snow ? statics.maxSnow : statics.maxRain;
+          if (!(value > 0 && max > 0)) continue;
           const text = snow ? fmtSnow(value, units) : fmtRain(value, units);
-          if (!text) return;
+          if (!text) continue;
           els.push(centerText(
             `${snow ? 'sv' : 'rv'}${i}`, text, colCenter(i), top + PRECIP_VALUE_Y,
             fonts.small, snow ? C.snowInk : C.rainInk,
           ));
-        });
+        }
         break;
 
       case 'freeze': {
@@ -1969,22 +2120,25 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         valueRuns(n, (i) => freezeValues[i] != null).forEach((run) => {
           const x0 = colLeft(run[0]);
           const x1 = colLeft(run[run.length - 1]) + CELL_W;
+          if (x1 < xLo || x0 > xHi) return;
           // The curve holds flat out to the run's outer edges, so a run reads as covering its
           // columns edge to edge rather than tapering in from their centers.
-          const points = [
+          const points = slicePoints([
             { x: x0, y: freezeY(freezeValues[run[0]]!) },
             ...run.map((i) => ({ x: colCenter(i), y: freezeY(freezeValues[i]!) })),
             { x: x1, y: freezeY(freezeValues[run[run.length - 1]]!) },
-          ];
+          ], xLo, xHi);
+          const xFirst = points[0].x;
+          const xLast = points[points.length - 1].x;
           const cold = Skia.Path.Make();
           smoothTo(cold, points);
-          cold.lineTo(x1, top);
-          cold.lineTo(x0, top);
+          cold.lineTo(xLast, top);
+          cold.lineTo(xFirst, top);
           cold.close();
           const warm = Skia.Path.Make();
           smoothTo(warm, points);
-          warm.lineTo(x1, bottom);
-          warm.lineTo(x0, bottom);
+          warm.lineTo(xLast, bottom);
+          warm.lineTo(xFirst, bottom);
           warm.close();
           const isotherm = Skia.Path.Make();
           smoothTo(isotherm, points);
@@ -1996,80 +2150,19 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
             </Group>,
           );
         });
-        periods.forEach((p, i) => {
-          const txt = fmtFreeze(p.freeze_m, units);
+        for (let i = c0; i < c1; i++) {
+          const txt = fmtFreeze(periods[i].freeze_m, units);
           els.push(centerText(`fz${i}`, txt || '—', colCenter(i), mid, fonts.data,
             txt ? '#1c1c1e' : C.nil));
-        });
-        break;
-      }
-
-      case 'cloud-band': {
-        // Windy-style cloud cross-section from the message's cloud_band stacks, as real filled
-        // contours (see isoLoops above). The y axis is linear in pressure from 300 hPa (top) to
-        // 1000 hPa (bottom), which compresses altitude aloft roughly the way Windy's axis does.
-        // Grid points sit at column centers; a sentinel ring pads the field so every contour
-        // closes, with the ring's coordinates clamped onto the band's edges so loops hug them.
-        const yOfHpa = (hpa: number) =>
-          top + ((hpa - BAND_TOP_HPA) / (BAND_BOTTOM_HPA - BAND_TOP_HPA)) * row.height;
-        const field = buildCloudField(periods);
-        const W = n + 2, H = GRID_ROWS + 2;
-        const val = (i: number, j: number) =>
-          i === 0 || j === 0 || i === W - 1 || j === H - 1 ? -1 : field[(j - 1) * n + (i - 1)];
-        const xs = [colLeft(0), ...periods.map((_, i) => colCenter(i)), colLeft(0) + n * CELL_W];
-        const ys = [top, ...Array.from({ length: GRID_ROWS }, (_, j) =>
-          top + (j * row.height) / (GRID_ROWS - 1)), top + row.height];
-        const px = (g: number) => {
-          const f = Math.floor(g);
-          return lerp(xs[f], xs[Math.min(f + 1, xs.length - 1)], g - f);
-        };
-        const py = (g: number) => {
-          const f = Math.floor(g);
-          return lerp(ys[f], ys[Math.min(f + 1, ys.length - 1)], g - f);
-        };
-        // Loops smaller than half a grid cell are quantization noise, not weather — a lone
-        // point one ladder step over a threshold, or the resampler's integer rounding — and a
-        // filled contour would render them as crisp specks. Shoelace area, in pixels.
-        const minLoopArea = 0.5 * CELL_W * (row.height / (GRID_ROWS - 1));
-        const loopArea = (pts: { x: number; y: number }[]) => {
-          let a = 0;
-          for (let i = 0; i < pts.length; i++) {
-            const q = pts[(i + 1) % pts.length];
-            a += pts[i].x * q.y - q.x * pts[i].y;
-          }
-          return Math.abs(a) / 2;
-        };
-        for (const [threshold, alpha] of CLOUD_BAND_STEPS) {
-          const loops = isoLoops(val, W, H, threshold);
-          if (!loops.length) continue;
-          const path = Skia.Path.Make();
-          path.setFillType(FillType.EvenOdd); // an inner loop is a hole in its surrounding band
-          for (const loop of loops) {
-            const mapped = loop.map((p) => ({ x: px(p.x), y: py(p.y) }));
-            if (loopArea(mapped) < minLoopArea) continue;
-            smoothClosed(path, mapped);
-          }
-          els.push(<Path key={`cb${ri}-${threshold}`} path={path}
-            color={rgb(CLOUD_BAND_INK, alpha)} />);
-        }
-
-        // One gridline per wire level — the axis lists exactly what the message carries. The
-        // altitudes those lines stand for are written in the fixed rail (see RowLegend), not
-        // here: they are the scale of a 220px plot, and drawn into the scene they scrolled off
-        // with the first day.
-        for (const hpa of CLOUD_BAND_LEVELS_HPA) {
-          // 300 and 1000 hPa coincide with the row's own edges — the rail labels them, and a
-          // line on the edge would only redraw the row boundary.
-          if (hpa === BAND_TOP_HPA || hpa === BAND_BOTTOM_HPA) continue;
-          els.push(
-            <Line key={`cbg${ri}-${hpa}`} p1={vec(0, yOfHpa(hpa))} p2={vec(width, yOfHpa(hpa))}
-              color={C.grid} strokeWidth={1}>
-              <DashPathEffect intervals={[3, 4]} />
-            </Line>,
-          );
         }
         break;
       }
+
+      case 'cloud-band':
+        // Contours and gridlines are global geometry, built once in buildSceneStatics and
+        // shared by every tile — each canvas clips them to its own bounds.
+        els.push(...statics.cloudBandEls);
+        break;
 
       case 'wind-sfc': case 'wind-gust': case 'wind-500': case 'wind-600': case 'wind-700': {
         const base = row.kind.replace('-', '_'); // wind-sfc → wind_sfc, wind-500 → wind_500
@@ -2078,23 +2171,29 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         // Surface direction lives in its own arrow row below the gust row; gusts have none.
         const inlineArrow = row.kind !== 'wind-sfc' && row.kind !== 'wind-gust';
         const speedAt = (i: number) => periods[i][speedKey] as number | undefined;
+        // A run trimmed to the slice, not the whole run: the ribbon blends linearly between
+        // column centers, so a sub-run holding every center adjacent to the tile paints the
+        // tile's pixels exactly — the flat hold it gains at its cut ends lies in the margin,
+        // where the canvas clips.
         valueRuns(n, (i) => speedAt(i) != null).forEach((run) => {
+          const sub = run.filter((i) => i >= c0 && i < c1);
+          if (!sub.length) return;
           els.push(windRibbon(
-            `wbg${ri}-${run[0]}`, run,
+            `wbg${ri}-${sub[0]}`, sub,
             (i) => ({ left: colLeft(i), center: colCenter(i), right: colLeft(i) + CELL_W }),
             (i) => windColor(speedAt(i)!), top, row.height,
           ));
         });
-        periods.forEach((p, i) => {
+        for (let i = c0; i < c1; i++) {
           const kph = speedAt(i);
           const cx = colCenter(i);
-          if (kph == null) { els.push(centerText(`w${ri}-${i}`, '—', cx, mid, fonts.wind, C.nil)); return; }
-          const di = inlineArrow ? p[dirKey] as number | undefined : undefined;
+          if (kph == null) { els.push(centerText(`w${ri}-${i}`, '—', cx, mid, fonts.wind, C.nil)); continue; }
+          const di = inlineArrow ? periods[i][dirKey] as number | undefined : undefined;
           const arrow = di != null ? ARROWS[CARDINALS[di] ?? 'N'] ?? '' : '';
           // Rows carrying an inline arrow split the (now shorter) row evenly above and below center.
           els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, arrow ? mid - 6 : mid, fonts.wind, WIND_INK));
           els.push(centerText(`wa${ri}-${i}`, arrow, cx, mid + 6, fonts.data, WIND_INK));
-        });
+        }
         break;
       }
 
@@ -2111,19 +2210,22 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         // color. A hard step per column made a smoke plume read as a bar chart of six categories
         // instead of as something arriving.
         valueRuns(n, (i) => valueAt(i) != null).forEach((run) => {
+          // Trimmed to the slice like the wind ribbon above, and exact for the same reason.
+          const sub = run.filter((i) => i >= c0 && i < c1);
+          if (!sub.length) return;
           els.push(windRibbon(
-            `aqbg${ri}-${run[0]}`, run,
+            `aqbg${ri}-${sub[0]}`, sub,
             (i) => ({ left: colLeft(i), center: colCenter(i), right: colLeft(i) + CELL_W }),
             (i) => aqBand(valueAt(i)!, scale).color, top, row.height,
           ));
         });
-        periods.forEach((_, i) => {
+        for (let i = c0; i < c1; i++) {
           const v = valueAt(i);
           const cx = colCenter(i);
           // Past the CAMS horizon there is no forecast at all, which is a different thing from
           // clean air — so those columns get the empty-cell dash and no colored ground, exactly
           // like a wind row with nothing in it.
-          if (v == null) { els.push(centerText(`aq${ri}-${i}`, '—', cx, mid, fonts.wind, C.nil)); return; }
+          if (v == null) { els.push(centerText(`aq${ri}-${i}`, '—', cx, mid, fonts.wind, C.nil)); continue; }
           // The gradient is exact at the column's center, which is where the digits sit, so the
           // ink is measured against this cell's own band rather than the blend either side. One
           // white for the whole row was tried and doesn't survive the light fills — on EPA's
@@ -2131,7 +2233,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
           const band = aqBand(v, scale);
           els.push(centerText(`aq${ri}-${i}`, String(Math.round(v)), cx, mid, fonts.wind,
             band.ink ?? bandInk(hexRgb(band.color))));
-        });
+        }
         break;
       }
 
@@ -2144,14 +2246,15 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         // The name itself is NOT drawn here: it is RN text in a sticky overlay, so a run wider
         // than the screen keeps its label in frame the way the model bands and day headers do.
         // What the canvas draws is the bracket the label sits in.
-        const segs = dominantSegments(periods, row.kind);
+        const segs = statics.dominantSegs[row.kind] ?? [];
         const named = new Set<number>();
         segs.forEach((sg) => { for (let i = sg.start; i < sg.end; i++) named.add(i); });
-        periods.forEach((_, i) => {
-          if (named.has(i)) return;
+        for (let i = c0; i < c1; i++) {
+          if (named.has(i)) continue;
           els.push(centerText(`dm${ri}-${i}`, '—', colCenter(i), mid, fonts.wind, C.nil));
-        });
+        }
         segs.forEach((sg, si) => {
+          if (colLeft(sg.end) < xLo || colLeft(sg.start) > xHi) return;
           const x0 = colLeft(sg.start), x1 = colLeft(sg.end);
           // |____| : a dotted rule on the text's own centre line, closed by a cap at each end of
           // the run. The caps rise from the rule toward the AQI row above, so the bracket points
@@ -2181,9 +2284,9 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         // dir index 0 (N wind) points south = +90° in screen coords.
         const L = 14, SHAFT = 4.5, HEAD_L = 6.5, HEAD_W = 10.5;
         const h = L / 2, s = SHAFT / 2, w = HEAD_W / 2;
-        periods.forEach((p, i) => {
-          const di = p.wind_sfc_dir;
-          if (di == null) return;
+        for (let i = c0; i < c1; i++) {
+          const di = periods[i].wind_sfc_dir;
+          if (di == null) continue;
           const cx = colCenter(i);
           const path = Skia.Path.Make();
           path.moveTo(cx - h, mid - s);
@@ -2200,7 +2303,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
               <Path path={path} color={C.dirArrow} />
             </Group>,
           );
-        });
+        }
         break;
       }
 
@@ -2210,6 +2313,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         // drawn in the page's own white: at a handoff two bands can be a shade apart (ICON-EU 7km
         // beside ICON 13km), and a rule of their own is what keeps the seam a boundary.
         modelBands.forEach((band, bi) => {
+          if (colLeft(band.end) < xLo || colLeft(band.start) > xHi) return;
           const x0 = colLeft(band.start);
           els.push(
             <Rect key={`mdl${ri}-${bi}`} x={x0} y={top} width={colLeft(band.end) - x0}
@@ -2225,13 +2329,13 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
 
       case 'cloud-high': case 'cloud-mid': case 'cloud-low': {
         const key = CLOUD_KEYS[row.kind];
-        periods.forEach((p, i) => {
-          const pct = p[key] as number | undefined;
+        for (let i = c0; i < c1; i++) {
+          const pct = periods[i][key] as number | undefined;
           const cx = colCenter(i);
-          if (pct == null) { els.push(centerText(`cc${ri}-${i}`, '—', cx, mid, fonts.data, C.nil)); return; }
+          if (pct == null) { els.push(centerText(`cc${ri}-${i}`, '—', cx, mid, fonts.data, C.nil)); continue; }
           els.push(<Rect key={`ccbg${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W} height={row.height}
             color={`rgba(130,130,130,${(pct / 100).toFixed(2)})`} />);
-        });
+        }
         break;
       }
     }
@@ -2254,8 +2358,9 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
   if (spanY > spanTop) dividerSpans.push([spanTop, spanY]);
   dayGroups.slice(1).forEach((group, i) => {
     const x = colLeft(group.start);
-    dividerSpans.forEach(([from, to], s) => {
-      els.push(<Line key={`day-divider${i}-${s}`} p1={vec(x, from)} p2={vec(x, to)} color={C.divider} strokeWidth={1} />);
+    if (x < xLo || x > xHi) return;
+    dividerSpans.forEach(([yFrom, yTo], s) => {
+      els.push(<Line key={`day-divider${i}-${s}`} p1={vec(x, yFrom)} p2={vec(x, yTo)} color={C.divider} strokeWidth={1} />);
     });
   });
 
@@ -2278,12 +2383,13 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
     prevWasPrecip = isPrecip;
     seamY += row.height;
   });
-  return els;
+  return { els, markerIndex };
 }
 
-// A single canvas tile. Memoized so a ModelCanvas re-render (selection moving, panel state)
-// repaints no tiles: a Skia Canvas repaints on any React commit that reaches it, and each paint
-// is a full scene pass.
+// A single canvas tile, holding its own slice of the scene (buildScene) in the drawing's
+// absolute coordinates, shifted into place. Memoized so a ModelCanvas re-render (selection
+// moving, panel state, the minute tick moving the marker in another tile) repaints no tiles:
+// a Skia Canvas repaints on any React commit that reaches it.
 const CanvasTile = memo(function CanvasTile({ tile, els, totalH, paint, onPress }: {
   tile: Tile; els: ReactNode[]; totalH: number; paint: number;
   onPress: (locationX: number, tileOffset: number) => void;
@@ -2517,10 +2623,48 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     () => modelSegments(dates, steps, predictCenter(center, lat, lon).models, attributionMs),
     [dates, steps, center, lat, lon, attributionMs],
   );
-  const els = useMemo(
-    () => buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups, modelBands }),
-    [periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, dayGroups, modelBands],
+  const statics = useMemo(() => buildSceneStatics({ periods, rows, steps }), [periods, rows, steps]);
+  // One scene slice per tile, built eagerly — the build is cheap element allocation, and building
+  // them all up front costs about what the single full-scene build did. What it buys is the mount:
+  // a tile commits only its own columns instead of the whole forecast, which is what made the
+  // first paint slow and left blank tiles trailing a fast scroll.
+  const slices = useMemo(
+    () => tiles.map((tile) => buildScene({
+      periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics,
+      from: tile.offset / CELL_W, to: (tile.offset + tile.width) / CELL_W,
+    })),
+    [tiles, periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics],
   );
+  // Current time, positioned proportionally within its period. It runs through the date/time
+  // header and visual weather rows down to precip (statics.markerBottom). Built apart from the
+  // slices because it is the one element that moves with the clock: the minute tick makes a new
+  // marker, and only the tile it crosses re-renders.
+  const marker = useMemo(() => {
+    const i = dates.findIndex((date, k) => now >= date.getTime() && now < date.getTime() + steps[k] * 3600000);
+    if (i < 0 || statics.markerTop == null || statics.markerBottom == null) return null;
+    const fraction = (now - dates[i].getTime()) / (steps[i] * 3600000);
+    const x = i * CELL_W + fraction * CELL_W;
+    return {
+      x,
+      el: (
+        <Line key="current-time" p1={vec(x, 0)} p2={vec(x, statics.markerBottom)}
+          color="rgba(255,59,48,0.5)" strokeWidth={1}>
+          <DashPathEffect intervals={[5, 4]} />
+        </Line>
+      ),
+    };
+  }, [now, dates, steps, statics]);
+  // The marker spliced into the tile(s) it crosses, at the z-position the slice reserved for it
+  // (over the area fills, under the row content). Unaffected tiles keep their slice's array
+  // identity, so CanvasTile's memo holds for them.
+  const tileEls = useMemo(() => slices.map((slice, k) => {
+    if (marker == null) return slice.els;
+    const tile = tiles[k];
+    if (marker.x < tile.offset - 1 || marker.x > tile.offset + tile.width + 1) return slice.els;
+    const els = slice.els.slice();
+    els.splice(slice.markerIndex, 0, marker.el);
+    return els;
+  }), [slices, marker, tiles]);
   // Walked rather than measured from the bottom: the model row closes the weather rows, and the
   // air-quality block sits below it when the request asked for any of it.
   // Every dominant-pollutant row in this block: where it sits and the runs it labels. Walked
@@ -2564,9 +2708,9 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     const x = tileOffset + locationX;
     onSelectColumn(blockIndex, Math.min(periods.length - 1, Math.floor(x / CELL_W)));
   }, [onSelectColumn, blockIndex, periods.length]);
-  const renderTile = useCallback(({ item: tile }: { item: Tile }) => (
-    <CanvasTile tile={tile} els={els} totalH={totalH} paint={paint} onPress={onPressTile} />
-  ), [els, totalH, paint, onPressTile]);
+  const renderTile = useCallback(({ item: tile, index }: { item: Tile; index: number }) => (
+    <CanvasTile tile={tile} els={tileEls[index]} totalH={totalH} paint={paint} onPress={onPressTile} />
+  ), [tileEls, totalH, paint, onPressTile]);
 
   // The selection overlay tracks the scroll on the native driver, but only the scroll: which column
   // it sits on is a discrete jump, so it rides a static `left` that commits with everything else
@@ -2604,11 +2748,14 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
         keyExtractor={(tile) => String(tile.offset)}
         // The paint epoch lives outside `data`, so tell the list its cells are stale when it moves.
         extraData={paint}
-        // Render more tiles ahead of the viewport so a Skia tile mounts (an expensive full-scene
-        // paint) before it scrolls into view rather than as it appears — reduces scroll hitching.
-        initialNumToRender={2}
-        maxToRenderPerBatch={3}
-        windowSize={5}
+        // Render tiles ahead of the viewport so one mounts before it scrolls into view rather
+        // than as it appears. A tile mounts only its own slice of the scene (see buildScene), so
+        // the render window can afford to run a tile or two further past the screen than it used
+        // to — but not much further: every mounted tile holds a full-height Metal drawable, and
+        // that is a memory cost the slicing didn't change.
+        initialNumToRender={3}
+        maxToRenderPerBatch={4}
+        windowSize={7}
         // Never let the ScrollView natively detach canvas tiles: a Skia Canvas repaints only on
         // React commits, so a reattached tile keeps its released (blank) Metal drawable.
         // Virtualization via windowSize still unmounts far-off tiles for memory.
