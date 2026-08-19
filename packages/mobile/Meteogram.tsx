@@ -15,13 +15,37 @@ import {
   resampleColumn, pressureToMeters,
   BAND_TOP_HPA, BAND_BOTTOM_HPA, GRID_ROWS,
 } from './cloudBand';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { precipMark, weatherGlyph, wmoName, type MoonPhase, type Prim } from './weatherGlyph';
 
 // ── Layout constants ───────────────────────────────────────────────────────
-// The row-label column lives inside the drawing and scrolls horizontally with the
-// data. Units are folded into the labels.
+// Rows are named by a narrow unit rail fixed to the left of the drawing (RowLegend). It sits
+// BESIDE the scrolling canvas rather than over it — the scene's own content starts at column 0 —
+// so no data column is ever hidden behind it at any scroll offset. The rail is also the only
+// thing naming a row once the forecast is scrolled past its first day, which is what the label
+// column it replaces could not do: that column lived inside the drawing and scrolled away with
+// the data.
 
-const NAME_W = 96;
+const LEGEND_W = 44;
+// Line box for one rail token, and for one cloud-band altitude label. Both are centered by
+// placing this box on the row's midline rather than by stretching lineHeight to the row height:
+// where a tall line box puts its glyphs is a platform question, and the rail's rows run from 26px
+// to 220px. The level box is the tighter of the two because the band's levels are 24px apart at
+// their closest (925 → 1000 hPa over ROW_H.CLOUD_BAND).
+const LEGEND_LINE_H = 13;
+const LEGEND_LEVEL_H = 11;
+// Rail symbols, and the line box they occupy when stacked over a unit.
+const LEGEND_ICON_SIZE = 13;
+const LEGEND_ICON_H = 14;
+// The precip row's pair of marks — the SAME drop and flake the overview strip stamps across its
+// wet stretches (precipMark), so the rail names that row with the shapes the reader already
+// learned there rather than with a second set that means the same thing. Drawn in one ink: these
+// say the row carries rain and snow, not how much of either. The drop is narrow (DROP_ASPECT) and
+// the flake is as wide as it is tall, so the two centers are not symmetric about the rail's
+// middle — the pair is what's centered, not each mark.
+const LEGEND_MARK_H = 12;
+const LEGEND_MARK_RAIN_CX = 14;
+const LEGEND_MARK_SNOW_CX = 27;
 const CELL_W = 38;
 // The weather glyphs have fixed natural geometry, extending up to ±26.5px around their center
 // (widest: partly-cloudy and shower codes). They are shrunk into their column by this factor;
@@ -35,6 +59,16 @@ const GLYPH_NATURAL_W = 56;
 // narrow and let FlatList virtualize the off-screen tiles. Wider tiles mean fewer seams
 // to paint mid-scroll (smoother) while staying well under the texture limit (16×38×3px).
 const CANVAS_TILE_W = CELL_W * 16;
+
+// Where the temperature numbers sit inside their row, measured from its top. They ride high
+// rather than centered: the row is tall because the temperature area sweeps through it, and the
+// curve needs the space under the digits. The rail reads this too, so "°F" lines up with the
+// numbers it names instead of floating a dozen pixels below them.
+const TEMP_VALUE_Y = 14;
+
+// Where the hour labels sit in the header block, from the top of the drawing. The rail puts its
+// clock on this line, so the symbol reads as naming that row of times.
+const HOUR_LABEL_Y = 44;
 
 const ROW_H = {
   DATE: 58,
@@ -774,7 +808,15 @@ type RowKind =
 interface Row {
   kind: RowKind;
   height: number;
+  // Section bands only — the one row kind that still carries prose, drawn across the full width.
   label: string;
+  // The WORD the fixed rail writes against this row: the unit where the unit identifies the row,
+  // and a short name where it doesn't — two rows both reading "mph" (wind and gust) or five all
+  // reading "AQI" would name nothing. Empty where the row's own content already says what it is
+  // (the weather glyphs, the dominant-pollutant bracket), where a symbol says it instead
+  // (LEGEND_ICONS), and on the cloud band, which gets an altitude ladder rather than a single
+  // entry.
+  legend: string;
 }
 
 // The cloud-cover rows and the field each one reads. Shared by the scene, which shades the cells,
@@ -799,13 +841,13 @@ const AQ_KEYS = {
   'aqi': { field: 'aqi', label: 'AQI', scale: 'us' },
   'aqi-pm25': { field: 'aqi_pm25', label: 'PM2.5', scale: 'us' },
   'aqi-pm10': { field: 'aqi_pm10', label: 'PM10', scale: 'us' },
-  'aqi-o3': { field: 'aqi_o3', label: 'Ozone', scale: 'us' },
+  'aqi-o3': { field: 'aqi_o3', label: 'O₃', scale: 'us' },
   'aqi-no2': { field: 'aqi_no2', label: 'NO₂', scale: 'us' },
   'aqi-so2': { field: 'aqi_so2', label: 'SO₂', scale: 'us' },
   'aqi-eu': { field: 'aqi_eu', label: 'AQI', scale: 'eu' },
   'aqi-eu-pm25': { field: 'aqi_eu_pm25', label: 'PM2.5', scale: 'eu' },
   'aqi-eu-pm10': { field: 'aqi_eu_pm10', label: 'PM10', scale: 'eu' },
-  'aqi-eu-o3': { field: 'aqi_eu_o3', label: 'Ozone', scale: 'eu' },
+  'aqi-eu-o3': { field: 'aqi_eu_o3', label: 'O₃', scale: 'eu' },
   'aqi-eu-no2': { field: 'aqi_eu_no2', label: 'NO₂', scale: 'eu' },
   'aqi-eu-so2': { field: 'aqi_eu_so2', label: 'SO₂', scale: 'eu' },
 } as const satisfies Record<string, { field: keyof Period; label: string; scale: 'us' | 'eu' }>;
@@ -833,7 +875,7 @@ const AQ_DOMINANT_FOR: Partial<Record<AqKind, AqDominantKind>> = {
 // The wire carries a position in the scale's constituent list (AQ_DOMINANT_US/_EU in the
 // protocol); these are the same pollutants written the way the rows above them are labelled.
 const POLLUTANT_LABEL: Record<string, string> = {
-  'pm2.5': 'PM2.5', ozone: 'Ozone', pm10: 'PM10', no2: 'NO₂', so2: 'SO₂', co: 'CO',
+  'pm2.5': 'PM2.5', ozone: 'O₃', pm10: 'PM10', no2: 'NO₂', so2: 'SO₂', co: 'CO',
 };
 const pollutantName = (scale: 'us' | 'eu', idx: number | undefined): string | undefined => {
   const ids = scale === 'us' ? AQ_DOMINANT_US : AQ_DOMINANT_EU;
@@ -845,8 +887,12 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
   const rows: Row[] = [];
   const has = (fn: (p: Period) => unknown) => periods.some((p) => fn(p) != null);
   const tU = tempUnit(u), frU = freezeUnit(u), wU = windUnit(u);
+  // The accumulation area is plotted in LIQUID EQUIVALENT — snow enters it at 10:1 — so this is
+  // the unit of the graph, not of every number on it. The cells print their own suffix (IN, MM,
+  // CM) precisely because rain and snow don't share one in metric.
+  const accU = u === 'imperial' ? 'in' : 'mm';
 
-  rows.push({ kind: 'clouds', height: ROW_H.CLOUD, label: '' });
+  rows.push({ kind: 'clouds', height: ROW_H.CLOUD, label: '', legend: '' });
 
   const hasSurface =
     has((p) => p.precip) || has((p) => p.temp_c) ||
@@ -854,12 +900,15 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
     has((p) => p.wind_sfc_kph) || has((p) => p.wind_gust_kph);
   if (hasSurface) {
     if (has((p) => p.temp_c))
-      rows.push({ kind: 'temp', height: ROW_H.TEMP, label: `Temp ${tU}` });
+      rows.push({ kind: 'temp', height: ROW_H.TEMP, label: '', legend: tU });
     if (has((p) => p.precip) || has((p) => p.snow_cm) || has((p) => p.rain_mm))
-      rows.push({ kind: 'accumulation', height: ROW_H.SNOW, label: 'Precip' });
-    if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.WIND, label: `Wind ${wU}` });
-    if (has((p) => p.wind_gust_kph)) rows.push({ kind: 'wind-gust', height: ROW_H.WIND, label: `Gust ${wU}` });
-    if (has((p) => p.wind_sfc_dir)) rows.push({ kind: 'wind-dir', height: ROW_H.DIR, label: 'Dir' });
+      rows.push({ kind: 'accumulation', height: ROW_H.SNOW, label: '', legend: accU });
+    // The gust row inherits the wind row's unit from the row directly above it and spends its
+    // token naming itself instead — "mph" twice running says which scale, but not which row.
+    if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.WIND, label: '', legend: wU });
+    if (has((p) => p.wind_gust_kph)) rows.push({ kind: 'wind-gust', height: ROW_H.WIND, label: '', legend: 'gust' });
+    // No word: the rail draws a windsock here (LEGEND_ICONS).
+    if (has((p) => p.wind_sfc_dir)) rows.push({ kind: 'wind-dir', height: ROW_H.DIR, label: '', legend: '' });
   }
 
   // Which model the numbers came from. Unconditional: unlike every other row this one isn't read
@@ -872,36 +921,39 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
   // Freezing level, cloud cover and the pressure levels all come from this same center, so a band
   // above them attributes them correctly; air quality does not, and is the one block that has to
   // say so for itself.
-  rows.push({ kind: 'model', height: ROW_H.MODEL, label: 'Model' });
+  rows.push({ kind: 'model', height: ROW_H.MODEL, label: '', legend: 'model' });
 
-  // Freezing level is an altitude, not a surface reading — it heads the upper-air sections with
-  // its unit in the header, so the single row below it needs no label of its own.
+  // Freezing level is an altitude, not a surface reading, so it heads a section of its own. The
+  // unit rides in the rail with the row rather than in this header.
   if (has((p) => p.freeze_m)) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Freezing level (${frU})` });
-    rows.push({ kind: 'freeze', height: ROW_H.FREEZE, label: '' });
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Freezing level', legend: '' });
+    rows.push({ kind: 'freeze', height: ROW_H.FREEZE, label: '', legend: frU });
   }
 
   // The Windy-style vertical cloud band — v3 messages carry it in place of the low/mid/high
-  // trio below, so exactly one of these two cloud blocks renders for any given message.
+  // trio below, so exactly one of these two cloud blocks renders for any given message. Its axis
+  // is the ladder of wire levels the rail draws, so the header names the unit that ladder is in.
   if (has((p) => p.cloud_band)) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Clouds by altitude (${frU} · hPa)` });
-    rows.push({ kind: 'cloud-band', height: ROW_H.CLOUD_BAND, label: '' });
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Clouds by altitude (${frU})`, legend: '' });
+    rows.push({ kind: 'cloud-band', height: ROW_H.CLOUD_BAND, label: '', legend: '' });
   }
 
   const hasCloud = has((p) => p.cloud_high) || has((p) => p.cloud_mid) || has((p) => p.cloud_low);
   if (hasCloud) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Cloud cover' });
-    if (has((p) => p.cloud_high)) rows.push({ kind: 'cloud-high', height: ROW_H.DATA, label: 'High' });
-    if (has((p) => p.cloud_mid)) rows.push({ kind: 'cloud-mid', height: ROW_H.DATA, label: 'Mid' });
-    if (has((p) => p.cloud_low)) rows.push({ kind: 'cloud-low', height: ROW_H.DATA, label: 'Low' });
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Cloud cover', legend: '' });
+    if (has((p) => p.cloud_high)) rows.push({ kind: 'cloud-high', height: ROW_H.DATA, label: '', legend: 'high' });
+    if (has((p) => p.cloud_mid)) rows.push({ kind: 'cloud-mid', height: ROW_H.DATA, label: '', legend: 'mid' });
+    if (has((p) => p.cloud_low)) rows.push({ kind: 'cloud-low', height: ROW_H.DATA, label: '', legend: 'low' });
   }
 
+  // Three rows on one scale: the header carries the unit once and each row's rail token is the
+  // pressure level that distinguishes it.
   const hasUpper = has((p) => p.wind_500_kph) || has((p) => p.wind_600_kph) || has((p) => p.wind_700_kph);
   if (hasUpper) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Pressure level winds (${wU})` });
-    if (has((p) => p.wind_500_kph)) rows.push({ kind: 'wind-500', height: ROW_H.WIND_UPPER, label: pressureLabel(500) });
-    if (has((p) => p.wind_600_kph)) rows.push({ kind: 'wind-600', height: ROW_H.WIND_UPPER, label: pressureLabel(600) });
-    if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.WIND_UPPER, label: pressureLabel(700) });
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Pressure level winds (${wU})`, legend: '' });
+    if (has((p) => p.wind_500_kph)) rows.push({ kind: 'wind-500', height: ROW_H.WIND_UPPER, label: '', legend: '500' });
+    if (has((p) => p.wind_600_kph)) rows.push({ kind: 'wind-600', height: ROW_H.WIND_UPPER, label: '', legend: '600' });
+    if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.WIND_UPPER, label: '', legend: '700' });
   }
 
   // Air quality, below the model line and carrying its own attribution in its header: the CAMS
@@ -920,14 +972,18 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
       kind: 'section',
       height: ROW_H.SECTION,
       label: `Air quality (${camsDomain(lat, lon)}, ${AQ_SCALE_WORD[scale]} scale)`,
+      legend: '',
     });
     for (const kind of scaleRows) {
-      rows.push({ kind, height: ROW_H.WIND, label: AQ_KEYS[kind].label });
+      // Every one of these rows is in index points, so the rail names the pollutant instead —
+      // the unit is the one thing they all share.
+      rows.push({ kind, height: ROW_H.WIND, label: '', legend: AQ_KEYS[kind].label });
       // A headline brings its dominant-pollutant row with it — it rides the same request bit,
-      // so if the headline has values this does too.
+      // so if the headline has values this does too. Its rail token is empty: the row is a
+      // caption on the headline above it and writes the pollutant's name into its own bracket.
       const dom = AQ_DOMINANT_FOR[kind];
       if (dom && has((p) => p[AQ_DOMINANT_KEYS[dom].field] as unknown))
-        rows.push({ kind: dom, height: ROW_H.WIND, label: 'Pollutant' });
+        rows.push({ kind: dom, height: ROW_H.WIND, label: '', legend: '' });
     }
   }
 
@@ -980,7 +1036,7 @@ function fitModelLabel(spec: ModelSpec | null, available: number, font: SkFont):
 function baseline(cy: number, size: number) { return cy + size * 0.35; }
 
 interface Fonts {
-  label: SkFont; sub: SkFont; data: SkFont; small: SkFont; date: SkFont;
+  data: SkFont; small: SkFont; date: SkFont;
   hour: SkFont; hourSuffix: SkFont;
   // The strip's header text is light-weight — at header size a thin face keeps the day columns
   // legible without competing with the glyphs below them.
@@ -1111,16 +1167,23 @@ type Tile = { offset: number; width: number };
 // position.
 // Memoized for the same reason as CanvasTile: every prop is identity-stable while a selection
 // changes, and an unchecked re-render rebuilds the strip's elements and repaints its canvas.
-const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps, units, now, width, flatListRef, scrollX, fonts, paint }: {
+const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps, units, now, width, viewportW, flatListRef, scrollX, fonts, paint }: {
   // `dates` are absolute instants; `zoned` is the same series on the forecast point's wall clock,
   // for the day columns and their labels.
   periods: Period[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; now: number;
-  width: number; flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value; fonts: Fonts;
+  // Two different widths, and mixing them up puts the viewport window in the wrong place: `width`
+  // is how many pixels the strip DRAWS across (it spans the screen, rail included), `viewportW` is
+  // how much of the meteogram below is visible at once (the screen less the fixed rail). The
+  // window's position and the scrub target are answers about the viewport; everything the strip
+  // paints is in its own pixels.
+  width: number; viewportW: number;
+  flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value; fonts: Fonts;
   // Epoch that remounts the canvas after this tab was hidden — see Meteogram.
   paint: number;
 }) {
   const n = periods.length;
   const W = width;
+  const VW = viewportW;
   const dayGroups = buildDayGroups(zoned);
 
   // Time-linear columns: each period's width is proportional to the hours it spans. Full days come
@@ -1298,8 +1361,8 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
     }
   });
 
-  const contentW = NAME_W + n * CELL_W;
-  const maxOffset = Math.max(0, contentW - W);
+  const contentW = n * CELL_W;
+  const maxOffset = Math.max(0, contentW - VW);
 
   // Scrub: map the touched time position back to a fractional period index, then center the
   // viewport on it.
@@ -1310,7 +1373,7 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
     let i = 0;
     while (i < n - 1 && cum[i + 1] <= hours) i++;
     const t = i + (hours - cum[i]) / steps[i];
-    const offset = Math.max(0, Math.min(maxOffset, NAME_W + t * CELL_W - W / 2));
+    const offset = Math.max(0, Math.min(maxOffset, t * CELL_W - VW / 2));
     flatListRef.current?.scrollToOffset({ offset, animated: false });
   };
   const pan = useMemo(() => PanResponder.create({
@@ -1320,7 +1383,7 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
     onPanResponderGrant: (e) => scrub(e.nativeEvent.locationX),
     onPanResponderMove: (e) => scrub(e.nativeEvent.locationX),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [steps, maxOffset, W]);
+  }), [steps, maxOffset, W, VW]);
 
   // The main canvas scrolls by equal-width period columns while the strip is linear in time, so
   // map BOTH viewport edges through the resolution boundaries — piecewise-linear, on the native
@@ -1330,7 +1393,7 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
   const resBoundaries = [0];
   for (let i = 1; i < n; i++) if (steps[i] !== steps[i - 1]) resBoundaries.push(i);
   resBoundaries.push(n);
-  const inputRange = resBoundaries.map((i) => NAME_W + i * CELL_W);
+  const inputRange = resBoundaries.map((i) => i * CELL_W);
   const outputRange = resBoundaries.map((i) => timeX(cum[i]));
   const stripXOf = (contentX: number) => {
     if (contentX <= inputRange[0]) return outputRange[0];
@@ -1352,11 +1415,11 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
   const knots = new Set([0, maxOffset]);
   for (const x of inputRange) {
     if (x > 0 && x < maxOffset) knots.add(x);
-    if (x - W > 0 && x - W < maxOffset) knots.add(x - W);
+    if (x - VW > 0 && x - VW < maxOffset) knots.add(x - VW);
   }
   const offsets = [...knots].sort((a, b) => a - b);
   const lefts = offsets.map((o) => stripXOf(o));
-  const rights = offsets.map((o) => stripXOf(o + W));
+  const rights = offsets.map((o) => stripXOf(o + VW));
   const interp = (values: number[]) =>
     scrollX.interpolate({ inputRange: offsets, outputRange: values, extrapolate: 'clamp' });
   const win = maxOffset > 0
@@ -1514,12 +1577,11 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
   modelBands: ModelSegment[];
 }): ReactNode[] {
   const n = periods.length;
-  const width = NAME_W + n * CELL_W;
+  const width = n * CELL_W;
   const totalH = ROW_H.DATE + rows.reduce((s, r) => s + r.height, 0);
-  const colLeft = (i: number) => NAME_W + i * CELL_W;
-  const colCenter = (i: number) => NAME_W + i * CELL_W + CELL_W / 2;
+  const colLeft = (i: number) => i * CELL_W;
+  const colCenter = (i: number) => i * CELL_W + CELL_W / 2;
   const els: ReactNode[] = [];
-  els.push(<Rect key="key-column-bg" x={0} y={0} width={NAME_W} height={totalH} color={C.keyBg} />);
 
   // 1. Location-aware astronomical night shading. Partial rectangles place sunrise and sunset
   // within a column rather than rounding them to the forecast period boundary. The shading stops
@@ -1554,9 +1616,9 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
   // 2. Date header. Hours occupy their own row. Each day label sticks to the visible left
   // edge while its columns are being scrolled, then yields to the following day.
   zoned.forEach((d, i) => {
-    els.push(centerHour(`hour${i}`, hourParts(d, steps[i], timeFormat), colCenter(i), 44, fonts.hour, fonts.hourSuffix, C.hour));
+    els.push(centerHour(`hour${i}`, hourParts(d, steps[i], timeFormat), colCenter(i), HOUR_LABEL_Y, fonts.hour, fonts.hourSuffix, C.hour));
   });
-  els.push(<Line key="date-row-rule" p1={vec(NAME_W, 31)} p2={vec(width, 31)} color={C.grid} strokeWidth={1} />);
+  els.push(<Line key="date-row-rule" p1={vec(0, 31)} p2={vec(width, 31)} color={C.grid} strokeWidth={1} />);
 
   // Temperature domain across all periods.
   const temps: number[] = [];
@@ -1727,15 +1789,13 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
     const mid = top + row.height / 2;
     y += row.height;
 
+    // Section bands paint their ground here and are LABELLED outside the scene: the header names
+    // the block every row under it belongs to, and a band that scrolled its own name away would
+    // leave a bare gray stripe exactly when the reader most needs to know what they are looking
+    // at. See SectionLabels.
     if (row.kind === 'section') {
       els.push(<Rect key={`sec-bg${ri}`} x={0} y={top} width={width} height={row.height} color={C.section} />);
-      els.push(<Text key={`sec-l${ri}`} x={12} y={baseline(mid, fonts.sub.getSize())} text={row.label.toUpperCase()} font={fonts.sub} color={C.sectionText} />);
       return;
-    }
-
-    // Row label (left column, scrolls with data).
-    if (row.label) {
-      els.push(<Text key={`lbl${ri}`} x={12} y={baseline(mid, fonts.label.getSize())} text={row.label} font={fonts.label} color={C.label} />);
     }
 
     switch (row.kind) {
@@ -1763,7 +1823,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         periods.forEach((p, i) => {
           const cx = colCenter(i);
           if (p.temp_c != null) {
-            els.push(centerText(`th${i}`, fmtTemp(p.temp_c, units), cx, top + 14, fonts.data, '#1c1c1e'));
+            els.push(centerText(`th${i}`, fmtTemp(p.temp_c, units), cx, top + TEMP_VALUE_Y, fonts.data, '#1c1c1e'));
           }
         });
         break;
@@ -1887,25 +1947,20 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
             color={rgb(CLOUD_BAND_INK, alpha)} />);
         }
 
-        // One gridline per wire level — the axis lists exactly what the message carries.
-        // Labels pair the level's standard-atmosphere altitude (the header names the unit)
-        // with its pressure; the transmitted coordinate is pressure, altitude is the
-        // translation a reader in the mountains actually thinks in.
+        // One gridline per wire level — the axis lists exactly what the message carries. The
+        // altitudes those lines stand for are written in the fixed rail (see RowLegend), not
+        // here: they are the scale of a 220px plot, and drawn into the scene they scrolled off
+        // with the first day.
         for (const hpa of CLOUD_BAND_LEVELS_HPA) {
-          const gy = yOfHpa(hpa);
-          // 300 and 1000 hPa coincide with the row's own edges — label them, skip the line.
-          if (hpa !== BAND_TOP_HPA && hpa !== BAND_BOTTOM_HPA) {
-            els.push(
-              <Line key={`cbg${ri}-${hpa}`} p1={vec(NAME_W, gy)} p2={vec(width, gy)}
-                color={C.grid} strokeWidth={1}>
-                <DashPathEffect intervals={[3, 4]} />
-              </Line>,
-            );
-          }
-          const ty = Math.min(Math.max(gy, top + 7), top + row.height - 7);
-          els.push(<Text key={`cbgl${ri}-${hpa}`} x={12} y={baseline(ty, fonts.small.getSize())}
-            text={`${fmtFreeze(pressureToMeters(hpa), units)} · ${hpa}`}
-            font={fonts.small} color={C.label} />);
+          // 300 and 1000 hPa coincide with the row's own edges — the rail labels them, and a
+          // line on the edge would only redraw the row boundary.
+          if (hpa === BAND_TOP_HPA || hpa === BAND_BOTTOM_HPA) continue;
+          els.push(
+            <Line key={`cbg${ri}-${hpa}`} p1={vec(0, yOfHpa(hpa))} p2={vec(width, yOfHpa(hpa))}
+              color={C.grid} strokeWidth={1}>
+              <DashPathEffect intervals={[3, 4]} />
+            </Line>,
+          );
         }
         break;
       }
@@ -2119,6 +2174,168 @@ const CanvasTile = memo(function CanvasTile({ tile, els, totalH, paint, onPress 
   );
 });
 
+// ── Fixed left rail ────────────────────────────────────────────────────────
+
+// Rows whose rail entry is (or includes) a symbol rather than a word. Monochrome, in the rail's
+// own ink: these say what a row IS, and a second color here would read as a value — every color
+// elsewhere in the drawing encodes one.
+//
+// Direction gets a windsock and no word: the row is a line of arrows, and "dir" spelled out named
+// something the arrows already say. The precip row's marks are not here — they come from
+// precipMark, so that they are the strip's own drop and flake (see LEGEND_MARK_H).
+const LEGEND_ICONS: Partial<Record<RowKind, (keyof typeof MaterialCommunityIcons.glyphMap)[]>> = {
+  'wind-dir': ['windsock'],
+};
+
+// The rail's own ink, for the marks. `ground` only matters to the mixed mark, which the rail
+// doesn't draw — the rail's two marks are a drop and a flake side by side, not one combined
+// symbol, because they name two things the row carries rather than one period holding both.
+const LEGEND_MARK_COLORS = { rain: C.unit, snow: C.unit, ground: '#ffffff' };
+
+// Where a row's own content sits, as an offset from the row's top — what the rail lines its entry
+// up with. Everything is centered in its row except the temperature (see TEMP_VALUE_Y).
+function legendCy(row: Row): number {
+  return row.kind === 'temp' ? TEMP_VALUE_Y : row.height / 2;
+}
+
+// One rung of the cloud band's altitude axis. Written in thousands all the way down, so the
+// ladder reads as one scale — and so its lowest rung can't be taken for one of the 500 / 600 /
+// 700 hPa tokens the pressure-level wind rows carry a few rows below it. fmtFreeze drops the "k"
+// under 1000 ft, which is right for a number sitting in a column cell and wrong for one sitting
+// in a column of eight. Metric needs none of this: its rungs are 9200 down to 100 m, nowhere
+// near the pressure levels.
+function ladderLabel(hpa: number, units: Units): string {
+  const text = fmtFreeze(pressureToMeters(hpa), units);
+  if (units !== 'imperial' || text.endsWith('k')) return text;
+  const feet = Number(text);
+  return feet > 0 ? `${(feet / 1000).toFixed(1)}k` : text;
+}
+
+/**
+ * The unit rail: what each row is, written once and never scrolled away.
+ *
+ * It is laid out by walking the same row heights the scene walks, so an entry sits on its row by
+ * construction rather than by a second set of coordinates that could drift from the drawing's.
+ * Text and icons are RN views — nothing here moves, and a canvas per row would be a surface to
+ * repaint on every commit that reaches this block. The one exception is the precip marks, which
+ * are Skia because they are the strip's own geometry (precipMark) rather than a font glyph.
+ *
+ * Section bands carry their ground across the rail so a header reads as one strip rather than as
+ * a label with a notch cut in front of it.
+ */
+const RowLegend = memo(function RowLegend({ rows, units, paint }: {
+  rows: Row[]; units: Units;
+  // Epoch that remounts the marks canvas after this tab was hidden — see Meteogram.
+  paint: number;
+}) {
+  const els: ReactNode[] = [];
+  // The hour row, which sits in the header above every data row and so is walked separately.
+  els.push(
+    <MaterialCommunityIcons key="clock" name="clock-outline" size={LEGEND_ICON_SIZE} color={C.unit}
+      style={[styles.legendClock, { top: HOUR_LABEL_Y - LEGEND_ICON_H / 2 }]} />,
+  );
+  let y = ROW_H.DATE;
+  rows.forEach((row, ri) => {
+    const top = y;
+    y += row.height;
+
+    if (row.kind === 'section') {
+      els.push(<View key={`sec${ri}`} style={[styles.legendSection, { top, height: row.height }]} />);
+      return;
+    }
+
+    // The cloud band's axis: one altitude per wire level, on the same pressure-linear mapping the
+    // scene draws its gridlines with. Altitude rather than the transmitted pressure — a reader in
+    // the mountains thinks in feet, and the pair ("14k · 600") doesn't fit a 44px rail. The
+    // section header names the unit, and the detail panel gives both.
+    if (row.kind === 'cloud-band') {
+      for (const hpa of CLOUD_BAND_LEVELS_HPA) {
+        const gy = top + ((hpa - BAND_TOP_HPA) / (BAND_BOTTOM_HPA - BAND_TOP_HPA)) * row.height;
+        // The top and bottom levels sit on the row's own edges; nudge their labels inside it so
+        // the ladder reads against the plot rather than against the row above or below.
+        const ty = Math.min(Math.max(gy - LEGEND_LEVEL_H / 2, top), top + row.height - LEGEND_LEVEL_H);
+        els.push(
+          <RNText key={`cb${ri}-${hpa}`} numberOfLines={1} style={[styles.legendLevel, { top: ty }]}>
+            {ladderLabel(hpa, units)}
+          </RNText>,
+        );
+      }
+      return;
+    }
+
+    // Symbols over the unit, as one stack centered on whatever the row's own content lines up
+    // with. A row can have either half or both.
+    const icons = LEGEND_ICONS[row.kind];
+    const marks = row.kind === 'accumulation';
+    const iconH = icons || marks ? LEGEND_ICON_H : 0;
+    const textH = row.legend ? LEGEND_LINE_H : 0;
+    if (!iconH && !textH) return;
+    const stackTop = top + legendCy(row) - (iconH + textH) / 2;
+
+    if (marks) {
+      els.push(
+        <Canvas key={`m${ri}-${paint}`} style={[styles.legendMarks, { top: stackTop }]}>
+          {([['rain', LEGEND_MARK_RAIN_CX], ['snow', LEGEND_MARK_SNOW_CX]] as const).flatMap(
+            ([kind, cx]) => precipMark(kind, cx, LEGEND_ICON_H / 2, LEGEND_MARK_H, LEGEND_MARK_COLORS)
+              .map((prim, i) => glyphPrimitive(`lm${ri}-${kind}-${i}`, prim, false)),
+          )}
+        </Canvas>,
+      );
+    } else if (icons) {
+      els.push(
+        <View key={`i${ri}`} style={[styles.legendIcons, { top: stackTop, height: LEGEND_ICON_H }]}>
+          {icons.map((name) => (
+            <MaterialCommunityIcons key={name} name={name} size={LEGEND_ICON_SIZE} color={C.unit} />
+          ))}
+        </View>,
+      );
+    }
+    if (row.legend) {
+      els.push(
+        <RNText key={`u${ri}`} numberOfLines={1}
+          style={[styles.legendUnit, { top: stackTop + iconH }]}>
+          {row.legend}
+        </RNText>,
+      );
+    }
+  });
+  return <View pointerEvents="none" style={styles.legend}>{els}</View>;
+});
+
+// Section headers, pinned rather than drawn into the scrolling scene. They span the full width of
+// the block — rail included — because the band they sit on does.
+const SectionLabels = memo(function SectionLabels({ rows }: { rows: Row[] }) {
+  const els: ReactNode[] = [];
+  let y = ROW_H.DATE;
+  rows.forEach((row, ri) => {
+    const top = y;
+    y += row.height;
+    if (row.kind !== 'section' || !row.label) return;
+    els.push(
+      <RNText key={ri} numberOfLines={1}
+        style={[styles.sectionLabel, { top: top + (row.height - LEGEND_LINE_H) / 2 }]}>
+        {row.label.toUpperCase()}
+      </RNText>,
+    );
+  });
+  return <View pointerEvents="none" style={styles.sectionOverlay}>{els}</View>;
+});
+
+// Animated.interpolate wants an input range that never goes backwards, and the sticky-label ranges
+// below collapse two of their knots for anything anchored at content x=0 — the first day of the
+// forecast, the first model band — now that the scene's columns start there. Drop the knots that
+// don't advance; what's left describes the same piecewise line.
+function monotonicRange(knots: [input: number, output: number][]): { inputRange: number[]; outputRange: number[] } {
+  const inputRange: number[] = [];
+  const outputRange: number[] = [];
+  for (const [input, output] of knots) {
+    if (inputRange.length && input <= inputRange[inputRange.length - 1]) continue;
+    inputRange.push(input);
+    outputRange.push(output);
+  }
+  return { inputRange, outputRange };
+}
+
 function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
@@ -2133,8 +2350,11 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<Tile>>(null);
   const screenW = useWindowDimensions().width;
+  // How much of the forecast is on screen at once: the rail is beside the scroll view, not over
+  // it, so it comes off the viewport rather than merely covering part of it.
+  const viewportW = screenW - LEGEND_W;
   const n = periods.length;
-  const width = NAME_W + n * CELL_W;
+  const width = n * CELL_W;
   const totalH = ROW_H.DATE + rows.reduce((s, r) => s + r.height, 0);
   // Memoized so tile objects keep their identity across re-renders: CanvasTile bails out by
   // reference equality, and a fresh array would repaint every mounted tile on each selection.
@@ -2142,7 +2362,7 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     const offset = index * CANVAS_TILE_W;
     return { offset, width: Math.min(CANVAS_TILE_W, width - offset) };
   }), [width]);
-  const colLeft = (i: number) => NAME_W + i * CELL_W;
+  const colLeft = (i: number) => i * CELL_W;
 
   const dayGroups = useMemo(() => buildDayGroups(zoned), [zoned]);
   // Held apart from the scene because the labels are drawn outside it, and memoized for the same
@@ -2196,8 +2416,7 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
 
   const onPressTile = useCallback((locationX: number, tileOffset: number) => {
     const x = tileOffset + locationX;
-    if (x < NAME_W) return; // row-label gutter
-    onSelectColumn(blockIndex, Math.min(periods.length - 1, Math.floor((x - NAME_W) / CELL_W)));
+    onSelectColumn(blockIndex, Math.min(periods.length - 1, Math.floor(x / CELL_W)));
   }, [onSelectColumn, blockIndex, periods.length]);
   const renderTile = useCallback(({ item: tile }: { item: Tile }) => (
     <CanvasTile tile={tile} els={els} totalH={totalH} paint={paint} onPress={onPressTile} />
@@ -2212,13 +2431,20 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   // never re-attached: a fresh node per selection doesn't recompute until the next scroll event,
   // which would strand the overlay off-screen-left until the user nudged the list.
   const scrollShift = useRef(Animated.multiply(scrollX, -1)).current;
-  const selectedLeft = selected != null ? NAME_W + selected * CELL_W : 0;
+  const selectedLeft = selected != null ? selected * CELL_W : 0;
 
   return (
     <View>
+      {/* The strip spans the whole screen, rail and all: it is a map of the forecast rather than
+          a row of it, and insetting it would spend 44px of an already coarse graph on nothing.
+          What it does share with the rows below is the viewport those rows are read through. */}
       <OverviewStrip periods={periods} dates={dates} zoned={zoned} steps={steps} units={units} now={now}
-        width={screenW} flatListRef={flatListRef} scrollX={scrollX} fonts={fonts} paint={paint} />
+        width={screenW} viewportW={viewportW} flatListRef={flatListRef} scrollX={scrollX} fonts={fonts} paint={paint} />
       <View style={{ height: totalH }}>
+      {/* Everything that scrolls, inset past the rail. The overlays inside here are positioned in
+          viewport coordinates and ride the scroll; the rail and the section labels are siblings
+          of this view, in the block's own coordinates, and never move. */}
+      <View style={{ height: totalH, marginLeft: LEGEND_W }}>
       <Animated.FlatList
         ref={flatListRef}
         data={tiles}
@@ -2290,12 +2516,14 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
           const label = fitDayLabel(group.date, end - start - 20, fonts.date);
           const textWidth = fonts.date.getTextWidth(label);
           const stickyEnd = end - textWidth - 20;
-          const translateX = stickyEnd > start
-            ? scrollX.interpolate({
-                inputRange: [0, start, stickyEnd, width],
-                outputRange: [start + 10, 10, 10, end - textWidth - 10 - width],
-                extrapolate: 'extend',
-              })
+          const range = monotonicRange([
+            [0, start + 10],
+            [start, 10],
+            [stickyEnd, 10],
+            [width, end - textWidth - 10 - width],
+          ]);
+          const translateX = stickyEnd > start && range.inputRange.length >= 2
+            ? scrollX.interpolate({ ...range, extrapolate: 'extend' })
             : Animated.subtract(start + 10, scrollX);
           return (
             <Animated.Text
@@ -2322,12 +2550,14 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
           // the band's right edge, which is where the pinned line and the parked one meet — the
           // label then holds one pad inside the seam for the rest of the scroll.
           const stickyEnd = end - textWidth - 16;
-          const translateX = stickyEnd > start
-            ? scrollX.interpolate({
-                inputRange: [0, start, stickyEnd, width],
-                outputRange: [start + 8, 8, 8, end - textWidth - 8 - width],
-                extrapolate: 'extend',
-              })
+          const range = monotonicRange([
+            [0, start + 8],
+            [start, 8],
+            [stickyEnd, 8],
+            [width, end - textWidth - 8 - width],
+          ]);
+          const translateX = stickyEnd > start && range.inputRange.length >= 2
+            ? scrollX.interpolate({ ...range, extrapolate: 'extend' })
             : Animated.subtract(start + 8, scrollX);
           return (
             <Animated.Text
@@ -2372,27 +2602,27 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
             // middle of the band once the whole thing fits. Clamped to the run so a sliver at the
             // edge of the screen can't push the name out over the run next door.
             //
-            // NOTE `screenW`, not `width` — in this scope `width` is the CONTENT width
-            // (NAME_W + n · CELL_W), which is several screens across. The sticky day and model
-            // labels use it only as a far extrapolation anchor, where any value past the pin
-            // gives the slope they want; here it is the viewport that defines "visible", and
-            // using the content width instead puts the label off the right of the screen.
+            // NOTE `viewportW`, not `width` — in this scope `width` is the CONTENT width
+            // (n · CELL_W), which is several screens across. The sticky day and model labels use
+            // it only as a far extrapolation anchor, where any value past the pin gives the slope
+            // they want; here it is the viewport that defines "visible", and using the content
+            // width instead puts the label off the right of the screen.
             const labelX = (sx: number) => {
               const l = Math.max(start - sx, 0);
-              const r = Math.min(end - sx, screenW);
+              const r = Math.min(end - sx, viewportW);
               const c = (l + r) / 2 - textWidth / 2;
               return Math.min(Math.max(c, start - sx), end - sx - textWidth);
             };
             // The function is piecewise linear; these are its knees, so sampling exactly here
             // reproduces it rather than approximating it. Outer anchors extend the end slopes.
             const knees = [
-              start - screenW + textWidth,
-              Math.min(start, end - screenW),
-              Math.max(start, end - screenW),
+              start - viewportW + textWidth,
+              Math.min(start, end - viewportW),
+              Math.max(start, end - viewportW),
               end - textWidth,
             ];
             const inputRange: number[] = [];
-            for (const v of [knees[0] - screenW, ...knees, knees[3] + screenW])
+            for (const v of [knees[0] - viewportW, ...knees, knees[3] + viewportW])
               if (!inputRange.length || v > inputRange[inputRange.length - 1] + 0.01)
                 inputRange.push(v);
             const translateX = inputRange.length >= 2
@@ -2414,6 +2644,9 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
           })}
         </View>
       ))}
+      </View>
+      <RowLegend rows={rows} units={units} paint={paint} />
+      <SectionLabels rows={rows} />
       </View>
     </View>
   );
@@ -2454,8 +2687,6 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
   const selectColumn = useCallback((block: number, period: number) => setSelection({ block, period }), []);
 
   const fonts = useMemo<Fonts>(() => ({
-    label: matchFont({ fontSize: 12, fontWeight: '500' }),
-    sub: matchFont({ fontSize: 10.5, fontWeight: '700' }),
     data: matchFont({ fontSize: 13 }),
     small: matchFont({ fontSize: 10.5, fontWeight: '600' }),
     date: matchFont({ fontSize: 14, fontWeight: '600' }),
@@ -2755,6 +2986,39 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   container: { backgroundColor: '#fff' },
+  // The fixed rail. Opaque and bordered: it is the edge the plot is read from, and the day
+  // dividers and ribbons run right up to it.
+  legend: {
+    position: 'absolute', left: 0, top: 0, bottom: 0, width: LEGEND_W,
+    backgroundColor: '#fff',
+    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: C.divider,
+  },
+  legendSection: { position: 'absolute', left: 0, right: 0, backgroundColor: C.section },
+  legendIcons: {
+    position: 'absolute', left: 0, right: 0,
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center', columnGap: 2,
+  },
+  // Icon fonts carry their own line box, so the clock is placed by its box rather than centered
+  // by a flex row like the pair above.
+  legendClock: { position: 'absolute', left: 0, right: 0, textAlign: 'center' },
+  legendMarks: { position: 'absolute', left: 0, width: LEGEND_W, height: LEGEND_ICON_H },
+  // Centered in the rail: the tokens run from two characters to six, and against the plot edge
+  // the short ones read as a ragged margin rather than as a column.
+  legendUnit: {
+    position: 'absolute', left: 0, right: 0,
+    textAlign: 'center',
+    fontSize: 10, lineHeight: LEGEND_LINE_H, fontWeight: '600', color: C.unit,
+  },
+  legendLevel: {
+    position: 'absolute', left: 0, right: 0,
+    textAlign: 'center',
+    fontSize: 9, lineHeight: LEGEND_LEVEL_H, color: C.unit,
+  },
+  sectionOverlay: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
+  sectionLabel: {
+    position: 'absolute', left: 12, right: 0,
+    fontSize: 10.5, lineHeight: LEGEND_LINE_H, fontWeight: '700', color: C.sectionText,
+  },
   overviewStrip: {
     backgroundColor: SC.bg,
     borderBottomWidth: StyleSheet.hairlineWidth,
