@@ -6,7 +6,7 @@ import {
   FillType,
 } from '@shopify/react-native-skia';
 import {
-  CARDINALS, RAIN_MAX_MM, modelsFromMask, startDatetime, predictCenter, attributeHour,
+  CARDINALS, RAIN_K, modelsFromMask, startDatetime, predictCenter, attributeHour,
   AQ_DOMINANT_US, AQ_DOMINANT_EU, CLOUD_BAND_LEVELS_HPA,
   type Center, type ForecastMessage, type ModelSpec, type Period,
 } from '@weather/protocol';
@@ -16,7 +16,7 @@ import {
   BAND_TOP_HPA, BAND_BOTTOM_HPA, GRID_ROWS,
 } from './cloudBand';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { precipMark, weatherGlyph, wmoName, type MoonPhase, type Prim } from './weatherGlyph';
+import { precipMark, weatherGlyph, wmoName, type MoonPhase, type Prim, type PrecipMarkKind } from './weatherGlyph';
 
 // ── Layout constants ───────────────────────────────────────────────────────
 // Rows are named by a narrow unit rail fixed to the left of the drawing (RowLegend). It sits
@@ -37,15 +37,14 @@ const LEGEND_LEVEL_H = 11;
 // Rail symbols, and the line box they occupy when stacked over a unit.
 const LEGEND_ICON_SIZE = 13;
 const LEGEND_ICON_H = 14;
-// The precip row's pair of marks — the SAME drop and flake the overview strip stamps across its
-// wet stretches (precipMark), so the rail names that row with the shapes the reader already
-// learned there rather than with a second set that means the same thing. Drawn in one ink: these
-// say the row carries rain and snow, not how much of either. The drop is narrow (DROP_ASPECT) and
-// the flake is as wide as it is tall, so the two centers are not symmetric about the rail's
-// middle — the pair is what's centered, not each mark.
+// A precip row's mark — the SAME drop or flake the overview strip stamps across its wet stretches
+// (precipMark), so the rail names the row with a shape the reader already learned rather than with
+// a second set that means the same thing. One mark per row, over that row's own unit: the snow row
+// is a flake over "cm", the rain row a drop over "mm". Both in the rail's grey (LEGEND_MARK_COLORS)
+// and both centered in it — the drop is narrow (DROP_ASPECT) and the flake as wide as it is tall,
+// but each is alone on its row, so each is centered on its own.
 const LEGEND_MARK_H = 12;
-const LEGEND_MARK_RAIN_CX = 14;
-const LEGEND_MARK_SNOW_CX = 27;
+const LEGEND_MARK_CX = LEGEND_W / 2;
 const CELL_W = 38;
 // The weather glyphs have fixed natural geometry, extending up to ±26.5px around their center
 // (widest: partly-cloudy and shower codes). They are shrunk into their column by this factor;
@@ -75,7 +74,11 @@ const ROW_H = {
   SECTION: 22,
   CLOUD: 58,
   TEMP: 52,
-  SNOW: 50,
+  // Snow and rain each get their own row, so one is shorter than the single stacked area they
+  // replace: each carries one number rather than two lines of them, and the pair still ends up
+  // taller than the stack did — which is the point, since two areas on one baseline could only be
+  // told apart by which color was on top.
+  PRECIP: 38,
   DATA: 42,
   // The freezing level is a graph rather than a bare number, so it needs room for the isotherm to
   // move in under its band of column labels.
@@ -95,11 +98,47 @@ const ROW_H = {
   MODEL: 26,
 } as const;
 
-// Accumulation areas use the codec's sqrt companding on a fixed full-scale (RAIN_MAX_MM of
-// liquid equivalent) instead of normalizing to the forecast's own maximum: a trace 0.5 mm
-// period draws a small-but-visible bump rather than filling the row just because nothing
-// heavier is in the window.
-const accumFrac = (mmEq: number) => Math.min(1, Math.sqrt(Math.max(0, mmEq) / RAIN_MAX_MM));
+// What counts as a FULL-SCALE period, from which everything about the two accumulation areas
+// follows. Fixing it in millimetres of liquid equivalent — the row was pinned to the codec's own
+// top level, 144 mm — spent nearly the whole row on rates no forecast in the window reached: a wet
+// 6 hours at 5 mm drew a fifth of it, and a drizzle and a downpour landed a few pixels apart.
+//
+// Full scale is stated for a SIX-HOUR period, at 20 of the wire's 64 sqrt-companded steps
+// (RAIN_K), and read off in the same companding the areas always used — sqrt(mm / 144) is exactly
+// level / 63, so this is that curve with its top moved down.
+const PRECIP_FULL_SCALE_LEVELS = 20;
+const PRECIP_FULL_SCALE_6H = (PRECIP_FULL_SCALE_LEVELS / RAIN_K) ** 2; // ≈ 14.5 mm eq
+const PRECIP_REF_HOURS = 6;
+// Duration then moves that scale, because the same depth is a different event over a different
+// span: an inch of snow in an hour is a squall, and an inch of snow in a day is a flurry that
+// never stopped. It moves as the SQUARE ROOT of the period's length rather than in proportion to
+// it — the depth–duration shape real precipitation follows, since nothing holds its peak rate for
+// a whole day. Proportional would be plotting a bare rate, which pins full scale for a 6-hour
+// period at six times an hourly one and flattens every ordinary wet day back into the floor;
+// leaving duration out is what put an hour of snow and a day of it at the same height.
+const precipFullScale = (stepHours: number) =>
+  PRECIP_FULL_SCALE_6H * Math.sqrt(Math.max(1, stepHours) / PRECIP_REF_HOURS);
+// A period as a fraction of what its own duration counts as full: 1 is a full-scale period.
+const precipNorm = (mmEq: number, stepHours: number) =>
+  Math.max(0, mmEq) / precipFullScale(stepHours);
+// The window's own peak takes the top back over once it passes full scale, so a genuine storm is
+// never clipped — it just compresses everything under it, which is what a storm does to a row.
+const precipScaleOf = (peakNorm: number) => Math.max(1, peakNorm);
+const accumFrac = (norm: number, scale: number) => Math.min(1, Math.sqrt(norm / scale));
+// Where a precip row's amount sits, from the row's top — the MIDDLE of the digits, which is what
+// centerText takes (it works the baseline out from the font). Down near the floor of the row, so
+// the number reads as a label lying on the area rather than as a value floating over it. The rail
+// reads this too (legendCy), so "in" sits on the same line as the amounts it names.
+const PRECIP_VALUE_Y = ROW_H.PRECIP - 10;
+// Headroom over a full-scale period, so an area at the top of its scale still reads as an area
+// with a top edge rather than as a filled row.
+const PRECIP_PLOT_PAD = 4;
+// The hairline along that top edge (C.rainEdge / C.snowEdge). Under a pixel: at a full one the
+// edge read as a curve drawn over the wash rather than as the boundary of it. Weight is width
+// times contrast, and the contrast is the half doing the work at night, so it is the width that
+// comes off — a sub-pixel stroke antialiases to a fainter line of the same color rather than to a
+// thinner one, which is exactly the softening wanted here.
+const PRECIP_EDGE_W = 0.75;
 
 // The freezing-level row plots the 0°C isotherm over the full row height, with its per-column
 // altitudes centered on the row — the curve passes behind them. Like the temperature area, the plot
@@ -179,6 +218,32 @@ const C = {
   freezeWarm: 'rgba(214, 82, 62, 0.14)',
   // The isotherm itself, dark enough to hold its shape against both washes.
   freezeLine: '#7e8896',
+  // The two precip inks, for the numbers each precip row prints (the rail's marks stay grey — see
+  // LEGEND_MARK_COLORS). Snow is the lighter of the pair, matching the two areas: it kept its color
+  // from the stacked area the two rows replaced, where snow lay over rain as the paler band.
+  rainInk: '#1d5182',
+  snowInk: '#4f82ae',
+  // The areas themselves, each a wash well clear of its own ink. Rain used to be plotted in the
+  // mid-blue it carried as the lower band of the stacked area, where nothing was written on it —
+  // as its own row it has numbers lying across it, and dark blue on that blue was about 2:1. The
+  // numbers sit low and a shallow period's fill doesn't reach them, so that was fixed by lightening
+  // the ground rather than the text, which would then be white on white.
+  //
+  // The pair is then set as far apart as those numbers allow: rain as blue as it can be under a
+  // legible ink (3.9:1), snow as close to white. Side by side they separate 1.8:1, where the first
+  // pass at this left them a barely-there 1.3:1 — two washes of the same water.
+  rainArea: '#7fb8e6',
+  snowArea: '#e3f1fb',
+  // A hairline along the top of each area, a step darker than the wash under it. It is what draws
+  // the shape where the ground behind it changes: night shading tints the row's white a grey that
+  // the snow wash cannot be told from (1.01:1), and an area with no edge simply disappears into
+  // the small hours. Both edges also clear the night tint itself — 1.8:1 for snow, 2.8:1 for rain
+  // — so the curve holds its line across a day/night boundary instead of fading at it.
+  rainEdge: '#4f95cf',
+  snowEdge: '#8fbade',
+  // The chance curve. Grey rather than either precip ink, and unfilled: the row is a probability,
+  // and anything blue and filled under it would be read as the water the two rows below it carry.
+  chanceLine: '#7b8ea6',
 } as const;
 
 // The overview strip runs on a dark ground: at strip scale the graphs are a few pixels tall, and a
@@ -504,20 +569,28 @@ function fmtTemp(c: number | undefined, u: Units): string {
   if (c == null) return '';
   return u === 'imperial' ? `${Math.round((c * 9) / 5 + 32)}°` : `${Math.round(c)}°`;
 }
+// Below the resolution the column can print, a measurable amount says so rather than printing
+// nothing: the area is visibly off the floor in those periods, and a blank under a raised curve
+// reads as data the message didn't carry instead of as a trace. Only ever below — an amount that
+// rounds to the smallest printable figure prints that figure, and a period with nothing in it
+// prints nothing at all.
 function fmtSnow(cm: number, u: Units): string {
   if (u === 'imperial') {
     const inches = cm / 2.54;
-    return inches >= 0.1 ? `${inches.toFixed(inches < 1 ? 1 : 0)}IN` : '';
+    if (inches >= 0.1) return `${inches.toFixed(inches < 1 ? 1 : 0)}`;
+    return cm > 0 ? '<0.1' : '';
   }
-  return cm >= 0.5 ? `${Math.round(cm)}CM` : '';
+  if (cm >= 0.5) return `${Math.round(cm)}`;
+  return cm > 0 ? '<0.5' : '';
 }
 function fmtRain(mm: number, u: Units): string {
   if (u === 'imperial') {
     const inches = mm / 25.4;
-    return inches >= 0.01 ? `${inches.toFixed(2)}IN` : '';
+    if (inches >= 0.01) return `${inches.toFixed(2)}`;
+    return mm > 0 ? '<0.01' : '';
   }
-  if (mm < 0.5) return '';
-  return `${mm < 10 ? mm.toFixed(1) : Math.round(mm)}MM`;
+  if (mm >= 0.5) return `${mm < 10 ? mm.toFixed(1) : Math.round(mm)}`;
+  return mm > 0 ? '<0.5' : '';
 }
 // Column labels are abbreviated to thousands ("14k", "13.5k") — a grouped "14,000" outgrows the
 // cell. Metric already fits at 100 m granularity.
@@ -798,7 +871,7 @@ function pressureLabel(level: 500 | 600 | 700): string {
 // ── Row model ──────────────────────────────────────────────────────────────
 
 type RowKind =
-  | 'clouds' | 'temp' | 'accumulation' | 'freeze' | 'wind-sfc' | 'wind-gust' | 'wind-dir'
+  | 'clouds' | 'temp' | 'precip-chance' | 'snow' | 'rain' | 'freeze' | 'wind-sfc' | 'wind-gust' | 'wind-dir'
   | 'cloud-high' | 'cloud-mid' | 'cloud-low'
   | 'aqi' | 'aqi-pm25' | 'aqi-o3' | 'aqi-pm10' | 'aqi-no2' | 'aqi-so2'
   | 'aqi-dominant' | 'aqi-eu-dominant'
@@ -818,6 +891,11 @@ interface Row {
   // entry.
   legend: string;
 }
+
+// The rows that make up the precip block, in the order they are drawn. They are grouped for the
+// seams between them (buildScene) — they read as one block, and each one plots from a baseline the
+// row under it also plots from.
+const PRECIP_BLOCK = new Set<RowKind>(['snow', 'rain', 'precip-chance']);
 
 // The cloud-cover rows and the field each one reads. Shared by the scene, which shades the cells,
 // and by the selection readout, which labels them.
@@ -886,11 +964,18 @@ const pollutantName = (scale: 'us' | 'eu', idx: number | undefined): string | un
 function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[] {
   const rows: Row[] = [];
   const has = (fn: (p: Period) => unknown) => periods.some((p) => fn(p) != null);
+  // A precip row earns its place by carrying an amount, not by the variable being requested. The
+  // decoder hands back a column of zeros for a variable that was asked for and never happened, and
+  // where the stacked area could absorb that — the other half of it still had something to draw —
+  // two rows cannot: a requested-but-dry snow column would stand as a blank band the height of the
+  // rain row beside it.
+  const hasAmount = (fn: (p: Period) => number | undefined) => periods.some((p) => (fn(p) ?? 0) > 0);
   const tU = tempUnit(u), frU = freezeUnit(u), wU = windUnit(u);
-  // The accumulation area is plotted in LIQUID EQUIVALENT — snow enters it at 10:1 — so this is
-  // the unit of the graph, not of every number on it. The cells print their own suffix (IN, MM,
-  // CM) precisely because rain and snow don't share one in metric.
-  const accU = u === 'imperial' ? 'in' : 'mm';
+  // A precip row's token is the unit its OWN numbers are in — the two rows don't share one in
+  // metric, and that is most of why they are two rows. Neither is the unit of the area under it:
+  // both areas are drawn in liquid equivalent (accumFrac).
+  const snowU = u === 'imperial' ? 'in' : 'cm';
+  const rainU = u === 'imperial' ? 'in' : 'mm';
 
   rows.push({ kind: 'clouds', height: ROW_H.CLOUD, label: '', legend: '' });
 
@@ -901,8 +986,15 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
   if (hasSurface) {
     if (has((p) => p.temp_c))
       rows.push({ kind: 'temp', height: ROW_H.TEMP, label: '', legend: tU });
-    if (has((p) => p.precip) || has((p) => p.snow_cm) || has((p) => p.rain_mm))
-      rows.push({ kind: 'accumulation', height: ROW_H.SNOW, label: '', legend: accU });
+    // Snow over rain, the order the freezing level's washes and the old stacked area both used:
+    // frozen above liquid.
+    if (hasAmount((p) => p.snow_cm)) rows.push({ kind: 'snow', height: ROW_H.PRECIP, label: '', legend: snowU });
+    if (hasAmount((p) => p.rain_mm)) rows.push({ kind: 'rain', height: ROW_H.PRECIP, label: '', legend: rainU });
+    // Chance closes the precip block, under the two amounts it is the odds of. Unlike them it is
+    // kept on presence rather than on carrying a value above zero — a flat 0% line across the
+    // window is a forecast of a dry week, where a flat zero AMOUNT is only the absence of one.
+    if (has((p) => p.precip))
+      rows.push({ kind: 'precip-chance', height: ROW_H.PRECIP, label: '', legend: '%' });
     // The gust row inherits the wind row's unit from the row directly above it and spends its
     // token naming itself instead — "mph" twice running says which scale, but not which row.
     if (has((p) => p.wind_sfc_kph)) rows.push({ kind: 'wind-sfc', height: ROW_H.WIND, label: '', legend: wU });
@@ -1665,78 +1757,62 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
     );
   }
 
-  // Precipitation probability as a smooth 0–100% area behind its value labels.
-  // Snow and rain share a stacked area. Snow is converted to liquid-equivalent depth at 10:1,
-  // so 10 inches of snow plots at the same height as 1 inch of rain.
+  // One smooth area per precip row, each rising from its own row's baseline. Snow is plotted at
+  // liquid equivalent (1 cm ≈ 1 mm of water, so the cm number is already the mm-equivalent one),
+  // which is what lets the two rows be read against each other: at equal duration, equal heights
+  // are equal water, whatever the numbers printed on them say. That is also why ONE scale is taken
+  // over both rows rather than each row fitting its own peak — a row scaled to itself would draw a
+  // dusting of snow as tall as the storm of rain beside it. Each period is normalized by its OWN
+  // step first (precipNorm), so a window that drops from 6h to 12h partway through doesn't step up
+  // an area that is only carrying twice as many hours of the same weather.
   const maxSnow = Math.max(0, ...periods.map((p) => p.snow_cm ?? 0));
   const maxRain = Math.max(0, ...periods.map((p) => p.rain_mm ?? 0));
-  let accumulationTop: number | undefined;
-  let accumulationBottom: number | undefined;
-  let accumulationY = ROW_H.DATE;
+  const snowNorm = periods.map((period, i) => precipNorm(period.snow_cm ?? 0, steps[i]));
+  const rainNorm = periods.map((period, i) => precipNorm(period.rain_mm ?? 0, steps[i]));
+  const precipScale = precipScaleOf(Math.max(0, ...snowNorm, ...rainNorm));
+  const precipSpans = new Map<RowKind, { top: number; bottom: number }>();
+  let precipRowY = ROW_H.DATE;
   rows.forEach((row) => {
-    if (row.kind === 'accumulation') {
-      accumulationTop ??= accumulationY;
-      accumulationBottom = accumulationY + row.height;
-    }
-    accumulationY += row.height;
+    if (row.kind === 'snow' || row.kind === 'rain')
+      precipSpans.set(row.kind, { top: precipRowY, bottom: precipRowY + row.height });
+    precipRowY += row.height;
   });
-  const rainEquivalent = periods.map((period) => period.rain_mm ?? 0);
-  // 1 cm snow / 10 = 1 mm liquid equivalent, so the numeric cm value already matches rain mm.
-  const snowEquivalent = periods.map((period) => period.snow_cm ?? 0);
-  const totalEquivalent = rainEquivalent.map((rain, i) => rain + snowEquivalent[i]);
-  const maxEquivalent = Math.max(0, ...totalEquivalent);
-  if (accumulationTop != null && accumulationBottom != null && maxEquivalent > 0) {
-    const plotTop = accumulationTop + 4;
-    const valueY = (value: number) => accumulationBottom! - accumFrac(value) * (accumulationBottom! - plotTop);
-    const boundary = (values: number[]) => [
+  ([
+    ['snow', snowNorm, maxSnow, C.snowArea, C.snowEdge],
+    ['rain', rainNorm, maxRain, C.rainArea, C.rainEdge],
+  ] as const).forEach(([kind, values, max, color, edgeColor]) => {
+    const span = precipSpans.get(kind);
+    if (!span || max <= 0) return;
+    const plotTop = span.top + PRECIP_PLOT_PAD;
+    const valueY = (norm: number) =>
+      span.bottom - accumFrac(norm, precipScale) * (span.bottom - plotTop);
+    const points = [
       { x: colLeft(0), y: valueY(values[0]) },
       ...values.map((value, i) => ({ x: colCenter(i), y: valueY(value) })),
       { x: colLeft(n), y: valueY(values[values.length - 1]) },
     ];
-    const rainPoints = boundary(rainEquivalent);
-    const totalPoints = boundary(totalEquivalent);
-    const rainArea = Skia.Path.Make();
-    smoothTo(rainArea, rainPoints);
-    rainArea.lineTo(colLeft(n), accumulationBottom);
-    rainArea.lineTo(colLeft(0), accumulationBottom);
-    rainArea.close();
-    const snowArea = Skia.Path.Make();
-    smoothTo(snowArea, totalPoints);
-    smoothTo(snowArea, rainPoints, true);
-    snowArea.close();
+    const area = Skia.Path.Make();
+    smoothTo(area, points);
+    area.lineTo(colLeft(n), span.bottom);
+    area.lineTo(colLeft(0), span.bottom);
+    area.close();
+    // The top boundary again as its own open path, so only the curve is stroked: stroking the
+    // closed area would draw the outline along the row's bottom edge too, a second rule beside
+    // the seam. The edge is what carries the shape once the ground under it moves — snow's wash
+    // against the night tint is a 1.01:1 difference, which is to say none at all.
+    const edge = Skia.Path.Make();
+    smoothTo(edge, points);
     els.splice(headerInsertIndex, 0,
-      <Group key="accumulation-area">
-        <Path path={rainArea} color="#4b8fc8" />
-        <Path path={snowArea} color="#c6e1f5" />
+      <Group key={`${kind}-area`}>
+        <Path path={area} color={color} />
+        <Path path={edge} style="stroke" strokeWidth={PRECIP_EDGE_W} color={edgeColor} />
       </Group>,
     );
-  }
-
-  // Precipitation chance overlays the accumulation chart as a line with its own fixed 0–100%
-  // scale. It intentionally has no fill or value labels.
-  const precipValues = periods.map((period) => period.precip);
-  if (accumulationTop != null && accumulationBottom != null && precipValues.some((value) => value != null)) {
-    const plotTop = accumulationTop + 4;
-    const first = precipValues.find((value): value is number => value != null)!;
-    const last = [...precipValues].reverse().find((value): value is number => value != null)!;
-    const precipY = (value: number) => accumulationBottom! - (value / 100) * (accumulationBottom! - plotTop);
-    const points = [
-      { x: colLeft(0), y: precipY(first) },
-      ...precipValues.flatMap((value, i) => value == null ? [] : [{ x: colCenter(i), y: precipY(value) }]),
-      { x: colLeft(n), y: precipY(last) },
-    ];
-    const line = Skia.Path.Make();
-    smoothTo(line, points);
-    els.push(
-      <Path key="precip-line" path={line} style="stroke" strokeWidth={1} color="#245d91">
-        <DashPathEffect intervals={[4, 3]} />
-      </Path>,
-    );
-  }
+  });
 
   // Current time, positioned proportionally within its period. Run it through the date/time
   // header and visual weather rows down to precip, excluding wind and the sections below it.
-  const markerRows = new Set<RowKind>(['clouds', 'temp', 'accumulation']);
+  const markerRows = new Set<RowKind>(['clouds', 'temp', 'precip-chance', 'snow', 'rain']);
   let markerTop: number | undefined;
   let markerBottom: number | undefined;
   let markerY = ROW_H.DATE;
@@ -1829,22 +1905,52 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
         break;
       }
 
-      case 'accumulation':
+      case 'precip-chance': {
+        // A dashed curve on a fixed 0–100% scale — fixed because a probability's full scale is the
+        // whole of it, and a 30% chance that filled the row because nothing beat it would be a lie
+        // the amounts above can afford (they are quantities) and this row cannot. No numbers and
+        // no fill: the shape is the reading, and the exact percentage is one tap away. The dashes
+        // are what keep a row of pure line from reading as a border under the rain area.
+        const bottom = top + row.height;
+        const plotTop = top + PRECIP_PLOT_PAD;
+        const chanceY = (v: number) =>
+          bottom - (Math.min(100, Math.max(0, v)) / 100) * (bottom - plotTop);
+        valueRuns(n, (i) => periods[i].precip != null).forEach((run) => {
+          const x0 = colLeft(run[0]);
+          const x1 = colLeft(run[run.length - 1]) + CELL_W;
+          const points = [
+            { x: x0, y: chanceY(periods[run[0]].precip!) },
+            ...run.map((i) => ({ x: colCenter(i), y: chanceY(periods[i].precip!) })),
+            { x: x1, y: chanceY(periods[run[run.length - 1]].precip!) },
+          ];
+          const curve = Skia.Path.Make();
+          smoothTo(curve, points);
+          els.push(
+            <Path key={`pc${ri}-${run[0]}`} path={curve}
+              style="stroke" strokeWidth={1.25} color={C.chanceLine}>
+              <DashPathEffect intervals={[4, 3]} />
+            </Path>,
+          );
+        });
+        break;
+      }
+
+      // One amount per row, on the row's own baseline. The max gate is what it always was: a
+      // column prints a number only where the window has an area to print it against, so a
+      // forecast whose every period rounds to nothing draws neither.
+      case 'snow':
+      case 'rain':
         periods.forEach((p, i) => {
-          const cm = p.snow_cm ?? 0;
-          const mm = p.rain_mm ?? 0;
-          const cx = colCenter(i);
-          const snowText = cm > 0 && maxSnow > 0 ? fmtSnow(cm, units) : '';
-          const rainText = mm > 0 && maxRain > 0 ? fmtRain(mm, units) : '';
-          if (snowText && rainText) {
-            const rainY = top + row.height - 10;
-            els.push(centerText(`sv${i}`, snowText, cx, rainY - 18, fonts.small, '#4f82ae'));
-            els.push(centerText(`rv${i}`, rainText, cx, rainY, fonts.small, '#245d91'));
-          } else if (snowText) {
-            els.push(centerText(`sv${i}`, snowText, cx, top + row.height - 10, fonts.small, '#4f82ae'));
-          } else if (rainText) {
-            els.push(centerText(`rv${i}`, rainText, cx, top + row.height - 10, fonts.small, '#245d91'));
-          }
+          const snow = row.kind === 'snow';
+          const value = (snow ? p.snow_cm : p.rain_mm) ?? 0;
+          const max = snow ? maxSnow : maxRain;
+          if (!(value > 0 && max > 0)) return;
+          const text = snow ? fmtSnow(value, units) : fmtRain(value, units);
+          if (!text) return;
+          els.push(centerText(
+            `${snow ? 'sv' : 'rv'}${i}`, text, colCenter(i), top + PRECIP_VALUE_Y,
+            fonts.small, snow ? C.snowInk : C.rainInk,
+          ));
         });
         break;
 
@@ -2152,6 +2258,26 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, now
       els.push(<Line key={`day-divider${i}-${s}`} p1={vec(x, from)} p2={vec(x, to)} color={C.divider} strokeWidth={1} />);
     });
   });
+
+  // A rule on every seam INSIDE the precip block — snow/rain, rain/chance, snow/chance. These are
+  // the drawing's only stacked rows that each plot from their own baseline, so without a rule an
+  // area rising into the row above reads as that row's own bottom edge, and the chance curve
+  // running low reads as a border under the rain. No rule at the block's outer edges: the rows
+  // above and below it are unfilled and end it on their own. Drawn here, after the rows, so it
+  // lies over the fills rather than under them.
+  let seamY = ROW_H.DATE;
+  let prevWasPrecip = false;
+  rows.forEach((row) => {
+    const isPrecip = PRECIP_BLOCK.has(row.kind);
+    if (isPrecip && prevWasPrecip) {
+      els.push(
+        <Line key={`precip-seam${seamY}`} p1={vec(0, seamY)} p2={vec(width, seamY)}
+          color={C.divider} strokeWidth={1} />,
+      );
+    }
+    prevWasPrecip = isPrecip;
+    seamY += row.height;
+  });
   return els;
 }
 
@@ -2187,15 +2313,27 @@ const LEGEND_ICONS: Partial<Record<RowKind, (keyof typeof MaterialCommunityIcons
   'wind-dir': ['windsock'],
 };
 
-// The rail's own ink, for the marks. `ground` only matters to the mixed mark, which the rail
-// doesn't draw — the rail's two marks are a drop and a flake side by side, not one combined
-// symbol, because they name two things the row carries rather than one period holding both.
+// The rail's own grey, for both marks. The rail names rows; it does not carry values, and every
+// other color in the drawing encodes one — a flake in the snow row's blue would read as a sample
+// of that row rather than as its name. Shape and position say which row this is, and the divider
+// under it says where the row ends. `ground` only matters to the mixed mark, which the rail never
+// draws: each precip row gets the one mark that is its own.
 const LEGEND_MARK_COLORS = { rain: C.unit, snow: C.unit, ground: '#ffffff' };
 
-// Where a row's own content sits, as an offset from the row's top — what the rail lines its entry
-// up with. Everything is centered in its row except the temperature (see TEMP_VALUE_Y).
+// Where the rail centers a row's entry, as an offset from the row's top. Most rows fill their
+// height, so the entry sits in the middle of them; the rows that print a line of numbers instead
+// hand the rail that line, so a unit reads against the values it names rather than against the
+// row's geometric middle.
+//
+// The two amount rows solve for it: their entry is a mark stacked over a unit, and it is the UNIT
+// that has to land on the numbers, not the stack as a whole. The unit's line box is centered half
+// an icon BELOW the stack's center, so the stack goes up by that much — which leaves the mark
+// sitting over the numbers, where a symbol naming them belongs. Temperature needs no such term:
+// its entry is a bare unit, so the stack's center IS the unit's.
 function legendCy(row: Row): number {
-  return row.kind === 'temp' ? TEMP_VALUE_Y : row.height / 2;
+  if (row.kind === 'temp') return TEMP_VALUE_Y;
+  if (row.kind === 'snow' || row.kind === 'rain') return PRECIP_VALUE_Y - LEGEND_ICON_H / 2;
+  return row.height / 2;
 }
 
 // One rung of the cloud band's altitude axis. Written in thousands all the way down, so the
@@ -2266,19 +2404,23 @@ const RowLegend = memo(function RowLegend({ rows, units, paint }: {
     // Symbols over the unit, as one stack centered on whatever the row's own content lines up
     // with. A row can have either half or both.
     const icons = LEGEND_ICONS[row.kind];
-    const marks = row.kind === 'accumulation';
-    const iconH = icons || marks ? LEGEND_ICON_H : 0;
+    // The chance row takes a drop too, over "%" rather than over a depth: it is the odds of the
+    // drop falling at all, and a shape the reader already reads as precipitation says that faster
+    // than any glyph meaning "probability" could.
+    const mark: PrecipMarkKind | undefined =
+      row.kind === 'snow' ? 'snow'
+        : row.kind === 'rain' || row.kind === 'precip-chance' ? 'rain'
+          : undefined;
+    const iconH = mark || icons ? LEGEND_ICON_H : 0;
     const textH = row.legend ? LEGEND_LINE_H : 0;
     if (!iconH && !textH) return;
     const stackTop = top + legendCy(row) - (iconH + textH) / 2;
 
-    if (marks) {
+    if (mark) {
       els.push(
         <Canvas key={`m${ri}-${paint}`} style={[styles.legendMarks, { top: stackTop }]}>
-          {([['rain', LEGEND_MARK_RAIN_CX], ['snow', LEGEND_MARK_SNOW_CX]] as const).flatMap(
-            ([kind, cx]) => precipMark(kind, cx, LEGEND_ICON_H / 2, LEGEND_MARK_H, LEGEND_MARK_COLORS)
-              .map((prim, i) => glyphPrimitive(`lm${ri}-${kind}-${i}`, prim, false)),
-          )}
+          {precipMark(mark, LEGEND_MARK_CX, LEGEND_ICON_H / 2, LEGEND_MARK_H, LEGEND_MARK_COLORS)
+            .map((prim, i) => glyphPrimitive(`lm${ri}-${i}`, prim, false))}
         </Canvas>,
       );
     } else if (icons) {
@@ -2894,14 +3036,17 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
   const rows: [string, string][] = [];
   if (has((q) => q.temp_c))
     rows.push(['Temperature', p.temp_c != null ? `${fmtTemp(p.temp_c, units)}${units === 'imperial' ? 'F' : 'C'}` : '—']);
+  // Probability lives here and only here: the drawing carries the two amounts, and this panel is
+  // where a column's numbers are read one at a time.
   if (has((q) => q.precip)) rows.push(['Precip chance', p.precip != null ? `${p.precip}%` : '—']);
-  if (has((q) => q.rain_mm)) {
-    rows.push(['Rain', fmtRainFull(p.rain_mm ?? 0, units)]);
-    rows.push(['Total rain accumulation', fmtRainFull(cumRain, units)]);
-  }
+  // Snow before rain, the order the two rows are drawn in.
   if (has((q) => q.snow_cm)) {
     rows.push(['Snow', fmtSnowFull(p.snow_cm ?? 0, units)]);
     rows.push(['Total snow accumulation', fmtSnowFull(cumSnow, units)]);
+  }
+  if (has((q) => q.rain_mm)) {
+    rows.push(['Rain', fmtRainFull(p.rain_mm ?? 0, units)]);
+    rows.push(['Total rain accumulation', fmtRainFull(cumRain, units)]);
   }
   if (has((q) => q.wind_sfc_kph)) rows.push(['Wind', fmtWindFull(p.wind_sfc_kph, p.wind_sfc_dir, units)]);
   if (has((q) => q.freeze_m)) rows.push(['Freezing level', fmtFreezeFull(p.freeze_m, units)]);
