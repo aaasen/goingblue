@@ -31,6 +31,12 @@ export const DERIVE_VARS: readonly string[] = [
   "wind_speed_600hPa", "wind_direction_600hPa",
   "wind_speed_700hPa", "wind_direction_700hPa",
   "cloud_cover", "cloud_cover_high", "cloud_cover_mid", "cloud_cover_low",
+  // NOT listed: the cloud band's `cloud_cover_XhPa` / `relative_humidity_XhPa` /
+  // `geopotential_height_XhPa` levels, and eachForecast does NOT apply fillCloudBand. Nothing
+  // derived today reads the band — derive-cloud-delta-codebooks still trains the legacy
+  // low/mid/high tables that v3 maps the eight levels onto by altitude. Whoever derives proper
+  // per-level band tables has to add all three families here AND run the hourly stack through
+  // fillCloudBand first, or the tables will be trained on values production no longer sends.
   // Air quality — served from a different corpus source, see EXTRA_SOURCE_VARS below. Both
   // indices in full: each headline plus every constituent the scale defines.
   "us_aqi", "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi_pm10",
@@ -244,7 +250,7 @@ export async function deriveCountsMulti(
 export async function eachForecast(
   cb: (hourly: HourlyData, startHour: number, loc: string, pos?: { lat: number; lon: number },
        split?: string) => void,
-  split: "train" | "all" = "train",
+  split: "train" | "eval" | "all" = "train",
   vars: readonly string[] | null = DERIVE_VARS,
   shard?: { index: number; total: number },
 ): Promise<void> {
@@ -272,7 +278,10 @@ export async function eachForecast(
     if (shard && index % shard.total !== shard.index) continue;
     const loc = locs.get(locationId);
     if (!loc) continue;
-    if (split === "train" && loc.split !== "train") continue; // eval/favorites: never trained on
+    // "train" is the derivation default — eval/favorites never influence a codebook. "eval" is
+    // the mirror, for scans that MUST run held-out (a change measured on the sites that trained
+    // the tables it runs against would flatter itself).
+    if (split !== "all" && loc.split !== split) continue;
     const raw = loadCell(db, DERIVE_SOURCE, locationId, windowStart, primaryVars);
     if (!raw) continue;
     for (const e of extraLoads) {
@@ -288,7 +297,7 @@ export async function eachForecast(
   }
   db.close();
   if (!shard)
-    console.log(`  scanned ${cells} cells over ${seen.size} ${split === "train" ? "train " : ""}locations (${DERIVE_SOURCE})`);
+    console.log(`  scanned ${cells} cells over ${seen.size} ${split === "all" ? "" : split + " "}locations (${DERIVE_SOURCE})`);
 }
 
 // Deterministic 5-fold assignment by location id, for held-out (split-by-location) checks.

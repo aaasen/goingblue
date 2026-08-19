@@ -139,8 +139,14 @@ const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0)
 // cloud persistence is what they measure. 300 hPa (9.2 km) reads the high table, 400–700
 // (7.2–3.0 km) the mid, 850–1000 (1.5–0.1 km) the low.
 const CLOUD_ANCHOR_BITS = VAR_BITS_V3[VARS_BIT.cch]; // 3
-const quantCover = (pct: number | undefined): number =>
-  clampInt(Math.round((pct ?? 0) * 7 / 100), CLOUD_ANCHOR_BITS);
+const CLOUD_STEPS = (1 << CLOUD_ANCHOR_BITS) - 1;    // 7: the top step of the quantized scale
+export const quantCover = (pct: number | undefined): number =>
+  clampInt(Math.round((pct ?? 0) * CLOUD_STEPS / 100), CLOUD_ANCHOR_BITS);
+// The smallest cover percentage that survives quantCover: half a step, 50/7 ≈ 7.14% at 3 bits.
+// Anything below it encodes as clear no matter where it came from. Exported because the server's
+// cloud-band fill has to know it — a synthesized value under this threshold ships an empty band
+// anyway — and hardcoding it there would let a width change here silently desynchronize the two.
+export const CLOUD_COVER_MIN_PCT = 50 / CLOUD_STEPS;
 const cloudBandCodec = (bk: ClassBooks, hpa: number): DeltaCodec =>
   hpa <= 300 ? bk.cloudHighDelta : hpa <= 700 ? bk.cloudMidDelta : bk.cloudLowDelta;
 

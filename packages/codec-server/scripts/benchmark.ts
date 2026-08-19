@@ -37,7 +37,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { adjustPrecipPhase, buildFillMessage, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
+import { adjustPrecipPhase, buildFillMessage, fillCloudBand, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import {
   VARS_BIT, ALWAYS_VARS, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
   fillProfile, maxFillSeq, v3EncodeBreakdown, V3_VERSION, type Alphabet,
@@ -898,9 +898,10 @@ async function report(args: Args): Promise<void> {
     // structurally gone; a cell missing a whole base variable still gets skipped below.
     if (!baseComplete(raw)) { skipped++; continue; }
     const { locId, lat, lon, elevation } = cell;
-    // Same precip-phase correction production applies after fetch (src/forecast.ts), so the
-    // report encodes the distributions clients actually receive.
-    const h = adjustPrecipPhase(raw, elevation);
+    // Same post-fetch hourly corrections production applies (src/forecast.ts), in the same order,
+    // so the report encodes the distributions clients actually receive. fillCloudBand needs the
+    // level humidity and geopotential, which the untargeted loadCell above already brings in.
+    const h = fillCloudBand(adjustPrecipPhase(raw, elevation));
     const utcOffsetHours = utcOffsetFor(lon);
     const startEpochHour = requestUtcHour(
       Math.floor(Date.parse(cell.windowStart + "Z") / 3600000), utcOffsetHours, args.requestHour);
