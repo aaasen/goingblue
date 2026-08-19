@@ -2367,6 +2367,10 @@ const RowLegend = memo(function RowLegend({ rows, units, paint }: {
   paint: number;
 }) {
   const els: ReactNode[] = [];
+  // The rail's edge, drawn first so every section band below paints over it: a header spans the
+  // full width, and a divider crossing it cuts the strip in two. A child rather than the rail's
+  // own border, which would sit above the bands however they were sized.
+  els.push(<View key="edge" style={styles.legendEdge} />);
   // The hour row, which sits in the header above every data row and so is walked separately.
   els.push(
     <MaterialCommunityIcons key="clock" name="clock-outline" size={LEGEND_ICON_SIZE} color={C.unit}
@@ -3131,12 +3135,15 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   container: { backgroundColor: '#fff' },
-  // The fixed rail. Opaque and bordered: it is the edge the plot is read from, and the day
+  // The fixed rail. Opaque and edged: the edge is what the plot is read from, and the day
   // dividers and ribbons run right up to it.
   legend: {
     position: 'absolute', left: 0, top: 0, bottom: 0, width: LEGEND_W,
     backgroundColor: '#fff',
-    borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: C.divider,
+  },
+  legendEdge: {
+    position: 'absolute', right: 0, top: 0, bottom: 0,
+    width: StyleSheet.hairlineWidth, backgroundColor: C.divider,
   },
   legendSection: { position: 'absolute', left: 0, right: 0, backgroundColor: C.section },
   legendIcons: {
