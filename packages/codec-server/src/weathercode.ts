@@ -8,9 +8,12 @@
  * Shape of the rule: FORM comes from coverage (how much of the window was wet), INTENSITY from
  * accumulation (which agrees with the snow_cm/rain_mm shipped in the same period), and the swap is
  * ONE-DIRECTIONAL — a continuous code may downgrade to its shower form, a shower code never
- * upgrades. That last part makes the rule a no-op at 1h resolution (a one-hour window is either
- * fully wet or fully dry) and means it never overrides the model's own convective call. It mirrors
- * adjustPrecipPhase, which is one-directional for the same reason.
+ * upgrades. That last part makes the form swap a no-op at 1h resolution (a one-hour window is
+ * either fully wet or fully dry) and means it never overrides the model's own convective call. It
+ * mirrors adjustPrecipPhase, which is one-directional for the same reason. The one rule that CAN
+ * rewrite a 1h code is the mixed-phase gate's amount arm (step 3): the model splits accumulation
+ * by phase within a single hour but its weathercode cannot say "both", so a genuinely mixed hour
+ * becomes 68/69 here.
  *
  * Why the shower codes are the target: 80/81/82 and 85/86 already ARE the alphabet's intermittent
  * form, and glyphSpec already renders them with the sun behind the cloud (`sky: shower ? 'partly'
@@ -48,9 +51,10 @@ const FOG = new Set([45, 48]);
 
 // Tunable knobs, all wire format if this ships.
 export const CONT_COVERAGE = 0.5;  // ≥ this fraction wet → continuous form, else shower form
-export const MIX_FRAC = 0.25;      // minority phase ≥ this fraction of wet hours → 68/69
+export const MIX_FRAC = 0.25;      // minority phase ≥ this fraction of wet hours OR of total WE → 68/69
 export const FOG_COVERAGE = 0.25;  // fog needs this much of the window to beat the sky ladder
 export const MIX_HEAVY_MM = 0.5;   // liquid-equivalent mm per wet hour splitting 68 from 69
+export const MIX_MIN_WE_MM = 0.2;  // amount arm's trace floor: minority phase must clear this in WE mm
 const SNOW_CM_PER_MM = 0.7;        // matches adjustPrecipPhase in src/forecast.ts
 
 // Implied sky coverage 0..100 of a non-precipitating code — mirrors codeCoverage() in
@@ -90,10 +94,12 @@ export function drySkyCode(codes: number[]): number {
  * same no-data value toFullPeriod already substitutes.
  *
  * `drySkyMax` reverts step 2 to today's `max` for dry windows, leaving the wet-side rule intact —
- * used only by the cost scan to price the two halves of the change independently.
+ * used only by the cost scan to price the two halves of the change independently. `noAmountMix`
+ * disables the amount arm of the mixed-phase gate — used only by its cost scan
+ * (analyze-wc-amount-mix-heldout.ts) to price that arm against the code-count arm alone.
  */
 export function aggregateWeathercode(
-  codes: number[], snowCm: number, rainMm: number, drySkyMax = false,
+  codes: number[], snowCm: number, rainMm: number, drySkyMax = false, noAmountMix = false,
 ): number {
   const N = codes.length;
   if (N === 0) return 0;
@@ -123,9 +129,22 @@ export function aggregateWeathercode(
   const liquid = rain.length + drizzle.length;
 
   // 3. PHASE. Mixed first — with no 68/69 the alphabet resolves these to pure snow 98.9% of the
-  // time, which reads as powder when half the window was rain.
-  if (Math.min(liquid, snow.length) / nWet >= MIX_FRAC) {
-    const rate = (rainMm + snowCm / SNOW_CM_PER_MM) / nWet;
+  // time, which reads as powder when half the window was rain. Two arms, OR-ed:
+  //   codes:   the minority phase holds ≥ MIX_FRAC of the wet hours' CODES.
+  //   amounts: an hourly weathercode is single-valued — the model tags each borderline hour with
+  //            only its dominant phase — so a window of "mostly snow, some rain" hours can carry
+  //            zero rain codes while rain_mm accumulates visibly in the same period's own row.
+  //            Compare the phases in water equivalent instead: minority ≥ MIX_FRAC of total WE,
+  //            above a trace floor. Catches ~0.85% of wet periods at every resolution (67-72%
+  //            of them rain-under-snow, emitted as pure snow before), including 1h, where the
+  //            code arm structurally cannot fire (analyze-wc-amount-mix.ts).
+  const snowWE = snowCm / SNOW_CM_PER_MM;
+  const minorityWE = Math.min(rainMm, snowWE);
+  const codeMix = Math.min(liquid, snow.length) / nWet >= MIX_FRAC;
+  const amountMix = !noAmountMix &&
+    minorityWE >= MIX_MIN_WE_MM && minorityWE / (rainMm + snowWE) >= MIX_FRAC;
+  if (codeMix || amountMix) {
+    const rate = (rainMm + snowWE) / nWet;
     return rate < MIX_HEAVY_MM ? WMO_MIX_LIGHT : WMO_MIX_HEAVY;
   }
 

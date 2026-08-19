@@ -64,6 +64,40 @@ describe("aggregateWeathercode", () => {
       // 1 rain hour in 12 snow ones is a transition, not a wintry mix.
       expect(aggregateWeathercode([...rep(71, 11), ...rep(61, 1)], 3.0, 0.2)).not.toBe(68);
     });
+
+    it("fires on amounts when every hourly code says snow but rain accumulated too", () => {
+      // The field case: hourly codes are single-valued, so "mostly snow, some rain" hours all
+      // read as snow — but the rain shipped in the same period's own row. 4.2 cm = 6 mm WE
+      // against 4 mm rain: rain holds 40% of the water, well past MIX_FRAC.
+      expect(aggregateWeathercode(rep(73, 12), 4.2, 4.0)).toBe(69);
+    });
+
+    it("is symmetric: snow accumulating under all-rain codes also reads as mixed", () => {
+      expect(aggregateWeathercode(rep(63, 12), 4.2, 4.0)).toBe(69);
+    });
+
+    it("ignores a trace of the minority phase below the WE floor", () => {
+      // 0.1 mm of rain under 3 cm of snow is quantization dust, not a wintry mix.
+      expect(aggregateWeathercode(rep(73, 12), 3.0, 0.1)).toBe(73);
+    });
+
+    it("ignores a minority phase below the WE share gate however much fell", () => {
+      // 2 mm rain under 14 cm (20 mm WE) of snow is 9% of the water: a snowstorm, not a mix.
+      expect(aggregateWeathercode(rep(75, 12), 14.0, 2.0)).toBe(75);
+    });
+
+    it("can call a single mixed hour 68/69 at 1h resolution", () => {
+      // The one place the aggregation may rewrite a 1h code: the model splits amounts by phase
+      // within the hour but its weathercode cannot say "both".
+      expect(aggregateWeathercode([73], 0.14, 0.2)).toBe(68);
+      expect(aggregateWeathercode([73], 2.1, 2.0)).toBe(69);
+    });
+
+    it("keeps the amount arm out of the code-arm's escapes", () => {
+      // Freezing rain with snow accumulating stays the freezing escape — being wrong about ice
+      // is a safety problem, so it is never diluted into "mixed".
+      expect(aggregateWeathercode([...rep(66, 2), ...rep(73, 10)], 2.1, 2.0)).toBe(66);
+    });
   });
 
   describe("escapes", () => {
