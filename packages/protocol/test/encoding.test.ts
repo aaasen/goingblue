@@ -229,9 +229,38 @@ describe("v3 round-trip encoding", () => {
     expect(p.wind_600_dir).toBe(PERIOD.wind_600_dir);
     expect(p.wind_700_kph).toBeCloseTo(PERIOD.wind_700_kph!, 3);
     expect(p.wind_700_dir).toBe(PERIOD.wind_700_dir);
-    // the cloud band is quantized to 3 bits per level (0–7 steps), decoded back to nearest %
-    expect(p.cloud_band).toEqual(
+    // The default layout here is 12h periods, which the band's resolution clamp strips —
+    // "not forecast", never "clear". The fine-layout round-trip lives in its own test below.
+    expect(p.cloud_band).toBeUndefined();
+  });
+
+  it("round-trips the cloud band only on fine-resolution periods", () => {
+    const hourly = roundTrip(msg({ periods: [Array(49).fill(PERIOD)] }, { hourly: true }));
+    // quantized to 3 bits per level (0–7 steps), decoded back to nearest %; at 500 m the
+    // forecast point is under every level, so all eight are carried.
+    expect(hourly.periods[0][0].cloud_band).toEqual(
       PERIOD.cloud_band!.map((v) => Math.round(Math.round(v * 7 / 100) * 100 / 7)));
+  });
+
+  it("truncates the band's levels to one below the forecast point", () => {
+    // 4267 m quantizes to 4300 m — ground ≈ 593 hPa, so 300/400/500 hPa sit above the point
+    // and 600 is the one carried below it. Everything under 600 never rides the wire.
+    const p = roundTrip(msg({ elevation: 4267, periods: [Array(49).fill(PERIOD)] }, { hourly: true }))
+      .periods[0][0];
+    expect(p.cloud_band).toEqual(
+      PERIOD.cloud_band!.slice(0, 4).map((v) => Math.round(Math.round(v * 7 / 100) * 100 / 7)));
+  });
+
+  it("spends fewer body bits at altitude (dropped band levels are not encoded)", () => {
+    // A slim period, so the codebook-class selector answers to the band alone — with the full
+    // PERIOD the weathercode column can swing the class choice between the two encodings and
+    // the per-column costs stop being comparable.
+    const slim = { weathercode: PERIOD.weathercode, cloud_band: PERIOD.cloud_band };
+    const bits = (elevation: number) => v3EncodeBreakdown(msg(
+      { vars_mask: 1 << VARS_BIT.cch, elevation, periods: [Array(49).fill(slim)] },
+      { hourly: true })).bodyBits;
+    // 4267 m drops half the levels (8 → 4): anchors and their whole delta chains go with them.
+    expect(bits(4267)).toBeLessThan(bits(0) * 0.8);
   });
 
   it("round-trips every air-quality column on its own scale", () => {

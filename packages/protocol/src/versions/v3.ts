@@ -1,5 +1,5 @@
 import {
-  WMO_CODES, VARS_BIT, CLOUD_BAND_LEVELS_HPA,
+  WMO_CODES, VARS_BIT, CLOUD_BAND_LEVELS_HPA, metersToPressure,
 } from "../constants.js";
 import { layoutFor, maxFillSeq, effectiveMode } from "../layout.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "../bits.js";
@@ -58,6 +58,11 @@ const CODE_BITS = 7;
 // so metre precision isn't needed.
 const ELEV_BITS = 7;
 const ELEV_STEP_M = 100;
+// The elevation as the wire carries it — the value the DECODER will hand back. Every rule that
+// keys off elevation (cloudBandLevelCount) must read this, not the raw input, or the encoder
+// and decoder derive different structure from the same message.
+const quantElevM = (m: number): number =>
+  Math.min(Math.max(Math.round(m / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1) * ELEV_STEP_M;
 // Codebook-class selector: 3 bits for up to 8 classes (CODEBOOK_CLASSES may be smaller; the
 // field width is wire format and stays fixed).
 const CLASS_BITS = 3;
@@ -75,9 +80,10 @@ const HEADER_CHARS = nCharsForBits(V3_HEADER_BITS); // packed-header chars (excl
 // wind: 8 = 5-bit speed (extended Beaufort force 0..17) + 3-bit direction (raw-width
 // equivalent; both entropy-coded).
 // gust: 5 = speed only, no direction (bit 8, formerly cloud_total).
-// cloud band: bit 9 (v2's cch) carries the whole CLOUD_BAND_LEVELS_HPA stack at 3 bits per
-// level anchor; bits 10/11 (v2's ccm/ccl) carry nothing in v3 but stay in the table so the
-// `c` toggle's mask decodes identically.
+// cloud band: bit 9 (v2's cch) carries the CLOUD_BAND_LEVELS_HPA stack at 3 bits per level
+// anchor — clamped to the ≤3h periods and to one level below the forecast point, see
+// cloudBandPeriodCount / cloudBandLevelCount; bits 10/11 (v2's ccm/ccl) carry nothing in v3
+// but stay in the table so the `c` toggle's mask decodes identically.
 // air quality: 5 bits each — a 26-symbol ladder (0 = no data, 1..25 bands), both scales.
 export const VAR_BITS_V3 = [3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5];
 //                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^g ^cband ^(10/11 unused) ^rain
@@ -147,10 +153,50 @@ export const quantCover = (pct: number | undefined): number =>
 // cloud-band fill has to know it — a synthesized value under this threshold ships an empty band
 // anyway — and hardcoding it there would let a width change here silently desynchronize the two.
 export const CLOUD_COVER_MIN_PCT = 50 / CLOUD_STEPS;
-// One codec per level, indexed by position in CLOUD_BAND_LEVELS_HPA — the same index the
-// derive script counts on, so the two cannot drift apart without the digest test noticing.
-const cloudBandCodec = (bk: ClassBooks, levelIdx: number): DeltaCodec =>
-  bk.cloudBandDelta[levelIdx];
+
+// THE BAND'S TWO FREE CLAMPS. Both trim symbols the reader gets little from, and both are
+// derived from values the two sides already share — the layout and the header's elevation — so
+// like the AQ horizon clamp they cost zero wire bits. Both are wire format: moving either
+// changes what an encoded message means.
+//
+// Resolution: a period's band is the per-level MAX over the hours it spans (the server's
+// aggregation), so a 6h or 12h column is the union of every deck that passed — near-overcast
+// almost everywhere, and rendered as a cross-section it reads as a persistent thick layer. At
+// those spans the weathercode row is the honest cloud summary, so the band stops at the first
+// period coarser than 3h. Layouts coarsen front-to-back (see layout.ts), which makes the kept
+// periods a leading run: each level's delta chain truncates, it never gaps.
+export const CLOUD_BAND_MAX_HOURS = 3;
+// How many leading periods carry band symbols. Unlike aqPeriodCount this can be 0 — a layout
+// can open at 6h or 12h (Range does) — and then the column carries nothing, anchors included.
+export function cloudBandPeriodCount(periodHours: number[]): number {
+  let n = 0;
+  for (const h of periodHours) {
+    if (h > CLOUD_BAND_MAX_HOURS) break;
+    n++;
+  }
+  return n;
+}
+
+// Elevation: levels below the forecast point are air the model puts under the terrain — the
+// fill synthesizes readings there, and a reader standing on the point can't see them anyway —
+// so the band carries every level above the ground plus ONE below (the slice the point stands
+// in, which is where an undercast shows). The count is a leading run of CLOUD_BAND_LEVELS_HPA:
+// the summit of Denali (~6200 m, ground ≈ 459 hPa) keeps [300, 400, 500] — a 30k/24k/18k
+// ladder — while anything under ~110 m keeps all eight. Feed this the HEADER's elevation
+// (quantElevM on the way in, the decoded value on the way out). The floor of 2 keeps the band
+// a band (one slice) even for a bogus elevation above every level; no terrain on Earth
+// reaches 300 hPa, so real inputs never hit it.
+export function cloudBandLevelCount(headerElevationM: number): number {
+  const ground = metersToPressure(headerElevationM);
+  let n = 0;
+  while (n < CLOUD_BAND_LEVELS_HPA.length && CLOUD_BAND_LEVELS_HPA[n] < ground) n++;
+  return Math.min(CLOUD_BAND_LEVELS_HPA.length, Math.max(2, n + 1));
+}
+// One codec per (resolution, level) — res is the ARRIVING period's resTableIdx, the level index
+// is the position in CLOUD_BAND_LEVELS_HPA; the same axes the derive script counts on, so the
+// two cannot drift apart without the digest test noticing.
+const cloudBandCodec = (bk: ClassBooks, res: number, levelIdx: number): DeltaCodec =>
+  bk.cloudBandDelta[res][levelIdx];
 
 // ── Air quality ────────────────────────────────────────────────────────────────
 // Five columns over two incompatible index scales (see the AQI ladders in entropy.ts), all from
@@ -465,17 +511,23 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
     mark("freeze", before);
   }
 
-  // cloud band: level-major — for each pressure level, per model, an anchor (first period, full
-  // width) followed by entropy-coded period-over-period deltas under that level's own table
-  // (see cloudBandCodec above — no per-message selector).
+  // cloud band: level-major — for each carried pressure level, per model, an anchor (first
+  // period, full width) followed by entropy-coded period-over-period deltas under the
+  // (arriving period's resolution, level) table (see cloudBandCodec above — no per-message
+  // selector). Both clamps apply (see cloudBandPeriodCount / cloudBandLevelCount): only the
+  // leading ≤3h periods carry symbols, and only the levels down to one below the forecast
+  // point — keyed off the QUANTIZED elevation, since that is the value the decoder reads back
+  // out of the header.
   if (msg.vars_mask & (1 << VARS_BIT.cch)) {
     before = em.cost;
-    for (let li = 0; li < CLOUD_BAND_LEVELS_HPA.length; li++) {
-      const codec = cloudBandCodec(books, li);
+    const nCb = cloudBandPeriodCount(msg.periodHours);
+    const nLev = nCb > 0 ? cloudBandLevelCount(quantElevM(msg.elevation)) : 0;
+    for (let li = 0; li < nLev; li++) {
       for (let m = 0; m < nModels; m++) {
         em.raw(quantCover(msg.periods[m][0].cloud_band?.[li]), CLOUD_ANCHOR_BITS);
-        for (let p = 1; p < nPeriods; p++) {
-          codec.encode(em, quantCover(msg.periods[m][p].cloud_band?.[li])
+        for (let p = 1; p < nCb; p++) {
+          cloudBandCodec(books, res[p], li).encode(em,
+            quantCover(msg.periods[m][p].cloud_band?.[li])
             - quantCover(msg.periods[m][p - 1].cloud_band?.[li]));
         }
       }
@@ -666,7 +718,7 @@ function buildHeader(msg: ForecastMessage, cls: number): number[] {
   const headerBits: number[] = [];
   putInt(headerBits, msg.code, CODE_BITS);
   putInt(headerBits, seq - 1, V3_SEQ_BITS);
-  putInt(headerBits, Math.min(Math.max(Math.round(msg.elevation / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1), ELEV_BITS);
+  putInt(headerBits, quantElevM(msg.elevation) / ELEV_STEP_M, ELEV_BITS);
   putInt(headerBits, cls, CLASS_BITS);
   return headerBits;
 }
@@ -802,7 +854,7 @@ export function v3MessageFromString(s: string, resolve: ContextResolver): Foreca
   const periods = decodeBody(
     decodeBodyAuto(rest.slice(HEADER_CHARS), device && DEVICE_TRANSPORT[device].alphabet),
     CLASS_BOOKS[codebookClass], vars_mask,
-    layout.periodHours, firstStart.getUTCHours(), utcOffsetHours, 1);
+    layout.periodHours, firstStart.getUTCHours(), utcOffsetHours, elevation, 1);
 
   return {
     version,
@@ -826,11 +878,12 @@ export function v3MessageFromString(s: string, resolve: ContextResolver): Foreca
 }
 
 // Decodes the column-major body written by buildBody, given the structure the header/context
-// implies (`periodHours` is the derived layout — it keys the wind tables per period). Throws
-// unless the stream is consumed exactly (see SymSource.assertDone).
+// implies (`periodHours` is the derived layout — it keys the wind tables per period, and
+// `elevation` is the header's, which keys the cloud band's level count). Throws unless the
+// stream is consumed exactly (see SymSource.assertDone).
 function decodeBody(
   bodyBits: number[], books: ClassBooks, vars_mask: number, periodHours: number[],
-  firstHour: number, utcOffsetHours: number, nModels: number,
+  firstHour: number, utcOffsetHours: number, elevation: number, nModels: number,
 ): Period[][] {
   const nPeriods = periodHours.length;
   const rd = reader(bodyBits, books);
@@ -888,16 +941,21 @@ function decodeBody(
     }
   }
 
+  // Cloud band mirrors buildBody, both clamps included: only the leading ≤3h periods and only
+  // the levels down to one below the header's elevation carry symbols. The decoded array is
+  // exactly the carried levels — its LENGTH is how the app learns the band's floor — and a
+  // period past the resolution clamp is left without the field: "not forecast", never "clear",
+  // the same convention as the AQ horizon.
   if (vars_mask & (1 << VARS_BIT.cch)) {
-    const nLevels = CLOUD_BAND_LEVELS_HPA.length;
-    for (let li = 0; li < nLevels; li++) {
-      const codec = cloudBandCodec(books, li);
+    const nCb = cloudBandPeriodCount(periodHours);
+    const nLev = nCb > 0 ? cloudBandLevelCount(elevation) : 0;
+    for (let li = 0; li < nLev; li++) {
       for (let m = 0; m < nModels; m++) {
         let quant = rd.int(CLOUD_ANCHOR_BITS);
-        (periods[m][0].cloud_band ??= new Array<number>(nLevels).fill(0))[li] = Math.round((quant * 100) / 7);
-        for (let p = 1; p < nPeriods; p++) {
-          quant += rd.delta(codec);
-          (periods[m][p].cloud_band ??= new Array<number>(nLevels).fill(0))[li] = Math.round((quant * 100) / 7);
+        (periods[m][0].cloud_band ??= new Array<number>(nLev).fill(0))[li] = Math.round((quant * 100) / 7);
+        for (let p = 1; p < nCb; p++) {
+          quant += rd.delta(cloudBandCodec(books, res[p], li));
+          (periods[m][p].cloud_band ??= new Array<number>(nLev).fill(0))[li] = Math.round((quant * 100) / 7);
         }
       }
     }

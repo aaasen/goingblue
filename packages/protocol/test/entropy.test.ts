@@ -252,12 +252,15 @@ describe("freezing level delta entropy coding", () => {
   });
 });
 
-// Every cloud-band level uses a single-table bounded delta codec from makeDeltaCodec — same
-// shape, different weights per level. Table-driven so all eight get the same coverage without
-// eight copies of the test body.
+// Every cloud-band (resolution, level) uses a single-table bounded delta codec from
+// makeDeltaCodec — same shape, different weights per cell. Table-driven so every cell the wire
+// can key gets the same coverage without copies of the test body; only the 3h/1h rows are
+// exercised because only they serve (the wire clamps band symbols to ≤3h periods).
 const DELTA_CODECS: { label: string; codec: DeltaCodec; maxDelta: number; rawBits: number }[] =
-  CLOUD_BAND_LEVELS_HPA.map((hpa, li) => (
-    { label: `cloud band ${hpa} hPa`, codec: CLOUD_BAND_DELTA[li], maxDelta: 7, rawBits: 3 }));
+  [3, 4].flatMap((res) => CLOUD_BAND_LEVELS_HPA.map((hpa, li) => ({
+    label: `cloud band ${hpa} hPa @${res === 3 ? "3h" : "1h"}`,
+    codec: CLOUD_BAND_DELTA[res][li], maxDelta: 7, rawBits: 3,
+  })));
 
 describe.each(DELTA_CODECS)("$label delta entropy coding", ({ codec, maxDelta, rawBits }) => {
   const bitsFor = (deltas: number[]): number =>

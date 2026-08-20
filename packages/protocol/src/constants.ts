@@ -77,6 +77,18 @@ export const MODEL_NAMES: string[] = [
 // it, which reads as clear sky, and neither is in the training corpus.
 export const CLOUD_BAND_LEVELS_HPA = [300, 400, 500, 600, 700, 850, 925, 1000] as const;
 
+// International Standard Atmosphere, troposphere leg — the fixed scale that places the band's
+// pressure levels at altitudes. Good to a few tens of meters over the band's span. WIRE FORMAT
+// for v3: cloudBandLevelCount reads the ground pressure off it, so a coefficient change moves
+// which levels a message carries. The app uses the same pair for the band's axis labels and
+// ground line, which is exactly why it lives here and not in two copies.
+export function pressureToMeters(hpa: number): number {
+  return 44330.77 * (1 - Math.pow(hpa / 1013.25, 0.190263));
+}
+export function metersToPressure(m: number): number {
+  return 1013.25 * Math.pow(1 - m / 44330.77, 1 / 0.190263);
+}
+
 // vars_mask bit indices
 export const VARS_BIT: Record<string, number> = {
   precip: 0,

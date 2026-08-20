@@ -7,7 +7,7 @@ import {
   WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL, WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES,
   FREEZE_DELTA_WEIGHTS_BY_RES, FREEZE_DELTA_TEMP_WEIGHTS_BY_RES,
   GUST_DELTA_WEIGHTS_BY_RES, SFC_DELTA_GUST_WEIGHTS_BY_RES,
-  CLOUD_BAND_DELTA_WEIGHTS_BY_LEVEL,
+  CLOUD_BAND_DELTA_WEIGHTS_BY_RES_LEVEL,
   TEMP_DELTA_BOOTSTRAP_WEIGHTS, TEMP_DELTA_WEIGHTS_BY_RES,
   PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES,
   SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES,
@@ -424,12 +424,15 @@ export interface ClassBooks {
   // sits, so it moves with the airmass temperature, and temp decodes first, making its delta
   // free context. See codec-server/scripts/derive-freeze-delta-codebooks.ts.
   freezeDeltaBook(res: number, tempDelta: number | null): CodeBook;
-  // Cloud band cover deltas (0..7 quantized, deltas -7..7), ONE CODEC PER PRESSURE LEVEL,
-  // indexed by CLOUD_BAND_LEVELS_HPA index — persistence varies with height (a 300 hPa cirrus
-  // sheet and a 1000 hPa deck are not the same process), so the levels are not pooled. Trained
-  // on the post-fillCloudBand stack the wire actually carries. See
+  // Cloud band cover deltas (0..7 quantized, deltas -7..7), ONE CODEC PER (RESOLUTION,
+  // PRESSURE LEVEL) — [res][CLOUD_BAND_LEVELS_HPA index]. Persistence varies with height (a
+  // 300 hPa cirrus sheet and a 1000 hPa deck are not the same process), so the levels are not
+  // pooled; and a period's band is the per-level max over its span, so the span reshapes the
+  // deltas too. Only the 3h/1h rows serve — the wire clamps band symbols to ≤3h periods
+  // (cloudBandPeriodCount in v3.ts) — the coarser rows keep the shape uniform with the other
+  // res-keyed tables. Trained on the post-fillCloudBand stack the wire actually carries. See
   // codec-server/scripts/derive-cloud-delta-codebooks.ts.
-  cloudBandDelta: DeltaCodec[];
+  cloudBandDelta: DeltaCodec[][];
   // Order-1 codebooks over the wet columns' quantized VALUES (not deltas — zero is an absorbing
   // regime), keyed by (resolution, SAME-period weathercode class, previous decoded value) —
   // bootstrap for a column's first cell. Rain/snow key on a BUCKET of the previous value (see
@@ -529,7 +532,8 @@ function buildClassBooks(t: ClassTableSet): ClassBooks {
         ? freezeDeltaTablesByRes[res]
         : freezeDeltaTempTables[res][tempDeltaBucket(tempDelta)];
     },
-    cloudBandDelta: t.CLOUD_BAND_DELTA_WEIGHTS_BY_LEVEL.map((w) => makeDeltaCodec(w, 7)),
+    cloudBandDelta: t.CLOUD_BAND_DELTA_WEIGHTS_BY_RES_LEVEL.map(
+      (byLevel) => byLevel.map((w) => makeDeltaCodec(w, 7))),
     precipBook: makeValueCodec(t.PRECIP_BOOTSTRAP_WEIGHTS, t.PRECIP_WEIGHTS_BY_RES, (p) => p),
     snowBook: makeValueCodec(t.SNOW_BOOTSTRAP_WEIGHTS, t.SNOW_WEIGHTS_BY_RES, accumBucket),
     rainBook: makeValueCodec(t.RAIN_BOOTSTRAP_WEIGHTS, t.RAIN_WEIGHTS_BY_RES, accumBucket),
@@ -594,7 +598,7 @@ const AQ_BOOKS = {
 
 // The base (class 0) table set — codebooks.gen.ts as one ClassTableSet.
 const BASE_TABLES: ClassTableSet = {
-  CLOUD_BAND_DELTA_WEIGHTS_BY_LEVEL,
+  CLOUD_BAND_DELTA_WEIGHTS_BY_RES_LEVEL,
   FREEZE_DELTA_WEIGHTS_BY_RES, FREEZE_DELTA_TEMP_WEIGHTS_BY_RES,
   GUST_DELTA_WEIGHTS_BY_RES, SFC_DELTA_GUST_WEIGHTS_BY_RES,
   PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES,
@@ -705,9 +709,10 @@ const bundleOf = (t: ClassTableSet) => ({
   // upperDeltaBucket, falling back to windSpeedDelta[res][0] when gust is absent.
   gustDelta: { byRes: t.GUST_DELTA_WEIGHTS_BY_RES.map(qf) },
   sfcDeltaGust: { byRes: t.SFC_DELTA_GUST_WEIGHTS_BY_RES.map((rows) => rows.map(qf)) },
-  // One table per CLOUD_BAND_LEVELS_HPA level, in that order — the level index is the codec
-  // index, so a reordering of the levels is itself a wire change and trips the digest.
-  cloudBandDelta: t.CLOUD_BAND_DELTA_WEIGHTS_BY_LEVEL.map(qf),
+  // One table per (resolution, CLOUD_BAND_LEVELS_HPA level), in that order — both indices are
+  // the codec indices, so a reordering of either axis is itself a wire change and trips the
+  // digest.
+  cloudBandDelta: t.CLOUD_BAND_DELTA_WEIGHTS_BY_RES_LEVEL.map((rows) => rows.map(qf)),
   tempDelta: {
     bootstrap: qf(t.TEMP_DELTA_BOOTSTRAP_WEIGHTS),
     byRes: t.TEMP_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),

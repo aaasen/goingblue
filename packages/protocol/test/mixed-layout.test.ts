@@ -18,6 +18,8 @@ import {
   beaufortMidKph,
   aqiMid,
   aqPeriodCount,
+  cloudBandPeriodCount,
+  CLOUD_BAND_MAX_HOURS,
   AQI_US_LOWER,
   AQI_EU_LOWER,
 } from "../src/index.js";
@@ -150,8 +152,27 @@ describe("mixed-layout round-trip encoding", () => {
       expect(d.freeze_m).toBeCloseTo(p.freeze_m!, 5);
       expect(d.wind_sfc_kph).toBeCloseTo(p.wind_sfc_kph!, 5);
       expect(d.wind_sfc_dir).toBe(p.wind_sfc_dir);
-      expect(d.cloud_band).toEqual(p.cloud_band);
+      // The band rides only the ≤3h periods; the 6h tail decodes without the field.
+      if (original.periodHours[i] <= CLOUD_BAND_MAX_HOURS) expect(d.cloud_band).toEqual(p.cloud_band);
+      else expect(d.cloud_band).toBeUndefined();
     });
+  });
+
+  it("clamps the cloud band to the leading fine-resolution periods on every layout", () => {
+    // Like the AQ clamp: both sides derive the cutoff from periodHours alone, so a mismatch
+    // between them would surface as a mis-framed rANS stream somewhere on some path. Walk every
+    // seq of every mode and hold the decoded shape against the same derivation.
+    for (const mode of [MODE_DETAIL, MODE_AUTO, MODE_RANGE]) {
+      for (let seq = 1; seq <= maxFillSeq(mode); seq++) {
+        const { original, decoded } = roundTrip(seq, mode);
+        const nCb = cloudBandPeriodCount(original.periodHours);
+        original.periods[0].forEach((p, i) => {
+          const d = decoded.periods[0][i];
+          if (i < nCb) expect(d.cloud_band, `${mode}/${seq}/${i}`).toEqual(p.cloud_band);
+          else expect(d.cloud_band, `${mode}/${seq}/${i}`).toBeUndefined();
+        });
+      }
+    }
   });
 
   it("clamps air quality to the CAMS horizon on every mode's longest layout", () => {

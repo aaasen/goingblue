@@ -12,8 +12,8 @@ import {
 } from '@weather/protocol';
 import type { TimeFormat, Units } from './settings';
 import {
-  resampleColumn, pressureToMeters, metersToPressure, hpaToFrac,
-  BAND_TOP_HPA, BAND_BOTTOM_HPA, GRID_ROWS, GRID_STEP_HPA,
+  bandScale, pressureToMeters, metersToPressure,
+  BAND_TOP_HPA, GRID_STEP_HPA, type BandScale,
 } from './cloudBand';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { precipMark, weatherGlyph, wmoName, type MoonPhase, type Prim, type PrecipMarkKind } from './weatherGlyph';
@@ -83,13 +83,16 @@ const ROW_H = {
   // The freezing level is a graph rather than a bare number, so it needs room for the isotherm to
   // move in under its band of column labels.
   FREEZE: 66,
-  // The vertical cloud band spans 300–1000 hPa on an even ladder — one equal slice per wire
-  // level, edge to edge with nothing padded outside them (hpaToFrac) — so this height divides
-  // into 7 25px slices. A slice is what a deck confined to a single level is drawn in, and 25px
-  // still reads as its own streak rather than blurring into its neighbors; the band is the
-  // tallest row in the drawing either way, and every slice spent above it is one the reader
-  // scrolls past to reach the rows below.
-  CLOUD_BAND: 175,
+  // The vertical cloud band runs 300 hPa down to the message's own floor on an even ladder —
+  // one equal slice per wire-level gap, edge to edge with nothing padded outside them
+  // (bandScale) — at this height per slice. A slice is what a deck confined to a single level
+  // is drawn in, and 25px still reads as its own streak rather than blurring into its
+  // neighbors; every slice spent above that is one the reader scrolls past to reach the rows
+  // below. The row's height therefore follows the level count: a sea-level forecast carries
+  // all 8 levels (7 slices, 175px), a summit forecast fewer — the wire truncates the stack at
+  // one level below the forecast point, and the row shrinks with it instead of stretching a
+  // shorter ladder over a full-height band.
+  CLOUD_BAND_SLICE: 25,
   // Wind speeds are a single short number on a colored ground, so they need less room than the
   // other data rows — and there are up to five of them stacked (surface, gust, three upper levels).
   WIND: 26,
@@ -1044,9 +1047,17 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
   // The Windy-style vertical cloud band — v3 messages carry it in place of the low/mid/high
   // trio below, so exactly one of these two cloud blocks renders for any given message. Its axis
   // is the ladder of wire levels the rail draws, so the header names the unit that ladder is in.
-  if (has((p) => p.cloud_band)) {
+  // The wire clamps the band to the leading ≤3h periods, so a message can carry it on some
+  // periods and not others (never the reverse of that shape); presence anywhere is what makes
+  // the row. The row's height follows the message's level count — the decoded array's length,
+  // which the wire truncates at one level below the forecast point.
+  const bandStack = periods.find((p) => p.cloud_band)?.cloud_band;
+  if (bandStack) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Clouds by altitude (${frU})`, legend: '' });
-    rows.push({ kind: 'cloud-band', height: ROW_H.CLOUD_BAND, label: '', legend: '' });
+    rows.push({
+      kind: 'cloud-band', height: ROW_H.CLOUD_BAND_SLICE * (bandScale(bandStack.length).levels.length - 1),
+      label: '', legend: '',
+    });
   }
 
   const hasCloud = has((p) => p.cloud_high) || has((p) => p.cloud_mid) || has((p) => p.cloud_low);
@@ -1584,11 +1595,14 @@ const CLOUD_BAND_STEPS: [threshold: number, alpha: number][] = [
 const GROUND_LABEL_X = 4;
 const GROUND_LABEL_GAP = 3;
 
-// Coverage 0..100 at every (grid row, period): row-major, GRID_ROWS × n.
-function buildCloudField(periods: Period[]): Uint8Array {
+// Coverage 0..100 at every (grid row, period): row-major, scale.gridRows × periods.length.
+// The caller passes only the periods that carry a band — the wire clamps band symbols to the
+// leading ≤3h periods, and a period without the field is "not forecast", which must never be
+// resampled into the 0 that draws as clear sky.
+function buildCloudField(periods: Period[], scale: BandScale): Uint8Array {
   const n = periods.length;
-  const field = new Uint8Array(GRID_ROWS * n);
-  for (let i = 0; i < n; i++) resampleColumn(periods[i].cloud_band, field, i, n);
+  const field = new Uint8Array(scale.gridRows * n);
+  for (let i = 0; i < n; i++) scale.resampleColumn(periods[i].cloud_band, field, i, n);
   return field;
 }
 
@@ -1794,11 +1808,17 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
   }
 
   // The vertical cloud band: Windy-style cloud cross-section from the message's cloud_band
-  // stacks, as real filled contours (see isoLoops above). The y axis runs 300 hPa (top) to
-  // 1000 hPa (bottom) on an even ladder — one equal slice per wire level, see hpaToFrac — so
-  // every level shows a deck at the same size. Grid points sit at column centers; a sentinel
-  // ring pads the field so every contour closes, with the ring's coordinates clamped onto the
-  // band's edges so loops hug them.
+  // stacks, as real filled contours (see isoLoops above). The y axis runs 300 hPa (top) to the
+  // message's own floor (bottom) on an even ladder — one equal slice per wire level, see
+  // bandScale — so every level shows a deck at the same size. Grid points sit at column
+  // centers; a sentinel ring pads the field so every contour closes, with the ring's
+  // coordinates clamped onto the band's edges so loops hug them.
+  //
+  // The wire clamps band symbols to the leading ≤3h periods, so the drawing spans only the
+  // columns that carry data and stops at their boundary — the rest of the row stays empty,
+  // which is "not forecast" exactly the way an empty air-quality cell is. The level count is
+  // read off the decoded array (the wire truncates the stack at one level below the forecast
+  // point), and the row's height in buildRows follows the same count.
   //
   // Marching squares runs over the whole field, and its loops cross tiles freely — so the band
   // is built HERE, once, into elements every tile includes and clips for itself.
@@ -1808,21 +1828,26 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
     const top = bandY;
     bandY += row.height;
     if (row.kind !== 'cloud-band') return;
-    const yOfHpa = (hpa: number) => top + hpaToFrac(hpa) * row.height;
-    const field = buildCloudField(periods);
-    const W = n + 2, H = GRID_ROWS + 2;
+    let nCb = 0;
+    while (nCb < n && periods[nCb].cloud_band) nCb++;
+    if (nCb === 0) return; // the row only exists when some period carries a band
+    const scale = bandScale(periods[0].cloud_band!.length);
+    const bandRight = colLeft(0) + nCb * CELL_W;
+    const yOfHpa = (hpa: number) => top + scale.hpaToFrac(hpa) * row.height;
+    const field = buildCloudField(periods.slice(0, nCb), scale);
+    const W = nCb + 2, H = scale.gridRows + 2;
     const val = (i: number, j: number) =>
-      i === 0 || j === 0 || i === W - 1 || j === H - 1 ? -1 : field[(j - 1) * n + (i - 1)];
-    const xs = [colLeft(0), ...periods.map((_, i) => colCenter(i)), colLeft(0) + n * CELL_W];
+      i === 0 || j === 0 || i === W - 1 || j === H - 1 ? -1 : field[(j - 1) * nCb + (i - 1)];
+    const xs = [colLeft(0), ...periods.slice(0, nCb).map((_, i) => colCenter(i)), bandRight];
     // The field's rows are uniform in pressure; the axis is not (hpaToFrac), so each row is
     // placed by its own pressure. The contour walk works in grid coordinates and reads its
     // pixels back through these tables, so the ladder bends the loops with it. Both sentinel
     // rows sit ON the outermost data rows: cloud meets the ground squarely at the bottom, and
     // stops dead at 300 hPa on top. A ring standing off either edge would have every contour
     // interpolate into the gap, painting cloud past the levels the message carries.
-    const gridYs = Array.from({ length: GRID_ROWS }, (_, j) =>
-      top + hpaToFrac(BAND_TOP_HPA + j * GRID_STEP_HPA) * row.height);
-    const ys = [gridYs[0], ...gridYs, gridYs[GRID_ROWS - 1]];
+    const gridYs = Array.from({ length: scale.gridRows }, (_, j) =>
+      top + scale.hpaToFrac(BAND_TOP_HPA + j * GRID_STEP_HPA) * row.height);
+    const ys = [gridYs[0], ...gridYs, gridYs[scale.gridRows - 1]];
     const px = (g: number) => {
       const f = Math.floor(g);
       return lerp(xs[f], xs[Math.min(f + 1, xs.length - 1)], g - f);
@@ -1838,7 +1863,7 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
     // apiece), so the threshold stays under half a cell everywhere rather than eating real
     // one-cell blobs wherever the rows run closest together.
     let minRowGap = Infinity;
-    for (let j = 1; j < GRID_ROWS; j++) minRowGap = Math.min(minRowGap, ys[j + 1] - ys[j]);
+    for (let j = 1; j < scale.gridRows; j++) minRowGap = Math.min(minRowGap, ys[j + 1] - ys[j]);
     const minLoopArea = 0.5 * CELL_W * minRowGap;
     const loopArea = (pts: { x: number; y: number }[]) => {
       let a = 0;
@@ -1862,18 +1887,33 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
         color={rgb(CLOUD_BAND_INK, alpha)} />);
     }
 
-    // One gridline per wire level — the axis lists exactly what the message carries. The
-    // altitudes those lines stand for are written in the fixed rail (see RowLegend), not
-    // here: they are the scale of a 220px plot, and drawn into the scene they scrolled off
-    // with the first day.
-    for (const hpa of CLOUD_BAND_LEVELS_HPA) {
+    // Where the band stops short of the window (coarser periods follow), the contours dissolve
+    // into the boundary over the last half column instead of hitting it as a sheer face — the
+    // sentinel column already tapers them, and this wash softens what remains. Over the
+    // contours only: the gridlines and ground line draw after it, ending crisply at the
+    // boundary, so the SCALE reads as ending while the CLOUD reads as passing out of view.
+    if (nCb < n) {
+      cloudBandEls.push(
+        <Rect key={`cbfade${ri}`} x={bandRight - CELL_W / 2} y={top}
+          width={CELL_W / 2} height={row.height}>
+          <LinearGradient start={vec(bandRight - CELL_W / 2, 0)} end={vec(bandRight, 0)}
+            colors={['rgba(255,255,255,0)', '#ffffff']} />
+        </Rect>,
+      );
+    }
+
+    // One gridline per wire level — the axis lists exactly what the message carries, and runs
+    // exactly as far as the message carries it (bandRight). The altitudes those lines stand
+    // for are written in the fixed rail (see RowLegend), not here: they are the scale of a
+    // 220px plot, and drawn into the scene they scrolled off with the first day.
+    for (const hpa of scale.levels) {
       // Both end levels sit on the row's own edges, where a line would only redraw a boundary
       // the section header above and the row below already draw — 300 hPa against the header's
-      // ground, 1000 hPa against the row under it. The edges ARE those two rungs; the rail's
-      // labels land on them, and the five rungs between them are what needs a line of its own.
-      if (hpa === BAND_TOP_HPA || hpa === BAND_BOTTOM_HPA) continue;
+      // ground, the floor level against the row under it. The edges ARE those two rungs; the
+      // rail's labels land on them, and the rungs between them are what needs a line of its own.
+      if (hpa === BAND_TOP_HPA || hpa === scale.bottomHpa) continue;
       cloudBandEls.push(
-        <Line key={`cbg${ri}-${hpa}`} p1={vec(0, yOfHpa(hpa))} p2={vec(width, yOfHpa(hpa))}
+        <Line key={`cbg${ri}-${hpa}`} p1={vec(0, yOfHpa(hpa))} p2={vec(bandRight, yOfHpa(hpa))}
           color={C.grid} strokeWidth={1}>
           <DashPathEffect intervals={[3, 4]} />
         </Line>,
@@ -1881,20 +1921,21 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
     }
 
     // The ground: the forecast point's elevation, placed on the same pressure ladder as the cloud
-    // (standard atmosphere — the band is a scale, not a sounding). Everything under it is air the
-    // model puts below the terrain, which is why a mountain forecast can show cloud filling the
-    // bottom of a band whose floor is a sea-level 1000 hPa. Drawn last, so it lies over both the
-    // contours and the gridlines.
+    // (standard atmosphere — the band is a scale, not a sounding). With the wire truncating the
+    // stack at one level below the forecast point, the line sits inside the bottom slice — the
+    // slice that exists precisely so an undercast below the point has somewhere to show. Drawn
+    // last, so it lies over both the contours and the gridlines.
     //
-    // Skipped at and below the band's floor: an elevation under ~110 m clamps onto the row's bottom
-    // edge, where the line would only redraw the boundary the row below already draws — and 0 is
-    // also what the wire reports when it has no elevation to carry, so there would be nothing to
-    // stand for. The same reasoning skips the two end gridlines above.
+    // Skipped at and below the band's floor: from low country the floor is 1000 hPa and an
+    // elevation under ~110 m clamps onto the row's bottom edge, where the line would only redraw
+    // the boundary the row below already draws — and 0 is also what the wire reports when it has
+    // no elevation to carry, so there would be nothing to stand for. The same reasoning skips the
+    // two end gridlines above.
     const groundHpa = metersToPressure(elevation);
-    if (elevation > 0 && groundHpa < BAND_BOTTOM_HPA) {
+    if (elevation > 0 && groundHpa < scale.bottomHpa) {
       const groundY = yOfHpa(groundHpa);
       cloudBandEls.push(
-        <Line key={`cbgnd${ri}`} p1={vec(0, groundY)} p2={vec(width, groundY)}
+        <Line key={`cbgnd${ri}`} p1={vec(0, groundY)} p2={vec(bandRight, groundY)}
           color={C.groundLine} strokeWidth={1.25}>
           <DashPathEffect intervals={[5, 4]} />
         </Line>,
@@ -2549,8 +2590,12 @@ function ladderLabel(hpa: number, units: Units): string {
  * Section bands carry their ground across the rail so a header reads as one strip rather than as
  * a label with a notch cut in front of it.
  */
-const RowLegend = memo(function RowLegend({ rows, units, paint }: {
+const RowLegend = memo(function RowLegend({ rows, units, bandLevels, paint }: {
   rows: Row[]; units: Units;
+  // How many pressure levels the message's cloud band carries (0 when it carries none) — the
+  // wire truncates the stack at one level below the forecast point, and the rail's ladder has
+  // to list exactly the levels the band draws.
+  bandLevels: number;
   // Epoch that remounts the marks canvas after this tab was hidden — see Meteogram.
   paint: number;
 }) {
@@ -2574,24 +2619,26 @@ const RowLegend = memo(function RowLegend({ rows, units, paint }: {
       return;
     }
 
-    // The cloud band's axis: one altitude per wire level, on the same even ladder the scene draws
-    // its gridlines with. Altitude rather than the transmitted pressure — a reader in the
-    // mountains thinks in feet, and the pair ("14k · 600") doesn't fit a 44px rail. The section
-    // header names the unit, and the detail panel gives both.
+    // The cloud band's axis: one altitude per carried wire level, on the same even ladder the
+    // scene draws its gridlines with. Altitude rather than the transmitted pressure — a reader
+    // in the mountains thinks in feet, and the pair ("14k · 600") doesn't fit a 44px rail. The
+    // section header names the unit, and the detail panel gives both.
     //
-    // The bottom level goes unlabelled. It is the ground — 364 ft, and the ladder would have to
+    // A 1000 hPa floor goes unlabelled. It is the ground — 364 ft, and the ladder would have to
     // print a fraction to say so — and it sits on the row's own bottom edge, where a number reads
-    // as much against the row below as against the band. The rung above it stands for the lowest
-    // cloud the message can carry, which is what the reader needs the scale for.
+    // as much against the row below as against the band. A TRUNCATED floor is labelled: on a
+    // summit forecast the bottom level is a real altitude one level below the point (18k on the
+    // summit of Denali), not the ground, and the reader needs the scale's end named.
     if (row.kind === 'cloud-band') {
-      for (const hpa of CLOUD_BAND_LEVELS_HPA) {
-        if (hpa === BAND_BOTTOM_HPA) continue;
-        const gy = top + hpaToFrac(hpa) * row.height;
-        // Rungs are centered on their own altitude, except at the top: 300 hPa IS the row's top
-        // edge, so centering would hang half the "30k+" over the section header above it. The
-        // clamp drops it flush inside the band instead — still the topmost number in the rail,
-        // and reading against the edge it names. The inner rungs clear both edges by a full
-        // slice, so for them the clamp only guards the arithmetic.
+      const scale = bandScale(bandLevels);
+      for (const hpa of scale.levels) {
+        if (hpa === 1000) continue;
+        const gy = top + scale.hpaToFrac(hpa) * row.height;
+        // Rungs are centered on their own altitude, except at the ends: 300 hPa IS the row's top
+        // edge, so centering would hang half the "30k+" over the section header above it, and a
+        // truncated floor is the bottom edge likewise. The clamp drops each flush inside the
+        // band instead — still reading against the edge it names. The inner rungs clear both
+        // edges by a full slice, so for them the clamp only guards the arithmetic.
         const ty = Math.min(Math.max(gy - LEGEND_LEVEL_H / 2, top), top + row.height - LEGEND_LEVEL_H);
         els.push(
           <RNText key={`cb${ri}-${hpa}`} numberOfLines={1} style={[styles.legendLevel, { top: ty }]}>
@@ -3031,7 +3078,8 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
         </View>
       ))}
       </View>
-      <RowLegend rows={rows} units={units} paint={paint} />
+      <RowLegend rows={rows} units={units} paint={paint}
+        bandLevels={periods.find((p) => p.cloud_band)?.cloud_band?.length ?? 0} />
       <SectionLabels rows={rows} />
       </View>
     </View>
@@ -3298,7 +3346,11 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
   if (has((q) => q.wind_600_kph)) rows.push([upperWindLabel(600), fmtWindFull(p.wind_600_kph, p.wind_600_dir, units)]);
   if (has((q) => q.wind_700_kph)) rows.push([upperWindLabel(700), fmtWindFull(p.wind_700_kph, p.wind_700_dir, units)]);
   if (has((q) => q.cloud_band)) {
-    CLOUD_BAND_LEVELS_HPA.forEach((hpa, li) => {
+    // Only the levels the message carries — the wire truncates the stack at one level below the
+    // forecast point, so the carried count is any band-bearing period's array length. A period
+    // outside the band's resolution clamp lists them with dashes, like any other absent value.
+    const bandLevels = periods.find((q) => q.cloud_band)?.cloud_band?.length ?? 0;
+    CLOUD_BAND_LEVELS_HPA.slice(0, bandLevels).forEach((hpa, li) => {
       const v = p.cloud_band?.[li];
       // "and above" on the top level, matching the rail's "30k+" — the highest level the
       // message carries is the only one whose reading is not bracketed by a level above it.
