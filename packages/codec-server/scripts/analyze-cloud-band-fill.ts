@@ -49,13 +49,10 @@ const BAND_MASK = 1 << VARS_BIT.cch;
 const args = process.argv.slice(2);
 const stride = Math.max(1, Number(args[args.indexOf("--stride") + 1]) || 50);
 
-// eachForecast runs adjustPrecipPhase before the callback (needs temperature_2m and
-// freezing_level_height), and fillCloudBand needs all three level families. DERIVE_VARS carries
-// neither the levels nor — deliberately — the fill; see its comment.
-const SCAN_VARS = [
-  ...DERIVE_VARS,
-  ...CLOUD_VARS, ...RH_VARS, ...LEVELS.map((l) => `geopotential_height_${l}hPa`),
-];
+// DERIVE_VARS already carries all three level families (the band codebooks train on them), so
+// the default load is enough. What this scan must NOT take is eachForecast's own fillCloudBand:
+// sections A–C measure the fill by comparing before against after, and a pre-filled cell would
+// have it validating its own output. Hence `fillBand: false` on the call below.
 
 // A code that implies cloud. WMO 0/1 are clear and mainly-clear; everything from 2 up is partly
 // cloudy or worse, including every precipitating and fog code. This is the same coarse proxy the
@@ -171,7 +168,7 @@ await eachForecast((raw, _startHour, _loc, pos) => {
     countPeriods(raw, windows, off, period0.get(res)!);
     countPeriods(filled, windows, off, period1.get(res)!);
   }
-}, "eval", SCAN_VARS, { index: 0, total: stride });
+}, "eval", DERIVE_VARS, { index: 0, total: stride }, false);
 
 console.log(`\ncloud-band fill — ${cells} eval cells (1 in ${stride}), ` +
   `${hourly0.hours.toLocaleString()} hours\n`);

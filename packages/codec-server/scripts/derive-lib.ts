@@ -7,9 +7,10 @@
  */
 import { fileURLToPath } from "node:url";
 import {
-  adjustPrecipPhase, aggregateHourly, rowsFromWindows, HOURS_PER_PERIOD,
+  adjustPrecipPhase, aggregateHourly, fillCloudBand, rowsFromWindows, HOURS_PER_PERIOD,
   type HourlyData, type Row,
 } from "../src/forecast.ts";
+import { CLOUD_BAND_LEVELS_HPA } from "@weather/protocol";
 import { dbLocations, listCells, loadCell, modelElevations, openDb } from "./corpus-db.ts";
 
 // The derivation corpus: the production source's cells in the corpus DB (see corpus-db.ts).
@@ -31,12 +32,13 @@ export const DERIVE_VARS: readonly string[] = [
   "wind_speed_600hPa", "wind_direction_600hPa",
   "wind_speed_700hPa", "wind_direction_700hPa",
   "cloud_cover", "cloud_cover_high", "cloud_cover_mid", "cloud_cover_low",
-  // NOT listed: the cloud band's `cloud_cover_XhPa` / `relative_humidity_XhPa` /
-  // `geopotential_height_XhPa` levels, and eachForecast does NOT apply fillCloudBand. Nothing
-  // derived today reads the band — derive-cloud-delta-codebooks still trains the legacy
-  // low/mid/high tables that v3 maps the eight levels onto by altitude. Whoever derives proper
-  // per-level band tables has to add all three families here AND run the hourly stack through
-  // fillCloudBand first, or the tables will be trained on values production no longer sends.
+  // The cloud band's three level families, all eight levels each. The band the wire carries is
+  // not any of them raw: eachForecast runs the stack through fillCloudBand (below), which
+  // recomputes cover from the humidity, fills empty low/mid bands from the trio, and folds the
+  // model's high cloud into the top slot — so the band tables train on exactly what production
+  // sends. The trio above is still loaded: fillCloudBand reads it, and it feeds the fill.
+  ...CLOUD_BAND_LEVELS_HPA.flatMap((l) =>
+    [`cloud_cover_${l}hPa`, `relative_humidity_${l}hPa`, `geopotential_height_${l}hPa`]),
   // Air quality — served from a different corpus source, see EXTRA_SOURCE_VARS below. Both
   // indices in full: each headline plus every constituent the scale defines.
   "us_aqi", "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi_pm10",
@@ -247,12 +249,17 @@ export async function deriveCountsMulti(
 // location's lat/lon from the registry mirror, for scripts that need geography (UTC offset,
 // solar position). Cells are loaded with only the DERIVE_VARS series by default (see that
 // list's caveat); pass `vars: null` for the full ~80-variable load.
+//
+// `fillBand: false` hands the callback the cloud band exactly as the corpus served it, skipping
+// fillCloudBand. Only a scan MEASURING the fill wants that (analyze-cloud-band-fill.ts) — every
+// derivation wants production's corrected stack, which is the default.
 export async function eachForecast(
   cb: (hourly: HourlyData, startHour: number, loc: string, pos?: { lat: number; lon: number },
        split?: string) => void,
   split: "train" | "eval" | "all" = "train",
   vars: readonly string[] | null = DERIVE_VARS,
   shard?: { index: number; total: number },
+  fillBand = true,
 ): Promise<void> {
   const db = openDb();
   const locs = dbLocations(db);
@@ -289,7 +296,13 @@ export async function eachForecast(
       if (!extra) continue;
       for (const v of e.vars) if (extra[v]) raw[v] = extra[v];
     }
-    const hourly = adjustPrecipPhase(raw, elevs.get(locationId) ?? loc.elev_m ?? null);
+    // The same two corrections, in the same order, that production applies before aggregating
+    // (buildFillMessage in forecast.ts) — a codebook trained on the uncorrected stack would be
+    // trained on values no client ever receives. fillCloudBand returns `raw` untouched when the
+    // cell carries no pressure-level humidity, so cells predating the level collection are
+    // unaffected.
+    const corrected = adjustPrecipPhase(raw, elevs.get(locationId) ?? loc.elev_m ?? null);
+    const hourly = fillBand ? fillCloudBand(corrected) : corrected;
     cells++;
     seen.add(locationId);
     cb(hourly, Math.floor(Date.parse(windowStart + "Z") / 3600000), locationId,

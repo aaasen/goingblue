@@ -133,11 +133,11 @@ const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0)
 // cloud band: coverage at each CLOUD_BAND_LEVELS_HPA pressure level, all riding the single cch
 // bit — v3's replacement for the v2 low/mid/high trio. Same anchor+delta shape as freeze: per
 // level, a 3-bit anchor then entropy-coded period-over-period deltas. Conditioning is
-// deliberately just the previous value for now (internet-route testing; the vertical-neighbor
-// chain is a later derive), and the tables are the v2-era low/mid/high tables mapped by each
-// level's altitude — untrained for this exact use but alphabet-compatible (deltas −7..7), and
-// cloud persistence is what they measure. 300 hPa (9.2 km) reads the high table, 400–700
-// (7.2–3.0 km) the mid, 850–1000 (1.5–0.1 km) the low.
+// deliberately just the previous value at the same level for now (the vertical-neighbor chain is
+// a later derive), but each level has its OWN delta table, trained on the post-fillCloudBand
+// stack this column carries — see codec-server/scripts/derive-cloud-delta-codebooks.ts. (Until
+// 2026-08-19 the eight levels shared the v2-era low/mid/high tables, mapped on by altitude:
+// alphabet-compatible but trained on a different variable.)
 const CLOUD_ANCHOR_BITS = VAR_BITS_V3[VARS_BIT.cch]; // 3
 const CLOUD_STEPS = (1 << CLOUD_ANCHOR_BITS) - 1;    // 7: the top step of the quantized scale
 export const quantCover = (pct: number | undefined): number =>
@@ -147,8 +147,10 @@ export const quantCover = (pct: number | undefined): number =>
 // cloud-band fill has to know it — a synthesized value under this threshold ships an empty band
 // anyway — and hardcoding it there would let a width change here silently desynchronize the two.
 export const CLOUD_COVER_MIN_PCT = 50 / CLOUD_STEPS;
-const cloudBandCodec = (bk: ClassBooks, hpa: number): DeltaCodec =>
-  hpa <= 300 ? bk.cloudHighDelta : hpa <= 700 ? bk.cloudMidDelta : bk.cloudLowDelta;
+// One codec per level, indexed by position in CLOUD_BAND_LEVELS_HPA — the same index the
+// derive script counts on, so the two cannot drift apart without the digest test noticing.
+const cloudBandCodec = (bk: ClassBooks, levelIdx: number): DeltaCodec =>
+  bk.cloudBandDelta[levelIdx];
 
 // ── Air quality ────────────────────────────────────────────────────────────────
 // Five columns over two incompatible index scales (see the AQI ladders in entropy.ts), all from
@@ -464,12 +466,12 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
   }
 
   // cloud band: level-major — for each pressure level, per model, an anchor (first period, full
-  // width) followed by entropy-coded period-over-period deltas under the altitude-mapped table
+  // width) followed by entropy-coded period-over-period deltas under that level's own table
   // (see cloudBandCodec above — no per-message selector).
   if (msg.vars_mask & (1 << VARS_BIT.cch)) {
     before = em.cost;
     for (let li = 0; li < CLOUD_BAND_LEVELS_HPA.length; li++) {
-      const codec = cloudBandCodec(books, CLOUD_BAND_LEVELS_HPA[li]);
+      const codec = cloudBandCodec(books, li);
       for (let m = 0; m < nModels; m++) {
         em.raw(quantCover(msg.periods[m][0].cloud_band?.[li]), CLOUD_ANCHOR_BITS);
         for (let p = 1; p < nPeriods; p++) {
@@ -889,7 +891,7 @@ function decodeBody(
   if (vars_mask & (1 << VARS_BIT.cch)) {
     const nLevels = CLOUD_BAND_LEVELS_HPA.length;
     for (let li = 0; li < nLevels; li++) {
-      const codec = cloudBandCodec(books, CLOUD_BAND_LEVELS_HPA[li]);
+      const codec = cloudBandCodec(books, li);
       for (let m = 0; m < nModels; m++) {
         let quant = rd.int(CLOUD_ANCHOR_BITS);
         (periods[m][0].cloud_band ??= new Array<number>(nLevels).fill(0))[li] = Math.round((quant * 100) / 7);

@@ -13,9 +13,8 @@ import {
   encodeFreezeDelta,
   decodeFreezeDelta,
   FREEZE_DELTA_MAX,
-  CLOUD_LOW_DELTA,
-  CLOUD_MID_DELTA,
-  CLOUD_HIGH_DELTA,
+  CLOUD_BAND_DELTA,
+  CLOUD_BAND_LEVELS_HPA,
   type DeltaCodec,
   type SymSink,
   encodeTempDelta,
@@ -253,14 +252,12 @@ describe("freezing level delta entropy coding", () => {
   });
 });
 
-// The three cloud levels all use single-table bounded delta codecs from makeDeltaCodec — same
-// shape, different weights. Table-driven so all three get the same coverage without tripling the
-// test body.
-const DELTA_CODECS: { label: string; codec: DeltaCodec; maxDelta: number; rawBits: number }[] = [
-  { label: "cloud low", codec: CLOUD_LOW_DELTA, maxDelta: 7, rawBits: 3 },
-  { label: "cloud mid", codec: CLOUD_MID_DELTA, maxDelta: 7, rawBits: 3 },
-  { label: "cloud high", codec: CLOUD_HIGH_DELTA, maxDelta: 7, rawBits: 3 },
-];
+// Every cloud-band level uses a single-table bounded delta codec from makeDeltaCodec — same
+// shape, different weights per level. Table-driven so all eight get the same coverage without
+// eight copies of the test body.
+const DELTA_CODECS: { label: string; codec: DeltaCodec; maxDelta: number; rawBits: number }[] =
+  CLOUD_BAND_LEVELS_HPA.map((hpa, li) => (
+    { label: `cloud band ${hpa} hPa`, codec: CLOUD_BAND_DELTA[li], maxDelta: 7, rawBits: 3 }));
 
 describe.each(DELTA_CODECS)("$label delta entropy coding", ({ codec, maxDelta, rawBits }) => {
   const bitsFor = (deltas: number[]): number =>
