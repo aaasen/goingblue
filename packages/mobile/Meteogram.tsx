@@ -12,7 +12,7 @@ import {
 } from '@weather/protocol';
 import type { TimeFormat, Units } from './settings';
 import {
-  resampleColumn, pressureToMeters, hpaToFrac,
+  resampleColumn, pressureToMeters, metersToPressure, hpaToFrac,
   BAND_TOP_HPA, BAND_BOTTOM_HPA, GRID_ROWS, GRID_STEP_HPA,
 } from './cloudBand';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -246,6 +246,14 @@ const C = {
   // The chance curve. Grey rather than either precip ink, and unfilled: the row is a probability,
   // and anything blue and filled under it would be read as the water the two rows below it carry.
   chanceLine: '#7b8ea6',
+  // The forecast point's own elevation, drawn across the cloud band: the band's floor is 1000 hPa
+  // everywhere, so on high ground a good part of the plot is air that is underground there. Red is
+  // the one warm ink among the band's greys, and the dashes keep it reading as a reference line
+  // laid over the contours rather than as another cloud edge.
+  groundLine: 'rgba(198, 60, 44, 0.85)',
+  // Its label, in the same red at full strength: at 10.5px the line's alpha would thin the text to
+  // a blush, and the number has to hold against the cloud fill it may be lying on.
+  groundText: '#c63c2c',
 } as const;
 
 // The overview strip runs on a dark ground: at strip scale the graphs are a few pixels tall, and a
@@ -632,6 +640,15 @@ function fmtSnowFull(cm: number, u: Units): string {
 function fmtFreezeFull(m: number | undefined, u: Units): string {
   if (m == null) return '—';
   const v = u === 'imperial' ? Math.round((m * 3.28084) / 500) * 500 : Math.round(m / 100) * 100;
+  return `${v.toLocaleString()} ${freezeUnit(u)}`;
+}
+// The cloud band's ground line names its own altitude. A straight conversion of the header's
+// meters, to the foot — the SAME arithmetic the decoder's forecast summary does (elevationLabel),
+// so one message's elevation reads the same in both places. The wire quantizes it to 100 m steps,
+// which is coarser than either reading suggests; rounding the feet to the hundred here doesn't
+// recover that (100 m is 328 ft), it only makes the band and the summary disagree about one field.
+function fmtElevation(m: number, u: Units): string {
+  const v = u === 'imperial' ? Math.round(m * 3.28084) : Math.round(m);
   return `${v.toLocaleString()} ${freezeUnit(u)}`;
 }
 function fmtWindFull(kph: number | undefined, dir: number | undefined, u: Units): string {
@@ -1562,6 +1579,11 @@ const CLOUD_BAND_STEPS: [threshold: number, alpha: number][] = [
   [64.5, 0.17], [78.5, 0.20], [93.5, 0.25],
 ];
 
+// The ground line's label: inset from the drawing's left edge, and the gap between the text box
+// and the line it names.
+const GROUND_LABEL_X = 4;
+const GROUND_LABEL_GAP = 3;
+
 // Coverage 0..100 at every (grid row, period): row-major, GRID_ROWS × n.
 function buildCloudField(periods: Period[]): Uint8Array {
   const n = periods.length;
@@ -1706,8 +1728,10 @@ interface SceneStatics {
   dominantSegs: Partial<Record<AqDominantKind, DominantSegment[]>>;
 }
 
-function buildSceneStatics({ periods, rows, steps }: {
-  periods: Period[]; rows: Row[]; steps: number[];
+function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
+  // `elevation` is the forecast point's height in meters, off the message header — the cloud band
+  // draws it as its ground line, and `units`/`fonts` are what that line's label is written with.
+  periods: Period[]; rows: Row[]; steps: number[]; elevation: number; units: Units; fonts: Fonts;
 }): SceneStatics {
   const n = periods.length;
   const width = n * CELL_W;
@@ -1853,6 +1877,43 @@ function buildSceneStatics({ periods, rows, steps }: {
           color={C.grid} strokeWidth={1}>
           <DashPathEffect intervals={[3, 4]} />
         </Line>,
+      );
+    }
+
+    // The ground: the forecast point's elevation, placed on the same pressure ladder as the cloud
+    // (standard atmosphere — the band is a scale, not a sounding). Everything under it is air the
+    // model puts below the terrain, which is why a mountain forecast can show cloud filling the
+    // bottom of a band whose floor is a sea-level 1000 hPa. Drawn last, so it lies over both the
+    // contours and the gridlines.
+    //
+    // Skipped at and below the band's floor: an elevation under ~110 m clamps onto the row's bottom
+    // edge, where the line would only redraw the boundary the row below already draws — and 0 is
+    // also what the wire reports when it has no elevation to carry, so there would be nothing to
+    // stand for. The same reasoning skips the two end gridlines above.
+    const groundHpa = metersToPressure(elevation);
+    if (elevation > 0 && groundHpa < BAND_BOTTOM_HPA) {
+      const groundY = yOfHpa(groundHpa);
+      cloudBandEls.push(
+        <Line key={`cbgnd${ri}`} p1={vec(0, groundY)} p2={vec(width, groundY)}
+          color={C.groundLine} strokeWidth={1.25}>
+          <DashPathEffect intervals={[5, 4]} />
+        </Line>,
+      );
+      // The altitude the line stands for, at its left end. The rail beside the canvas labels the
+      // wire's levels and nothing else, so this reading has to travel with the line — which means
+      // it scrolls away with the first day, like every other label drawn into the scene. That is
+      // the right trade here: the ground is a fixed altitude, read once, and a value repeated down
+      // the forecast would sit on cloud in every column instead of just the first.
+      //
+      // Above the line by preference, so the dashes underline it; below when the line runs too
+      // near the top of the band for the text to fit over it (an elevation up near 300 hPa).
+      const size = fonts.small.getSize();
+      const cy = groundY - size - GROUND_LABEL_GAP >= top
+        ? groundY - size / 2 - GROUND_LABEL_GAP
+        : groundY + size / 2 + GROUND_LABEL_GAP;
+      cloudBandEls.push(
+        <Text key={`cbgndl${ri}`} x={GROUND_LABEL_X} y={baseline(cy, size)}
+          text={fmtElevation(elevation, units)} font={fonts.small} color={C.groundText} />,
       );
     }
   });
@@ -2175,8 +2236,8 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
       }
 
       case 'cloud-band':
-        // Contours and gridlines are global geometry, built once in buildSceneStatics and
-        // shared by every tile — each canvas clips them to its own bounds.
+        // Contours, gridlines and the ground line are global geometry, built once in
+        // buildSceneStatics and shared by every tile — each canvas clips them to its own bounds.
         els.push(...statics.cloudBandEls);
         break;
 
@@ -2618,10 +2679,10 @@ function monotonicRange(knots: [input: number, output: number][]): { inputRange:
   return { inputRange, outputRange };
 }
 
-function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint }: {
+function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, elevation, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
-  periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; lat: number; lon: number; fonts: Fonts;
+  periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; lat: number; lon: number; elevation: number; fonts: Fonts;
   // The selector option this block was fetched under, and the instant its model horizons are
   // measured from — see modelSegments.
   center: Center; attributionMs: number;
@@ -2653,7 +2714,9 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     () => modelSegments(dates, steps, predictCenter(center, lat, lon).models, attributionMs),
     [dates, steps, center, lat, lon, attributionMs],
   );
-  const statics = useMemo(() => buildSceneStatics({ periods, rows, steps }), [periods, rows, steps]);
+  const statics = useMemo(
+    () => buildSceneStatics({ periods, rows, steps, elevation, units, fonts }),
+    [periods, rows, steps, elevation, units, fonts]);
   // One scene slice per tile, built eagerly — the build is cheap element allocation, and building
   // them all up front costs about what the single full-scene build did. What it buys is the mount:
   // a tile commits only its own columns instead of the whole forecast, which is what made the
@@ -3068,7 +3131,7 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
               <RNText style={styles.modelHeaderText}>{b.name}</RNText>
             </View>
           )}
-          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} zoned={b.zoned} steps={b.steps} units={units} timeFormat={timeFormat} now={now} lat={msg.lat} lon={msg.lon} fonts={fonts}
+          <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} zoned={b.zoned} steps={b.steps} units={units} timeFormat={timeFormat} now={now} lat={msg.lat} lon={msg.lon} elevation={msg.elevation} fonts={fonts}
             center={b.center} attributionMs={b.attributionMs}
             blockIndex={bi}
             selected={sel?.block === bi ? sel.period : null}
