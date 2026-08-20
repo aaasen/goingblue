@@ -35,8 +35,12 @@
  * OPEN_METEO_API_KEY switches to the commercial endpoint.
  */
 import { mkdir, writeFile } from "node:fs/promises";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { adjustPrecipPhase, buildFillMessage, fillCloudBand, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import {
   VARS_BIT, ALWAYS_VARS, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
@@ -341,14 +345,16 @@ const GROUP_VARS: Record<GroupId, string[]> = {
 const maskOf = (vars: string[]) => vars.reduce((m, v) => m | (1 << VARS_BIT[v]), 0);
 const BASE_MASK = maskOf(BASE_VARS);
 
-// The variable selections the report draws: the base set, each group on its own, and everything
-// at once. This used to be the full power set, which the air-quality groups would have taken from
-// 16 selections to 512 — and the report never rendered more than these anyway (the frontier chart
-// and the mode comparison both walk base + `1 << i`, and the pooled line is explicitly the mean of
-// those, not of all combinations). Bitmask numbering is unchanged, so the "mode:combo" view keys
-// still address the same selections.
+// The variable selections the report draws: the base set and each group on its own — ONE extra
+// group at a time, never in combination. This used to be the full power set (512 selections
+// once the air-quality groups split), then base + singles + everything-at-once; the report
+// never rendered more than the singles (the frontier chart and the mode comparison both walk
+// base + `1 << i`, and the pooled line is explicitly the mean of those), so the all-groups view
+// was computed and thrown away. Bitmask numbering is unchanged, so the "mode:combo" view keys
+// still address the same selections. ALL_COMBO survives only as the LAYOUT mask: messages are
+// aggregated once with every column populated, then vars_mask is overridden per combo.
 const ALL_COMBO = (1 << GROUP_IDS.length) - 1;
-const COMBOS = [0, ...GROUP_IDS.map((_, i) => 1 << i), ALL_COMBO];
+const COMBOS = [0, ...GROUP_IDS.map((_, i) => 1 << i)];
 const comboGroups = (c: number): GroupId[] => GROUP_IDS.filter((_, i) => c & (1 << i));
 const comboMask = (c: number) => BASE_MASK | maskOf(comboGroups(c).flatMap((g) => GROUP_VARS[g]));
 const DEFAULT_COMBO = 0; // base variables only (no optional groups)
@@ -391,6 +397,9 @@ interface Args {
   // shared
   location?: string;
   source?: string;       // restrict collection to one SOURCES entry (collect only)
+  // internal: this process is one report shard — scan its slice, write the JSON, exit
+  // (spawned by scanSharded; not in the usage text).
+  reportShard?: { index: number; total: number; out: string };
 }
 
 const USAGE = `benchmark.ts — collect the forecast corpus and benchmark the encoding against it
@@ -413,7 +422,8 @@ Modes
 
 Collect options
   --limit <n>               max fetches this run (0 = unlimited); pace big pulls with this
-  --concurrency <n>         fetches in flight, 1-32 (default 8)
+  --concurrency <n>         parallelism, 1-32 (default 8): fetches in flight while collecting,
+                            encoder worker processes while reporting
   --location <id>           restrict to one registry location (also filters the report)
   --source <id>             restrict collection to one source (gfs_seamless, ecmwf_ifs,
                             ecmwf_ifs025, gem_seamless, best_match, cams) — stage a big
@@ -471,6 +481,8 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--alphabet") args.alphabet = argv[++i] as Alphabet;
     else if (a === "--location") args.location = argv[++i];
     else if (a === "--source") args.source = argv[++i];
+    else if (a === "--report-shard")
+      args.reportShard = { index: parseInt(argv[++i], 10), total: parseInt(argv[++i], 10), out: argv[++i] };
     else throw new Error(`Unknown argument: ${a} (--help lists the options)`);
   }
   if (!["base85", "base94", "base124", "base32768"].includes(args.alphabet)) {
@@ -858,15 +870,34 @@ function buildView(
   };
 }
 
-async function report(args: Args): Promise<void> {
+// A view = mode × variable-combo. Every (mode, combo) is precomputed.
+const vkey = (mode: number, combo: number) => `${mode}:${combo}`;
+
+// One pass over the report cells (or one shard of them): every (cell, mode, combo) fitted
+// through the real codec, accumulated into plain-object arrays so a worker process can JSON the
+// result back to the parent (see --report-shard / scanSharded). Accumulation is per-cell
+// independent and every statistic downstream is order-insensitive (means, boxes, histograms;
+// the per-mode groups list stays index-aligned with its fits within any concatenation), so a
+// sharded run reproduces the single-process numbers exactly.
+interface ScanResult {
+  fitsFor: Record<string, StoredFit[]>;              // "mode:combo" → per-cell fits
+  colBits: Record<string, Record<string, number[]>>; // "mode:combo" → column → per-cell bits
+  forecasts: string[];                               // fitted cells' location ids, push order
+  groupsFor: Record<number, string[]>;               // mode → fitted cells' strata, push order
+  groupLocs: Record<string, string[]>;               // stratum → distinct location ids
+  skipped: number; short: number; uncovered: number;
+  versionBits: number; headerBits: number;
+}
+
+async function scanReport(args: Args, shard?: { index: number; total: number }): Promise<ScanResult> {
   // Single source (best_match supplies every variable group, so no cross-source fallback needed).
   // The db stays open through the loop — cells are streamed one at a time (see ReportCell).
   const db = openDb();
-  const cells = loadReportCells(db, args.split, args.location);
-  if (cells.length === 0) throw new Error("No forecasts found — run collection first (or import the old JSON tree: import-corpus-json.ts)");
+  const allCells = loadReportCells(db, args.split, args.location);
+  // listCells is a deterministic ORDER BY, so shards partition the corpus identically on every
+  // run and every worker (the same convention as generate-codebooks.ts).
+  const cells = shard ? allCells.filter((_, i) => i % shard.total === shard.index) : allCells;
 
-  // A view = mode × variable-combo. Every (mode, combo) is precomputed.
-  const vkey = (mode: number, combo: number) => `${mode}:${combo}`;
   const fitsFor = new Map<string, StoredFit[]>();
   const colBits = new Map<string, Map<string, number[]>>();
   for (const m of MODES) for (const c of COMBOS) {
@@ -957,16 +988,96 @@ async function report(args: Args): Promise<void> {
   }
   db.close();
 
+  return {
+    fitsFor: Object.fromEntries(fitsFor),
+    colBits: Object.fromEntries([...colBits].map(([vk, cb]) => [vk, Object.fromEntries(cb)])),
+    forecasts: forecasts.map((f) => f.location),
+    groupsFor: Object.fromEntries(groupsFor),
+    groupLocs: Object.fromEntries([...groupLocs].map(([g, s]) => [g, [...s]])),
+    skipped, short, uncovered, versionBits, headerBits,
+  };
+}
+
+// Concatenate shard results, in shard order. Per-vk arrays stay index-aligned with each other
+// and with groupsFor because each shard's own arrays are, and every shard contributes whole
+// cells.
+function mergeScans(parts: ScanResult[]): ScanResult {
+  const out = parts[0];
+  for (const p of parts.slice(1)) {
+    for (const [vk, fits] of Object.entries(p.fitsFor)) out.fitsFor[vk].push(...fits);
+    for (const [vk, cb] of Object.entries(p.colBits)) {
+      const dst = out.colBits[vk];
+      for (const [col, bits] of Object.entries(cb)) (dst[col] ??= []).push(...bits);
+    }
+    out.forecasts.push(...p.forecasts);
+    for (const [m, gs] of Object.entries(p.groupsFor)) out.groupsFor[Number(m)].push(...gs);
+    for (const [g, locs] of Object.entries(p.groupLocs))
+      out.groupLocs[g] = [...new Set([...(out.groupLocs[g] ?? []), ...locs])];
+    out.skipped += p.skipped; out.short += p.short; out.uncovered += p.uncovered;
+    out.versionBits = p.versionBits || out.versionBits;
+    out.headerBits = p.headerBits || out.headerBits;
+  }
+  return out;
+}
+
+// The scan split across worker processes: encoding is CPU-bound and every cell is independent,
+// so shards run the same scanReport over an index-strided slice and JSON their accumulators to
+// a temp file; the parent concatenates. Child processes under the tsx loader for the same
+// reason as generate-codebooks.ts (worker_threads can't carry loader flags per worker); SQLite
+// is read-only here and in WAL mode, so concurrent readers are safe.
+async function scanSharded(args: Args, workers: number): Promise<ScanResult> {
+  const TSX_CLI = join(dirname(createRequire(import.meta.url).resolve("tsx/package.json")), "dist", "cli.mjs");
+  if (!existsSync(TSX_CLI)) return scanReport(args); // no loader to hand the children
+  const self = fileURLToPath(import.meta.url);
+  const tmp = mkdtempSync(join(tmpdir(), "benchmark-"));
+  try {
+    const outs = Array.from({ length: workers }, (_, i) => join(tmp, `shard-${i}.json`));
+    const settled = await Promise.allSettled(outs.map((out, i) => new Promise<void>((ok, fail) => {
+      const child = spawn(
+        process.execPath,
+        [TSX_CLI, self, ...process.argv.slice(2), "--report-shard", String(i), String(workers), out],
+        { stdio: ["ignore", "inherit", "inherit"] },
+      );
+      child.on("error", fail);
+      child.on("exit", (code, signal) => {
+        if (signal) return fail(new Error(`report shard ${i} killed by ${signal}`));
+        if (code !== 0) return fail(new Error(`report shard ${i} exited ${code}`));
+        ok();
+      });
+    })));
+    const failed = settled.filter((r) => r.status === "rejected");
+    if (failed.length)
+      throw new Error(`${failed.length} of ${workers} report shards failed:\n` +
+        failed.map((r) => `  ${(r as PromiseRejectedResult).reason}`).join("\n"));
+    return mergeScans(outs.map((out) => JSON.parse(readFileSync(out, "utf8")) as ScanResult));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function report(args: Args): Promise<void> {
+  const db = openDb();
+  const nCells = loadReportCells(db, args.split, args.location).length;
+  db.close();
+  if (nCells === 0) throw new Error("No forecasts found — run collection first (or import the old JSON tree: import-corpus-json.ts)");
+
+  const workers = Math.max(1, Math.min(args.concurrency, nCells));
+  const started = Date.now();
+  if (workers > 1) console.log(`encoding ${nCells} cells across ${workers} workers…`);
+  const scan = workers > 1 ? await scanSharded(args, workers) : await scanReport(args);
+  console.log(`(scan ${((Date.now() - started) / 1000).toFixed(1)}s)`);
+  const { forecasts, skipped, short, uncovered, versionBits, headerBits } = scan;
+
   // Build per-view stats. A mode the corpus can't cover for *any* forecast has no fits at all —
   // drop it rather than render a view full of NaNs (it means the window is too short; see
   // HORIZON_DAYS).
-  const modes = MODES.filter((m) => fitsFor.get(vkey(m, DEFAULT_COMBO))!.length > 0);
+  const modes = MODES.filter((m) => scan.fitsFor[vkey(m, DEFAULT_COMBO)].length > 0);
   if (modes.length === 0) throw new Error("No (forecast, mode) pair is covered by the corpus — re-collect with a longer window");
   const views: Record<string, ViewStats> = {};
   for (const m of modes) {
     for (const c of COMBOS) {
       const vk = vkey(m, c);
-      views[vk] = buildView(m, fitsFor.get(vk)!, colBits.get(vk)!);
+      views[vk] = buildView(m, scan.fitsFor[vk], new Map(Object.entries(scan.colBits[vk])));
     }
   }
   const dropped = MODES.filter((m) => !modes.includes(m));
@@ -974,14 +1085,14 @@ async function report(args: Args): Promise<void> {
 
   // Per-stratum breakdown, default combo: mean fill % (the tracked metric — see the report table)
   // and mean body bits/period per group, per mode.
-  const strata: StratumStat[] = [...groupLocs.keys()]
+  const strata: StratumStat[] = Object.keys(scan.groupLocs)
     .sort((a, b) => groupOrder(a) - groupOrder(b))
     .map((group) => ({
       group,
-      locations: groupLocs.get(group)!.size,
+      locations: scan.groupLocs[group].length,
       perMode: modes.map((m) => {
-        const fits = fitsFor.get(vkey(m, DEFAULT_COMBO))!;
-        const groups = groupsFor.get(m)!;
+        const fits = scan.fitsFor[vkey(m, DEFAULT_COMBO)];
+        const groups = scan.groupsFor[m];
         const mine = fits.filter((_, i) => groups[i] === group);
         if (mine.length === 0) return { m, n: 0, fillPct: NaN, bpp: NaN };
         return {
@@ -1000,7 +1111,7 @@ async function report(args: Args): Promise<void> {
     requestHour: args.requestHour,
     maxChars: args.maxChars,
     forecasts: forecasts.length,
-    locations: new Set(forecasts.map((f) => f.location)).size,
+    locations: new Set(forecasts).size,
     skipped,
     short,
     uncovered,
@@ -1566,8 +1677,13 @@ function renderHtml(s: ReportData): string {
   const comparison = renderModeComparison(s);
   const modeRadios = s.modes.map((m) =>
     `<label><input type="radio" name="mode" value="${m}"${m === s.defaultMode ? " checked" : ""}> ${esc(modeLabel(m))}</label>`).join("");
-  const groupChecks = s.groups.map((g, i) =>
-    `<label><input type="checkbox" class="group" value="${g.id}" data-bit="${1 << i}"${s.defaultCombo & (1 << i) ? " checked" : ""}> ${esc(g.label)}</label>`).join("");
+  // A radio, not checkboxes: the computed views are base + ONE group at a time (see COMBOS), so
+  // the selector offers exactly those — a multi-select could address views that don't exist.
+  const groupRadios = [
+    `<label><input type="radio" name="vars" data-bit="0"${s.defaultCombo === 0 ? " checked" : ""}> Base only</label>`,
+    ...s.groups.map((g, i) =>
+      `<label><input type="radio" name="vars" data-bit="${1 << i}"${s.defaultCombo === 1 << i ? " checked" : ""}> ${esc(g.label)}</label>`),
+  ].join("");
   const notes = [
     s.skipped ? `Skipped ${s.skipped} forecast(s) with an incomplete base series.` : "",
     s.uncovered ? `Skipped ${s.uncovered} (forecast, mode) pair(s) the corpus window doesn't cover.` : "",
@@ -1745,7 +1861,7 @@ ${renderStrata(s)}
 <h2>Benchmark detail</h2>
 <div class="selectors">
   <div class="sel"><span class="sel-label">Priority</span>${modeRadios}</div>
-  <div class="sel"><span class="sel-label">Variables</span>${groupChecks}</div>
+  <div class="sel"><span class="sel-label">Extra variable</span>${groupRadios}</div>
 </div>
 ${quality}
 
@@ -1754,17 +1870,17 @@ ${quality}
 <script>
 const views = [...document.querySelectorAll(".view")];
 const modeRadios = [...document.querySelectorAll('input[name=mode]')];
-const groupBoxes = [...document.querySelectorAll('input.group')];
+const varRadios = [...document.querySelectorAll('input[name=vars]')];
 
 const mode = () => modeRadios.find((r) => r.checked).value;
-const combo = () => groupBoxes.reduce((c, b) => c | (b.checked ? +b.dataset.bit : 0), 0);
+const combo = () => +varRadios.find((r) => r.checked).dataset.bit;
 
 function update() {
   const m = mode(), c = combo();
   views.forEach((v) => v.hidden = !(v.dataset.mode === m && +v.dataset.combo === c));
 }
 
-[...modeRadios, ...groupBoxes].forEach((el) => el.addEventListener("change", update));
+[...modeRadios, ...varRadios].forEach((el) => el.addEventListener("change", update));
 update();
 </script>
 </body>
@@ -1922,6 +2038,12 @@ function dump(source: string, locationId: string, windowStart: string): void {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.reportShard) {
+    // Spawned by scanSharded: scan this shard's slice of the report cells and hand the
+    // accumulators back through the temp file. Nothing else — no collection, no report.
+    writeFileSync(args.reportShard.out, JSON.stringify(await scanReport(args, args.reportShard)));
+    return;
+  }
   if (args.dump) return dump(...args.dump);
   if (args.validate) return validate(args);
   const locations = args.location ? LOCATIONS.filter((l) => l.id === args.location) : LOCATIONS;
