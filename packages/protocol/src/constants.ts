@@ -55,8 +55,15 @@ export const HTTP_ALPHABET =
   Array.from({ length: 0x7e - 0x21 + 1 }, (_, i) => String.fromCharCode(0x21 + i)).join("");
 
 // The refinement ladder: resolution index (0..4, coarse → fine) → hours per period.
-// Fill layouts use indices 1..4; index 0 is retained for resolution-keyed codebooks — see layout.ts.
+// Fill layouts use indices 1..4; index 0 (24h) survives only as a ladder position — see layout.ts.
 export const RESOLUTION_HOURS: Record<number, number> = { 0: 24, 1: 12, 2: 6, 3: 3, 4: 1 };
+
+// The resolutions fill layouts actually emit, as RESOLUTION_HOURS indices, in CODEBOOK TABLE ROW
+// ORDER: every resolution-keyed weight table carries exactly one row per entry (24h never occurs
+// in a layout, so no table trains or ships a row for it), and hours → table row is this array's
+// position (resTableIdx in v3.ts). The derive scripts iterate this same array, so the trained
+// rows and the rows the codec reads cannot drift apart.
+export const TABLE_RES_IDXS = [1, 2, 3, 4] as const;
 
 // Model choice is expressed at the forecast-center level, not the individual model. Each center
 // maps to an Open-Meteo _seamless family (or, for Europe, HRES surface + IFS 0.25° pressure

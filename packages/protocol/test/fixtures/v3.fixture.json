@@ -7,11 +7,10 @@
     "mode": 0,
     "utcOffsetHours": -9
   },
-  "encoded": "$!!U;2xMx)\"FIq@H;r(*Qh0l3uU\"+@+g-K1gqCdU\"vR40;hf2n@1uI?br%w4v29,Y($FWRxq(O#x)KlOX:z&.ta@Ut>*>9YY1b2Bg2\"-_tbj\"iG2eO)K@ft!l\"*j*b=O_r3d@j/Ns6S+TJ?Wa5K@!lO5D4k;c/gB(G@&4GSBtubco0(",
+  "encoded": "$!!'Ny@IMuoUcafc/wZ2k1L'Csdk&f3:GKC=_hA3ch310SC-5X/xtVzt52Uqzsuc$/uQ,io*j\"9/3zVHxI_<($.-s6Ig&D4A\"A&_cmR##Hqd;7d81*J4_7$RAC6Uj?2K.W1(qGZGrm)npLQp@iLLxSlC\"QZ:8VuZlwY3V)o,9(F<>>GW)\"",
   "decoded": {
     "version": 3,
     "code": 0,
-    "codebookClass": 6,
     "days": 3,
     "models_mask": 1,
     "vars_mask": 33554431,

@@ -20,9 +20,8 @@
  *
  * Training mirrors the wire exactly: local-midnight-aligned uniform windows per resolution (the
  * alignment layoutFor produces), the same quantizers as v3.ts, temp deltas clamped and diffed
- * against the reconstruction. The 24h row (resolution index 0) is trained too even though fill
- * layouts never emit 24h periods — it keeps the [res][ctx][sym] shape uniform with the other
- * resolution-keyed tables.
+ * against the reconstruction. Only the resolutions layouts emit are trained — TABLE_RES_IDXS
+ * (12h/6h/3h/1h) in table-row order, the same mapping resTableIdx applies at the codec.
  *
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
@@ -32,6 +31,7 @@
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {
   VARS_BIT, tempDeltaBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_MIN, TEMP_DELTA_MAX,
+  TABLE_RES_IDXS,
 } from "@weather/protocol";
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone,
@@ -42,7 +42,7 @@ const STEP_BITS = 5;               // matches the freeze column width in v3.ts (
 const STEP_MAX = (1 << STEP_BITS) - 1;
 const NSYM = 2 * STEP_MAX + 1;     // 63: deltas -31..31, no escape needed (already bounded)
 const STEP_M = 304.8;              // 1000 ft, must match v3.ts
-const NRES = 5; // 24h/12h/6h/3h/1h — row 0 (24h) is dead in fill layouts but kept for shape
+const NRES = TABLE_RES_IDXS.length; // 12h/6h/3h/1h — the resolutions layouts emit, in row order
 const NBUCKET = TEMP_DELTA_PREV_BUCKETS;
 const MASK = (1 << VARS_BIT.temp) | (1 << VARS_BIT.freeze);
 
@@ -82,7 +82,7 @@ export function counter(): CellCounter {
       for (let res = 0; res < NRES; res++) {
         // Periods anchored to the cell's first local midnight, aggregated once per cell
         // and shared with every other counter that wants this anchoring.
-        const slice = ctx.atMidnight(res);
+        const slice = ctx.atMidnight(TABLE_RES_IDXS[res]);
         if (!slice) continue;
         const { hpp, start: firstUtc, n } = slice;
         const periods = slice.rows.map((r) => toFullPeriod(r, MASK, "US"));
@@ -144,7 +144,7 @@ export async function derive(precounted?: Float64Array): Promise<DerivedTables> 
       flatBits += bitsUnder(row, marginal);
     }
     const n = Math.max(1, sum(marginal));
-    const label = ["24h", "12h", "6h", "3h", "1h"][res];
+    const label = ["12h", "6h", "3h", "1h"][res];
     console.log(`  ${label}: n=${sum(marginal)} mean=${(bits / n).toFixed(3)} b/period` +
       ` (res-only fallback ${(flatBits / n).toFixed(3)}, training-set)`);
   }

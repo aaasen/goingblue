@@ -13,9 +13,8 @@ import {
   encodeFreezeDelta,
   decodeFreezeDelta,
   FREEZE_DELTA_MAX,
-  CLOUD_BAND_DELTA,
+  cloudBandBook,
   CLOUD_BAND_LEVELS_HPA,
-  type DeltaCodec,
   type SymSink,
   encodeTempDelta,
   decodeTempDelta,
@@ -91,7 +90,7 @@ describe("weathercode entropy coding", () => {
 
 describe("wind direction entropy coding", () => {
   it("round-trips every direction under every (resolution, prev, upper) context", () => {
-    for (let res = 0; res <= 4; res++) {
+    for (let res = 0; res <= 3; res++) {
       for (const prev of [null, 0, 1, 2, 3, 4, 5, 6, 7]) {
         for (const upper of [null, 0, 3, 7]) {
           for (let dir = 0; dir < 8; dir++) {
@@ -135,15 +134,15 @@ describe("wind direction entropy coding", () => {
 
   it("a persistent (all-W) sequence costs fewer bits under order-1 context than under the bootstrap table alone, and beats raw 3-bit", () => {
     const allW = Array(64).fill(6); // direction index 6 = W
-    const contextual = seqCost(allW, 4, () => null);
-    const bootstrapOnly = seqCost(allW, 4, () => null, true);
+    const contextual = seqCost(allW, 3, () => null);
+    const bootstrapOnly = seqCost(allW, 3, () => null, true);
     expect(contextual).toBeLessThan(bootstrapOnly);
     expect(contextual).toBeLessThan(allW.length * 3); // beats raw 3 bits/value
   });
 
   it("persistence is cheaper at 1h than at 6h (resolution-keyed tables)", () => {
     const allW = Array(64).fill(6);
-    expect(seqCost(allW, 4, () => null)).toBeLessThan(seqCost(allW, 2, () => null));
+    expect(seqCost(allW, 3, () => null)).toBeLessThan(seqCost(allW, 1, () => null));
   });
 
   it("an agreeing upper level makes a persistent sequence cheaper (cross-level context)", () => {
@@ -155,7 +154,7 @@ describe("wind direction entropy coding", () => {
 describe("wind speed delta entropy coding", () => {
   const allBooks = () => {
     const books = [];
-    for (let res = 0; res <= 4; res++) {
+    for (let res = 0; res <= 3; res++) {
       for (let level = 0; level < 4; level++) books.push(windSpeedBook(res, level, null));
       for (const upperDelta of [-5, -1, 0, 1, 5]) books.push(windSpeedBook(res, 0, upperDelta));
     }
@@ -175,7 +174,7 @@ describe("wind speed delta entropy coding", () => {
 
   it("decodes a concatenated delta sequence unambiguously", () => {
     const seq = [0, 1, -1, 0, 2, -3, 17, 0, 1, -17, 0, 0];
-    const book = windSpeedBook(4, 1, null);
+    const book = windSpeedBook(3, 1, null);
     const { source } = encoded((sink) => { for (const d of seq) encodeWindSpeedDelta(sink, book, d); });
     const out: number[] = [];
     for (let k = 0; k < seq.length; k++) out.push(decodeWindSpeedDelta(source, book));
@@ -187,7 +186,7 @@ describe("wind speed delta entropy coding", () => {
     expect([-31, -2, -1, 0, 1, 2, 31].map(upperDeltaBucket)).toEqual([0, 0, 1, 2, 3, 4, 4]);
   });
 
-  const bitsFor = (deltas: number[], book = windSpeedBook(4, 0, null)) =>
+  const bitsFor = (deltas: number[], book = windSpeedBook(3, 0, null)) =>
     costOf((sink) => { for (const d of deltas) encodeWindSpeedDelta(sink, book, d); });
 
   it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 5-bit", () => {
@@ -209,7 +208,7 @@ describe("freezing level delta entropy coding", () => {
   // representative same-period temp delta per bucket: ≤-2 | -1 | 0 | +1 | ≥+2.
   const allBooks = () => {
     const books = [];
-    for (let res = 0; res <= 4; res++) {
+    for (let res = 0; res <= 3; res++) {
       for (const tempDelta of [null, -5, -1, 0, 1, 5]) books.push(freezeDeltaBook(res, tempDelta));
     }
     return books;
@@ -228,7 +227,7 @@ describe("freezing level delta entropy coding", () => {
 
   it("decodes a concatenated delta sequence unambiguously", () => {
     const seq = [0, 1, -1, 0, 2, -3, 17, 0, 1, -25, 0, 0];
-    const book = freezeDeltaBook(4, 0);
+    const book = freezeDeltaBook(3, 0);
     const { source } = encoded((sink) => { for (const d of seq) encodeFreezeDelta(sink, book, d); });
     const out: number[] = [];
     for (let k = 0; k < seq.length; k++) out.push(decodeFreezeDelta(source, book));
@@ -236,7 +235,7 @@ describe("freezing level delta entropy coding", () => {
     source.assertDone();
   });
 
-  const bitsFor = (deltas: number[], book = freezeDeltaBook(4, null)) =>
+  const bitsFor = (deltas: number[], book = freezeDeltaBook(3, null)) =>
     costOf((sink) => { for (const d of deltas) encodeFreezeDelta(sink, book, d); });
 
   it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 5-bit", () => {
@@ -252,46 +251,50 @@ describe("freezing level delta entropy coding", () => {
   });
 });
 
-// Every cloud-band (resolution, level) uses a single-table bounded delta codec from
-// makeDeltaCodec — same shape, different weights per cell. Table-driven so every cell the wire
-// can key gets the same coverage without copies of the test body; only the 3h/1h rows are
-// exercised because only they serve (the wire clamps band symbols to ≤3h periods).
-const DELTA_CODECS: { label: string; codec: DeltaCodec; maxDelta: number; rawBits: number }[] =
-  [3, 4].flatMap((res) => CLOUD_BAND_LEVELS_HPA.map((hpa, li) => ({
-    label: `cloud band ${hpa} hPa @${res === 3 ? "3h" : "1h"}`,
-    codec: CLOUD_BAND_DELTA[res][li], maxDelta: 7, rawBits: 3,
-  })));
+// The cloud band's order-1 value books: one per (level, previous step), reached through the
+// same cloudBandBook the wire uses. Table-driven so every level gets the same coverage without
+// eight copies of the test body.
+describe.each(CLOUD_BAND_LEVELS_HPA.map((hpa, li) => ({ hpa, li })))(
+  "cloud band $hpa hPa entropy coding", ({ li }) => {
+    // Cost of a value column with the context threaded the way v3.ts threads it: each step's
+    // book keyed by the previous decoded step.
+    const bitsFor = (steps: number[], first: number): number =>
+      costOf((sink) => {
+        let prev = first;
+        for (const s of steps) { sink.sym(cloudBandBook(li, prev), s); prev = s; }
+      });
 
-describe.each(DELTA_CODECS)("$label delta entropy coding", ({ codec, maxDelta, rawBits }) => {
-  const bitsFor = (deltas: number[]): number =>
-    costOf((sink) => { for (const d of deltas) codec.encode(sink, d); });
+    it("round-trips every step under every previous-step context", () => {
+      for (let prev = 0; prev < 8; prev++) {
+        for (let s = 0; s < 8; s++) {
+          const { cost, source } = encoded((sink) => sink.sym(cloudBandBook(li, prev), s));
+          expect(cost).toBeGreaterThan(0);
+          expect(source.sym(cloudBandBook(li, prev))).toBe(s);
+          source.assertDone(); // consumed exactly the coded symbol, no more
+        }
+      }
+    });
 
-  it(`round-trips every delta in the bounded range (-${maxDelta}..${maxDelta})`, () => {
-    for (let d = -maxDelta; d <= maxDelta; d++) {
-      const { cost, source } = encoded((sink) => codec.encode(sink, d));
-      expect(cost).toBeGreaterThan(0);
-      expect(codec.decode(source)).toBe(d);
-      source.assertDone(); // consumed exactly the coded symbol, no more
-    }
+    it("decodes a concatenated column unambiguously, context threaded like the wire", () => {
+      const seq = [0, 1, 0, 0, 2, 7, 7, 5, 0, 0, 3];
+      const { source } = encoded((sink) => {
+        let prev = 0;
+        for (const s of seq) { sink.sym(cloudBandBook(li, prev), s); prev = s; }
+      });
+      const out: number[] = [];
+      let prev = 0;
+      for (let k = 0; k < seq.length; k++) { out.push(source.sym(cloudBandBook(li, prev))); prev = out[k]; }
+      expect(out).toEqual(seq);
+      source.assertDone();
+    });
+
+    it("a persistent column costs fewer bits than a flickering one, and beats raw 3-bit", () => {
+      const clear = Array(64).fill(0);
+      const flicker = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? 0 : 7));
+      expect(bitsFor(clear, 0)).toBeLessThan(bitsFor(flicker, 0));
+      expect(bitsFor(clear, 0)).toBeLessThan(clear.length * 3);
+    });
   });
-
-  it("decodes a concatenated delta sequence unambiguously", () => {
-    const seq = [0, 1, -1, 0, 2, -3, 0, 1, -2, 0, 0];
-    const { source } = encoded((sink) => { for (const d of seq) codec.encode(sink, d); });
-    const out: number[] = [];
-    for (let k = 0; k < seq.length; k++) out.push(codec.decode(source));
-    expect(out).toEqual(seq);
-    source.assertDone();
-  });
-
-  it(`a near-constant column costs fewer bits than a wide-swinging one, and beats raw ${rawBits}-bit`, () => {
-    const flat = Array(64).fill(0);
-    const swing = Math.min(5, maxDelta);
-    const swings = Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? swing : -swing));
-    expect(bitsFor(flat)).toBeLessThan(bitsFor(swings));
-    expect(bitsFor(flat)).toBeLessThan(flat.length * rawBits);
-  });
-});
 
 // Every distinct temp codebook: the bootstrap plus one (res × tod × prevΔ-bucket) table per
 // combination, reached through the same tempDeltaBook the wire uses. One representative
@@ -299,7 +302,7 @@ describe.each(DELTA_CODECS)("$label delta entropy coding", ({ codec, maxDelta, r
 const PREV_BUCKET_REPS = [-5, -1, 0, 1, 5];
 function allTempBooks(): CodeBook[] {
   const books: CodeBook[] = [tempDeltaBook(0, 0, null)]; // bootstrap (context args ignored)
-  for (let res = 0; res < 5; res++) {
+  for (let res = 0; res < 4; res++) {
     for (let tod = 0; tod < TEMP_DELTA_TOD_BUCKETS; tod++) {
       for (const prev of PREV_BUCKET_REPS) books.push(tempDeltaBook(res, tod, prev));
     }
@@ -312,7 +315,7 @@ function allTempBooks(): CodeBook[] {
 function tempBits(deltas: number[]): number {
   return costOf((sink) => {
     let prev: number | null = null;
-    for (const d of deltas) { encodeTempDelta(sink, tempDeltaBook(4, 0, prev), d); prev = d; }
+    for (const d of deltas) { encodeTempDelta(sink, tempDeltaBook(3, 0, prev), d); prev = d; }
   });
 }
 
@@ -350,7 +353,7 @@ describe("temperature delta entropy coding", () => {
 
   it("decodes a concatenated context-threaded sequence unambiguously, mixing core and escape", () => {
     const seq = [0, 1, -1, 0, 2, -3, 9, 0, 1, -14, 0, 0];
-    for (let res = 0; res < 5; res++) {
+    for (let res = 0; res < 4; res++) {
       const { source } = encoded((sink) => {
         let prev: number | null = null;
         for (const d of seq) { encodeTempDelta(sink, tempDeltaBook(res, 3, prev), d); prev = d; }

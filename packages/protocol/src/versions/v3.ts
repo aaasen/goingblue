@@ -1,5 +1,6 @@
 import {
   WMO_CODES, VARS_BIT, CLOUD_BAND_LEVELS_HPA, metersToPressure,
+  RESOLUTION_HOURS, TABLE_RES_IDXS,
 } from "../constants.js";
 import { layoutFor, maxFillSeq, effectiveMode } from "../layout.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "../bits.js";
@@ -11,7 +12,7 @@ import { DEVICE_TRANSPORT } from "../devices.js";
 import { WMO2IDX, type Period } from "../model.js";
 import type { ForecastMessage, MessageHeader, VersionedCodec, ContextResolver } from "../model.js";
 import {
-  WEATHERCODE_CLASS, CLASS_BOOKS, CODEBOOK_CLASSES, type ClassBooks,
+  WEATHERCODE_CLASS, BOOKS, type Books,
   encodeWindSpeedDelta, decodeWindSpeedDelta, quantWind, beaufortMidKph, CALM_MAX_FORCE,
   encodeFreezeDelta, decodeFreezeDelta,
   encodeAqiDelta, decodeAqiDelta, quantAqi, aqiMid,
@@ -21,7 +22,7 @@ import {
   AQ_DOMINANT_US, AQ_DOMINANT_EU, AQI_NO_DATA, aqDominantUnknown, aqDominantNSym,
   encodeTempDelta, decodeTempDelta, tempTodBucket,
   TEMP_DELTA_MIN, TEMP_DELTA_MAX,
-  makeBitSink, makeBitSource, type CodeBook, type DeltaCodec,
+  makeBitSink, makeBitSource, type CodeBook,
 } from "../entropy.js";
 
 export const V3_VERSION = 3;
@@ -39,17 +40,16 @@ const VERSION = V3_VERSION;
 // codebooks were derived across resolutions for exactly this reason, see entropy.ts).
 //
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
-// packed header. Packed header layout (25 bits):
-//   code:7 seq:8 elev:7 class:3
+// packed header. Packed header layout (22 bits):
+//   code:7 seq:8 elev:7
 // seq:8 stores (seq - 1), i.e. 1..256; the largest layout is seq = maxFillSeq(mode).
-// class:3 is the codebook-class selector: the encoder builds the body under every class's table
-// set and keeps the cheapest (see CLASS_BOOKS in entropy.ts). The 3 bits ride free — 25 bits
-// still fit the same 4 base-85 header chars 22 did (4 × log2(85) ≈ 25.6).
+// (A 3-bit codebook-class selector sat after elev until 2026-08-20, when the class machinery
+// was removed; 22 bits fill the same 4 base-85 header chars — 4 × log2(85) ≈ 25.6.)
 // The body carries no length field — it is a single rANS stream (see rans.ts), serialized
 // little-endian and self-delimiting: the decoder knows the structure and consumes exactly the
 // symbols the encoder wrote (see encodeBodyLE/decodeBodyLE and SymSource.assertDone).
-// The columns have no per-column selectors: within a class, each symbol's codebook is keyed by
-// context both sides already have (see entropy.ts).
+// The columns have no per-column selectors: each symbol's codebook is keyed by context both
+// sides already have (see entropy.ts).
 export const V3_SEQ_BITS = 8;
 
 // Message code: client-assigned key the response echoes; see RequestContext / model.ts.
@@ -63,12 +63,7 @@ const ELEV_STEP_M = 100;
 // and decoder derive different structure from the same message.
 const quantElevM = (m: number): number =>
   Math.min(Math.max(Math.round(m / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1) * ELEV_STEP_M;
-// Codebook-class selector: 3 bits for up to 8 classes (CODEBOOK_CLASSES may be smaller; the
-// field width is wire format and stays fixed).
-const CLASS_BITS = 3;
-
-export const V3_HEADER_BITS =
-  CODE_BITS + V3_SEQ_BITS + ELEV_BITS + CLASS_BITS; // 25
+export const V3_HEADER_BITS = CODE_BITS + V3_SEQ_BITS + ELEV_BITS; // 22
 // Total chars before the body: the shared version prefix plus this version's packed header.
 export const V3_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(V3_HEADER_BITS); // 1 + 4 = 5
 const HEADER_BITS = V3_HEADER_BITS;
@@ -137,13 +132,14 @@ const FREEZE_ANCHOR_BITS = VAR_BITS_V3[VARS_BIT.freeze];
 const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0) / FREEZE_STEP_M + 1e-9), FREEZE_ANCHOR_BITS);
 
 // cloud band: coverage at each CLOUD_BAND_LEVELS_HPA pressure level, all riding the single cch
-// bit — v3's replacement for the v2 low/mid/high trio. Same anchor+delta shape as freeze: per
-// level, a 3-bit anchor then entropy-coded period-over-period deltas. Conditioning is
-// deliberately just the previous value at the same level for now (the vertical-neighbor chain is
-// a later derive), but each level has its OWN delta table, trained on the post-fillCloudBand
-// stack this column carries — see codec-server/scripts/derive-cloud-delta-codebooks.ts. (Until
-// 2026-08-19 the eight levels shared the v2-era low/mid/high tables, mapped on by altitude:
-// alphabet-compatible but trained on a different variable.)
+// bit — v3's replacement for the v2 low/mid/high trio. Per level: a 3-bit anchor (first
+// period), then ORDER-1 VALUE symbols — each step coded under the (level, previous step) book,
+// the same model the wet columns use. The previous value is the band's dominant context (the
+// RH-diagnostic fill pins levels at exactly 0 for long runs; held-out −27% vs unconditioned
+// per-level deltas — the vertical-neighbor chain added only −0.19 b/period on top and was left
+// out; see analyze-cloud-neighbor-heldout.ts). Tables are trained on the post-fillCloudBand
+// stack at the band's serving resolutions only — see
+// codec-server/scripts/derive-cloud-delta-codebooks.ts.
 const CLOUD_ANCHOR_BITS = VAR_BITS_V3[VARS_BIT.cch]; // 3
 const CLOUD_STEPS = (1 << CLOUD_ANCHOR_BITS) - 1;    // 7: the top step of the quantized scale
 export const quantCover = (pct: number | undefined): number =>
@@ -192,11 +188,6 @@ export function cloudBandLevelCount(headerElevationM: number): number {
   while (n < CLOUD_BAND_LEVELS_HPA.length && CLOUD_BAND_LEVELS_HPA[n] < ground) n++;
   return Math.min(CLOUD_BAND_LEVELS_HPA.length, Math.max(2, n + 1));
 }
-// One codec per (resolution, level) — res is the ARRIVING period's resTableIdx, the level index
-// is the position in CLOUD_BAND_LEVELS_HPA; the same axes the derive script counts on, so the
-// two cannot drift apart without the digest test noticing.
-const cloudBandCodec = (bk: ClassBooks, res: number, levelIdx: number): DeltaCodec =>
-  bk.cloudBandDelta[res][levelIdx];
 
 // ── Air quality ────────────────────────────────────────────────────────────────
 // Five columns over two incompatible index scales (see the AQI ladders in entropy.ts), all from
@@ -240,7 +231,7 @@ const AQ_DELTA_COLUMNS: {
   bit: number;
   field: AqField;
   lower: readonly number[];
-  bookOf(bk: ClassBooks): (res: number, tod: number, prevDelta: number | null) => CodeBook;
+  bookOf(bk: Books): (res: number, tod: number, prevDelta: number | null) => CodeBook;
 }[] = [
   { bit: VARS_BIT.aq_pm25, field: "aqi_pm25", lower: AQI_US_LOWER,
     bookOf: (bk) => (res, _tod, prev) => bk.aqPm25Book(res, prev) },
@@ -273,13 +264,13 @@ interface AqHeadline {
   // The three constituents that ever lead this index, in AQI_BASE_* bit order.
   baseBits: [pm25: number, o3: number, pm10: number];
   residualMasks: ReadonlySet<number>;
-  residualBook(bk: ClassBooks, res: number, baseMask: number): CodeBook;
-  deltaBook(bk: ClassBooks, res: number, tod: number, prevDelta: number | null): CodeBook;
+  residualBook(bk: Books, res: number, baseMask: number): CodeBook;
+  deltaBook(bk: Books, res: number, tod: number, prevDelta: number | null): CodeBook;
   // The dominant-pollutant column that rides this headline: which constituent it is reporting.
   dominantField: "aqi_dominant" | "aqi_eu_dominant";
   nDominant: number;
   dominantUnknown: number;
-  dominantBook(bk: ClassBooks, prev: number | null): CodeBook;
+  dominantBook(bk: Books, prev: number | null): CodeBook;
 }
 const AQ_HEADLINES: AqHeadline[] = [
   {
@@ -327,7 +318,7 @@ const aqBaseMask = (h: AqHeadline, varsMask: number): number => {
 // freeze (bit 3) and the cloud band (bit 9) are handled separately in buildBody/decode below.
 const VALUE_COLUMNS: {
   bit: number;
-  bookOf(bk: ClassBooks): (res: number, wcClass: number, prev: number | null) => CodeBook;
+  bookOf(bk: Books): (res: number, wcClass: number, prev: number | null) => CodeBook;
   get(p: Period): number;          // quantized value symbol
   set(p: Period, v: number): void; // dequantize the symbol back onto the period
 }[] = [
@@ -366,12 +357,15 @@ const WIND_COLUMNS: {
   { bit: 7, kph: "wind_700_kph", dir: "wind_700_dir", level: 3, upperBit: 6 },
 ];
 
-// Per-period codebook resolution index (0..4 = 24h..1h) from each period's span. The fill mixes
+// Per-period codebook table row (0..3 = 12h..1h, TABLE_RES_IDXS order — the only resolutions a
+// layout can produce, so no table ships a 24h row) from each period's span. The fill mixes
 // resolutions within one message, and both sides know the layout (the encoder from
 // msg.periodHours, the decoder from layoutFor), so a per-period table key costs no wire bits.
 // A period-over-period delta at a resolution boundary is keyed by the ARRIVING period's
-// resolution — the step it spans.
-const HOURS_TO_RES: Record<number, number> = { 24: 0, 12: 1, 6: 2, 3: 3, 1: 4 };
+// resolution — the step it spans. The `?? 0` (12h row) is unreachable today — layoutFor emits
+// only these four spans — and exists so a malformed periodHours misprices instead of crashing.
+const HOURS_TO_RES: Record<number, number> = Object.fromEntries(
+  TABLE_RES_IDXS.map((r, row) => [RESOLUTION_HOURS[r], row]));
 const resTableIdx = (periodHours: number[]): number[] =>
   periodHours.map((h) => HOURS_TO_RES[h] ?? 0);
 
@@ -393,7 +387,7 @@ const todTableIdx = (firstHour: number, periodHours: number[], utcOffsetHours: n
 // A sequential reader over the entropy-coded body: convenience wrappers for each codec around
 // the shared SymSource (which owns the coder state). `books` is the codebook class the header
 // selected — the table set every symbol decodes under.
-function reader(bits: number[], books: ClassBooks) {
+function reader(bits: number[], books: Books) {
   const src = makeBitSource(bits);
   return {
     int: (n: number): number => src.raw(n),
@@ -402,7 +396,6 @@ function reader(bits: number[], books: ClassBooks) {
     windSpeedDelta: (book: CodeBook): number => decodeWindSpeedDelta(src, book),
     freezeDelta: (book: CodeBook): number => decodeFreezeDelta(src, book),
     aqiDelta: (book: CodeBook): number => decodeAqiDelta(src, book),
-    delta: (codec: DeltaCodec): number => codec.decode(src),
     tempDelta: (book: CodeBook): number => decodeTempDelta(src, book),
     assertDone: (): void => src.assertDone(),
   };
@@ -437,7 +430,7 @@ type ColumnSink = (name: string, bits: number) => void;
 // The optional sink observes per-column bit costs without changing the bytes produced. The
 // returned sink exposes `cost` (exact model bits) without serializing, so the class search
 // only pays for serialization once, on the winner.
-function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): ReturnType<typeof makeBitSink> {
+function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): ReturnType<typeof makeBitSink> {
   const nModels = msg.periods.length;
   const nPeriods = msg.periods[0].length;
   const res = resTableIdx(msg.periodHours);
@@ -511,24 +504,23 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
     mark("freeze", before);
   }
 
-  // cloud band: level-major — for each carried pressure level, per model, an anchor (first
-  // period, full width) followed by entropy-coded period-over-period deltas under the
-  // (arriving period's resolution, level) table (see cloudBandCodec above — no per-message
-  // selector). Both clamps apply (see cloudBandPeriodCount / cloudBandLevelCount): only the
-  // leading ≤3h periods carry symbols, and only the levels down to one below the forecast
-  // point — keyed off the QUANTIZED elevation, since that is the value the decoder reads back
-  // out of the header.
+  // cloud band: level-major — for each carried pressure level, per model, a raw anchor (first
+  // period, full width) then order-1 value symbols, each under the (level, previous step) book.
+  // Both clamps apply (see cloudBandPeriodCount / cloudBandLevelCount): only the leading ≤3h
+  // periods carry symbols, and only the levels down to one below the forecast point — keyed off
+  // the QUANTIZED elevation, since that is the value the decoder reads back out of the header.
   if (msg.vars_mask & (1 << VARS_BIT.cch)) {
     before = em.cost;
     const nCb = cloudBandPeriodCount(msg.periodHours);
     const nLev = nCb > 0 ? cloudBandLevelCount(quantElevM(msg.elevation)) : 0;
     for (let li = 0; li < nLev; li++) {
       for (let m = 0; m < nModels; m++) {
-        em.raw(quantCover(msg.periods[m][0].cloud_band?.[li]), CLOUD_ANCHOR_BITS);
+        let prev = quantCover(msg.periods[m][0].cloud_band?.[li]);
+        em.raw(prev, CLOUD_ANCHOR_BITS);
         for (let p = 1; p < nCb; p++) {
-          cloudBandCodec(books, res[p], li).encode(em,
-            quantCover(msg.periods[m][p].cloud_band?.[li])
-            - quantCover(msg.periods[m][p - 1].cloud_band?.[li]));
+          const cur = quantCover(msg.periods[m][p].cloud_band?.[li]);
+          em.sym(books.cloudBandBook(li, prev), cur);
+          prev = cur;
         }
       }
     }
@@ -709,9 +701,8 @@ function buildBody(msg: ForecastMessage, books: ClassBooks, sink?: ColumnSink): 
 
 // lat/lon/model/vars/duration/offset and the request datetime are recovered client-side via
 // `code` (RequestContext), and the period layout is derived from `seq` — so all of them are
-// intentionally absent from the header. `cls` is the codebook class the body was built under —
-// encoder policy (cheapest of CLASS_BOOKS), never taken from the message.
-function buildHeader(msg: ForecastMessage, cls: number): number[] {
+// intentionally absent from the header.
+function buildHeader(msg: ForecastMessage): number[] {
   const seq = msg.seq;
   if (!Number.isInteger(seq) || seq < 1 || seq > 1 << V3_SEQ_BITS)
     throw new Error(`v3: message has no valid fill-sequence number (seq=${seq})`);
@@ -719,23 +710,7 @@ function buildHeader(msg: ForecastMessage, cls: number): number[] {
   putInt(headerBits, msg.code, CODE_BITS);
   putInt(headerBits, seq - 1, V3_SEQ_BITS);
   putInt(headerBits, quantElevM(msg.elevation) / ELEV_STEP_M, ELEV_BITS);
-  putInt(headerBits, cls, CLASS_BITS);
   return headerBits;
-}
-
-// Builds the body under every codebook class and keeps the cheapest — the selector this buys is
-// 3 free header bits, so the only cost is encoder CPU. Deterministic: model cost is exact and
-// ties break to the lowest class, so re-encoding a decoded message reproduces the same string.
-// The optional sink observes the WINNING class's per-column costs (that pass is rebuilt so the
-// search itself stays sink-free).
-function buildBestBody(msg: ForecastMessage, sink?: ColumnSink): { em: ReturnType<typeof makeBitSink>; cls: number } {
-  let best = { em: buildBody(msg, CLASS_BOOKS[0]), cls: 0 };
-  for (let cls = 1; cls < CLASS_BOOKS.length; cls++) {
-    const em = buildBody(msg, CLASS_BOOKS[cls]);
-    if (em.cost < best.em.cost) best = { em, cls };
-  }
-  if (sink) buildBody(msg, CLASS_BOOKS[best.cls], sink);
-  return best;
 }
 
 // The version tag and packed header are always base-85; only the body follows `alphabet`. See
@@ -746,32 +721,31 @@ function encodeBodyIn(alphabet: Alphabet, bits: number[]): string {
 }
 
 export function v3MessageToString(msg: ForecastMessage, alphabet: Alphabet = "base85"): string {
-  const { em, cls } = buildBestBody(msg);
-  return encodeVersion(VERSION) + encode(buildHeader(msg, cls)) + encodeBodyIn(alphabet, em.bits);
+  const em = buildBody(msg, BOOKS);
+  return encodeVersion(VERSION) + encode(buildHeader(msg)) + encodeBodyIn(alphabet, em.bits);
 }
 
 // One column's contribution to a message: its model cost in (fractional) bits.
 export interface ColumnBreakdown { name: string; bits: number }
 
 // Per-column bit accounting for a message, for encoding experiments. Produces the identical string
-// as v3MessageToString (via the same buildBestBody), plus the bit cost of the version prefix,
+// as v3MessageToString (via the same buildBody), plus the bit cost of the version prefix,
 // packed header, weathercode, and every present variable column.
 export interface V3Breakdown {
   encoded: string;
   chars: number;
   versionBits: number;   // self-describing version prefix
-  headerBits: number;    // packed header (code/seq/elev/class)
+  headerBits: number;    // packed header (code/seq/elev)
   bodyBits: number;      // actual serialized body bits (rANS state + renorm words)
   overheadBits: number;  // bodyBits − Σ columns[].bits: the coder's flush/renorm slack
-  codebookClass: number; // the class the try-all-pick-best encoder selected
   columns: ColumnBreakdown[];
 }
 
 export function v3EncodeBreakdown(msg: ForecastMessage, alphabet: Alphabet = "base85"): V3Breakdown {
   const columns: ColumnBreakdown[] = [];
-  const { em, cls } = buildBestBody(msg, (name, bits) => columns.push({ name, bits }));
+  const em = buildBody(msg, BOOKS, (name, bits) => columns.push({ name, bits }));
   const body = em.bits;
-  const encoded = encodeVersion(VERSION) + encode(buildHeader(msg, cls)) + encodeBodyIn(alphabet, body);
+  const encoded = encodeVersion(VERSION) + encode(buildHeader(msg)) + encodeBodyIn(alphabet, body);
   const modelBits = columns.reduce((s, c) => s + c.bits, 0);
   return {
     encoded,
@@ -780,7 +754,6 @@ export function v3EncodeBreakdown(msg: ForecastMessage, alphabet: Alphabet = "ba
     headerBits: HEADER_BITS,
     bodyBits: body.length,
     overheadBits: body.length - modelBits,
-    codebookClass: cls,
     columns,
   };
 }
@@ -804,15 +777,12 @@ export function v3HeaderFromString(s: string): MessageHeader {
   const code = hr.int(CODE_BITS);
   const seq = hr.int(V3_SEQ_BITS) + 1;
   const elevation = hr.int(ELEV_BITS) * ELEV_STEP_M;
-  const codebookClass = hr.int(CLASS_BITS);
-  if (codebookClass >= CODEBOOK_CLASSES)
-    throw new Error(`v3: unknown codebook class ${codebookClass} (this build has ${CODEBOOK_CLASSES})`);
 
-  return { version, code, seq, elevation, codebookClass };
+  return { version, code, seq, elevation };
 }
 
 export function v3MessageFromString(s: string, resolve: ContextResolver): ForecastMessage {
-  const { version, code, seq, elevation, codebookClass } = v3HeaderFromString(s);
+  const { version, code, seq, elevation } = v3HeaderFromString(s);
   const rest = s.slice(VERSION_PREFIX_CHARS);
 
   // Recover the request-echo fields the slim header omits.
@@ -853,13 +823,12 @@ export function v3MessageFromString(s: string, resolve: ContextResolver): Foreca
   // alphabet older than that context.
   const periods = decodeBody(
     decodeBodyAuto(rest.slice(HEADER_CHARS), device && DEVICE_TRANSPORT[device].alphabet),
-    CLASS_BOOKS[codebookClass], vars_mask,
+    BOOKS, vars_mask,
     layout.periodHours, firstStart.getUTCHours(), utcOffsetHours, elevation, 1);
 
   return {
     version,
     code,
-    codebookClass,
     days: layout.days,
     models_mask,
     vars_mask,
@@ -882,7 +851,7 @@ export function v3MessageFromString(s: string, resolve: ContextResolver): Foreca
 // `elevation` is the header's, which keys the cloud band's level count). Throws unless the
 // stream is consumed exactly (see SymSource.assertDone).
 function decodeBody(
-  bodyBits: number[], books: ClassBooks, vars_mask: number, periodHours: number[],
+  bodyBits: number[], books: Books, vars_mask: number, periodHours: number[],
   firstHour: number, utcOffsetHours: number, elevation: number, nModels: number,
 ): Period[][] {
   const nPeriods = periodHours.length;
@@ -942,10 +911,11 @@ function decodeBody(
   }
 
   // Cloud band mirrors buildBody, both clamps included: only the leading ≤3h periods and only
-  // the levels down to one below the header's elevation carry symbols. The decoded array is
-  // exactly the carried levels — its LENGTH is how the app learns the band's floor — and a
-  // period past the resolution clamp is left without the field: "not forecast", never "clear",
-  // the same convention as the AQ horizon.
+  // the levels down to one below the header's elevation carry symbols — a raw anchor, then
+  // order-1 value symbols under the (level, previous step) book. The decoded array is exactly
+  // the carried levels — its LENGTH is how the app learns the band's floor — and a period past
+  // the resolution clamp is left without the field: "not forecast", never "clear", the same
+  // convention as the AQ horizon.
   if (vars_mask & (1 << VARS_BIT.cch)) {
     const nCb = cloudBandPeriodCount(periodHours);
     const nLev = nCb > 0 ? cloudBandLevelCount(elevation) : 0;
@@ -954,7 +924,7 @@ function decodeBody(
         let quant = rd.int(CLOUD_ANCHOR_BITS);
         (periods[m][0].cloud_band ??= new Array<number>(nLev).fill(0))[li] = Math.round((quant * 100) / 7);
         for (let p = 1; p < nCb; p++) {
-          quant += rd.delta(cloudBandCodec(books, res[p], li));
+          quant = rd.sym(books.cloudBandBook(li, quant));
           (periods[m][p].cloud_band ??= new Array<number>(nLev).fill(0))[li] = Math.round((quant * 100) / 7);
         }
       }

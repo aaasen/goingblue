@@ -1,47 +1,31 @@
 /**
- * Derive the cloud band's delta Huffman codebooks — ONE PER (RESOLUTION, PRESSURE LEVEL), over
- * the corpus's period-over-period quantized cover deltas at that level and span. Same method as
- * derive-freeze-delta-codebooks.ts. The quantized cover step (0..7, 3-bit — see the cloud band
- * column in v3.ts) is bounded, so the full delta range -7..7 (15 symbols) fits directly in the
- * alphabet — no escape/raw-payload fallback needed.
+ * Derive the cloud band's codebooks — ORDER-1 VALUE CODING, one table per (PRESSURE LEVEL,
+ * PREVIOUS VALUE): the quantized cover step (0..7, 3-bit — see the cloud band column in v3.ts)
+ * keyed by the level's own previous decoded step. The same model the precip/snow/rain columns
+ * ship, and measured to be the band's dominant context: the RH-diagnostic fill pins levels at
+ * exactly 0 for long runs (rhCrit floor), so "was clear" reshapes the whole next-step
+ * distribution. Held-out (5-fold by location, analyze-cloud-neighbor-heldout.ts, 2026-08-20):
+ * per-level pooled deltas 10.59 → per-level × prev exact 7.74 b/period over the 8 levels
+ * (−27%); the vertical-neighbor delta added only −0.19 on top and was left out; res keying
+ * added ~nothing (−0.09) at the resolutions that serve.
+ *
+ * ONLY THE SERVING RESOLUTIONS ARE TRAINED. The wire clamps band symbols to periods at ≤3h
+ * resolution (cloudBandPeriodCount / CLOUD_BAND_MAX_HOURS in v3.ts), so 3h and 1h are the only
+ * spans a table will ever price — both are counted, pooled (the held-out scan put the res split
+ * within noise of the pool). The level clamp (cloudBandLevelCount) means summit messages skip
+ * their sub-ground levels; training still counts every level at every site — the low-level
+ * tables are dominated by the low-country sites that actually send them.
  *
  * WHAT IS COUNTED. The v3 wire carries coverage at each CLOUD_BAND_LEVELS_HPA level, and what
- * lands in those slots is not any raw upstream field: fillCloudBand (forecast.ts) recomputes each
- * level from `relative_humidity_XhPa` via Sundqvist, synthesizes low/mid cover from the model's
- * own layer cloud wherever the diagnostic reads empty, and folds the model's high-cloud integral
- * into the top slot. toFullPeriod applies exactly that correction before aggregation, so these
- * tables train on the stack production sends.
+ * lands in those slots is not any raw upstream field: fillCloudBand (forecast.ts) recomputes
+ * each level from `relative_humidity_XhPa` via Sundqvist, synthesizes low/mid cover from the
+ * model's own layer cloud wherever the diagnostic reads empty, and folds the model's high-cloud
+ * integral into the top slot. toFullPeriod applies exactly that correction before aggregation,
+ * so these tables train on the stack production sends.
  *
- * WHY PER LEVEL. Persistence is not constant with height, and three tables over eight levels put
- * 400 hPa (7 km, free troposphere) and 700 hPa (3 km, within reach of the boundary layer) on one
- * distribution. Each level gets its own row; the level index IS the CLOUD_BAND_LEVELS_HPA index,
- * so v3.ts indexes the codec by level with no mapping table in between.
- *
- * WHY PER RESOLUTION. A period's band is the per-level MAX over the hours it spans, so span
- * changes the delta distribution wholesale (1h deltas are 82% zero; 24h nowhere near). The
- * level-only predecessor was trained at 1h and used everywhere; measured over the train corpus,
- * bits/period summed over the eight levels:
- *
- *                        24h     12h      6h      3h      1h
- *   retired trio       23.44   20.95   18.40   15.08   12.11
- *   per-level only     23.78   21.22   18.44   15.10   12.08
- *   per-level × res    22.56   20.45   18.16   14.99   12.08
- *
- * [res][level] wins or ties everywhere, and is what every other delta column in this codec
- * already does (v3.ts hands each column resTableIdx(periodHours) for free). NOTE the wire now
- * clamps band symbols to periods at ≤3h resolution (cloudBandPeriodCount in v3.ts), so only the
- * 3h and 1h rows ever serve; the coarser rows are trained anyway to keep the [res][level][sym]
- * shape uniform with the other resolution-keyed tables — the same reason freeze keeps its dead
- * 24h row. The elevation clamp (cloudBandLevelCount) likewise means summit messages skip their
- * sub-ground levels; training still counts every level at every site — the low-level tables are
- * dominated by the low-country sites that actually send them.
- *
- * Still true, and not re-litigated here: per-message k-means selection of cloud tables does not
- * pay. A held-out check (split by location) on the old trio found cheapest-of-16 with a 4-bit
- * selector within 0.01 b/period of one shared table per level (low 1.688 vs 1.696, mid 1.826 vs
- * 1.826, high 1.908 vs 1.915) — a wash that doesn't justify 48 tables and three selectors.
- * Conditioning stays (resolution, previous value at the same level); the vertical-neighbor chain
- * (level l keyed on level l-1's delta) is a later derive.
+ * Each model's first period stays a raw 3-bit anchor on the wire (not counted here); the tables
+ * price transitions only. The level index IS the CLOUD_BAND_LEVELS_HPA index and the prev index
+ * IS the previous quantized step, so v3.ts indexes the books with no mapping in between.
  *
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
@@ -49,7 +33,10 @@
  *   pnpm exec tsx packages/codec-server/scripts/derive-cloud-delta-codebooks.ts
  */
 import { toFullPeriod } from "../src/forecast.ts";
-import { CLOUD_BAND_LEVELS_HPA, VARS_BIT, quantCover } from "@weather/protocol";
+import {
+  CLOUD_BAND_LEVELS_HPA, VARS_BIT, quantCover,
+  RESOLUTION_HOURS, TABLE_RES_IDXS, CLOUD_BAND_MAX_HOURS,
+} from "@weather/protocol";
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, huffmanLengths, scaledWeights, runStandalone,
   type CellCounter, type DerivedTables,
@@ -58,38 +45,35 @@ import {
 const LEVELS = CLOUD_BAND_LEVELS_HPA;
 const NLEVEL = LEVELS.length;      // 8, highest first (300 hPa … 1000 hPa)
 const STEP_BITS = 3;               // matches the cloud band column width in v3.ts (steps 0..7)
-const STEP_MAX = (1 << STEP_BITS) - 1;
-const NSYM = 2 * STEP_MAX + 1;     // 15: deltas -7..7, no escape needed (already bounded)
-const NRES = 5;                    // 24h/12h/6h/3h/1h — only 3h/1h serve post-clamp (see header)
-const RAW_BITS = STEP_BITS;        // cost of the fixed-width fallback
+const NSYM = 1 << STEP_BITS;       // 8 value symbols
+const NPREV = NSYM;                // keyed by the previous step, exact
+// The spans the band actually rides — derived from the wire's own clamp so the two can't drift.
+const SERVING_RES_IDXS = TABLE_RES_IDXS.filter((r) => RESOLUTION_HOURS[r] <= CLOUD_BAND_MAX_HOURS);
 const CLOUD_MASK = 1 << VARS_BIT.cch; // v3: the whole band rides this one bit
 
-const deltaSym = (delta: number): number => delta + STEP_MAX; // -7..7 -> 0..14
-
 export function counter(): CellCounter {
-  const tables = [{ name: "cloudBandDelta", dims: [NRES, NLEVEL, NSYM] }];
+  const tables = [{ name: "cloudBand", dims: [NLEVEL, NPREV, NSYM] }];
   const { nSlots } = tableOffsets(tables);
   const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
 
-  // counts[res][level][sym], plus each LEVEL's pooled-over-res marginal to back an empty
-  // (res, level) row — level identity dominates the delta shape (see header), so a sparse
-  // coarse-res row borrows from its own level, never from its neighbors.
-  const resRows = (counts: ArrayLike<number>): { rows: number[][][]; levelMarginal: number[][] } => {
-    const rows = Array.from({ length: NRES }, (_, res) =>
-      Array.from({ length: NLEVEL }, (_, li) => rowAt(counts, (res * NLEVEL + li) * NSYM, NSYM)));
-    const levelMarginal = Array.from({ length: NLEVEL }, (_, li) => {
+  // counts[level][prev][sym], plus each LEVEL's pooled-over-prev marginal to back an empty
+  // (level, prev) row — a thin context degrades to the level's own distribution, never a
+  // neighbor's.
+  const levelRows = (counts: ArrayLike<number>): { rows: number[][][]; marginal: number[][] } => {
+    const rows = Array.from({ length: NLEVEL }, (_, li) =>
+      Array.from({ length: NPREV }, (_, prev) => rowAt(counts, (li * NPREV + prev) * NSYM, NSYM)));
+    const marginal = rows.map((byPrev) => {
       const m = new Array<number>(NSYM).fill(0);
-      for (let res = 0; res < NRES; res++)
-        for (let s = 0; s < NSYM; s++) m[s] += rows[res][li][s];
+      for (const row of byPrev) for (let s = 0; s < NSYM; s++) m[s] += row[s];
       return m;
     });
-    return { rows, levelMarginal };
+    return { rows, marginal };
   };
 
   return {
     tables, nSlots,
     countCell(ctx, add) {
-      for (let res = 0; res < NRES; res++) {
+      for (const res of SERVING_RES_IDXS) {
         // Periods anchored to the cell's first local midnight, aggregated once per cell and
         // shared with every other counter that wants this anchoring — the alignment layoutFor
         // produces, so training mirrors the wire's period boundaries.
@@ -102,25 +86,25 @@ export function counter(): CellCounter {
           let prev = quantCover(periods[0].cloud_band?.[li]);
           for (let p = 1; p < periods.length; p++) {
             const cur = quantCover(periods[p].cloud_band?.[li]);
-            add((res * NLEVEL + li) * NSYM + deltaSym(cur - prev));
+            add((li * NPREV + prev) * NSYM + cur);
             prev = cur;
           }
         }
       }
     },
     tablesFrom(counts): DerivedTables {
-      const { rows, levelMarginal } = resRows(counts);
+      const { rows, marginal } = levelRows(counts);
       return {
-        CLOUD_BAND_DELTA_WEIGHTS_BY_RES_LEVEL: rows.map((byLevel, res) =>
-          byLevel.map((row, li) => scaledWeights(sum(row) > 0 ? row : levelMarginal[li]))),
+        CLOUD_BAND_WEIGHTS_BY_LEVEL_PREV: rows.map((byPrev, li) =>
+          byPrev.map((row) => scaledWeights(sum(row) > 0 ? row : marginal[li]))),
       };
     },
     costBits(counts) {
-      const { rows, levelMarginal } = resRows(counts);
+      const { rows, marginal } = levelRows(counts);
       const L = new Float64Array(nSlots);
-      rows.forEach((byLevel, res) => byLevel.forEach((row, li) => {
-        const c = rowCostBits(scaledWeights(sum(row) > 0 ? row : levelMarginal[li]));
-        for (let s = 0; s < NSYM; s++) L[(res * NLEVEL + li) * NSYM + s] = c[s];
+      rows.forEach((byPrev, li) => byPrev.forEach((row, prev) => {
+        const c = rowCostBits(scaledWeights(sum(row) > 0 ? row : marginal[li]));
+        for (let s = 0; s < NSYM; s++) L[(li * NPREV + prev) * NSYM + s] = c[s];
       }));
       return L;
     },
@@ -131,30 +115,31 @@ export async function derive(precounted?: Float64Array): Promise<DerivedTables> 
   const c = counter();
   const counts = precounted ?? await deriveCounts(c);
   const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
-  const rows = Array.from({ length: NRES }, (_, res) =>
-    Array.from({ length: NLEVEL }, (_, li) => rowAt(counts, (res * NLEVEL + li) * NSYM, NSYM)));
 
-  // Training-set mean bits/period per resolution, summed over the levels, beside what a
-  // res-less per-level table (the pooled-over-res marginal) would have charged — the shipped
-  // predecessor, so the delta is what the res axis buys.
-  console.log(`  CLOUD_BAND_DELTA_WEIGHTS_BY_RES_LEVEL — mean bits/period over the 8 levels, training set (raw = ${8 * RAW_BITS})`);
-  for (let res = 0; res < NRES; res++) {
-    let bits = 0, resless = 0, n = 0;
-    for (let li = 0; li < NLEVEL; li++) {
-      const row = rows[res][li];
-      const pooled = new Array<number>(NSYM).fill(0);
-      for (let r = 0; r < NRES; r++) for (let s = 0; s < NSYM; s++) pooled[s] += rows[r][li][s];
-      const own = huffmanLengths(scaledWeights(sum(row) > 0 ? row : pooled));
-      const was = huffmanLengths(scaledWeights(pooled));
+  // Training-set mean bits/period per level under the prev-keyed tables, beside the level's
+  // unconditioned (order-0 value) table — the delta is what the order-1 context buys.
+  console.log(`  CLOUD_BAND_WEIGHTS_BY_LEVEL_PREV — mean bits/period, training set, ${SERVING_RES_IDXS.map((r) => `${RESOLUTION_HOURS[r]}h`).join("+")} pooled (raw = ${STEP_BITS})`);
+  let total = 0, flatTotal = 0, totalN = 0;
+  for (let li = 0; li < NLEVEL; li++) {
+    const byPrev = Array.from({ length: NPREV }, (_, prev) =>
+      rowAt(counts, (li * NPREV + prev) * NSYM, NSYM));
+    const marginal = new Array<number>(NSYM).fill(0);
+    for (const row of byPrev) for (let s = 0; s < NSYM; s++) marginal[s] += row[s];
+    const flat = huffmanLengths(scaledWeights(marginal));
+    let bits = 0, flatBits = 0;
+    for (const row of byPrev) {
+      if (sum(row) === 0) continue;
+      const own = huffmanLengths(scaledWeights(row));
       bits += row.reduce((s, cnt, sym) => s + cnt * own[sym], 0);
-      resless += row.reduce((s, cnt, sym) => s + cnt * was[sym], 0);
-      n = Math.max(n, sum(row));
+      flatBits += row.reduce((s, cnt, sym) => s + cnt * flat[sym], 0);
     }
-    const label = ["24h", "12h", "6h", "3h", "1h"][res];
-    const served = res >= 3 ? "" : "  (dead post-clamp, kept for shape)";
-    console.log(`    ${label.padStart(3)}: n=${n} mean=${(bits / Math.max(1, n)).toFixed(2)}` +
-      ` (per-level-only ${(resless / Math.max(1, n)).toFixed(2)})${served}`);
+    const n = Math.max(1, sum(marginal));
+    total += bits; flatTotal += flatBits; totalN = Math.max(totalN, n);
+    console.log(`    ${String(LEVELS[li]).padStart(4)} hPa: n=${sum(marginal)} ` +
+      `mean=${(bits / n).toFixed(3)} (order-0 ${(flatBits / n).toFixed(3)})`);
   }
+  console.log(`    band total: ${(total / Math.max(1, totalN)).toFixed(2)} b/period ` +
+    `(order-0 ${(flatTotal / Math.max(1, totalN)).toFixed(2)})`);
   return c.tablesFrom(counts);
 }
 

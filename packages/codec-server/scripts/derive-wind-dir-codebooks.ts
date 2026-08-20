@@ -33,7 +33,7 @@
  *   pnpm exec tsx packages/codec-server/scripts/derive-wind-dir-codebooks.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
-import { VARS_BIT, type Period } from "@weather/protocol";
+import { VARS_BIT, TABLE_RES_IDXS, type Period } from "@weather/protocol";
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone,
   quantWind, CALM_MAX_FORCE,
@@ -41,7 +41,7 @@ import {
 } from "./derive-lib.ts";
 
 const NDIR = 8;
-const NRES = 5; // resolution indices 0..4 (24h/12h/6h/3h/1h)
+const NRES = TABLE_RES_IDXS.length; // 12h/6h/3h/1h — the resolutions layouts emit, in row order
 const WIND_MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
 const SPEED_FIELDS = ["wind_sfc_kph", "wind_500_kph", "wind_600_kph", "wind_700_kph"] as const;
 const DIR_FIELDS = ["wind_sfc_dir", "wind_500_dir", "wind_600_dir", "wind_700_dir"] as const;
@@ -83,7 +83,7 @@ export function counter(): CellCounter {
       for (let resIdx = 0; resIdx < NRES; resIdx++) {
         // Periods anchored to the request hour, aggregated once per cell and shared with every
         // other counter using this anchoring.
-        const slice = ctx.atRequest(resIdx);
+        const slice = ctx.atRequest(TABLE_RES_IDXS[resIdx]);
         if (!slice) continue;
         const { n, rows } = slice;
         const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US", resIdx));

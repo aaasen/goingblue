@@ -93,14 +93,14 @@ export function quantWind(kph: number | undefined): number {
 // Tables a derive script contributes, keyed by their codebooks.gen.ts constant name.
 export type DerivedTables = Record<string, number[] | number[][] | number[][][]>;
 
-// ── Per-cell counting (shared by derive() and the class-clustering extractor) ────
+// ── Per-cell counting ────────────────────────────────────────────────────────────
 //
 // Each derive script factors its corpus counting into a CellCounter: a fixed flat "slot" space
 // enumerating every (table row × symbol) its counted tables have, plus a per-cell counting
 // function. derive() sums every train cell into one flat vector and assembles the shipped
-// tables from it (identical results to the old inline loops); the codebook-class clustering
-// (extract-cell-counts.ts / EM) keeps one sparse vector per cell instead, so table sets can be
-// re-fit to any subset of cells without another corpus scan.
+// tables from it. (The per-cell factoring once also fed a codebook-class EM over sparse
+// per-cell vectors; the class machinery was removed 2026-08-20, the factoring stays because
+// generate-codebooks.ts shares one corpus scan across every counter.)
 
 // One counted table: `dims` are its axes, the LAST dim being the symbol alphabet — so the table
 // is a row-major sequence of rows of length dims.at(-1), each row one codebook's counts.

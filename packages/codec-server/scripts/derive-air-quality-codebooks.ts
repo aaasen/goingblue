@@ -37,9 +37,6 @@
  * - EU PM2.5 is a cheap column because Open-Meteo's European index uses a 24h RUNNING MEAN for
  *   particulates; it is a far smoother series than the instantaneous US sub-index.
  *
- * These tables are NOT part of the codebook-class ladder — they are shared by every class (see
- * the AQ books in entropy.ts). Registering this script in extract-cell-counts.ts and re-running
- * derive-class-ladder.ts is the follow-up that would fit them per class.
  *
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
@@ -52,13 +49,14 @@ import {
   AQI_RESIDUAL_MAX, AQI_NO_DATA, aqiDeltaSym,
   AQI_US_RESIDUAL_MASKS, AQI_EU_RESIDUAL_MASKS, AQ_HORIZON_HOURS,
   quantAqi, tempDeltaBucket, tempTodBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_TOD_BUCKETS,
+  TABLE_RES_IDXS,
 } from "@weather/protocol";
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone,
   type CellCounter, type DerivedTables,
 } from "./derive-lib.ts";
 
-const NRES = 5;                              // 24h/12h/6h/3h/1h — row 0 kept for table shape
+const NRES = TABLE_RES_IDXS.length;          // 12h/6h/3h/1h — the resolutions layouts emit
 const NDELTA = AQI_DELTA_NSYM;               // 16: deltas -7..7 + escape (see entropy.ts)
 const ESCAPE_SYM = NDELTA - 1;
 const NRESID = AQI_RESIDUAL_MAX + 1;         // 26: residual 0..25, non-negative by construction
@@ -194,7 +192,7 @@ export function counter(): CellCounter {
       for (let res = 0; res < NRES; res++) {
         // Periods anchored to the cell's first local midnight, aggregated once per cell
         // and shared with every other counter that wants this anchoring.
-        const slice = ctx.atMidnight(res);
+        const slice = ctx.atMidnight(TABLE_RES_IDXS[res]);
         if (!slice) continue;
         // Clamped to the horizon the WIRE encodes. Production stops every air-quality column at
         // AQ_HORIZON_HOURS (aqPeriodCount in v3.ts), so periods past it are never emitted — and
@@ -335,7 +333,7 @@ export async function derive(precounted?: Float64Array): Promise<DerivedTables> 
   const counts = precounted ?? await deriveCounts(c);
   const { offsets } = tableOffsets(c.tables);
   const L = c.costBits(counts);
-  const RES_LABEL = ["24h", "12h", "6h", "3h", "1h"];
+  const RES_LABEL = ["12h", "6h", "3h", "1h"];
 
   // Training-set mean bits/period per column at each resolution (held-out numbers are the
   // planning ladder's job; this is the generation log's sanity check).

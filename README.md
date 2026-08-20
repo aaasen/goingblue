@@ -108,7 +108,6 @@ To keep the message small, the server never sends the client information that it
 | `index`  |    7 | message index the client stores its request context under        |
 | `seq`   |    8 | fill sequence number to derive forecast length and layout |
 | `elev`  |    7 | elevation in 100 m steps                                          |
-| `class` |    3 | which of the 8 codebook classes the body used                   |
 
 ### Strategy by Variable
 
@@ -129,7 +128,7 @@ Each variable has a different quantization method and codebook strategy. The var
 | snow                 | value | 64 companded steps                                      | resolution × previous-value bucket (0 \| 1–3 \| 4–9 \| 10–20 \| 21+) × same-period weathercode class | sqrt-companded, 0–200 cm |
 | rain                 | value | 64 companded steps                                      | resolution × previous-value bucket (same) × same-period weathercode class | sqrt-companded, 0–144 mm |
 | freezing level       | delta | Δ −31…+31                                               | resolution × same-period temperature Δ bucket (≤−2 \| −1 \| 0 \| +1 \| ≥+2); resolution alone when temp is absent | 1000 ft steps, 0–31000 ft; 5-bit anchor |
-| cloud (high/mid/low) | delta | Δ −7…+7                                                 | one shared table per level                     | 0–100% in eighths; 3-bit anchor       |
+| cloud band           | value | eighths 0…7                                             | pressure level × previous value                | 0–100% in eighths; 3-bit anchor       |
 | wind gust            | delta | Δ −17…+17                                               | resolution (encodes first, no context of its own) | extended Beaufort force 0…17, km/h bands; 5-bit anchor |
 | wind speed           | delta | Δ −17…+17                                               | resolution × level; surface by the gust column's Δ bucket; 600/700 hPa by the upper level's Δ bucket | extended Beaufort force 0…17, km/h bands (midpoint decode); 5-bit anchor |
 | wind direction       | value | 8 cardinals                                             | resolution × previous direction (× upper direction for 600/700 hPa); calm periods emit no symbol | 45° points |

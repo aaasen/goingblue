@@ -30,13 +30,13 @@
  *   pnpm exec tsx packages/codec-server/scripts/derive-wind-speed-delta-codebooks.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
-import { VARS_BIT, type Period } from "@weather/protocol";
+import { VARS_BIT, TABLE_RES_IDXS, type Period } from "@weather/protocol";
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone, quantWind,
   type CellCounter, type DerivedTables,
 } from "./derive-lib.ts";
 
-const NRES = 5;
+const NRES = TABLE_RES_IDXS.length; // 12h/6h/3h/1h — the resolutions layouts emit, in row order
 const NLEVEL = 4;                  // sfc, 500, 600, 700
 const NBUCKET = 5;                 // upper Δ buckets: ≤-2, -1, 0, +1, ≥+2
 const SPEED_MAX = 17;              // extended Beaufort force domain, must match v3.ts
@@ -78,7 +78,7 @@ export function counter(): CellCounter {
       for (let resIdx = 0; resIdx < NRES; resIdx++) {
         // Periods anchored to the request hour, aggregated once per cell and shared with every
         // other counter using this anchoring.
-        const slice = ctx.atRequest(resIdx);
+        const slice = ctx.atRequest(TABLE_RES_IDXS[resIdx]);
         if (!slice) continue;
         const { n, rows } = slice;
         const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US", resIdx));

@@ -31,6 +31,7 @@ import { rowsFromWindows, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {
   tempDeltaBucket, tempTodBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_TOD_BUCKETS,
   TEMP_DELTA_CORE_RADIUS, TEMP_DELTA_MIN, TEMP_DELTA_MAX, TEMP_DELTA_ESCAPE_BITS,
+  TABLE_RES_IDXS,
 } from "@weather/protocol";
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone,
@@ -39,7 +40,7 @@ import {
 
 const NSYM = 2 * TEMP_DELTA_CORE_RADIUS + 2; // 16: 15 core + escape
 const ESCAPE_SYM = NSYM - 1;
-const NRES = 5; // 24h/12h/6h/3h/1h — row 0 (24h) is dead in fill layouts but kept for shape
+const NRES = TABLE_RES_IDXS.length; // 12h/6h/3h/1h — the resolutions layouts emit, in row order
 const NCTX = TEMP_DELTA_PREV_BUCKETS * TEMP_DELTA_TOD_BUCKETS; // 40
 
 const deltaSym = (d: number) => (Math.abs(d) <= TEMP_DELTA_CORE_RADIUS ? d + TEMP_DELTA_CORE_RADIUS : ESCAPE_SYM);
@@ -75,7 +76,7 @@ export function counter(): CellCounter {
       for (let res = 0; res < NRES; res++) {
         // Periods anchored to the cell's first local midnight, aggregated once per cell
         // and shared with every other counter that wants this anchoring.
-        const slice = ctx.atMidnight(res);
+        const slice = ctx.atMidnight(TABLE_RES_IDXS[res]);
         if (!slice) continue;
         const { hpp, start: firstUtc, n } = slice;
         const rows = slice.rows;
@@ -132,7 +133,7 @@ export async function derive(precounted?: Float64Array): Promise<DerivedTables> 
       bits += counts[slot] * L[slot];
       n += counts[slot];
     }
-    const label = ["24h", "12h", "6h", "3h", "1h"][res];
+    const label = ["12h", "6h", "3h", "1h"][res];
     console.log(`  ${label}: n=${n} mean=${(bits / Math.max(1, n)).toFixed(3)} b/period (training-set)`);
   }
   return c.tablesFrom(counts);

@@ -40,14 +40,14 @@
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {
   VARS_BIT, compandSqrt, SNOW_K, RAIN_K, ACCUM_BITS,
-  WMO2IDX, WEATHERCODE_CLASS, WC_CLASSES, type Period,
+  WMO2IDX, WEATHERCODE_CLASS, WC_CLASSES, TABLE_RES_IDXS, type Period,
 } from "@weather/protocol";
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone,
   type CellCounter, type DerivedTables,
 } from "./derive-lib.ts";
 
-const NRES = 5;
+const NRES = TABLE_RES_IDXS.length; // 12h/6h/3h/1h — the resolutions layouts emit, in row order
 const PRECIP_NSYM = 8;
 const ACCUM_NSYM = 1 << ACCUM_BITS; // 64
 
@@ -106,7 +106,7 @@ export function counter(): CellCounter {
       for (let resIdx = 0; resIdx < NRES; resIdx++) {
         // Periods anchored to the request hour, aggregated once per cell and shared with every
         // other counter using this anchoring.
-        const slice = ctx.atRequest(resIdx);
+        const slice = ctx.atRequest(TABLE_RES_IDXS[resIdx]);
         if (!slice) continue;
         const { n, rows } = slice;
         const periods: Period[] = rows.map((r) => toFullPeriod(r, VARS_MASK, "US"));

@@ -29,7 +29,7 @@
  *   pnpm exec tsx packages/codec-server/scripts/derive-gust-delta-codebooks.ts
  */
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
-import { VARS_BIT, upperDeltaBucket, type Period } from "@weather/protocol";
+import { VARS_BIT, upperDeltaBucket, TABLE_RES_IDXS, type Period } from "@weather/protocol";
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone, quantWind,
   type CellCounter, type DerivedTables,
@@ -37,7 +37,7 @@ import {
 
 const FORCE_MAX = 17;              // extended Beaufort domain, must match v3.ts
 const NSYM = 2 * FORCE_MAX + 1;    // 35: deltas -17..17
-const NRES = 5; // 24h/12h/6h/3h/1h — row 0 (24h) is dead in fill layouts but kept for shape
+const NRES = TABLE_RES_IDXS.length; // 12h/6h/3h/1h — the resolutions layouts emit, in row order
 const NBUCKET = 5;                 // upperDeltaBucket domain: ≤-2, -1, 0, +1, ≥+2
 const MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.gust);
 
@@ -74,7 +74,7 @@ export function counter(): CellCounter {
       for (let res = 0; res < NRES; res++) {
         // Periods anchored to the cell's first local midnight, aggregated once per cell
         // and shared with every other counter that wants this anchoring.
-        const slice = ctx.atMidnight(res);
+        const slice = ctx.atMidnight(TABLE_RES_IDXS[res]);
         if (!slice) continue;
         const { hpp, start: firstUtc, n } = slice;
         const periods = slice.rows.map((r) => toFullPeriod(r, MASK, "US"));
@@ -136,7 +136,7 @@ export async function derive(precounted?: Float64Array): Promise<DerivedTables> 
     let sfcBits = 0;
     for (const row of sfcRowsRes) sfcBits += bitsUnder(row, sum(row) > 0 ? row : sfcMarginal);
     const n = Math.max(1, sum(gustRow));
-    const label = ["24h", "12h", "6h", "3h", "1h"][res];
+    const label = ["12h", "6h", "3h", "1h"][res];
     console.log(`  ${label}: n=${sum(gustRow)} gust=${(bitsUnder(gustRow, gustRow) / n).toFixed(3)}` +
       ` sfc|gustΔ=${(sfcBits / Math.max(1, sum(sfcMarginal))).toFixed(3)} b/period (training-set)`);
   }
