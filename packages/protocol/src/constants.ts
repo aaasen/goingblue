@@ -25,6 +25,21 @@ export const ALPHABET =
 // (0x24 ¤ vs $, 0x40 ¡ vs @, 0x5F § vs _) and which a Latin-1 confusion would swap silently.
 export const GSM_LATIN1 = "£¥èéùìòÇØøÅåÆæßÉ¤¡ÄÖÑÜ§¿äöñüà";
 
+// The three of those the inReach leg turns base-85 INTO. A reply written in ALPHABET arrives in the
+// Garmin Messenger app with every $ @ _ shown as ¤ ¡ § — the septets are carried intact and
+// displayed by the GSM-7 table rather than ASCII (field-confirmed 2026-08-22: the swapped-back
+// paste decoded in the shipped app, and nothing else in the reply was touched). So in a reply
+// that never spent the GSM-7 half, the three can only mean their ASCII twins, and the decoder
+// folds them back (see foldSeptetSwap). The SMS route is the one exception, because there they
+// are their own characters — base-124 spends all three.
+export const SEPTET_SWAP: Record<string, string> = { "¤": "$", "¡": "@", "§": "_" };
+
+// Undoes the inReach display swap above on a string known to be base-85/ASCII — a version tag,
+// a packed header, or the body of any route but SMS. Never call it on a base-124 body.
+export function foldSeptetSwap(s: string): string {
+  return s.replace(/[¤¡§]/g, (c) => SEPTET_SWAP[c]);
+}
+
 // Greek: the ten GSM-7 basic characters with NO ISO-8859-1 equivalent, and so the ten with
 // somewhere to fall. Probe 13 found a hop on the inbound SMS leg that transcodes through Latin-1
 // and turns exactly these into C1 controls, deterministically — septet position q arriving as

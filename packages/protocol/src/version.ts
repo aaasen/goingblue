@@ -1,4 +1,4 @@
-import { ALPHABET } from "./constants.js";
+import { ALPHABET, foldSeptetSwap } from "./constants.js";
 
 // Every message begins with a self-describing version tag: a single base-85 character
 // whose alphabet index is the protocol version (0–84). It is fixed-width and identical
@@ -21,11 +21,13 @@ export function encodeVersion(version: number): string {
   return ALPHABET[version];
 }
 
-// Reads the version tag without decoding the rest of the message.
+// Reads the version tag without decoding the rest of the message. The tag is folded through the
+// inReach display swap first (v3's tag is `$`, which that route shows as `¤` — see SEPTET_SWAP),
+// so a pasted inReach reply identifies its version before anything else has a chance to fold it.
 export function peekVersion(s: string): number {
   if (s.length < VERSION_PREFIX_CHARS)
     throw new Error(`Malformed message: too short to contain a version tag`);
-  const version = CHAR_TO_VALUE[s[0]];
+  const version = CHAR_TO_VALUE[foldSeptetSwap(s[0])];
   if (version === undefined)
     throw new Error(`Malformed message: invalid version tag ${JSON.stringify(s[0])}`);
   return version;
