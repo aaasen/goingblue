@@ -16,7 +16,7 @@ interface Props {
 }
 
 const UNITS_OPTIONS: { value: Units; label: string }[] = [
-  { value: 'imperial', label: 'Imperial' },
+  { value: 'imperial', label: 'US' },
   { value: 'metric', label: 'Metric' },
 ];
 
