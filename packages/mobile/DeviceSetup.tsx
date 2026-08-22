@@ -29,20 +29,20 @@ export default function DeviceSetup() {
 
   return (
     <>
-      <Device name="Garmin Earthmate" open={open === 'Garmin Earthmate'} onToggle={toggle}>
-        <EarthmateSteps />
+      <Device name="SMS/Text Message" open={open === 'SMS/Text Message'} onToggle={toggle}>
+        <SmsSteps />
       </Device>
       <Device name="Garmin Messenger" open={open === 'Garmin Messenger'} onToggle={toggle}>
         <MessengerSteps />
       </Device>
-      <Device name="SMS/Text Message" open={open === 'SMS/Text Message'} onToggle={toggle}>
-        <SmsSteps />
-      </Device>
-      <Device name="ZOLEO" open={open === 'ZOLEO'} onToggle={toggle}>
-        <ZoleoSteps />
+      <Device name="Garmin Earthmate" open={open === 'Garmin Earthmate'} onToggle={toggle}>
+        <EarthmateSteps />
       </Device>
       <Device name="iPhone satellite messaging" open={open === 'iPhone satellite messaging'} onToggle={toggle}>
         <IPhoneSteps />
+      </Device>
+      <Device name="ZOLEO" open={open === 'ZOLEO'} onToggle={toggle}>
+        <ZoleoSteps />
       </Device>
     </>
   );
@@ -104,11 +104,7 @@ function EarthmateSteps() {
         </Text>
       </Step>
 
-      <Step n={4} title="Read the forecast">
-        <Text style={styles.para}>
-          Paste the reply into the <Bold>Decoder</Bold> tab to visualize the forecast.
-        </Text>
-      </Step>
+      <ViewForecastStep n={4} />
     </>
   );
 }
@@ -149,11 +145,7 @@ function MessengerSteps() {
         </Text>
       </Step>
 
-      <Step n={5} title="Read the forecast">
-        <Text style={styles.para}>
-          Paste the reply into the <Bold>Decoder</Bold> tab to visualize the forecast.
-        </Text>
-      </Step>
+      <ViewForecastStep n={5} />
     </>
   );
 }
@@ -176,11 +168,7 @@ function SmsSteps() {
         </Text>
       </Step>
 
-      <Step n={3} title="Read the forecast">
-        <Text style={styles.para}>
-          Copy the reply and paste it into the <Bold>Decoder</Bold> tab to visualize the forecast.
-        </Text>
-      </Step>
+      <ViewForecastStep n={3} />
     </>
   );
 }
@@ -207,11 +195,7 @@ function ZoleoSteps() {
         </Text>
       </Step>
 
-      <Step n={3} title="Read the forecast">
-        <Text style={styles.para}>
-          Copy the reply and paste it into the <Bold>Decoder</Bold> tab to visualize the forecast.
-        </Text>
-      </Step>
+      <ViewForecastStep n={3} />
     </>
   );
 }
@@ -245,13 +229,21 @@ function IPhoneSteps() {
         </Text>
       </Step>
 
-      <Step n={4} title="Read the forecast">
-        <Text style={styles.para}>
-          Copy each message into the <Bold>Decoder</Bold> tab to view the forecast. There may be
-          multiple messages in a single forecast.
-        </Text>
-      </Step>
+      <ViewForecastStep n={4} />
     </>
+  );
+}
+
+// The last step of every route: whatever carried the reply, the Decoder is the only thing that
+// reads it. One component rather than five copies — the five had already drifted into three
+// different wordings.
+function ViewForecastStep({ n }: { n: number }) {
+  return (
+    <Step n={n} title="View the forecast">
+      <Text style={styles.para}>
+        Copy the reply into the <Bold>Decoder</Bold> tab to visualize the forecast.
+      </Text>
+    </Step>
   );
 }
 
