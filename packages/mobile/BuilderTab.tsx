@@ -12,7 +12,7 @@ import {
   VARS_BIT, V3_VERSION,
   ALWAYS_VARS_MASK, CONFIGURABLE_VAR_GROUPS, MODEL_BIT,
   WIND_LEVELS_HPA,
-  MODE_DETAIL, MODE_AUTO, MODE_RANGE, predictCenter, estimatedLastFullRunMs, FILL_SLOTS,
+  MODE_DETAIL, MODE_AUTO, MODE_RANGE, predictCenter, estimatedLastFullRunMs, FILL_SLOTS, multiMessageOffered,
   type RequestContext, type Center,
 } from '@weather/protocol';
 import { API_BASE } from './account';
@@ -23,7 +23,7 @@ import { allocCode } from './cache';
 import LocationMap from './LocationMap';
 import HelpScreen from './HelpScreen';
 import { MODELS } from './models';
-import { DEVICES, deviceCode, supportsMultiMessage, type Device } from './devices';
+import { DEVICES, deviceCode, type Device } from './devices';
 
 // The request time, in UTC hours since the epoch, aligned down to the hour. Sent in the request
 // (`t:`) so the forecast window is fixed against delivery delay, and stored in the request
@@ -473,10 +473,6 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
   // hence the explicit `=== false`, so the button doesn't flicker disabled on mount.
   const offline = Network.useNetworkState().isConnected === false;
 
-  // How many messages the reply may use, and what that buys. Only a route that splits its reply
-  // (see supportsMultiMessage) can spend more than one; everywhere else the choice isn't offered
-  // and this stays at the default.
-  const messages = supportsMultiMessage(device) && twoMessages ? 2 : DEFAULT_MESSAGES;
 
   // The forecast fetch currently on the wire, so something other than its own timeout can call it
   // off. Only the internet route has one — the other devices hand the request to another app and
@@ -517,6 +513,14 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
     ALWAYS_VARS_MASK,
   );
   const modeName = PRIORITIES.find((m) => m.value === mode)!.label;
+
+  // Whether the multi-message switch is on offer at all, and so how many messages the reply may
+  // use. The route decides whether a second message is possible, the selection whether it is
+  // worth asking about (multiMessageOffered states the rule per route); a switch left on from an
+  // earlier selection counts only while it is showing, so narrowing the variables back down
+  // returns to one message without the reader having to find and turn it off.
+  const multiMessageShown = multiMessageOffered(deviceCode(device), variableCodes, windLevels);
+  const messages = multiMessageShown && twoMessages ? 2 : DEFAULT_MESSAGES;
 
   const parsedCustomCoords = parseLatLon(customCoords);
   const customCoordsInvalid = customCoords.trim().length > 0 && parsedCustomCoords == null;
@@ -862,13 +866,17 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
         />
         {/* A switch rather than an On/Off segment: this is one setting being turned on, not a
             choice between two things, and it is read far more often than it is changed. */}
-        {supportsMultiMessage(device) && (
+        {multiMessageShown && (
           <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>Multi-message forecast</Text>
+            <View style={styles.switchText}>
+              <Text style={styles.switchLabel}>Multi-message forecast</Text>
+              <Text style={styles.switchHint}>Use multiple messages for more range and detail</Text>
+            </View>
             <Switch
               value={twoMessages}
               onValueChange={onTwoMessagesChange}
               accessibilityLabel="Multi-message forecast"
+              accessibilityHint="Use multiple messages for more range and detail"
             />
           </View>
         )}
@@ -1133,9 +1141,11 @@ const styles = StyleSheet.create({
   // A settings row: label left, switch right, the switch's own height setting the row's.
   switchRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    gap: 12, marginTop: 10,
+    gap: 12, marginTop: 16,
   },
-  switchLabel: { flexShrink: 1, fontSize: 15, color: '#1c1c1e' },
+  switchText: { flexShrink: 1 },
+  switchLabel: { fontSize: 15, color: '#1c1c1e' },
+  switchHint: { fontSize: 12, color: '#8e8e93', lineHeight: 17, marginTop: 2 },
 
   helpLink: { alignSelf: 'center', marginTop: 18, paddingVertical: 6, paddingHorizontal: 12 },
   helpLinkText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },

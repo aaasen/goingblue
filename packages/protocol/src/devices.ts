@@ -150,3 +150,32 @@ export function maxCharsFor(code: DeviceCode, messages: number, headerChars: num
   if (partBody === null) return n * transport.maxChars;
   return headerChars + n * partBody;
 }
+
+// Whether the builder OFFERS the multi-message switch for a request. A route that can spend more
+// than one message (supportsMessages) should not always be asked to: a second message is a second
+// paste for the reader and a second delivery paid for, and one message is usually enough. The
+// rule is deliberately plain enough to state in a sentence per route rather than predicted from
+// the encoder, because a reader has to be able to guess why the switch comes and goes:
+//
+//   iPhone   always — a satellite bubble carries about half of what ZOLEO does, so even the base
+//            forecast is short there.
+//   inReach, SMS   when any extra variable is on. Base fills a 160-character message to about
+//            ten days on its own; the first extra column is what starts cutting coverage.
+//   ZOLEO    when clouds are on, or two or more other extras. 240 bytes covers the base forecast
+//            with room to spare; clouds is three columns and the one single toggle that spends
+//            that room by itself.
+//
+// `variableCodes` are the request's `v:` group codes (see CONFIGURABLE_VAR_GROUPS — "c" is the
+// cloud toggle, every other code is one column) and `windLevels` the `w:` ladder indices, one
+// column each. The selections count, not the model: a group the model can't supply is already
+// dropped by the builder before it gets here.
+export function multiMessageOffered(code: DeviceCode, variableCodes: readonly string[], windLevels: readonly number[]): boolean {
+  if (!supportsMessages(code)) return false;
+  const clouds = variableCodes.includes("c");
+  const others = variableCodes.filter((c) => c !== "c").length + windLevels.length;
+  switch (code) {
+    case "i": return true;
+    case "z": return clouds || others >= 2;
+    default: return clouds || others >= 1;
+  }
+}
