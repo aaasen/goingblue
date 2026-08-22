@@ -88,7 +88,7 @@ export async function saveDevice(device: Device): Promise<void> {
   try { await AsyncStorage.setItem(DEVICE_KEY, device); } catch { /* ignore */ }
 }
 
-// Whether an iPhone satellite reply may span two messages instead of one. Persisted for the same
+// Whether a messaging reply may span two messages instead of one. Persisted for the same
 // reason as the device: it's a standing choice about how you use the thing you carry, not a
 // per-request one. Defaults ON — one message is a thin forecast, and the reader who turned this
 // off did so knowing that, where a reader who never saw it did not.

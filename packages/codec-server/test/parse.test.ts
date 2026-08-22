@@ -314,7 +314,8 @@ describe("parseRequest", () => {
 
   it("n: is independent of the device, so token order never matters", () => {
     expect(parseRequest("n:2 d:i").maxChars).toBe(parseRequest("d:i n:2").maxChars);
-    expect(parseRequest("n:2 d:g").maxChars).toBe(2 * SMS_MAX_CHARS);
+    expect(parseRequest("n:2 d:g").maxChars).toBe(maxCharsFor("g", 2, V3_HEADER_CHARS));
+    expect(parseRequest("n:2 d:s").maxChars).toBe(2 * SMS_MAX_CHARS);
   });
 });
 

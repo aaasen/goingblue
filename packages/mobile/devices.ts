@@ -1,6 +1,6 @@
 import type { ComponentProps } from 'react';
 import type MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { DEVICE_TRANSPORT, type DeviceCode } from '@weather/protocol';
+import { supportsMessages, type DeviceCode } from '@weather/protocol';
 
 // How the request leaves the phone, and how the reply comes back. The builder's single action
 // button is whatever the selected device's `action` says, but the device is more than a button
@@ -47,8 +47,9 @@ export function deviceCode(device: Device): DeviceCode {
   return DEVICES.find((d) => d.value === device)!.code;
 }
 
-// Only the iPhone route splits a reply across messages; for everything else the reply is one
-// message and the choice would be meaningless, so the builder offers it nowhere else.
+// Every messaging route can spend more than one message — as labelled parts (iPhone, inReach,
+// ZOLEO) or one longer concatenated reply (SMS). Internet has no budget to divide, so the
+// builder offers the choice nowhere else.
 export function supportsMultiMessage(device: Device): boolean {
-  return DEVICE_TRANSPORT[deviceCode(device)].alphabet === 'base32768';
+  return supportsMessages(deviceCode(device));
 }

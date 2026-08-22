@@ -3,7 +3,7 @@ import {
   CODECS, V3_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, MODEL_BIT, IPHONE_MAX_CHARS,
-  V3_HEADER_CHARS, maxCharsFor, reassembleReply,
+  V3_HEADER_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, maxCharsFor, reassembleReply,
   type RequestContext,
 } from "@weather/protocol";
 import {
@@ -128,7 +128,7 @@ describe("encodeFillSeq", () => {
   // bubble is min(70 UTF-16 code units, ~140 bytes of compressed UTF-8) — see PROBES.md — so
   // this measures the encoded reply against BOTH, in the units each cap is actually expressed in.
   describe("an iPhone reply fits one satellite bubble", () => {
-    const iphone = params({ alphabet: "base32768", maxChars: IPHONE_MAX_CHARS });
+    const iphone = params({ alphabet: "base32768", device: "i", maxChars: IPHONE_MAX_CHARS });
     const reply = fitFillToBudget(
       encodeSeq(iphone), (e) => e.length, maxFillSeq(MODE_AUTO), iphone.maxChars)!;
 
@@ -168,6 +168,7 @@ describe("encodeFillSeq", () => {
       it("collapses a two-message request whose content ran short to one plain bubble", () => {
         const p = params({
           alphabet: "base32768",
+          device: "i",
           messages: 2,
           maxChars: maxCharsFor("i", 2, V3_HEADER_CHARS),
         });
@@ -187,6 +188,7 @@ describe("encodeFillSeq", () => {
     describe("spread over two messages", () => {
       const p = params({
         alphabet: "base32768",
+        device: "i",
         messages: 2,
         maxChars: maxCharsFor("i", 2, V3_HEADER_CHARS),
       });
@@ -227,6 +229,87 @@ describe("encodeFillSeq", () => {
         encodeSeq(params({ maxChars: 70 })), (e) => e.length, maxFillSeq(MODE_AUTO), 70)!;
       const periods = (s: string) => decodeMessage(s, () => ctx).periodHours!.length;
       expect(periods(reply)).toBeGreaterThan(periods(narrow));
+    });
+  });
+
+  // inReach splits the same way, at SMS size: a single reply is one 160-character message, and a
+  // reader who asked for two gets two labelled parts, each a whole message with the header
+  // repeated, so nothing depends on the device reassembling concatenated segments.
+  describe("an inReach reply over several messages", () => {
+    const one = params({ alphabet: "base85", device: "g", maxChars: SMS_MAX_CHARS });
+    const single = fitFillToBudget(
+      encodeSeq(one), (e) => e.length, maxFillSeq(MODE_AUTO), one.maxChars)!;
+
+    it("keeps a single message unlabelled, right up to the full 160", () => {
+      expect(single.length).toBeLessThanOrEqual(SMS_MAX_CHARS);
+      expect(splitReplyFor(one, single, V3_HEADER_CHARS)).toEqual([single]);
+      const full = single.slice(0, V3_HEADER_CHARS) + "A".repeat(SMS_MAX_CHARS - V3_HEADER_CHARS);
+      expect(splitReplyFor(one, full, V3_HEADER_CHARS)).toEqual([full]);
+    });
+
+    it("never splits an SMS reply, whatever the count asked for", () => {
+      const sms = params({ alphabet: "base124", device: "s", messages: 2, maxChars: maxCharsFor("s", 2, V3_HEADER_CHARS) });
+      const long = single.slice(0, V3_HEADER_CHARS) + "A".repeat(300);
+      expect(splitReplyFor(sms, long, V3_HEADER_CHARS)).toEqual([long]);
+    });
+
+    describe("spread over two messages", () => {
+      const p = params({
+        alphabet: "base85",
+        device: "g",
+        messages: 2,
+        maxChars: maxCharsFor("g", 2, V3_HEADER_CHARS),
+      });
+      const encoded = fitFillToBudget(
+        encodeSeq(p), (e) => e.length, maxFillSeq(MODE_AUTO), p.maxChars)!;
+      const parts = splitReplyFor(p, encoded, V3_HEADER_CHARS);
+
+      it("sends exactly two, each one whole SMS at most, labelled and sharing the header", () => {
+        expect(encoded.length).toBeGreaterThan(SMS_MAX_CHARS);
+        expect(parts).toHaveLength(2);
+        for (const part of parts) expect(part.length).toBeLessThanOrEqual(SMS_MAX_CHARS);
+        expect(parts[0].startsWith("1/2 ")).toBe(true);
+        expect(parts[1].startsWith("2/2 ")).toBe(true);
+        const header = (s: string) => s.slice(4, 4 + V3_HEADER_CHARS);
+        expect(header(parts[0])).toBe(header(parts[1]));
+      });
+
+      it("decodes to a fuller forecast than one message, in any paste order", () => {
+        const whole = reassembleReply(parts.join("\n"), () => V3_HEADER_CHARS);
+        expect(whole).toBe(encoded);
+        const decoded = decodeMessage(whole, () => ctx);
+        const reversed = reassembleReply([...parts].reverse().join(" "), () => V3_HEADER_CHARS);
+        expect(decodeMessage(reversed, () => ctx)).toEqual(decoded);
+        expect(decoded.periodHours!.length)
+          .toBeGreaterThan(decodeMessage(single, () => ctx).periodHours!.length);
+      });
+    });
+  });
+
+  // ZOLEO splits the same way at its own size. Its gateway reassembles concatenated segments
+  // and then truncates at 240 bytes, so only separate messages can carry more than one.
+  describe("a ZOLEO reply over several messages", () => {
+    const p = params({
+      alphabet: "base85",
+      device: "z",
+      messages: 2,
+      maxChars: maxCharsFor("z", 2, V3_HEADER_CHARS),
+    });
+    const encoded = fitFillToBudget(
+      encodeSeq(p), (e) => e.length, maxFillSeq(MODE_AUTO), p.maxChars)!;
+    const parts = splitReplyFor(p, encoded, V3_HEADER_CHARS);
+
+    it("sends exactly two, each inside the 240-byte cap on its own", () => {
+      expect(encoded.length).toBeGreaterThan(ZOLEO_MAX_CHARS);
+      expect(parts).toHaveLength(2);
+      for (const part of parts) expect(Buffer.byteLength(part, "utf8")).toBeLessThanOrEqual(ZOLEO_MAX_CHARS);
+      expect(parts[0].startsWith("1/2 ")).toBe(true);
+    });
+
+    it("reassembles and decodes", () => {
+      const whole = reassembleReply(parts.join("\n"), () => V3_HEADER_CHARS);
+      expect(whole).toBe(encoded);
+      expect(decodeMessage(whole, () => ctx).seq).toBe(decodeMessage(encoded, () => ctx).seq);
     });
   });
 

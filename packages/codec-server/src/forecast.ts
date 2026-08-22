@@ -22,13 +22,12 @@ import {
   type DeviceCode,
   CODECS,
   DEVICE_TRANSPORT,
-  IPHONE_MAX_CHARS,
   MAX_MESSAGES,
   isDeviceCode,
   maxCharsFor,
+  partBodyChars,
   splitReply,
   supportedVersions,
-  widePartBodyChars,
   CLOUD_BAND_LEVELS_HPA,
   WIND_LEVELS_HPA, WIND_LEVEL_BITS, WIND_LEVELS_MASK, windLevelsMaskFromToken,
   CLOUD_COVER_MIN_PCT,
@@ -1024,8 +1023,12 @@ export interface ForecastParams {
   // Character set for the response body, from the request's `d:` device token. Absent means
   // base-85, which is what every device but iPhone uses (see DEVICE_TRANSPORT).
   alphabet?: Alphabet;
-  // How many messages the reply may be spread over (`n:`, default 1). Only a wide reply is
-  // actually split; see splitReplyFor.
+  // The route itself (`d:`), for the routes whose reply is split into labelled messages —
+  // see splitReplyFor. Absent when the request named none.
+  device?: DeviceCode;
+  // How many messages the reply may be spread over (`n:`, default 1). Only a route that splits
+  // (iPhone, inReach, ZOLEO) sends more than one; SMS spends it as one longer concatenated
+  // reply. See splitReplyFor.
   messages: number;
   // Protocol version from the request's `vN` token, or null when the token is absent. A version
   // is required — there is no default: each deployed codec server serves the version(s) baked
@@ -1168,7 +1171,7 @@ export function parseRequest(body: string): ForecastParams {
   // route's limit and so the safe reading of an unidentified sender.
   const maxChars = maxCharsFor(device ?? "s", messages, headerChars);
 
-  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, alphabet, messages, decoderVersion, userToken, code, startEpochHour };
+  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, alphabet, device: device ?? undefined, messages, decoderVersion, userToken, code, startEpochHour };
 }
 
 // What a request asked for, in names rather than bits, for the gateway to record (see
@@ -1326,19 +1329,21 @@ export function buildLayoutMessage(
   };
 }
 
-// The reply as the messages it will be sent in. Only a wide reply is ever split: it is the one
-// route where the transport won't reassemble what it breaks, so the parts have to be labelled and
-// self-identifying (see parts.ts). Everything else stays a single string, and its transport
-// concatenates its own segments as it always has.
+// The reply as the messages it will be sent in. Only the routes that split (partBodyChars: iPhone,
+// whose relay won't reassemble what it breaks, and inReach, whose device isn't trusted to) send
+// labelled, self-identifying parts (see parts.ts). Everything else stays a single string, and its
+// transport concatenates its own segments as it always has.
 export function splitReplyFor(params: ForecastParams, encoded: string, headerChars: number): string[] {
-  if (params.alphabet !== "base32768") return [encoded];
-  // Whole-reply test first, against the BUBBLE's cap rather than a part's: an unlabelled single
-  // message fits 45 body characters where a labelled part fits 43, and the single-message fill
-  // targets exactly that 45 — split at the part size alone and every such reply goes out as a
-  // full part plus a one-or-two-character tail (seen in the field 2026-08-17). This is also what
-  // lets a multi-message request whose content ran short collapse back to one plain bubble.
-  if (encoded.length <= IPHONE_MAX_CHARS) return [encoded];
-  return splitReply(encoded, headerChars, widePartBodyChars(headerChars));
+  const partBody = params.device && partBodyChars(params.device, headerChars);
+  if (!partBody) return [encoded];
+  // Whole-reply test first, against the MESSAGE's cap rather than a part's: an unlabelled single
+  // message fits more body than a labelled part (45 vs 43 on iPhone, 155 vs 151 on inReach), and
+  // the single-message fill targets exactly that — split at the part size alone and every such
+  // reply goes out as a full part plus a one-or-two-character tail (seen in the field
+  // 2026-08-17). This is also what lets a multi-message request whose content ran short collapse
+  // back to one plain message.
+  if (encoded.length <= DEVICE_TRANSPORT[params.device!].maxChars) return [encoded];
+  return splitReply(encoded, headerChars, partBody);
 }
 
 // buildFillMessage + encode, for the request path (see fetchForecast).

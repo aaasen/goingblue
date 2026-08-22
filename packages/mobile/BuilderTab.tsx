@@ -123,13 +123,6 @@ const DEVICE_INFO = [
   { name: 'iPhone', desc: 'Sends the forecast over a text message, and asks for the reply in a form that fits a single message over satellite. Choose this on an iPhone that can text without cell service.' },
 ];
 
-// Why the iPhone route offers a message-count choice at all: one satellite bubble is a real
-// forecast but a thin one, and the reader deciding between one message and two needs to know
-// that before they are out of range and stuck with the answer.
-const IPHONE_MESSAGE_NOTE =
-  'iPhone satellite messages hold fewer characters than text messages. Use multiple messages '
-  + 'for more detail.';
-
 // Id of the subgroup the air-quality toggles fold under — stable across a change of scale, which
 // its heading is not, so folding it open survives switching from one index to the other.
 const AIR_SUBGROUP = 'air';
@@ -475,8 +468,9 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
   // hence the explicit `=== false`, so the button doesn't flicker disabled on mount.
   const offline = Network.useNetworkState().isConnected === false;
 
-  // How many messages the reply may use, and what that buys. Only the iPhone route can spend
-  // more than one; everywhere else the choice isn't offered and this stays at the default.
+  // How many messages the reply may use, and what that buys. Only a route that splits its reply
+  // (see supportsMultiMessage) can spend more than one; everywhere else the choice isn't offered
+  // and this stays at the default.
   const messages = supportsMultiMessage(device) && twoMessages ? 2 : DEFAULT_MESSAGES;
 
   // The forecast fetch currently on the wire, so something other than its own timeout can call it
@@ -861,20 +855,17 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
             onDeviceChange(DEVICES[e.nativeEvent.selectedSegmentIndex].value);
           }}
         />
+        {/* A switch rather than an On/Off segment: this is one setting being turned on, not a
+            choice between two things, and it is read far more often than it is changed. */}
         {supportsMultiMessage(device) && (
-          <>
-            <Text style={styles.deviceNote}>{IPHONE_MESSAGE_NOTE}</Text>
-            {/* A switch rather than an On/Off segment: this is one setting being turned on, not a
-                choice between two things, and it is read far more often than it is changed. */}
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Multi-message forecast</Text>
-              <Switch
-                value={twoMessages}
-                onValueChange={onTwoMessagesChange}
-                accessibilityLabel="Multi-message forecast"
-              />
-            </View>
-          </>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>Multi-message forecast</Text>
+            <Switch
+              value={twoMessages}
+              onValueChange={onTwoMessagesChange}
+              accessibilityLabel="Multi-message forecast"
+            />
+          </View>
         )}
       </Section>
 
@@ -1124,7 +1115,6 @@ const styles = StyleSheet.create({
   btnText: { fontSize: 16, fontWeight: '600' },
 
   offlineNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, textAlign: 'center', marginTop: 10 },
-  deviceNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: 12 },
   // A settings row: label left, switch right, the switch's own height setting the row's.
   switchRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

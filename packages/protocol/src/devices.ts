@@ -99,13 +99,44 @@ export function widePartBodyChars(headerChars: number): number {
   return Math.floor((BUBBLE_BYTES - PART_LABEL_CHARS - headerChars) / WIDE_CHAR_BYTES);
 }
 
+// Body characters that fit in ONE labelled part on a route that splits a long reply into separate
+// messages (see parts.ts), or null on a route that never does. Three routes split:
+//
+// iPhone, because Apple's relay won't reassemble what it breaks — the bubble math above.
+//
+// inReach, because a Garmin message is one 160-character SMS and nothing has shown the device
+// reassembling a concatenated pair; labelled parts assume nothing about that. Each part spends
+// its label and a repeated header out of the same 160 — 151 body characters with v3's header,
+// against 155 in a single unlabelled message — so one message is still the plain reply and the
+// split only starts when a reader asked for more than one.
+//
+// ZOLEO, because its gateway reassembles concatenated segments and then TRUNCATES at 240 bytes
+// (probe 15) — so a longer reply can only reach the device as separate messages, each inside
+// the cap on its own: 231 body characters a part.
+//
+// SMS is deliberately NOT here: its reply leaves as one string and its transport concatenates
+// the segments (measured — Messages reassembles), which costs no label and no repeated header.
+export function partBodyChars(code: DeviceCode, headerChars: number): number | null {
+  const transport = DEVICE_TRANSPORT[code];
+  if (transport.alphabet === "base32768") return widePartBodyChars(headerChars);
+  if (code === "g" || code === "z") return transport.maxChars - PART_LABEL_CHARS - headerChars;
+  return null;
+}
+
+// Whether a route's reply may be asked for over several messages (`n:`) — as labelled parts
+// where the route splits (partBodyChars), or as one longer string where its transport
+// concatenates (SMS). Only the internet route has nothing to ask for.
+export function supportsMessages(code: DeviceCode): boolean {
+  return DEVICE_TRANSPORT[code].maxChars !== UNCAPPED_MAX_CHARS;
+}
+
 // The encoded length to aim for when a reply may span `messages` messages.
 //
 // The single-message case is deliberately NOT `messages × per-part`: one message carries no label
-// and repeats no header, so it fits 45 body characters where each part of a split reply fits 43.
-// Splitting therefore costs a little per part and wins overall — two messages carry 86 body
-// characters (1290 bits) against one message's 45 (675), and past 1025 bits, which is what a full
-// 160-character SMS holds.
+// and repeats no header, so on iPhone it fits 45 body characters where each part of a split reply
+// fits 43. Splitting therefore costs a little per part and wins overall — two messages carry 86
+// body characters (1290 bits) against one message's 45 (675), and past 1025 bits, which is what a
+// full 160-character SMS holds.
 export function maxCharsFor(code: DeviceCode, messages: number, headerChars: number): number {
   const transport = DEVICE_TRANSPORT[code];
   const n = Math.min(Math.max(Math.floor(messages) || 1, 1), MAX_MESSAGES);
@@ -113,13 +144,9 @@ export function maxCharsFor(code: DeviceCode, messages: number, headerChars: num
   // that never splits has no second message to ask for. Returned unmultiplied so the number stays
   // the one constant rather than an arbitrary multiple of it.
   if (transport.maxChars === UNCAPPED_MAX_CHARS) return UNCAPPED_MAX_CHARS;
-  // ZOLEO ignores `n:`. Its reply leaves as ONE string (see splitReplyFor) on the bet that the
-  // transport concatenates its own segments — but ZOLEO's gateway reassembles them and then
-  // TRUNCATES at its 240-byte cap (probe 15's 480-character ruler arrived as one message cut at
-  // 240). A multiplied budget here wouldn't be more messages, it would be a reply the device can
-  // never decode: no prefix of an encoded forecast decodes.
-  if (code === "z") return transport.maxChars;
-  if (transport.alphabet !== "base32768") return n * transport.maxChars;
   if (n === 1) return transport.maxChars;
-  return headerChars + n * widePartBodyChars(headerChars);
+  const partBody = partBodyChars(code, headerChars);
+  // A route whose transport concatenates (SMS): one string, n segments long.
+  if (partBody === null) return n * transport.maxChars;
+  return headerChars + n * partBody;
 }

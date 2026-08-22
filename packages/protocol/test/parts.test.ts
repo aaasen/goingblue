@@ -3,7 +3,7 @@ import {
   splitReply, reassembleReply, mergeParts, partLabel, PART_LABEL_CHARS,
   chunkLines, collectingChunks, type ReplyOracles,
 } from "../src/parts.js";
-import { maxCharsFor, widePartBodyChars, MAX_MESSAGES, UNCAPPED_MAX_CHARS } from "../src/devices.js";
+import { maxCharsFor, partBodyChars, widePartBodyChars, MAX_MESSAGES, UNCAPPED_MAX_CHARS } from "../src/devices.js";
 import { V3_HEADER_CHARS, v3Codec } from "../src/versions/v3.js";
 import type { ForecastMessage } from "../src/model.js";
 import v3Fixture from "./fixtures/v3.fixture.json";
@@ -159,20 +159,28 @@ describe("the multi-message budget", () => {
     expect(two * 15).toBeGreaterThan(160 * Math.log2(85)); // 1290 bits vs a 160-char SMS's 1025
   });
 
-  it("leaves the SMS-segment devices at whole SMS segments", () => {
-    for (const code of ["s", "g"] as const) {
-      expect(maxCharsFor(code, 1, H)).toBe(160);
-      expect(maxCharsFor(code, 2, H)).toBe(320);
-    }
+  it("leaves SMS at whole concatenated segments", () => {
+    expect(maxCharsFor("s", 1, H)).toBe(160);
+    expect(maxCharsFor("s", 2, H)).toBe(320);
+    expect(partBodyChars("s", H)).toBeNull();
   });
 
-  it("gives ZOLEO its 240-byte message and ignores the message count", () => {
-    // The reply leaves as one string, and ZOLEO's gateway reassembles concatenated segments and
-    // then truncates at 240 bytes (probe 15) — a multiplied budget would be an undecodable reply,
-    // not a second message.
+  it("gives inReach labelled parts, each one whole message", () => {
+    // A part spends its label and a repeated header out of the same 160, so one message stays
+    // the plain unlabelled reply and two carry 2 × 151 body characters against one's 155.
+    expect(partBodyChars("g", H)).toBe(160 - PART_LABEL_CHARS - H);
+    expect(maxCharsFor("g", 1, H)).toBe(160);
+    expect(maxCharsFor("g", 2, H)).toBe(H + 2 * 151);
+    expect(PART_LABEL_CHARS + H + partBodyChars("g", H)!).toBe(160);
+  });
+
+  it("gives ZOLEO labelled parts, each inside its 240-byte message", () => {
+    // A concatenated reply would be reassembled and then truncated at 240 bytes (probe 15), so
+    // more forecast can only reach a ZOLEO as separate messages, each one inside the cap alone.
+    expect(partBodyChars("z", H)).toBe(240 - PART_LABEL_CHARS - H);
     expect(maxCharsFor("z", 1, H)).toBe(240);
-    expect(maxCharsFor("z", 2, H)).toBe(240);
-    expect(maxCharsFor("z", MAX_MESSAGES, H)).toBe(240);
+    expect(maxCharsFor("z", 2, H)).toBe(H + 2 * 231);
+    expect(PART_LABEL_CHARS + H + partBodyChars("z", H)!).toBe(240);
   });
 
   it("ignores the message count on a route with no budget to divide", () => {
