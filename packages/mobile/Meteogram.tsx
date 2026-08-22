@@ -2660,7 +2660,10 @@ const RowLegend = memo(function RowLegend({ rows, units, bandLevels, paint }: {
         : row.kind === 'rain' || row.kind === 'precip-chance' ? 'rain'
           : undefined;
     const iconH = mark || icons ? LEGEND_ICON_H : 0;
-    const textH = row.legend ? LEGEND_LINE_H : 0;
+    // Wind-aloft rungs sit on the cloud band's altitude ladder and print the same tokens, so
+    // they wear the band's type (legendLevel) — one scale, one size.
+    const onLadder = row.kind === 'wind-aloft';
+    const textH = row.legend ? (onLadder ? LEGEND_LEVEL_H : LEGEND_LINE_H) : 0;
     if (!iconH && !textH) return;
     const stackTop = top + legendCy(row) - (iconH + textH) / 2;
 
@@ -2683,7 +2686,7 @@ const RowLegend = memo(function RowLegend({ rows, units, bandLevels, paint }: {
     if (row.legend) {
       els.push(
         <RNText key={`u${ri}`} numberOfLines={1}
-          style={[styles.legendUnit, { top: stackTop + iconH }]}>
+          style={[onLadder ? styles.legendLevel : styles.legendUnit, { top: stackTop + iconH }]}>
           {row.legend}
         </RNText>,
       );
