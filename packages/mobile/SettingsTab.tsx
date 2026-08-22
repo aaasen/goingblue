@@ -86,13 +86,6 @@ export default function SettingsTab({
         </Text>.
       </Text>
 
-      {/* Apple asks third parties who use their word marks to carry a credit line. iPhone is the
-          only one of theirs on the list we use; "Messages" names their app in the setup steps,
-          which is referential use and needs no credit. */}
-      <Text style={styles.trademarks}>
-        Apple and iPhone are trademarks of Apple Inc., registered in the U.S. and other countries.
-      </Text>
-
       <Text style={styles.legalLinks}>
         <Text style={styles.link} onPress={() => Linking.openURL(TERMS_URL)}>Terms &amp; Conditions</Text>
         {'   ·   '}
@@ -119,7 +112,4 @@ const styles = StyleSheet.create({
   sectionNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: -4, marginBottom: 10 },
   footer: { fontSize: 13, color: '#8e8e93', marginTop: 20, lineHeight: 19 },
   legalLinks: { fontSize: 13, color: '#8e8e93', marginTop: 12, lineHeight: 19 },
-  // Smaller than the data credit above it: a legal notice to have on the record, not something a
-  // reader of this screen is looking for.
-  trademarks: { fontSize: 11, color: '#aeaeb2', marginTop: 16, lineHeight: 16 },
 });

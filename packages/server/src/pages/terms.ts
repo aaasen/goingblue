@@ -54,9 +54,10 @@ forecast information.</p>
 
 <h2>Trademarks</h2>
 <p>Apple and iPhone are trademarks of Apple Inc., registered in the U.S. and other countries.
-Garmin, inReach, Earthmate, and Messenger are trademarks of Garmin Ltd. or its subsidiaries. ${BRAND} is
-not affiliated with, endorsed by, or sponsored by either company; their names are used only to
-describe the devices and services the Service works with.</p>
+Garmin, inReach, Earthmate, and Messenger are trademarks of Garmin Ltd. or its subsidiaries.
+ZOLEO is a trademark of Zoleo Inc. ${BRAND} is not affiliated with, endorsed by, or sponsored by
+these companies; their names are used only to describe the devices and services the Service works
+with.</p>
 
 <h2>Changes to these terms</h2>
 <p>We may update these terms from time to time. The "Last updated" date above reflects the
