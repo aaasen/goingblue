@@ -150,7 +150,7 @@ interface VarGroup {
 }
 
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
-// protocol variables together (e.g. "Clouds" covers high/mid/low cloud cover, not total).
+// protocol variables together (e.g. "Clouds" covers the pressure-level band, not total cover).
 // Order is display order only — the server ORs the `v:` codes into a mask, so the emitted
 // order carries no meaning. Precip chance sits last of the weather groups: it costs the most for
 // the least detail.
@@ -162,7 +162,7 @@ interface VarGroup {
 const VAR_GROUPS: VarGroup[] = [
   {
     value: 'clouds', code: 'c', label: 'Detailed Clouds', vars: CONFIGURABLE_VAR_GROUPS.c,
-    desc: 'Low, medium, and high cloud cover.',
+    desc: 'Cloud cover at 8 different levels of the atmosphere.',
   },
   // One row per pressure level, highest first. The label is the level's rung on the cloud
   // band's altitude ladder (ladderLabel — the same rough band the meteogram's rail names), the
@@ -185,8 +185,7 @@ const VAR_GROUPS: VarGroup[] = [
   {
     value: 'aqi', code: 'a', label: 'AQI (Dominant pollutant)', vars: CONFIGURABLE_VAR_GROUPS.a,
     subgroup: AIR_SUBGROUP, scale: 'us',
-    desc: 'Index of the worst pollutant out of PM2.5, PM10, ozone, nitrogen dioxide, sulphur '
-      + 'dioxide, and carbon monoxide.',
+    desc: 'Index of the worst pollutant out of PM2.5, PM10, ozone, NO₂, and SO₂.',
   },
   {
     value: 'smoke', code: 's', label: 'PM2.5 (Smoke)', vars: CONFIGURABLE_VAR_GROUPS.s,
@@ -216,8 +215,7 @@ const VAR_GROUPS: VarGroup[] = [
   {
     value: 'aqi-eu', code: 'e', label: 'AQI (Dominant pollutant)', vars: CONFIGURABLE_VAR_GROUPS.e,
     subgroup: AIR_SUBGROUP, scale: 'eu',
-    desc: 'Index of the worst pollutant out of PM2.5, PM10, ozone, nitrogen dioxide, and sulphur '
-      + 'dioxide.',
+    desc: 'Index of the worst pollutant out of PM2.5, PM10, ozone, NO₂, and SO₂.',
   },
   {
     value: 'smoke-eu', code: '2', label: 'PM2.5 (Smoke)', vars: CONFIGURABLE_VAR_GROUPS['2'],
@@ -267,7 +265,13 @@ function visibleVarGroups(scale: AqiScale): VarGroup[] {
 // so a new group can only ever be added in one place.
 type VarNode =
   | { kind: 'group'; group: VarGroup }
-  | { kind: 'subgroup'; id: string; label: string; desc: string; members: VarGroup[] };
+  | {
+      kind: 'subgroup'; id: string; label: string; desc: string; members: VarGroup[];
+      // Set where the heading's own paragraph says everything its rows would: the info card then
+      // prints the paragraph alone. The rows still draw in the list — that is where they are
+      // picked — but in the card they would only restate their own labels.
+      descCoversMembers?: boolean;
+    };
 
 // One drawn row of the open list, flattened out of the tree so the hairline separator can be
 // dropped from the last row whichever kind it turns out to be.
@@ -280,14 +284,15 @@ type VarRow =
 const AIR_DESC =
   'There are two different scales for air quality: US (0-500), and European (0-100). The scale '
   + 'can be changed in Settings. Sourced from the CAMS model, which has a time horizon of 4 days.';
-const WIND_DESC =
-  'Wind at standard pressure levels, on the same altitude bands as Detailed Clouds, from 300 hPa '
-  + 'down to 925 hPa. Pick only the levels you need: each one costs a share of the message.';
+const WIND_DESC = 'Winds at up to 7 pressure levels in the atmosphere.';
 // The subgroup headings. The air-quality one names the hazard and nothing else: which index is
 // in force is a Settings preference, and repeating it on every visit to the builder would put a
 // choice in front of the reader that isn't theirs to make here.
-const SUBGROUPS: Record<string, { label: string; desc: string }> = {
-  [WIND_SUBGROUP]: { label: 'Pressure-Level Winds', desc: WIND_DESC },
+const SUBGROUPS: Record<string, {
+  label: string; desc: string; descCoversMembers?: boolean;
+}> = {
+  // One row per level, each described by its own label — the count in WIND_DESC is the whole story.
+  [WIND_SUBGROUP]: { label: 'Pressure-Level Winds', desc: WIND_DESC, descCoversMembers: true },
   [AIR_SUBGROUP]: { label: 'Air Quality', desc: AIR_DESC },
 };
 
@@ -945,13 +950,23 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
           </Text>
         ) : (
           <View key={node.id}>
-            <Text style={styles.modalSubhead}>{node.label}</Text>
-            <Text style={styles.modalSubdesc}>{node.desc}</Text>
-            {node.members.map((m) => (
-              <Text key={m.value} style={[styles.modalItemIndent, styles.modalItemNested]}>
-                <Text style={styles.modalBold}>{groupLabel(m, units)}</Text>: {m.desc}
+            {/* A subgroup whose paragraph covers its rows has nothing under it to head, so it
+                reads as one more entry — same label, colon and text as the top-level ones. */}
+            {node.descCoversMembers ? (
+              <Text style={styles.modalItemIndent}>
+                <Text style={styles.modalBold}>{node.label}</Text>: {node.desc}
               </Text>
-            ))}
+            ) : (
+              <>
+                <Text style={styles.modalSubhead}>{node.label}</Text>
+                <Text style={styles.modalSubdesc}>{node.desc}</Text>
+                {node.members.map((m) => (
+                  <Text key={m.value} style={[styles.modalItemIndent, styles.modalItemNested]}>
+                    <Text style={styles.modalBold}>{groupLabel(m, units)}</Text>: {m.desc}
+                  </Text>
+                ))}
+              </>
+            )}
           </View>
         )))}
         <Text style={[styles.modalBody, styles.modalNote]}>Each added variable takes away from the detail and range of the forecast.</Text>
