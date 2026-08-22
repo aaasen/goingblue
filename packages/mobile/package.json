@@ -5,6 +5,7 @@
   "main": "index.ts",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
+    "@maplibre/maplibre-react-native": "11.3.6",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-segmented-control/segmented-control": "2.5.7",
     "@shopify/react-native-skia": "2.6.2",
@@ -20,7 +21,6 @@
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-native": "0.86.2",
-    "react-native-maps": "1.27.2",
     "react-native-reanimated": "4.5.1",
     "react-native-worklets": "0.10.1",
     "tz-lookup": "^6.1.25"
@@ -33,7 +33,9 @@
   "expo": {
     "install": {
       "// typescript": "SDK 57 pins ~6.0.3, but the workspace is on 7 and these sources typecheck clean under it. TS only ever runs as a checker here (Metro/Babel do the transform), so the SDK pin is advisory.",
-      "exclude": ["typescript"]
+      "exclude": [
+        "typescript"
+      ]
     }
   },
   "scripts": {

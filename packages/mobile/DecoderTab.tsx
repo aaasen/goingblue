@@ -525,7 +525,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
           </View>
 
           {/* Forecast location. Keyed on the coordinate so loading a new forecast recenters the map.
-              Only mounted while this tab is visible: a react-native-maps surface left mounted under a
+              Only mounted while this tab is visible: a native map surface left mounted under a
               `display: none` tab makes the builder tab's map drop its marker, so we unmount it here. */}
           <View>
             {active && (
