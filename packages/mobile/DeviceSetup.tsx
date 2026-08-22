@@ -8,7 +8,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 const FORECAST_NUMBER = '(425) 434-5858';
 // Opening the hosted vCard hands the user off to the system's own "add contact" flow, so the app
 // needs no Contacts permission. Earthmate keeps its own contact list, so only its steps go
-// without — every other route (SMS, iPhone, the ZOLEO app) reads the phone's contacts.
+// without — every other route (SMS, iPhone, ZOLEO, Garmin Messenger) reads the phone's contacts.
 const CONTACT_VCF_URL = 'https://going.blue/contact.vcf';
 
 // Android needs this opted into before LayoutAnimation does anything; on iOS it's already on.
@@ -31,6 +31,9 @@ export default function DeviceSetup() {
     <>
       <Device name="Garmin Earthmate" open={open === 'Garmin Earthmate'} onToggle={toggle}>
         <EarthmateSteps />
+      </Device>
+      <Device name="Garmin Messenger" open={open === 'Garmin Messenger'} onToggle={toggle}>
+        <MessengerSteps />
       </Device>
       <Device name="SMS/Text Message" open={open === 'SMS/Text Message'} onToggle={toggle}>
         <SmsSteps />
@@ -102,6 +105,51 @@ function EarthmateSteps() {
       </Step>
 
       <Step n={4} title="Read the forecast">
+        <Text style={styles.para}>
+          Paste the reply into the <Bold>Decoder</Bold> tab to visualize the forecast.
+        </Text>
+      </Step>
+    </>
+  );
+}
+
+// The other Garmin app, for the devices Earthmate no longer supports. It sends over the same
+// inReach route — same builder button, same d: token — so only the app's own steps differ, and
+// unlike Earthmate it imports from the phone's contacts, which is what the vCard is for.
+function MessengerSteps() {
+  return (
+    <>
+      <Text style={styles.deviceDesc}>
+        Messenger is Garmin&apos;s companion app for newer inReach devices.
+      </Text>
+
+      <Step n={1} title="Add Going Blue as a contact">
+        <ContactCard />
+      </Step>
+
+      <Step n={2} title="Import the contact into Messenger">
+        <Text style={styles.para}>
+          Open Garmin Messenger and go to{' '}
+          <Bold>Device › Contacts › Add Contact › Import Contact</Bold>, then import the Going Blue
+          contact.
+        </Text>
+      </Step>
+
+      <Step n={3} title="Send the request">
+        <Text style={styles.para}>
+          On the Builder tab, choose <Bold>inReach</Bold> as your device and tap{' '}
+          <Bold>Copy inReach Message</Bold>, then send the message to Going Blue through the
+          Messenger app.
+        </Text>
+      </Step>
+
+      <Step n={4} title="Copy the reply">
+        <Text style={styles.para}>
+          When the response arrives, press and hold the message and choose <Bold>Copy</Bold>.
+        </Text>
+      </Step>
+
+      <Step n={5} title="Read the forecast">
         <Text style={styles.para}>
           Paste the reply into the <Bold>Decoder</Bold> tab to visualize the forecast.
         </Text>

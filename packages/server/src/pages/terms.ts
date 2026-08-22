@@ -54,7 +54,7 @@ forecast information.</p>
 
 <h2>Trademarks</h2>
 <p>Apple and iPhone are trademarks of Apple Inc., registered in the U.S. and other countries.
-Garmin, inReach, and Earthmate are trademarks of Garmin Ltd. or its subsidiaries. ${BRAND} is
+Garmin, inReach, Earthmate, and Messenger are trademarks of Garmin Ltd. or its subsidiaries. ${BRAND} is
 not affiliated with, endorsed by, or sponsored by either company; their names are used only to
 describe the devices and services the Service works with.</p>
 

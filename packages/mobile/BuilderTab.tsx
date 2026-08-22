@@ -118,7 +118,7 @@ const MODEL_HINT_NO_LOCATION = 'Set a location to see which models will be used.
 const DEVICE_INFO = [
   { name: 'Internet', desc: 'Fetches the forecast over a WiFi or cellular data connection.' },
   { name: 'SMS', desc: 'Sends the forecast over a text message for weak cell reception without data.' },
-  { name: 'inReach', desc: 'Copies the message so that it can be pasted into the Garmin Earthmate app and sent over inReach.' },
+  { name: 'inReach', desc: 'Copies the message so that it can be pasted into the Garmin Earthmate or Messenger app and sent over inReach.' },
   { name: 'ZOLEO', desc: 'Copies the message so that it can be pasted into the ZOLEO app and sent over satellite.' },
   { name: 'iPhone', desc: 'Sends the forecast over a text message, and asks for the reply in a form that fits a single message over satellite. Choose this on an iPhone that can text without cell service.' },
 ];
