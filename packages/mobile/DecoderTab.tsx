@@ -5,7 +5,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {
-  VARS_BIT, startDatetime, MODE_NAMES, DEFAULT_MODE, type ForecastMessage,
+  VARS_BIT, WIND_LEVELS_HPA, startDatetime, MODE_NAMES, DEFAULT_MODE, type ForecastMessage,
 } from '@weather/protocol';
 import {
   chunksCollected, decodeAny, loadStore, attachResponse, mergeReply, normalizeReply,
@@ -113,7 +113,7 @@ function cacheMetaLabel(slot: Slot, token: string, units: Units, detailed = fals
 
 const OPTIONAL_VARIABLE_ICONS = [
   { vars: ['cch', 'ccm', 'ccl'], symbol: '☁️', label: 'Detailed clouds' },
-  { vars: ['w500', 'w600', 'w700'], symbol: '💨', label: 'High altitude winds' },
+  { vars: WIND_LEVELS_HPA.map((l) => `w${l}`), symbol: '💨', label: 'Pressure-level winds' },
   { vars: ['freeze'], symbol: '🌡️', label: 'Freezing level' },
   // One icon for the whole air-quality block: which index a request picked is the meteogram's
   // business, and five near-identical chips on a cache row would say less than one.

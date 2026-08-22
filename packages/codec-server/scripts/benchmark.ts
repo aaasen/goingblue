@@ -43,7 +43,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adjustPrecipPhase, buildFillMessage, fillCloudBand, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import {
-  VARS_BIT, ALWAYS_VARS, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
+  VARS_BIT, ALWAYS_VARS, WIND_LEVELS_HPA, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
   fillProfile, maxFillSeq, v3EncodeBreakdown, V3_VERSION, type Alphabet,
   type ForecastMessage, type V3Breakdown,
 } from "@weather/protocol";
@@ -63,34 +63,31 @@ const BENCHMARKS_DIR = join(REPO_ROOT, "data", "benchmarks"); // timestamped HTM
 // ── Collection config ────────────────────────────────────────────────────────────
 
 // Protocol variable groups mirroring the app's selector (BuilderTab.tsx); the report's toggles.
+// The European-scale air-quality columns are on the wire but not in the report: each EU index
+// encodes at almost exactly the cost of its US counterpart, so their six rows doubled the
+// air-quality half of every table to say the same thing twice. The US scale stands in for both.
 type GroupId =
   | "clouds" | "highwind" | "freeze" | "precip"
-  | "aqi" | "smoke" | "ozone" | "pm10" | "no2" | "so2"
-  | "aqiEu" | "smokeEu" | "pm10Eu" | "ozoneEu" | "no2Eu" | "so2Eu";
+  | "aqi" | "pm25" | "ozone" | "pm10" | "no2" | "so2";
 const GROUP_IDS: GroupId[] = [
   "clouds", "highwind", "freeze", "precip",
-  "aqi", "smoke", "ozone", "pm10", "no2", "so2",
-  "aqiEu", "smokeEu", "pm10Eu", "ozoneEu", "no2Eu", "so2Eu",
+  "aqi", "pm25", "ozone", "pm10", "no2", "so2",
 ];
 const GROUP_LABEL: Record<GroupId, string> = {
-  clouds: "Clouds", highwind: "High Altitude Winds", freeze: "Freezing Level",
+  clouds: "Clouds", highwind: "Pressure-Level Winds (600/500/400 hPa)", freeze: "Freezing Level",
   precip: "Precip Chance",
-  aqi: "Air Quality (US)", smoke: "Smoke (US)", ozone: "Ozone (US)",
+  aqi: "Air Quality (US)", pm25: "PM2.5 (US)", ozone: "Ozone (US)",
   pm10: "PM10 (US)", no2: "NO2 (US)", so2: "SO2 (US)",
-  aqiEu: "Air Quality (EU)", smokeEu: "Smoke (EU)", pm10Eu: "PM10 (EU)",
-  ozoneEu: "Ozone (EU)", no2Eu: "NO2 (EU)", so2Eu: "SO2 (EU)",
 };
 // Short forms for the frontier chart, where each curve is labelled on the plot itself.
 const GROUP_SHORT: Record<GroupId, string> = {
   clouds: "Cloud", highwind: "Wind", freeze: "FL", precip: "Precip",
-  aqi: "AQI", smoke: "Smoke", ozone: "O3", pm10: "PM10", no2: "NO2", so2: "SO2",
-  aqiEu: "AQI-EU", smokeEu: "Smoke-EU", pm10Eu: "PM10-EU", ozoneEu: "O3-EU",
-  no2Eu: "NO2-EU", so2Eu: "SO2-EU",
+  aqi: "AQI", pm25: "PM2.5", ozone: "O3", pm10: "PM10", no2: "NO2", so2: "SO2",
 };
 // Which groups the frontier chart breaks out on hover. The air-quality variables all cost about
 // the same and all cost little (the 4-day clamp means they only pay for the front of the window),
 // so their curves landed on top of each other in the same corner of the plot with their labels
-// overlapping — now thirteen lines saying one thing, at the price of making the four curves that
+// overlapping — seven lines saying one thing, at the price of making the four curves that
 // differ hard to follow. US AQI stands in for the group; the rest keep their rows in the mode
 // comparison table, which is where their individual numbers are legible anyway.
 const FRONTIER_GROUPS = new Set<GroupId>(["clouds", "highwind", "freeze", "precip", "aqi"]);
@@ -102,8 +99,13 @@ const BASE_HOURLY = [
   "weather_code", "snowfall", "rain", "showers",
 ];
 const CLOUD_HOURLY = ["cloud_cover_high", "cloud_cover_mid", "cloud_cover_low"];
-const HIGHWIND_HOURLY = ["wind_speed_500hPa", "wind_direction_500hPa", "wind_speed_600hPa",
-  "wind_direction_600hPa", "wind_speed_700hPa", "wind_direction_700hPa"];
+// Every WIND_LEVELS_HPA level: the reader picks any subset, the benchmark carries them all.
+const HIGHWIND_HOURLY = WIND_LEVELS_HPA.flatMap((l) => [`wind_speed_${l}hPa`, `wind_direction_${l}hPa`]);
+// The levels the report's wind selection turns on — a plausible reader's subset (the flight-level
+// bracket, ~14k/18k/24k ft), not the whole ladder. All seven at once is a selection nobody makes
+// and it swamped the message; three shows what the column actually costs in use. The corpus still
+// carries all seven (HIGHWIND_HOURLY above), so widening this is a report-only change.
+const BENCH_WIND_LEVELS_HPA = [400, 500, 600];
 const FREEZE_HOURLY = ["freezing_level_height"];
 
 // Candidate-spec additions (see CorpusPlan.md): future-display surface variables, plus clouds and
@@ -326,21 +328,15 @@ function requestUtcHour(windowStartUtcHour: number, utcOffsetHours: number, hour
 const BASE_VARS: string[] = [...ALWAYS_VARS];
 const GROUP_VARS: Record<GroupId, string[]> = {
   clouds: ["cch", "ccm", "ccl"],
-  highwind: ["w500", "w600", "w700"],
+  highwind: BENCH_WIND_LEVELS_HPA.map((l) => `w${l}`),
   freeze: ["freeze"],
   precip: ["precip"],
   aqi: ["aqi"],
-  smoke: ["aq_pm25"],
+  pm25: ["aq_pm25"],
   ozone: ["aq_o3"],
   pm10: ["aq_pm10"],
   no2: ["aq_no2"],
   so2: ["aq_so2"],
-  aqiEu: ["aqi_eu"],
-  smokeEu: ["aqi_eu_pm25"],
-  pm10Eu: ["aqi_eu_pm10"],
-  ozoneEu: ["aqi_eu_o3"],
-  no2Eu: ["aqi_eu_no2"],
-  so2Eu: ["aqi_eu_so2"],
 };
 const maskOf = (vars: string[]) => vars.reduce((m, v) => m | (1 << VARS_BIT[v]), 0);
 const BASE_MASK = maskOf(BASE_VARS);

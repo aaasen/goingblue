@@ -11,11 +11,13 @@ import SegmentedControl from '@react-native-segmented-control/segmented-control'
 import {
   VARS_BIT, V3_VERSION,
   ALWAYS_VARS_MASK, CONFIGURABLE_VAR_GROUPS, MODEL_BIT,
+  WIND_LEVELS_HPA,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE, predictCenter, estimatedLastFullRunMs, FILL_SLOTS,
   type RequestContext, type Center,
 } from '@weather/protocol';
 import { API_BASE } from './account';
-import { type AqiScale } from './settings';
+import { type AqiScale, type Units } from './settings';
+import { ladderLabel } from './cloudBand';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import { allocCode } from './cache';
 import LocationMap from './LocationMap';
@@ -131,10 +133,15 @@ const IPHONE_MESSAGE_NOTE =
 // Id of the subgroup the air-quality toggles fold under — stable across a change of scale, which
 // its heading is not, so folding it open survives switching from one index to the other.
 const AIR_SUBGROUP = 'air';
+// Id of the subgroup the pressure-level wind toggles fold under, one row per level.
+const WIND_SUBGROUP = 'wind';
 
 interface VarGroup {
   value: string;
-  code: string;
+  // The group's `v:` request code — or, for a pressure-level wind row, absent: those travel in
+  // the `w:` token as ladder indices (`windLevel`).
+  code?: string;
+  windLevel?: number;
   label: string;
   // Help copy for this group, shown in the Extra Variables modal. Kept beside the label so the two
   // can't drift: a row and its explanation are written once, in one place.
@@ -164,10 +171,16 @@ const VAR_GROUPS: VarGroup[] = [
     value: 'clouds', code: 'c', label: 'Detailed Clouds', vars: CONFIGURABLE_VAR_GROUPS.c,
     desc: 'Low, medium, and high cloud cover.',
   },
-  {
-    value: 'highwind', code: 'w', label: 'High Altitude Winds', vars: CONFIGURABLE_VAR_GROUPS.w,
-    desc: 'Winds at 500, 600, and 700 hPa pressure levels.',
-  },
+  // One row per pressure level, highest first. The label is the level's rung on the cloud
+  // band's altitude ladder (ladderLabel — the same rough band the meteogram's rail names), the
+  // pressure after it for the reader who thinks in hectopascals; the rung is written in the
+  // reader's unit at render time (windLevelLabel). Every ticked level is carried — a reader on a
+  // summit who ticks 925 hPa gets model air under the terrain, which is theirs to leave out.
+  ...WIND_LEVELS_HPA.map((hpa, li): VarGroup => ({
+    value: `w${hpa}`, windLevel: li, label: `${hpa} hPa`, vars: [`w${hpa}`],
+    subgroup: WIND_SUBGROUP,
+    desc: `Wind speed and direction at the ${hpa} hPa pressure level.`,
+  })),
   {
     value: 'freeze', code: 'f', label: 'Freezing Level', vars: CONFIGURABLE_VAR_GROUPS.f,
     desc: 'Altitude at which atmospheric temperature drops to 0°C.',
@@ -240,6 +253,15 @@ const VAR_GROUPS: VarGroup[] = [
   },
 ];
 
+// "18k ft (500 hPa)": the level's rung on the altitude ladder, then the pressure the wire names.
+function windLevelLabel(hpa: number, units: Units): string {
+  return `${ladderLabel(hpa, units)} (${hpa} hPa)`;
+}
+// A group's label in the reader's units — only the wind levels carry a unit.
+function groupLabel(g: VarGroup, units: Units): string {
+  return g.windLevel != null ? windLevelLabel(WIND_LEVELS_HPA[g.windLevel], units) : g.label;
+}
+
 // The groups on offer under a given scale preference: everything that isn't tied to an index, plus
 // the chosen index's own. The single source for both what the list draws and what the request can
 // carry, so a hidden group can't reach the `v:` token.
@@ -265,18 +287,24 @@ type VarRow =
 const AIR_DESC =
   'There are two different scales for air quality: US (0-500), and European (0-100). The scale '
   + 'can be changed in Settings. Sourced from the CAMS model, which has a time horizon of 4 days.';
+const WIND_DESC =
+  'Wind at standard pressure levels, on the same altitude bands as Detailed Clouds, from 300 hPa '
+  + 'down to 925 hPa. Pick only the levels you need: each one costs a share of the message.';
+// The subgroup headings. The air-quality one names the hazard and nothing else: which index is
+// in force is a Settings preference, and repeating it on every visit to the builder would put a
+// choice in front of the reader that isn't theirs to make here.
+const SUBGROUPS: Record<string, { label: string; desc: string }> = {
+  [WIND_SUBGROUP]: { label: 'Pressure-Level Winds', desc: WIND_DESC },
+  [AIR_SUBGROUP]: { label: 'Air Quality', desc: AIR_DESC },
+};
 
 function buildVarTree(scale: AqiScale): VarNode[] {
-  // Air quality is the only subgroup. Its heading names the hazard and nothing else: which index
-  // is in force is a Settings preference, and repeating it on every visit to the builder would
-  // put a choice in front of the reader that isn't theirs to make here.
-  const label = 'Air Quality';
   const tree: VarNode[] = [];
   for (const group of visibleVarGroups(scale)) {
     const open = tree[tree.length - 1];
     if (group.subgroup == null) tree.push({ kind: 'group', group });
     else if (open?.kind === 'subgroup' && open.id === group.subgroup) open.members.push(group);
-    else tree.push({ kind: 'subgroup', id: group.subgroup, label, desc: AIR_DESC, members: [group] });
+    else tree.push({ kind: 'subgroup', id: group.subgroup, ...SUBGROUPS[group.subgroup], members: [group] });
   }
   return tree;
 }
@@ -291,13 +319,15 @@ const DEFAULT_GROUPS = new Set<string>();
 // `z:` is the local-midnight UTC offset the period grid aligns to. `u:` carries the account token
 // so the server can attribute the request to the user. `k:` is the message code the slim response
 // echoes so the client can recover the request context (see cache.ts).
-function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], device: Device, messages: number, code: number, startEpochHour: number): string {
+function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], windLevels: number[], device: Device, messages: number, code: number, startEpochHour: number): string {
   const parts: string[] = [`v${V3_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   parts.push(`p:${PRIORITIES.find((m) => m.value === mode)!.token}`);
   parts.push(`z:${requestOffsetHours(coords, startEpochHour)}`);
   parts.push(`m:${model}`);
   if (variableCodes.length) parts.push(`v:${variableCodes.join('')}`);
+  // Pressure-level wind: the ladder indices of the selected levels (`w:234` = 500/600/700 hPa).
+  if (windLevels.length) parts.push(`w:${windLevels.join('')}`);
   // `d:` is what tells the server which pipe the reply has to fit down — it picks the response
   // alphabet as well as its length. The length is derived from `d:` and `n:` at both ends, off
   // the one table in the protocol, so the request no longer spends characters restating it.
@@ -414,9 +444,11 @@ interface Props {
   onTwoMessagesChange: (on: boolean) => void;
   // Which air-quality index to offer. A Settings preference, changed there rather than here.
   aqiScale: AqiScale;
+  // The reader's units, for the wind levels' altitude rungs.
+  units: Units;
 }
 
-export default function BuilderTab({ token, onForecastReceived, active, device, onDeviceChange, twoMessages, onTwoMessagesChange, aqiScale }: Props) {
+export default function BuilderTab({ token, onForecastReceived, active, device, onDeviceChange, twoMessages, onTwoMessagesChange, aqiScale, units }: Props) {
   const [locationMode, setLocationMode] = useState<LocationMode>('current');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   // When the fix in gpsCoords was taken (ms epoch, 0 = never). The OS's own timestamp, not ours:
@@ -479,7 +511,8 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
   // it isn't reported as if it did — activeGroups has already dropped those.
   const activeValues = new Set(activeGroups.map((g) => g.value));
   const configurableVars = activeGroups.flatMap((g) => g.vars);
-  const variableCodes = activeGroups.map((g) => g.code);
+  const variableCodes = activeGroups.flatMap((g) => (g.code != null ? [g.code] : []));
+  const windLevels = activeGroups.flatMap((g) => (g.windLevel != null ? [g.windLevel] : []));
   const varsMask = configurableVars.reduce(
     (mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)),
     ALWAYS_VARS_MASK,
@@ -582,7 +615,7 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return null;
     const startHour = alignedStartEpochHour();
     const code = await allocCode(token, buildContext(coords, mode, model, varsMask, startHour, device), `${modeName} · ${model.toUpperCase()}`);
-    return buildMsg(token, coords, mode, model, variableCodes, device, messages, code, startHour);
+    return buildMsg(token, coords, mode, model, variableCodes, windLevels, device, messages, code, startHour);
   }
 
   async function handleCopy() {
@@ -804,7 +837,7 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked, disabled }}
               >
-                <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{row.group.label}</Text>
+                <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{groupLabel(row.group, units)}</Text>
                 <Text style={[styles.varCheck, !checked && styles.varCheckHidden]}>✓</Text>
               </TouchableOpacity>
             );
@@ -925,7 +958,7 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
             <Text style={styles.modalSubdesc}>{node.desc}</Text>
             {node.members.map((m) => (
               <Text key={m.value} style={[styles.modalItemIndent, styles.modalItemNested]}>
-                <Text style={styles.modalBold}>{m.label}</Text>: {m.desc}
+                <Text style={styles.modalBold}>{groupLabel(m, units)}</Text>: {m.desc}
               </Text>
             ))}
           </View>

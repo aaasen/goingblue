@@ -6,6 +6,11 @@ export const WMO2IDX: Record<number, number> = Object.fromEntries(
   WMO_CODES.map((c, i) => [c, i]),
 );
 
+export interface WindAloft {
+  kph: number;
+  dir: number;
+}
+
 export interface Period {
   // WMO Weather code.
   weathercode: number;
@@ -29,18 +34,16 @@ export interface Period {
   // Freezing altitude in meters.
   freeze_m?: number;
 
-  // Wind speeds in kilometers per hour and direction.
-  // Surface level as well as 500, 600, 700 hPa pressure levels.
+  // Surface (10m) wind speed in kilometers per hour and direction (octant index, see CARDINALS).
   wind_sfc_kph?: number;
   wind_sfc_dir?: number;
   // Peak surface (10m) wind gust in kilometers per hour. No direction.
   wind_gust_kph?: number;
-  wind_500_kph?: number;
-  wind_500_dir?: number;
-  wind_600_kph?: number;
-  wind_600_dir?: number;
-  wind_700_kph?: number;
-  wind_700_dir?: number;
+  // Pressure-level wind: one entry per WIND_LEVELS_HPA level (constants.ts), highest (300 hPa)
+  // first, null where the level was not requested. Every requested level is carried, even one
+  // under the terrain — the reader chose it (unlike the cloud band, which trims itself). Absent
+  // altogether when no level was requested.
+  wind_aloft?: (WindAloft | null)[];
 
   // Cloud cover percentages.
   cloud_high?: number;    // 8km+   (v2 and earlier; v3 carries the band below instead)

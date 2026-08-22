@@ -307,12 +307,13 @@ The Going Blue codec relies on the client and server having identical codebooks.
 
 #### In development: Codec v3 (App version 1.2.0)
 
- - Added ZOLEO support with 240 character messages.
- - Expanded detailed cloud cover with several more cloud levels and better cloud rendering.
- - Added a legend to the meteogram.
+ - Added ZOLEO support with 240 character messages (up from 160 on SMS/Garmin).
+ - Expanded detailed cloud cover from 3 to 8 levels and improved detailed cloud rendering in the meteogram.
+ - Expanded pressure-level winds from 3 to 7 levels.
+ - Added a floating legend to the meteogram.
  - Split out rain, snow, and precip chance in the meteogram to improve legibility.
- - Report mixed rain/snow weathercode when there is a substantial amount of each precip type.
- - Optimized meteogram rendering.
+ - Added support for mixed rain/snow weathercodes when there is a substantial amount of each precip type.
+ - Improved meteogram rendering speed.
 
 ## License
 

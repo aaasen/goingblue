@@ -8,6 +8,9 @@ import {
   decodeMessage,
   type ForecastMessage,
   type Period,
+  type WindAloft,
+  WIND_LEVELS_HPA,
+  WIND_LEVELS_MASK,
   type RequestContext,
   CARDINALS,
   DEFAULT_VARS_MASK,
@@ -41,6 +44,13 @@ const qRain = (mm: number) => expandSqrt(compandSqrt(mm, RAIN_K, ACCUM_BITS), RA
 
 // Every v3 variable: bits 0..12 weather, 13..25 air quality (both indices in full).
 const ALL_VARS = Object.values(VARS_BIT).reduce((m, b) => m | (1 << b), 0);
+// WIND_LEVELS_HPA ladder indices used below, and helpers to build wind_aloft stacks.
+const L500 = WIND_LEVELS_HPA.indexOf(500), L600 = WIND_LEVELS_HPA.indexOf(600);
+const L700 = WIND_LEVELS_HPA.indexOf(700), L925 = WIND_LEVELS_HPA.indexOf(925);
+const withAloft = (li: number, w: WindAloft): (WindAloft | null)[] =>
+  PERIOD.wind_aloft!.map((v, i) => (i === li ? w : v));
+const aloftOnly = (li: number, w: WindAloft): (WindAloft | null)[] =>
+  WIND_LEVELS_HPA.map((_, i) => (i === li ? w : null));
 // Every air-quality column: its VARS_BIT name, its Period field, and which ladder it decodes on.
 const AQ_CASES: [bit: string, field: keyof Period, scale: "us" | "eu"][] = [
   ["aq_pm25", "aqi_pm25", "us"],
@@ -68,12 +78,8 @@ const PERIOD: Period = {
   wind_sfc_kph: 16,        // force 3 midpoint — all wind speeds round-trip as band midpoints
   wind_sfc_dir: 2,
   wind_gust_kph: 34,       // force 5
-  wind_500_kph: 44.5,      // force 6
-  wind_500_dir: 4,
-  wind_600_kph: 34,        // force 5
-  wind_600_dir: 3,
-  wind_700_kph: 24.5,      // force 4
-  wind_700_dir: 2,
+  // One entry per WIND_LEVELS_HPA level (300 hPa first), forces 9 down to 2.
+  wind_aloft: [9, 8, 6, 5, 4, 3, 2].map((force, li) => ({ kph: beaufortMidKph(force), dir: [5, 5, 4, 3, 2, 2, 1][li] })),
   cloud_band: [60, 55, 40, 35, 30, 20, 15, 10],
   // Air quality. Each headline sits at or above every one of its own scale's sub-index bands,
   // which is what the wire assumes when it codes the headline as a residual against their max.
@@ -223,12 +229,12 @@ describe("v3 round-trip encoding", () => {
     expect(p.wind_sfc_kph).toBeCloseTo(PERIOD.wind_sfc_kph!, 3);
     expect(p.wind_sfc_dir).toBe(PERIOD.wind_sfc_dir);
     expect(p.wind_gust_kph).toBeCloseTo(PERIOD.wind_gust_kph!, 3);
-    expect(p.wind_500_kph).toBeCloseTo(PERIOD.wind_500_kph!, 3);
-    expect(p.wind_500_dir).toBe(PERIOD.wind_500_dir);
-    expect(p.wind_600_kph).toBeCloseTo(PERIOD.wind_600_kph!, 3);
-    expect(p.wind_600_dir).toBe(PERIOD.wind_600_dir);
-    expect(p.wind_700_kph).toBeCloseTo(PERIOD.wind_700_kph!, 3);
-    expect(p.wind_700_dir).toBe(PERIOD.wind_700_dir);
+    // At 500 m every level sits above the point, so all seven come back.
+    expect(p.wind_aloft).toHaveLength(WIND_LEVELS_HPA.length);
+    p.wind_aloft!.forEach((w, li) => {
+      expect(w!.kph).toBeCloseTo(PERIOD.wind_aloft![li]!.kph, 3);
+      expect(w!.dir).toBe(PERIOD.wind_aloft![li]!.dir);
+    });
     // The default layout here is 12h periods, which the band's resolution clamp strips —
     // "not forecast", never "clear". The fine-layout round-trip lives in its own test below.
     expect(p.cloud_band).toBeUndefined();
@@ -423,7 +429,7 @@ describe("v3 round-trip encoding", () => {
     expect(p.freeze_m).toBeUndefined();
     expect(p.wind_sfc_kph).toBeUndefined();
     expect(p.wind_gust_kph).toBeUndefined();
-    expect(p.wind_500_kph).toBeUndefined();
+    expect(p.wind_aloft).toBeUndefined();
     expect(p.cloud_band).toBeUndefined();
   });
 
@@ -435,7 +441,7 @@ describe("v3 round-trip encoding", () => {
     expect(p.freeze_m).toBeCloseTo(6 * 304.8, 5);
     expect(p.temp_c).toBeUndefined();
     expect(p.snow_cm).toBeUndefined();
-    expect(p.wind_500_kph).toBeUndefined();
+    expect(p.wind_aloft).toBeUndefined();
   });
 
   it("temp round-trips on its own bit", () => {
@@ -448,19 +454,18 @@ describe("v3 round-trip encoding", () => {
     expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.precip)).toBeTruthy();
     expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.snow)).toBeTruthy();
     expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.freeze)).toBeTruthy();
-    expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.w500)).toBeTruthy();
-    expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.w600)).toBeTruthy();
-    expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.w700)).toBeTruthy();
+    // Pressure-level wind is opt-in, level by level (`w:` token) — none on by default.
+    expect(DEFAULT_VARS_MASK & WIND_LEVELS_MASK).toBe(0);
     expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.temp)).toBeFalsy();
     expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.wind)).toBeFalsy();
   });
 
   it("handles all 8 wind directions", () => {
     for (let dir = 0; dir < 8; dir++) {
-      const period = { ...PERIOD, wind_700_dir: dir };
+      const period = { ...PERIOD, wind_aloft: withAloft(L700, { kph: 24.5, dir }) };
       const decoded = roundTrip(msg({ periods: [[period]] }));
-      expect(decoded.periods[0][0].wind_700_dir).toBe(dir);
-      expect(CARDINALS[decoded.periods[0][0].wind_700_dir!]).toBe(CARDINALS[dir]);
+      expect(decoded.periods[0][0].wind_aloft![L700]!.dir).toBe(dir);
+      expect(CARDINALS[decoded.periods[0][0].wind_aloft![L700]!.dir]).toBe(CARDINALS[dir]);
     }
   });
 
@@ -510,8 +515,8 @@ describe("v3 round-trip encoding", () => {
   });
 
   it("quantizes wind speed to Beaufort band midpoints", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, wind_700_kph: 43.4 }]] }));
-    expect(decoded.periods[0][0].wind_700_kph).toBeCloseTo(bmid(6), 3); // 39-49 kph band
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, wind_aloft: withAloft(L700, { kph: 43.4, dir: 2 }) }]] }));
+    expect(decoded.periods[0][0].wind_aloft![L700]!.kph).toBeCloseTo(bmid(6), 3); // 39-49 kph band
   });
 
   it("clamps snow to 200 cm max", () => {
@@ -666,19 +671,19 @@ describe("v3 round-trip encoding", () => {
 
   it("round-trips hurricane-force jet winds (extended Beaufort, forces 13..17)", () => {
     const periods = [[
-      { ...PERIOD, wind_500_kph: bmid(13) },
-      { ...PERIOD, wind_500_kph: bmid(15) },
-      { ...PERIOD, wind_500_kph: bmid(17) }, // open-ended top band (≥202 kph)
+      { ...PERIOD, wind_aloft: withAloft(L500, { kph: bmid(13), dir: 4 }) },
+      { ...PERIOD, wind_aloft: withAloft(L500, { kph: bmid(15), dir: 4 }) },
+      { ...PERIOD, wind_aloft: withAloft(L500, { kph: bmid(17), dir: 4 }) }, // open-ended top band (≥202 kph)
     ]];
     const decoded = roundTrip(msg({ periods }));
-    expect(decoded.periods[0][0].wind_500_kph).toBeCloseTo(bmid(13), 3);
-    expect(decoded.periods[0][1].wind_500_kph).toBeCloseTo(bmid(15), 3);
-    expect(decoded.periods[0][2].wind_500_kph).toBeCloseTo(bmid(17), 3);
+    expect(decoded.periods[0][0].wind_aloft![L500]!.kph).toBeCloseTo(bmid(13), 3);
+    expect(decoded.periods[0][1].wind_aloft![L500]!.kph).toBeCloseTo(bmid(15), 3);
+    expect(decoded.periods[0][2].wind_aloft![L500]!.kph).toBeCloseTo(bmid(17), 3);
   });
 
   it("clamps wind speed into the top Beaufort band", () => {
-    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, wind_700_kph: 400 }]] }));
-    expect(decoded.periods[0][0].wind_700_kph).toBeCloseTo(bmid(17), 3);
+    const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, wind_aloft: withAloft(L700, { kph: 400, dir: 2 }) }]] }));
+    expect(decoded.periods[0][0].wind_aloft![L700]!.kph).toBeCloseTo(bmid(17), 3);
   });
 
   it("calm periods carry no direction bits: direction values during calm can't change the encoding", () => {
@@ -698,16 +703,40 @@ describe("v3 round-trip encoding", () => {
     expect(decoded.periods[0].map((p) => p.wind_sfc_kph)).toEqual(forces.map(bmid));
   });
 
-  it("round-trips w600 without w500 present (no upper-level context available)", () => {
+  it("round-trips w600 alone (no upper-level context available)", () => {
     const vars_mask = 1 << VARS_BIT.w600;
     const forces = [10, 12, 11, 13, 12];
     const dirs = [2, 2, 3, 3, 4];
-    const periods = [forces.map((f, i) => ({ weathercode: 0, wind_600_kph: bmid(f), wind_600_dir: dirs[i] }))];
+    const periods = [forces.map((f, i) => ({ weathercode: 0, wind_aloft: aloftOnly(L600, { kph: bmid(f), dir: dirs[i] }) }))];
     const decoded = roundTrip(msg({ vars_mask, periods }));
     decoded.periods[0].forEach((p, i) => {
-      expect(p.wind_600_kph).toBeCloseTo(bmid(forces[i]), 3);
-      expect(p.wind_600_dir).toBe(dirs[i]);
+      expect(p.wind_aloft![L600]!.kph).toBeCloseTo(bmid(forces[i]), 3);
+      expect(p.wind_aloft![L600]!.dir).toBe(dirs[i]);
+      // Unrequested levels decode as null, never as a value.
+      expect(p.wind_aloft!.filter((w) => w !== null)).toHaveLength(1);
     });
+  });
+
+  it("round-trips a non-adjacent selection (500 + 700 hPa, conditioning across a skipped rung)", () => {
+    const vars_mask = (1 << VARS_BIT.w500) | (1 << VARS_BIT.w700);
+    const forces = [10, 12, 11, 13, 12];
+    const periods = [forces.map((f, i) => ({ weathercode: 0, wind_aloft: WIND_LEVELS_HPA.map((_, li) =>
+      li === L500 ? { kph: bmid(f + 2), dir: i % 8 } : li === L700 ? { kph: bmid(f), dir: (i + 1) % 8 } : null) }))];
+    const decoded = roundTrip(msg({ vars_mask, periods }));
+    decoded.periods[0].forEach((p, i) => {
+      expect(p.wind_aloft![L500]!.kph).toBeCloseTo(bmid(forces[i] + 2), 3);
+      expect(p.wind_aloft![L700]!.kph).toBeCloseTo(bmid(forces[i]), 3);
+      expect(p.wind_aloft![L700]!.dir).toBe((i + 1) % 8);
+      expect(p.wind_aloft![L600]).toBeNull();
+    });
+  });
+
+  it("carries every requested level whatever the elevation (no clamp, unlike the cloud band)", () => {
+    // 4267 m → ground ≈ 593 hPa, so 700 hPa and below sit under the terrain — the reader asked
+    // for them, so they ride the wire regardless.
+    const p = roundTrip(msg({ elevation: 4267, periods: [[PERIOD, PERIOD, PERIOD]] })).periods[0][1];
+    expect(p.wind_aloft!.every((w) => w !== null)).toBe(true);
+    p.wind_aloft!.forEach((w, li) => expect(w!.kph).toBeCloseTo(PERIOD.wind_aloft![li]!.kph, 3));
   });
 
   it("an upper level that agrees makes the lower direction column cheaper (cross-level context)", () => {
@@ -720,9 +749,10 @@ describe("v3 round-trip encoding", () => {
       seq: 48, mode: MODE_RANGE, hour: 0, periodHours: Array(n).fill(6),
     };
     const both = msg({ ...sixHourly, vars_mask: (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600),
-      periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_500_kph: bmid(8), wind_500_dir: 6, wind_600_kph: bmid(6), wind_600_dir: 6 }))] });
+      periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_aloft: WIND_LEVELS_HPA.map((_, li) =>
+        li === L500 ? { kph: bmid(8), dir: 6 } : li === L600 ? { kph: bmid(6), dir: 6 } : null) }))] });
     const alone = msg({ ...sixHourly, vars_mask: 1 << VARS_BIT.w600,
-      periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_600_kph: bmid(6), wind_600_dir: 6 }))] });
+      periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_aloft: aloftOnly(L600, { kph: bmid(6), dir: 6 }) }))] });
     const w600Bits = (m: ForecastMessage) =>
       v3EncodeBreakdown(m).columns.find((c) => c.name === "w600")!.bits;
     expect(w600Bits(both)).toBeLessThan(w600Bits(alone));
@@ -861,19 +891,19 @@ describe("delta temperature encoding", () => {
 
 describe("body decode desync detection", () => {
   it("throws when meaningful body bits remain past the last column read (e.g. context-store drift)", () => {
-    // Vary the last-decoded column (700 hPa wind) so its bits are guaranteed non-zero — set bits
+    // Vary the last-decoded column (925 hPa wind) so its bits are guaranteed non-zero — set bits
     // at the top of the body survive encodeBodyLE's high-order-zero trimming.
     const periods = [[
-      { ...PERIOD, wind_700_dir: 2 },
-      { ...PERIOD, wind_700_dir: 5 },
-      { ...PERIOD, wind_700_dir: 7 },
+      { ...PERIOD, wind_aloft: withAloft(L925, { kph: 9, dir: 2 }) },
+      { ...PERIOD, wind_aloft: withAloft(L925, { kph: 9, dir: 5 }) },
+      { ...PERIOD, wind_aloft: withAloft(L925, { kph: 9, dir: 7 }) },
     ]];
     const m = msg({ periods });
     const encoded = v3MessageToString(m);
     // Resolve with a vars_mask missing that final column: the decoder reads every earlier column
-    // identically, then stops with the wind-700 bits unread — the shape of codebook or
+    // identically, then stops with the 925 hPa bits unread — the shape of codebook or
     // request-store drift, which would otherwise return garbage values silently.
-    const drifted = { ...ctxOf(m), vars_mask: m.vars_mask & ~(1 << VARS_BIT.w700) };
+    const drifted = { ...ctxOf(m), vars_mask: m.vars_mask & ~(1 << VARS_BIT.w925) };
     expect(() => v3MessageFromString(encoded, () => drifted)).toThrow(/desynced/);
     // The same message with the true context still decodes.
     expect(() => v3MessageFromString(encoded, () => ctxOf(m))).not.toThrow();

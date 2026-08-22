@@ -96,12 +96,20 @@ describe("parseRequest", () => {
       (1 << VARS_BIT["ccm"]) |
       (1 << VARS_BIT["ccl"]),
     );
-    expect(parseRequest("v:w").varsMask).toBe(
+    // Pressure-level wind is not a `v:` group: `v:w` is ignored, `w:` lists ladder indices.
+    expect(parseRequest("v:w").varsMask).toBe(ALWAYS_VARS_MASK);
+    expect(parseRequest("w:234").varsMask).toBe(
       ALWAYS_VARS_MASK |
       (1 << VARS_BIT["w500"]) |
       (1 << VARS_BIT["w600"]) |
       (1 << VARS_BIT["w700"]),
     );
+    expect(parseRequest("w:06").varsMask).toBe(
+      ALWAYS_VARS_MASK | (1 << VARS_BIT["w300"]) | (1 << VARS_BIT["w925"]),
+    );
+    // Out-of-ladder characters are ignored; an empty token adds nothing.
+    expect(parseRequest("w:79x").varsMask).toBe(ALWAYS_VARS_MASK);
+    expect(parseRequest("w:").varsMask).toBe(ALWAYS_VARS_MASK);
     expect(parseRequest("v:f").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["freeze"]));
     expect(parseRequest("v:p").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["precip"]));
     // Air quality: one code per index, so a reader can ask for smoke without paying for ozone.
@@ -150,7 +158,7 @@ describe("parseRequest", () => {
   });
 
   it("v: combines configurable variable group codes without delimiters", () => {
-    const p = parseRequest("v:pcwf");
+    const p = parseRequest("v:pcf w:234");
     expect(p.varsMask).toBe(
       ALWAYS_VARS_MASK |
       (1 << VARS_BIT["precip"]) |
@@ -171,7 +179,7 @@ describe("parseRequest", () => {
   });
 
   it("v: continues to accept comma-separated group codes", () => {
-    expect(parseRequest("v:c,w,f").varsMask).toBe(parseRequest("v:cwf").varsMask);
+    expect(parseRequest("v:c,p,f").varsMask).toBe(parseRequest("v:cpf").varsMask);
   });
 
   it("includes only the always-on variables when no configurable vars are specified", () => {
@@ -334,7 +342,7 @@ describe("describeRequest", () => {
     expect(describe_("").vars).toEqual(["temp", "snow", "wind", "gust", "rain"]);
     expect(describe_("v:pf").vars).toContain("precip");
     expect(describe_("v:pf").vars).toContain("freeze");
-    expect(describe_("v:w").vars).toEqual(expect.arrayContaining(["w500", "w600", "w700"]));
+    expect(describe_("w:234").vars).toEqual(expect.arrayContaining(["w500", "w600", "w700"]));
   });
 
   // The rounding lives here, in the stateless service, so a position precise enough to place

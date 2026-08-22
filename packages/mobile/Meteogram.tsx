@@ -7,12 +7,12 @@ import {
 } from '@shopify/react-native-skia';
 import {
   CARDINALS, RAIN_K, modelsFromMask, startDatetime, predictCenter, attributeHour,
-  AQ_DOMINANT_US, AQ_DOMINANT_EU, CLOUD_BAND_LEVELS_HPA,
+  AQ_DOMINANT_US, AQ_DOMINANT_EU, CLOUD_BAND_LEVELS_HPA, WIND_LEVELS_HPA,
   type Center, type ForecastMessage, type ModelSpec, type Period,
 } from '@weather/protocol';
 import type { TimeFormat, Units } from './settings';
 import {
-  bandScale, pressureToMeters, metersToPressure,
+  bandScale, ladderLabel, pressureToMeters, metersToPressure,
   BAND_TOP_HPA, GRID_STEP_HPA, type BandScale,
 } from './cloudBand';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -886,8 +886,14 @@ function buildDayGroups(dates: Date[]): DayGroup[] {
   return groups;
 }
 
-function pressureLabel(level: 500 | 600 | 700): string {
+function pressureLabel(level: number): string {
   return `${level} hPa`;
+}
+
+// Which WIND_LEVELS_HPA levels a message carries: those with a value on any period. Unrequested
+// levels are null throughout.
+function windLevelsPresent(periods: Period[]): number[] {
+  return WIND_LEVELS_HPA.flatMap((_, li) => (periods.some((p) => p.wind_aloft?.[li] != null) ? [li] : []));
 }
 
 // ── Row model ──────────────────────────────────────────────────────────────
@@ -898,7 +904,7 @@ type RowKind =
   | 'aqi' | 'aqi-pm25' | 'aqi-o3' | 'aqi-pm10' | 'aqi-no2' | 'aqi-so2'
   | 'aqi-dominant' | 'aqi-eu-dominant'
   | 'aqi-eu' | 'aqi-eu-pm25' | 'aqi-eu-o3' | 'aqi-eu-pm10' | 'aqi-eu-no2' | 'aqi-eu-so2'
-  | 'wind-500' | 'wind-600' | 'wind-700' | 'model' | 'section' | 'cloud-band';
+  | 'wind-aloft' | 'model' | 'section' | 'cloud-band';
 
 interface Row {
   kind: RowKind;
@@ -912,6 +918,8 @@ interface Row {
   // (LEGEND_ICONS), and on the cloud band, which gets an altitude ladder rather than a single
   // entry.
   legend: string;
+  // wind-aloft rows only: the WIND_LEVELS_HPA index the row draws.
+  level?: number;
 }
 
 // The rows that make up the precip block, in the order they are drawn. They are grouped for the
@@ -1046,14 +1054,14 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
 
   // The Windy-style vertical cloud band — v3 messages carry it in place of the low/mid/high
   // trio below, so exactly one of these two cloud blocks renders for any given message. Its axis
-  // is the ladder of wire levels the rail draws, so the header names the unit that ladder is in.
+  // is the ladder of wire levels the rail draws, each rung carrying its own unit.
   // The wire clamps the band to the leading ≤3h periods, so a message can carry it on some
   // periods and not others (never the reverse of that shape); presence anywhere is what makes
   // the row. The row's height follows the message's level count — the decoded array's length,
   // which the wire truncates at one level below the forecast point.
   const bandStack = periods.find((p) => p.cloud_band)?.cloud_band;
   if (bandStack) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Clouds by altitude (${frU})`, legend: '' });
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Clouds by altitude', legend: '' });
     rows.push({
       kind: 'cloud-band', height: ROW_H.CLOUD_BAND_SLICE * (bandScale(bandStack.length).levels.length - 1),
       label: '', legend: '',
@@ -1068,14 +1076,16 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
     if (has((p) => p.cloud_low)) rows.push({ kind: 'cloud-low', height: ROW_H.DATA, label: '', legend: 'low' });
   }
 
-  // Three rows on one scale: the header carries the unit once and each row's rail token is the
-  // pressure level that distinguishes it.
-  const hasUpper = has((p) => p.wind_500_kph) || has((p) => p.wind_600_kph) || has((p) => p.wind_700_kph);
-  if (hasUpper) {
-    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Pressure level winds (${wU})`, legend: '' });
-    if (has((p) => p.wind_500_kph)) rows.push({ kind: 'wind-500', height: ROW_H.WIND_UPPER, label: '', legend: '500' });
-    if (has((p) => p.wind_600_kph)) rows.push({ kind: 'wind-600', height: ROW_H.WIND_UPPER, label: '', legend: '600' });
-    if (has((p) => p.wind_700_kph)) rows.push({ kind: 'wind-700', height: ROW_H.WIND_UPPER, label: '', legend: '700' });
+  // One row per carried pressure level, highest first, on the cloud band's altitude ladder: each
+  // row's rail token is the level's rung ("18k ft", "5.5km" — ladderLabel), the same rough band
+  // the band's axis names, so a reader lines a wind row up with the cloud layer beside it. The
+  // header carries the speed unit, as the surface wind rows do.
+  const aloftLevels = windLevelsPresent(periods);
+  if (aloftLevels.length) {
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Pressure-level winds (${wU})`, legend: '' });
+    for (const li of aloftLevels) {
+      rows.push({ kind: 'wind-aloft', height: ROW_H.WIND_UPPER, label: '', legend: ladderLabel(WIND_LEVELS_HPA[li], u), level: li });
+    }
   }
 
   // Air quality, below the model line and carrying its own attribution in its header: the CAMS
@@ -1717,7 +1727,7 @@ const TINTABLE_STOP = new Set<RowKind>([
   'wind-sfc', 'wind-gust', 'wind-dir', 'freeze', 'cloud-band', 'cloud-high', 'cloud-mid', 'cloud-low',
   ...AQ_KINDS, // air-quality cells carry their category as a fill, same as the wind ribbon
   ...AQ_DOMINANT_KINDS, // and the dominant row is painted with its headline's fill
-  'wind-500', 'wind-600', 'wind-700', 'model',
+  'wind-aloft', 'model',
 ]);
 
 // The rows the current-time marker runs through: the date/time header and visual weather rows
@@ -2282,13 +2292,14 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         els.push(...statics.cloudBandEls);
         break;
 
-      case 'wind-sfc': case 'wind-gust': case 'wind-500': case 'wind-600': case 'wind-700': {
-        const base = row.kind.replace('-', '_'); // wind-sfc → wind_sfc, wind-500 → wind_500
-        const speedKey = `${base}_kph` as keyof Period;
-        const dirKey = `${base}_dir` as keyof Period;
+      case 'wind-sfc': case 'wind-gust': case 'wind-aloft': {
         // Surface direction lives in its own arrow row below the gust row; gusts have none.
-        const inlineArrow = row.kind !== 'wind-sfc' && row.kind !== 'wind-gust';
-        const speedAt = (i: number) => periods[i][speedKey] as number | undefined;
+        const inlineArrow = row.kind === 'wind-aloft';
+        const li = row.level ?? 0;
+        const speedAt = (i: number): number | undefined => row.kind === 'wind-sfc' ? periods[i].wind_sfc_kph
+          : row.kind === 'wind-gust' ? periods[i].wind_gust_kph
+          : periods[i].wind_aloft?.[li]?.kph;
+        const dirAt = (i: number): number | undefined => periods[i].wind_aloft?.[li]?.dir;
         // A run trimmed to the slice, not the whole run: the ribbon blends linearly between
         // column centers, so a sub-run holding every center adjacent to the tile paints the
         // tile's pixels exactly — the flat hold it gains at its cut ends lies in the margin,
@@ -2306,7 +2317,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           const kph = speedAt(i);
           const cx = colCenter(i);
           if (kph == null) { els.push(centerText(`w${ri}-${i}`, '—', cx, mid, fonts.wind, C.nil)); continue; }
-          const di = inlineArrow ? periods[i][dirKey] as number | undefined : undefined;
+          const di = inlineArrow ? dirAt(i) : undefined;
           const arrow = di != null ? ARROWS[CARDINALS[di] ?? 'N'] ?? '' : '';
           // Rows carrying an inline arrow split the (now shorter) row evenly above and below center.
           els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, arrow ? mid - 6 : mid, fonts.wind, WIND_INK));
@@ -2560,23 +2571,6 @@ function legendCy(row: Row): number {
   return row.height / 2;
 }
 
-// One rung of the cloud band's altitude axis. Written in whole thousands, so the ladder reads as
-// one scale — and so no rung can be taken for one of the 500 / 600 / 700 hPa tokens the
-// pressure-level wind rows carry a few rows below it. Rounded to the nearer thousand rather than
-// carried to a decimal (23.5k → 24k): these are the heights of pressure surfaces, which move
-// hundreds of feet with the weather, so a tenth is precision the number does not have — and a
-// column of seven bare thousands is a scale a reader takes in at a glance. Metric keeps
-// fmtFreeze's hundreds: its rungs are 9200 down to 800 m, nowhere near the pressure levels.
-//
-// The top rung is written "30k+". 300 hPa is the highest level the message carries, so the band
-// stops flat there — and an unqualified "30k" would make that flat top a claim about the sky,
-// that cloud ends at 30k, when it is only a statement about the wire. The "+" turns the top of
-// the scale into what it actually is: everything from 30k up, gathered onto one edge.
-function ladderLabel(hpa: number, units: Units): string {
-  const m = pressureToMeters(hpa);
-  const text = units === 'imperial' ? `${Math.round((m * 3.28084) / 1000)}k` : fmtFreeze(m, units);
-  return hpa === BAND_TOP_HPA ? `${text}+` : text;
-}
 
 /**
  * The unit rail: what each row is, written once and never scrolled away.
@@ -2622,7 +2616,7 @@ const RowLegend = memo(function RowLegend({ rows, units, bandLevels, paint }: {
     // The cloud band's axis: one altitude per carried wire level, on the same even ladder the
     // scene draws its gridlines with. Altitude rather than the transmitted pressure — a reader
     // in the mountains thinks in feet, and the pair ("14k · 600") doesn't fit a 44px rail. The
-    // section header names the unit, and the detail panel gives both.
+    // rung carries its own unit, and the detail panel gives both.
     //
     // A 1000 hPa floor goes unlabelled. It is the ground — 364 ft, and the ladder would have to
     // print a fraction to say so — and it sits on the row's own bottom edge, where a number reads
@@ -2642,7 +2636,7 @@ const RowLegend = memo(function RowLegend({ rows, units, bandLevels, paint }: {
         const ty = Math.min(Math.max(gy - LEGEND_LEVEL_H / 2, top), top + row.height - LEGEND_LEVEL_H);
         els.push(
           <RNText key={`cb${ri}-${hpa}`} numberOfLines={1} style={[styles.legendLevel, { top: ty }]}>
-            {ladderLabel(hpa, units)}
+            {ladderLabel(hpa, units, true)}
           </RNText>,
         );
       }
@@ -3216,9 +3210,10 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
 
 const LEADER_DOTS = '.'.repeat(160);
 
-// Detail-panel variant of pressureLabel, e.g. "Wind 500 hPa".
-function upperWindLabel(level: 500 | 600 | 700): string {
-  return `Wind ${pressureLabel(level)}`;
+// Detail-panel label for a pressure-level wind row, e.g. "Wind 18k ft (500 hPa)": the rail's
+// altitude rung first, the transmitted pressure after it.
+function upperWindLabel(hpa: number, units: Units): string {
+  return `Wind ${ladderLabel(hpa, units)} (${pressureLabel(hpa)})`;
 }
 
 const MOON_PHASE_LABELS: Record<CyclePhase, string> = {
@@ -3345,9 +3340,10 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
   }
   if (has((q) => q.wind_sfc_kph)) rows.push(['Wind', fmtWindFull(p.wind_sfc_kph, p.wind_sfc_dir, units)]);
   if (has((q) => q.freeze_m)) rows.push(['Freezing level', fmtFreezeFull(p.freeze_m, units)]);
-  if (has((q) => q.wind_500_kph)) rows.push([upperWindLabel(500), fmtWindFull(p.wind_500_kph, p.wind_500_dir, units)]);
-  if (has((q) => q.wind_600_kph)) rows.push([upperWindLabel(600), fmtWindFull(p.wind_600_kph, p.wind_600_dir, units)]);
-  if (has((q) => q.wind_700_kph)) rows.push([upperWindLabel(700), fmtWindFull(p.wind_700_kph, p.wind_700_dir, units)]);
+  for (const li of windLevelsPresent(periods)) {
+    const w = p.wind_aloft?.[li];
+    rows.push([upperWindLabel(WIND_LEVELS_HPA[li], units), fmtWindFull(w?.kph, w?.dir, units)]);
+  }
   if (has((q) => q.cloud_band)) {
     // Only the levels the message carries — the wire truncates the stack at one level below the
     // forecast point, so the carried count is any band-bearing period's array length. A period

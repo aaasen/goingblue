@@ -10,7 +10,7 @@ import {
   adjustPrecipPhase, aggregateHourly, fillCloudBand, rowsFromWindows, HOURS_PER_PERIOD,
   type HourlyData, type Row,
 } from "../src/forecast.ts";
-import { CLOUD_BAND_LEVELS_HPA } from "@weather/protocol";
+import { CLOUD_BAND_LEVELS_HPA, WIND_LEVELS_HPA } from "@weather/protocol";
 import { dbLocations, listCells, loadCell, modelElevations, openDb } from "./corpus-db.ts";
 
 // The derivation corpus: the production source's cells in the corpus DB (see corpus-db.ts).
@@ -28,9 +28,8 @@ export const DERIVE_VARS: readonly string[] = [
   "temperature_2m", "freezing_level_height", "weather_code",
   "rain", "showers", "snowfall", "precipitation_probability",
   "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m",
-  "wind_speed_500hPa", "wind_direction_500hPa",
-  "wind_speed_600hPa", "wind_direction_600hPa",
-  "wind_speed_700hPa", "wind_direction_700hPa",
+  // Pressure-level wind at every WIND_LEVELS_HPA level — the reader picks any subset.
+  ...WIND_LEVELS_HPA.flatMap((l) => [`wind_speed_${l}hPa`, `wind_direction_${l}hPa`]),
   "cloud_cover", "cloud_cover_high", "cloud_cover_mid", "cloud_cover_low",
   // The cloud band's three level families, all eight levels each. The band the wire carries is
   // not any of them raw: eachForecast runs the stack through fillCloudBand (below), which

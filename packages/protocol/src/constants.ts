@@ -83,6 +83,13 @@ export const MODEL_NAMES: string[] = [
 // deliberately absent for now: best_match zero-fills 750 where the serving model doesn't carry
 // it, which reads as clear sky, and neither is in the training corpus.
 export const CLOUD_BAND_LEVELS_HPA = [300, 400, 500, 600, 700, 850, 925, 1000] as const;
+// Pressure-level wind uses the same ladder minus its 1000 hPa floor, one selectable column per
+// level (WIND_LEVEL_BITS), highest first — Period.wind_aloft is indexed by it. 1000 hPa is
+// ~110 m: the always-on 10 m wind already describes that air, and above ~110 m the level is
+// under the terrain, so it never earned a column (dropped 2026-08-22). Every center's pressure
+// product serves wind at all seven (verified 2026-08-22 against best_match, gfs_seamless,
+// gem_seamless and ecmwf_ifs025), so no level is gated per center.
+export const WIND_LEVELS_HPA = CLOUD_BAND_LEVELS_HPA.slice(0, 7) as readonly number[];
 
 // International Standard Atmosphere, troposphere leg — the fixed scale that places the band's
 // pressure levels at altitudes. Good to a few tens of meters over the band's span. WIRE FORMAT
@@ -103,9 +110,16 @@ export const VARS_BIT: Record<string, number> = {
   snow: 2,
   freeze: 3,
   wind: 4,   // surface (10m) wind
-  w500: 5,
-  w600: 6,
-  w700: 7,
+  // Pressure-level wind, one bit per WIND_LEVELS_HPA entry (see WIND_LEVEL_BITS): the three
+  // slots the old fixed 500/600/700 trio held plus 25..28. Selected per level by the `w:`
+  // request token, never on by default.
+  w300: 5,
+  w400: 6,
+  w500: 7,
+  w600: 25,
+  w700: 26,
+  w850: 27,
+  w925: 28,
   gust: 8,   // surface (10m) wind gusts, speed only (bit formerly carried cc, total cloud cover)
   cch: 9,    // v2: high cloud cover. v3: the whole cloud band (CLOUD_BAND_LEVELS_HPA) rides
              // this one bit; 10/11 still arrive set by the `c` toggle but carry no v3 column.
@@ -129,7 +143,7 @@ export const VARS_BIT: Record<string, number> = {
   // carbon monoxide sub-index and the European one does not, but CO leads the US headline in
   // 0.0% of corpus periods — it is never the pollutant a reader is being warned about — so
   // carrying it would have bought a column that says nothing and made the two scales' menus
-  // differ for no reader-visible gain. Bit 25 is free if that judgement ever changes.
+  // differ for no reader-visible gain. Bit 29 is the next free one if that judgement changes.
   aqi_eu_pm10: 18, // European AQI PM10 sub-index
   aqi_eu_no2: 19,  // European AQI nitrogen dioxide sub-index
   aqi_eu_o3: 20,   // European AQI ozone sub-index — leads this scale 68.6% of the time
@@ -138,6 +152,22 @@ export const VARS_BIT: Record<string, number> = {
   aq_no2: 23,      // US AQI nitrogen dioxide sub-index
   aq_so2: 24,      // US AQI sulphur dioxide sub-index
 };
+
+// vars_mask bit of each WIND_LEVELS_HPA level, ladder order (300 hPa first).
+export const WIND_LEVEL_BITS: readonly number[] = WIND_LEVELS_HPA.map((l) => VARS_BIT[`w${l}`]);
+export const WIND_LEVELS_MASK = WIND_LEVEL_BITS.reduce((m, b) => m | (1 << b), 0);
+// The `w:` request token: ladder indices of the selected levels, e.g. `w:234` = 500/600/700 hPa.
+export function windLevelsToken(mask: number): string {
+  return WIND_LEVEL_BITS.map((b, i) => (mask & (1 << b) ? String(i) : "")).join("");
+}
+export function windLevelsMaskFromToken(token: string): number {
+  let mask = 0;
+  for (const ch of token) {
+    const i = ch.charCodeAt(0) - 48;
+    if (i >= 0 && i < WIND_LEVEL_BITS.length) mask |= 1 << WIND_LEVEL_BITS[i];
+  }
+  return mask;
+}
 
 // Core forecast variables are implicit in every request. The request's `v:` token only carries
 // user-configurable additions, which keeps the satellite message body as short as possible.
@@ -148,14 +178,14 @@ export const ALWAYS_VARS_MASK = ALWAYS_VARS.reduce(
 );
 
 // Single-character request codes for the user-configurable variable groups. A group is however
-// many protocol variables one toggle turns on together: the cloud and upper-wind toggles cover
-// three each, while every air-quality index is its own toggle — the pollutants behave differently
-// enough (smoke vs photochemical smog vs traffic NO2) that a reader wants them separately, and
-// each costs its own share of the message budget.
+// many protocol variables one toggle turns on together: the cloud toggle covers three, while
+// every air-quality index is its own toggle — the pollutants behave differently enough (smoke vs
+// photochemical smog vs traffic NO2) that a reader wants them separately, and each costs its own
+// share of the message budget. Pressure-level wind is not a group: its levels travel in the
+// `w:` token (windLevelsToken), one ladder index per selected level.
 export const CONFIGURABLE_VAR_GROUPS = {
   p: ["precip"],
   c: ["cch", "ccm", "ccl"],
-  w: ["w500", "w600", "w700"],
   f: ["freeze"],
   a: ["aqi"],           // US Air Quality Index
   s: ["aq_pm25"],       // smoke
@@ -177,9 +207,8 @@ export const VAR_GROUP_CODES = Object.keys(CONFIGURABLE_VAR_GROUPS).join("");
 
 export const WMO_BITS = 5;
 
-export const DEFAULT_VARS_MASK =
-  (1 << 0) | (1 << 2) | (1 << 3) | (1 << 5) | (1 << 6) | (1 << 7);
-// precip + snow + freeze + w500 + w600 + w700
+export const DEFAULT_VARS_MASK = (1 << 0) | (1 << 2) | (1 << 3);
+// precip + snow + freeze — pressure-level wind is opt-in, level by level
 
 // The symbol alphabet. A code's INDEX here is its wire symbol (WMO2IDX in model.ts is just this
 // list inverted), so codes are APPENDED, never inserted in numeric order — inserting renumbers

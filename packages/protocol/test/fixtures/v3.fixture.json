@@ -7,13 +7,13 @@
     "mode": 0,
     "utcOffsetHours": -9
   },
-  "encoded": "$!!'Ny@IMuoUcafc/wZ2k1L'Csdk&f3:GKC=_hA3ch310SC-5X/xtVzt52Uqzsuc$/uQ,io*j\"9/3zVHxI_<($.-s6Ig&D4A\"A&_cmR##Hqd;7d81*J4_7$RAC6Uj?2K.W1(qGZGrm)npLQp@iLLxSlC\"QZ:8VuZlwY3V)o,9(F<>>GW)\"",
+  "encoded": "$!!'N'1lt\"><Kax/5rMnaP5tSaNi.opRUp'Sp$0R)ZLdiaksra<\"zz_&2e@3.:i/#&*iHU=st@ZGU4Ox>hOF!zOK=.m.PevfLWb8L6x,EBz,$k2j2d92h:B9>V,1nraRK;=I'wt)EDM;1K5UHJWFB#AD;SmG8jq.?&\"JCxLwE1\"G8.Om30(gEcVr+s=50c0H7X/",
   "decoded": {
     "version": 3,
     "code": 0,
     "days": 3,
     "models_mask": 1,
-    "vars_mask": 33554431,
+    "vars_mask": 536870911,
     "month": 6,
     "day": 15,
     "hour": 21,
@@ -52,12 +52,36 @@
           "wind_gust_kph": 34,
           "wind_sfc_kph": 16,
           "wind_sfc_dir": 5,
-          "wind_500_kph": 44.5,
-          "wind_500_dir": 4,
-          "wind_600_kph": 44.5,
-          "wind_600_dir": 3,
-          "wind_700_kph": 24.5,
-          "wind_700_dir": 2
+          "wind_aloft": [
+            {
+              "kph": 68.5,
+              "dir": 4
+            },
+            {
+              "kph": 56,
+              "dir": 4
+            },
+            {
+              "kph": 44.5,
+              "dir": 4
+            },
+            {
+              "kph": 44.5,
+              "dir": 3
+            },
+            {
+              "kph": 24.5,
+              "dir": 2
+            },
+            {
+              "kph": 16,
+              "dir": 2
+            },
+            {
+              "kph": 16,
+              "dir": 3
+            }
+          ]
         },
         {
           "weathercode": 61,
@@ -89,12 +113,36 @@
           "wind_gust_kph": 44.5,
           "wind_sfc_kph": 24.5,
           "wind_sfc_dir": 5,
-          "wind_500_kph": 56,
-          "wind_500_dir": 3,
-          "wind_600_kph": 44.5,
-          "wind_600_dir": 3,
-          "wind_700_kph": 34,
-          "wind_700_dir": 3
+          "wind_aloft": [
+            {
+              "kph": 82,
+              "dir": 3
+            },
+            {
+              "kph": 68.5,
+              "dir": 3
+            },
+            {
+              "kph": 56,
+              "dir": 3
+            },
+            {
+              "kph": 44.5,
+              "dir": 3
+            },
+            {
+              "kph": 34,
+              "dir": 3
+            },
+            {
+              "kph": 24.5,
+              "dir": 3
+            },
+            {
+              "kph": 24.5,
+              "dir": 4
+            }
+          ]
         },
         {
           "weathercode": 63,
@@ -126,12 +174,36 @@
           "wind_gust_kph": 56,
           "wind_sfc_kph": 34,
           "wind_sfc_dir": 4,
-          "wind_500_kph": 56,
-          "wind_500_dir": 3,
-          "wind_600_kph": 56,
-          "wind_600_dir": 2,
-          "wind_700_kph": 34,
-          "wind_700_dir": 3
+          "wind_aloft": [
+            {
+              "kph": 82,
+              "dir": 3
+            },
+            {
+              "kph": 68.5,
+              "dir": 3
+            },
+            {
+              "kph": 56,
+              "dir": 3
+            },
+            {
+              "kph": 56,
+              "dir": 2
+            },
+            {
+              "kph": 34,
+              "dir": 3
+            },
+            {
+              "kph": 24.5,
+              "dir": 3
+            },
+            {
+              "kph": 24.5,
+              "dir": 4
+            }
+          ]
         },
         {
           "weathercode": 71,
@@ -163,12 +235,36 @@
           "wind_gust_kph": 34,
           "wind_sfc_kph": 24.5,
           "wind_sfc_dir": 5,
-          "wind_500_kph": 56,
-          "wind_500_dir": 4,
-          "wind_600_kph": 44.5,
-          "wind_600_dir": 3,
-          "wind_700_kph": 24.5,
-          "wind_700_dir": 2
+          "wind_aloft": [
+            {
+              "kph": 82,
+              "dir": 4
+            },
+            {
+              "kph": 68.5,
+              "dir": 4
+            },
+            {
+              "kph": 56,
+              "dir": 4
+            },
+            {
+              "kph": 44.5,
+              "dir": 3
+            },
+            {
+              "kph": 24.5,
+              "dir": 2
+            },
+            {
+              "kph": 24.5,
+              "dir": 2
+            },
+            {
+              "kph": 16,
+              "dir": 3
+            }
+          ]
         },
         {
           "weathercode": 2,
@@ -194,12 +290,36 @@
           "wind_gust_kph": 16,
           "wind_sfc_kph": 9,
           "wind_sfc_dir": 6,
-          "wind_500_kph": 34,
-          "wind_500_dir": 5,
-          "wind_600_kph": 24.5,
-          "wind_600_dir": 4,
-          "wind_700_kph": 16,
-          "wind_700_dir": 5
+          "wind_aloft": [
+            {
+              "kph": 56,
+              "dir": 5
+            },
+            {
+              "kph": 44.5,
+              "dir": 5
+            },
+            {
+              "kph": 34,
+              "dir": 5
+            },
+            {
+              "kph": 24.5,
+              "dir": 4
+            },
+            {
+              "kph": 16,
+              "dir": 5
+            },
+            {
+              "kph": 9,
+              "dir": 5
+            },
+            {
+              "kph": 3.5,
+              "dir": 3
+            }
+          ]
         },
         {
           "weathercode": 71,
@@ -225,12 +345,36 @@
           "wind_gust_kph": 24.5,
           "wind_sfc_kph": 16,
           "wind_sfc_dir": 4,
-          "wind_500_kph": 44.5,
-          "wind_500_dir": 4,
-          "wind_600_kph": 34,
-          "wind_600_dir": 4,
-          "wind_700_kph": 24.5,
-          "wind_700_dir": 3
+          "wind_aloft": [
+            {
+              "kph": 68.5,
+              "dir": 4
+            },
+            {
+              "kph": 56,
+              "dir": 4
+            },
+            {
+              "kph": 44.5,
+              "dir": 4
+            },
+            {
+              "kph": 34,
+              "dir": 4
+            },
+            {
+              "kph": 24.5,
+              "dir": 3
+            },
+            {
+              "kph": 16,
+              "dir": 3
+            },
+            {
+              "kph": 9,
+              "dir": 4
+            }
+          ]
         },
         {
           "weathercode": 3,
@@ -256,12 +400,36 @@
           "wind_gust_kph": 34,
           "wind_sfc_kph": 24.5,
           "wind_sfc_dir": 3,
-          "wind_500_kph": 44.5,
-          "wind_500_dir": 2,
-          "wind_600_kph": 34,
-          "wind_600_dir": 2,
-          "wind_700_kph": 24.5,
-          "wind_700_dir": 1
+          "wind_aloft": [
+            {
+              "kph": 68.5,
+              "dir": 2
+            },
+            {
+              "kph": 56,
+              "dir": 2
+            },
+            {
+              "kph": 44.5,
+              "dir": 2
+            },
+            {
+              "kph": 34,
+              "dir": 2
+            },
+            {
+              "kph": 24.5,
+              "dir": 1
+            },
+            {
+              "kph": 24.5,
+              "dir": 1
+            },
+            {
+              "kph": 16,
+              "dir": 2
+            }
+          ]
         },
         {
           "weathercode": 61,
@@ -287,12 +455,36 @@
           "wind_gust_kph": 56,
           "wind_sfc_kph": 24.5,
           "wind_sfc_dir": 2,
-          "wind_500_kph": 56,
-          "wind_500_dir": 1,
-          "wind_600_kph": 44.5,
-          "wind_600_dir": 1,
-          "wind_700_kph": 34,
-          "wind_700_dir": 0
+          "wind_aloft": [
+            {
+              "kph": 82,
+              "dir": 1
+            },
+            {
+              "kph": 68.5,
+              "dir": 1
+            },
+            {
+              "kph": 56,
+              "dir": 1
+            },
+            {
+              "kph": 44.5,
+              "dir": 1
+            },
+            {
+              "kph": 34,
+              "dir": 0
+            },
+            {
+              "kph": 24.5,
+              "dir": 0
+            },
+            {
+              "kph": 24.5,
+              "dir": 1
+            }
+          ]
         }
       ]
     ],

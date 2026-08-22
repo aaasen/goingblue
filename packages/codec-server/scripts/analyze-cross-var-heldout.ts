@@ -37,7 +37,7 @@ import {
   WMO2IDX, VARS_BIT, compandSqrt, SNOW_K, RAIN_K, ACCUM_BITS,
   WEATHERCODE_CLASS, WC_CLASSES,
   tempDeltaBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_MIN, TEMP_DELTA_MAX,
-  upperDeltaBucket,
+  upperDeltaBucket, WIND_LEVELS_HPA,
   type Period,
 } from "@weather/protocol";
 import { eachForecast, foldOf, N_FOLDS, scaledWeights } from "./derive-lib.ts";
@@ -138,9 +138,9 @@ async function collectChains(): Promise<Chain[]> {
           : upperDeltaBucket(qSfc(p.wind_sfc_kph) - qSfc(periods[i - 1].wind_sfc_kph))),
         sfcDB8: Int8Array.from(periods, (p, i) => i === 0 ? -1
           : upperDeltaBucket(qOld(p.wind_sfc_kph) - qOld(periods[i - 1].wind_sfc_kph))),
-        w5Q8: Uint8Array.from(periods, (p) => qOld(p.wind_500_kph)),
-        w6Q8: Uint8Array.from(periods, (p) => qOld(p.wind_600_kph)),
-        w7Q8: Uint8Array.from(periods, (p) => qOld(p.wind_700_kph)),
+        w5Q8: Uint8Array.from(periods, (p) => qOld(p.wind_aloft?.[WIND_LEVELS_HPA.indexOf(500)]?.kph)),
+        w6Q8: Uint8Array.from(periods, (p) => qOld(p.wind_aloft?.[WIND_LEVELS_HPA.indexOf(600)]?.kph)),
+        w7Q8: Uint8Array.from(periods, (p) => qOld(p.wind_aloft?.[WIND_LEVELS_HPA.indexOf(700)]?.kph)),
       };
       // Same-period temp-delta bucket, from the clamped wire chain (temp decodes before freeze).
       let recon = clampInt(Math.round((periods[0].temp_c ?? 0) + 100), 8);

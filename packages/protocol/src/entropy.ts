@@ -166,6 +166,16 @@ export const WIND_SPEED_DELTA_MAX = BEAUFORT_MAX;
 export function upperDeltaBucket(d: number): number {
   return d <= -2 ? 0 : d === -1 ? 1 : d === 0 ? 2 : d === 1 ? 3 : 4;
 }
+export const N_UPPER_BUCKETS = 5;
+
+// How far apart, in WIND_LEVELS_HPA rungs, a pressure-level wind column and the served level it
+// conditions on sit: adjacent (1), one rung skipped (2), or further (3+). Levels share the
+// synoptic flow less the further apart they are, so the upper-conditioned wind tables are keyed
+// by this class (must match the derive scripts). Classes 0..N_WIND_GAPS-1.
+export const N_WIND_GAPS = 3;
+export function windGapClass(gap: number): number {
+  return Math.min(Math.max(gap, 1), N_WIND_GAPS) - 1;
+}
 
 // must mirror the freeze column width in v3.ts (0..31)
 export const FREEZE_DELTA_MAX = 31;
@@ -373,13 +383,15 @@ export interface Books {
   decodeWeathercode(src: SymSource, prevSym: number | null): number;
   // The codebook for one direction symbol. `prev` is the last direction encoded in this column
   // (null for the column's first — bootstrap), `upper` the upper level's same-period displayed
-  // direction (null when that column is absent or this level has none). See
+  // direction (null when that column is absent or this level has none), `gap` the ladder
+  // distance to that level (see windGapClass). See
   // codec-server/scripts/derive-wind-dir-codebooks.ts for the context ladder.
-  windDirBook(res: number, prev: number | null, upper: number | null): CodeBook;
-  // The codebook for one speed delta. `level` indexes WIND_COLUMNS order (sfc, 500, 600, 700);
-  // `upperDelta` is the upper level's same-period delta (null when that column is absent or this
-  // level has none). See codec-server/scripts/derive-wind-speed-delta-codebooks.ts.
-  windSpeedBook(res: number, level: number, upperDelta: number | null): CodeBook;
+  windDirBook(res: number, prev: number | null, upper: number | null, gap: number): CodeBook;
+  // The codebook for one speed delta. `level` indexes the unconditioned table axis (0 = surface,
+  // 1 + WIND_LEVELS_HPA index for the pressure levels); `upperDelta` is the served level above's
+  // same-period delta (null when there is none), `gap` the ladder distance to it. See
+  // codec-server/scripts/derive-wind-speed-delta-codebooks.ts.
+  windSpeedBook(res: number, level: number, upperDelta: number | null, gap: number): CodeBook;
   // The codebook for one gust delta. Gust decodes FIRST among the wind columns (no context of
   // its own) — chosen so the surface column can lean on it, and can one day become optional
   // without touching gust. See codec-server/scripts/derive-gust-delta-codebooks.ts.
@@ -481,16 +493,16 @@ function buildBooks(t: typeof BASE_TABLES): Books {
   return {
     encodeWeathercode: weathercode.encode,
     decodeWeathercode: weathercode.decode,
-    windDirBook(res, prev, upper) {
+    windDirBook(res, prev, upper, gap) {
       if (prev === null) return windDirBootstrap;
       return upper === null
         ? windDirTables[res][prev]
-        : windDirUpperTables[res][prev * NDIR + upper];
+        : windDirUpperTables[res][(windGapClass(gap) * NDIR + prev) * NDIR + upper];
     },
-    windSpeedBook(res, level, upperDelta) {
+    windSpeedBook(res, level, upperDelta, gap) {
       return upperDelta === null
         ? windSpeedTables[res][level]
-        : windSpeedUpperTables[res][upperDeltaBucket(upperDelta)];
+        : windSpeedUpperTables[res][windGapClass(gap) * N_UPPER_BUCKETS + upperDeltaBucket(upperDelta)];
     },
     gustDeltaBook(res) {
       return gustDeltaTablesByRes[res];

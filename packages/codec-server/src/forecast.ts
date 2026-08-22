@@ -30,6 +30,7 @@ import {
   supportedVersions,
   widePartBodyChars,
   CLOUD_BAND_LEVELS_HPA,
+  WIND_LEVELS_HPA, WIND_LEVEL_BITS, WIND_LEVELS_MASK, windLevelsMaskFromToken,
   CLOUD_COVER_MIN_PCT,
   quantCover,
 } from "@weather/protocol";
@@ -105,8 +106,10 @@ const SURFACE_VARS = [
   "cloud_cover_mid",
   "cloud_cover_low",
 ];
-const PRESSURE_LEVELS = [500, 600, 700];
-const PRESSURE_VAR_NAMES = ["temperature", "wind_speed", "wind_direction"];
+// Pressure-level wind at every WIND_LEVELS_HPA level, whichever the request selected — one
+// upstream call serves any selection, and the derive scripts read all eight.
+const WIND_ALOFT_SPEED_VARS = WIND_LEVELS_HPA.map((l) => `wind_speed_${l}hPa`);
+const WIND_ALOFT_DIR_VARS = WIND_LEVELS_HPA.map((l) => `wind_direction_${l}hPa`);
 // The cloud band's levels ride the pressure-level request (for Europe that's the 0.25° IFS,
 // which lacks 600/400 — those come back null and repairCloudBand interpolates them in).
 //
@@ -197,12 +200,10 @@ export interface Row {
   freezing_level_m: number | null;
   snow_cm: number;
   rain_mm: number;
-  wind_speed_500hPa: number | null;
-  wind_direction_500hPa: number | null;
-  wind_speed_600hPa: number | null;
-  wind_direction_600hPa: number | null;
-  wind_speed_700hPa: number | null;
-  wind_direction_700hPa: number | null;
+  // Pressure-level wind per WIND_LEVELS_HPA entry (300 hPa first): window max speed and the
+  // speed-weighted dominant direction in degrees.
+  wind_aloft_kph: (number | null)[];
+  wind_aloft_deg: (number | null)[];
   cloud_cover: number | null;
   cloud_cover_high: number | null;
   cloud_cover_mid: number | null;
@@ -674,7 +675,7 @@ async function fetchHourly(
 ): Promise<[HourlyData, string[], number]> {
   const center = CENTERS[modelKey];
   const pressureVars = [
-    ...PRESSURE_VAR_NAMES.flatMap((v) => PRESSURE_LEVELS.map((l) => `${v}_${l}hPa`)),
+    ...WIND_ALOFT_SPEED_VARS, ...WIND_ALOFT_DIR_VARS,
     ...CLOUD_BAND_FETCH_VARS,
   ];
   // Drop freezing_level_height from the request for centers that don't provide it (GEM, ECMWF);
@@ -885,12 +886,8 @@ export function rowsFromWindows(
 
     const sfcSpd = pick(h.wind_speed_10m);
     const sfcDir = pick(h.wind_direction_10m);
-    const spd500 = pickUnk("wind_speed_500hPa");
-    const dir500 = pickUnk("wind_direction_500hPa");
-    const spd600 = pickUnk("wind_speed_600hPa");
-    const dir600 = pickUnk("wind_direction_600hPa");
-    const spd700 = pickUnk("wind_speed_700hPa");
-    const dir700 = pickUnk("wind_direction_700hPa");
+    const aloftSpd = WIND_ALOFT_SPEED_VARS.map(pickUnk);
+    const aloftDir = WIND_ALOFT_DIR_VARS.map(pickUnk);
 
     // The accumulations feed the weathercode below — the summary's intensity comes from how much
     // actually fell, so the code agrees with the numbers shipped beside it instead of reporting
@@ -915,12 +912,9 @@ export function rowsFromWindows(
       freezing_level_m: maxOf(pickUnk("freezing_level_height")),
       snow_cm: snowCm,
       rain_mm: rainMm,
-      wind_speed_500hPa: maxOf(spd500),
-      wind_direction_500hPa: dominantDirDeg(spd500, dir500),
-      wind_speed_600hPa: maxOf(spd600),
-      wind_direction_600hPa: dominantDirDeg(spd600, dir600),
-      wind_speed_700hPa: maxOf(spd700),
-      wind_direction_700hPa: dominantDirDeg(spd700, dir700),
+      // Same worst-hour semantics as the surface wind, per pressure level.
+      wind_aloft_kph: aloftSpd.map(maxOf),
+      wind_aloft_deg: aloftSpd.map((spd, li) => dominantDirDeg(spd, aloftDir[li])),
       cloud_cover: maxOf(pick(h.cloud_cover)),
       cloud_cover_high: maxOf(pick(h.cloud_cover_high)),
       cloud_cover_mid: maxOf(pick(h.cloud_cover_mid)),
@@ -975,17 +969,10 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period
     p.wind_sfc_dir = degToDirIdx(r.wind_direction_10m);
   }
   if (varsMask & (1 << VARS_BIT.gust)) p.wind_gust_kph = r.wind_gusts_10m ?? 0;
-  if (varsMask & (1 << VARS_BIT.w500)) {
-    p.wind_500_kph = r.wind_speed_500hPa ?? 0;
-    p.wind_500_dir = degToDirIdx(r.wind_direction_500hPa);
-  }
-  if (varsMask & (1 << VARS_BIT.w600)) {
-    p.wind_600_kph = r.wind_speed_600hPa ?? 0;
-    p.wind_600_dir = degToDirIdx(r.wind_direction_600hPa);
-  }
-  if (varsMask & (1 << VARS_BIT.w700)) {
-    p.wind_700_kph = r.wind_speed_700hPa ?? 0;
-    p.wind_700_dir = degToDirIdx(r.wind_direction_700hPa);
+  if (varsMask & WIND_LEVELS_MASK) {
+    p.wind_aloft = WIND_LEVEL_BITS.map((bit, li) => varsMask & (1 << bit)
+      ? { kph: r.wind_aloft_kph?.[li] ?? 0, dir: degToDirIdx(r.wind_aloft_deg?.[li]) }
+      : null);
   }
   // The v3 wire reads cloud_band; the low/mid/high fields stay filled because the derive
   // scripts (and any v2-era tooling) read Periods through this same function.
@@ -1121,8 +1108,12 @@ export function parseRequest(body: string): ForecastParams {
           if (m in MODEL_NAME_TO_BIT) mask |= 1 << MODEL_NAME_TO_BIT[m];
         }
         if (mask) modelsMask = mask;
+      } else if (key === "w") {
+        // Pressure-level wind: the WIND_LEVELS_HPA ladder indices to carry (`w:234` = 500/600/
+        // 700 hPa). Unknown characters are ignored; nothing is on without this token.
+        varsMask |= windLevelsMaskFromToken(val);
       } else if (key === "v") {
-        // Compact group codes need no delimiter (`v:pcwf`, `v:aso`). The character class comes
+        // Compact group codes need no delimiter (`v:pcf`, `v:aso`). The character class comes
         // from the group table itself, so a group added there can't be silently unparseable here.
         // Keep accepting comma-separated and long-form protocol variable names for requests
         // produced by older clients.

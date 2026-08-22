@@ -25,6 +25,7 @@ import {
   TEMP_DELTA_MAX,
   type CodeBook,
   makeBitSink,
+  WIND_LEVELS_HPA,
   makeBitSource,
 } from "../src/index.js";
 
@@ -94,7 +95,7 @@ describe("wind direction entropy coding", () => {
       for (const prev of [null, 0, 1, 2, 3, 4, 5, 6, 7]) {
         for (const upper of [null, 0, 3, 7]) {
           for (let dir = 0; dir < 8; dir++) {
-            const book = windDirBook(res, prev, upper);
+            const book = windDirBook(res, prev, upper, 1);
             const { cost, source } = encoded((sink) => sink.sym(book, dir));
             expect(cost).toBeGreaterThan(0);
             expect(source.sym(book)).toBe(dir);
@@ -110,12 +111,12 @@ describe("wind direction entropy coding", () => {
     const uppers = seq.map((_, i) => (i % 3 === 0 ? null : (i * 5) % 8)); // mix of with/without upper
     const { source } = encoded((sink) => {
       let prev: number | null = null;
-      seq.forEach((d, i) => { sink.sym(windDirBook(2, prev, uppers[i]), d); prev = d; });
+      seq.forEach((d, i) => { sink.sym(windDirBook(2, prev, uppers[i], 1), d); prev = d; });
     });
     let prev: number | null = null;
     const out: number[] = [];
     for (let k = 0; k < seq.length; k++) {
-      const sym = source.sym(windDirBook(2, prev, uppers[k]));
+      const sym = source.sym(windDirBook(2, prev, uppers[k], 1));
       out.push(sym);
       prev = sym;
     }
@@ -127,7 +128,7 @@ describe("wind direction entropy coding", () => {
     costOf((sink) => {
       let prev: number | null = null;
       dirs.forEach((d, i) => {
-        sink.sym(windDirBook(res, bootstrapOnly ? null : prev, bootstrapOnly ? null : upper(i)), d);
+        sink.sym(windDirBook(res, bootstrapOnly ? null : prev, bootstrapOnly ? null : upper(i), 1), d);
         prev = d;
       });
     });
@@ -155,8 +156,12 @@ describe("wind speed delta entropy coding", () => {
   const allBooks = () => {
     const books = [];
     for (let res = 0; res <= 3; res++) {
-      for (let level = 0; level < 4; level++) books.push(windSpeedBook(res, level, null));
-      for (const upperDelta of [-5, -1, 0, 1, 5]) books.push(windSpeedBook(res, 0, upperDelta));
+      // Level axis: surface, then every WIND_LEVELS_HPA rung; the upper-conditioned books are
+      // keyed by bucket × ladder gap class (1, 2, 3+).
+      for (let level = 0; level <= WIND_LEVELS_HPA.length; level++) books.push(windSpeedBook(res, level, null, 0));
+      for (const upperDelta of [-5, -1, 0, 1, 5]) {
+        for (const gap of [1, 2, 3, 7]) books.push(windSpeedBook(res, 0, upperDelta, gap));
+      }
     }
     return books;
   };
@@ -174,7 +179,7 @@ describe("wind speed delta entropy coding", () => {
 
   it("decodes a concatenated delta sequence unambiguously", () => {
     const seq = [0, 1, -1, 0, 2, -3, 17, 0, 1, -17, 0, 0];
-    const book = windSpeedBook(3, 1, null);
+    const book = windSpeedBook(3, 1, null, 0);
     const { source } = encoded((sink) => { for (const d of seq) encodeWindSpeedDelta(sink, book, d); });
     const out: number[] = [];
     for (let k = 0; k < seq.length; k++) out.push(decodeWindSpeedDelta(source, book));
@@ -186,7 +191,7 @@ describe("wind speed delta entropy coding", () => {
     expect([-31, -2, -1, 0, 1, 2, 31].map(upperDeltaBucket)).toEqual([0, 0, 1, 2, 3, 4, 4]);
   });
 
-  const bitsFor = (deltas: number[], book = windSpeedBook(3, 0, null)) =>
+  const bitsFor = (deltas: number[], book = windSpeedBook(3, 0, null, 0)) =>
     costOf((sink) => { for (const d of deltas) encodeWindSpeedDelta(sink, book, d); });
 
   it("a near-constant column costs fewer bits than a wide-swinging one, and beats raw 5-bit", () => {
@@ -198,7 +203,9 @@ describe("wind speed delta entropy coding", () => {
 
   it("a matching upper-level delta makes the same delta cheaper (cross-level context)", () => {
     const rising = Array(64).fill(2);
-    expect(bitsFor(rising, windSpeedBook(2, 2, 2))).toBeLessThan(bitsFor(rising, windSpeedBook(2, 2, null)));
+    expect(bitsFor(rising, windSpeedBook(2, 2, 2, 1))).toBeLessThan(bitsFor(rising, windSpeedBook(2, 2, null, 0)));
+    // A level further down the ladder still helps, under its own gap class.
+    expect(bitsFor(rising, windSpeedBook(2, 2, 2, 3))).toBeLessThan(bitsFor(rising, windSpeedBook(2, 2, null, 0)));
   });
 });
 

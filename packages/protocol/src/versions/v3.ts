@@ -1,5 +1,5 @@
 import {
-  WMO_CODES, VARS_BIT, CLOUD_BAND_LEVELS_HPA, metersToPressure,
+  WMO_CODES, VARS_BIT, CLOUD_BAND_LEVELS_HPA, WIND_LEVELS_HPA, WIND_LEVEL_BITS, metersToPressure,
   RESOLUTION_HOURS, TABLE_RES_IDXS,
 } from "../constants.js";
 import { layoutFor, maxFillSeq, effectiveMode } from "../layout.js";
@@ -59,7 +59,7 @@ const CODE_BITS = 7;
 const ELEV_BITS = 7;
 const ELEV_STEP_M = 100;
 // The elevation as the wire carries it — the value the DECODER will hand back. Every rule that
-// keys off elevation (cloudBandLevelCount) must read this, not the raw input, or the encoder
+// keys off elevation (pressureLevelCount) must read this, not the raw input, or the encoder
 // and decoder derive different structure from the same message.
 const quantElevM = (m: number): number =>
   Math.min(Math.max(Math.round(m / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1) * ELEV_STEP_M;
@@ -73,18 +73,21 @@ const HEADER_CHARS = nCharsForBits(V3_HEADER_BITS); // packed-header chars (excl
 // snow/rain: 6 bits each, sqrt-companded (see ACCUM_* below). rain is bit 12, the slot
 // formerly reserved for the removed `vis`; bit 13 (formerly tmin) is reserved.
 // wind: 8 = 5-bit speed (extended Beaufort force 0..17) + 3-bit direction (raw-width
-// equivalent; both entropy-coded).
+// equivalent; both entropy-coded) — surface (bit 4) and every WIND_LEVELS_HPA level (bits 5..7
+// and 25..28, see WIND_LEVEL_BITS), each carried whenever requested (no elevation clamp).
 // gust: 5 = speed only, no direction (bit 8, formerly cloud_total).
 // cloud band: bit 9 (v2's cch) carries the CLOUD_BAND_LEVELS_HPA stack at 3 bits per level
 // anchor — clamped to the ≤3h periods and to one level below the forecast point, see
 // cloudBandPeriodCount / cloudBandLevelCount; bits 10/11 (v2's ccm/ccl) carry nothing in v3
 // but stay in the table so the `c` toggle's mask decodes identically.
 // air quality: 5 bits each — a 26-symbol ladder (0 = no data, 1..25 bands), both scales.
-export const VAR_BITS_V3 = [3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5];
-//                          ^p ^t ^s ^f ^w ^5 ^6 ^7 ^g ^cband ^(10/11 unused) ^rain
-//                                                    ^aq_pm25 ^aq_o3 ^aqi ^aqi_eu ^aqi_eu_pm25
-//                                     ^aqi_eu_pm10 ^aqi_eu_no2 ^aqi_eu_o3 ^aqi_eu_so2
-//                                                  ^aq_pm10 ^aq_no2 ^aq_so2
+export const VAR_BITS_V3 = [
+  3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 8, 8, 8, 8,
+];
+//  ^p ^t ^s ^f ^w ^w300 ^w400 ^w500 ^g ^cband ^(10/11 unused) ^rain
+//                                   ^aq_pm25 ^aq_o3 ^aqi ^aqi_eu ^aqi_eu_pm25
+//                    ^aqi_eu_pm10 ^aqi_eu_no2 ^aqi_eu_o3 ^aqi_eu_so2 ^aq_pm10 ^aq_no2 ^aq_so2
+//                                                  ^w600 ^w700 ^w850 ^w925
 
 const TEMP_OFFSET = 100;
 
@@ -175,19 +178,23 @@ export function cloudBandPeriodCount(periodHours: number[]): number {
 
 // Elevation: levels below the forecast point are air the model puts under the terrain — the
 // fill synthesizes readings there, and a reader standing on the point can't see them anyway —
-// so the band carries every level above the ground plus ONE below (the slice the point stands
-// in, which is where an undercast shows). The count is a leading run of CLOUD_BAND_LEVELS_HPA:
-// the summit of Denali (~6200 m, ground ≈ 459 hPa) keeps [300, 400, 500] — a 30k/24k/18k
-// ladder — while anything under ~110 m keeps all eight. Feed this the HEADER's elevation
-// (quantElevM on the way in, the decoded value on the way out). The floor of 2 keeps the band
-// a band (one slice) even for a bogus elevation above every level; no terrain on Earth
-// reaches 300 hPa, so real inputs never hit it.
-export function cloudBandLevelCount(headerElevationM: number): number {
+// so a pressure-level column carries every level above the ground plus ONE below (the slice the
+// point stands in, which is where an undercast shows). The count is a leading run of the
+// shared ladder (CLOUD_BAND_LEVELS_HPA = WIND_LEVELS_HPA): the summit of Denali (~6200 m,
+// ground ≈ 459 hPa) keeps [300, 400, 500] — a 30k/24k/18k ladder — while anything under
+// ~110 m keeps all eight. Feed this the HEADER's elevation (quantElevM on the way in, the
+// decoded value on the way out). The floor of 2 keeps the cloud band a band (one slice) even
+// for a bogus elevation above every level; no terrain on Earth reaches 300 hPa, so real inputs
+// never hit it. The wind columns deliberately do NOT apply it: the reader picks wind levels one
+// by one and gets exactly those (a level under the terrain is the reader's call to leave out),
+// whereas the cloud band is all-or-nothing and so has to trim itself.
+export function pressureLevelCount(headerElevationM: number): number {
   const ground = metersToPressure(headerElevationM);
   let n = 0;
   while (n < CLOUD_BAND_LEVELS_HPA.length && CLOUD_BAND_LEVELS_HPA[n] < ground) n++;
   return Math.min(CLOUD_BAND_LEVELS_HPA.length, Math.max(2, n + 1));
 }
+export const cloudBandLevelCount = pressureLevelCount;
 
 // ── Air quality ────────────────────────────────────────────────────────────────
 // Five columns over two incompatible index scales (see the AQI ladders in entropy.ts), all from
@@ -333,29 +340,66 @@ const VALUE_COLUMNS: {
     set: (p, v) => { p.rain_mm = expandSqrt(v, RAIN_K); } },
 ];
 
-// Wind columns (surface gusts + surface + 500/600/700 hPa): speed + direction per cell, both
-// entropy-coded under tables keyed by context both sides already have — each period's
-// resolution, the column's level, and another column's already-decoded same-period values (see
-// gustDeltaBook/sfcSpeedBook/windSpeedBook/windDirBook in entropy.ts). `upperBit` names the
-// column conditioned on, applied only when that column is present in vars_mask (conditioning
-// columns encode/decode first in this array's order). GUST LEADS: it carries the peak-wind
-// story and conditions the surface column — not the reverse — so surface wind can one day
-// leave the always-on set without touching gust (direction of conditioning is bit-neutral;
-// the option value decided it, 2026-07-31). 600/700 hPa condition on the level above, since
-// adjacent pressure levels share the synoptic flow. Calm periods (force ≤ CALM_MAX_FORCE)
-// carry no direction symbol at all — see buildBody. `dir: null` marks a speed-only column
-// (gusts). All speeds share the extended-Beaufort quantization (see WIND_FORCE_BITS above);
-// `level` indexes the unconditioned windSpeedDelta table axis (level 0 = the surface fallback
-// when gust is absent).
-const WIND_COLUMNS: {
-  bit: number; kph: keyof Period; dir: keyof Period | null; level: number; upperBit: number;
-}[] = [
-  { bit: 8, kph: "wind_gust_kph", dir: null, level: 0, upperBit: -1 },
-  { bit: 4, kph: "wind_sfc_kph", dir: "wind_sfc_dir", level: 0, upperBit: 8 },
-  { bit: 5, kph: "wind_500_kph", dir: "wind_500_dir", level: 1, upperBit: -1 },
-  { bit: 6, kph: "wind_600_kph", dir: "wind_600_dir", level: 2, upperBit: 5 },
-  { bit: 7, kph: "wind_700_kph", dir: "wind_700_dir", level: 3, upperBit: 6 },
+// Wind columns (surface gusts + surface + one per WIND_LEVELS_HPA pressure level): speed +
+// direction per cell, both entropy-coded under tables keyed by context both sides already have
+// — each period's resolution, the column's level, and another column's already-decoded
+// same-period values (see gustDeltaBook/sfcSpeedBook/windSpeedBook/windDirBook in entropy.ts).
+// `upperBit` names the column conditioned on, applied only when that column is present in
+// vars_mask (conditioning columns encode/decode first in this array's order). GUST LEADS: it
+// carries the peak-wind story and conditions the surface column — not the reverse — so surface
+// wind can one day leave the always-on set without touching gust (direction of conditioning is
+// bit-neutral; the option value decided it, 2026-07-31). Each pressure level conditions on the
+// nearest REQUESTED level above it (levels share the synoptic flow, less so the further apart
+// they sit — the ladder gap between them keys the table, see windGapClass in entropy.ts); the
+// topmost requested level is unconditioned. The request is what both sides share, so the
+// conditioning graph costs no wire bits — and no elevation clamp applies (see
+// pressureLevelCount): every requested level is carried. Calm periods (force ≤ CALM_MAX_FORCE)
+// carry no direction symbol at all — see buildBody. `dir: false` marks a speed-only column (gusts). All speeds share the
+// extended-Beaufort quantization (see WIND_FORCE_BITS above); `level` indexes the
+// unconditioned windSpeedDelta table axis (0 = surface, also the surface fallback when gust is
+// absent; 1 + ladder index for the pressure levels).
+interface WindColumn {
+  bit: number;
+  name: string;
+  level: number;
+  // ladder index of the pressure level, -1 for the surface columns
+  li: number;
+  dir: boolean;
+  getKph(p: Period): number | undefined;
+  getDir(p: Period): number | undefined;
+  set(p: Period, kph: number, dir: number | null): void;
+}
+const aloft = (p: Period, li: number) => p.wind_aloft?.[li] ?? undefined;
+const WIND_COLUMNS: WindColumn[] = [
+  { bit: VARS_BIT.gust, name: "gust", level: 0, li: -1, dir: false,
+    getKph: (p) => p.wind_gust_kph, getDir: () => undefined,
+    set: (p, kph) => { p.wind_gust_kph = kph; } },
+  { bit: VARS_BIT.wind, name: "wind", level: 0, li: -1, dir: true,
+    getKph: (p) => p.wind_sfc_kph, getDir: (p) => p.wind_sfc_dir,
+    set: (p, kph, dir) => { p.wind_sfc_kph = kph; p.wind_sfc_dir = dir ?? 0; } },
+  ...WIND_LEVELS_HPA.map((hpa, li): WindColumn => ({
+    bit: WIND_LEVEL_BITS[li], name: `w${hpa}`, level: 1 + li, li, dir: true,
+    getKph: (p) => aloft(p, li)?.kph, getDir: (p) => aloft(p, li)?.dir,
+    set: (p, kph, dir) => {
+      p.wind_aloft ??= WIND_LEVELS_HPA.map(() => null);
+      p.wind_aloft[li] = { kph, dir: dir ?? 0 };
+    } })),
 ];
+// The wind columns a message carries, with each one's conditioning column resolved: the
+// surface column leans on gust when present; a pressure level on the nearest requested level
+// above it.
+function requestedWindColumns(vars_mask: number): { col: WindColumn; upper: WindColumn | null }[] {
+  const out: { col: WindColumn; upper: WindColumn | null }[] = [];
+  let lastLevel: WindColumn | null = null;
+  for (const col of WIND_COLUMNS) {
+    if (!(vars_mask & (1 << col.bit))) continue;
+    let upper: WindColumn | null = null;
+    if (col.bit === VARS_BIT.wind) upper = out.find((e) => e.col.bit === VARS_BIT.gust)?.col ?? null;
+    else if (col.li >= 0) { upper = lastLevel; lastLevel = col; }
+    out.push({ col, upper });
+  }
+  return out;
+}
 
 // Per-period codebook table row (0..3 = 12h..1h, TABLE_RES_IDXS order — the only resolutions a
 // layout can produce, so no table ships a 24h row) from each period's span. The fill mixes
@@ -634,36 +678,36 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
     mark(BIT_NAME[col.bit], before);
   }
   // Both sides quantize identically: a decoded band midpoint re-quantizes to its force.
-  const windSpeed = (c: Period, col: (typeof WIND_COLUMNS)[number]) =>
-    quantWind((c[col.kph] as number) ?? 0);
+  const windSpeed = (c: Period, col: WindColumn) => quantWind(col.getKph(c) ?? 0);
   // Quantized speeds and displayed directions of already-encoded wind columns, keyed by var
-  // bit — the cross-column context for the surface (← gust) and 600/700 hPa (← level above)
-  // columns; conditioning columns encode first.
+  // bit — the cross-column context for the surface (← gust) and pressure-level (← nearest
+  // requested level above) columns; conditioning columns encode first.
   const spdByBit = new Map<number, number[][]>();
   const dispByBit = new Map<number, number[][]>();
-  for (const col of WIND_COLUMNS) {
-    if (!(msg.vars_mask & (1 << col.bit))) continue;
+  for (const { col, upper: upperCol } of requestedWindColumns(msg.vars_mask)) {
     before = em.cost;
-    const upper = col.upperBit >= 0 && (msg.vars_mask & (1 << col.upperBit))
-      ? { spd: spdByBit.get(col.upperBit)!, disp: dispByBit.get(col.upperBit)! }
+    const upper = upperCol
+      ? { spd: spdByBit.get(upperCol.bit)!, disp: dispByBit.get(upperCol.bit)! }
       : null;
     // Direction context only exists when the conditioning column HAS a direction stream —
     // gust doesn't, so the surface column's dir tables stay unconditioned.
-    const upperDir = upper && WIND_COLUMNS.find((c) => c.bit === col.upperBit)?.dir ? upper.disp : null;
+    const upperDir = upper && upperCol!.dir ? upper.disp : null;
+    const gap = upperCol && col.li >= 0 ? col.li - upperCol.li : 0;
     const spd: number[][] = msg.periods.map((rows) => rows.map((c) => windSpeed(c, col)));
 
     // Speed: per model, a raw force anchor then entropy-coded period-over-period deltas —
     // gust under its res-keyed tables, surface keyed by gust's same-period delta (falling back
-    // to the level-0 table when gust is absent), 500/600/700 keyed by (res, level) or the level
-    // above's same-period delta (see gustDeltaBook/sfcSpeedBook/windSpeedBook in entropy.ts).
-    // Never diffed across a model boundary.
+    // to the level-0 table when gust is absent), pressure levels keyed by (res, level) or the
+    // requested level above's same-period delta and the ladder gap to it (see
+    // gustDeltaBook/sfcSpeedBook/windSpeedBook in entropy.ts). Never diffed across a model
+    // boundary.
     for (let m = 0; m < nModels; m++) {
       em.raw(spd[m][0], WIND_FORCE_BITS);
       for (let p = 1; p < nPeriods; p++) {
         const upperDelta = upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null;
         const book = col.bit === VARS_BIT.gust ? books.gustDeltaBook(res[p])
           : col.bit === VARS_BIT.wind ? books.sfcSpeedBook(res[p], upperDelta)
-          : books.windSpeedBook(res[p], col.level, upperDelta);
+          : books.windSpeedBook(res[p], col.level, upperDelta, gap);
         encodeWindSpeedDelta(em, book, spd[m][p] - spd[m][p - 1]);
       }
     }
@@ -677,13 +721,12 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
     // direction symbols.
     const disp: number[][] = msg.periods.map((rows) => rows.map(() => 0));
     if (col.dir) {
-      const dir = col.dir;
       const eff: number[] = new Array(nModels).fill(0);
       let prevDir: number | null = null;
       eachCell(nPeriods, nModels, (p, m) => {
         if (spd[m][p] > CALM_MAX_FORCE) {
-          const d = ((msg.periods[m][p][dir] as number) ?? 0) % 8;
-          em.sym(books.windDirBook(res[p], prevDir, upperDir ? upperDir[m][p] : null), d);
+          const d = (col.getDir(msg.periods[m][p]) ?? 0) % 8;
+          em.sym(books.windDirBook(res[p], prevDir, upperDir ? upperDir[m][p] : null, gap), d);
           prevDir = d;
           eff[m] = d;
         }
@@ -693,7 +736,7 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
     spdByBit.set(col.bit, spd);
     dispByBit.set(col.bit, disp);
 
-    mark(BIT_NAME[col.bit], before);
+    mark(col.name, before);
   }
 
   return em;
@@ -1018,26 +1061,23 @@ function decodeBody(
   // directions, with the upper column's already-decoded values as cross-level context.
   const spdByBit = new Map<number, number[][]>();
   const dispByBit = new Map<number, number[][]>();
-  for (const col of WIND_COLUMNS) {
-    if (!(vars_mask & (1 << col.bit))) continue;
-    const upper = col.upperBit >= 0 && (vars_mask & (1 << col.upperBit))
-      ? { spd: spdByBit.get(col.upperBit)!, disp: dispByBit.get(col.upperBit)! }
+  for (const { col, upper: upperCol } of requestedWindColumns(vars_mask)) {
+    const upper = upperCol
+      ? { spd: spdByBit.get(upperCol.bit)!, disp: dispByBit.get(upperCol.bit)! }
       : null;
-
-    const upperDir = upper && WIND_COLUMNS.find((c) => c.bit === col.upperBit)?.dir ? upper.disp : null;
+    const upperDir = upper && upperCol!.dir ? upper.disp : null;
+    const gap = upperCol && col.li >= 0 ? col.li - upperCol.li : 0;
     const spd: number[][] = Array.from({ length: nModels }, () => new Array<number>(nPeriods).fill(0));
     for (let m = 0; m < nModels; m++) {
       let speed = rd.int(WIND_FORCE_BITS);
       spd[m][0] = speed;
-      (periods[m][0][col.kph] as number) = beaufortMidKph(speed);
       for (let p = 1; p < nPeriods; p++) {
         const upperDelta = upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null;
         const book = col.bit === VARS_BIT.gust ? books.gustDeltaBook(res[p])
           : col.bit === VARS_BIT.wind ? books.sfcSpeedBook(res[p], upperDelta)
-          : books.windSpeedBook(res[p], col.level, upperDelta);
+          : books.windSpeedBook(res[p], col.level, upperDelta, gap);
         speed += rd.windSpeedDelta(book);
         spd[m][p] = speed;
-        (periods[m][p][col.kph] as number) = beaufortMidKph(speed);
       }
     }
 
@@ -1046,19 +1086,19 @@ function decodeBody(
     // Speed-only columns (gusts) carried no direction symbols at all.
     const disp: number[][] = Array.from({ length: nModels }, () => new Array<number>(nPeriods).fill(0));
     if (col.dir) {
-      const dir = col.dir;
       const eff: number[] = new Array(nModels).fill(0);
       let prevDir: number | null = null;
       eachCell(nPeriods, nModels, (p, m) => {
         if (spd[m][p] > CALM_MAX_FORCE) {
-          const d = rd.sym(books.windDirBook(res[p], prevDir, upperDir ? upperDir[m][p] : null));
+          const d = rd.sym(books.windDirBook(res[p], prevDir, upperDir ? upperDir[m][p] : null, gap));
           prevDir = d;
           eff[m] = d;
         }
         disp[m][p] = eff[m];
-        (periods[m][p][dir] as number) = eff[m];
       });
     }
+    eachCell(nPeriods, nModels, (p, m) =>
+      col.set(periods[m][p], beaufortMidKph(spd[m][p]), col.dir ? disp[m][p] : null));
     spdByBit.set(col.bit, spd);
     dispByBit.set(col.bit, disp);
   }

@@ -18,9 +18,12 @@
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD, type HourlyData } from "../src/forecast.ts";
 import { eachForecast, foldOf, N_FOLDS, scaledWeights } from "./derive-lib.ts";
-import { quantizeFreqs, RANS_PROB_BITS, VARS_BIT, type Period } from "@weather/protocol";
+import { quantizeFreqs, RANS_PROB_BITS, VARS_BIT, WIND_LEVELS_HPA, type Period } from "@weather/protocol";
 
 const WIND_MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
+// The three levels this scan was written against (the wire now carries any subset of the eight
+// WIND_LEVELS_HPA levels — see derive-wind-*-codebooks.ts for the gap-keyed training).
+const ALOFT_IDX = [500, 600, 700].map((l) => WIND_LEVELS_HPA.indexOf(l));
 // STALE (2026-07-31): this scan predates the extended-Beaufort wire (quantWind in v3.ts) and
 // still quantizes linearly — its recorded conclusions stand, but re-derive the chains against
 // quantWind before trusting fresh numbers. See analyze-wind-scale-heldout.ts for the scale scan.
@@ -30,8 +33,8 @@ const NSPD = 2 * SPEED_MAX + 1;          // deltas -31..31
 const NDIR = 8;
 const RES_INDICES = [0, 1, 2, 3, 4];
 const LEVELS = ["sfc", "500", "600", "700"] as const;
-const SPEED_FIELDS = ["wind_sfc_kph", "wind_500_kph", "wind_600_kph", "wind_700_kph"] as const;
-const DIR_FIELDS = ["wind_sfc_dir", "wind_500_dir", "wind_600_dir", "wind_700_dir"] as const;
+const speedOf = (p: Period, L: number) => (L === 0 ? p.wind_sfc_kph : p.wind_aloft?.[ALOFT_IDX[L - 1]]?.kph);
+const dirOf = (p: Period, L: number) => (L === 0 ? p.wind_sfc_dir : p.wind_aloft?.[ALOFT_IDX[L - 1]]?.dir);
 // level -> index of the level it may condition on (already decoded), or -1
 const UPPER_OF = [-1, -1, 1, 2];
 
@@ -65,8 +68,8 @@ await eachForecast((hourly: HourlyData, runHour: number, loc: string) => {
     if (n < 2) continue;
     const rows = aggregateHourly(hourly, hourly.time, n, resIdx, start);
     const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US"));
-    const sp = LEVELS.map((_, L) => periods.map((p) => qSpeed((p as any)[SPEED_FIELDS[L]], L)));
-    const dr = LEVELS.map((_, L) => periods.map((p) => (((p as any)[DIR_FIELDS[L]] as number) ?? 0) % 8));
+    const sp = LEVELS.map((_, L) => periods.map((p) => qSpeed(speedOf(p, L), L)));
+    const dr = LEVELS.map((_, L) => periods.map((p) => (dirOf(p, L) ?? 0) % 8));
     // Displayed dir under calm gating: last encoded dir, 0 before any.
     const disp = LEVELS.map((_, L) => {
       let eff = 0;

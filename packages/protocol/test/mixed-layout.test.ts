@@ -48,12 +48,9 @@ function periodAt(i: number): Period {
     // above the calm gate (force ≤ 1) so directions round-trip too.
     wind_sfc_kph: beaufortMidKph((i % 6) + 2),
     wind_sfc_dir: i % 8,
-    wind_500_kph: beaufortMidKph((i % 4) + 4),
-    wind_500_dir: (i + 2) % 8,
-    wind_600_kph: beaufortMidKph((i % 5) + 3),
-    wind_600_dir: (i + 4) % 8,
-    wind_700_kph: beaufortMidKph((i % 3) + 2),
-    wind_700_dir: (i + 6) % 8,
+    // Every pressure level, forces above the calm gate, one moving value per level.
+    wind_aloft: Array.from({ length: 7 }, (_, li) =>
+      ({ kph: beaufortMidKph(((i + li) % 5) + 2), dir: (i + 2 * li) % 8 })),
     // Step-aligned so the 3-bit quantization round-trips exactly, one moving value per level.
     cloud_band: Array.from({ length: 8 }, (_, li) => Math.round(((i + li) % 8) * 100 / 7)),
     // Air quality, as ladder band representatives so they round-trip exactly. Each headline stays

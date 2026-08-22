@@ -163,6 +163,7 @@ export default function App() {
           twoMessages={twoMessages}
           onTwoMessagesChange={setTwoMessages}
           aqiScale={aqiScale}
+          units={units}
         />
       </View>
       <View

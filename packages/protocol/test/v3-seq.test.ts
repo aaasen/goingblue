@@ -6,8 +6,7 @@ import type { ForecastMessage, Period, RequestContext } from "../src/model.js";
 
 const PERIOD: Period = {
   weathercode: 3, precip: 57, snow_cm: 0, freeze_m: 3048,
-  wind_500_kph: 48, wind_500_dir: 4, wind_600_kph: 40, wind_600_dir: 3,
-  wind_700_kph: 24, wind_700_dir: 2,
+  wind_aloft: [null, null, { kph: 48, dir: 4 }, { kph: 40, dir: 3 }, { kph: 24, dir: 2 }, null, null],
 };
 
 // Requested at local midnight (UTC offset 0) so day 0 is a complete day.
