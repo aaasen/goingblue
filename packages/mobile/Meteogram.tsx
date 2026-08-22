@@ -1897,12 +1897,21 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
         color={rgb(CLOUD_BAND_INK, alpha)} />);
     }
 
-    // Where the band stops short of the window (coarser periods follow), the contours dissolve
-    // into the boundary over the last half column instead of hitting it as a sheer face — the
-    // sentinel column already tapers them, and this wash softens what remains. Over the
-    // contours only: the gridlines and ground line draw after it, ending crisply at the
-    // boundary, so the SCALE reads as ending while the CLOUD reads as passing out of view.
+    // Where the band stops short of the window (coarser periods follow), the rest of the row is
+    // filled in the day divider's grey: left white, those columns would read as a
+    // clear sky — the same white a 0% contour field paints — when the message simply carries no
+    // band for them. The divider grey is already the drawing's "not content" tone, a step darker
+    // than the grid, so it reads as blank rather than as a pale cloud. On the data side of the
+    // seam the contours dissolve to white over the last half column instead of hitting the grey
+    // as a sheer face — the sentinel column already tapers them, and this wash softens what
+    // remains. Over the contours only: the gridlines and ground line draw after it, ending
+    // crisply at the boundary, so the SCALE reads as ending while the CLOUD reads as passing out
+    // of view.
     if (nCb < n) {
+      cloudBandEls.push(
+        <Rect key={`cbnone${ri}`} x={bandRight} y={top} width={width - bandRight}
+          height={row.height} color={C.divider} />,
+      );
       cloudBandEls.push(
         <Rect key={`cbfade${ri}`} x={bandRight - CELL_W / 2} y={top}
           width={CELL_W / 2} height={row.height}>
@@ -2352,9 +2361,14 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           const v = valueAt(i);
           const cx = colCenter(i);
           // Past the CAMS horizon there is no forecast at all, which is a different thing from
-          // clean air — so those columns get the empty-cell dash and no colored ground, exactly
-          // like a wind row with nothing in it.
-          if (v == null) { els.push(centerText(`aq${ri}-${i}`, '—', cx, mid, fonts.wind, C.nil)); continue; }
+          // clean air — so those columns are filled in the day divider's grey, the drawing's
+          // "not content" tone, as the cloud band's tail is, rather than left white beside the
+          // category colors, where they would read as the cleanest category of all.
+          if (v == null) {
+            els.push(<Rect key={`aq${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W}
+              height={row.height} color={C.divider} />);
+            continue;
+          }
           // The gradient is exact at the column's center, which is where the digits sit, so the
           // ink is measured against this cell's own band rather than the blend either side. One
           // white for the whole row was tried and doesn't survive the light fills — on EPA's
@@ -2378,9 +2392,12 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         const segs = statics.dominantSegs[row.kind] ?? [];
         const named = new Set<number>();
         segs.forEach((sg) => { for (let i = sg.start; i < sg.end; i++) named.add(i); });
+        // Columns with no headline to caption — past the CAMS horizon — take the same grey as the
+        // row above them, so the blank runs to the bottom of the block as one shape.
         for (let i = c0; i < c1; i++) {
           if (named.has(i)) continue;
-          els.push(centerText(`dm${ri}-${i}`, '—', colCenter(i), mid, fonts.wind, C.nil));
+          els.push(<Rect key={`dm${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W}
+            height={row.height} color={C.divider} />);
         }
         segs.forEach((sg, si) => {
           if (colLeft(sg.end) < xLo || colLeft(sg.start) > xHi) return;
