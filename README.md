@@ -14,7 +14,7 @@ Going Blue is a weather app designed specifically for satellite messengers. It w
 
 - Works via the internet, SMS, Garmin inReach, and iPhone satellite messaging. 
 - Uses a custom compression codec optimized for weather data that packs hundreds of data points into a single message. Choose between hourly detail and extended range up to 13 days.
-- Temperature, snow, rain, wind, and cloud cover included by default. Optional variables include pressure-level winds for high-altitude mountaineering, AQI for planning around wildfire smoke, low/mid/high cloud cover, and freezing level.
+- Temperature, snow, rain, wind, and cloud cover included by default. Optional variables include pressure-level winds for high-altitude mountaineering, AQI for planning around wildfire smoke, detailed cloud cover with 8 levels, and freezing level.
 - Weather forecasts from over 30 models including HRRR (3km), HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for your location.
 - Compare forecasts from American, Canadian, and European forecast centers.
 - All forecasts are saved on your device for comparing multiple models and past forecasts.
@@ -111,27 +111,26 @@ To keep the message small, the server never sends the client information that it
 
 ### Strategy by Variable
 
-Each variable has a different quantization method and codebook strategy. The variables that are always included are:
-1. Weathercode
-2. Temperature
-3. Snow
-4. Rain
-5. Wind gust
-6. Wind speed
-7. Wind direction
+Each variable has a different quantization method and codebook strategy. Quantization is chosen to minimize the cost of each column while maintaining the useful information. For example, wind uses the Beaufort scale which is tuned for perceptible differences in wind speed like Beaufort 1 "Direction shown by smoke drift but not by wind vanes" versus Beaufort 2 "Wind felt on face; leaves rustle; wind vane moved by wind".
 
-| Variable             | Model | States (the symbol alphabet)                          | Codebook keyed by                              | Quantization                          |
-| -------------------- | ----- | ------------------------------------------------------ | ---------------------------------------------- | ------------------------------------- |
-| weathercode          | value | 30 WMO codes                                            | previous code                                  | —                                     |
-| temperature          | delta | Δ°C −7…+7, plus an escape symbol + raw 6-bit (−32…+31) | resolution × time-of-day (8 × 3h local buckets) × previous-delta bucket (≤−2 \| −1 \| 0 \| +1 \| ≥+2) | 1 °C steps, −100…+155 °C; 8-bit anchor |
-| precipitation prob.  | value | eighths 0…7                                             | resolution × previous value × same-period weathercode class | 0–100% in eighths        |
-| snow                 | value | 64 companded steps                                      | resolution × previous-value bucket (0 \| 1–3 \| 4–9 \| 10–20 \| 21+) × same-period weathercode class | sqrt-companded, 0–200 cm |
-| rain                 | value | 64 companded steps                                      | resolution × previous-value bucket (same) × same-period weathercode class | sqrt-companded, 0–144 mm |
-| freezing level       | delta | Δ −31…+31                                               | resolution × same-period temperature Δ bucket (≤−2 \| −1 \| 0 \| +1 \| ≥+2); resolution alone when temp is absent | 1000 ft steps, 0–31000 ft; 5-bit anchor |
-| cloud band           | value | eighths 0…7                                             | pressure level × previous value                | 0–100% in eighths; 3-bit anchor       |
-| wind gust            | delta | Δ −17…+17                                               | resolution (encodes first, no context of its own) | extended Beaufort force 0…17, km/h bands; 5-bit anchor |
-| wind speed           | delta | Δ −17…+17                                               | resolution × level; surface by the gust column's Δ bucket; 600/700 hPa by the upper level's Δ bucket | extended Beaufort force 0…17, km/h bands (midpoint decode); 5-bit anchor |
-| wind direction       | value | 8 cardinals                                             | resolution × previous direction (× upper direction for 600/700 hPa); calm periods emit no symbol | 45° points |
+The codebooks try to take advantage of correlated weather variables. For example, temperature is keyed by time of day since often it has a diurnal cycle. Snow and rain use the weathercode class (clear, rainy, snowy, etc.). Most variables use the forecast resolution (1h, 3h, 6h, 12h) since the forecast resolution affects the amount of accumulation and magnitude of change in each period. The goal of all of this is to make the probability distribution of each codebook heavily skewed so that the most common state can be encoded very cheaply.
+
+| Variable                        | Model | Unit                                               | Codebook keyed by                                             |
+| ------------------------------- | ----- | -------------------------------------------------- | ------------------------------------------------------------- |
+| Weathercode                     | Value | WMO Code                                           | Previous weathercode                                          |
+| Temperature                     | Delta | 1 °C (-100°C to 155°C)                                | Previous temperature delta, time of day, forecast resolution  |
+| Precip chance                   | Value | % in 8 steps                                       | Previous value, weathercode class, forecast resolution        |
+| Snow                            | Value | cm, 64 sqrt-companded steps (0-200cm)              | Previous value bucket, weathercode class, forecast resolution |
+| Rain                            | Value | mm, 64 sqrt-companded steps (0-144mm)              | Previous value bucket, weathercode class, forecast resolution |
+| Freezing level                  | Delta | 1000ft steps (0-31,000ft)                         | Temperature delta bucket, forecast resolution                 |
+| Cloud band                      | Value | % in 8 steps                                       | Previous value, pressure level                                |
+| Wind gust                       | Delta | Extended Beaufort force (0-17)                     | Forecast resolution                                           |
+| Surface wind speed              | Delta | Extended Beaufort force (0-17)                     | Wind gust delta, forecast resolution                          |
+| Pressure-level wind speed       | Delta | Extended Beaufort force (0-17)                     | Pressure level, forecast resolution                           |
+| Wind direction                  | Value | 8 cardinal directions                              | Previous direction, forecast resolution                       |
+| AQI, Ozone, NO₂ (diurnal cycle) | Delta | Air quality index (US: 0-500, EU: 0-100), 25 bands | Previous delta, time of day, forecast resolution              |
+| PM2.5, PM10, SO₂                | Delta | Air quality index (US: 0-500, EU: 0-100), 25 bands | Previous delta, forecast resolution                           |
+| Dominant pollutant              | Value | Pollutant (PM2.5, PM10, Ozone, SO2, NO2)           | Previous dominant pollutant                                   |
 
 ### Alphabet and Message Length
 
@@ -165,7 +164,7 @@ Each device has a different character set and message length. Going Blue chooses
 
 Entropy coding requires having accurate statistics about the distribution of each symbol since sequences that aren't represented in the training data will be very expensive to encode. For example, if we trained the codebooks only on tropical weather forecasts, the encoder would assign very long symbols to snow and a forecast in the arctic would be very expensive.
 
-The encoder is trained on over 100k historical forecasts collected from the [Open-Meteo Historical Forecast API](https://open-meteo.com/en/docs/historical-forecast-api). These forecasts are sampled from 8,500 locations across the world. Forecast locations are not uniformly sampled across the globe since that would bias the forecasts strongly towards the ocean. Instead, the forecast points are allocated based on 30 Köppen climate classes based on the square-root of the area of the climate class. This ensures that rare climate classes have enough training data while still allocating more share to more common climate types. 
+The encoder is trained on over 100k historical forecasts collected from the [Open-Meteo Historical Forecast API](https://open-meteo.com/en/docs/historical-forecast-api). These forecasts are sampled from 10,000 locations across the world. Forecast locations are not uniformly sampled across the globe since that would bias the forecasts strongly towards the ocean. Instead, the forecast points are allocated based on 30 Köppen climate classes based on the square-root of the area of the climate class. This ensures that rare climate classes have enough training data while still allocating more share to more common climate types. 
 
 Ocean locations are not included in Köppen but they are included in the training data with an 85/15 land/ocean split. This gives the ocean a similar weight to a high-level Köppen climate class (tropical, arid, temperate, continental, polar). Ocean locations are sampled from 6 30° latitude bands with the same `sqrt(area)` allocation as climate classes.
 
@@ -187,14 +186,11 @@ Some interesting findings from the evaluation:
 1. Wind is the most expensive variable (steady, gust, direction combined) taking an average of 40.1% of the message. Temperature is the second most expensive at 24.6% followed by weathercode at 19%. Since snow and rain are sparse, they only take up an average of 10.8% combined. 
 1. A 1st-percentile forecast containing all optional variables (detailed clouds, high altitude winds, freezing level, and precip chance) still delivers 7 days of forecast data at 6h resolution for 3 days and 12h resolution for the next 4 days.
 
-### Weather Data Transformation
+### Weather Data & Transformation
 
- - Rain -> snow remapping based on temperature. Temperature is already adjusted for elevation by Open-Meteo. The rain -> snow remapping makes precip type consistent with temperature.
- - Mixed rain/snow weathercodes during mixed precip periods.
- - Pressure-level cloud extrapolation from low/mid/high clouds based on relative humidity.
- - Weathercode summarization. Weathercodes are aggregated from hourly data for longer periods. Showery codes are used to indicate mixed conditions. 
+Going Blue uses [Open-Meteo](https://open-meteo.com/) for weather data with some transformations that are explained below.
 
-#### Elevation Correction
+#### Elevation Correction for Temperature and Precipitation
 
 Open-Meteo accepts an elevation parameter for forecasts and adjusts temperature from the model's grid cell elevation using temperature lapse rate. It does not adjust other variables like precipitation type. This can lead to contradictory forecasts in the mountains. For example, a forecast for the summit of Denali may show very low temperatures and rain if it is raining at the grid cell elevation (~3000m for GFS). 
 
@@ -206,6 +202,45 @@ The following weathercodes are remapped:
  - 80/81/82 (rain showers)   → 85/85/86 (snow showers)
 
 Freezing drizzle (56/57) and freezing rain (66/67) are not transformed.
+
+#### Pressure-level Cloud Interpolation
+
+Open-Meteo provides cloud cover at various pressure levels. This is calculated based on the relative humidity compared to the critical relative humidity at each pressure level using Sundqvist's formula. The pressure-level cloud data drives the detailed cloud view in the meteogram, which shows clouds at 8 different levels in the atmosphere. This information can help determine what type of clouds are forecast: high cirrus overcast, a lenticular on the summit, or valley fog?
+
+There is a subtle problem with using clouds at each pressure level directly: the pressure-level variable only reports clouds that are exactly at that band. If there is a cloud at 20k but we only pull the 18k and 24k bands, we will miss that cloud entirely. This can lead to inconsistent forecasts where we report "cloudy" in the weathercode but the meteogram shows no clouds. 
+
+To fix this, Going Blue attributes low (<3km), mid (3-8km), and high (>8km) cloud cover to their respective pressure levels. The low, mid, and high cloud cover variables are derived from the tens to hundreds of pressure levels within each model, so there are no gaps.
+
+First, each pressure level is associated with a band using geopotential heights. For example:
+ - Low (<3km): 1000, 925, 850 hPa
+ - Mid (3-8km): 700, 600, 500, 400 hPa
+ - High (>8km): 300 hPa
+
+If the band reports clouds but none of its member levels do, the member levels are assigned clouds based on their relative humidity. Clouds from the low/mid/high band are split between the levels in the band whose humidity is furthest above critical relative humidity. 
+
+#### Weathercode Summarization
+
+Open-Meteo is an hourly weather API but Going Blue forecast periods range from 1h to 12h. Going Blue summarizes the hourly weathercodes of a period in a single weathercode for the period. Showery codes are used to represent mixed conditions. For example, if it snows 3 hours in a 12h period and is sunny the remaining 9 hours, a "snow showers" code will be used. 
+
+Open-Meteo does not emit mixed rain/snow weathercodes. Going Blue uses a mixed code if the water equivalent of the lesser type of precipitation exceeds 25% of the total precipitation. For example, in a period with 1" of snow (~0.14" water equivalent) and 0.1" of rain, rain accounts for 42% of the precip so it gets a mixed code. With 1" of snow and 0.01" of rain, rain is just a trace at 7% of total precip and the snow code is used.
+
+#### Air Quality
+
+Air quality is sourced from the CAMS model which has 11km resolution in Europe and 44km resolution in the rest of the world. The US and Europe have separate air quality scales that have different weights and health thresholds for each pollutant. Both scales calculate the index of each constituent pollutant and then take the maximum index as the headline AQI. The constituent pollutants are:
+ - PM2.5 (smoke)
+ - PM10 (dust)
+ - Ozone (smog)
+ - Nitrogen Dioxide (traffic)
+ - Sulfur Dioxide (industrial/volcanic)
+ - Carbon Monoxide (US only)
+
+In practice, PM2.5 and ozone drive the headline AQI with PM10 a distant third. The other pollutants are rarely the main concern. Dominant pollutant frequency by scale:
+ - American scale: PM2.5 56.9%, Ozone 40.3%, PM10 2.8%
+ - European scale: PM2.5 23.1%, Ozone 68.6%, PM10 8.3%
+
+Because of this, the headline AQI can be derived from other pollutants if they are already present in the message. If at least PM2.5 and ozone are present, just the residual between the estimated AQI and the actual AQI is sent. The residual is almost nothing (~0.036 bits/period) if PM2.5, ozone, and PM10 are already in the message. With PM2.5 and ozone, the headline AQI only costs 0.275 bits/period on the American scale and 0.653 bits/period on the European. This is significantly cheaper than encoding headline AQI without the constituent variables, which costs roughly 1 bit/period.
+
+Going Blue reports the headline AQI in addition to the dominant pollutant. It can also report the index of any individual pollutant with the exception of Carbon Monoxide, which is US-only and rarely a problem. 
 
 ## Development
 
