@@ -300,12 +300,27 @@ function seqLabel(mode: number, seq: number): string {
   return runs.join(" ") + cover;
 }
 
+// Two anchors can be a single interpolation move apart — Auto's "coverage to 10" and "hourly
+// refinement begins" differ by one slot bumped from 3h to 1h, so they land on seq 20 and 21 of 45.
+// Ticks 1/45 of the axis apart print their labels straight through each other, twice over (each
+// mark carries a fill percentage below the axis and a reach percentage above), which is how a
+// legible chart ends up reading "44.446.7%". A mark needs about its own label width of clearance,
+// and a percentage label is ~6% of the plot; anything tighter than that merges.
+const MIN_MARK_GAP = 0.06; // fraction of the seq axis between two marks' labels
+
 // The landmarks the report marks on every seq axis: the mode's anchor waypoints (layout.ts).
-// The first couple of anchors sit inside the truncated ramp — too close to zero to label.
+// The first couple of anchors sit inside the truncated ramp — too close to zero to label. When two
+// crowd, the later one survives: the anchors are nested, so it is the earlier one plus the moves
+// between them, and it names the deeper rung the path has just reached.
 function anchorMarks(mode: number): { seq: number; label: string }[] {
-  return FILL_ANCHOR_SEQS[mode]
-    .filter((seq) => seq > 3)
-    .map((seq) => ({ seq, label: seqLabel(mode, seq) }));
+  const max = maxFillSeq(mode);
+  const marks: { seq: number; label: string }[] = [];
+  for (const seq of FILL_ANCHOR_SEQS[mode].filter((s) => s > 3)) {
+    const prev = marks[marks.length - 1];
+    if (prev && (seq - prev.seq) / max < MIN_MARK_GAP) marks.pop();
+    marks.push({ seq, label: seqLabel(mode, seq) });
+  }
+  return marks;
 }
 
 // The corpus has no timezone, and production takes the offset from the client's `z:` token — so
