@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Chunked basemap prototype</title>
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
+<style>
+  html, body { margin: 0; height: 100%; }
+  #map { position: absolute; inset: 0; }
+  #panel {
+    position: absolute; top: 10px; right: 10px; z-index: 10;
+    background: rgba(255,255,255,.92); border-radius: 8px; padding: 10px 14px;
+    font: 12px/1.6 -apple-system, sans-serif; box-shadow: 0 1px 6px rgba(0,0,0,.25);
+    min-width: 230px;
+  }
+  #panel b { font-size: 12px; }
+  #panel label { display: flex; justify-content: space-between; gap: 8px; }
+  #panel input[type=range] { width: 110px; }
+  .jump { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .jump button { font-size: 11px; padding: 2px 6px; }
+  #coords { color: #666; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <b>Offline: global z6 + USA z9 + AK z10 &middot; Online: z15</b>
+  <label>Hillshade <input id="hs" type="range" min="0" max="100" value="55"></label>
+  <div class="jump">
+    <button data-v="63.07,-151.00,8">Denali</button>
+    <button data-v="62.93,-150.72,11">Ruth Gorge</button>
+    <button data-v="63.069,-151.007,12.5">Summit z12.5</button>
+    <button data-v="48.85,-121.35,8">US/CA border</button>
+    <button data-v="51.4,-116.2,8">Banff (no pack)</button>
+    <button data-v="39.1,-106.5,8">Colorado</button>
+    <button data-v="46.0,8.0,8">Alps (no pack)</button>
+    <button data-v="0,0,1">World</button>
+  </div>
+  <div id="coords"></div>
+</div>
+<script src="vendor/maplibre-gl.js"></script>
+<script src="vendor/pmtiles.js"></script>
+<script>
+const protocol = new pmtiles.Protocol();
+maplibregl.addProtocol("pmtiles", protocol.tile);
+const base = location.origin + location.pathname.replace(/[^/]*$/, "");
+
+const LC = {
+  forest: "#aac29e", grassland: "#d1d7b4", scrub: "#c4d0aa",
+  farmland: "#ded9be", barren: "#d8d3c7", glacier: "#f2f8fc",
+  urban_area: "#d5cfd3",
+};
+const lcColor = ["match", ["get", "kind"], ...Object.entries(LC).flat(),
+                 "#d8d3c7"];
+
+// Full layer stack for one archive set. p = id prefix, src = {base, lc, hs}.
+function stack(p, src) {
+  const halo = { "text-halo-color": "#ffffff", "text-halo-width": 1.4 };
+  return [
+    { id: p + "earth", type: "fill", source: src.base, "source-layer": "earth",
+      paint: { "fill-color": "#d8d3c7" } },
+    { id: p + "landcover", type: "fill", source: src.lc,
+      "source-layer": "landcover",
+      paint: { "fill-color": lcColor, "fill-opacity": 1.0 } },
+    { id: p + "glacier", type: "fill", source: src.base, "source-layer": "landuse",
+      filter: ["==", ["get", "kind"], "glacier"],
+      paint: { "fill-color": "#f2f8fc", "fill-opacity": 0.9 } },
+    { id: p + "bare-rock", type: "fill", source: src.base,
+      "source-layer": "landuse",
+      filter: ["==", ["get", "kind"], "bare_rock"],
+      paint: { "fill-color": "#cdc7bd", "fill-opacity": 0.7 } },
+    { id: p + "hillshade", type: "raster", source: src.hs,
+      paint: { "raster-opacity": 0.55, "raster-contrast": 0.25,
+               "raster-resampling": "linear" } },
+    { id: p + "water", type: "fill", source: src.base, "source-layer": "water",
+      filter: ["==", ["geometry-type"], "Polygon"],
+      paint: { "fill-color": "#a9c7dc" } },
+    { id: p + "boundaries-region", type: "line", source: src.base,
+      "source-layer": "boundaries",
+      filter: ["!=", ["get", "kind"], "country"],
+      paint: { "line-color": "#9b909b", "line-width": 0.8,
+               "line-dasharray": [3, 2] } },
+    { id: p + "boundaries-country", type: "line", source: src.base,
+      "source-layer": "boundaries",
+      filter: ["==", ["get", "kind"], "country"],
+      paint: { "line-color": "#8a7f8a", "line-width": 1.4 } },
+    ...[[p + "water-labels", 0, 2], [p + "water-labels-mid", 9, 5],
+        [p + "water-labels-all", 10, 99]].map(([id, minzoom, maxrank]) => ({
+      id, type: "symbol", source: src.base, "source-layer": "water_labels",
+      minzoom, ...(!id.endsWith("all") && { maxzoom: minzoom === 0 ? 9 : 10 }),
+      filter: ["<=", ["coalesce", ["get", "rank"], 1], maxrank],
+      layout: { "text-field": ["get", "name"],
+                "text-font": ["Noto Sans Italic"], "text-size": 12,
+                "text-padding": 8 },
+      paint: { "text-color": "#4a7ba6", ...halo },
+    })),
+    { id: p + "glacier-labels", type: "symbol", source: src.base,
+      "source-layer": "glacier_labels",
+      layout: { "text-field": ["get", "name"],
+                "text-font": ["Noto Sans Italic"], "text-size": 12 },
+      paint: { "text-color": "#6a94b8", ...halo } },
+    ...[[p + "peaks", 0, 2], [p + "peaks-mid", 9, 6],
+        [p + "peaks-all", 10, 99]].map(([id, minzoom, maxrank]) => ({
+      id, type: "symbol", source: src.base, "source-layer": "peaks",
+      minzoom, ...(!id.endsWith("all") && { maxzoom: minzoom === 0 ? 9 : 10 }),
+      filter: ["<=", ["coalesce", ["get", "rank"], 1], maxrank],
+      layout: {
+        "icon-image": "peak-triangle", "icon-size": 1, "text-optional": true,
+        "text-field": ["case", ["has", "ele"],
+          ["concat", ["get", "name"], "\n",
+           ["number-format", ["round", ["*", ["get", "ele"], 3.28084]],
+            { "max-fraction-digits": 0 }], " ft"],
+          ["get", "name"]],
+        "text-font": ["Noto Sans Medium"], "text-size": 12,
+        "text-anchor": "top", "text-offset": [0, 0.6], "text-padding": 14,
+        "symbol-sort-key": ["-", 9000, ["coalesce", ["get", "ele"], 0]],
+      },
+      paint: { "text-color": "#5a4636", ...halo },
+    })),
+    { id: p + "places-city", type: "symbol", source: src.base,
+      "source-layer": "places",
+      filter: ["==", ["get", "kind"], "locality"],
+      layout: { "text-field": ["get", "name"],
+                "text-font": ["Noto Sans Regular"], "text-size": 12,
+                "symbol-sort-key": ["coalesce", ["get", "min_zoom"], 10] },
+      paint: { "text-color": "#3d3a38", ...halo } },
+    { id: p + "places-region", type: "symbol", source: src.base,
+      "source-layer": "places",
+      filter: ["==", ["get", "kind"], "region"],
+      layout: { "text-field": ["get", "name"],
+                "text-font": ["Noto Sans Regular"], "text-size": 12,
+                "text-transform": "uppercase", "text-letter-spacing": 0.1 },
+      paint: { "text-color": "#8a847e", ...halo } },
+    { id: p + "places-country", type: "symbol", source: src.base,
+      "source-layer": "places",
+      filter: ["==", ["get", "kind"], "country"],
+      layout: { "text-field": ["get", "name"],
+                "text-font": ["Noto Sans Medium"], "text-size": 14,
+                "text-transform": "uppercase" },
+      paint: { "text-color": "#54504e", ...halo } },
+  ];
+}
+
+const USA_BOUNDS = [-180, 18, 180, 72];
+const AK_BOUNDS = [-180, 51, -129, 72];
+const style = {
+  version: 8,
+  glyphs: base + "fonts/{fontstack}/{range}.pbf",
+  sources: {
+    // global overview: z0-6 archives, overzoomed past 6 everywhere
+    gbase: { type: "vector", url: "pmtiles://" + base + "archives/global-base-z6.pmtiles" },
+    ghs: { type: "raster", url: "pmtiles://" + base + "archives/global-hs-z6.pmtiles",
+           tileSize: 512 },
+    // USA pack: z6-8 only (global covers below), bounds-limited
+    ubase: { type: "vector", minzoom: 6, maxzoom: 9, bounds: USA_BOUNDS,
+      tiles: ["pmtiles://" + base + "archives/pack-usa-base.pmtiles/{z}/{x}/{y}"] },
+    ubaseLow: { type: "vector", minzoom: 6, maxzoom: 7, bounds: USA_BOUNDS,
+      tiles: ["pmtiles://" + base + "archives/pack-usa-base.pmtiles/{z}/{x}/{y}"] },
+    uhs: { type: "raster", minzoom: 6, maxzoom: 9, bounds: USA_BOUNDS,
+      tileSize: 512,
+      tiles: ["pmtiles://" + base + "archives/pack-usa-hs.pmtiles/{z}/{x}/{y}"] },
+    // Alaska state pack: z10
+    abase: { type: "vector", minzoom: 6, maxzoom: 10, bounds: AK_BOUNDS,
+      tiles: ["pmtiles://" + base + "archives/pack-ak-base-z10.pmtiles/{z}/{x}/{y}"] },
+    abaseLow: { type: "vector", minzoom: 6, maxzoom: 7, bounds: AK_BOUNDS,
+      tiles: ["pmtiles://" + base + "archives/pack-ak-base-z10.pmtiles/{z}/{x}/{y}"] },
+    ahs: { type: "raster", minzoom: 6, maxzoom: 10, bounds: AK_BOUNDS,
+      tileSize: 512,
+      tiles: ["pmtiles://" + base + "archives/pack-ak-hs-z10.pmtiles/{z}/{x}/{y}"] },
+    // online tier: full-depth public archives, streamed + cached; fails
+    // gracefully to the offline stacks below when there is no network
+    obase: { type: "vector", minzoom: 10, maxzoom: 14,
+      tiles: ["pmtiles://" + base + "archives/online-sim.pmtiles/{z}/{x}/{y}"] },
+    obaseLow: { type: "vector", maxzoom: 7,
+      tiles: ["pmtiles://" + base + "archives/online-sim.pmtiles/{z}/{x}/{y}"] },
+    odem: { type: "raster-dem", encoding: "terrarium", tileSize: 512, maxzoom: 12,
+      tiles: ["pmtiles://https://download.mapterhorn.com/planet.pmtiles/{z}/{x}/{y}"] },
+  },
+  layers: [
+    { id: "background", type: "background",
+      paint: { "background-color": "#a9c7dc" } },
+    ...stack("g-", { base: "gbase", lc: "gbase", hs: "ghs" }),
+    ...stack("u-", { base: "ubase", lc: "ubaseLow", hs: "uhs" }),
+    ...stack("a-", { base: "abase", lc: "abaseLow", hs: "ahs" }),
+    // online stack: fills + dynamic client-side hillshade, z10+
+    { id: "o-earth", type: "fill", source: "obase", "source-layer": "earth",
+      minzoom: 10, paint: { "fill-color": "#d8d3c7" } },
+    { id: "o-landcover", type: "fill", source: "obaseLow",
+      "source-layer": "landcover", minzoom: 10,
+      paint: { "fill-color": lcColor, "fill-opacity": 1.0 } },
+    { id: "o-glacier", type: "fill", source: "obase", "source-layer": "landuse",
+      minzoom: 10, filter: ["==", ["get", "kind"], "glacier"],
+      paint: { "fill-color": "#f2f8fc", "fill-opacity": 0.9 } },
+    { id: "o-bare-rock", type: "fill", source: "obase", "source-layer": "landuse",
+      minzoom: 10, filter: ["==", ["get", "kind"], "bare_rock"],
+      paint: { "fill-color": "#cdc7bd", "fill-opacity": 0.7 } },
+    { id: "o-hillshade", type: "hillshade", source: "odem", minzoom: 10,
+      paint: { "hillshade-exaggeration": 0.4,
+               "hillshade-shadow-color": "#5a5248",
+               "hillshade-highlight-color": "#ffffff" } },
+    { id: "o-water", type: "fill", source: "obase", "source-layer": "water",
+      minzoom: 10, filter: ["==", ["geometry-type"], "Polygon"],
+      paint: { "fill-color": "#a9c7dc" } },
+    { id: "o-boundaries", type: "line", source: "obase",
+      "source-layer": "boundaries", minzoom: 10,
+      paint: { "line-color": "#8a7f8a", "line-width": 1.2 } },
+    // labels ride on top from the offline packs (overzoomed points)
+    { id: "t-water-labels", type: "symbol", source: "ubase",
+      "source-layer": "water_labels", minzoom: 10,
+      layout: { "text-field": ["get", "name"],
+                "text-font": ["Noto Sans Italic"], "text-size": 12 },
+      paint: { "text-color": "#4a7ba6", "text-halo-color": "#ffffff",
+               "text-halo-width": 1.4 } },
+    { id: "t-glacier-labels", type: "symbol", source: "ubase",
+      "source-layer": "glacier_labels", minzoom: 10,
+      layout: { "text-field": ["get", "name"],
+                "text-font": ["Noto Sans Italic"], "text-size": 12 },
+      paint: { "text-color": "#6a94b8", "text-halo-color": "#ffffff",
+               "text-halo-width": 1.4 } },
+    { id: "t-peaks", type: "symbol", source: "ubase", "source-layer": "peaks",
+      minzoom: 10,
+      layout: {
+        "icon-image": "peak-triangle", "icon-size": 1, "text-optional": true,
+        "text-field": ["case", ["has", "ele"],
+          ["concat", ["get", "name"], "\n",
+           ["number-format", ["round", ["*", ["get", "ele"], 3.28084]],
+            { "max-fraction-digits": 0 }], " ft"],
+          ["get", "name"]],
+        "text-font": ["Noto Sans Medium"], "text-size": 12,
+        "text-anchor": "top", "text-offset": [0, 0.6],
+        "symbol-sort-key": ["-", 9000, ["coalesce", ["get", "ele"], 0]],
+      },
+      paint: { "text-color": "#5a4636", "text-halo-color": "#ffffff",
+               "text-halo-width": 1.4 } },
+    { id: "t-places", type: "symbol", source: "ubase", "source-layer": "places",
+      minzoom: 10, filter: ["==", ["get", "kind"], "locality"],
+      layout: { "text-field": ["get", "name"],
+                "text-font": ["Noto Sans Regular"], "text-size": 12 },
+      paint: { "text-color": "#3d3a38", "text-halo-color": "#ffffff",
+               "text-halo-width": 1.4 } },
+  ],
+};
+
+const map = window.map = new maplibregl.Map({
+  container: "map", style,
+  center: [-151.0, 63.07], zoom: 7.2, maxZoom: 15.5,
+});
+map.addControl(new maplibregl.NavigationControl());
+function peakTriangle(size) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  ctx.beginPath();
+  ctx.moveTo(size / 2, 1.5);
+  ctx.lineTo(size - 1.5, size - 2);
+  ctx.lineTo(1.5, size - 2);
+  ctx.closePath();
+  ctx.strokeStyle = "rgba(255,255,255,0.95)";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = "#5a4636";
+  ctx.fill();
+  return ctx.getImageData(0, 0, size, size);
+}
+map.on("styleimagemissing", (e) => {
+  if (e.id === "peak-triangle" && !map.hasImage("peak-triangle"))
+    map.addImage("peak-triangle", peakTriangle(16), { pixelRatio: 2 });
+});
+
+document.getElementById("hs").oninput = (e) => {
+  for (const id of ["g-hillshade", "u-hillshade", "a-hillshade"])
+    map.setPaintProperty(id, "raster-opacity", e.target.value / 100);
+};
+document.querySelectorAll(".jump button").forEach((b) => {
+  b.onclick = () => {
+    const [lat, lon, z] = b.dataset.v.split(",").map(Number);
+    map.jumpTo({ center: [lon, lat], zoom: z });
+  };
+});
+map.on("mousemove", (e) => {
+  document.getElementById("coords").textContent =
+    e.lngLat.lat.toFixed(4) + ", " + e.lngLat.lng.toFixed(4) +
+    "  z" + map.getZoom().toFixed(1);
+});
+</script>
+</body>
+</html>

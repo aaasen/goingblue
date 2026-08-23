@@ -1,0 +1,430 @@
+#!/usr/bin/env python3
+"""Basemap build driver: one global z0-MAXZOOM pair, then every pack is an extract of it.
+
+    basemap.py all      --work DIR [--vectors SRC] [--terrain SRC] [--landcover SRC] [--maxzoom 10]
+    basemap.py overture --work DIR [--release 2026-07-22.0]
+    basemap.py labels   --work DIR [--overture DB] --maxzoom 10
+    basemap.py landcover --work DIR [--landcover SRC] [--bbox W,S,E,N] --maxzoom 10
+    basemap.py vectors  --work DIR --vectors SRC --maxzoom 10      # strip + join labels + landcover
+    basemap.py hillshade --work DIR --terrain SRC --maxzoom 10
+    basemap.py regions  --work DIR                                   # Natural Earth polygons
+    basemap.py packs    --work DIR [--maxzoom 10] [--only id,id]
+
+SRC is a local .pmtiles or an https:// archive (then `pmtiles extract --maxzoom` pulls a
+z0-MAXZOOM copy into DIR first). Outputs in DIR:
+
+    overture.duckdb (--overture)     named peaks / lakes / glaciers with English names (overture step)
+    labels.pmtiles                   those, ranked + zoom-banded
+    landcover.pmtiles                CGLS-LC100 land cover vectorized for z0-MAXZOOM (stock ends at z7)
+    global-base.pmtiles              stripped Protomaps vectors + labels (the online archive)
+    global-hs.pmtiles                prebaked hillshade (the online archive)
+    global-z6-{base,hs}.pmtiles      z0-6 extract, bundled with the app
+    regions/ne_{countries,states}.geojson  Natural Earth 10m admin-0 / admin-1 (regions step)
+    packs/<id>-{base,hs}.pmtiles     one pair per catalogue entry
+    catalogue.json                   what the app lists: id, name, parent, bounds, bytes
+
+Every step skips work whose output already exists, so a killed run (spot VM) resumes.
+Tools: pmtiles, tippecanoe/tile-join, duckdb CLI; python venv with pmtiles, mapbox-vector-tile,
+shapely, numpy, Pillow (strip_build.py / hillshade_build.py live next to this file).
+"""
+import argparse, csv, io, json, os, shutil, subprocess, sys, time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+DEFAULT_VECTORS = "https://build.protomaps.com/20260820.pmtiles"
+DEFAULT_TERRAIN = "https://download.mapterhorn.com/planet.pmtiles"
+OVERTURE_RELEASE = "2026-07-22.0"
+NATURAL_EARTH = "https://naciscdn.org/naturalearth/10m/cultural"
+DEFAULT_LANDCOVER = ("https://zenodo.org/records/3939050/files/"
+                     "PROBAV_LC100_global_v3.0.1_2019-nrt_Discrete-Classification-map_EPSG-4326.tif")
+BUNDLED_ZOOM = 6
+
+# Admin-0 units that get admin-1 subdivision packs (storage convenience inside big countries).
+SUBDIVIDE = {"US", "CA"}
+
+# Label significance. Peaks rank per 0.25-degree cell by elevation, lakes by area; the style
+# shows rank<=2 at z<=8, <=6 at z9, everything at z10+. Minzoom bands put the biggest features
+# into the overview tiles (the bundled z6 archive sees only minzoom<=6).
+PEAK_RANK_MAX = 15
+LAKE_RANK_MAX = 8
+LAKE_MIN_AREA = 2e-5  # deg^2
+PEAK_ZOOM = [(5000, 4), (4000, 5), (3000, 6), (2000, 7)]        # elevation m -> minzoom, else 8
+LAKE_ZOOM = [(0.5, 4), (0.1, 5), (0.02, 6), (0.005, 7)]          # areadeg -> minzoom, else 8
+GLACIER_ZOOM = [(0.02, 6), (0.005, 7)]                           # else 8
+
+
+def log(msg):
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def run(cmd, **kw):
+    log("$ " + " ".join(str(c) for c in cmd))
+    subprocess.run([str(c) for c in cmd], check=True, **kw)
+
+
+def done(path):
+    return Path(path).exists() and Path(path).stat().st_size > 0
+
+
+def banded(value, bands, default=8):
+    for threshold, zoom in bands:
+        if value is not None and value >= threshold:
+            return zoom
+    return default
+
+
+# ---------------------------------------------------------------- sources
+
+def ensure_source(src, work, name, maxzoom):
+    """A local archive is used as-is; a URL is extracted to z0-maxzoom under work/."""
+    if not src.startswith(("http://", "https://")):
+        return Path(src)
+    out = work / f"{name}-src-z{maxzoom}.pmtiles"
+    if done(out):
+        log(f"have {out.name}")
+        return out
+    run(["pmtiles", "extract", src, out, f"--maxzoom={maxzoom}"])
+    return out
+
+
+# ---------------------------------------------------------------- overture
+
+def build_overture(db, release):
+    """Pull the named peaks / lakes / glaciers (primary + English names) into a duckdb file."""
+    if done(db):
+        # An existing db is used as-is (the labels step warns if it predates name_en); delete
+        # it to force a rescan — the scan reads several GB from Overture's S3 bucket.
+        log(f"have {Path(db).name}")
+        return db
+    sql = (HERE / "overture_labels.sql").read_text().replace("RELEASE", release)
+    log(f"scanning Overture {release} (base/land + base/water)")
+    Path(db).parent.mkdir(parents=True, exist_ok=True)
+    run(["duckdb", str(db), "-c", sql])
+    return db
+
+
+# ---------------------------------------------------------------- labels
+
+def build_labels(work, overture, maxzoom):
+    out = work / "labels.pmtiles"
+    if done(out):
+        log(f"have {out.name}")
+        return out
+    seq = work / "labels.geojsonseq"
+    def name_col(table):
+        cols = subprocess.run(["duckdb", str(overture), "-readonly", "-csv", "-c", f"describe {table}"],
+                              check=True, capture_output=True, text=True).stdout
+        if "name_en" not in cols:
+            log(f"{table} has no name_en column — local-language names only")
+            return "name"
+        return "coalesce(name_en, name)"
+    peak_name, lake_name, glacier_name = name_col("peaks"), name_col("lake_labels"), name_col("glacier_labels")
+    sql = f"""
+    with p as (
+      select {peak_name} as name, elevation, lon, lat,
+             row_number() over (partition by floor(lon*4), floor(lat*4)
+                                order by elevation desc nulls last) as rank
+      from peaks where name is not null),
+    l as (
+      select {lake_name} as name, lon, lat, areadeg,
+             row_number() over (partition by floor(lon*4), floor(lat*4)
+                                order by areadeg desc) as rank
+      from lake_labels where name is not null and areadeg >= {LAKE_MIN_AREA})
+    select 'peaks' as layer, name, elevation as ele, null as areadeg, rank, lon, lat
+      from p where rank <= {PEAK_RANK_MAX}
+    union all
+    select 'water_labels', name, null, areadeg, rank, lon, lat
+      from l where rank <= {LAKE_RANK_MAX}
+    union all
+    select 'glacier_labels', {glacier_name}, null, areadeg, null, lon, lat
+      from glacier_labels where name is not null
+    """
+    log("querying overture labels")
+    res = subprocess.run(["duckdb", str(overture), "-readonly", "-csv", "-c", sql],
+                         check=True, capture_output=True, text=True)
+    counts = {}
+    num = lambda v: None if v in ("", "NULL") else float(v)
+    with open(seq, "w") as f:
+        for row in csv.DictReader(io.StringIO(res.stdout)):
+            layer = row["layer"]
+            props = {"name": row["name"]}
+            if layer == "peaks":
+                ele = num(row["ele"])
+                ele = int(ele) if ele is not None else None
+                props.update(kind="peak", rank=int(row["rank"]))
+                if ele is not None:
+                    props["ele"] = ele
+                minzoom = banded(ele, PEAK_ZOOM)
+            elif layer == "water_labels":
+                props["rank"] = int(row["rank"])
+                minzoom = banded(num(row["areadeg"]), LAKE_ZOOM)
+            else:
+                minzoom = banded(num(row["areadeg"]) or 0, GLACIER_ZOOM)
+            counts[layer] = counts.get(layer, 0) + 1
+            f.write(json.dumps({
+                "type": "Feature",
+                "tippecanoe": {"layer": layer, "minzoom": min(minzoom, maxzoom)},
+                "properties": props,
+                "geometry": {"type": "Point",
+                             "coordinates": [round(float(row["lon"]), 5), round(float(row["lat"]), 5)]},
+            }, ensure_ascii=False) + "\n")
+    log(f"labels: {counts}")
+    # Points only; never drop or cluster — the style does the thinning by rank.
+    run(["tippecanoe", "-o", out, "--force", "-Z", "0", "-z", str(maxzoom),
+         "-r1", "-pf", "-pk", "-ps",
+         "-n", "weather-labels", "-A", "© Overture Maps Foundation, OpenStreetMap contributors",
+         seq])
+    return out
+
+
+# ---------------------------------------------------------------- landcover
+
+def build_landcover(work, landcover_src, maxzoom, bbox=None):
+    out = work / "landcover.pmtiles"
+    if done(out):
+        log(f"have {out.name}")
+        return out
+    src = landcover_src
+    if src.startswith(("http://", "https://")):
+        # One sequential download: Zenodo rate-limits the parallel windowed reads.
+        local = work / "landcover-src.tif"
+        if not done(local):
+            run(["curl", "-L", "--retry", "5", "-o", local, src])
+        src = local
+    cmd = [sys.executable, HERE / "landcover_build.py", src, out, str(maxzoom), "--work", work / "landcover-work"]
+    if bbox:
+        cmd.append(f"--bbox={bbox}")
+    run(cmd)
+    return out
+
+
+# ---------------------------------------------------------------- vectors
+
+def build_vectors(work, vectors_src, labels, landcover, maxzoom):
+    out = work / "global-base.pmtiles"
+    if done(out):
+        log(f"have {out.name}")
+        return out
+    src = ensure_source(vectors_src, work, "vectors", maxzoom)
+    stripped_mb = work / "stripped.mbtiles"
+    stripped = work / "stripped.pmtiles"
+    if not done(stripped):
+        if stripped_mb.exists():
+            stripped_mb.unlink()
+        run([sys.executable, HERE / "strip_build.py", src, stripped_mb, str(maxzoom)],
+            env={**os.environ, "STRIP_DROP": "landcover" if landcover else ""})
+        run(["pmtiles", "convert", stripped_mb, stripped])
+        stripped_mb.unlink()
+    run(["tile-join", "--force", "-pk", "-o", out, stripped, labels, *([landcover] if landcover else [])])
+    return out
+
+
+# ---------------------------------------------------------------- hillshade
+
+def build_hillshade(work, terrain_src, maxzoom):
+    out = work / "global-hs.pmtiles"
+    if done(out):
+        log(f"have {out.name}")
+        return out
+    src = ensure_source(terrain_src, work, "terrain", maxzoom)
+    mb = work / "hillshade.mbtiles"
+    if mb.exists():
+        mb.unlink()
+    run([sys.executable, HERE / "hillshade_build.py", src, mb, str(maxzoom)])
+    run(["pmtiles", "convert", mb, out])
+    mb.unlink()
+    return out
+
+
+# ---------------------------------------------------------------- regions
+
+def build_regions(work):
+    """Natural Earth 10m admin-0 countries and admin-1 states/provinces as GeoJSON."""
+    import zipfile
+    import shapefile  # pyshp
+    out = {}
+    for name, stem in (("countries", "ne_10m_admin_0_countries"), ("states", "ne_10m_admin_1_states_provinces")):
+        geojson = work / "regions" / f"ne_{name}.geojson"
+        out[name] = geojson
+        if done(geojson):
+            log(f"have {geojson.name}")
+            continue
+        geojson.parent.mkdir(parents=True, exist_ok=True)
+        zpath = work / "regions" / f"{stem}.zip"
+        if not done(zpath):
+            run(["curl", "-fsSL", "--retry", "5", "-o", zpath, f"{NATURAL_EARTH}/{stem}.zip"])
+        with zipfile.ZipFile(zpath) as z:
+            members = {Path(m).suffix: m for m in z.namelist() if Path(m).stem == stem}
+            with z.open(members[".shp"]) as shp, z.open(members[".dbf"]) as dbf, z.open(members[".shx"]) as shx:
+                r = shapefile.Reader(shp=io.BytesIO(shp.read()), dbf=io.BytesIO(dbf.read()),
+                                     shx=io.BytesIO(shx.read()), encoding="utf-8", encodingErrors="replace")
+                fc = r.__geo_interface__
+        json.dump(fc, open(geojson, "w"))
+        log(f"{geojson.name}: {len(fc['features'])} features")
+    return out
+
+
+# ---------------------------------------------------------------- packs
+
+def merge_geometries(geoms):
+    polys = []
+    for g in geoms:
+        polys.extend([g["coordinates"]] if g["type"] == "Polygon" else g["coordinates"])
+    return {"type": "MultiPolygon", "coordinates": polys}
+
+
+def catalogue_entries(countries_path, states_path):
+    """Catalogue rows from Natural Earth admin-0 and admin-1: (id, name, parent, geometry).
+
+    Admin-0 units sharing an ISO code (France + Clipperton, Australia + its territories) merge
+    into one pack; units without one (bases, leases) fold into their sovereign's pack when it
+    has one, otherwise stand alone under their ADM0_A3 (Somaliland, N. Cyprus, Siachen…).
+    """
+    by_id = {}
+    countries = json.load(open(countries_path))["features"]
+    def iso(p):
+        code = p.get("ISO_A2_EH") or p.get("ISO_A2")
+        return None if not code or code == "-99" else code.lower()
+    by_sov = {p["SOV_A3"]: iso(p) for p in (f["properties"] for f in countries) if iso(p)}
+    for f in countries:
+        p = f["properties"]
+        key = iso(p) or by_sov.get(p.get("SOV_A3")) or p["ADM0_A3"].lower()
+        e = by_id.setdefault(key, {"id": key, "name": None, "parent": None, "geoms": [], "type": None})
+        # The unit that owns the code names the pack; a dependency only names it when alone.
+        if e["name"] is None or (iso(p) == key and e["type"] != "owner"):
+            e["name"], e["type"] = p.get("NAME_EN") or p["NAME"], "owner" if iso(p) == key else None
+        e["geoms"].append(f["geometry"])
+    entries = [{"id": e["id"], "name": e["name"], "parent": None,
+                "geometry": e["geoms"][0] if len(e["geoms"]) == 1 else merge_geometries(e["geoms"])}
+               for e in by_id.values()]
+    if states_path:
+        for f in json.load(open(states_path))["features"]:
+            p = f["properties"]
+            if p["iso_a2"] not in SUBDIVIDE:
+                continue
+            entries.append({"id": p["iso_3166_2"].lower(), "name": p.get("name_en") or p["name"],
+                            "parent": p["iso_a2"].lower(), "geometry": f["geometry"]})
+    return entries
+
+
+def bounds_of(geometry):
+    xs, ys = [], []
+    def walk(c):
+        if isinstance(c[0], (int, float)):
+            xs.append(c[0]); ys.append(c[1])
+        else:
+            for d in c:
+                walk(d)
+    walk(geometry["coordinates"])
+    return [round(min(xs), 4), round(min(ys), 4), round(max(xs), 4), round(max(ys), 4)]
+
+
+def extract(src, out, region=None, maxzoom=None):
+    if done(out):
+        return
+    cmd = ["pmtiles", "extract", src, out]
+    if region:
+        cmd.append(f"--region={region}")
+    if maxzoom is not None:
+        cmd.append(f"--maxzoom={maxzoom}")
+    run(cmd)
+
+
+def build_packs(work, base, hs, countries, states, maxzoom, only=None):
+    packs = work / "packs"
+    regions = work / "pack-regions"
+    packs.mkdir(exist_ok=True)
+    regions.mkdir(exist_ok=True)
+
+    # Bundled overview.
+    extract(base, work / f"global-z{BUNDLED_ZOOM}-base.pmtiles", maxzoom=BUNDLED_ZOOM)
+    extract(hs, work / f"global-z{BUNDLED_ZOOM}-hs.pmtiles", maxzoom=BUNDLED_ZOOM)
+
+    rows = []
+    entries = catalogue_entries(countries, states)
+    if only:
+        entries = [e for e in entries if e["id"] in only]
+    for i, e in enumerate(entries):
+        region = regions / f"{e['id']}.geojson"
+        if not region.exists():
+            json.dump({"type": "Feature", "properties": {}, "geometry": e["geometry"]}, open(region, "w"))
+        pair = {}
+        for kind, src in (("base", base), ("hs", hs)):
+            out = packs / f"{e['id']}-{kind}.pmtiles"
+            try:
+                extract(src, out, region=region, maxzoom=maxzoom)
+            except subprocess.CalledProcessError:
+                # A region with no tiles in the source (test runs on a regional source) yields
+                # no pack; the catalogue simply omits it.
+                log(f"no {kind} tiles for {e['id']}, skipping")
+                if out.exists():
+                    out.unlink()
+                break
+            pair[kind] = out.stat().st_size
+        if len(pair) < 2:
+            continue
+        rows.append({"id": e["id"], "name": e["name"], "parent": e["parent"],
+                     "maxzoom": maxzoom, "bounds": bounds_of(e["geometry"]),
+                     "bytes": pair["base"] + pair["hs"],
+                     "files": {"base": f"packs/{e['id']}-base.pmtiles", "hs": f"packs/{e['id']}-hs.pmtiles"}})
+        log(f"pack {i + 1}/{len(entries)} {e['id']}: {(pair['base'] + pair['hs']) / 1e6:.1f} MB")
+    rows.sort(key=lambda r: (r["parent"] or "", r["id"]))
+    cat = {"version": 1, "maxzoom": maxzoom, "bundled_maxzoom": BUNDLED_ZOOM,
+           # Stock Protomaps landcover ends at z7; ours goes to maxzoom when landcover.pmtiles was built.
+           "landcover_maxzoom": maxzoom if done(work / "landcover.pmtiles") else 7,
+           "global": {"base": "global-base.pmtiles", "hs": "global-hs.pmtiles"},
+           "packs": rows}
+    json.dump(cat, open(work / "catalogue.json", "w"), indent=1)
+    total = sum(r["bytes"] for r in rows)
+    log(f"catalogue: {len(rows)} packs, {total / 1e9:.2f} GB")
+
+
+# ---------------------------------------------------------------- main
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("step", choices=["all", "overture", "labels", "landcover", "vectors", "hillshade", "regions", "packs"])
+    ap.add_argument("--work", required=True, type=Path)
+    ap.add_argument("--maxzoom", type=int, default=10)
+    ap.add_argument("--vectors", default=DEFAULT_VECTORS, help="Protomaps archive (file or https)")
+    ap.add_argument("--terrain", default=DEFAULT_TERRAIN, help="Mapterhorn archive (file or https)")
+    ap.add_argument("--landcover", default=DEFAULT_LANDCOVER, help="CGLS-LC100 discrete GeoTIFF (file or https); 'none' to keep stock z0-7")
+    ap.add_argument("--bbox", help="W,S,E,N window for the landcover step (test runs)")
+    ap.add_argument("--overture", type=Path, help="label tables db (default: DIR/overture.duckdb, built by the overture step)")
+    ap.add_argument("--release", default=OVERTURE_RELEASE, help="Overture release for the overture step")
+    ap.add_argument("--countries", type=Path, default=HERE.parent / "regions" / "ne_countries.geojson")
+    ap.add_argument("--states", type=Path, default=HERE.parent / "regions" / "ne_states.geojson")
+    ap.add_argument("--only", help="comma-separated pack ids (packs step), e.g. us-co,us-wa")
+    a = ap.parse_args()
+    a.work.mkdir(parents=True, exist_ok=True)
+    a.overture = a.overture or a.work / "overture.duckdb"
+    for tool in ("pmtiles", "tippecanoe", "tile-join", "duckdb"):
+        if not shutil.which(tool):
+            sys.exit(f"missing tool: {tool}")
+
+    labels = base = hs = landcover = None
+    if a.step in ("all", "overture"):
+        build_overture(a.overture, a.release)
+    if a.step in ("all", "labels", "vectors"):
+        labels = build_labels(a.work, a.overture, a.maxzoom)
+    if a.step in ("all", "landcover", "vectors") and a.landcover != "none":
+        landcover = build_landcover(a.work, a.landcover, a.maxzoom, a.bbox)
+    if a.step in ("all", "vectors"):
+        base = build_vectors(a.work, a.vectors, labels, landcover, a.maxzoom)
+    if a.step in ("all", "hillshade"):
+        hs = build_hillshade(a.work, a.terrain, a.maxzoom)
+    if a.step in ("all", "regions", "packs"):
+        regions = build_regions(a.work)
+    if a.step in ("all", "packs"):
+        base = base or a.work / "global-base.pmtiles"
+        hs = hs or a.work / "global-hs.pmtiles"
+        for p in (base, hs):
+            if not done(p):
+                sys.exit(f"missing {p}; run vectors/hillshade first")
+        build_packs(a.work, base, hs, regions["countries"], regions["states"], a.maxzoom,
+                    only=set(a.only.split(",")) if a.only else None)
+    log("done")
+
+
+if __name__ == "__main__":
+    main()

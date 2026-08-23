@@ -33,6 +33,7 @@ const LANDCOVER_COLORS: Record<string, string> = {
   barren: '#d8d3c7',
   glacier: '#f2f8fc',
   urban_area: '#d5cfd3',
+  wetland: '#c3d3c4',
 };
 const EARTH = '#d8d3c7';
 const WATER = '#a9c7dc';
@@ -46,18 +47,21 @@ const landcoverColor = [
 
 const halo = { 'text-halo-color': '#ffffff', 'text-halo-width': 1.4 };
 
+// English where the source carries it (all stock Protomaps layers), else the local name.
+const nameEn = ['coalesce', ['get', 'name:en'], ['get', 'name']] as unknown as string;
+
 // Peak label: "Name\n20,310 ft". The stock schema carries `elevation` in metres.
 const peakText = [
   'case',
   ['has', 'elevation'],
   [
     'concat',
-    ['get', 'name'],
+    nameEn,
     '\n',
     ['number-format', ['round', ['*', ['get', 'elevation'], 3.28084]], { 'max-fraction-digits': 0 }],
     ' ft',
   ],
-  ['get', 'name'],
+  nameEn,
 ] as unknown as string;
 
 interface StackSources {
@@ -131,6 +135,16 @@ function stack(p: string, src: StackSources): LayerSpecification[] {
     shade,
     fill('water', 'water', { 'fill-color': WATER }, ['==', ['geometry-type'], 'Polygon']),
     {
+      // Rivers: stock water lines from z9 (streams arrive at higher zooms than we carry).
+      id: p + 'rivers',
+      type: 'line',
+      source: src.base,
+      'source-layer': 'water',
+      ...minzoom,
+      filter: ['==', ['geometry-type'], 'LineString'],
+      paint: { 'line-color': WATER, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.8, 12, 2] },
+    },
+    {
       id: p + 'boundaries-region',
       type: 'line',
       source: src.base,
@@ -150,7 +164,7 @@ function stack(p: string, src: StackSources): LayerSpecification[] {
     },
     symbol('water-labels', 'water', {
       filter: ['all', ['==', ['geometry-type'], 'Point'], ['has', 'name']],
-      layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Italic'], 'text-size': 12, 'text-padding': 8 },
+      layout: { 'text-field': nameEn, 'text-font': ['Noto Sans Italic'], 'text-size': 12, 'text-padding': 8 },
       paint: { 'text-color': '#4a7ba6', ...halo },
     }),
     symbol('peaks', 'pois', {
@@ -172,7 +186,7 @@ function stack(p: string, src: StackSources): LayerSpecification[] {
     symbol('places-city', 'places', {
       filter: ['==', ['get', 'kind'], 'locality'],
       layout: {
-        'text-field': ['get', 'name'],
+        'text-field': nameEn,
         'text-font': ['Noto Sans Regular'],
         'text-size': 12,
         'symbol-sort-key': ['coalesce', ['get', 'min_zoom'], 10],
@@ -182,7 +196,7 @@ function stack(p: string, src: StackSources): LayerSpecification[] {
     symbol('places-region', 'places', {
       filter: ['==', ['get', 'kind'], 'region'],
       layout: {
-        'text-field': ['get', 'name'],
+        'text-field': nameEn,
         'text-font': ['Noto Sans Regular'],
         'text-size': 12,
         'text-transform': 'uppercase',
@@ -193,7 +207,7 @@ function stack(p: string, src: StackSources): LayerSpecification[] {
     symbol('places-country', 'places', {
       filter: ['==', ['get', 'kind'], 'country'],
       layout: {
-        'text-field': ['get', 'name'],
+        'text-field': nameEn,
         'text-font': ['Noto Sans Medium'],
         'text-size': 14,
         'text-transform': 'uppercase',

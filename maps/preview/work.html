@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Basemap build preview</title>
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
+<style>
+  html, body { margin: 0; height: 100%; }
+  #map { position: absolute; inset: 0; }
+  #panel {
+    position: absolute; top: 10px; right: 10px; z-index: 10;
+    background: rgba(255,255,255,.92); border-radius: 8px; padding: 10px 14px;
+    font: 12px/1.6 -apple-system, sans-serif; box-shadow: 0 1px 6px rgba(0,0,0,.25);
+    min-width: 230px;
+  }
+  #panel label { display: flex; justify-content: space-between; gap: 8px; }
+  #panel input[type=range] { width: 110px; }
+  .jump { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .jump button { font-size: 11px; padding: 2px 6px; }
+  #coords { color: #666; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <b>Driver output</b> <span id="which"></span>
+  <label>Hillshade <input id="hs" type="range" min="0" max="100" value="55"></label>
+  <label>Pack <select id="pack"><option value="">(none — online global)</option></select></label>
+  <label><span>Online global</span><input id="online" type="checkbox" checked></label>
+  <div class="jump">
+    <button data-v="63.07,-151.00,8">Denali</button>
+    <button data-v="48.85,-121.35,8">US/CA border</button>
+    <button data-v="39.1,-106.5,8">Colorado</button>
+    <button data-v="47.6,-121.5,9">Cascades</button>
+    <button data-v="0,0,1">World</button>
+  </div>
+  <div id="coords"></div>
+</div>
+<script src="vendor/maplibre-gl.js"></script>
+<script src="vendor/pmtiles.js"></script>
+<script src="style.js"></script>
+<script type="module">
+// Composes the stacks the way the app will: bundled global z6 under the installed pack under
+// the online global archive. `?work=DIR` picks the driver output dir (default: the `work`
+// symlink next to this page). Only the pack's bounds gate its sources; the online archive is
+// simply a third source of the same data, so it is toggleable to see what offline-only looks
+// like.
+const protocol = new pmtiles.Protocol();
+maplibregl.addProtocol("pmtiles", protocol.tile);
+const here = location.origin + location.pathname.replace(/[^/]*$/, "");
+const work = here + (new URLSearchParams(location.search).get("work") || "work") + "/";
+document.getElementById("which").textContent = work.replace(here, "");
+
+const cat = await (await fetch(work + "catalogue.json")).json();
+const bundled = `z${cat.bundled_maxzoom}`;
+const sel = document.getElementById("pack");
+for (const p of cat.packs) {
+  const o = document.createElement("option");
+  o.value = p.id; o.textContent = `${p.name} (${(p.bytes / 1e6).toFixed(1)} MB)`;
+  sel.appendChild(o);
+}
+
+function archive(id, kind) {
+  return id ? work + cat.packs.find((p) => p.id === id).files[kind] : null;
+}
+
+function buildStyle(packId, online) {
+  const pack = cat.packs.find((p) => p.id === packId);
+  const sources = {
+    gbase: { type: "vector", url: "pmtiles://" + work + `global-${bundled}-base.pmtiles` },
+    ghs: { type: "raster", url: "pmtiles://" + work + `global-${bundled}-hs.pmtiles`, tileSize: 512 },
+  };
+  const layers = [
+    { id: "background", type: "background", paint: { "background-color": "#a9c7dc" } },
+    ...stack("g-", { base: "gbase", lc: "gbase", hs: "ghs" }),
+  ];
+  const tier = (p, base, hs, extra) => {
+    sources[p + "base"] = { type: "vector", minzoom: cat.bundled_maxzoom, maxzoom: cat.maxzoom,
+      tiles: ["pmtiles://" + base + "/{z}/{x}/{y}"], ...extra };
+    sources[p + "lc"] = { type: "vector", minzoom: cat.bundled_maxzoom, maxzoom: cat.landcover_maxzoom ?? 7,
+      tiles: ["pmtiles://" + base + "/{z}/{x}/{y}"], ...extra };
+    sources[p + "hs"] = { type: "raster", minzoom: cat.bundled_maxzoom, maxzoom: cat.maxzoom,
+      tileSize: 512, tiles: ["pmtiles://" + hs + "/{z}/{x}/{y}"], ...extra };
+    layers.push(...stack(p, { base: p + "base", lc: p + "lc", hs: p + "hs" }));
+  };
+  if (online) tier("o-", work + cat.global.base, work + cat.global.hs, {});
+  if (pack) tier("p-", archive(packId, "base"), archive(packId, "hs"), { bounds: pack.bounds });
+  return { version: 8, glyphs: here + "fonts/{fontstack}/{range}.pbf", sources, layers };
+}
+
+const map = window.map = new maplibregl.Map({
+  container: "map", style: buildStyle("", true),
+  center: [-151.0, 63.07], zoom: 7.2, maxZoom: cat.maxzoom + 2.5,
+});
+map.addControl(new maplibregl.NavigationControl());
+function peakTriangle(size) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  ctx.beginPath();
+  ctx.moveTo(size / 2, 1.5); ctx.lineTo(size - 1.5, size - 2); ctx.lineTo(1.5, size - 2);
+  ctx.closePath();
+  ctx.strokeStyle = "rgba(255,255,255,0.95)"; ctx.lineWidth = 3; ctx.stroke();
+  ctx.fillStyle = "#5a4636"; ctx.fill();
+  return ctx.getImageData(0, 0, size, size);
+}
+map.on("styleimagemissing", (e) => {
+  if (e.id === "peak-triangle" && !map.hasImage("peak-triangle"))
+    map.addImage("peak-triangle", peakTriangle(16), { pixelRatio: 2 });
+});
+
+function restyle() {
+  map.setStyle(buildStyle(sel.value, document.getElementById("online").checked), { diff: false });
+  applyShade();
+}
+function applyShade() {
+  const v = document.getElementById("hs").value / 100;
+  for (const id of ["g-hillshade", "o-hillshade", "p-hillshade"])
+    if (map.getLayer(id)) map.setPaintProperty(id, "raster-opacity", v);
+}
+sel.onchange = restyle;
+document.getElementById("online").onchange = restyle;
+document.getElementById("hs").oninput = applyShade;
+map.on("style.load", applyShade);
+document.querySelectorAll(".jump button").forEach((b) => {
+  b.onclick = () => {
+    const [lat, lon, z] = b.dataset.v.split(",").map(Number);
+    map.jumpTo({ center: [lon, lat], zoom: z });
+  };
+});
+map.on("mousemove", (e) => {
+  document.getElementById("coords").textContent =
+    e.lngLat.lat.toFixed(4) + ", " + e.lngLat.lng.toFixed(4) + "  z" + map.getZoom().toFixed(1);
+});
+</script>
+</body>
+</html>

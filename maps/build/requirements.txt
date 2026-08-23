@@ -1,0 +1,7 @@
+pmtiles==3.7.0
+mapbox-vector-tile==2.2.0
+shapely==2.1.2
+numpy==2.4.6
+pillow==12.3.0
+rasterio==1.4.4
+pyshp==2.3.1

@@ -1,0 +1,13 @@
+{
+  "name": "@weather/maps-preview",
+  "private": true,
+  "description": "Browser preview of the basemap build output; shots/shot.mjs screenshots it with the local Chrome.",
+  "type": "module",
+  "scripts": {
+    "serve": "./run.sh",
+    "shots": "node shots/shot.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.8.0"
+  }
+}

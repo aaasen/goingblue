@@ -29,3 +29,6 @@ docs/private/
 
 # Deployment target (GCP project/region/instance names); documented in deploy.sh
 deploy.env
+
+# Python
+__pycache__/
