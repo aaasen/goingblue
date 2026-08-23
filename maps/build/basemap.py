@@ -209,10 +209,14 @@ def build_vectors(work, vectors_src, labels, landcover, maxzoom):
     stripped_mb = work / "stripped.mbtiles"
     stripped = work / "stripped.pmtiles"
     if not done(stripped):
-        if stripped_mb.exists():
-            stripped_mb.unlink()
-        run([sys.executable, HERE / "strip_build.py", src, stripped_mb, str(maxzoom)],
-            env={**os.environ, "STRIP_DROP": "landcover" if landcover else ""})
+        # A leftover mbtiles is reused: it is only deleted after a successful convert, so its
+        # presence means the strip finished and only the convert needs rerunning. Delete it by
+        # hand if a strip was killed mid-write.
+        if done(stripped_mb):
+            log(f"have {stripped_mb.name}, converting")
+        else:
+            run([sys.executable, HERE / "strip_build.py", src, stripped_mb, str(maxzoom)],
+                env={**os.environ, "STRIP_DROP": "landcover" if landcover else ""})
         run(["pmtiles", "convert", stripped_mb, stripped])
         stripped_mb.unlink()
     run(["tile-join", "--force", "-pk", "-o", out, stripped, labels, *([landcover] if landcover else [])])

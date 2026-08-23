@@ -10,7 +10,6 @@ FROM python:3.12-slim-bookworm AS tools
 ARG TIPPECANOE_VERSION=2.79.0
 ARG PMTILES_VERSION=1.31.2
 ARG DUCKDB_VERSION=1.5.5
-ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential ca-certificates curl git libsqlite3-dev unzip zlib1g-dev \
@@ -20,11 +19,11 @@ RUN git clone --depth 1 --branch ${TIPPECANOE_VERSION} https://github.com/felt/t
     && make -C /src/tippecanoe -j"$(nproc)" \
     && make -C /src/tippecanoe install PREFIX=/opt/tools
 
-RUN case "${TARGETARCH}" in amd64) a=x86_64 ;; arm64) a=arm64 ;; *) a=${TARGETARCH} ;; esac \
-    && curl -fsSL "https://github.com/protomaps/go-pmtiles/releases/download/v${PMTILES_VERSION}/go-pmtiles_${PMTILES_VERSION}_Linux_${a}.tar.gz" \
-       | tar -xz -C /opt/tools/bin pmtiles
-
-RUN curl -fsSL -o /tmp/duckdb.zip "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/duckdb_cli-linux-${TARGETARCH}.zip" \
+# Arch from the build host (the legacy builder on Debian's docker.io does not set TARGETARCH).
+RUN case "$(uname -m)" in x86_64) p=x86_64; d=amd64 ;; aarch64|arm64) p=arm64; d=arm64 ;; *) echo "unsupported arch"; exit 1 ;; esac \
+    && curl -fsSL "https://github.com/protomaps/go-pmtiles/releases/download/v${PMTILES_VERSION}/go-pmtiles_${PMTILES_VERSION}_Linux_${p}.tar.gz" \
+       | tar -xz -C /opt/tools/bin pmtiles \
+    && curl -fsSL -o /tmp/duckdb.zip "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/duckdb_cli-linux-${d}.zip" \
     && unzip -q /tmp/duckdb.zip -d /opt/tools/bin && rm /tmp/duckdb.zip
 
 FROM python:3.12-slim-bookworm

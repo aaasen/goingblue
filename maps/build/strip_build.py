@@ -148,6 +148,9 @@ def main():
                        (z, x, (1 << z) - 1 - y, tid))
             written += 1
     db.commit()
+    # pmtiles convert looks tiles up by z/x/y; without this index each lookup scans the table.
+    db.execute("CREATE UNIQUE INDEX map_idx ON map (zoom_level, tile_column, tile_row)")
+    db.commit()
     db.close()
     print(f"done: {n} source tiles, {written} written")
 
