@@ -308,7 +308,7 @@ The Going Blue codec relies on the client and server having identical codebooks.
 #### In development: Codec v3 (App version 1.2.0)
 
  - Added ZOLEO support with 240 character messages (up from 160 on SMS/Garmin).
- - Added Garmin Messenger support for newer inReach device.
+ - Added Garmin Messenger support for newer inReach devices.
  - Expanded support for multi-message forecasts from iPhone to all devices.
  - Expanded detailed cloud cover from 3 to 8 levels and improved detailed cloud rendering in the meteogram.
  - Expanded pressure-level winds from 3 to 7 levels.
@@ -316,6 +316,8 @@ The Going Blue codec relies on the client and server having identical codebooks.
  - Split out rain, snow, and precip chance in the meteogram to improve legibility.
  - Added support for mixed rain/snow weathercodes when there is a substantial amount of each precip type.
  - Improved meteogram rendering speed.
+ - Added offline maps with downloadable region packs. 
+ - Added more options to the unit selector.
 
 ## License
 
