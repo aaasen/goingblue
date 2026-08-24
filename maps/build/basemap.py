@@ -66,6 +66,17 @@ def done(path):
     return Path(path).exists() and Path(path).stat().st_size > 0
 
 
+def run_to(out, cmd_of):
+    """Run a command that writes `out`, via a temp name renamed only on success — a killed run
+    must never leave a partial file that a resume then trusts as finished."""
+    out = Path(out)
+    tmp = out.with_name(out.name + ".tmp")
+    if tmp.exists():
+        tmp.unlink()
+    run(cmd_of(tmp))
+    tmp.rename(out)
+
+
 def banded(value, bands, default=8):
     for threshold, zoom in bands:
         if value is not None and value >= threshold:
@@ -83,7 +94,7 @@ def ensure_source(src, work, name, maxzoom):
     if done(out):
         log(f"have {out.name}")
         return out
-    run(["pmtiles", "extract", src, out, f"--maxzoom={maxzoom}"])
+    run_to(out, lambda tmp: ["pmtiles", "extract", src, tmp, f"--maxzoom={maxzoom}"])
     return out
 
 
@@ -189,7 +200,7 @@ def build_landcover(work, landcover_src, maxzoom, bbox=None):
         # One sequential download: Zenodo rate-limits the parallel windowed reads.
         local = work / "landcover-src.tif"
         if not done(local):
-            run(["curl", "-L", "--retry", "5", "-o", local, src])
+            run_to(local, lambda tmp: ["curl", "-fL", "--retry", "5", "-o", tmp, src])
         src = local
     cmd = [sys.executable, HERE / "landcover_build.py", src, out, str(maxzoom), "--work", work / "landcover-work"]
     if bbox:
@@ -326,12 +337,14 @@ def bounds_of(geometry):
 def extract(src, out, region=None, maxzoom=None):
     if done(out):
         return
-    cmd = ["pmtiles", "extract", src, out]
-    if region:
-        cmd.append(f"--region={region}")
-    if maxzoom is not None:
-        cmd.append(f"--maxzoom={maxzoom}")
-    run(cmd)
+    def cmd(tmp):
+        c = ["pmtiles", "extract", src, tmp]
+        if region:
+            c.append(f"--region={region}")
+        if maxzoom is not None:
+            c.append(f"--maxzoom={maxzoom}")
+        return c
+    run_to(out, cmd)
 
 
 def build_packs(work, base, hs, countries, states, maxzoom, only=None):
