@@ -19,7 +19,11 @@
         "foregroundImage": "./assets/icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.laneaasen.weather"
+      "package": "com.laneaasen.weather",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "extra": {
       "eas": {
@@ -49,6 +53,12 @@
         }
       ],
       "expo-status-bar"
-    ]
+    ],
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/d7df179b-5e9e-4cce-8b42-27288a8f1298"
+    }
   }
 }
