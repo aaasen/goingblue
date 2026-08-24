@@ -532,8 +532,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
               <LocationMap
                 key={`${decoded.lat},${decoded.lon}`}
                 coord={{ lat: decoded.lat, lon: decoded.lon }}
-                height={160}
-                flush
+                height={200}
               />
             )}
           </View>

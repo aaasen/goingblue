@@ -764,11 +764,15 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
               </View>
             </View>
             <Text style={styles.mapHint}>Tap the map to set a location</Text>
-            <LocationMap
-              coord={coordsValid ? resolvedCoords : null}
-              onPick={(c) => setCustomCoords(`${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`)}
-              active={active}
-            />
+            {/* Edge to edge: the negative inset cancels the scroll content's horizontal padding,
+                so the map spans the screen rather than sitting inside the section's column. */}
+            <View style={styles.mapFullBleed}>
+              <LocationMap
+                coord={coordsValid ? resolvedCoords : null}
+                onPick={(c) => setCustomCoords(`${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`)}
+                active={active}
+              />
+            </View>
           </>
         )}
       </Section>
@@ -1069,10 +1073,13 @@ function InfoModal({ visible, title, onClose, children }: {
   );
 }
 
+// The scroll content's inset. Named so the map can cancel it and run edge to edge.
+const CONTENT_PAD = 16;
+
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: '#f2f2f7' },
   // Bottom pad covers the home-indicator inset the scroll view now extends under.
-  content: { padding: 16, paddingBottom: 72 },
+  content: { padding: CONTENT_PAD, paddingBottom: 72 },
 
   // Sheet frame, matching HelpScreen's. The safe area carries the status bar inset now that this
   // runs the full height, so the header only needs the same 12pt the tab bar's rows use.
@@ -1126,6 +1133,7 @@ const styles = StyleSheet.create({
   coordInput: { flex: 1, fontSize: 15, color: '#1c1c1e' },
   coordInputInvalid: { color: '#cc2222' },
   mapHint: { fontSize: 12, color: '#8e8e93', marginTop: 10 },
+  mapFullBleed: { marginTop: 10, marginHorizontal: -CONTENT_PAD },
   modelHint: { fontSize: 12, color: '#8e8e93', lineHeight: 17, marginTop: 8 },
 
   // Full-width action, its icon and label on a single centered row.

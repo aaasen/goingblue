@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Camera, Images, Map, Marker, type CameraRef, type PressEvent } from '@maplibre/maplibre-react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import type { NativeSyntheticEvent } from 'react-native';
 import { basemapStyle, MAX_ZOOM } from './basemapStyle';
 
@@ -15,11 +16,9 @@ interface Props {
   // When provided, the map is a picker: tapping reports a new coordinate.
   // When omitted, the map is a read-only preview (no panning, so it doesn't fight a parent ScrollView).
   onPick?: (c: LatLon) => void;
+  // Inline height. Omitted, the map is square at whatever width it is given.
   height?: number;
   active?: boolean;
-  // Full-bleed: no outer margin and square corners, for a map that runs edge to edge against its
-  // neighbours rather than sitting inside a card.
-  flush?: boolean;
 }
 
 // Wide view of the contiguous US, used as the picker's starting point before any coordinate is set.
@@ -29,9 +28,11 @@ const PICKED_ZOOM = 9;
 
 const MAP_IMAGES = { 'peak-triangle': require('./assets/peak-triangle.png') };
 
-// MapLibre Native map over the PMTiles basemap (see basemapStyle.ts). Callers also expose lat/lon
-// text inputs for setting a custom location without the map.
-export default function LocationMap({ coord, onPick, height, active = true, flush = false }: Props) {
+// MapLibre Native map over the PMTiles basemap (see basemapStyle.ts). One component for both the
+// builder's picker and the decoder's preview — they differ only in height and in whether tapping
+// picks a coordinate. Either way the corner button opens the same map fullscreen, where it pans and
+// zooms freely. Callers also expose lat/lon text inputs for setting a location without the map.
+export default function LocationMap({ coord, onPick, height, active = true }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
@@ -61,16 +62,18 @@ export default function LocationMap({ coord, onPick, height, active = true, flus
       }
     : undefined;
 
-  function renderMap(ref: React.RefObject<CameraRef | null>, key?: number) {
+  // `pannable` is separate from `interactive`: an inline preview stays locked so it doesn't fight
+  // the parent ScrollView, but the same map in the fullscreen modal has no scroll view to fight.
+  function renderMap(ref: React.RefObject<CameraRef | null>, pannable: boolean, key?: number) {
     return (
       <Map
         key={key}
         style={StyleSheet.absoluteFill}
         mapStyle={basemapStyle}
         onPress={onPress}
-        dragPan={interactive}
-        touchZoom={interactive}
-        doubleTapZoom={interactive}
+        dragPan={pannable}
+        touchZoom={pannable}
+        doubleTapZoom={pannable}
         touchRotate={false}
         touchPitch={false}
         compass={false}
@@ -92,20 +95,20 @@ export default function LocationMap({ coord, onPick, height, active = true, flus
   }
 
   return (
-    <View style={[styles.wrap, flush && styles.flush, height == null ? styles.square : { height }]}>
+    <View style={[styles.wrap, height == null ? styles.square : { height }]}>
       {!fullscreen && (
         <>
-          {renderMap(cameraRef, mapRevision)}
-          {interactive && (
-            <TouchableOpacity
-              style={styles.fullscreenButton}
-              onPress={() => setFullscreen(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Open map fullscreen"
-            >
-              <Text style={styles.fullscreenButtonText}>⛶</Text>
-            </TouchableOpacity>
-          )}
+          {renderMap(cameraRef, interactive, mapRevision)}
+          <TouchableOpacity
+            style={styles.fullscreenButton}
+            onPress={() => setFullscreen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Open map fullscreen"
+          >
+            {/* Material's fullscreen glyph rather than a ⛶ text character, which several
+                platforms draw as a plain box or a missing-glyph slug. */}
+            <MaterialCommunityIcons name="fullscreen" size={26} color="#2a6bb5" />
+          </TouchableOpacity>
         </>
       )}
       {fullscreen && (
@@ -116,7 +119,7 @@ export default function LocationMap({ coord, onPick, height, active = true, flus
           onRequestClose={() => setFullscreen(false)}
         >
           <View style={styles.fullscreenWrap}>
-            {renderMap(fullscreenCameraRef)}
+            {renderMap(fullscreenCameraRef, true)}
             <TouchableOpacity
               style={styles.doneButton}
               onPress={() => setFullscreen(false)}
@@ -134,8 +137,8 @@ export default function LocationMap({ coord, onPick, height, active = true, flus
 const PIN = '#d0433b';
 
 const styles = StyleSheet.create({
-  wrap: { marginTop: 10, borderRadius: 12, overflow: 'hidden', backgroundColor: '#e5e8ee' },
-  flush: { marginTop: 0, borderRadius: 0 },
+  // Full-bleed by default: no outer margin, square corners. Callers place and space it.
+  wrap: { overflow: 'hidden', backgroundColor: '#e5e8ee' },
   square: { width: '100%', aspectRatio: 1 },
   fullscreenWrap: { flex: 1, backgroundColor: '#e5e8ee' },
   pin: { alignItems: 'center' },
@@ -152,7 +155,6 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
     width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
   },
-  fullscreenButtonText: { color: '#2a6bb5', fontSize: 24, lineHeight: 28 },
   doneButton: {
     position: 'absolute', top: 56, right: 16, backgroundColor: 'rgba(255,255,255,0.96)',
     borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10,
