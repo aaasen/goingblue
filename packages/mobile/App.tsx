@@ -11,7 +11,7 @@ import { clearStore } from './cache';
 import {
   loadAqiScale, loadDevice, loadTimeFormat, loadTwoMessages, loadUnits,
   saveAqiScale, saveDevice, saveTimeFormat, saveTwoMessages, saveUnits,
-  type AqiScale, type TimeFormat, type Units,
+  defaultUnitPrefs, type AqiScale, type TimeFormat, type UnitPrefs,
 } from './settings';
 import { DEFAULT_DEVICE, type Device } from './devices';
 import { configureTileCache } from './tileCache';
@@ -30,7 +30,7 @@ export default function App() {
   const [forecastData, setForecastData] = useState('');
   // undefined = still loading from storage; null = no account yet (show setup); string = ready.
   const [token, setToken] = useState<string | null | undefined>(undefined);
-  const [units, setUnitsState] = useState<Units>('imperial');
+  const [units, setUnitsState] = useState<UnitPrefs>(defaultUnitPrefs('imperial'));
   const [timeFormat, setTimeFormatState] = useState<TimeFormat>('12h');
   const [aqiScale, setAqiScaleState] = useState<AqiScale>('us');
   // Builder-only, but loaded here with the rest: the builder is the tab that comes up first, so
@@ -70,7 +70,7 @@ export default function App() {
   }, []);
 
   // Persist unit changes so the choice survives across sessions.
-  function setUnits(u: Units) {
+  function setUnits(u: UnitPrefs) {
     setUnitsState(u);
     saveUnits(u);
   }

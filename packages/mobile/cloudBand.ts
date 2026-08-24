@@ -8,6 +8,7 @@
 // pressures at altitudes for the axis labels.
 
 import { CLOUD_BAND_LEVELS_HPA, pressureToMeters, metersToPressure } from '@weather/protocol';
+import type { LevelUnit } from './settings';
 
 export { pressureToMeters, metersToPressure };
 
@@ -15,7 +16,8 @@ export const BAND_TOP_HPA = CLOUD_BAND_LEVELS_HPA[0];
 
 // One rung of the altitude ladder: the standard-atmosphere height of a wire level, as a rough
 // band with its unit — thousands of feet ("14k ft", "400 ft" at the ground) or half-kilometres
-// ("5.5km", "0.1km" at the ground) — the same label for every reader of a pressure level, whether on the cloud band's
+// ("5.5km", "0.1km" at the ground) — or, for the reader who thinks in pressure, the level itself
+// ("500 hPa"). The same label for every reader of a pressure level, whether on the cloud band's
 // rail, a wind row, or the builder's level list.
 //
 // On the cloud band the top rung is written "30k+" (`open`): 300 hPa is the highest level the
@@ -24,11 +26,14 @@ export const BAND_TOP_HPA = CLOUD_BAND_LEVELS_HPA[0];
 // The "+" turns the top of the scale into what it actually is: everything from 30k up, gathered
 // onto one edge (fillCloudBand folds the model's high cloud into that slot). A wind level is a
 // point reading — 300 hPa wind is the wind AT 30k, bundling nothing above it — so wind rungs
-// are plain.
-export function ladderLabel(hpa: number, units: 'imperial' | 'metric', open = false): string {
+// are plain. In pressure the open top reads "≤300 hPa": up is DOWN in hPa, so a "+" would point
+// the wrong way.
+export function ladderLabel(hpa: number, unit: LevelUnit, open = false): string {
+  const isTop = open && hpa === BAND_TOP_HPA;
+  if (unit === 'hpa') return `${isTop ? '≤' : ''}${hpa} hPa`;
   const m = pressureToMeters(hpa);
-  const plus = open && hpa === BAND_TOP_HPA ? '+' : '';
-  if (units === 'imperial') {
+  const plus = isTop ? '+' : '';
+  if (unit === 'ft') {
     const ft = m * 3.28084;
     return ft < 1000 ? `${Math.round(ft / 100) * 100} ft` : `${Math.round(ft / 1000)}k${plus} ft`;
   }

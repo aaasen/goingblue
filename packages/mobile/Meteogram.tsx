@@ -7,10 +7,10 @@ import {
 } from '@shopify/react-native-skia';
 import {
   CARDINALS, RAIN_K, modelsFromMask, startDatetime, predictCenter, attributeHour,
-  AQ_DOMINANT_US, AQ_DOMINANT_EU, CLOUD_BAND_LEVELS_HPA, WIND_LEVELS_HPA,
+  AQ_DOMINANT_US, AQ_DOMINANT_EU, CLOUD_BAND_LEVELS_HPA, WIND_LEVELS_HPA, quantWind,
   type Center, type ForecastMessage, type ModelSpec, type Period,
 } from '@weather/protocol';
-import type { TimeFormat, Units } from './settings';
+import type { AltitudeUnit, TimeFormat, UnitPrefs } from './settings';
 import {
   bandScale, ladderLabel, pressureToMeters, metersToPressure,
   BAND_TOP_HPA, GRID_STEP_HPA, type BandScale,
@@ -578,17 +578,17 @@ function windRibbon(
 
 // ── Unit-aware formatting (no suffix; unit lives in the row label) ──────────--
 
-function fmtTemp(c: number | undefined, u: Units): string {
+function fmtTemp(c: number | undefined, u: UnitPrefs): string {
   if (c == null) return '';
-  return u === 'imperial' ? `${Math.round((c * 9) / 5 + 32)}°` : `${Math.round(c)}°`;
+  return u.temp === 'f' ? `${Math.round((c * 9) / 5 + 32)}°` : `${Math.round(c)}°`;
 }
 // Below the resolution the column can print, a measurable amount says so rather than printing
 // nothing: the area is visibly off the floor in those periods, and a blank under a raised curve
 // reads as data the message didn't carry instead of as a trace. Only ever below — an amount that
 // rounds to the smallest printable figure prints that figure, and a period with nothing in it
 // prints nothing at all.
-function fmtSnow(cm: number, u: Units): string {
-  if (u === 'imperial') {
+function fmtSnow(cm: number, u: UnitPrefs): string {
+  if (u.snow === 'in') {
     const inches = cm / 2.54;
     if (inches >= 0.1) return `${inches.toFixed(inches < 1 ? 1 : 0)}`;
     return cm > 0 ? '<0.1' : '';
@@ -596,8 +596,8 @@ function fmtSnow(cm: number, u: Units): string {
   if (cm >= 0.5) return `${Math.round(cm)}`;
   return cm > 0 ? '<0.5' : '';
 }
-function fmtRain(mm: number, u: Units): string {
-  if (u === 'imperial') {
+function fmtRain(mm: number, u: UnitPrefs): string {
+  if (u.rain === 'in') {
     const inches = mm / 25.4;
     if (inches >= 0.01) return `${inches.toFixed(2)}`;
     return mm > 0 ? '<0.01' : '';
@@ -607,23 +607,32 @@ function fmtRain(mm: number, u: Units): string {
 }
 // Column labels are abbreviated to thousands ("14k", "13.5k") — a grouped "14,000" outgrows the
 // cell. Metric already fits at 100 m granularity.
-function fmtFreeze(m: number | undefined, u: Units): string {
+function fmtFreeze(m: number | undefined, u: UnitPrefs): string {
   if (m == null) return '';
-  if (u === 'imperial') {
+  if (u.altitude === 'ft') {
     const ft = Math.round((m * 3.28084) / 500) * 500;
     return ft < 1000 ? `${ft}` : `${(ft / 1000).toFixed(ft % 1000 === 0 ? 0 : 1)}k`;
   }
   return `${Math.round(m / 100) * 100}`;
 }
-function fmtWind(kph: number | undefined, u: Units): string {
+// Whole numbers in every unit: the wire carries wind as Beaufort forces and the decoder hands
+// back band midpoints, so a decimal would be precision the message never had. Beaufort itself
+// reads the force straight back off the midpoint — the only display with nothing rounded.
+function fmtWind(kph: number | undefined, u: UnitPrefs): string {
   if (kph == null) return '';
-  return u === 'imperial' ? `${Math.round(kph / 1.60934)}` : `${Math.round(kph)}`;
+  switch (u.wind) {
+    case 'mph': return `${Math.round(kph / 1.60934)}`;
+    case 'kmh': return `${Math.round(kph)}`;
+    case 'ms': return `${Math.round(kph / 3.6)}`;
+    case 'kt': return `${Math.round(kph / 1.852)}`;
+    case 'bft': return `${quantWind(kph)}`;
+  }
 }
 
 // Detail-panel variants: unit-suffixed and never blanked — the panel must show the trace
 // amounts the column labels drop below their display thresholds.
-function fmtRainFull(mm: number, u: Units): string {
-  if (u === 'imperial') {
+function fmtRainFull(mm: number, u: UnitPrefs): string {
+  if (u.rain === 'in') {
     if (mm <= 0) return '0 in';
     const inches = mm / 25.4;
     return inches < 0.01 ? '<0.01 in' : `${inches.toFixed(2)} in`;
@@ -631,8 +640,8 @@ function fmtRainFull(mm: number, u: Units): string {
   if (mm <= 0) return '0 mm';
   return `${mm < 10 ? mm.toFixed(1) : Math.round(mm)} mm`;
 }
-function fmtSnowFull(cm: number, u: Units): string {
-  if (u === 'imperial') {
+function fmtSnowFull(cm: number, u: UnitPrefs): string {
+  if (u.snow === 'in') {
     if (cm <= 0) return '0 in';
     const inches = cm / 2.54;
     return inches < 0.1 ? '<0.1 in' : `${inches.toFixed(1)} in`;
@@ -640,30 +649,39 @@ function fmtSnowFull(cm: number, u: Units): string {
   if (cm <= 0) return '0 cm';
   return `${cm < 10 ? cm.toFixed(1) : Math.round(cm)} cm`;
 }
-function fmtFreezeFull(m: number | undefined, u: Units): string {
+// A height above sea level to the nearest 500 ft / 100 m, with its unit.
+function fmtAltitudeFull(m: number, unit: AltitudeUnit): string {
+  const v = unit === 'ft' ? Math.round((m * 3.28084) / 500) * 500 : Math.round(m / 100) * 100;
+  return `${v.toLocaleString()} ${unit}`;
+}
+function fmtFreezeFull(m: number | undefined, u: UnitPrefs): string {
   if (m == null) return '—';
-  const v = u === 'imperial' ? Math.round((m * 3.28084) / 500) * 500 : Math.round(m / 100) * 100;
-  return `${v.toLocaleString()} ${freezeUnit(u)}`;
+  return fmtAltitudeFull(m, u.altitude);
+}
+// A pressure level in full, on the reader's level unit: its standard-atmosphere height
+// ("18,000 ft") or the pressure itself ("500 hPa").
+function fmtLevelFull(hpa: number, u: UnitPrefs): string {
+  return u.level === 'hpa' ? pressureLabel(hpa) : fmtAltitudeFull(pressureToMeters(hpa), u.level);
 }
 // The cloud band's ground line names its own altitude. A straight conversion of the header's
 // meters, to the foot — the SAME arithmetic the decoder's forecast summary does (elevationLabel),
 // so one message's elevation reads the same in both places. The wire quantizes it to 100 m steps,
 // which is coarser than either reading suggests; rounding the feet to the hundred here doesn't
 // recover that (100 m is 328 ft), it only makes the band and the summary disagree about one field.
-function fmtElevation(m: number, u: Units): string {
-  const v = u === 'imperial' ? Math.round(m * 3.28084) : Math.round(m);
-  return `${v.toLocaleString()} ${freezeUnit(u)}`;
+function fmtElevation(m: number, u: UnitPrefs): string {
+  const v = u.altitude === 'ft' ? Math.round(m * 3.28084) : Math.round(m);
+  return `${v.toLocaleString()} ${u.altitude}`;
 }
-function fmtWindFull(kph: number | undefined, dir: number | undefined, u: Units): string {
+function fmtWindFull(kph: number | undefined, dir: number | undefined, u: UnitPrefs): string {
   if (kph == null) return '—';
   const cardinal = dir != null ? CARDINALS[dir] : undefined;
   const dirText = cardinal ? ` ${ARROWS[cardinal] ?? ''} ${cardinal}` : '';
   return `${fmtWind(kph, u)} ${windUnit(u)}${dirText}`;
 }
 
-function tempUnit(u: Units) { return u === 'imperial' ? '°F' : '°C'; }
-function freezeUnit(u: Units) { return u === 'imperial' ? 'ft' : 'm'; }
-function windUnit(u: Units) { return u === 'imperial' ? 'mph' : 'kph'; }
+function tempUnit(u: UnitPrefs) { return u.temp === 'f' ? '°F' : '°C'; }
+const WIND_UNIT_LABELS: Record<UnitPrefs['wind'], string> = { mph: 'mph', kmh: 'km/h', ms: 'm/s', kt: 'kt', bft: 'bft' };
+function windUnit(u: UnitPrefs) { return WIND_UNIT_LABELS[u.wind]; }
 
 // Every label below reads a ZONED date: a Date displaced by the forecast point's UTC offset, so
 // that its UTC fields spell out the wall clock at the forecast point rather than at the device (see
@@ -991,7 +1009,7 @@ const pollutantName = (scale: 'us' | 'eu', idx: number | undefined): string | un
   return POLLUTANT_LABEL[ids[idx]] ?? ids[idx];
 };
 
-function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[] {
+function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number): Row[] {
   const rows: Row[] = [];
   const has = (fn: (p: Period) => unknown) => periods.some((p) => fn(p) != null);
   // A precip row earns its place by carrying an amount, not by the variable being requested. The
@@ -1000,12 +1018,12 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
   // two rows cannot: a requested-but-dry snow column would stand as a blank band the height of the
   // rain row beside it.
   const hasAmount = (fn: (p: Period) => number | undefined) => periods.some((p) => (fn(p) ?? 0) > 0);
-  const tU = tempUnit(u), frU = freezeUnit(u), wU = windUnit(u);
+  const tU = tempUnit(u), frU = u.altitude, wU = windUnit(u);
   // A precip row's token is the unit its OWN numbers are in — the two rows don't share one in
   // metric, and that is most of why they are two rows. Neither is the unit of the area under it:
   // both areas are drawn in liquid equivalent (accumFrac).
-  const snowU = u === 'imperial' ? 'in' : 'cm';
-  const rainU = u === 'imperial' ? 'in' : 'mm';
+  const snowU = u.snow;
+  const rainU = u.rain;
 
   rows.push({ kind: 'clouds', height: ROW_H.CLOUD, label: '', legend: '' });
 
@@ -1084,7 +1102,7 @@ function buildRows(periods: Period[], u: Units, lat: number, lon: number): Row[]
   if (aloftLevels.length) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Pressure-level winds (${wU})`, legend: '' });
     for (const li of aloftLevels) {
-      rows.push({ kind: 'wind-aloft', height: ROW_H.WIND_UPPER, label: '', legend: ladderLabel(WIND_LEVELS_HPA[li], u), level: li });
+      rows.push({ kind: 'wind-aloft', height: ROW_H.WIND_UPPER, label: '', legend: ladderLabel(WIND_LEVELS_HPA[li], u.level), level: li });
     }
   }
 
@@ -1302,7 +1320,7 @@ type Tile = { offset: number; width: number };
 const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps, units, now, width, viewportW, flatListRef, scrollX, fonts, paint }: {
   // `dates` are absolute instants; `zoned` is the same series on the forecast point's wall clock,
   // for the day columns and their labels.
-  periods: Period[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; now: number;
+  periods: Period[]; dates: Date[]; zoned: Date[]; steps: number[]; units: UnitPrefs; now: number;
   // Two different widths, and mixing them up puts the viewport window in the wrong place: `width`
   // is how many pixels the strip DRAWS across (it spans the screen, rail included), `viewportW` is
   // how much of the meteogram below is visible at once (the screen less the fixed rail). The
@@ -1755,7 +1773,7 @@ interface SceneStatics {
 function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
   // `elevation` is the forecast point's height in meters, off the message header — the cloud band
   // draws it as its ground line, and `units`/`fonts` are what that line's label is written with.
-  periods: Period[]; rows: Row[]; steps: number[]; elevation: number; units: Units; fonts: Fonts;
+  periods: Period[]; rows: Row[]; steps: number[]; elevation: number; units: UnitPrefs; fonts: Fonts;
 }): SceneStatics {
   const n = periods.length;
   const width = n * CELL_W;
@@ -2003,7 +2021,7 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
 function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics, from, to }: {
   // `dates` are absolute instants — what the sun answers to. `zoned` is the same series on the
   // forecast point's wall clock, which is what the hour and day labels read.
-  periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat;
+  periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: UnitPrefs; timeFormat: TimeFormat;
   lat: number; lon: number; fonts: Fonts; dayGroups: DayGroup[];
   // The model row's bands. Their labels are not drawn here — they stick to the viewport's left
   // edge, like the day labels, so they live in the overlay above the canvas.
@@ -2602,7 +2620,7 @@ function legendCy(row: Row): number {
  * a label with a notch cut in front of it.
  */
 const RowLegend = memo(function RowLegend({ rows, units, bandLevels, paint }: {
-  rows: Row[]; units: Units;
+  rows: Row[]; units: UnitPrefs;
   // How many pressure levels the message's cloud band carries (0 when it carries none) — the
   // wire truncates the stack at one level below the forecast point, and the rail's ladder has
   // to list exactly the levels the band draws.
@@ -2653,7 +2671,7 @@ const RowLegend = memo(function RowLegend({ rows, units, bandLevels, paint }: {
         const ty = Math.min(Math.max(gy - LEGEND_LEVEL_H / 2, top), top + row.height - LEGEND_LEVEL_H);
         els.push(
           <RNText key={`cb${ri}-${hpa}`} numberOfLines={1} style={[styles.legendLevel, { top: ty }]}>
-            {ladderLabel(hpa, units, true)}
+            {ladderLabel(hpa, units.level, true)}
           </RNText>,
         );
       }
@@ -2743,7 +2761,7 @@ function monotonicRange(knots: [input: number, output: number][]): { inputRange:
 function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, elevation, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
-  periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: Units; timeFormat: TimeFormat; now: number; lat: number; lon: number; elevation: number; fonts: Fonts;
+  periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: UnitPrefs; timeFormat: TimeFormat; now: number; lat: number; lon: number; elevation: number; fonts: Fonts;
   // The selector option this block was fetched under, and the instant its model horizons are
   // measured from — see modelSegments.
   center: Center; attributionMs: number;
@@ -3103,7 +3121,7 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
 // ── Public component ─────────────────────────────────────────────────────--
 
 export default function Meteogram({ msg, units, timeFormat, active }: {
-  msg: ForecastMessage; units: Units; timeFormat: TimeFormat; active: boolean;
+  msg: ForecastMessage; units: UnitPrefs; timeFormat: TimeFormat; active: boolean;
 }) {
   // Memoized because `blocks` depends on it: a fresh array here would rebuild every block —
   // and with them every Skia scene — on each render, e.g. whenever the selection moves.
@@ -3228,9 +3246,11 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
 const LEADER_DOTS = '.'.repeat(160);
 
 // Detail-panel label for a pressure-level wind row, e.g. "Wind 18k ft (500 hPa)": the rail's
-// altitude rung first, the transmitted pressure after it.
-function upperWindLabel(hpa: number, units: Units): string {
-  return `Wind ${ladderLabel(hpa, units)} (${pressureLabel(hpa)})`;
+// altitude rung first, the transmitted pressure after it — or just "Wind 500 hPa" for the reader
+// whose ladder is pressure, where the pair would say it twice.
+function upperWindLabel(hpa: number, units: UnitPrefs): string {
+  if (units.level === 'hpa') return `Wind ${pressureLabel(hpa)}`;
+  return `Wind ${ladderLabel(hpa, units.level)} (${pressureLabel(hpa)})`;
 }
 
 const MOON_PHASE_LABELS: Record<CyclePhase, string> = {
@@ -3291,7 +3311,7 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
   // on the forecast point's clock, matching the column the tap came from.
   periods: Period[]; index: number; dates: Date[]; zoned: Date[]; steps: number[];
   modelName?: string; modelColor: string;
-  units: Units; timeFormat: TimeFormat; lat: number; lon: number; utcOffsetHours: number;
+  units: UnitPrefs; timeFormat: TimeFormat; lat: number; lon: number; utcOffsetHours: number;
   // Epoch that remounts the glyph canvases after this tab was hidden — see Meteogram.
   paint: number;
   onClose: () => void;
@@ -3342,7 +3362,7 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
 
   const rows: [string, string][] = [];
   if (has((q) => q.temp_c))
-    rows.push(['Temperature', p.temp_c != null ? `${fmtTemp(p.temp_c, units)}${units === 'imperial' ? 'F' : 'C'}` : '—']);
+    rows.push(['Temperature', p.temp_c != null ? `${fmtTemp(p.temp_c, units)}${units.temp === 'f' ? 'F' : 'C'}` : '—']);
   // Probability lives here and only here: the drawing carries the two amounts, and this panel is
   // where a column's numbers are read one at a time.
   if (has((q) => q.precip)) rows.push(['Precip chance', p.precip != null ? `${p.precip}%` : '—']);
@@ -3370,7 +3390,7 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
       const v = p.cloud_band?.[li];
       // "and above" on the top level, matching the rail's "30k+" — the highest level the
       // message carries is the only one whose reading is not bracketed by a level above it.
-      const at = fmtFreezeFull(pressureToMeters(hpa), units) + (hpa === BAND_TOP_HPA ? ' and above' : '');
+      const at = fmtLevelFull(hpa, units) + (hpa === BAND_TOP_HPA ? ' and above' : '');
       rows.push([`Clouds ${at}`, v != null ? `${v}%` : '—']);
     });
   }

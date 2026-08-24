@@ -11,7 +11,7 @@ import {
   chunksCollected, decodeAny, loadStore, attachResponse, mergeReply, normalizeReply,
   prunePastForecasts, replyParts, type Slot,
 } from './cache';
-import type { TimeFormat, Units } from './settings';
+import type { TimeFormat, UnitPrefs } from './settings';
 import LocationMap from './LocationMap';
 import Meteogram from './Meteogram';
 import { modelLabelsFromMask, modelIconsFromMask } from './models';
@@ -54,14 +54,14 @@ function priorityLabel(msg: ForecastMessage): string {
  * The forecast point's elevation, in the user's units. Empty at sea level, which
  * is also what the wire format reports when it has no elevation to carry.
  */
-function elevationLabel(msg: ForecastMessage, units: Units): string {
+function elevationLabel(msg: ForecastMessage, units: UnitPrefs): string {
   if (msg.elevation <= 0) return '';
-  return units === 'imperial'
+  return units.altitude === 'ft'
     ? `${Math.round(msg.elevation * 3.28084).toLocaleString()}ft`
     : `${Math.round(msg.elevation).toLocaleString()}m`;
 }
 
-function metaLabel(msg: ForecastMessage, units: Units): string {
+function metaLabel(msg: ForecastMessage, units: UnitPrefs): string {
   const models = modelLabelsFromMask(msg.models_mask);
   const elev = elevationLabel(msg, units);
   const elevStr = elev ? ` · ${elev}` : '';
@@ -96,7 +96,7 @@ function normalizedForecastData(encoded: string): string {
  * is for the loaded forecast's own meta row, which has the width for the request
  * date and the forecast point's elevation; the past-forecast list stays compact.
  */
-function cacheMetaLabel(slot: Slot, token: string, units: Units, detailed = false): string {
+function cacheMetaLabel(slot: Slot, token: string, units: UnitPrefs, detailed = false): string {
   try {
     const msg = decodeAny(slot.encoded!, token);
     const models = modelIconsFromMask(msg.models_mask).join(' ');
@@ -231,7 +231,7 @@ interface Props {
   token: string;
   forecastData: string;
   onForecastDataChange: (v: string) => void;
-  units: Units;
+  units: UnitPrefs;
   timeFormat: TimeFormat;
   active: boolean;
 }

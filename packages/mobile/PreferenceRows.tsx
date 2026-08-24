@@ -1,14 +1,22 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { AQI_SCALES, type AqiScale, type TimeFormat, type Units } from './settings';
+import {
+  ALTITUDE_UNITS, AQI_SCALES, LEVEL_UNITS, RAIN_UNITS, SNOW_UNITS, TEMP_UNITS, WIND_UNITS,
+  applyUnitSystem, type AqiScale, type TimeFormat, type UnitOption, type UnitPrefs, type Units,
+} from './settings';
 
 // The display preferences, as one block: Units, Time format, and Air quality. Both the setup
 // screen and the Settings tab render this component rather than their own rows, so the two
-// surfaces always offer the same set — a preference added here shows up in both.
+// surfaces always offer the same set — a preference added here shows up in both. The one
+// exception is the per-quantity unit rows under the master switch (`detailed`): Settings lists
+// them, first run doesn't — a reader on their first screen picks a system, and the sailor who
+// wants knots knows to look for it later.
 
 interface Props {
-  units: Units;
-  onUnitsChange: (u: Units) => void;
+  units: UnitPrefs;
+  onUnitsChange: (u: UnitPrefs) => void;
+  // Show the per-quantity unit rows under the master switch.
+  detailed?: boolean;
   timeFormat: TimeFormat;
   onTimeFormatChange: (format: TimeFormat) => void;
   aqiScale: AqiScale;
@@ -26,13 +34,34 @@ const TIME_FORMAT_OPTIONS: { value: TimeFormat; label: string }[] = [
 ];
 
 export default function PreferenceRows({
-  units, onUnitsChange, timeFormat, onTimeFormatChange, aqiScale, onAqiScaleChange,
+  units, onUnitsChange, detailed, timeFormat, onTimeFormatChange, aqiScale, onAqiScaleChange,
 }: Props) {
+  // One row per quantity. Each writes its own field; the master switch goes through
+  // applyUnitSystem, which moves the quantities on a system's standard unit and leaves a
+  // knots or hPa choice alone.
+  const unitRow = <K extends keyof UnitPrefs>(label: string, key: K, options: readonly UnitOption<UnitPrefs[K]>[]) => (
+    <Row label={label} spaced indented>
+      <Toggle options={options} selected={units[key]} onChange={(v) => onUnitsChange({ ...units, [key]: v })} />
+    </Row>
+  );
   return (
     <>
       <Row label="Units">
-        <Toggle options={UNITS_OPTIONS} selected={units} onChange={onUnitsChange} />
+        <Toggle options={UNITS_OPTIONS} selected={units.system}
+          onChange={(system) => onUnitsChange(applyUnitSystem(units, system))} />
       </Row>
+      {detailed && (
+        <>
+          {unitRow('Temperature', 'temp', TEMP_UNITS)}
+          {unitRow('Rain', 'rain', RAIN_UNITS)}
+          {unitRow('Snow', 'snow', SNOW_UNITS)}
+          {unitRow('Wind', 'wind', WIND_UNITS)}
+          {/* Elevation and freezing level are both heights above sea level, so one unit. */}
+          {unitRow('Elevation', 'altitude', ALTITUDE_UNITS)}
+          {/* The cloud band's rungs and the wind-aloft levels. */}
+          {unitRow('Pressure-level', 'level', LEVEL_UNITS)}
+        </>
+      )}
       <Row label="Time format" spaced>
         <Toggle options={TIME_FORMAT_OPTIONS} selected={timeFormat} onChange={onTimeFormatChange} />
       </Row>
@@ -46,10 +75,12 @@ export default function PreferenceRows({
   );
 }
 
-function Row({ label, spaced, children }: { label: string; spaced?: boolean; children: ReactNode }) {
+function Row({ label, spaced, indented, children }: {
+  label: string; spaced?: boolean; indented?: boolean; children: ReactNode;
+}) {
   return (
     <View style={[styles.row, spaced && styles.rowSpacing]}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={[styles.label, indented && styles.labelIndented]}>{label}</Text>
       {children}
     </View>
   );
@@ -84,8 +115,11 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   rowSpacing: { marginTop: 14 },
   label: { fontSize: 13, fontWeight: '600', color: '#3a3a3c' },
+  // The per-quantity rows sit under the master switch as its detail: lighter and stepped in.
+  labelIndented: { fontWeight: '500', color: '#6e6e73', paddingLeft: 12 },
   toggle: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: '#e5e5ea', borderRadius: 8, padding: 2 },
-  toggleBtn: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 6 },
+  // 14 rather than 16 so the five-way wind toggle clears its label on a 360dp phone.
+  toggleBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6 },
   toggleBtnActive: { backgroundColor: '#fff' },
   toggleText: { fontSize: 13, color: '#6e6e73', fontWeight: '500' },
   toggleTextActive: { color: '#1c1c1e' },

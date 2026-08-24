@@ -16,7 +16,7 @@ import {
   type RequestContext, type Center,
 } from '@weather/protocol';
 import { API_BASE } from './account';
-import { type AqiScale, type Units } from './settings';
+import { type AqiScale, type UnitPrefs } from './settings';
 import { ladderLabel } from './cloudBand';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import { allocCode } from './cache';
@@ -245,12 +245,13 @@ const VAR_GROUPS: VarGroup[] = [
   },
 ];
 
-// "18k ft (500 hPa)": the level's rung on the altitude ladder, then the pressure the wire names.
-function windLevelLabel(hpa: number, units: Units): string {
-  return `${ladderLabel(hpa, units)} (${hpa} hPa)`;
+// "18k ft (500 hPa)": the level's rung on the altitude ladder, then the pressure the wire names —
+// or just "500 hPa" for the reader whose ladder IS pressure, where the pair would say it twice.
+function windLevelLabel(hpa: number, units: UnitPrefs): string {
+  return units.level === 'hpa' ? `${hpa} hPa` : `${ladderLabel(hpa, units.level)} (${hpa} hPa)`;
 }
 // A group's label in the reader's units — only the wind levels carry a unit.
-function groupLabel(g: VarGroup, units: Units): string {
+function groupLabel(g: VarGroup, units: UnitPrefs): string {
   return g.windLevel != null ? windLevelLabel(WIND_LEVELS_HPA[g.windLevel], units) : g.label;
 }
 
@@ -430,7 +431,7 @@ interface Props {
   // Which air-quality index to offer. A Settings preference, changed there rather than here.
   aqiScale: AqiScale;
   // The reader's units, for the wind levels' altitude rungs.
-  units: Units;
+  units: UnitPrefs;
 }
 
 export default function BuilderTab({ token, onForecastReceived, active, device, onDeviceChange, twoMessages, onTwoMessagesChange, aqiScale, units }: Props) {

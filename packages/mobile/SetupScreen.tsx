@@ -5,7 +5,7 @@ import {
 import { createAccount } from './account';
 import GettingStarted from './GettingStarted';
 import PreferenceRows from './PreferenceRows';
-import type { AqiScale, TimeFormat, Units } from './settings';
+import type { AqiScale, TimeFormat, UnitPrefs } from './settings';
 
 const TERMS_URL = 'https://going.blue/terms';
 const PRIVACY_URL = 'https://going.blue/privacy';
@@ -13,8 +13,8 @@ const PRIVACY_URL = 'https://going.blue/privacy';
 interface Props {
   // Called with the provisioned token once setup completes; the token is already persisted.
   onReady: (token: string) => void;
-  units: Units;
-  onUnitsChange: (u: Units) => void;
+  units: UnitPrefs;
+  onUnitsChange: (u: UnitPrefs) => void;
   timeFormat: TimeFormat;
   onTimeFormatChange: (format: TimeFormat) => void;
   aqiScale: AqiScale;

@@ -4,7 +4,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import PreferenceRows from './PreferenceRows';
 import OfflineMapsScreen, { downloadedPacks } from './OfflineMapsScreen';
 import { loadDownloadedPacks, saveDownloadedPacks } from './offlineMaps';
-import type { AqiScale, TimeFormat, Units } from './settings';
+import type { AqiScale, TimeFormat, UnitPrefs } from './settings';
 
 const TERMS_URL = 'https://going.blue/terms';
 const PRIVACY_URL = 'https://going.blue/privacy';
@@ -13,8 +13,8 @@ export default function SettingsTab({
   onDeleteAccount, units, onUnitsChange, timeFormat, onTimeFormatChange, aqiScale, onAqiScaleChange,
 }: {
   onDeleteAccount: () => Promise<void>;
-  units: Units;
-  onUnitsChange: (u: Units) => void;
+  units: UnitPrefs;
+  onUnitsChange: (u: UnitPrefs) => void;
   timeFormat: TimeFormat;
   onTimeFormatChange: (format: TimeFormat) => void;
   aqiScale: AqiScale;
@@ -78,6 +78,7 @@ export default function SettingsTab({
         <PreferenceRows
           units={units}
           onUnitsChange={onUnitsChange}
+          detailed
           timeFormat={timeFormat}
           onTimeFormatChange={onTimeFormatChange}
           aqiScale={aqiScale}
