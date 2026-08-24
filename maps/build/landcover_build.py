@@ -61,11 +61,14 @@ def polygonize_window(args):
         return 0
     ids = sieve(ids, SIEVE_PX)
     n = 0
-    with open(out, "w") as f:
+    # Temp-then-rename: a killed window must not leave a truncated file the resume then skips.
+    tmp = Path(str(out) + ".tmp")
+    with open(tmp, "w") as f:
         for geom, val in shapes(ids, mask=ids > 0, transform=transform):
             f.write(json.dumps({"type": "Feature", "properties": {"kind": ID_KINDS[int(val)]},
                                 "geometry": geom}, separators=(",", ":")) + "\n")
             n += 1
+    tmp.rename(out)
     return n
 
 
@@ -97,12 +100,14 @@ def build_band(src, work, bbox, minzoom, maxzoom, factor, jobs):
         total = sum(ex.map(polygonize_window, tasks))
     print(f"  {total} polygons", flush=True)
     files = [str(p) for p in sorted(seqdir.glob("*.geojsonseq")) if p.stat().st_size > 0]
-    subprocess.run(["tippecanoe", "-o", str(out), "--force", "-l", "landcover",
+    tmp = out.with_name("tmp-" + out.name)
+    subprocess.run(["tippecanoe", "-o", str(tmp), "--force", "-l", "landcover",
                     "-Z", str(minzoom), "-z", str(maxzoom),
                     "--detect-shared-borders", "--coalesce-smallest-as-needed",
                     "--no-tile-size-limit", "--no-feature-limit", "-pf", "-pk", "-ps",
                     "-n", "weather-landcover", "-A", "© Copernicus Global Land Service",
                     *files], check=True)
+    tmp.rename(out)
     return out
 
 
@@ -123,7 +128,9 @@ def main():
         if minzoom > a.maxzoom:
             break
         bands.append(build_band(a.src, work, bbox, minzoom, min(maxzoom, a.maxzoom), factor, a.jobs))
-    subprocess.run(["tile-join", "--force", "-pk", "-o", str(a.out), *map(str, bands)], check=True)
+    tmp = a.out.with_name("tmp-" + a.out.name)
+    subprocess.run(["tile-join", "--force", "-pk", "-o", str(tmp), *map(str, bands)], check=True)
+    tmp.rename(a.out)
     print(f"done: {a.out} {a.out.stat().st_size / 1e6:.1f} MB", flush=True)
 
 

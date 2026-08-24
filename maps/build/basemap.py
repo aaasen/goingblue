@@ -75,16 +75,17 @@ def done(path):
     return Path(path).exists() and Path(path).stat().st_size > 0
 
 
-def run_to(out, cmd_of, attempts=1):
+def run_to(out, cmd_of, attempts=1, **kw):
     """Run a command that writes `out`, via a temp name renamed only on success — a killed run
     must never leave a partial file that a resume then trusts as finished."""
     out = Path(out)
-    tmp = out.with_name(out.name + ".tmp")
+    # Prefix rather than a .tmp suffix: tippecanoe and pmtiles pick formats by extension.
+    tmp = out.with_name("tmp-" + out.name)
     for attempt in range(attempts):
         if tmp.exists():
             tmp.unlink()
         try:
-            run(cmd_of(tmp))
+            run(cmd_of(tmp), **kw)
             break
         except subprocess.CalledProcessError:
             if attempt == attempts - 1:
@@ -145,7 +146,7 @@ def build_overture(db, release):
     sql = (HERE / "overture_labels.sql").read_text().replace("RELEASE", release)
     log(f"scanning Overture {release} (base/land + base/water)")
     Path(db).parent.mkdir(parents=True, exist_ok=True)
-    run(["duckdb", str(db), "-c", sql])
+    run_to(db, lambda tmp: ["duckdb", str(tmp), "-c", sql])
     return db
 
 
@@ -216,10 +217,10 @@ def build_labels(work, overture, maxzoom):
             }, ensure_ascii=False) + "\n")
     log(f"labels: {counts}")
     # Points only; never drop or cluster — the style does the thinning by rank.
-    run(["tippecanoe", "-o", out, "--force", "-Z", "0", "-z", str(maxzoom),
-         "-r1", "-pf", "-pk", "-ps",
-         "-n", "weather-labels", "-A", "© Overture Maps Foundation, OpenStreetMap contributors",
-         seq])
+    run_to(out, lambda tmp: ["tippecanoe", "-o", tmp, "--force", "-Z", "0", "-z", str(maxzoom),
+                             "-r1", "-pf", "-pk", "-ps",
+                             "-n", "weather-labels", "-A", "© Overture Maps Foundation, OpenStreetMap contributors",
+                             seq])
     return out
 
 
@@ -255,17 +256,17 @@ def build_vectors(work, vectors_src, labels, landcover, maxzoom):
     stripped_mb = work / "stripped.mbtiles"
     stripped = work / "stripped.pmtiles"
     if not done(stripped):
-        # A leftover mbtiles is reused: it is only deleted after a successful convert, so its
-        # presence means the strip finished and only the convert needs rerunning. Delete it by
-        # hand if a strip was killed mid-write.
+        # The strip lands atomically, so a present mbtiles always means a finished strip and
+        # only the convert needs (re)running.
         if done(stripped_mb):
             log(f"have {stripped_mb.name}, converting")
         else:
-            run([sys.executable, HERE / "strip_build.py", src, stripped_mb, str(maxzoom)],
-                env={**os.environ, "STRIP_DROP": "landcover" if landcover else ""})
-        run(["pmtiles", "convert", stripped_mb, stripped])
+            run_to(stripped_mb, lambda tmp: [sys.executable, HERE / "strip_build.py", src, tmp, str(maxzoom)],
+                   env={**os.environ, "STRIP_DROP": "landcover" if landcover else ""})
+        run_to(stripped, lambda tmp: ["pmtiles", "convert", stripped_mb, tmp])
         stripped_mb.unlink()
-    run(["tile-join", "--force", "-pk", "-o", out, stripped, labels, *([landcover] if landcover else [])])
+    run_to(out, lambda tmp: ["tile-join", "--force", "-pk", "-o", tmp, stripped, labels,
+                             *([landcover] if landcover else [])])
     return out
 
 
@@ -278,11 +279,10 @@ def build_hillshade(work, terrain_src, maxzoom):
         return out
     src = ensure_source(terrain_src, work, "terrain", maxzoom, bands=TERRAIN_BANDS)
     srcs = src if isinstance(src, list) else [src]
+    # The bake resumes from an existing mbtiles (it skips tiles already in it).
     mb = work / "hillshade.mbtiles"
-    if mb.exists():
-        mb.unlink()
     run([sys.executable, HERE / "hillshade_build.py", ",".join(map(str, srcs)), mb, str(maxzoom)])
-    run(["pmtiles", "convert", mb, out])
+    run_to(out, lambda tmp: ["pmtiles", "convert", mb, tmp])
     mb.unlink()
     return out
 

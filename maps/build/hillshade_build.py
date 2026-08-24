@@ -121,18 +121,19 @@ def main():
                 continue
             seen.add(zxy)
             tasks.append(zxy)
-    tasks.sort(key=lambda t: (t[0], t[2], t[1]))   # row-major per zoom for cache
-    print(f"{len(tasks)} tiles to bake")
 
+    # WAL + periodic commits: the bake runs for hours on a spot VM, so a preemption must leave
+    # a consistent db that the next run extends instead of a corrupt one it starts over from.
     db = sqlite3.connect(OUT)
     db.executescript("""
-        PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;
-        CREATE TABLE metadata (name text, value text);
-        CREATE TABLE map (zoom_level int, tile_column int, tile_row int, tile_id text);
-        CREATE TABLE images (tile_id text PRIMARY KEY, tile_data blob);
-        CREATE VIEW tiles AS SELECT map.zoom_level, map.tile_column, map.tile_row,
+        PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;
+        CREATE TABLE IF NOT EXISTS metadata (name text, value text);
+        CREATE TABLE IF NOT EXISTS map (zoom_level int, tile_column int, tile_row int, tile_id text);
+        CREATE TABLE IF NOT EXISTS images (tile_id text PRIMARY KEY, tile_data blob);
+        CREATE VIEW IF NOT EXISTS tiles AS SELECT map.zoom_level, map.tile_column, map.tile_row,
             images.tile_data FROM map JOIN images ON images.tile_id = map.tile_id;
     """)
+    db.execute("DELETE FROM metadata")
     db.executemany("INSERT INTO metadata VALUES (?, ?)", {
         "name": "weather-hillshade", "format": "webp",
         "minzoom": "0", "maxzoom": MAXZOOM,
@@ -140,12 +141,20 @@ def main():
         "type": "baselayer",
         "attribution": "© Mapterhorn, Copernicus DEM",
     }.items())
+    baked = {(z, x, (1 << z) - 1 - row) for z, x, row in
+             db.execute("SELECT zoom_level, tile_column, tile_row FROM map")}
+    if baked:
+        tasks = [t for t in tasks if t not in baked]
+        print(f"resuming: {len(baked)} tiles already baked")
+    tasks.sort(key=lambda t: (t[0], t[2], t[1]))   # row-major per zoom for cache
+    print(f"{len(tasks)} tiles to bake")
 
     n = 0
     with Pool(WORKERS, initializer=init_worker) as pool:
         for res in pool.imap(process, tasks, chunksize=32):
             n += 1
             if n % 10000 == 0:
+                db.commit()
                 print(f"...{n}/{len(tasks)}", flush=True)
             if res is None:
                 continue
@@ -156,7 +165,7 @@ def main():
                        (z, x, (1 << z) - 1 - y, tid))
     db.commit()
     # pmtiles convert looks tiles up by z/x/y; without this index each lookup scans the table.
-    db.execute("CREATE UNIQUE INDEX map_idx ON map (zoom_level, tile_column, tile_row)")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS map_idx ON map (zoom_level, tile_column, tile_row)")
     db.commit()
     db.close()
     print(f"done: {n} tiles")
