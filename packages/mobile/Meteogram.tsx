@@ -45,18 +45,18 @@ const LEGEND_ICON_H = 14;
 // but each is alone on its row, so each is centered on its own.
 const LEGEND_MARK_H = 12;
 const LEGEND_MARK_CX = LEGEND_W / 2;
-const CELL_W = 38;
+const CELL_W = 34;
 // The weather glyphs have fixed natural geometry, extending up to ±26.5px around their center
 // (widest: partly-cloudy and shower codes). They are shrunk into their column by this factor;
 // keep GLYPH_SCALE ≤ CELL_W / 53 so neighboring columns don't overlap.
-const GLYPH_SCALE = 0.7;
+const GLYPH_SCALE = 0.64;
 // Clip bound for a glyph in its own (unscaled) coordinates, covering the widest glyph.
 const GLYPH_NATURAL_W = 56;
 // A Canvas is backed by a CAMetalLayer whose drawable size is measured in physical
 // pixels. A single canvas spanning a long hourly forecast can exceed Metal's maximum
 // texture width on Retina devices and abort the entire process. Keep each drawable
 // narrow and let FlatList virtualize the off-screen tiles. Wider tiles mean fewer seams
-// to paint mid-scroll (smoother) while staying well under the texture limit (16×38×3px).
+// to paint mid-scroll (smoother) while staying well under the texture limit (16×34×3px).
 const CANVAS_TILE_W = CELL_W * 16;
 
 // Where the temperature numbers sit inside their row, measured from its top. They ride high
@@ -3096,7 +3096,7 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
             // where the text sits, and translateX moves that box's left edge, so centring on the
             // glyphs alone would let the plate hang over the run's cap.
             //
-            // The PAD is what gives way on a narrow run, not the label. A single period is 38px
+            // The PAD is what gives way on a narrow run, not the label. A single period is 34px
             // and "PM2.5" is ~31 of them, so a fixed 4px each side overflowed and the name was
             // dropped entirely — a bracket with nothing in it. The pad shrinks to whatever is
             // left instead, down to nothing, and only a run too narrow for the glyphs themselves
