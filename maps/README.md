@@ -49,24 +49,31 @@ Overture via S3, the CGLS GeoTIFF, Natural Earth polygons). Four steps: clone, b
 
 **1. Create the VM** (spot, 8 vCPU, 300 GB SSD-class disk — the bake mmaps the terrain archive):
 
-    gcloud compute instances create basemap \
-      --zone us-west1-b --machine-type e2-standard-8 \
-      --provisioning-model SPOT --instance-termination-action STOP \
-      --image-family debian-12 --image-project debian-cloud \
-      --boot-disk-size 300GB --boot-disk-type pd-balanced
-    gcloud compute ssh basemap --zone us-west1-b
+```bash
+gcloud compute instances create basemap \
+  --zone us-west1-b --machine-type e2-standard-8 \
+  --provisioning-model SPOT --instance-termination-action STOP \
+  --image-family debian-12 --image-project debian-cloud \
+  --boot-disk-size 300GB --boot-disk-type pd-balanced
+gcloud compute ssh basemap --zone us-west1-b
+```
 
 **2. Clone and build** (on the VM; the image build is ~5 min, mostly compiling tippecanoe):
 
-    sudo apt-get update && sudo apt-get install -y docker.io git rclone tmux
-    sudo usermod -aG docker $USER && newgrp docker
-    git clone https://github.com/aaasen/goingblue && docker build -t basemap goingblue/maps
-    sudo mkdir -p /data && sudo chown $USER /data
+```bash
+sudo apt-get update && sudo apt-get install -y docker.io git rclone tmux
+sudo usermod -aG docker $USER && newgrp docker
+git clone https://github.com/aaasen/goingblue
+docker build -t basemap goingblue/maps
+sudo mkdir -p /data && sudo chown $USER /data
+```
 
 **3. Run** under tmux so an SSH drop doesn't kill it:
 
-    tmux new -s build
-    docker run --rm -v /data:/data basemap all --work /data/work-z10 --maxzoom 10 2>&1 | tee -a /data/build.log
+```bash
+tmux new -s build
+docker run --rm -v /data:/data basemap all --work /data/work-z10 --maxzoom 10 2>&1 | tee -a /data/build.log
+```
 
 Detach with `Ctrl-b d`, `tmux attach -t build` to check. Order: Overture scan → labels → CGLS
 download (1.7 GB) + landcover → Protomaps z0–10 extract (~8 GB) → strip + join → Mapterhorn

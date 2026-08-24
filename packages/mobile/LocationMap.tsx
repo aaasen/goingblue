@@ -85,8 +85,9 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
         {coord && (
           <Marker lngLat={[coord.lon, coord.lat]} anchor="bottom">
             <View style={styles.pin}>
-              <View style={styles.pinHead} />
-              <View style={styles.pinTail} />
+              <View style={styles.pinBalloon}>
+                <View style={styles.pinDot} />
+              </View>
             </View>
           </Marker>
         )}
@@ -135,22 +136,33 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
 }
 
 const PIN = '#d0433b';
+// Width of the marker's square before it is turned; the point it lands on is a corner, so the
+// shape reaches half its diagonal below the box centre — BALLOON * (√2 - 1) / 2 past the bottom.
+const BALLOON = 26;
+const TIP_DROP = Math.round((BALLOON * (Math.SQRT2 - 1)) / 2);
 
 const styles = StyleSheet.create({
   // Full-bleed by default: no outer margin, square corners. Callers place and space it.
   wrap: { overflow: 'hidden', backgroundColor: '#e5e8ee' },
   square: { width: '100%', aspectRatio: 1 },
   fullscreenWrap: { flex: 1, backgroundColor: '#e5e8ee' },
-  pin: { alignItems: 'center' },
-  pinHead: {
-    width: 22, height: 22, borderRadius: 11, backgroundColor: PIN,
-    borderWidth: 2.5, borderColor: '#ffffff',
+  // Teardrop marker: a square rounded on three corners and left sharp on the fourth, turned 45°
+  // so the sharp corner points down. A rotation doesn't change the layout box, so the turned shape
+  // hangs TIP_DROP past all four sides; padding gives that back, which both keeps the tip on the
+  // anchor point and stops the widest part being clipped by the marker container.
+  pin: { alignItems: 'center', padding: TIP_DROP },
+  pinBalloon: {
+    width: BALLOON, height: BALLOON, backgroundColor: PIN,
+    borderRadius: BALLOON / 2, borderBottomRightRadius: 0,
+    borderWidth: 2, borderColor: '#ffffff',
+    alignItems: 'center', justifyContent: 'center',
+    transform: [{ rotate: '45deg' }],
+    shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 3, shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
-  pinTail: {
-    width: 0, height: 0, marginTop: -3,
-    borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 10,
-    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: PIN,
-  },
+  // Rotates with its parent, which a circle doesn't show. The rounded head is centred on the
+  // square, so centring the dot centres it in the head.
+  pinDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#ffffff' },
   fullscreenButton: {
     position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
     width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
