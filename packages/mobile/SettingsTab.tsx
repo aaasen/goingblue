@@ -44,9 +44,7 @@ export default function SettingsTab({
     setPacks(next);
   }
 
-  const DELETE_MESSAGE =
-    'This erases your account and clears your saved forecasts, then returns to setup. ' +
-    'Neither can be recovered.';
+  const DELETE_MESSAGE = 'Deletion is permanent.';
 
   // Deletion needs the network, so it can fail. Say so and leave the account intact rather than
   // clearing the app locally — the token is the only handle on the account, and a device that
@@ -114,8 +112,7 @@ export default function SettingsTab({
       {/* Account */}
       <Text style={[styles.heading, { marginTop: 28 }]}>Account</Text>
       <Text style={styles.sectionNote}>
-        Your account is an anonymous token — no name, email, or phone number. Deleting it removes
-        it from our servers.
+        Deleting an account clears it from the server and resets the app to its original state.
       </Text>
       <TouchableOpacity
         style={[styles.resetBtn, deleting && styles.resetBtnDisabled]}
