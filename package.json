@@ -19,7 +19,7 @@
     "build": "pnpm --filter @weather/protocol build && pnpm --filter @weather/server build && pnpm --filter @weather/codec-server build",
     "start": "pnpm build && node packages/server/dist/index.js",
     "start:codec": "pnpm build && node packages/codec-server/dist/index.js",
-    "test": "pnpm --filter @weather/protocol test && pnpm --filter @weather/server test && pnpm --filter @weather/codec-server test",
+    "test": "pnpm --filter @weather/protocol test && pnpm --filter @weather/server test && pnpm --filter @weather/codec-server test && pnpm --filter @weather/mobile test",
     "benchmark": "pnpm --filter @weather/protocol build && tsx packages/codec-server/scripts/benchmark.ts",
     "corpus-map": "tsx packages/codec-server/scripts/corpus-map.ts",
     "generate": "pnpm --filter @weather/protocol build && tsx packages/codec-server/scripts/generate-codebooks.ts"

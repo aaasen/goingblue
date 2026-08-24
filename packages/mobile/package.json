@@ -28,7 +28,8 @@
   "devDependencies": {
     "@babel/core": "7.29.7",
     "@types/react": "~19.2.2",
-    "typescript": "~7.0.2"
+    "typescript": "~7.0.2",
+    "vitest": "^1.6.1"
   },
   "expo": {
     "install": {
@@ -42,7 +43,8 @@
     "eas-build-post-install": "pnpm --filter @weather/protocol build",
     "start": "expo start",
     "android": "expo run:android",
-    "ios": "expo run:ios"
+    "ios": "expo run:ios",
+    "test": "vitest run"
   },
   "private": true
 }

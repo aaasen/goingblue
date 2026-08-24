@@ -24,6 +24,7 @@ import LocationMap from './LocationMap';
 import HelpScreen from './HelpScreen';
 import { MODELS } from './models';
 import { DEVICES, deviceCode, type Device } from './devices';
+import { parseLatLon } from './coords';
 
 // The request time, in UTC hours since the epoch, aligned down to the hour. Sent in the request
 // (`t:`) so the forecast window is fixed against delivery delay, and stored in the request
@@ -363,20 +364,6 @@ function buildContext(coords: { lat: number; lon: number }, mode: number, model:
 function smsUrl(body: string): string {
   const separator = Platform.OS === 'ios' ? '&' : '?';
   return `sms:${FORECAST_NUMBER_E164}${separator}body=${encodeURIComponent(body)}`;
-}
-
-// Parse a single "lat, lon" string into coordinates. Accepts comma- or whitespace-separated pairs,
-// optionally wrapped in parentheses (e.g. "(-44.9412396, -99.8386085)"). Returns null unless it's
-// exactly two numbers.
-function parseLatLon(s: string): { lat: number; lon: number } | null {
-  let value = s.trim();
-  const hasOpeningParen = value.startsWith('(');
-  const hasClosingParen = value.endsWith(')');
-  if (hasOpeningParen !== hasClosingParen) return null;
-  if (hasOpeningParen) value = value.slice(1, -1).trim();
-  const m = value.match(/^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/);
-  if (!m) return null;
-  return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
 }
 
 // The last instant any forecast can reach: the end of the final day slot the fill path can cover
@@ -761,6 +748,20 @@ export default function BuilderTab({ token, onForecastReceived, active, device, 
                   autoCorrect={false}
                   returnKeyType="done"
                 />
+                {/* Pasted coordinates are long and the keyboard's delete key clears them one
+                    character at a time; one tap on the ✕ empties the field. Only drawn when
+                    there is something to clear, so an empty field shows no control. */}
+                {customCoords.length > 0 && (
+                  <TouchableOpacity
+                    style={styles.coordClear}
+                    onPress={() => setCustomCoords('')}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear coordinates"
+                  >
+                    <MaterialCommunityIcons name="close-circle" size={18} color="#8e8e93" />
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
             <Text style={styles.mapHint}>Tap the map to set a location</Text>
@@ -1132,6 +1133,8 @@ const styles = StyleSheet.create({
   coordLabelWide: { width: 104 },
   coordInput: { flex: 1, fontSize: 15, color: '#1c1c1e' },
   coordInputInvalid: { color: '#cc2222' },
+  // The row aligns on the text baseline, which an icon doesn't have; centre it on the row instead.
+  coordClear: { alignSelf: 'center', marginLeft: 8 },
   mapHint: { fontSize: 12, color: '#8e8e93', marginTop: 10 },
   mapFullBleed: { marginTop: 10, marginHorizontal: -CONTENT_PAD },
   modelHint: { fontSize: 12, color: '#8e8e93', lineHeight: 17, marginTop: 8 },
