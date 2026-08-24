@@ -128,13 +128,6 @@ export default function SettingsTab({
           : <Text style={styles.resetBtnText}>Delete account</Text>}
       </TouchableOpacity>
 
-      <Text style={styles.footer}>
-        Weather data provided by{' '}
-        <Text style={styles.link} onPress={() => Linking.openURL('https://open-meteo.com/')}>
-          Open-Meteo
-        </Text>.
-      </Text>
-
       <Text style={styles.legalLinks}>
         <Text style={styles.link} onPress={() => Linking.openURL(TERMS_URL)}>Terms &amp; Conditions</Text>
         {'   ·   '}
@@ -165,6 +158,5 @@ const styles = StyleSheet.create({
   resetBtnDisabled: { opacity: 0.6 },
   resetBtnText: { color: '#cc2222', fontSize: 15, fontWeight: '600' },
   sectionNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: -4, marginBottom: 10 },
-  footer: { fontSize: 13, color: '#8e8e93', marginTop: 20, lineHeight: 19 },
-  legalLinks: { fontSize: 13, color: '#8e8e93', marginTop: 12, lineHeight: 19 },
+  legalLinks: { fontSize: 13, color: '#8e8e93', marginTop: 20, lineHeight: 19 },
 });
