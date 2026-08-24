@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  StyleSheet, Text, View, TouchableOpacity, ScrollView, Linking,
+  Animated, StyleSheet, Text, View, TouchableOpacity, Linking,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -237,6 +237,9 @@ interface Props {
 }
 
 export default function DecoderTab({ token, forecastData, onForecastDataChange, units, timeFormat, active }: Props) {
+  // The page's scroll offset, native-driven, handed to the meteogram so each block can pin its
+  // date header to the top of the screen once the drawn one scrolls away.
+  const scrollY = useRef(new Animated.Value(0)).current;
   const [decoded, setDecoded] = useState<ForecastMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [collecting, setCollecting] = useState<Collecting | null>(null);
@@ -443,10 +446,15 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
   );
 
   return (
-    <ScrollView
+    <Animated.ScrollView
       style={{ flex: 1, backgroundColor: '#f2f2f7' }}
       contentContainerStyle={{ paddingBottom: 72 }}
       keyboardShouldPersistTaps="handled"
+      scrollEventThrottle={16}
+      onScroll={Animated.event(
+        [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+        { useNativeDriver: true },
+      )}
     >
       {/* Primary action: pull the encoded reply straight off the clipboard. The button also carries
           the last press's outcome for a moment — a green check for what it loaded, a red ✕ when
@@ -540,7 +548,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
           {/* Forecast meteogram */}
           {/* `active` is not for hiding anything — the meteogram's canvases lose their drawables
               while this tab is hidden, so they need to know when to come back. */}
-          <Meteogram msg={decoded} units={units} timeFormat={timeFormat} active={active} />
+          <Meteogram msg={decoded} units={units} timeFormat={timeFormat} active={active} scrollY={scrollY} />
 
           {/* Open-Meteo's data is CC BY 4.0, which asks for credit where the data is shown —
               the Settings footer alone doesn't satisfy that. Same wording as there. */}
@@ -560,7 +568,7 @@ export default function DecoderTab({ token, forecastData, onForecastDataChange, 
       )}
 
       {pastSection}
-    </ScrollView>
+    </Animated.ScrollView>
   );
 }
 

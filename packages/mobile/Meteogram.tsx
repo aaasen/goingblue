@@ -2758,7 +2758,7 @@ function monotonicRange(knots: [input: number, output: number][]): { inputRange:
   return { inputRange, outputRange };
 }
 
-function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, elevation, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint }: {
+function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, elevation, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint, scrollY, pinTop }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
   periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: UnitPrefs; timeFormat: TimeFormat; now: number; lat: number; lon: number; elevation: number; fonts: Fonts;
@@ -2768,6 +2768,10 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   blockIndex: number; selected: number | null; onSelectColumn: (block: number, period: number) => void;
   // Epoch that remounts every canvas after this tab was hidden — see Meteogram.
   paint: number;
+  // The decoder page's vertical scroll offset (native-driven), and this block's top edge within
+  // that page's scroll content — together they place the pinned date header. `pinTop` is null
+  // until the layout chain above this component has reported in.
+  scrollY: Animated.Value; pinTop: number | null;
 }) {
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<Tile>>(null);
@@ -2778,6 +2782,30 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   const n = periods.length;
   const width = n * CELL_W;
   const totalH = ROW_H.DATE + rows.reduce((s, r) => s + r.height, 0);
+  // Where this block's canvas top sits in the page's scroll content: the block's own offset
+  // (pinTop, measured by Meteogram) plus this component's offset within the block wrapper and
+  // the overview strip above the canvas. Measured rather than summed from constants, so the
+  // model header bar and the strip can change height without the pin point drifting.
+  const [rootY, setRootY] = useState<number | null>(null);
+  const [stripH, setStripH] = useState<number | null>(null);
+  const headerY = pinTop != null && rootY != null && stripH != null ? pinTop + rootY + stripH : null;
+  // The pinned copy of the date header: invisible until the drawn header reaches the top of the
+  // screen, then riding the page scroll so it holds that edge — and stopping at the block's
+  // bottom, where it slides off with its own rows rather than floating over the next block's.
+  const pin = useMemo(() => {
+    if (headerY == null) return null;
+    const travel = totalH - ROW_H.DATE;
+    return {
+      translateY: scrollY.interpolate({
+        inputRange: [headerY, headerY + travel], outputRange: [0, travel], extrapolate: 'clamp',
+      }),
+      // A hard switch, not a fade: below the pin point the copy would lie exactly over the drawn
+      // header, hiding the night shading and the current-time marker it doesn't reproduce.
+      opacity: scrollY.interpolate({
+        inputRange: [headerY - 1, headerY], outputRange: [0, 1], extrapolate: 'clamp',
+      }),
+    };
+  }, [headerY, totalH, scrollY]);
   // Memoized so tile objects keep their identity across re-renders: CanvasTile bails out by
   // reference equality, and a fresh array would repaint every mounted tile on each selection.
   const tiles = useMemo(() => Array.from({ length: Math.ceil(width / CANVAS_TILE_W) }, (_, index) => {
@@ -2787,6 +2815,46 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   const colLeft = (i: number) => i * CELL_W;
 
   const dayGroups = useMemo(() => buildDayGroups(zoned), [zoned]);
+  // The day labels, shared by the header row at the top of the block and its pinned copy: each
+  // sticks to the visible left edge of its own day's columns, then yields to the following day.
+  // Built once — the same scrollX interpolations drive both mounts.
+  const dayLabelEls = useMemo(() => dayGroups.map((group, i) => {
+    const start = group.start * CELL_W;
+    const end = group.end * CELL_W;
+    const label = fitDayLabel(group.date, end - start - 20, fonts.date);
+    const textWidth = fonts.date.getTextWidth(label);
+    const stickyEnd = end - textWidth - 20;
+    const range = monotonicRange([
+      [0, start + 10],
+      [start, 10],
+      [stickyEnd, 10],
+      [width, end - textWidth - 10 - width],
+    ]);
+    const translateX = stickyEnd > start && range.inputRange.length >= 2
+      ? scrollX.interpolate({ ...range, extrapolate: 'extend' })
+      : Animated.subtract(start + 10, scrollX);
+    return (
+      <Animated.Text
+        key={`day${i}`}
+        style={[styles.stickyDayText, { transform: [{ translateX }] }]}
+      >
+        {label}
+      </Animated.Text>
+    );
+  }), [dayGroups, width, fonts, scrollX]);
+  // Native copies of the canvas's hour labels, for the pinned header: the number at the canvas's
+  // size with the meridiem a couple of sizes down, sharing its baseline via nested Text the way
+  // centerHour shares it, the pair centered in the column.
+  const hourEls = useMemo(() => zoned.map((d, i) => {
+    const parts = hourParts(d, steps[i], timeFormat);
+    if (!parts.num) return null;
+    return (
+      <RNText key={`h${i}`} style={[styles.pinnedHourText, { left: i * CELL_W }]}>
+        {parts.num}
+        {parts.suffix ? <RNText style={styles.pinnedHourSuffix}>{parts.suffix}</RNText> : null}
+      </RNText>
+    );
+  }), [zoned, steps, timeFormat]);
   // Held apart from the scene because the labels are drawn outside it, and memoized for the same
   // reason as the tiles: a fresh array on every render would repaint every mounted canvas.
   const modelBands = useMemo(
@@ -2896,13 +2964,13 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   const selectedLeft = selected != null ? selected * CELL_W : 0;
 
   return (
-    <View>
+    <View onLayout={(e) => setRootY(e.nativeEvent.layout.y)}>
       {/* The strip spans the whole screen, rail and all: it is a map of the forecast rather than
           a row of it, and insetting it would spend 44px of an already coarse graph on nothing.
           What it does share with the rows below is the viewport those rows are read through. */}
       <OverviewStrip periods={periods} dates={dates} zoned={zoned} steps={steps} units={units} now={now}
         width={screenW} viewportW={viewportW} flatListRef={flatListRef} scrollX={scrollX} fonts={fonts} paint={paint} />
-      <View style={{ height: totalH }}>
+      <View style={{ height: totalH }} onLayout={(e) => setStripH(e.nativeEvent.layout.y)}>
       {/* Everything that scrolls, inset past the rail. The overlays inside here are positioned in
           viewport coordinates and ride the scroll; the rail and the section labels are siblings
           of this view, in the block's own coordinates, and never move. */}
@@ -2975,30 +3043,7 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
         </View>
       )}
       <View pointerEvents="none" style={styles.stickyDayRow}>
-        {dayGroups.map((group, i) => {
-          const start = colLeft(group.start);
-          const end = colLeft(group.end);
-          const label = fitDayLabel(group.date, end - start - 20, fonts.date);
-          const textWidth = fonts.date.getTextWidth(label);
-          const stickyEnd = end - textWidth - 20;
-          const range = monotonicRange([
-            [0, start + 10],
-            [start, 10],
-            [stickyEnd, 10],
-            [width, end - textWidth - 10 - width],
-          ]);
-          const translateX = stickyEnd > start && range.inputRange.length >= 2
-            ? scrollX.interpolate({ ...range, extrapolate: 'extend' })
-            : Animated.subtract(start + 10, scrollX);
-          return (
-            <Animated.Text
-              key={`day${i}`}
-              style={[styles.stickyDayText, { transform: [{ translateX }] }]}
-            >
-              {label}
-            </Animated.Text>
-          );
-        })}
+        {dayLabelEls}
       </View>
       {/* Model names ride above their bands the way the day labels ride above their columns: a
           band can run four screens wide — IFS covering everything past the short-range models —
@@ -3113,6 +3158,34 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
       <RowLegend rows={rows} units={units} paint={paint}
         bandLevels={periods.find((p) => p.cloud_band)?.cloud_band?.length ?? 0} />
       <SectionLabels rows={rows} />
+      {/* The pinned date header. With enough rows selected the drawn header is off the top of the
+          screen before the reader is halfway down the block, and a column's day and hour were
+          then only recoverable by scrolling back up — the one question the fixed rail can't
+          answer, since time is the axis it doesn't name. This copy holds the viewport's top edge
+          while the block is under it, on the same native scroll value the page moves with. It is
+          a duplicate rather than the header itself: the drawn header keeps its night shading and
+          the current-time marker, which the plate doesn't reproduce, so the copy stays invisible
+          until the moment the real one leaves the screen. */}
+      {pin && (
+        <Animated.View pointerEvents="none"
+          style={[styles.pinnedHeader, { opacity: pin.opacity, transform: [{ translateY: pin.translateY }] }]}>
+          <View style={styles.pinnedHeaderScene}>
+            <Animated.View style={[styles.pinnedHourStrip, { width, transform: [{ translateX: scrollShift }] }]}>
+              {hourEls}
+            </Animated.View>
+            <View pointerEvents="none" style={styles.stickyDayRow}>{dayLabelEls}</View>
+            <View style={styles.pinnedDayRule} />
+          </View>
+          {/* The rail's slice of the header — edge and clock — so the plate reads as one strip
+              with the rail below it, and a day label scrolling past the edge disappears under it
+              exactly as it does in the block. */}
+          <View style={styles.pinnedHeaderRail}>
+            <View style={styles.legendEdge} />
+            <MaterialCommunityIcons name="clock-outline" size={LEGEND_ICON_SIZE} color={C.unit}
+              style={[styles.legendClock, { top: HOUR_LABEL_Y - LEGEND_ICON_H / 2 }]} />
+          </View>
+        </Animated.View>
+      )}
       </View>
     </View>
   );
@@ -3120,9 +3193,16 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
 
 // ── Public component ─────────────────────────────────────────────────────--
 
-export default function Meteogram({ msg, units, timeFormat, active }: {
+export default function Meteogram({ msg, units, timeFormat, active, scrollY }: {
   msg: ForecastMessage; units: UnitPrefs; timeFormat: TimeFormat; active: boolean;
+  // The page's vertical scroll offset (native-driven) — see the pinned header in ModelCanvas.
+  scrollY: Animated.Value;
 }) {
+  // The layout chain the pinned headers hang off: this component's top within the page's scroll
+  // content, and each block's top within this component. Summed per block and handed down;
+  // ModelCanvas measures its own internal offsets.
+  const [selfY, setSelfY] = useState<number | null>(null);
+  const [blockTops, setBlockTops] = useState<Record<number, number>>({});
   // Memoized because `blocks` depends on it: a fresh array here would rebuild every block —
   // and with them every Skia scene — on each render, e.g. whenever the selection moves.
   const models = useMemo(() => modelsFromMask(msg.models_mask), [msg.models_mask]);
@@ -3202,9 +3282,12 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
     : null;
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onLayout={(e) => setSelfY(e.nativeEvent.layout.y)}>
       {blocks.map((b, bi) => (
-        <View key={bi}>
+        <View key={bi} onLayout={(e) => {
+          const { y } = e.nativeEvent.layout;
+          setBlockTops((prev) => (prev[bi] === y ? prev : { ...prev, [bi]: y }));
+        }}>
           {/* Model header is a plain RN bar so it stays pinned at full width above the scrolling canvas. */}
           {blocks.length > 1 && (
             <View style={[styles.modelHeaderBar, { backgroundColor: b.color }]}>
@@ -3215,7 +3298,9 @@ export default function Meteogram({ msg, units, timeFormat, active }: {
             center={b.center} attributionMs={b.attributionMs}
             blockIndex={bi}
             selected={sel?.block === bi ? sel.period : null}
-            onSelectColumn={selectColumn} paint={paint} />
+            onSelectColumn={selectColumn} paint={paint}
+            scrollY={scrollY}
+            pinTop={selfY != null && blockTops[bi] != null ? selfY + blockTops[bi] : null} />
           {bi < blocks.length - 1 && <View style={styles.sep} />}
         </View>
       ))}
@@ -3575,6 +3660,29 @@ const styles = StyleSheet.create({
     lineHeight: ROW_H.WIND,
     color: '#1c1c1e', backgroundColor: '#ffffff',
   },
+  // The pinned date header: an opaque plate the height of the drawn one, riding the page scroll.
+  // White like the canvas ground — over arbitrary rows a plain plate reads as the floating header
+  // it is — with a hairline for the bottom edge it otherwise wouldn't have.
+  pinnedHeader: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: ROW_H.DATE,
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.divider,
+  },
+  // The scene's slice of the plate, inset past the rail and clipped like the scroll view it
+  // shadows, so labels vanish at the rail edge rather than sliding over it.
+  pinnedHeaderScene: { position: 'absolute', top: 0, bottom: 0, left: LEGEND_W, right: 0, overflow: 'hidden' },
+  pinnedHeaderRail: { position: 'absolute', top: 0, bottom: 0, left: 0, width: LEGEND_W, backgroundColor: '#fff' },
+  // Content-wide, translated by the block's own horizontal scroll — the native mirror of the
+  // hour row the canvas draws.
+  pinnedHourStrip: { position: 'absolute', top: 0, bottom: 0, left: 0 },
+  // Mirrors the canvas's date-row rule: a 1px line centered on y=31 in the grid's ink.
+  pinnedDayRule: { position: 'absolute', left: 0, right: 0, top: 30.5, height: 1, backgroundColor: C.grid },
+  // lineHeight 16 with its top at HOUR_LABEL_Y − 8 centers the text on the canvas's hour line.
+  pinnedHourText: {
+    position: 'absolute', width: CELL_W, textAlign: 'center',
+    top: HOUR_LABEL_Y - 8, fontSize: 12, lineHeight: 16, color: C.hour,
+  },
+  pinnedHourSuffix: { fontSize: 9.5 },
   modelHeaderBar: { paddingHorizontal: 14, paddingVertical: 7 },
   modelHeaderText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   sep: { height: 10, backgroundColor: '#f2f2f7' },
