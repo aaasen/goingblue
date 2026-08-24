@@ -1,54 +1,29 @@
-# Offline basemap
+# Maps
 
-One global z0–10 pair — `global-base.pmtiles` (stripped Protomaps vectors + Overture labels +
-Copernicus land cover) and `global-hs.pmtiles` (prebaked hillshade from Mapterhorn) — lives on
-R2 and is what the app streams online. Everything else is a `pmtiles extract` of it: the z0–6
-pair bundled in the app, one pack per country, and US-state / CA-province packs. No z11+ tier.
+Going Blue has a couple uses for maps:
+1. Custom location selector.
+2. Showing the forecast point.
 
-    build/      basemap.py driver; strip_build.py (vectors), hillshade_build.py (terrain),
-                landcover_build.py (CGLS-LC100), overture_labels.sql (labels with English names)
-    preview/    browser preview: work.html composes bundled z6 + a pack + the online archive the
-                way the app does; chunked.html / index.html are the earlier prototypes
-    Dockerfile  the pipeline with its tools, for the VM run
+The simplest solution would be to use the built-in Apple Maps and Google Maps, but these don't have any offline support. They might work if the forecast tile happens to be in the cache, but there are no guarantees.
 
-Inputs and outputs are large and untracked; locally they live in `data/basemap/` (gitignored):
-`sources/` (downloads: terrain, Protomaps extracts, overture.duckdb, `cgls-lc100-2019-wa.tif`),
-`archives/` (prototype pmtiles the old previews read), `work-*/` (driver outputs).
-`preview/work` and `preview/archives` are symlinks into it.
+To solve this, Going Blue uses a custom offline map built with MapLibre Native and PMTiles.
 
-## Pipeline (`build/basemap.py STEP --work DIR ...`)
+The basemap is custom-built to provide adequate detail in the mountains while maintaining a small size. It is built from the following sources:
+ - Protomaps for vectors
+ - Mapterhorn DEM for hillshading
+ - Overture for labels
+ - Copernicus Global Land Service CGLS-LC100 for land cover
+ - Natural Earth for region boundaries
 
-| step        | output                         | from                                             |
-|-------------|--------------------------------|--------------------------------------------------|
-| `overture`  | `overture.duckdb`              | Overture release: named peaks/lakes/glaciers, `name_en` |
-| `labels`    | `labels.pmtiles`               | ranked per 0.25° cell, minzoom by elevation/area |
-| `landcover` | `landcover.pmtiles`            | CGLS-LC100 100 m, 4 zoom bands (stock ends at z7) |
-| `vectors`   | `global-base.pmtiles`          | strip Protomaps + tile-join labels + landcover   |
-| `hillshade` | `global-hs.pmtiles`            | Mapterhorn terrarium → Horn shade, WebP q40       |
-| `regions`   | `regions/ne_*.geojson`         | Natural Earth 10m admin-0 / admin-1 download     |
-| `packs`     | `packs/*`, `global-z6-*`, `catalogue.json` | `pmtiles extract --region` per NE country + US/CA admin-1 |
-| `catalogue` | `catalogue.json` (sizes null)  | the pack list alone from `maps/regions`, no tiles or tools; bundled as `packages/mobile/assets/catalogue.json` until the real one exists |
+The basemap is hosted on Cloudflare R2 (free egress).
 
-`all` runs them in order. Every step skips outputs that already exist, so a killed run (spot
-VM) resumes with the same command. `--vectors/--terrain/--landcover` accept a local file or an
-https archive (the defaults are the public archives, extracted to z0–maxzoom first).
+A global z6 basemap is bundled into the app. Country, state, and province tiles are downloadable at z9 and z10 resolution. There is also a tile cache of up to 500MB.
 
-## Local test (inputs already on disk, ~5 min)
+## Basemap Generation
 
-    python3 -m venv venv && venv/bin/pip install -r build/requirements.txt   # + tippecanoe, pmtiles, duckdb on PATH
-    venv/bin/python build/basemap.py all --work data/basemap/work-usa-z9 --maxzoom 9 \
-        --overture data/basemap/sources/overture.duckdb \
-        --vectors data/basemap/sources/usa-src-z9.pmtiles --terrain data/basemap/sources/usa-terrain-z9.pmtiles \
-        --landcover data/basemap/sources/cgls-lc100-2019-wa.tif --only us,us-co,us-wa
-    maps/preview/run.sh            # then http://localhost:8471/work.html
-    pnpm --filter @weather/maps-preview shots [pack-id]   # screenshots into preview/shots-out/
+The entire custom basemap can be regenerated from public sources using a Docker container running on a VM.
 
-## Full build on a VM
-
-Nothing is needed from a dev machine: the pipeline downloads its own inputs (public archives,
-Overture via S3, the CGLS GeoTIFF, Natural Earth polygons). Four steps: clone, build, run, upload.
-
-**1. Create the VM** (spot, 8 vCPU, 300 GB SSD-class disk — the bake mmaps the terrain archive):
+1. Create the VM (8 CPUs, 300GB disk):
 
 ```bash
 gcloud compute instances create basemap \
@@ -59,7 +34,9 @@ gcloud compute instances create basemap \
 gcloud compute ssh basemap --zone us-west1-b
 ```
 
-**2. Clone and build** (on the VM; the image build is ~5 min, mostly compiling tippecanoe):
+Note that this uses a spot instance for lower cost.
+
+2. Clone the repository and build the Docker image:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y docker.io git rclone tmux
@@ -69,39 +46,47 @@ docker build -t basemap goingblue/maps
 sudo mkdir -p /data && sudo chown $USER /data
 ```
 
-**3. Run** under tmux so an SSH drop doesn't kill it:
+3. Run the container.
 
 ```bash
 tmux new -s build
 docker run --rm -v /data:/data basemap all --work /data/work-z10 --maxzoom 10 2>&1 | tee -a /data/build.log
 ```
 
-Detach with `Ctrl-b d`, `tmux attach -t build` to check. Order: Overture scan → labels → CGLS
-download (1.7 GB) + landcover → Protomaps z0–10 extract (~8 GB) → strip + join → Mapterhorn
-z0–10 extract (~50–60 GB, the longest download) → bake → Natural Earth → packs + catalogue.
+This may take several hours so it should be run under tmux. Detach from the tmux session with `Ctrl-b d` and re-attach with `tmux attach -t build`.
 
-If spot preempts the VM it stops: `gcloud compute instances start basemap --zone us-west1-b`,
-ssh back in, rerun the same `docker run`. Finished steps are skipped; the step in flight
-restarts (`pmtiles extract` and the bake are not resumable mid-step).
+If the VM is preempted, start it again and re-run the Docker container. It uses a persistent disk so it will not redo any steps that have already finished.
 
-**4. Upload to R2.** One-time `rclone config`: type `s3`, provider `Cloudflare`, the R2 access
-key and secret, endpoint `https://<account-id>.r2.cloudflarestorage.com`. Then:
+```bash
+gcloud compute instances start basemap --zone us-west1-b
+gcloud compute ssh basemap --zone us-west1-b
+```
 
-    rclone copy /data/work-z10 r2:basemap --include 'global-*.pmtiles' --include 'packs/**' \
-        --include catalogue.json --progress
+4. Upload to Cloudflare R2.
 
-Fetch `catalogue.json` and the `global-z6-*` pair locally for the app. Keep the raw extracts
-(`*-src-z10.pmtiles`, ~60 GB) only if a rebake is likely — `rclone copy` them too.
+Configure rclone: `rclone config`
+ - Type `s3`
+ - Provider `Cloudflare`
+ - R2 access key and secret
+ - Endpoint `https://<account-id>.r2.cloudflarestorage.com`
 
-**5. Delete the VM** (the disk goes with it; a lingering 300 GB disk is ~$30/month):
+Upload to R2:
+```bash
+rclone copy /data/work-z10 r2:basemap --include 'global-*.pmtiles' --include 'packs/**' --include catalogue.json --progress
+```
 
-    gcloud compute instances delete basemap --zone us-west1-b
+5. Update the basemap bundled in the app.
 
-Sizing: ~60–70 GB of source reads (ingress is free), ~3–5 GB of output. The laptop baked ~75
-hillshade tiles/s on 10 workers, so the global z10 bake is hours, not days; spot at ~$0.08/hr
-makes the whole run a few dollars. `WORKERS=` overrides the process counts.
+Run this from your own machine, not the VM:
 
-Sources are evaluation endpoints: build.protomaps.com is pinned to 20260820 in both
-`basemap.py` and `packages/mobile/basemapStyle.ts` — bump together; download.mapterhorn.com;
-Zenodo 3939050 (CGLS); naciscdn.org (Natural Earth). Attribution owed: OpenStreetMap,
-Protomaps, Overture, Mapterhorn / Copernicus DEM, Copernicus Global Land Service, Natural Earth.
+```bash
+gcloud compute scp --zone us-west1-b \
+  basemap:/data/work-z10/{catalogue.json,outlines.json,global-z6-base.pmtiles,global-z6-hs.pmtiles} \
+  packages/mobile/assets/
+```
+
+6. Delete the VM.
+
+```bash
+gcloud compute instances delete basemap --zone us-west1-b
+```
