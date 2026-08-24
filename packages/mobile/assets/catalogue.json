@@ -1,0 +1,5490 @@
+{
+ "version": 1,
+ "maxzoom": 10,
+ "bundled_maxzoom": 6,
+ "landcover_maxzoom": 7,
+ "global": {
+  "base": "global-base.pmtiles",
+  "hs": "global-hs.pmtiles"
+ },
+ "bundled": {
+  "base": "global-z6-base.pmtiles",
+  "hs": "global-z6-hs.pmtiles",
+  "maxzoom": 6,
+  "bytes": null
+ },
+ "packs": [
+  {
+   "id": "ad",
+   "name": "Andorra",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    1.4148,
+    42.4345,
+    1.7402,
+    42.6427
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ad-base.pmtiles",
+    "hs": "packs/ad-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ae",
+   "name": "United Arab Emirates",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    51.5684,
+    22.6215,
+    56.388,
+    26.0682
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ae-base.pmtiles",
+    "hs": "packs/ae-hs.pmtiles"
+   }
+  },
+  {
+   "id": "af",
+   "name": "Afghanistan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    60.4857,
+    29.3919,
+    74.8913,
+    38.4564
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/af-base.pmtiles",
+    "hs": "packs/af-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ag",
+   "name": "Antigua and Barbuda",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -61.8871,
+    16.9972,
+    -61.686,
+    17.7141
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ag-base.pmtiles",
+    "hs": "packs/ag-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ai",
+   "name": "Anguilla",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -63.16,
+    18.1714,
+    -62.9796,
+    18.2697
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ai-base.pmtiles",
+    "hs": "packs/ai-hs.pmtiles"
+   }
+  },
+  {
+   "id": "al",
+   "name": "Albania",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    19.2807,
+    39.6535,
+    21.0311,
+    42.6479
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/al-base.pmtiles",
+    "hs": "packs/al-hs.pmtiles"
+   }
+  },
+  {
+   "id": "am",
+   "name": "Armenia",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    43.4395,
+    38.869,
+    46.5848,
+    41.291
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/am-base.pmtiles",
+    "hs": "packs/am-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ao",
+   "name": "Angola",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    11.7431,
+    -18.0197,
+    24.0467,
+    -4.4289
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ao-base.pmtiles",
+    "hs": "packs/ao-hs.pmtiles"
+   }
+  },
+  {
+   "id": "aq",
+   "name": "Antarctica",
+   "continent": "Antarctica",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -180,
+    -89.9989,
+    180,
+    -60.5209
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/aq-base.pmtiles",
+    "hs": "packs/aq-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ar",
+   "name": "Argentina",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -73.5763,
+    -55.0321,
+    -53.6686,
+    -21.8025
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ar-base.pmtiles",
+    "hs": "packs/ar-hs.pmtiles"
+   }
+  },
+  {
+   "id": "as",
+   "name": "American Samoa",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -170.8205,
+    -14.3598,
+    -170.5681,
+    -14.2574
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/as-base.pmtiles",
+    "hs": "packs/as-hs.pmtiles"
+   }
+  },
+  {
+   "id": "at",
+   "name": "Austria",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    9.524,
+    46.3997,
+    17.1474,
+    49.0011
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/at-base.pmtiles",
+    "hs": "packs/at-hs.pmtiles"
+   }
+  },
+  {
+   "id": "au",
+   "name": "Australia",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    96.8259,
+    -54.7492,
+    158.9589,
+    -10.0518
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/au-base.pmtiles",
+    "hs": "packs/au-hs.pmtiles"
+   }
+  },
+  {
+   "id": "aw",
+   "name": "Aruba",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -70.0661,
+    12.423,
+    -69.8957,
+    12.6141
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/aw-base.pmtiles",
+    "hs": "packs/aw-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ax",
+   "name": "\u00c5land",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    19.519,
+    60.0117,
+    20.6113,
+    60.4058
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ax-base.pmtiles",
+    "hs": "packs/ax-hs.pmtiles"
+   }
+  },
+  {
+   "id": "az",
+   "name": "Azerbaijan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    44.7683,
+    38.3987,
+    50.3659,
+    41.891
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/az-base.pmtiles",
+    "hs": "packs/az-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ba",
+   "name": "Bosnia and Herzegovina",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    15.7366,
+    42.5597,
+    19.5838,
+    45.2766
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ba-base.pmtiles",
+    "hs": "packs/ba-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bb",
+   "name": "Barbados",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -59.6467,
+    13.0622,
+    -59.4276,
+    13.3177
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bb-base.pmtiles",
+    "hs": "packs/bb-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bd",
+   "name": "Bangladesh",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    88.0234,
+    20.7904,
+    92.6316,
+    26.5715
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bd-base.pmtiles",
+    "hs": "packs/bd-hs.pmtiles"
+   }
+  },
+  {
+   "id": "be",
+   "name": "Belgium",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    2.5249,
+    49.5109,
+    6.3645,
+    51.4911
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/be-base.pmtiles",
+    "hs": "packs/be-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bf",
+   "name": "Burkina Faso",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -5.5235,
+    9.4247,
+    2.3892,
+    15.0779
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bf-base.pmtiles",
+    "hs": "packs/bf-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bg",
+   "name": "Bulgaria",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    22.344,
+    41.2436,
+    28.5854,
+    44.2378
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bg-base.pmtiles",
+    "hs": "packs/bg-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bh",
+   "name": "Bahrain",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    50.4524,
+    25.8068,
+    50.6175,
+    26.2464
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bh-base.pmtiles",
+    "hs": "packs/bh-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bi",
+   "name": "Burundi",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    29.0142,
+    -4.4559,
+    30.8114,
+    -2.313
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bi-base.pmtiles",
+    "hs": "packs/bi-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bj",
+   "name": "Benin",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    0.7634,
+    6.2168,
+    3.8345,
+    12.3838
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bj-base.pmtiles",
+    "hs": "packs/bj-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bl",
+   "name": "Saint Barth\u00e9lemy",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -62.8754,
+    17.8752,
+    -62.7997,
+    17.9223
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bl-base.pmtiles",
+    "hs": "packs/bl-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bm",
+   "name": "Bermuda",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -64.8628,
+    32.2596,
+    -64.6683,
+    32.3869
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bm-base.pmtiles",
+    "hs": "packs/bm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bn",
+   "name": "Brunei",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    114.0639,
+    4.024,
+    115.3268,
+    5.0224
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bn-base.pmtiles",
+    "hs": "packs/bn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bo",
+   "name": "Bolivia",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -69.6457,
+    -22.8917,
+    -57.4957,
+    -9.7104
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bo-base.pmtiles",
+    "hs": "packs/bo-hs.pmtiles"
+   }
+  },
+  {
+   "id": "br",
+   "name": "Brazil",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -74.0021,
+    -33.7422,
+    -34.8055,
+    5.258
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/br-base.pmtiles",
+    "hs": "packs/br-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bs",
+   "name": "The Bahamas",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -78.9856,
+    20.9374,
+    -72.7473,
+    26.9401
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bs-base.pmtiles",
+    "hs": "packs/bs-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bt",
+   "name": "Bhutan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    88.7388,
+    26.7016,
+    92.0834,
+    28.3112
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bt-base.pmtiles",
+    "hs": "packs/bt-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bw",
+   "name": "Botswana",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    19.9773,
+    -26.8542,
+    29.3648,
+    -17.7876
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bw-base.pmtiles",
+    "hs": "packs/bw-hs.pmtiles"
+   }
+  },
+  {
+   "id": "by",
+   "name": "Belarus",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    23.1751,
+    51.265,
+    32.7103,
+    56.1458
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/by-base.pmtiles",
+    "hs": "packs/by-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bz",
+   "name": "Belize",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -89.2375,
+    15.8887,
+    -87.7886,
+    18.4823
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/bz-base.pmtiles",
+    "hs": "packs/bz-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca",
+   "name": "Canada",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 9,
+   "bounds": [
+    -141.0021,
+    41.6749,
+    -52.6537,
+    83.1161
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-base.pmtiles",
+    "hs": "packs/ca-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cd",
+   "name": "Democratic Republic of the Congo",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    12.2137,
+    -13.4538,
+    31.274,
+    5.3121
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cd-base.pmtiles",
+    "hs": "packs/cd-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cf",
+   "name": "Central African Republic",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    14.4312,
+    2.2701,
+    27.4033,
+    10.9962
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cf-base.pmtiles",
+    "hs": "packs/cf-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cg",
+   "name": "Republic of the Congo",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    11.1302,
+    -5.0043,
+    18.6222,
+    3.6873
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cg-base.pmtiles",
+    "hs": "packs/cg-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ch",
+   "name": "Switzerland",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    5.97,
+    45.83,
+    10.4546,
+    47.7756
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ch-base.pmtiles",
+    "hs": "packs/ch-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ci",
+   "name": "Ivory Coast",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -8.6036,
+    4.3513,
+    -2.5059,
+    10.7241
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ci-base.pmtiles",
+    "hs": "packs/ci-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ck",
+   "name": "Cook Islands",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -159.8425,
+    -21.2495,
+    -159.7369,
+    -21.1864
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ck-base.pmtiles",
+    "hs": "packs/ck-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cl",
+   "name": "Chile",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -109.4341,
+    -55.8917,
+    -66.4358,
+    -17.5061
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cl-base.pmtiles",
+    "hs": "packs/cl-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cm",
+   "name": "Cameroon",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    8.5328,
+    1.6762,
+    16.1834,
+    13.0785
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cm-base.pmtiles",
+    "hs": "packs/cm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cn",
+   "name": "People's Republic of China",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    73.6073,
+    18.2183,
+    134.7523,
+    53.5556
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cn-base.pmtiles",
+    "hs": "packs/cn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "co",
+   "name": "Colombia",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -79.0254,
+    -4.2359,
+    -66.876,
+    12.4344
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/co-base.pmtiles",
+    "hs": "packs/co-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cr",
+   "name": "Costa Rica",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -85.908,
+    8.0707,
+    -82.5636,
+    11.1895
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cr-base.pmtiles",
+    "hs": "packs/cr-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cu",
+   "name": "Cuba",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -84.8872,
+    19.8555,
+    -74.1368,
+    23.1904
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cu-base.pmtiles",
+    "hs": "packs/cu-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cv",
+   "name": "Cape Verde",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -25.3416,
+    14.8182,
+    -22.6819,
+    17.1937
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cv-base.pmtiles",
+    "hs": "packs/cv-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cw",
+   "name": "Cura\u00e7ao",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -69.1589,
+    12.0455,
+    -68.7511,
+    12.3803
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cw-base.pmtiles",
+    "hs": "packs/cw-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cy",
+   "name": "Cyprus",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    32.301,
+    34.5696,
+    34.0502,
+    35.1827
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cy-base.pmtiles",
+    "hs": "packs/cy-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cyn",
+   "name": "Turkish Republic of Northern Cyprus",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    32.7127,
+    35.0003,
+    34.5561,
+    35.6621
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cyn-base.pmtiles",
+    "hs": "packs/cyn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cz",
+   "name": "Czech Republic",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    12.0897,
+    48.5762,
+    18.8322,
+    51.0378
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/cz-base.pmtiles",
+    "hs": "packs/cz-hs.pmtiles"
+   }
+  },
+  {
+   "id": "de",
+   "name": "Germany",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    5.8575,
+    47.2788,
+    15.0166,
+    55.0587
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/de-base.pmtiles",
+    "hs": "packs/de-hs.pmtiles"
+   }
+  },
+  {
+   "id": "dj",
+   "name": "Djibouti",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    41.7646,
+    10.941,
+    43.4098,
+    12.7086
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/dj-base.pmtiles",
+    "hs": "packs/dj-hs.pmtiles"
+   }
+  },
+  {
+   "id": "dk",
+   "name": "Denmark",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    8.1215,
+    54.6289,
+    15.1371,
+    57.7369
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/dk-base.pmtiles",
+    "hs": "packs/dk-hs.pmtiles"
+   }
+  },
+  {
+   "id": "dm",
+   "name": "Dominica",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -61.4812,
+    15.2273,
+    -61.2511,
+    15.6331
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/dm-base.pmtiles",
+    "hs": "packs/dm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "do",
+   "name": "Dominican Republic",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -72.0004,
+    17.6356,
+    -68.3392,
+    19.914
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/do-base.pmtiles",
+    "hs": "packs/do-hs.pmtiles"
+   }
+  },
+  {
+   "id": "dz",
+   "name": "Algeria",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -8.6834,
+    18.9866,
+    11.9679,
+    37.0924
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/dz-base.pmtiles",
+    "hs": "packs/dz-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ec",
+   "name": "Ecuador",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -91.6542,
+    -4.9906,
+    -75.2496,
+    1.4554
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ec-base.pmtiles",
+    "hs": "packs/ec-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ee",
+   "name": "Estonia",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    21.8545,
+    57.5255,
+    28.1511,
+    59.639
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ee-base.pmtiles",
+    "hs": "packs/ee-hs.pmtiles"
+   }
+  },
+  {
+   "id": "eg",
+   "name": "Egypt",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    24.7032,
+    21.9949,
+    36.8714,
+    31.655
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/eg-base.pmtiles",
+    "hs": "packs/eg-hs.pmtiles"
+   }
+  },
+  {
+   "id": "eh",
+   "name": "Western Sahara",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -17.0988,
+    20.8062,
+    -8.6821,
+    27.6564
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/eh-base.pmtiles",
+    "hs": "packs/eh-hs.pmtiles"
+   }
+  },
+  {
+   "id": "er",
+   "name": "Eritrea",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    36.4268,
+    12.3766,
+    43.1167,
+    18.0051
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/er-base.pmtiles",
+    "hs": "packs/er-hs.pmtiles"
+   }
+  },
+  {
+   "id": "es",
+   "name": "Spain",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -18.1605,
+    27.6464,
+    4.3221,
+    43.7646
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/es-base.pmtiles",
+    "hs": "packs/es-hs.pmtiles"
+   }
+  },
+  {
+   "id": "et",
+   "name": "Ethiopia",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    32.9989,
+    3.4561,
+    47.9782,
+    14.8523
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/et-base.pmtiles",
+    "hs": "packs/et-hs.pmtiles"
+   }
+  },
+  {
+   "id": "fi",
+   "name": "Finland",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    20.6222,
+    59.816,
+    31.5365,
+    70.0648
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/fi-base.pmtiles",
+    "hs": "packs/fi-hs.pmtiles"
+   }
+  },
+  {
+   "id": "fj",
+   "name": "Fiji",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -180,
+    -21.7059,
+    180,
+    -12.477
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/fj-base.pmtiles",
+    "hs": "packs/fj-hs.pmtiles"
+   }
+  },
+  {
+   "id": "fk",
+   "name": "Falkland Islands",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -61.145,
+    -52.308,
+    -57.7918,
+    -51.2699
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/fk-base.pmtiles",
+    "hs": "packs/fk-hs.pmtiles"
+   }
+  },
+  {
+   "id": "fm",
+   "name": "Federated States of Micronesia",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    138.0619,
+    5.2772,
+    162.9935,
+    9.5933
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/fm-base.pmtiles",
+    "hs": "packs/fm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "fo",
+   "name": "Faroe Islands",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -7.4226,
+    61.4143,
+    -6.4061,
+    62.3557
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/fo-base.pmtiles",
+    "hs": "packs/fo-hs.pmtiles"
+   }
+  },
+  {
+   "id": "fr",
+   "name": "France",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -61.7941,
+    -21.369,
+    55.8391,
+    51.0971
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/fr-base.pmtiles",
+    "hs": "packs/fr-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ga",
+   "name": "Gabon",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    8.7031,
+    -3.9163,
+    14.4806,
+    2.3022
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ga-base.pmtiles",
+    "hs": "packs/ga-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gb",
+   "name": "United Kingdom",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -8.1448,
+    50.0214,
+    1.7466,
+    60.8319
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gb-base.pmtiles",
+    "hs": "packs/gb-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gd",
+   "name": "Grenada",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -61.7822,
+    12.0084,
+    -61.607,
+    12.237
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gd-base.pmtiles",
+    "hs": "packs/gd-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ge",
+   "name": "Georgia",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    39.9783,
+    41.0702,
+    46.6726,
+    43.5698
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ge-base.pmtiles",
+    "hs": "packs/ge-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gg",
+   "name": "Guernsey",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -2.6461,
+    49.4287,
+    -2.5123,
+    49.5066
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gg-base.pmtiles",
+    "hs": "packs/gg-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gh",
+   "name": "Ghana",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -3.2439,
+    4.7625,
+    1.1872,
+    11.1669
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gh-base.pmtiles",
+    "hs": "packs/gh-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gl",
+   "name": "Greenland",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -72.8181,
+    59.8155,
+    -11.4255,
+    83.5996
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gl-base.pmtiles",
+    "hs": "packs/gl-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gm",
+   "name": "The Gambia",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -16.8248,
+    13.0642,
+    -13.8267,
+    13.8121
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gm-base.pmtiles",
+    "hs": "packs/gm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gn",
+   "name": "Guinea",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -15.0512,
+    7.2159,
+    -7.6812,
+    12.6739
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gn-base.pmtiles",
+    "hs": "packs/gn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gq",
+   "name": "Equatorial Guinea",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    8.4343,
+    0.9601,
+    11.3354,
+    3.7583
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gq-base.pmtiles",
+    "hs": "packs/gq-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gr",
+   "name": "Greece",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    19.6465,
+    34.9345,
+    28.2318,
+    41.7438
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gr-base.pmtiles",
+    "hs": "packs/gr-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gs",
+   "name": "South Georgia and the South Sandwich Islands",
+   "continent": "Seven seas (open ocean)",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -38.0174,
+    -58.4923,
+    -26.2599,
+    -53.9841
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gs-base.pmtiles",
+    "hs": "packs/gs-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gt",
+   "name": "Guatemala",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -92.2352,
+    13.7365,
+    -88.2283,
+    17.8164
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gt-base.pmtiles",
+    "hs": "packs/gt-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gu",
+   "name": "Guam",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    144.6493,
+    13.2575,
+    144.9408,
+    13.6224
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gu-base.pmtiles",
+    "hs": "packs/gu-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gw",
+   "name": "Guinea-Bissau",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -16.7118,
+    10.9401,
+    -13.6735,
+    12.6799
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gw-base.pmtiles",
+    "hs": "packs/gw-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gy",
+   "name": "Guyana",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -61.3908,
+    1.2012,
+    -56.4828,
+    8.5493
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/gy-base.pmtiles",
+    "hs": "packs/gy-hs.pmtiles"
+   }
+  },
+  {
+   "id": "hk",
+   "name": "Hong Kong",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    113.8389,
+    22.1952,
+    114.3353,
+    22.565
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/hk-base.pmtiles",
+    "hs": "packs/hk-hs.pmtiles"
+   }
+  },
+  {
+   "id": "hm",
+   "name": "Heard Island and McDonald Islands",
+   "continent": "Seven seas (open ocean)",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    73.2512,
+    -53.1846,
+    73.8378,
+    -52.9663
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/hm-base.pmtiles",
+    "hs": "packs/hm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "hn",
+   "name": "Honduras",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -89.3626,
+    12.9792,
+    -83.1575,
+    16.514
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/hn-base.pmtiles",
+    "hs": "packs/hn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "hr",
+   "name": "Croatia",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    13.5172,
+    42.4329,
+    19.401,
+    46.5346
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/hr-base.pmtiles",
+    "hs": "packs/hr-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ht",
+   "name": "Haiti",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -74.4781,
+    18.0392,
+    -71.6453,
+    20.0937
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ht-base.pmtiles",
+    "hs": "packs/ht-hs.pmtiles"
+   }
+  },
+  {
+   "id": "hu",
+   "name": "Hungary",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    16.0931,
+    45.753,
+    22.8767,
+    48.5535
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/hu-base.pmtiles",
+    "hs": "packs/hu-hs.pmtiles"
+   }
+  },
+  {
+   "id": "id",
+   "name": "Indonesia",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    95.2066,
+    -10.9097,
+    140.9762,
+    5.907
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/id-base.pmtiles",
+    "hs": "packs/id-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ie",
+   "name": "Ireland",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -10.3902,
+    51.4737,
+    -6.0274,
+    55.3658
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ie-base.pmtiles",
+    "hs": "packs/ie-hs.pmtiles"
+   }
+  },
+  {
+   "id": "il",
+   "name": "Israel",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    34.2453,
+    29.4773,
+    35.888,
+    33.4157
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/il-base.pmtiles",
+    "hs": "packs/il-hs.pmtiles"
+   }
+  },
+  {
+   "id": "im",
+   "name": "Isle of Man",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -4.7854,
+    54.0587,
+    -4.338,
+    54.4072
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/im-base.pmtiles",
+    "hs": "packs/im-hs.pmtiles"
+   }
+  },
+  {
+   "id": "in",
+   "name": "India",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    68.165,
+    6.7487,
+    97.3436,
+    35.4959
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/in-base.pmtiles",
+    "hs": "packs/in-hs.pmtiles"
+   }
+  },
+  {
+   "id": "io",
+   "name": "British Indian Ocean Territory",
+   "continent": "Seven seas (open ocean)",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    72.3497,
+    -7.4354,
+    72.4985,
+    -7.2204
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/io-base.pmtiles",
+    "hs": "packs/io-hs.pmtiles"
+   }
+  },
+  {
+   "id": "iq",
+   "name": "Iraq",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    38.7735,
+    29.0637,
+    48.5465,
+    37.3719
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/iq-base.pmtiles",
+    "hs": "packs/iq-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ir",
+   "name": "Iran",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    44.0232,
+    25.1021,
+    63.3052,
+    39.7686
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ir-base.pmtiles",
+    "hs": "packs/ir-hs.pmtiles"
+   }
+  },
+  {
+   "id": "is",
+   "name": "Iceland",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -24.4757,
+    63.4067,
+    -13.5561,
+    66.5261
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/is-base.pmtiles",
+    "hs": "packs/is-hs.pmtiles"
+   }
+  },
+  {
+   "id": "it",
+   "name": "Italy",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    6.6277,
+    36.6878,
+    18.4858,
+    47.0821
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/it-base.pmtiles",
+    "hs": "packs/it-hs.pmtiles"
+   }
+  },
+  {
+   "id": "je",
+   "name": "Jersey",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -2.2358,
+    49.1698,
+    -2.0099,
+    49.2664
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/je-base.pmtiles",
+    "hs": "packs/je-hs.pmtiles"
+   }
+  },
+  {
+   "id": "jm",
+   "name": "Jamaica",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -78.3395,
+    17.7149,
+    -76.2108,
+    18.5222
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/jm-base.pmtiles",
+    "hs": "packs/jm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "jo",
+   "name": "Jordan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    34.9508,
+    29.1905,
+    39.2928,
+    33.3722
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/jo-base.pmtiles",
+    "hs": "packs/jo-hs.pmtiles"
+   }
+  },
+  {
+   "id": "jp",
+   "name": "Japan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    123.6798,
+    24.2661,
+    145.833,
+    45.5095
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/jp-base.pmtiles",
+    "hs": "packs/jp-hs.pmtiles"
+   }
+  },
+  {
+   "id": "kas",
+   "name": "Siachen Glacier",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    76.7669,
+    35.1099,
+    77.7994,
+    35.6617
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/kas-base.pmtiles",
+    "hs": "packs/kas-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ke",
+   "name": "Kenya",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    33.9,
+    -4.6924,
+    41.884,
+    5.4923
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ke-base.pmtiles",
+    "hs": "packs/ke-hs.pmtiles"
+   }
+  },
+  {
+   "id": "kg",
+   "name": "Kyrgyzstan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    69.2291,
+    39.2075,
+    80.2462,
+    43.2404
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/kg-base.pmtiles",
+    "hs": "packs/kg-hs.pmtiles"
+   }
+  },
+  {
+   "id": "kh",
+   "name": "Cambodia",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    102.3197,
+    10.4112,
+    107.6055,
+    14.7051
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/kh-base.pmtiles",
+    "hs": "packs/kh-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ki",
+   "name": "Kiribati",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -174.5408,
+    -11.4568,
+    174.7789,
+    3.9235
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ki-base.pmtiles",
+    "hs": "packs/ki-hs.pmtiles"
+   }
+  },
+  {
+   "id": "km",
+   "name": "Comoros",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    43.2267,
+    -12.3683,
+    44.5268,
+    -11.3685
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/km-base.pmtiles",
+    "hs": "packs/km-hs.pmtiles"
+   }
+  },
+  {
+   "id": "kn",
+   "name": "Saint Kitts and Nevis",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -62.8405,
+    17.1006,
+    -62.5322,
+    17.4026
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/kn-base.pmtiles",
+    "hs": "packs/kn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "kp",
+   "name": "North Korea",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    124.3486,
+    37.719,
+    130.6873,
+    42.9981
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/kp-base.pmtiles",
+    "hs": "packs/kp-hs.pmtiles"
+   }
+  },
+  {
+   "id": "kr",
+   "name": "South Korea",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    126.0075,
+    33.2015,
+    130.9343,
+    38.6234
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/kr-base.pmtiles",
+    "hs": "packs/kr-hs.pmtiles"
+   }
+  },
+  {
+   "id": "kw",
+   "name": "Kuwait",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    46.5314,
+    28.5332,
+    48.4425,
+    30.0973
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/kw-base.pmtiles",
+    "hs": "packs/kw-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ky",
+   "name": "Cayman Islands",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -81.4191,
+    19.2719,
+    -79.7423,
+    19.7657
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ky-base.pmtiles",
+    "hs": "packs/ky-hs.pmtiles"
+   }
+  },
+  {
+   "id": "kz",
+   "name": "Kazakhstan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    46.6092,
+    40.6086,
+    87.3229,
+    55.3896
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/kz-base.pmtiles",
+    "hs": "packs/kz-hs.pmtiles"
+   }
+  },
+  {
+   "id": "la",
+   "name": "Laos",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    100.1149,
+    13.9212,
+    107.6531,
+    22.4953
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/la-base.pmtiles",
+    "hs": "packs/la-hs.pmtiles"
+   }
+  },
+  {
+   "id": "lb",
+   "name": "Lebanon",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    35.1086,
+    33.0757,
+    36.585,
+    34.6787
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/lb-base.pmtiles",
+    "hs": "packs/lb-hs.pmtiles"
+   }
+  },
+  {
+   "id": "lc",
+   "name": "Saint Lucia",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -61.0731,
+    13.7176,
+    -60.8868,
+    14.0934
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/lc-base.pmtiles",
+    "hs": "packs/lc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "li",
+   "name": "Liechtenstein",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    9.4795,
+    47.0574,
+    9.6105,
+    47.2708
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/li-base.pmtiles",
+    "hs": "packs/li-hs.pmtiles"
+   }
+  },
+  {
+   "id": "lk",
+   "name": "Sri Lanka",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    79.7078,
+    5.9494,
+    81.877,
+    9.8127
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/lk-base.pmtiles",
+    "hs": "packs/lk-hs.pmtiles"
+   }
+  },
+  {
+   "id": "lr",
+   "name": "Liberia",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -11.5075,
+    4.3513,
+    -7.3999,
+    8.5377
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/lr-base.pmtiles",
+    "hs": "packs/lr-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ls",
+   "name": "Lesotho",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    27.0518,
+    -30.6423,
+    29.3907,
+    -28.5817
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ls-base.pmtiles",
+    "hs": "packs/ls-hs.pmtiles"
+   }
+  },
+  {
+   "id": "lt",
+   "name": "Lithuania",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    20.8998,
+    53.893,
+    26.7757,
+    56.4112
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/lt-base.pmtiles",
+    "hs": "packs/lt-hs.pmtiles"
+   }
+  },
+  {
+   "id": "lu",
+   "name": "Luxembourg",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    5.725,
+    49.4455,
+    6.4938,
+    50.1672
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/lu-base.pmtiles",
+    "hs": "packs/lu-hs.pmtiles"
+   }
+  },
+  {
+   "id": "lv",
+   "name": "Latvia",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    21.0149,
+    55.6675,
+    28.2021,
+    58.0634
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/lv-base.pmtiles",
+    "hs": "packs/lv-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ly",
+   "name": "Libya",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    9.3103,
+    19.4966,
+    25.1505,
+    33.1819
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ly-base.pmtiles",
+    "hs": "packs/ly-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ma",
+   "name": "Morocco",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -17.0031,
+    21.4207,
+    -1.0655,
+    35.9299
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ma-base.pmtiles",
+    "hs": "packs/ma-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mc",
+   "name": "Monaco",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    7.3777,
+    43.7317,
+    7.4387,
+    43.7709
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mc-base.pmtiles",
+    "hs": "packs/mc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "md",
+   "name": "Moldova",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    26.6189,
+    45.4504,
+    30.1311,
+    48.4777
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/md-base.pmtiles",
+    "hs": "packs/md-hs.pmtiles"
+   }
+  },
+  {
+   "id": "me",
+   "name": "Montenegro",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    18.4363,
+    41.8691,
+    20.3477,
+    43.5423
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/me-base.pmtiles",
+    "hs": "packs/me-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mf",
+   "name": "Saint Martin",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -63.123,
+    18.0689,
+    -63.0094,
+    18.1153
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mf-base.pmtiles",
+    "hs": "packs/mf-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mg",
+   "name": "Madagascar",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    43.2571,
+    -25.5705,
+    50.4827,
+    -12.0796
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mg-base.pmtiles",
+    "hs": "packs/mg-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mh",
+   "name": "Marshall Islands",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    166.8447,
+    5.7998,
+    171.7568,
+    11.1687
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mh-base.pmtiles",
+    "hs": "packs/mh-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mk",
+   "name": "North Macedonia",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    20.4486,
+    40.8499,
+    23.0057,
+    42.3582
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mk-base.pmtiles",
+    "hs": "packs/mk-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ml",
+   "name": "Mali",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -12.2806,
+    10.1433,
+    4.2347,
+    24.9956
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ml-base.pmtiles",
+    "hs": "packs/ml-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mm",
+   "name": "Myanmar",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    92.1796,
+    9.8754,
+    101.1473,
+    28.517
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mm-base.pmtiles",
+    "hs": "packs/mm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mn",
+   "name": "Mongolia",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    87.7432,
+    41.5955,
+    119.8979,
+    52.1173
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mn-base.pmtiles",
+    "hs": "packs/mn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mo",
+   "name": "Macau",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    113.4789,
+    22.1956,
+    113.5481,
+    22.2459
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mo-base.pmtiles",
+    "hs": "packs/mo-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mp",
+   "name": "Northern Mariana Islands",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    145.1521,
+    14.1113,
+    145.8354,
+    18.8068
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mp-base.pmtiles",
+    "hs": "packs/mp-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mr",
+   "name": "Mauritania",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -17.064,
+    14.7454,
+    -4.8226,
+    27.2859
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mr-base.pmtiles",
+    "hs": "packs/mr-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ms",
+   "name": "Montserrat",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -62.223,
+    16.6812,
+    -62.1484,
+    16.8096
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ms-base.pmtiles",
+    "hs": "packs/ms-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mt",
+   "name": "Malta",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    14.1804,
+    35.8202,
+    14.5662,
+    36.0758
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mt-base.pmtiles",
+    "hs": "packs/mt-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mu",
+   "name": "Mauritius",
+   "continent": "Seven seas (open ocean)",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    57.3177,
+    -20.5132,
+    57.792,
+    -19.9899
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mu-base.pmtiles",
+    "hs": "packs/mu-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mv",
+   "name": "Maldives",
+   "continent": "Seven seas (open ocean)",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    73.382,
+    3.2294,
+    73.5283,
+    4.2477
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mv-base.pmtiles",
+    "hs": "packs/mv-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mw",
+   "name": "Malawi",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    32.6704,
+    -17.1311,
+    35.8928,
+    -9.395
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mw-base.pmtiles",
+    "hs": "packs/mw-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mx",
+   "name": "Mexico",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -118.4014,
+    14.5454,
+    -86.6963,
+    32.7153
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mx-base.pmtiles",
+    "hs": "packs/mx-hs.pmtiles"
+   }
+  },
+  {
+   "id": "my",
+   "name": "Malaysia",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    99.6463,
+    0.862,
+    119.2663,
+    7.3517
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/my-base.pmtiles",
+    "hs": "packs/my-hs.pmtiles"
+   }
+  },
+  {
+   "id": "mz",
+   "name": "Mozambique",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    30.2218,
+    -26.8616,
+    40.8445,
+    -10.4644
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/mz-base.pmtiles",
+    "hs": "packs/mz-hs.pmtiles"
+   }
+  },
+  {
+   "id": "na",
+   "name": "Namibia",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    11.7217,
+    -28.9388,
+    25.2588,
+    -16.9677
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/na-base.pmtiles",
+    "hs": "packs/na-hs.pmtiles"
+   }
+  },
+  {
+   "id": "nc",
+   "name": "New Caledonia",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    159.9282,
+    -22.6611,
+    168.1391,
+    -19.1146
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/nc-base.pmtiles",
+    "hs": "packs/nc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ne",
+   "name": "Niger",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    0.1639,
+    11.6963,
+    15.9632,
+    23.5179
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ne-base.pmtiles",
+    "hs": "packs/ne-hs.pmtiles"
+   }
+  },
+  {
+   "id": "nf",
+   "name": "Norfolk Island",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    167.9062,
+    -29.0963,
+    167.9904,
+    -29.014
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/nf-base.pmtiles",
+    "hs": "packs/nf-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ng",
+   "name": "Nigeria",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    2.686,
+    4.2774,
+    14.6271,
+    13.8729
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ng-base.pmtiles",
+    "hs": "packs/ng-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ni",
+   "name": "Nicaragua",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -87.6702,
+    10.7354,
+    -83.1575,
+    15.0081
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ni-base.pmtiles",
+    "hs": "packs/ni-hs.pmtiles"
+   }
+  },
+  {
+   "id": "nl",
+   "name": "Netherlands",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -68.3711,
+    12.0321,
+    7.1973,
+    53.6255
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/nl-base.pmtiles",
+    "hs": "packs/nl-hs.pmtiles"
+   }
+  },
+  {
+   "id": "no",
+   "name": "Norway",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -9.0989,
+    58.0209,
+    33.6293,
+    80.4778
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/no-base.pmtiles",
+    "hs": "packs/no-hs.pmtiles"
+   }
+  },
+  {
+   "id": "np",
+   "name": "Nepal",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    80.0517,
+    26.3603,
+    88.1615,
+    30.3875
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/np-base.pmtiles",
+    "hs": "packs/np-hs.pmtiles"
+   }
+  },
+  {
+   "id": "nr",
+   "name": "Nauru",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    166.907,
+    -0.5508,
+    166.9584,
+    -0.4894
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/nr-base.pmtiles",
+    "hs": "packs/nr-hs.pmtiles"
+   }
+  },
+  {
+   "id": "nu",
+   "name": "Niue",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -169.9483,
+    -19.1379,
+    -169.7934,
+    -18.966
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/nu-base.pmtiles",
+    "hs": "packs/nu-hs.pmtiles"
+   }
+  },
+  {
+   "id": "nz",
+   "name": "New Zealand",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -176.8477,
+    -52.5703,
+    178.5362,
+    -8.5465
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/nz-base.pmtiles",
+    "hs": "packs/nz-hs.pmtiles"
+   }
+  },
+  {
+   "id": "om",
+   "name": "Oman",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    51.9776,
+    16.6484,
+    59.8375,
+    26.3563
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/om-base.pmtiles",
+    "hs": "packs/om-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pa",
+   "name": "Panama",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -83.0273,
+    7.2201,
+    -77.196,
+    9.5979
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/pa-base.pmtiles",
+    "hs": "packs/pa-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pe",
+   "name": "Peru",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -81.3366,
+    -18.3456,
+    -68.6853,
+    -0.0417
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/pe-base.pmtiles",
+    "hs": "packs/pe-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pf",
+   "name": "French Polynesia",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -151.5124,
+    -20.8759,
+    -136.2939,
+    -8.7815
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/pf-base.pmtiles",
+    "hs": "packs/pf-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pg",
+   "name": "Papua New Guinea",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    140.8623,
+    -11.6306,
+    155.9576,
+    -1.3532
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/pg-base.pmtiles",
+    "hs": "packs/pg-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ph",
+   "name": "Philippines",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    116.9695,
+    5.0602,
+    126.5934,
+    20.8413
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ph-base.pmtiles",
+    "hs": "packs/ph-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pk",
+   "name": "Pakistan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    60.8434,
+    23.7534,
+    77.0486,
+    37.0367
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/pk-base.pmtiles",
+    "hs": "packs/pk-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pl",
+   "name": "Poland",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    14.1286,
+    49.0208,
+    24.1058,
+    54.8382
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/pl-base.pmtiles",
+    "hs": "packs/pl-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pm",
+   "name": "Saint Pierre and Miquelon",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -56.3869,
+    46.7528,
+    -56.1374,
+    47.099
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/pm-base.pmtiles",
+    "hs": "packs/pm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pn",
+   "name": "Pitcairn Islands",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -128.3502,
+    -24.4126,
+    -128.2901,
+    -24.3232
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/pn-base.pmtiles",
+    "hs": "packs/pn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pr",
+   "name": "Puerto Rico",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -67.9371,
+    17.9473,
+    -65.2949,
+    18.5222
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/pr-base.pmtiles",
+    "hs": "packs/pr-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ps",
+   "name": "Palestine",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    34.1981,
+    31.2083,
+    35.5721,
+    32.5344
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ps-base.pmtiles",
+    "hs": "packs/ps-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pt",
+   "name": "Portugal",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -31.283,
+    32.6483,
+    -6.2125,
+    42.1374
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/pt-base.pmtiles",
+    "hs": "packs/pt-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pw",
+   "name": "Palau",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    131.135,
+    3.0219,
+    134.6596,
+    7.7121
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/pw-base.pmtiles",
+    "hs": "packs/pw-hs.pmtiles"
+   }
+  },
+  {
+   "id": "py",
+   "name": "Paraguay",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -62.651,
+    -27.5538,
+    -54.2418,
+    -19.2862
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/py-base.pmtiles",
+    "hs": "packs/py-hs.pmtiles"
+   }
+  },
+  {
+   "id": "qa",
+   "name": "Qatar",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    50.7546,
+    24.5646,
+    51.6089,
+    26.1533
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/qa-base.pmtiles",
+    "hs": "packs/qa-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ro",
+   "name": "Romania",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    20.2418,
+    43.6708,
+    29.7059,
+    48.2635
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ro-base.pmtiles",
+    "hs": "packs/ro-hs.pmtiles"
+   }
+  },
+  {
+   "id": "rs",
+   "name": "Serbia",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    18.8391,
+    42.2421,
+    22.9769,
+    46.1692
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/rs-base.pmtiles",
+    "hs": "packs/rs-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ru",
+   "name": "Russia",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -180,
+    41.1993,
+    180,
+    81.8542
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ru-base.pmtiles",
+    "hs": "packs/ru-hs.pmtiles"
+   }
+  },
+  {
+   "id": "rw",
+   "name": "Rwanda",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    28.8576,
+    -2.8086,
+    30.8766,
+    -1.0631
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/rw-base.pmtiles",
+    "hs": "packs/rw-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sa",
+   "name": "Saudi Arabia",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    34.6162,
+    16.3718,
+    55.641,
+    32.1245
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sa-base.pmtiles",
+    "hs": "packs/sa-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sb",
+   "name": "Solomon Islands",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    155.6775,
+    -11.8322,
+    166.9292,
+    -6.6089
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sb-base.pmtiles",
+    "hs": "packs/sb-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sc",
+   "name": "Seychelles",
+   "continent": "Seven seas (open ocean)",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    55.3834,
+    -4.7855,
+    55.543,
+    -4.5588
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sc-base.pmtiles",
+    "hs": "packs/sc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sd",
+   "name": "Sudan",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    21.8253,
+    8.6656,
+    38.6095,
+    22.2024
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sd-base.pmtiles",
+    "hs": "packs/sd-hs.pmtiles"
+   }
+  },
+  {
+   "id": "se",
+   "name": "Sweden",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    11.1472,
+    55.3464,
+    24.1555,
+    69.0369
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/se-base.pmtiles",
+    "hs": "packs/se-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sg",
+   "name": "Singapore",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    103.6502,
+    1.2654,
+    103.9964,
+    1.4471
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sg-base.pmtiles",
+    "hs": "packs/sg-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sh",
+   "name": "Saint Helena",
+   "continent": "Seven seas (open ocean)",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -14.4149,
+    -16.004,
+    -5.6597,
+    -7.8826
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sh-base.pmtiles",
+    "hs": "packs/sh-hs.pmtiles"
+   }
+  },
+  {
+   "id": "si",
+   "name": "Slovenia",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    13.3782,
+    45.4284,
+    16.5162,
+    46.8633
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/si-base.pmtiles",
+    "hs": "packs/si-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sk",
+   "name": "Slovakia",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    16.8627,
+    47.7634,
+    22.5387,
+    49.5977
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sk-base.pmtiles",
+    "hs": "packs/sk-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sl",
+   "name": "Sierra Leone",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -13.2927,
+    6.9065,
+    -10.2832,
+    9.9965
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sl-base.pmtiles",
+    "hs": "packs/sl-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sm",
+   "name": "San Marino",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    12.3969,
+    43.8941,
+    12.5146,
+    43.9897
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sm-base.pmtiles",
+    "hs": "packs/sm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sn",
+   "name": "Senegal",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -17.5356,
+    12.328,
+    -11.3824,
+    16.6789
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sn-base.pmtiles",
+    "hs": "packs/sn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "so",
+   "name": "Somalia",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    40.9645,
+    -1.6953,
+    51.3902,
+    11.9837
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/so-base.pmtiles",
+    "hs": "packs/so-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sol",
+   "name": "Somaliland",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    42.6564,
+    7.9971,
+    48.9386,
+    11.4998
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sol-base.pmtiles",
+    "hs": "packs/sol-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sr",
+   "name": "Suriname",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -58.0545,
+    1.8422,
+    -53.9905,
+    5.9935
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sr-base.pmtiles",
+    "hs": "packs/sr-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ss",
+   "name": "South Sudan",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    24.1474,
+    3.4907,
+    35.2684,
+    12.2231
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ss-base.pmtiles",
+    "hs": "packs/ss-hs.pmtiles"
+   }
+  },
+  {
+   "id": "st",
+   "name": "S\u00e3o Tom\u00e9 and Pr\u00edncipe",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    6.4682,
+    0.0474,
+    7.4523,
+    1.6991
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/st-base.pmtiles",
+    "hs": "packs/st-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sv",
+   "name": "El Salvador",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -90.1059,
+    13.164,
+    -87.7153,
+    14.4311
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sv-base.pmtiles",
+    "hs": "packs/sv-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sx",
+   "name": "Sint Maarten",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -63.1247,
+    18.0192,
+    -63.0112,
+    18.0689
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sx-base.pmtiles",
+    "hs": "packs/sx-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sy",
+   "name": "Syria",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    35.7645,
+    32.3173,
+    42.3591,
+    37.2973
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sy-base.pmtiles",
+    "hs": "packs/sy-hs.pmtiles"
+   }
+  },
+  {
+   "id": "sz",
+   "name": "Eswatini",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    30.7875,
+    -27.31,
+    32.1129,
+    -25.743
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/sz-base.pmtiles",
+    "hs": "packs/sz-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tc",
+   "name": "Turks and Caicos Islands",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -72.3424,
+    21.7517,
+    -71.6369,
+    21.9519
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tc-base.pmtiles",
+    "hs": "packs/tc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "td",
+   "name": "Chad",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    13.4482,
+    7.4753,
+    23.9834,
+    23.4452
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/td-base.pmtiles",
+    "hs": "packs/td-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tf",
+   "name": "French Southern and Antarctic Lands",
+   "continent": "Seven seas (open ocean)",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    51.6593,
+    -49.7099,
+    70.5555,
+    -46.3269
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tf-base.pmtiles",
+    "hs": "packs/tf-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tg",
+   "name": "Togo",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -0.0902,
+    6.0894,
+    1.7779,
+    11.1156
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tg-base.pmtiles",
+    "hs": "packs/tg-hs.pmtiles"
+   }
+  },
+  {
+   "id": "th",
+   "name": "Thailand",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    97.3739,
+    5.6368,
+    105.641,
+    20.4244
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/th-base.pmtiles",
+    "hs": "packs/th-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tj",
+   "name": "Tajikistan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    67.3496,
+    36.684,
+    75.1188,
+    41.0351
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tj-base.pmtiles",
+    "hs": "packs/tj-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tl",
+   "name": "East Timor",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    124.0363,
+    -9.5119,
+    127.2961,
+    -8.1399
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tl-base.pmtiles",
+    "hs": "packs/tl-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tm",
+   "name": "Turkmenistan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    52.4938,
+    35.1708,
+    66.6293,
+    42.7785
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tm-base.pmtiles",
+    "hs": "packs/tm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tn",
+   "name": "Tunisia",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    7.4956,
+    30.2294,
+    11.5359,
+    37.3404
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tn-base.pmtiles",
+    "hs": "packs/tn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "to",
+   "name": "Tonga",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -175.3624,
+    -21.4506,
+    -173.9219,
+    -18.5653
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/to-base.pmtiles",
+    "hs": "packs/to-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tr",
+   "name": "Turkey",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    25.6689,
+    35.8314,
+    44.8172,
+    42.0933
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tr-base.pmtiles",
+    "hs": "packs/tr-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tt",
+   "name": "Trinidad and Tobago",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -61.9061,
+    10.0646,
+    -60.5255,
+    11.3254
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tt-base.pmtiles",
+    "hs": "packs/tt-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tv",
+   "name": "Tuvalu",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    179.1957,
+    -8.535,
+    179.2166,
+    -8.4663
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tv-base.pmtiles",
+    "hs": "packs/tv-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tw",
+   "name": "Taiwan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    118.2873,
+    21.925,
+    121.929,
+    25.2769
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tw-base.pmtiles",
+    "hs": "packs/tw-hs.pmtiles"
+   }
+  },
+  {
+   "id": "tz",
+   "name": "Tanzania",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    29.3234,
+    -11.7162,
+    40.4636,
+    -0.9949
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/tz-base.pmtiles",
+    "hs": "packs/tz-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ua",
+   "name": "Ukraine",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    22.1318,
+    45.2341,
+    40.1283,
+    52.3536
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ua-base.pmtiles",
+    "hs": "packs/ua-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ug",
+   "name": "Uganda",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    29.5619,
+    -1.4699,
+    34.9782,
+    4.2202
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ug-base.pmtiles",
+    "hs": "packs/ug-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us",
+   "name": "United States of America",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 9,
+   "bounds": [
+    -178.1945,
+    18.9639,
+    179.78,
+    71.4077
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-base.pmtiles",
+    "hs": "packs/us-hs.pmtiles"
+   }
+  },
+  {
+   "id": "uy",
+   "name": "Uruguay",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -58.4381,
+    -34.9328,
+    -53.1256,
+    -30.1011
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/uy-base.pmtiles",
+    "hs": "packs/uy-hs.pmtiles"
+   }
+  },
+  {
+   "id": "uz",
+   "name": "Uzbekistan",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    55.9757,
+    37.1722,
+    73.1369,
+    45.5554
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/uz-base.pmtiles",
+    "hs": "packs/uz-hs.pmtiles"
+   }
+  },
+  {
+   "id": "va",
+   "name": "Vatican City",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    12.4275,
+    41.8976,
+    12.4392,
+    41.9062
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/va-base.pmtiles",
+    "hs": "packs/va-hs.pmtiles"
+   }
+  },
+  {
+   "id": "vc",
+   "name": "Saint Vincent and the Grenadines",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -61.3535,
+    12.6947,
+    -61.124,
+    13.3587
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/vc-base.pmtiles",
+    "hs": "packs/vc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ve",
+   "name": "Venezuela",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -73.3662,
+    0.688,
+    -59.8289,
+    12.1779
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ve-base.pmtiles",
+    "hs": "packs/ve-hs.pmtiles"
+   }
+  },
+  {
+   "id": "vg",
+   "name": "British Virgin Islands",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -64.6951,
+    18.3991,
+    -64.2736,
+    18.7527
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/vg-base.pmtiles",
+    "hs": "packs/vg-hs.pmtiles"
+   }
+  },
+  {
+   "id": "vi",
+   "name": "United States Virgin Islands",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -65.0236,
+    17.7017,
+    -64.5805,
+    18.3852
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/vi-base.pmtiles",
+    "hs": "packs/vi-hs.pmtiles"
+   }
+  },
+  {
+   "id": "vn",
+   "name": "Vietnam",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    102.1274,
+    8.5833,
+    109.4449,
+    23.3452
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/vn-base.pmtiles",
+    "hs": "packs/vn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "vu",
+   "name": "Vanuatu",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    166.5261,
+    -20.2418,
+    169.8963,
+    -13.7095
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/vu-base.pmtiles",
+    "hs": "packs/vu-hs.pmtiles"
+   }
+  },
+  {
+   "id": "wf",
+   "name": "Wallis and Futuna",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -178.1944,
+    -14.3249,
+    -176.1281,
+    -13.2217
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/wf-base.pmtiles",
+    "hs": "packs/wf-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ws",
+   "name": "Samoa",
+   "continent": "Oceania",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -172.7785,
+    -14.0473,
+    -171.4496,
+    -13.4652
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ws-base.pmtiles",
+    "hs": "packs/ws-hs.pmtiles"
+   }
+  },
+  {
+   "id": "xk",
+   "name": "Kosovo",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    20.0295,
+    41.8538,
+    21.7529,
+    43.2611
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/xk-base.pmtiles",
+    "hs": "packs/xk-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ye",
+   "name": "Yemen",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    42.549,
+    12.319,
+    54.5111,
+    18.9961
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ye-base.pmtiles",
+    "hs": "packs/ye-hs.pmtiles"
+   }
+  },
+  {
+   "id": "za",
+   "name": "South Africa",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    16.4476,
+    -46.9629,
+    37.8877,
+    -22.1463
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/za-base.pmtiles",
+    "hs": "packs/za-hs.pmtiles"
+   }
+  },
+  {
+   "id": "zm",
+   "name": "Zambia",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    21.9789,
+    -18.0415,
+    33.6615,
+    -8.1937
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/zm-base.pmtiles",
+    "hs": "packs/zm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "zw",
+   "name": "Zimbabwe",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    25.224,
+    -22.4021,
+    33.0067,
+    -15.6431
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/zw-base.pmtiles",
+    "hs": "packs/zw-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-ab",
+   "name": "Alberta",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -120.001,
+    48.9931,
+    -109.9994,
+    60.0011
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-ab-base.pmtiles",
+    "hs": "packs/ca-ab-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-bc",
+   "name": "British Columbia",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -139.0565,
+    48.3228,
+    -114.0506,
+    60.0016
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-bc-base.pmtiles",
+    "hs": "packs/ca-bc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-mb",
+   "name": "Manitoba",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -102.0016,
+    48.9918,
+    -88.9485,
+    60.0018
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-mb-base.pmtiles",
+    "hs": "packs/ca-mb-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-nb",
+   "name": "New Brunswick",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -69.0537,
+    44.6289,
+    -63.8319,
+    48.067
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-nb-base.pmtiles",
+    "hs": "packs/ca-nb-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-nl",
+   "name": "Newfoundland and Labrador",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -67.7615,
+    46.6283,
+    -52.6537,
+    60.306
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-nl-base.pmtiles",
+    "hs": "packs/ca-nl-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-ns",
+   "name": "Nova Scotia",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -66.3241,
+    43.5181,
+    -59.7271,
+    47.0097
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-ns-base.pmtiles",
+    "hs": "packs/ca-ns-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-nt",
+   "name": "Northwest Territories",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -136.4454,
+    60.0011,
+    -101.9866,
+    78.7578
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-nt-base.pmtiles",
+    "hs": "packs/ca-nt-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-nu",
+   "name": "Nunavut",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -120.6819,
+    51.9449,
+    -61.2072,
+    83.1161
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-nu-base.pmtiles",
+    "hs": "packs/ca-nu-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-on",
+   "name": "Ontario",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -95.1604,
+    41.6749,
+    -74.3404,
+    56.8513
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-on-base.pmtiles",
+    "hs": "packs/ca-on-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-pe",
+   "name": "Prince Edward Island",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -64.4031,
+    45.9669,
+    -62.0237,
+    47.0616
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-pe-base.pmtiles",
+    "hs": "packs/ca-pe-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-qc",
+   "name": "Quebec",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -79.7139,
+    45.0039,
+    -57.1001,
+    62.5725
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-qc-base.pmtiles",
+    "hs": "packs/ca-qc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-sk",
+   "name": "Saskatchewan",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -110.0,
+    48.9931,
+    -101.3673,
+    60.0011
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-sk-base.pmtiles",
+    "hs": "packs/ca-sk-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ca-yt",
+   "name": "Yukon",
+   "continent": "North America",
+   "parent": "ca",
+   "maxzoom": 10,
+   "bounds": [
+    -141.0021,
+    60.0011,
+    -123.8192,
+    69.6508
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/ca-yt-base.pmtiles",
+    "hs": "packs/ca-yt-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ak",
+   "name": "Alaska",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -178.1945,
+    51.6037,
+    -130.0141,
+    71.4077
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ak-base.pmtiles",
+    "hs": "packs/us-ak-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-al",
+   "name": "Alabama",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -88.4862,
+    30.2309,
+    -84.9215,
+    35.025
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-al-base.pmtiles",
+    "hs": "packs/us-al-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ar",
+   "name": "Arkansas",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -94.6184,
+    33.012,
+    -89.6889,
+    36.5009
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ar-base.pmtiles",
+    "hs": "packs/us-ar-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-az",
+   "name": "Arizona",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -114.836,
+    31.3242,
+    -109.0467,
+    37.0042
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-az-base.pmtiles",
+    "hs": "packs/us-az-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ca",
+   "name": "California",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -124.3717,
+    32.5334,
+    -114.125,
+    42.0008
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ca-base.pmtiles",
+    "hs": "packs/us-ca-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-co",
+   "name": "Colorado",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -109.0467,
+    37.0008,
+    -102.0128,
+    41.0009
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-co-base.pmtiles",
+    "hs": "packs/us-co-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ct",
+   "name": "Connecticut",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -73.723,
+    40.9919,
+    -71.7958,
+    42.0556
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ct-base.pmtiles",
+    "hs": "packs/us-ct-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-dc",
+   "name": "Washington",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -77.1221,
+    38.8065,
+    -76.9312,
+    39.0118
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-dc-base.pmtiles",
+    "hs": "packs/us-dc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-de",
+   "name": "Delaware",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -75.7847,
+    38.4549,
+    -75.0359,
+    39.8434
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-de-base.pmtiles",
+    "hs": "packs/us-de-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-fl",
+   "name": "Florida",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -87.6074,
+    24.5423,
+    -80.0413,
+    31.0017
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-fl-base.pmtiles",
+    "hs": "packs/us-fl-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ga",
+   "name": "Georgia",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -85.6236,
+    30.3714,
+    -80.8723,
+    35.0015
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ga-base.pmtiles",
+    "hs": "packs/us-ga-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-hi",
+   "name": "Hawaii",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -177.3905,
+    18.9639,
+    -154.8042,
+    28.2212
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-hi-base.pmtiles",
+    "hs": "packs/us-hi-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ia",
+   "name": "Iowa",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -96.6268,
+    40.3794,
+    -90.1494,
+    43.5024
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ia-base.pmtiles",
+    "hs": "packs/us-ia-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-id",
+   "name": "Idaho",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -117.2017,
+    42.0006,
+    -111.0503,
+    48.9931
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-id-base.pmtiles",
+    "hs": "packs/us-id-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-il",
+   "name": "Illinois",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -91.5017,
+    36.9921,
+    -87.0391,
+    42.513
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-il-base.pmtiles",
+    "hs": "packs/us-il-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-in",
+   "name": "Indiana",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -88.0953,
+    37.788,
+    -84.7896,
+    41.7608
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-in-base.pmtiles",
+    "hs": "packs/us-in-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ks",
+   "name": "Kansas",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -102.0245,
+    37.0008,
+    -94.6181,
+    40.0015
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ks-base.pmtiles",
+    "hs": "packs/us-ks-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ky",
+   "name": "Kentucky",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -89.56,
+    36.4997,
+    -81.9653,
+    39.1289
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ky-base.pmtiles",
+    "hs": "packs/us-ky-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-la",
+   "name": "Louisiana",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -94.0433,
+    28.9813,
+    -88.8126,
+    33.0159
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-la-base.pmtiles",
+    "hs": "packs/us-la-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ma",
+   "name": "Massachusetts",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -73.5073,
+    41.2495,
+    -69.9338,
+    42.8816
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ma-base.pmtiles",
+    "hs": "packs/us-ma-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-md",
+   "name": "Maryland",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -79.488,
+    37.954,
+    -75.0377,
+    39.7228
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-md-base.pmtiles",
+    "hs": "packs/us-md-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-me",
+   "name": "Maine",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -71.0845,
+    43.07,
+    -66.987,
+    47.463
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-me-base.pmtiles",
+    "hs": "packs/us-me-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-mi",
+   "name": "Michigan",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -90.4126,
+    41.7014,
+    -82.1379,
+    48.3031
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-mi-base.pmtiles",
+    "hs": "packs/us-mi-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-mn",
+   "name": "Minnesota",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -97.2257,
+    43.5012,
+    -89.4984,
+    49.3697
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-mn-base.pmtiles",
+    "hs": "packs/us-mn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-mo",
+   "name": "Missouri",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -95.765,
+    35.9927,
+    -89.1225,
+    40.6247
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-mo-base.pmtiles",
+    "hs": "packs/us-mo-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ms",
+   "name": "Mississippi",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -91.6564,
+    30.1926,
+    -88.0848,
+    35.0011
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ms-base.pmtiles",
+    "hs": "packs/us-ms-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-mt",
+   "name": "Montana",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -116.049,
+    44.3966,
+    -104.0048,
+    48.9931
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-mt-base.pmtiles",
+    "hs": "packs/us-mt-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-nc",
+   "name": "North Carolina",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -84.3247,
+    33.8767,
+    -75.4565,
+    36.6106
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-nc-base.pmtiles",
+    "hs": "packs/us-nc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-nd",
+   "name": "North Dakota",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -104.0339,
+    45.9428,
+    -96.5564,
+    48.9932
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-nd-base.pmtiles",
+    "hs": "packs/us-nd-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ne",
+   "name": "Nebraska",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -104.0289,
+    40.0011,
+    -95.3467,
+    43.0014
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ne-base.pmtiles",
+    "hs": "packs/us-ne-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-nh",
+   "name": "New Hampshire",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -72.5528,
+    42.7025,
+    -70.7331,
+    45.294
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-nh-base.pmtiles",
+    "hs": "packs/us-nh-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-nj",
+   "name": "New Jersey",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -75.5242,
+    38.9411,
+    -73.9101,
+    41.3573
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-nj-base.pmtiles",
+    "hs": "packs/us-nj-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-nm",
+   "name": "New Mexico",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -109.0478,
+    31.3279,
+    -103.0003,
+    37.0008
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-nm-base.pmtiles",
+    "hs": "packs/us-nm-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-nv",
+   "name": "Nevada",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -120.0008,
+    34.9911,
+    -114.0403,
+    42.0011
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-nv-base.pmtiles",
+    "hs": "packs/us-nv-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ny",
+   "name": "New York",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -79.763,
+    40.5187,
+    -71.9032,
+    45.0054
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ny-base.pmtiles",
+    "hs": "packs/us-ny-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-oh",
+   "name": "Ohio",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -84.8217,
+    38.415,
+    -80.5191,
+    42.3244
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-oh-base.pmtiles",
+    "hs": "packs/us-oh-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ok",
+   "name": "Oklahoma",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -103.0008,
+    33.6484,
+    -94.4391,
+    37.0008
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ok-base.pmtiles",
+    "hs": "packs/us-ok-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-or",
+   "name": "Oregon",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -124.5396,
+    42.0006,
+    -116.477,
+    46.2255
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-or-base.pmtiles",
+    "hs": "packs/us-or-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-pa",
+   "name": "Pennsylvania",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -80.5208,
+    39.7224,
+    -74.6991,
+    42.539
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-pa-base.pmtiles",
+    "hs": "packs/us-pa-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ri",
+   "name": "Rhode Island",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -71.8424,
+    41.3309,
+    -71.2321,
+    42.0169
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ri-base.pmtiles",
+    "hs": "packs/us-ri-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-sc",
+   "name": "South Carolina",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -83.3556,
+    32.0296,
+    -78.5643,
+    35.2109
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-sc-base.pmtiles",
+    "hs": "packs/us-sc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-sd",
+   "name": "South Dakota",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -104.0372,
+    42.5113,
+    -96.4536,
+    45.9431
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-sd-base.pmtiles",
+    "hs": "packs/us-sd-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-tn",
+   "name": "Tennessee",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -90.2938,
+    34.9881,
+    -81.6589,
+    36.693
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-tn-base.pmtiles",
+    "hs": "packs/us-tn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-tx",
+   "name": "Texas",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -106.6683,
+    25.8705,
+    -93.5306,
+    36.5012
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-tx-base.pmtiles",
+    "hs": "packs/us-tx-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-ut",
+   "name": "Utah",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -114.0426,
+    37.0008,
+    -109.0464,
+    42.0011
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-ut-base.pmtiles",
+    "hs": "packs/us-ut-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-va",
+   "name": "Virginia",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -83.6675,
+    36.5505,
+    -75.2258,
+    39.4519
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-va-base.pmtiles",
+    "hs": "packs/us-va-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-vt",
+   "name": "Vermont",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -73.4261,
+    42.7303,
+    -71.5102,
+    45.0076
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-vt-base.pmtiles",
+    "hs": "packs/us-vt-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-wa",
+   "name": "Washington",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -124.71,
+    45.5911,
+    -116.8965,
+    48.9931
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-wa-base.pmtiles",
+    "hs": "packs/us-wa-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-wi",
+   "name": "Wisconsin",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -92.8965,
+    42.4928,
+    -86.2645,
+    47.3091
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-wi-base.pmtiles",
+    "hs": "packs/us-wi-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-wv",
+   "name": "West Virginia",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -82.6195,
+    37.2081,
+    -77.7266,
+    40.647
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-wv-base.pmtiles",
+    "hs": "packs/us-wv-hs.pmtiles"
+   }
+  },
+  {
+   "id": "us-wy",
+   "name": "Wyoming",
+   "continent": "North America",
+   "parent": "us",
+   "maxzoom": 10,
+   "bounds": [
+    -111.0514,
+    41.0009,
+    -104.0217,
+    45.0011
+   ],
+   "bytes": null,
+   "files": {
+    "base": "packs/us-wy-base.pmtiles",
+    "hs": "packs/us-wy-hs.pmtiles"
+   }
+  }
+ ]
+}

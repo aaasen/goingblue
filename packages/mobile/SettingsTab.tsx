@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View, ScrollView, Linking, TouchableOpacity, Alert } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import PreferenceRows from './PreferenceRows';
+import OfflineMapsScreen, { downloadedPacks } from './OfflineMapsScreen';
+import { loadDownloadedPacks, saveDownloadedPacks } from './offlineMaps';
 import type { AqiScale, TimeFormat, Units } from './settings';
 
 const TERMS_URL = 'https://going.blue/terms';
@@ -18,6 +21,28 @@ export default function SettingsTab({
   onAqiScaleChange: (scale: AqiScale) => void;
 }) {
   const [deleting, setDeleting] = useState(false);
+  const [offlineMaps, setOfflineMaps] = useState(false);
+  // Read here rather than behind the splash with the preferences: this tab is mounted from the
+  // start but not the one that comes up first, so the set is in hand before it's ever looked at.
+  const [downloaded, setDownloaded] = useState<ReadonlySet<string>>(new Set());
+  const held = downloadedPacks(downloaded);
+
+  useEffect(() => { loadDownloadedPacks().then(setDownloaded); }, []);
+
+  // Selection is the whole of a download for now — the packs aren't published, so choosing one
+  // records it and nothing is fetched. The downloader slots in here when they are.
+  function setPacks(next: Set<string>) {
+    setDownloaded(next);
+    saveDownloadedPacks(next);
+  }
+  function downloadPack(id: string) {
+    setPacks(new Set([...downloaded, id]));
+  }
+  function removePack(id: string) {
+    const next = new Set(downloaded);
+    next.delete(id);
+    setPacks(next);
+  }
 
   const DELETE_MESSAGE =
     'This erases your account and clears your saved forecasts, then returns to setup. ' +
@@ -62,6 +87,30 @@ export default function SettingsTab({
         />
       </View>
 
+      {/* Offline maps: the door to the pack list. */}
+      <Text style={[styles.heading, { marginTop: 28 }]}>Offline maps</Text>
+      <View style={[styles.card, styles.listCard]}>
+        <TouchableOpacity
+          style={styles.listRow}
+          onPress={() => setOfflineMaps(true)}
+          activeOpacity={0.6}
+          accessibilityRole="button"
+        >
+          <View style={styles.listText}>
+            <Text style={styles.listTitle}>Manage downloads</Text>
+            <Text style={styles.listSubtitle}>{held.packs.length ? held.summary : 'None downloaded'}</Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={24} color="#c7c7cc" />
+        </TouchableOpacity>
+      </View>
+      <OfflineMapsScreen
+        visible={offlineMaps}
+        onClose={() => setOfflineMaps(false)}
+        downloaded={downloaded}
+        onDownload={downloadPack}
+        onRemove={removePack}
+      />
+
       {/* Account */}
       <Text style={[styles.heading, { marginTop: 28 }]}>Account</Text>
       <Text style={styles.sectionNote}>
@@ -104,6 +153,12 @@ const styles = StyleSheet.create({
   link: { color: '#2a6bb5', textDecorationLine: 'underline' },
 
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12 },
+  // Tappable rows, so the card pads only its sides and each row carries its own height.
+  listCard: { paddingVertical: 0 },
+  listRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, gap: 10 },
+  listText: { flex: 1 },
+  listTitle: { fontSize: 15, color: '#1c1c1e' },
+  listSubtitle: { fontSize: 13, color: '#8e8e93', marginTop: 2 },
   // Full-width destructive action, sitting on its own under the account note. Height is fixed so
   // swapping the label for a spinner mid-delete doesn't make the row jump.
   resetBtn: { backgroundColor: '#fff', borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center', marginTop: 4 },

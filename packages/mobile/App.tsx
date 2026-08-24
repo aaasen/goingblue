@@ -14,6 +14,7 @@ import {
   type AqiScale, type TimeFormat, type Units,
 } from './settings';
 import { DEFAULT_DEVICE, type Device } from './devices';
+import { configureTileCache } from './tileCache';
 
 type Tab = 'builder' | 'decoder' | 'settings';
 
@@ -44,6 +45,8 @@ export default function App() {
   // preferences decide how it reads. Applying them as they land would draw the first screen in
   // metric/24h and correct it a moment later, in full view now that the splash waits for this.
   useEffect(() => {
+    // Not awaited: the map's cache cap has no bearing on the first screen.
+    configureTileCache();
     Promise.all([loadToken(), loadUnits(), loadTimeFormat(), loadAqiScale(), loadDevice(), loadTwoMessages()])
       .then(([t, u, f, a, d, m]) => {
         setUnitsState(u);

@@ -27,6 +27,7 @@ Inputs and outputs are large and untracked; locally they live in `data/basemap/`
 | `hillshade` | `global-hs.pmtiles`            | Mapterhorn terrarium → Horn shade, WebP q40       |
 | `regions`   | `regions/ne_*.geojson`         | Natural Earth 10m admin-0 / admin-1 download     |
 | `packs`     | `packs/*`, `global-z6-*`, `catalogue.json` | `pmtiles extract --region` per NE country + US/CA admin-1 |
+| `catalogue` | `catalogue.json` (sizes null)  | the pack list alone from `maps/regions`, no tiles or tools; bundled as `packages/mobile/assets/catalogue.json` until the real one exists |
 
 `all` runs them in order. Every step skips outputs that already exist, so a killed run (spot
 VM) resumes with the same command. `--vectors/--terrain/--landcover` accept a local file or an
