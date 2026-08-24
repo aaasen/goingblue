@@ -11,7 +11,10 @@ import numpy as np
 from PIL import Image
 from pmtiles.reader import Reader, MmapSource, all_tiles
 
+# SRC may be several comma-separated archives that together cover the world (longitude bands);
+# lookups try each, so a tile's neighbour padding works across band boundaries.
 SRC = sys.argv[1] if len(sys.argv) > 1 else "terrain-z8.pmtiles"
+SRCS = SRC.split(",")
 OUT = sys.argv[2] if len(sys.argv) > 2 else "hillshade.mbtiles"
 MAXZOOM = sys.argv[3] if len(sys.argv) > 3 else "8"
 QUALITY = 40
@@ -19,12 +22,12 @@ EXAGGERATION = 1.3
 import os
 WORKERS = int(os.environ.get("WORKERS", os.cpu_count() or 4))
 
-_reader = None
+_readers = None
 _cache = None  # OrderedDict[(z,x,y)] -> int16 elev array or None
 
 def init_worker():
-    global _reader, _cache
-    _reader = Reader(MmapSource(open(SRC, "rb")))
+    global _readers, _cache
+    _readers = [Reader(MmapSource(open(p, "rb"))) for p in SRCS]
     _cache = OrderedDict()
 
 def get_elev(z, x, y):
@@ -37,7 +40,11 @@ def get_elev(z, x, y):
     if key in _cache:
         _cache.move_to_end(key)
         return _cache[key]
-    data = _reader.get(z, x, y)
+    data = None
+    for r in _readers:
+        data = r.get(z, x, y)
+        if data is not None:
+            break
     if data is None:
         val = None
     else:
@@ -101,13 +108,19 @@ def _make_empty():
 EMPTY_TILE = _make_empty()
 
 def main():
-    reader = Reader(MmapSource(open(SRC, "rb")))
+    seen = set()
     tasks = []
-    for zxy, _ in all_tiles(reader.get_bytes):
-        # Antarctica stays at overview detail: skip z7-8 below 60S
-        if zxy[0] >= 7 and tile_center_lat(zxy[2], zxy[0]) < -60:
-            continue
-        tasks.append(zxy)
+    for path in SRCS:
+        reader = Reader(MmapSource(open(path, "rb")))
+        for zxy, _ in all_tiles(reader.get_bytes):
+            # Antarctica stays at overview detail: skip z7-8 below 60S
+            if zxy[0] >= 7 and tile_center_lat(zxy[2], zxy[0]) < -60:
+                continue
+            # Band extracts are tile-granular, so boundary tiles can appear in two bands.
+            if zxy in seen:
+                continue
+            seen.add(zxy)
+            tasks.append(zxy)
     tasks.sort(key=lambda t: (t[0], t[2], t[1]))   # row-major per zoom for cache
     print(f"{len(tasks)} tiles to bake")
 

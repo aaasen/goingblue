@@ -34,6 +34,7 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_VECTORS = "https://build.protomaps.com/20260820.pmtiles"
 DEFAULT_TERRAIN = "https://download.mapterhorn.com/planet.pmtiles"
 OVERTURE_RELEASE = "2026-07-22.0"
+TERRAIN_BANDS = 16
 NATURAL_EARTH = "https://naciscdn.org/naturalearth/10m/cultural"
 DEFAULT_LANDCOVER = ("https://zenodo.org/records/3939050/files/"
                      "PROBAV_LC100_global_v3.0.1_2019-nrt_Discrete-Classification-map_EPSG-4326.tif")
@@ -66,14 +67,22 @@ def done(path):
     return Path(path).exists() and Path(path).stat().st_size > 0
 
 
-def run_to(out, cmd_of):
+def run_to(out, cmd_of, attempts=1):
     """Run a command that writes `out`, via a temp name renamed only on success — a killed run
     must never leave a partial file that a resume then trusts as finished."""
     out = Path(out)
     tmp = out.with_name(out.name + ".tmp")
-    if tmp.exists():
-        tmp.unlink()
-    run(cmd_of(tmp))
+    for attempt in range(attempts):
+        if tmp.exists():
+            tmp.unlink()
+        try:
+            run(cmd_of(tmp))
+            break
+        except subprocess.CalledProcessError:
+            if attempt == attempts - 1:
+                raise
+            log(f"attempt {attempt + 1}/{attempts} failed, retrying")
+            time.sleep(30)
     tmp.rename(out)
 
 
@@ -86,16 +95,34 @@ def banded(value, bands, default=8):
 
 # ---------------------------------------------------------------- sources
 
-def ensure_source(src, work, name, maxzoom):
-    """A local archive is used as-is; a URL is extracted to z0-maxzoom under work/."""
+def ensure_source(src, work, name, maxzoom, bands=1):
+    """A local archive is used as-is; a URL is extracted to z0-maxzoom under work/.
+
+    With bands > 1 the extract is split into that many longitude strips, returned as a list.
+    The server killed the terrain extract's single ~120 GB HTTP stream mid-transfer, and
+    go-pmtiles merges contiguous ranges into one request with no retry — small strips keep each
+    request a few minutes long, atomic, and individually retryable/resumable.
+    """
     if not src.startswith(("http://", "https://")):
-        return Path(src)
-    out = work / f"{name}-src-z{maxzoom}.pmtiles"
-    if done(out):
-        log(f"have {out.name}")
+        return [Path(p) for p in str(src).split(",")] if bands > 1 or "," in str(src) else Path(src)
+    if bands == 1:
+        out = work / f"{name}-src-z{maxzoom}.pmtiles"
+        if done(out):
+            log(f"have {out.name}")
+            return out
+        run_to(out, lambda tmp: ["pmtiles", "extract", src, tmp, f"--maxzoom={maxzoom}"], attempts=5)
         return out
-    run_to(out, lambda tmp: ["pmtiles", "extract", src, tmp, f"--maxzoom={maxzoom}"])
-    return out
+    outs = []
+    for i in range(bands):
+        out = work / f"{name}-src-z{maxzoom}-band{i:02d}.pmtiles"
+        outs.append(out)
+        if done(out):
+            log(f"have {out.name}")
+            continue
+        west, east = -180 + 360 * i / bands, -180 + 360 * (i + 1) / bands
+        run_to(out, lambda tmp: ["pmtiles", "extract", src, tmp, f"--maxzoom={maxzoom}",
+                                 f"--bbox={west},-85.05,{east},85.05"], attempts=5)
+    return outs
 
 
 # ---------------------------------------------------------------- overture
@@ -241,11 +268,12 @@ def build_hillshade(work, terrain_src, maxzoom):
     if done(out):
         log(f"have {out.name}")
         return out
-    src = ensure_source(terrain_src, work, "terrain", maxzoom)
+    src = ensure_source(terrain_src, work, "terrain", maxzoom, bands=TERRAIN_BANDS)
+    srcs = src if isinstance(src, list) else [src]
     mb = work / "hillshade.mbtiles"
     if mb.exists():
         mb.unlink()
-    run([sys.executable, HERE / "hillshade_build.py", src, mb, str(maxzoom)])
+    run([sys.executable, HERE / "hillshade_build.py", ",".join(map(str, srcs)), mb, str(maxzoom)])
     run(["pmtiles", "convert", mb, out])
     mb.unlink()
     return out
