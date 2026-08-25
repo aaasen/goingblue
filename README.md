@@ -12,7 +12,7 @@ Going Blue is a weather app designed specifically for satellite messengers. It w
 
 ## Features
 
-- Works via the internet, SMS, Garmin inReach, and iPhone satellite messaging. 
+- Works via the internet, SMS, Garmin inReach, ZOLEO, and iPhone satellite messaging. 
 - Uses a custom compression codec optimized for weather data that packs hundreds of data points into a single message. Choose between hourly detail and extended range up to 13 days.
 - Temperature, snow, rain, wind, and cloud cover included by default. Optional variables include pressure-level winds for high-altitude mountaineering, AQI for planning around wildfire smoke, detailed cloud cover with 8 levels, and freezing level.
 - Weather forecasts from over 30 models including HRRR (3km), HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for your location.
@@ -22,19 +22,19 @@ Going Blue is a weather app designed specifically for satellite messengers. It w
 ## Architecture
 
 There are a few components to the system:
-1. Forecast source: [Open-Meteo](https://open-meteo.com/) which provides all forecast data.
+1. Forecast source: [Open-Meteo](https://open-meteo.com/).
 1. Going Blue service: handles incoming SMS, fetches forecasts from Open-Meteo, and replies with encoded forecasts.
 1. Going Blue app: mobile app for creating forecast requests and decoding/visualizing forecast responses.
 
 The service is written in TypeScript. There are four packages:
-- `packages/protocol` — shared TypeScript binary encoding/decoding used by both the server and the mobile app.
-- `packages/server` — Hono/Node.js server; receives inbound messages, fetches forecasts, and sends replies.
-- `packages/codec-server` — Codec server for encoding messages. This is separate from the main server so that old codecs can be kept deployed as-is while the codec is modified.
-- `packages/mobile` — Expo React Native app for building requests and decoding forecasts.
+- `packages/protocol`: shared TypeScript binary encoding/decoding used by both the server and the mobile app.
+- `packages/server` — Hono/Node.js server that receives inbound SMS messages, fetches forecasts from Open-Meteo, encodes messages using codec services, and sends replies. Also hosts the website.
+- `packages/codec-server` — Codec server for encoding messages. Each codec version is deployed as a separate container so that old codecs can be frozen and maintained for clients on older versions.
+- `packages/mobile` — Expo React Native app for building requests and visualizing forecasts.
 
 ## Compression
 
-Going Blue uses a Markov model of weather combined with a [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) entropy coder.
+Going Blue uses a Markov model of weather combined with a [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) entropy coder. This is a similar entropy coder to what is used in modern compression codecs like [zstd](https://github.com/facebook/zstd) and [JPEG-XL](https://en.wikipedia.org/wiki/JPEG_XL).
 
 ### Markov Model
 
