@@ -729,18 +729,23 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // displaced over the meteogram's tail.
   const [mapFrame, setMapFrame] = useState<{ y: number; h: number } | null>(null);
   const [forecastEnd, setForecastEnd] = useState<number | null>(null);
+  // The open tap detail panel's height (0 when closed). It sits between the meteogram's last
+  // rows and the attribution, so it stretches forecastEnd without moving Meteogram's own clamp
+  // end — left in, the map would stay parked over the panel for that extra stretch of scroll
+  // after the strip and plate had ridden off, leaving a map slice under the status bar.
+  const [detailH, setDetailH] = useState(0);
   const mapPark = useMemo(() => {
     if (mapFrame == null || forecastEnd == null) return null;
     const parkY = mapFrame.y + mapFrame.h - topInset;
     // How far the park carries: the forecast's height below the map, less the docked stack that
-    // rides off beneath it. forecastEnd (the attribution's top) minus the stack height is the
-    // same scroll offset Meteogram's own clamp ends at, so the exits align.
-    const travel = forecastEnd - (mapFrame.y + mapFrame.h) - PINNED_STACK_H;
+    // rides off beneath it. forecastEnd (the attribution's top) minus the detail panel and the
+    // stack height is the same scroll offset Meteogram's own clamp ends at, so the exits align.
+    const travel = forecastEnd - detailH - (mapFrame.y + mapFrame.h) - PINNED_STACK_H;
     if (travel <= 0) return null;
     return scrollY.interpolate({
       inputRange: [parkY, parkY + travel], outputRange: [0, travel], extrapolate: 'clamp',
     });
-  }, [mapFrame, forecastEnd, scrollY, topInset]);
+  }, [mapFrame, forecastEnd, detailH, scrollY, topInset]);
   function scrollToForecast() {
     if (!pendingScroll.current || metaY.current == null) return;
     pendingScroll.current = false;
@@ -1526,7 +1531,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
           {/* Forecast meteogram. Nothing hides this screen any more, so it is always active — the
               prop still exists for the repaint-after-hide machinery it drives inside. */}
-          <Meteogram msg={decoded} units={units} timeFormat={timeFormat} active scrollY={scrollY} />
+          <Meteogram msg={decoded} units={units} timeFormat={timeFormat} active scrollY={scrollY} onDetailHeight={setDetailH} />
 
           {/* Open-Meteo's data is CC BY 4.0, which asks for credit where the data is shown —
               the Settings footer alone doesn't satisfy that. Same wording as there. */}

@@ -3221,10 +3221,15 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
 
 // ── Public component ─────────────────────────────────────────────────────--
 
-export default function Meteogram({ msg, units, timeFormat, active, scrollY }: {
+export default function Meteogram({ msg, units, timeFormat, active, scrollY, onDetailHeight }: {
   msg: ForecastMessage; units: UnitPrefs; timeFormat: TimeFormat; active: boolean;
   // The page's vertical scroll offset (native-driven) — see the pinned header in ModelCanvas.
   scrollY: Animated.Value;
+  // Height of the open tap detail panel, 0 when closed. The panel sits below the blocks but
+  // above the attribution HomeScreen measures the map park against, so HomeScreen subtracts
+  // this to keep the park ending where the blocks end — otherwise the map stays parked in the
+  // status-bar band while the strip and plate ride off, and the stack tears.
+  onDetailHeight?: (h: number) => void;
 }) {
   // The layout chain the pinned headers hang off: this component's top within the page's scroll
   // content, and each block's top within this component. Summed per block and handed down;
@@ -3331,6 +3336,9 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY }: {
           {bi < blocks.length - 1 && <View style={styles.sep} />}
         </View>
       ))}
+      {/* Wrapped and measured even while closed, so closing reports a height of 0 — see
+          onDetailHeight. */}
+      <View onLayout={(e) => onDetailHeight?.(e.nativeEvent.layout.height)}>
       {sel != null && (
         <DetailPanel
           periods={blocks[sel.block].periods}
@@ -3349,6 +3357,7 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY }: {
           onClose={() => setSelection(null)}
         />
       )}
+      </View>
     </View>
   );
 }
