@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { img } from "../assets.js";
 import { APP_STORE_URL, BRAND, CONTACT_EMAIL, REPO_URL } from "../constants.js";
 import { PAGE } from "./shell.js";
 
@@ -65,12 +66,12 @@ const HERO_CSS = `
     display: flex; align-items: center; justify-content: center;
     height: 480px; padding: 0 20px; text-align: center; color: #fff;
     background: linear-gradient(rgba(12, 34, 64, 0.15), rgba(12, 34, 64, 0.5)),
-      url(/img/sultana-1200.jpg) center top / cover no-repeat #0c2240;
+      url(${img("sultana-1200.jpg")}) center top / cover no-repeat #0c2240;
   }
   @media (min-width: 801px) {
     .hero {
       background-image: linear-gradient(rgba(12, 34, 64, 0.15), rgba(12, 34, 64, 0.5)),
-        url(/img/sultana-2400.jpg);
+        url(${img("sultana-2400.jpg")});
     }
   }
   @media (max-width: 600px) { .hero { height: 380px; } }
@@ -172,11 +173,11 @@ const GITHUB_MARK = `<svg viewBox="0 0 16 16" aria-hidden=true><path d="M8 0c4.4
 // draws none of its own for a page that brings a header.
 const HERO = `<header class=hero>
   <div>
-    <img class=appicon src="/img/icon-512.jpg" width=116 height=116 alt="">
+    <img class=appicon src="${img("icon-512.jpg")}" width=116 height=116 alt="">
     <h1>${BRAND}</h1>
     <p class=subtitle>Weather forecasts over satellite</p>
     <div class=badges>
-      <a class=appbtn href="${APP_STORE_URL}"><img src="/img/appstore-badge-white.svg" width=150
+      <a class=appbtn href="${APP_STORE_URL}"><img src="${img("appstore-badge-white.svg")}" width=150
         height=50 alt="Download on the App Store"></a>
       <a class=srcbtn href="${REPO_URL}" aria-label="View source on GitHub">${GITHUB_MARK}<span>View
         source</span></a>
@@ -202,30 +203,31 @@ iPhone satellite messaging.</p>
 
 <div class=shots>
   <figure>
-    <img src="/img/shot-meteogram-720.jpg" width=720 height=1564 loading=lazy
+    <img src="${img("shot-mont-blanc.jpg")}" width=750 height=1630 loading=lazy
       alt="&ldquo;Detailed forecasts up to 13 days without cell reception&rdquo; — a thirteen-day
-      meteogram, with hourly weather icons, temperature, precipitation, wind and gusts below it.">
+      Mont Blanc forecast, with hourly weather icons, temperature, snow, wind and gusts below it.">
   </figure>
   <figure>
-    <img src="/img/shot-builder-720.jpg" width=720 height=1564 loading=lazy
-      alt="&ldquo;30+ weather models over SMS, inReach, or iPhone satellite&rdquo; — the Builder tab,
-      with location, priority, model and extra-variable choices above a device picker.">
+    <img src="${img("shot-builder.jpg")}" width=750 height=1630 loading=lazy
+      alt="&ldquo;30+ weather models over SMS, inReach, ZOLEO, and iPhone satellite&rdquo; — the
+      forecast request builder, with location, priority, model and extra-variable choices above a
+      device picker.">
   </figure>
   <figure>
-    <img src="/img/shot-wind-720.jpg" width=720 height=1564 loading=lazy
-      alt="&ldquo;Mountain weather forecasts for climbers, skiers, and alpinists&rdquo; — a Denali
-      forecast showing freezing level and winds at the 500, 600 and 700 hPa pressure levels.">
+    <img src="${img("shot-denali.jpg")}" width=750 height=1630 loading=lazy
+      alt="&ldquo;High-altitude winds and freezing level forecasts for mountaineering&rdquo; — a
+      Denali forecast showing freezing level and winds at 10, 14, 18 and 24 thousand feet.">
   </figure>
   <figure>
-    <img src="/img/shot-air-720.jpg" width=720 height=1564 loading=lazy
-      alt="&ldquo;Plan around wildfire smoke with AQI forecasts&rdquo; — a forecast with an air quality
-      section listing AQI, the leading pollutant, and rows for PM2.5, PM10, ozone, nitrogen dioxide
-      and sulphur dioxide.">
+    <img src="${img("shot-cloud.jpg")}" width=750 height=1630 loading=lazy
+      alt="&ldquo;Avoid whiteouts and flat light with detailed cloud cover&rdquo; — a forecast in
+      Norway's Lyngen Alps with a clouds-by-altitude band from two to thirty thousand feet.">
   </figure>
   <figure>
-    <img src="/img/shot-history-720.jpg" width=720 height=1564 loading=lazy
-      alt="&ldquo;All forecasts are saved for comparing multiple models&rdquo; — the Decoder tab's list
-      of past forecasts, each row showing the time, model, coordinates and variables.">
+    <img src="${img("shot-air-quality.jpg")}" width=750 height=1630 loading=lazy
+      alt="&ldquo;Plan around wildfire smoke with air quality forecasts&rdquo; — a forecast with an
+      air quality section listing AQI, the leading pollutant, and rows for PM2.5, PM10, ozone,
+      nitrogen dioxide and sulfur dioxide.">
   </figure>
 </div>
 

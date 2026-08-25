@@ -24,34 +24,25 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-# One line per screenshot, keyed by the capture's name with its ordering prefix stripped. Every
-# capture must appear here — an unlisted one is an error rather than an unlabelled screenshot,
-# since a silently uncaptioned frame is the kind of thing that reaches the store.
-#
-# Order comes from the capture's numeric prefix, not from this dict: reordering the listing means
-# renaming the files in screenshots/, which is the same convention capture-screenshot.sh numbers
-# them under.
+# The manifest of the App Store set: one (capture name, caption) per screenshot, in listing order.
+# The framed output is numbered by position here — captures themselves are unnumbered, so
+# reordering the listing or benching a shot is an edit to this list, never a file rename. A listed
+# name with no capture is an error rather than a gap, since a set uploaded around a hole is the
+# kind of thing that reaches the store. Captures not listed here (a benched shot kept for later)
+# are left unframed, and their old framed output is pruned.
 # "iPhone satellite" is deliberate and should not be shortened to Apple's own feature name. See
 # d2cd3c9: Apple asks that their marks be adjectives modifying a generic noun rather than standing
 # alone as a feature name, and review guideline 2.3.7 polices trademarked terms in App Store
 # metadata specifically — which is exactly what a screenshot caption is.
-#
-# ZOLEO is not named here even though the landing page mentions it: devices.ts offers only
-# internet, SMS, inReach and iPhone, so a caption listing ZOLEO would name a device the picker in
-# the screenshot underneath does not have.
-CAPTIONS = {
-    # "up to 13 days" carries a hedge that has to stay. FILL_HORIZON_DAYS = 12 sets the ceiling,
-    # but reaching it depends on the reply budget, and effectiveMode() clamps Range to Auto for the
-    # short-horizon (Canadian) models — so a flat "13-day forecasts" would overclaim. The caption
-    # also no longer says "hourly": hourly detail and the full horizon are opposite ends of one
-    # budget in layout.ts, never both at once.
-    "mont-blanc": "Detailed forecasts up to 13 days without cell reception",
-    "builder": "30+ weather models over SMS, inReach, or iPhone satellite",
-    "denali": "Mountain weather forecasts for climbers, skiers, and alpinists",
-    "air-quality": "Plan around wildfire smoke with AQI forecasts",
-    "past": "All forecasts are saved for comparing multiple models",
-    "detail": "Detailed forecast information including sunrise, sunset, and moon phase",
-}
+CAPTIONS_LIST = [
+    ("mont-blanc", "Detailed forecasts up to 13 days without cell reception"),
+    ("builder", "30+ weather models over SMS, inReach, ZOLEO, and iPhone satellite"),
+    ("denali", "High-altitude winds and freezing level forecasts for mountaineering"),
+    ("cloud", "Avoid whiteouts and flat light with detailed cloud cover"),
+    ("air-quality", "Plan around wildfire smoke with air quality forecasts"),
+    # ("past", "All forecasts are saved for comparing multiple weather models"),
+    # ("detail", "Detailed forecast information including sunrise, sunset, and moon phase"),
+]
 
 # The 6.9" iPhone set. Input and output are both this size (see the module docstring).
 CANVAS_W, CANVAS_H = 1320, 2868
@@ -103,7 +94,7 @@ FONT_PATH = "/System/Library/Fonts/SFNS.ttf"
 # colour at every row and disappear, and the devices are already held apart by their own side
 # margins. Written at 2x the width GitHub renders a README at, which is where the phone UI stops
 # being legible below.
-README_COMBO_N = 4
+README_COMBO_N = 5
 README_COMBO_W = 2560
 
 HERE = Path(__file__).resolve().parent
@@ -246,22 +237,22 @@ def main() -> None:
     out_dir = args.out or OUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    shots = sorted(p for p in SRC_DIR.glob("[0-9][0-9]-*.png"))
-    if not shots:
-        sys.exit(f"no captures in {SRC_DIR} — run scripts/capture-screenshot.sh first")
+    if not CAPTIONS_LIST:
+        sys.exit("CAPTIONS_LIST is empty — nothing to frame")
 
-    missing = [p.name for p in shots if p.stem.split("-", 1)[1] not in CAPTIONS]
+    missing = [name for name, _ in CAPTIONS_LIST if not (SRC_DIR / f"{name}.png").exists()]
     if missing:
-        sys.exit("no caption in CAPTIONS for: " + ", ".join(missing))
+        sys.exit("no capture for: " + ", ".join(f"{m}.png" for m in missing) + " — run scripts/capture-screenshot.sh")
 
-    captions = [CAPTIONS[p.stem.split("-", 1)[1]] for p in shots]
+    captions = [caption for _, caption in CAPTIONS_LIST]
     font, wrapped = plan_captions(captions, CANVAS_W - 2 * TEXT_MARGIN_X)
     caption_zone_h = max(len(w) for w in wrapped) * int(font.size * LINE_SPACING)
 
     written = set()
     combo: list[Image.Image] = []
-    for src, lines in zip(shots, wrapped):
-        out = out_dir / src.name
+    for i, ((name, _), lines) in enumerate(zip(CAPTIONS_LIST, wrapped)):
+        src = SRC_DIR / f"{name}.png"
+        out = out_dir / f"{i + 1:02d}-{name}.png"
         img = frame(src, lines, font, caption_zone_h)
         img.save(out)
         written.add(out.name)
@@ -277,8 +268,8 @@ def main() -> None:
         strip.resize((README_COMBO_W, h), Image.LANCZOS).save(README_COMBO)
         print(f"{README_COMBO.name}  {README_COMBO_W}x{h}  (frames 1-{len(combo)})")
 
-    # Renaming a capture to reorder the listing leaves its framed output behind under the old
-    # name, and a stale frame sitting next to the real ones is a plausible thing to upload by
+    # Reordering CAPTIONS_LIST or benching an entry leaves its framed output behind under the old
+    # number, and a stale frame sitting next to the real ones is a plausible thing to upload by
     # mistake. Only ever removes files this script would have written.
     for stale in sorted(out_dir.glob("[0-9][0-9]-*.png")):
         if stale.name not in written:

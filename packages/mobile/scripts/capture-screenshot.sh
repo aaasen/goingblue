@@ -2,12 +2,13 @@
 #
 # Capture one App Store screenshot from the booted simulator.
 #
-#   ./scripts/capture-screenshot.sh meteogram   → screenshots/01-meteogram.png
-#   ./scripts/capture-screenshot.sh builder     → screenshots/02-builder.png
+#   ./scripts/capture-screenshot.sh meteogram   → screenshots/meteogram.png
+#   ./scripts/capture-screenshot.sh builder     → screenshots/builder.png
 #
-# Navigate the app to the screen you want, then run this. Files are numbered in capture order,
-# which is the order App Store Connect shows them in, so capture them in the order you want them
-# read. Run --clear when you're done to hand the status bar back to the simulator.
+# Navigate the app to the screen you want, then run this. Capturing the same name again overwrites
+# it, so a fumbled shot is just re-shot. Listing order is not decided here: it comes from the
+# capture's position in CAPTIONS_LIST in frame-screenshots.py, which numbers the framed output.
+# Run --clear when you're done to hand the status bar back to the simulator.
 #
 # App Store Connect wants one set of iPhone screenshots at the 6.9" size. There is no iPad set to
 # take: app.json sets supportsTablet: false.
@@ -58,19 +59,6 @@ apply_status_bar() {
     --operatorName ""
 }
 
-next_index() {
-  local max=0 base num
-  shopt -s nullglob
-  for f in "$OUT_DIR"/[0-9][0-9]-*.png; do
-    base="$(basename "$f")"
-    # 10# forces base 10, so 08 and 09 don't read as invalid octal.
-    num=$((10#${base:0:2}))
-    if (( num > max )); then max=$num; fi
-  done
-  shopt -u nullglob
-  printf '%02d' $((max + 1))
-}
-
 if [ "${1:-}" = "--clear" ]; then
   xcrun simctl status_bar booted clear
   echo "status bar restored"
@@ -88,7 +76,7 @@ DEVICE="$(booted_name)"
 mkdir -p "$OUT_DIR"
 apply_status_bar
 
-OUT="$OUT_DIR/$(next_index)-$NAME.png"
+OUT="$OUT_DIR/$NAME.png"
 xcrun simctl io booted screenshot "$OUT" >/dev/null 2>&1
 
 SIZE="$(sips -g pixelWidth -g pixelHeight "$OUT" | awk '/pixelWidth/{w=$2} /pixelHeight/{h=$2} END{print w "x" h}')"

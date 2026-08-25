@@ -1,3 +1,4 @@
+import { img } from "../assets.js";
 import { BRAND, LAST_UPDATED } from "../constants.js";
 
 type PageOpts = { showUpdated?: boolean; header?: string; css?: string };
@@ -17,7 +18,7 @@ export const PAGE = (title: string, body: string, { showUpdated = true, header, 
 <meta charset=utf-8>
 <meta name=viewport content="width=device-width, initial-scale=1">
 <link rel=icon href="/favicon.ico" sizes="16x16 32x32 48x48">
-<link rel=apple-touch-icon href="/img/icon-512.jpg">
+<link rel=apple-touch-icon href="${img("icon-512.jpg")}">
 <title>${title === BRAND ? BRAND : `${title} — ${BRAND}`}</title>
 <style>
   body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #1a1a1a; line-height: 1.55;
