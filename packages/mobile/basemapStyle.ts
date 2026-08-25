@@ -5,25 +5,26 @@ import type {
   SymbolLayerSpecification,
 } from '@maplibre/maplibre-react-native';
 
-// MapLibre style for the location picker, rendered by MapLibre Native straight out of PMTiles
-// archives. This is the "online tier" of the chunked basemap: full-depth public archives streamed
-// and cached by the native engine. The offline stacks (bundled global z6 + downloadable country and
-// state packs) slot in UNDER these layers later; the layer set here is the same one the packs use,
-// parameterized by source, so adding a pack is a second `stack()` with its own sources.
+// MapLibre style for the location picker, rendered by MapLibre Native straight out of our own
+// PMTiles archives on R2 — the production z0-10 basemap built by maps/build (stripped Protomaps
+// vectors + Overture labels with English names + Copernicus land cover, and a prebaked
+// hillshade). This is the online tier; the offline stacks (bundled global z6, downloadable
+// country/state packs) slot in UNDER these layers as further `stack()` calls with their own
+// sources — the layer set is identical, parameterized by source.
 //
-// Vectors are the Protomaps daily build (stock schema; only our layers are styled — roads and
-// buildings are never drawn). Terrain is Mapterhorn's planet DEM, shaded client-side by a
-// `hillshade` layer, so there is nothing to bake and crevasse/moraine detail comes through at z13.
-// Both are evaluation endpoints: production serves its own R2 copies.
+// The web twin of this stack is maps/preview/style.js; keep them in step.
 
-// Pinned rather than "latest": the offline packs are extracts of this build, so the online tier
-// and the packs agree on every feature and label. Bump both together.
-export const PROTOMAPS_BUILD = 'https://build.protomaps.com/20260820.pmtiles';
-export const MAPTERHORN_PLANET = 'https://download.mapterhorn.com/planet.pmtiles';
-// Noto Sans Regular/Medium/Italic — the three faces the offline packs bundle; hosted by Protomaps.
+export const BASEMAP_URL = 'https://r2.going.blue';
+// Noto Sans Regular/Medium/Italic — the three faces the basemap uses; hosted glyphs for now
+// (bundling them comes with the offline packs).
 const GLYPHS = 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf';
 
-export const MAX_ZOOM = 15.5;
+// Data ends at z10; overzoom keeps the map usable past it (~35 m/px at 63°N by 12.5).
+export const DATA_MAX_ZOOM = 10;
+export const MAX_ZOOM = 12.5;
+// Floor keeps the camera at a useful scale — continent-wide, but never the whole world tiled
+// out at once on a phone screen.
+export const MIN_ZOOM = 2;
 
 const LANDCOVER_COLORS: Record<string, string> = {
   forest: '#aac29e',
@@ -45,38 +46,37 @@ const landcoverColor = [
   EARTH,
 ] as unknown as string;
 
-const halo = { 'text-halo-color': '#ffffff', 'text-halo-width': 1.4 };
-
-// English where the source carries it (all stock Protomaps layers), else the local name.
+// English where the source carries it (stock Protomaps layers keep name:en; our own label
+// layers — peaks, water_labels, glacier_labels — were built with English coalesced into `name`).
 const nameEn = ['coalesce', ['get', 'name:en'], ['get', 'name']] as unknown as string;
 
-// Peak label: "Name\n20,310 ft". The stock schema carries `elevation` in metres.
+const halo = { 'text-halo-color': '#ffffff', 'text-halo-width': 1.4 };
+
+// Peak label: "Denali\n20,308 ft". The peaks layer carries `ele` in metres.
 const peakText = [
   'case',
-  ['has', 'elevation'],
+  ['has', 'ele'],
   [
     'concat',
-    nameEn,
+    ['get', 'name'],
     '\n',
-    ['number-format', ['round', ['*', ['get', 'elevation'], 3.28084]], { 'max-fraction-digits': 0 }],
+    ['number-format', ['round', ['*', ['get', 'ele'], 3.28084]], { 'max-fraction-digits': 0 }],
     ' ft',
   ],
-  nameEn,
+  ['get', 'name'],
 ] as unknown as string;
 
 interface StackSources {
-  // Vector source with earth/landuse/water/boundaries/places/pois.
+  // Vector source with earth/landcover/landuse/water/boundaries/places plus our peaks,
+  // water_labels and glacier_labels.
   base: string;
-  // Vector source for landcover. Stock landcover ends at z7, so this is a second source over the
-  // same archive capped at maxzoom 7 — it overzooms instead of vanishing at z8+.
-  landcover: string;
-  // Either a prebaked raster hillshade (offline packs) or a raster-dem (online) — see `shade`.
-  terrain: { kind: 'raster' | 'dem'; source: string };
+  // Raster source with the prebaked hillshade.
+  hillshade: string;
   // Layers only apply from this zoom — packs cover a zoom band, the online tier the top.
   minzoom?: number;
 }
 
-// Full layer set for one archive set, ids prefixed so several stacks can coexist.
+// Full layer set for one archive pair, ids prefixed so several stacks can coexist.
 function stack(p: string, src: StackSources): LayerSpecification[] {
   const minzoom = src.minzoom == null ? {} : { minzoom: src.minzoom };
   const fill = (id: string, sourceLayer: string, paint: Record<string, unknown>, filter?: FilterSpecification) =>
@@ -99,43 +99,36 @@ function stack(p: string, src: StackSources): LayerSpecification[] {
       ...spec,
     }) as LayerSpecification;
 
-  const shade: LayerSpecification =
-    src.terrain.kind === 'raster'
-      ? {
-          id: p + 'hillshade',
-          type: 'raster',
-          source: src.terrain.source,
-          ...minzoom,
-          paint: { 'raster-opacity': 0.55, 'raster-contrast': 0.25, 'raster-resampling': 'linear' },
-        }
-      : {
-          id: p + 'hillshade',
-          type: 'hillshade',
-          source: src.terrain.source,
-          ...minzoom,
-          paint: {
-            'hillshade-exaggeration': 0.4,
-            'hillshade-shadow-color': '#5a5248',
-            'hillshade-highlight-color': '#ffffff',
-          },
-        };
+  // Significance-ranked labels arrive in three zoom bands: only the biggest features at low
+  // zoom, everything from z10. rank is per 0.25° cell (peaks by elevation, lakes by area).
+  const banded = (
+    id: string,
+    sourceLayer: string,
+    bands: [suffix: string, bandMin: number, maxrank: number][],
+    spec: (filter: FilterSpecification) => Partial<SymbolLayerSpecification>,
+  ) =>
+    bands.map(([suffix, bandMin, maxrank]) =>
+      symbol(id + suffix, sourceLayer, {
+        ...spec(['<=', ['coalesce', ['get', 'rank'], 1], maxrank] as FilterSpecification),
+        minzoom: Math.max(bandMin, src.minzoom ?? 0),
+        ...(suffix !== '-all' && { maxzoom: bandMin === 0 ? 9 : 10 }),
+      }),
+    );
 
   return [
     fill('earth', 'earth', { 'fill-color': EARTH }),
-    {
-      id: p + 'landcover',
-      type: 'fill',
-      source: src.landcover,
-      'source-layer': 'landcover',
-      ...minzoom,
-      paint: { 'fill-color': landcoverColor },
-    },
+    fill('landcover', 'landcover', { 'fill-color': landcoverColor }),
     fill('glacier', 'landuse', { 'fill-color': '#f2f8fc', 'fill-opacity': 0.9 }, ['==', ['get', 'kind'], 'glacier']),
     fill('bare-rock', 'landuse', { 'fill-color': '#cdc7bd', 'fill-opacity': 0.7 }, ['==', ['get', 'kind'], 'bare_rock']),
-    shade,
+    {
+      id: p + 'hillshade',
+      type: 'raster',
+      source: src.hillshade,
+      ...minzoom,
+      paint: { 'raster-opacity': 0.55, 'raster-contrast': 0.25, 'raster-resampling': 'linear' },
+    },
     fill('water', 'water', { 'fill-color': WATER }, ['==', ['geometry-type'], 'Polygon']),
     {
-      // Rivers: stock water lines from z9 (streams arrive at higher zooms than we carry).
       id: p + 'rivers',
       type: 'line',
       source: src.base,
@@ -162,13 +155,17 @@ function stack(p: string, src: StackSources): LayerSpecification[] {
       filter: ['==', ['get', 'kind'], 'country'],
       paint: { 'line-color': '#8a7f8a', 'line-width': 1.4 },
     },
-    symbol('water-labels', 'water', {
-      filter: ['all', ['==', ['geometry-type'], 'Point'], ['has', 'name']],
-      layout: { 'text-field': nameEn, 'text-font': ['Noto Sans Italic'], 'text-size': 12, 'text-padding': 8 },
+    ...banded('water-labels', 'water_labels', [['', 0, 2], ['-mid', 9, 5], ['-all', 10, 99]], (filter) => ({
+      filter,
+      layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Italic'], 'text-size': 12, 'text-padding': 8 },
       paint: { 'text-color': '#4a7ba6', ...halo },
+    })),
+    symbol('glacier-labels', 'glacier_labels', {
+      layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Italic'], 'text-size': 12 },
+      paint: { 'text-color': '#6a94b8', ...halo },
     }),
-    symbol('peaks', 'pois', {
-      filter: ['all', ['==', ['get', 'kind'], 'peak'], ['has', 'name']],
+    ...banded('peaks', 'peaks', [['', 0, 2], ['-mid', 9, 6], ['-all', 10, 99]], (filter) => ({
+      filter,
       layout: {
         'icon-image': 'peak-triangle',
         'icon-size': 1,
@@ -179,10 +176,10 @@ function stack(p: string, src: StackSources): LayerSpecification[] {
         'text-anchor': 'top',
         'text-offset': [0, 0.6],
         'text-padding': 14,
-        'symbol-sort-key': ['-', 9000, ['coalesce', ['get', 'elevation'], 0]],
+        'symbol-sort-key': ['-', 9000, ['coalesce', ['get', 'ele'], 0]],
       },
       paint: { 'text-color': '#5a4636', ...halo },
-    }),
+    })),
     symbol('places-city', 'places', {
       filter: ['==', ['get', 'kind'], 'locality'],
       layout: {
@@ -221,22 +218,20 @@ export const basemapStyle: StyleSpecification = {
   version: 8,
   glyphs: GLYPHS,
   sources: {
-    'online-base': { type: 'vector', url: `pmtiles://${PROTOMAPS_BUILD}`, maxzoom: 15 },
-    'online-landcover': { type: 'vector', url: `pmtiles://${PROTOMAPS_BUILD}`, maxzoom: 7 },
-    'online-dem': {
-      type: 'raster-dem',
-      url: `pmtiles://${MAPTERHORN_PLANET}`,
-      encoding: 'terrarium',
+    'online-base': {
+      type: 'vector',
+      url: `pmtiles://${BASEMAP_URL}/global-base.pmtiles`,
+      maxzoom: DATA_MAX_ZOOM,
+    },
+    'online-hs': {
+      type: 'raster',
+      url: `pmtiles://${BASEMAP_URL}/global-hs.pmtiles`,
       tileSize: 512,
-      maxzoom: 12,
+      maxzoom: DATA_MAX_ZOOM,
     },
   },
   layers: [
     { id: 'background', type: 'background', paint: { 'background-color': WATER } },
-    ...stack('o-', {
-      base: 'online-base',
-      landcover: 'online-landcover',
-      terrain: { kind: 'dem', source: 'online-dem' },
-    }),
+    ...stack('o-', { base: 'online-base', hillshade: 'online-hs' }),
   ],
 };

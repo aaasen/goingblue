@@ -3,7 +3,7 @@ import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Camera, Images, Map, Marker, type CameraRef, type PressEvent } from '@maplibre/maplibre-react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import type { NativeSyntheticEvent } from 'react-native';
-import { basemapStyle, MAX_ZOOM } from './basemapStyle';
+import { basemapStyle, MAX_ZOOM, MIN_ZOOM } from './basemapStyle';
 
 export interface LatLon {
   lat: number;
@@ -81,7 +81,7 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
         attribution={false}
       >
         <Images images={MAP_IMAGES} />
-        <Camera ref={ref} initialViewState={initialViewState} maxZoom={MAX_ZOOM} />
+        <Camera ref={ref} initialViewState={initialViewState} minZoom={MIN_ZOOM} maxZoom={MAX_ZOOM} />
         {coord && (
           <Marker lngLat={[coord.lon, coord.lat]} anchor="bottom">
             <View style={styles.pin}>

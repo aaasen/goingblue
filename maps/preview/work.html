@@ -48,8 +48,14 @@
 const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 const here = location.origin + location.pathname.replace(/[^/]*$/, "");
-const work = here + (new URLSearchParams(location.search).get("work") || "work") + "/";
-document.getElementById("which").textContent = work.replace(here, "");
+const params = new URLSearchParams(location.search);
+const work = here + (params.get("work") || "work") + "/";
+// ?remote=https://… — base URL for the archives that are too big to keep locally (the global
+// pair and the packs, i.e. everything except the bundled z6 pair and catalogue). With it set,
+// this page previews the production layout: bundled tiles local, the rest streamed from R2.
+const remote = params.get("remote") ? params.get("remote").replace(/\/?$/, "/") : work;
+document.getElementById("which").textContent =
+  work.replace(here, "") + (remote === work ? "" : " + " + new URL(remote).host);
 
 const cat = await (await fetch(work + "catalogue.json")).json();
 const bundled = `z${cat.bundled_maxzoom}`;
@@ -61,7 +67,7 @@ for (const p of cat.packs) {
 }
 
 function archive(id, kind) {
-  return id ? work + cat.packs.find((p) => p.id === id).files[kind] : null;
+  return id ? remote + cat.packs.find((p) => p.id === id).files[kind] : null;
 }
 
 function buildStyle(packId, online) {
@@ -83,7 +89,7 @@ function buildStyle(packId, online) {
       tileSize: 512, tiles: ["pmtiles://" + hs + "/{z}/{x}/{y}"], ...extra };
     layers.push(...stack(p, { base: p + "base", lc: p + "lc", hs: p + "hs" }));
   };
-  if (online) tier("o-", work + cat.global.base, work + cat.global.hs, {});
+  if (online) tier("o-", remote + cat.global.base, remote + cat.global.hs, {});
   if (pack) tier("p-", archive(packId, "base"), archive(packId, "hs"), { bounds: pack.bounds });
   return { version: 8, glyphs: here + "fonts/{fontstack}/{range}.pbf", sources, layers };
 }
