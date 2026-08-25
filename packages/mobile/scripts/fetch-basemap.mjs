@@ -17,6 +17,7 @@ const assets = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'as
 const FILES = [
   ['global-z6-base.pmtiles', path.join(assets, 'basemap')],
   ['global-z6-hs.pmtiles', path.join(assets, 'basemap')],
+  ['fonts.zip', path.join(assets, 'basemap')],
   ['catalog.json', assets],
   ['outlines.json', assets],
 ];

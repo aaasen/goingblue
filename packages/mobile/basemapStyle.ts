@@ -231,7 +231,7 @@ export interface PackArchives extends ArchivePair {
 // zooms — a source overzooms past its data — so whichever upper tiers can't load (offline,
 // R2 unreachable) simply leave the finest available tier beneath showing: pack detail where a
 // pack is installed, bundled overview elsewhere.
-export function buildBasemapStyle(bundled?: ArchivePair, packs: PackArchives[] = []): StyleSpecification {
+export function buildBasemapStyle(bundled?: ArchivePair, packs: PackArchives[] = [], glyphsBase?: string): StyleSpecification {
   const sources: StyleSpecification['sources'] = {
     'online-base': {
       type: 'vector',
@@ -268,5 +268,6 @@ export function buildBasemapStyle(bundled?: ArchivePair, packs: PackArchives[] =
     }));
   }
   layers.push(...stack('o-', { base: 'online-base', hillshade: 'online-hs' }));
-  return { version: 8, glyphs: GLYPHS, sources, layers };
+  const glyphs = glyphsBase ? `${glyphsBase.replace(/\/$/, '')}/{fontstack}/{range}.pbf` : GLYPHS;
+  return { version: 8, glyphs, sources, layers };
 }

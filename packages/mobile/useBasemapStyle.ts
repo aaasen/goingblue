@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Asset } from 'expo-asset';
 import { LogManager, type StyleSpecification } from '@maplibre/maplibre-react-native';
 import { buildBasemapStyle, type ArchivePair } from './basemapStyle';
+import { ensureGlyphs } from './glyphs';
 import { installedPacks, usePackState } from './packStore';
 
 // A tile or archive fetch failing is normal operation for this map — offline (or with R2
@@ -22,6 +23,8 @@ const BUNDLED_HS = require('./assets/basemap/global-z6-hs.pmtiles');
 
 // undefined = not resolved yet; null = resolution failed, map runs online-only.
 let cachedBundled: ArchivePair | null | undefined;
+// undefined = not resolved yet; null = unpack failed, hosted glyphs.
+let cachedGlyphs: string | null | undefined;
 
 async function resolveBundled(): Promise<ArchivePair | null> {
   try {
@@ -42,24 +45,38 @@ async function resolveBundled(): Promise<ArchivePair | null> {
   }
 }
 
-// The map style: bundled tier + installed packs + online tier. Null only on the very first
-// render while the bundled archives resolve; rebuilt whenever a pack is installed or removed.
+// The map style: bundled tier + installed packs + online tier, with the unpacked local glyphs.
+// Null only on the very first render while the bundled archives and glyphs resolve; rebuilt
+// whenever a pack is installed or removed.
 export function useBasemapStyle(): StyleSpecification | null {
   const [bundled, setBundled] = useState(cachedBundled);
+  const [glyphs, setGlyphs] = useState(cachedGlyphs);
   const { installed } = usePackState();
   useEffect(() => {
-    if (cachedBundled !== undefined) return;
     let live = true;
-    resolveBundled().then((pair) => {
-      cachedBundled = pair;
-      if (live) setBundled(pair);
-    });
+    if (cachedBundled === undefined) {
+      resolveBundled().then((pair) => {
+        cachedBundled = pair;
+        if (live) setBundled(pair);
+      });
+    }
+    if (cachedGlyphs === undefined) {
+      ensureGlyphs()
+        .catch((e) => {
+          console.warn(`glyphs unavailable locally, labels need the network once: ${e}`);
+          return null;
+        })
+        .then((base) => {
+          cachedGlyphs = base;
+          if (live) setGlyphs(base);
+        });
+    }
     return () => {
       live = false;
     };
   }, []);
   return useMemo(() => {
-    if (bundled === undefined) return null;
-    return buildBasemapStyle(bundled ?? undefined, installedPacks());
-  }, [bundled, installed]);
+    if (bundled === undefined || glyphs === undefined) return null;
+    return buildBasemapStyle(bundled ?? undefined, installedPacks(), glyphs ?? undefined);
+  }, [bundled, glyphs, installed]);
 }
