@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CODECS } from "@weather/protocol";
-import { fetchForecast, parseRequest } from "../src/forecast.js";
+import { fetchForecast, parseRequest, splitReplyFor } from "../src/forecast.js";
 
 // Bit-exactness guard for the CURRENT protocol version: replays the recorded Open-Meteo
 // responses through the full pipeline (parse → aggregate → fill search → encode) and asserts
@@ -17,7 +17,7 @@ interface GoldenCase {
   name: string;
   request: string;
   responses: Record<string, string>; // base64 FlatBuffers bodies, keyed by path+query
-  encoded: string;
+  encoded: string; // the wire reply as /encode returns it: splitReplyFor(...).join("\n")
 }
 
 const goldens = existsSync(GOLDEN_PATH)
@@ -40,8 +40,12 @@ describe.skipIf(!goldens)("golden corpus (bit-exact encode)", () => {
 
       const params = parseRequest(c.request);
       expect(params.decoderVersion).toBe(goldens!.protocolVersion);
-      const encoded = await fetchForecast(params, CODECS[goldens!.protocolVersion]);
-      expect(encoded).toBe(c.encoded);
+      // Compare the WIRE text — post-split, newline-joined, the same construction the codec
+      // server's /encode returns and verify-container diffs — so the split boundaries and part
+      // labels are bit-frozen along with the encoding.
+      const codec = CODECS[goldens!.protocolVersion];
+      const encoded = await fetchForecast(params, codec);
+      expect(splitReplyFor(params, encoded, codec.headerChars).join("\n")).toBe(c.encoded);
     });
   }
 });

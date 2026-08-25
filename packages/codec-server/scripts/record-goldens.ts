@@ -15,7 +15,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CODECS, supportedVersions } from "@weather/protocol";
-import { fetchForecast, parseRequest } from "../src/forecast.ts";
+import { fetchForecast, parseRequest, splitReplyFor } from "../src/forecast.ts";
 
 const OUT_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "golden", "goldens.json");
 
@@ -31,19 +31,32 @@ const SITES = [
 ];
 
 // One variant per center so every upstream source shape is pinned, crossed with the three
-// priority modes, both budget regimes, and the configurable-variable groups. The `ca` case
-// also exercises the GEM horizon clamp (nulls past day 10 → seq search clamps).
+// priority modes, every device route (v3's `d:` picks the alphabet AND the budget — there is
+// no `c:` token anymore), the multi-message split shapes, and the configurable-variable
+// groups. The `ca` case also exercises the GEM horizon clamp (nulls past day 10 → seq search
+// clamps). The two `w:` cases cover all seven wind-aloft ladder rungs between them.
 const VARIANTS = [
-  { name: "auto-best", tokens: "p:a m:best c:160" },
-  { name: "detail-us-pcwf", tokens: "p:d m:us c:160 v:pcwf" },
-  { name: "range-eu-320", tokens: "p:r m:eu c:320" },
-  { name: "auto-ca-80-c", tokens: "p:a m:ca c:80 v:c" },
-  // Air quality pins the second upstream API's response shape alongside the weather one, and
-  // `aso` is the selection where the US headline codes as a residual against its sub-indices —
-  // the one air-quality path with a context switch in it. Range reaches past the 4-day CAMS
-  // horizon, so the clamp is pinned here too.
-  { name: "range-best-aso", tokens: "p:r m:best c:320 v:aso" },
-  { name: "auto-best-e2", tokens: "p:a m:best c:160 v:e2" },
+  // No d:/n: — budgeted as one 160-character base-85 SMS segment, the reply an unidentified
+  // (hand-typed) sender gets.
+  { name: "auto-best", tokens: "p:a m:best" },
+  // iPhone satellite: base32768, two labelled parts, all three non-AQ var groups.
+  { name: "detail-us-i2-pcf", tokens: "p:d m:us d:i n:2 v:pcf" },
+  // Internet: base94 with no length cap, so the fill binds on the upstream data horizon.
+  { name: "range-eu-d-w0246-c", tokens: "p:r m:eu d:d w:0246 v:c" },
+  // inReach: base-85 labelled 2×151 parts, clouds + band.
+  { name: "auto-ca-g2-c", tokens: "p:a m:ca d:g n:2 v:c" },
+  // ZOLEO: base-85 2×231 parts. Air quality pins the second upstream API's response shape
+  // alongside the weather one, and `aso` is the selection where the US headline codes as a
+  // residual against its sub-indices — the one air-quality path with a context switch in it.
+  // Range reaches past the 4-day CAMS horizon, so the clamp is pinned here too.
+  { name: "range-best-z2-aso", tokens: "p:r m:best d:z n:2 v:aso" },
+  // SMS: base124 single segment, European AQ pair.
+  { name: "auto-best-s-e2", tokens: "p:a m:best d:s v:e2" },
+  // Single-bubble iPhone: no `n:`, so the whole-reply-fits test (not the part size) decides
+  // the split — the boundary that misfired in the field 2026-08-17.
+  { name: "detail-best-i-w135", tokens: "p:d m:best d:i w:135" },
+  // SMS with n:2: the concatenating route spends its budget as ONE longer string, no labels.
+  { name: "auto-us-s2-pf", tokens: "p:a m:us d:s n:2 v:pf" },
 ];
 
 interface GoldenCase {
@@ -53,6 +66,9 @@ interface GoldenCase {
   // stripped, so replay is independent of OPEN_METEO_BASE_URL). The SDK transport is binary, so
   // the recorded body is the raw response bytes rather than parsed JSON.
   responses: Record<string, string>;
+  // The WIRE reply, exactly as `POST /encode` returns it: splitReplyFor(...).join("\n"). Pinning
+  // the post-split text freezes the part labels and split boundaries too — they are
+  // client-visible behavior — and makes verify-container's diff the same construction.
   encoded: string;
 }
 
@@ -89,9 +105,10 @@ for (const site of SITES) {
     k = (k + 1) % 128;
     recording = {};
     const params = parseRequest(request);
-    const encoded = await fetchForecast(params, codec);
+    const parts = splitReplyFor(params, await fetchForecast(params, codec), codec.headerChars);
+    const encoded = parts.join("\n");
     cases.push({ name: `${site.name}/${variant.name}`, request, responses: recording, encoded });
-    console.log(`${site.name}/${variant.name}: ${encoded.length} chars, ${Object.keys(recording).length} upstream responses`);
+    console.log(`${site.name}/${variant.name}: ${encoded.length} chars in ${parts.length} message(s), ${Object.keys(recording).length} upstream responses`);
     await new Promise((r) => setTimeout(r, 500)); // be polite to the live API
   }
 }
