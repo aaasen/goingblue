@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, SafeAreaView, ScrollView,
-  StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions,
+  ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, Pressable, SafeAreaView,
+  ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
@@ -1115,6 +1115,25 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       // which one this was, only the reader's paste order does. Zero once it decodes.
       const held = chunksCollected(merged, token);
       onForecastDataChange(merged);
+      // The labels below confirm the press, so they must not outrun the decoder: text that will
+      // neither decode nor stand as a collection gets the failure label here rather than a green
+      // beat the decode effect flips to red a moment later. Checked on the merged text whether or
+      // not the paste changed it — a re-paste of the same broken text changes nothing, never
+      // reaches the decode effect at all, and still isn't "Already loaded". The same decode the
+      // effect will run, so the two always agree on which this is.
+      let settles = held > 0;
+      if (!settles) {
+        try {
+          decodeAny(merged, token);
+          settles = true;
+        } catch (e) {
+          settles = String(e).includes('Missing message') && replyParts(merged).total > 0;
+        }
+      }
+      if (!settles) {
+        flash(FAILED_LABEL, true);
+        return;
+      }
       flash(
         merged.trim() === forecastData.trim() ? (held ? 'Already added' : 'Already loaded')
           : held ? `Added message ${held}`
@@ -1477,10 +1496,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             a reader has least reason to expect it. */}
         <View>
           <View style={styles.pasteRow}>
-            <TouchableOpacity
-              style={[
+            <Pressable
+              style={({ pressed }) => [
                 styles.pasteBtn,
                 outcome && (outcome.failed ? styles.pasteBtnFailed : styles.pasteBtnDone),
+                pressed && styles.btnPressed,
               ]}
               onPress={pasteFromClipboard}
               accessibilityRole="button"
@@ -1503,7 +1523,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               >
                 {outcome?.label ?? 'Paste Forecast'}
               </Text>
-            </TouchableOpacity>
+            </Pressable>
             <TouchableOpacity
               style={styles.clearBtn}
               onPress={clearForecast}
@@ -1693,7 +1713,10 @@ function Section({ label, info, children }: { label: string; info?: () => void; 
 
 // A full-width action button: icon and label, replaced by a spinner while the action resolves.
 // The variants differ only in fill, so one tint drives the icon and the label together — and a
-// disabled button is filled grey, which needs the light tint whatever its variant.
+// disabled button is filled grey, which needs the light tint whatever its variant. Busy is the
+// exception: a button that is off resolving its own press is working, not unavailable, so it
+// keeps its variant's fill under the spinner — grey there made the GPS re-fix before a copy
+// flash as a grey beat in the middle of the press-to-Copied sequence.
 function ActionButton({ icon, label, onPress, disabled, busy, variant }: {
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   label: string;
@@ -1703,10 +1726,11 @@ function ActionButton({ icon, label, onPress, disabled, busy, variant }: {
   variant: 'primary' | 'success';
 }) {
   const fill = { primary: styles.btnPrimary, success: styles.btnSuccess }[variant];
-  const tint = disabled || variant === 'primary' ? '#fff' : '#2a8f5a';
+  const greyed = disabled && !busy;
+  const tint = greyed || variant === 'primary' ? '#fff' : '#2a8f5a';
   return (
-    <TouchableOpacity
-      style={[styles.btn, fill, disabled && styles.btnDisabled]}
+    <Pressable
+      style={({ pressed }) => [styles.btn, fill, greyed && styles.btnDisabled, pressed && styles.btnPressed]}
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
@@ -1722,7 +1746,7 @@ function ActionButton({ icon, label, onPress, disabled, busy, variant }: {
           <Text style={[styles.btnText, { color: tint }]} numberOfLines={1}>{label}</Text>
         </>
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -1860,6 +1884,12 @@ const styles = StyleSheet.create({
   btnPrimary: { backgroundColor: '#2a6bb5' },
   btnSuccess: { backgroundColor: '#e8f5ec', borderWidth: 1, borderColor: '#2a8f5a' },
   btnDisabled: { backgroundColor: '#aeaeb2', borderColor: '#aeaeb2' },
+  // Press feedback for the action and paste buttons. A declarative dim rather than
+  // TouchableOpacity: both buttons re-render themselves from inside their own press handler
+  // (busy, copied, a paste outcome), and a re-render landing mid-fade could strand the touchable's
+  // animated opacity below 1 — the outcome then sat greyed until the next touch. Pressable's
+  // pressed flag has no animation state to strand.
+  btnPressed: { opacity: 0.4 },
   btnIcon: { marginRight: 8 },
   btnText: { fontSize: 16, fontWeight: '600' },
 
