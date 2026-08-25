@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Animated, View, Text as RNText, StyleSheet, FlatList, PanResponder, Pressable, useWindowDimensions } from 'react-native';
 import {
   Canvas, DashPathEffect, Group, Paint, Rect, RoundedRect, Circle, Line, Path, Text,
@@ -665,8 +665,9 @@ function fmtFreezeFull(m: number | undefined, u: UnitPrefs): string {
   if (m == null) return '—';
   return fmtAltitudeFull(m, u.altitude);
 }
-// A pressure level in full, on the reader's level unit: its standard-atmosphere height
-// ("18,000 ft") or the pressure itself ("500 hPa").
+// A pressure level in full, on the reader's level unit and only that: its standard-atmosphere
+// height ("18,000 ft") or the pressure itself ("500 hPa"). One reading, the one they asked for —
+// the rail names the same level in the same unit, in its short rung form (ladderLabel).
 function fmtLevelFull(hpa: number, u: UnitPrefs): string {
   return u.level === 'hpa' ? pressureLabel(hpa) : fmtAltitudeFull(pressureToMeters(hpa), u.level);
 }
@@ -3356,12 +3357,10 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY }: {
 
 const LEADER_DOTS = '.'.repeat(160);
 
-// Detail-panel label for a pressure-level wind row, e.g. "Wind 18k ft (500 hPa)": the rail's
-// altitude rung first, the transmitted pressure after it — or just "Wind 500 hPa" for the reader
-// whose ladder is pressure, where the pair would say it twice.
+// Detail-panel label for a pressure-level wind row, e.g. "Wind 18,000 ft" or "Wind 500 hPa" — the
+// level named the same way the panel's cloud rows name theirs.
 function upperWindLabel(hpa: number, units: UnitPrefs): string {
-  if (units.level === 'hpa') return `Wind ${pressureLabel(hpa)}`;
-  return `Wind ${ladderLabel(hpa, units.level)} (${pressureLabel(hpa)})`;
+  return `Wind ${fmtLevelFull(hpa, units)}`;
 }
 
 const MOON_PHASE_LABELS: Record<CyclePhase, string> = {
@@ -3433,6 +3432,10 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
   // Row presence mirrors buildRows: a group renders when any period in the model has it, and a
   // missing value within a present group reads — like the canvas dashes.
   const has = (fn: (q: Period) => unknown) => periods.some((q) => fn(q) != null);
+  // Snow is the one group kept on amount rather than presence, the same test the snow row on the
+  // canvas passes: a requested-but-dry column reads back as zeros, and a panel that lists them
+  // spends two lines saying a snowless week is snowless.
+  const hasAmount = (fn: (q: Period) => number | undefined) => periods.some((q) => (fn(q) ?? 0) > 0);
 
   // A Skia canvas applies child updates through its own async reconciler, so redrawing one canvas
   // per selection shows the new glyph a beat after the surrounding text. Instead, mount a canvas
@@ -3471,27 +3474,43 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
   const activeGlyph = glyphVariantAt(periods, dates, steps, index, lat, lon);
   const night = activeGlyph.night;
 
-  const rows: [string, string][] = [];
+  // The readout is grouped the way the canvas is sectioned, one group per subject, and a rule is
+  // drawn between the groups that survive. Rows keep the order they had; only the rules are new.
+  const thermal: [string, string][] = [];
+  const precip: [string, string][] = [];
+  const wind: [string, string][] = [];
+  const clouds: [string, string][] = [];
+  const air: [string, string][] = [];
+
   if (has((q) => q.temp_c))
-    rows.push(['Temperature', p.temp_c != null ? `${fmtTemp(p.temp_c, units)}${units.temp === 'f' ? 'F' : 'C'}` : '—']);
+    thermal.push(['Temperature', p.temp_c != null ? `${fmtTemp(p.temp_c, units)}${units.temp === 'f' ? 'F' : 'C'}` : '—']);
+  // The freezing level rides with temperature rather than with the winds it used to sit among:
+  // it is the other thing this column says about heat, and keeping it here leaves the surface
+  // wind and the levels above it unbroken.
+  if (has((q) => q.freeze_m)) thermal.push(['Freezing level', fmtFreezeFull(p.freeze_m, units)]);
+
   // Probability lives here and only here: the drawing carries the two amounts, and this panel is
   // where a column's numbers are read one at a time.
-  if (has((q) => q.precip)) rows.push(['Precip chance', p.precip != null ? `${p.precip}%` : '—']);
+  if (has((q) => q.precip)) precip.push(['Precip chance', p.precip != null ? `${p.precip}%` : '—']);
   // Snow before rain, the order the two rows are drawn in.
-  if (has((q) => q.snow_cm)) {
-    rows.push(['Snow', fmtSnowFull(p.snow_cm ?? 0, units)]);
-    rows.push(['Total snow accumulation', fmtSnowFull(cumSnow, units)]);
+  if (hasAmount((q) => q.snow_cm)) {
+    precip.push(['Snow', fmtSnowFull(p.snow_cm ?? 0, units)]);
+    precip.push(['Total snow accumulation', fmtSnowFull(cumSnow, units)]);
   }
   if (has((q) => q.rain_mm)) {
-    rows.push(['Rain', fmtRainFull(p.rain_mm ?? 0, units)]);
-    rows.push(['Total rain accumulation', fmtRainFull(cumRain, units)]);
+    precip.push(['Rain', fmtRainFull(p.rain_mm ?? 0, units)]);
+    precip.push(['Total rain accumulation', fmtRainFull(cumRain, units)]);
   }
-  if (has((q) => q.wind_sfc_kph)) rows.push(['Wind', fmtWindFull(p.wind_sfc_kph, p.wind_sfc_dir, units)]);
-  if (has((q) => q.freeze_m)) rows.push(['Freezing level', fmtFreezeFull(p.freeze_m, units)]);
+
+  if (has((q) => q.wind_sfc_kph)) wind.push(['Wind', fmtWindFull(p.wind_sfc_kph, p.wind_sfc_dir, units)]);
+  // On the surface wind's direction: a gust is that wind's peak, not a second wind, and the wire
+  // carries no bearing of its own for it.
+  if (has((q) => q.wind_gust_kph)) wind.push(['Gust', fmtWindFull(p.wind_gust_kph, p.wind_sfc_dir, units)]);
   for (const li of windLevelsPresent(periods)) {
     const w = p.wind_aloft?.[li];
-    rows.push([upperWindLabel(WIND_LEVELS_HPA[li], units), fmtWindFull(w?.kph, w?.dir, units)]);
+    wind.push([upperWindLabel(WIND_LEVELS_HPA[li], units), fmtWindFull(w?.kph, w?.dir, units)]);
   }
+
   if (has((q) => q.cloud_band)) {
     // Only the levels the message carries — the wire truncates the stack at one level below the
     // forecast point, so the carried count is any band-bearing period's array length. A period
@@ -3502,12 +3521,13 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
       // "and above" on the top level, matching the rail's "30k+" — the highest level the
       // message carries is the only one whose reading is not bracketed by a level above it.
       const at = fmtLevelFull(hpa, units) + (hpa === BAND_TOP_HPA ? ' and above' : '');
-      rows.push([`Clouds ${at}`, v != null ? `${v}%` : '—']);
+      clouds.push([`Clouds ${at}`, v != null ? `${v}%` : '—']);
     });
   }
-  if (has((q) => q.cloud_high)) rows.push(['Cloud high (>8km)', p.cloud_high != null ? `${p.cloud_high}%` : '—']);
-  if (has((q) => q.cloud_mid)) rows.push(['Cloud mid (3–8km)', p.cloud_mid != null ? `${p.cloud_mid}%` : '—']);
-  if (has((q) => q.cloud_low)) rows.push(['Cloud low (<3km)', p.cloud_low != null ? `${p.cloud_low}%` : '—']);
+  if (has((q) => q.cloud_high)) clouds.push(['Cloud high (>8km)', p.cloud_high != null ? `${p.cloud_high}%` : '—']);
+  if (has((q) => q.cloud_mid)) clouds.push(['Cloud mid (3–8km)', p.cloud_mid != null ? `${p.cloud_mid}%` : '—']);
+  if (has((q) => q.cloud_low)) clouds.push(['Cloud low (<3km)', p.cloud_low != null ? `${p.cloud_low}%` : '—']);
+
   // Air quality reads out with its category named — the number alone doesn't say whether to go
   // outside, and the two scales name their categories differently at the same value. A period
   // past the CAMS horizon has no value at all and says so.
@@ -3515,15 +3535,27 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
     const { field, label, scale } = AQ_KEYS[kind];
     if (!has((q) => q[field])) continue;
     const v = p[field] as number | undefined;
-    rows.push([label, v != null ? `${Math.round(v)} · ${aqBand(v, scale).name}` : 'Not forecast']);
+    air.push([label, v != null ? `${Math.round(v)} · ${aqBand(v, scale).name}` : 'Not forecast']);
     // The headline's line is followed by what is driving it, so the readout answers "how bad"
     // and "of what" together.
     const dom = AQ_DOMINANT_FOR[kind];
     if (!dom) continue;
     const dk = AQ_DOMINANT_KEYS[dom];
     if (!has((q) => q[dk.field] as unknown)) continue;
-    rows.push(['Dominant pollutant', pollutantName(dk.scale, p[dk.field] as number | undefined) ?? '—']);
+    air.push(['Dominant pollutant', pollutantName(dk.scale, p[dk.field] as number | undefined) ?? '—']);
   }
+
+  // The astronomy group answers for the whole day, not the selected period. It needs no header of
+  // its own — the panel's header already names the day, and now the same rule that separates
+  // every other group sets it apart.
+  const groups: { key: string; rows: [string, string][] }[] = [
+    { key: 'thermal', rows: thermal },
+    { key: 'precip', rows: precip },
+    { key: 'wind', rows: wind },
+    { key: 'clouds', rows: clouds },
+    { key: 'air', rows: air },
+    { key: 'astro', rows: astro },
+  ].filter((g) => g.rows.length > 0);
 
   return (
     <View style={styles.detailPanel}>
@@ -3554,11 +3586,13 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
         </View>
         <RNText style={styles.detailCodeName}>{wmoName(p.weathercode)}</RNText>
       </View>
-      {rows.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)}
-      {/* The astronomy rows answer for the whole day, not the selected period. A rule is enough to
-          set them apart — the panel header already names the day they belong to. */}
-      <View style={styles.detailDivider} />
-      {astro.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)}
+      {/* A rule between groups, never above the first one or below the last. */}
+      {groups.map((group, gi) => (
+        <Fragment key={group.key}>
+          {gi > 0 && <View style={styles.detailDivider} />}
+          {group.rows.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)}
+        </Fragment>
+      ))}
     </View>
   );
 }
