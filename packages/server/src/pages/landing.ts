@@ -241,13 +241,13 @@ iPhone satellite messaging.</p>
 
 <h2>Features</h2>
 <ul>
-  <li>Works via the internet, SMS, Garmin inReach, and iPhone satellite messaging.</li>
+  <li>Works via the internet, SMS, Garmin inReach, ZOLEO, and iPhone satellite messaging.</li>
   <li>Uses a custom compression codec optimized for weather data that packs hundreds of data
   points into a single message. Choose between hourly detail and extended range up to 13
   days.</li>
   <li>Temperature, snow, rain, wind, and cloud cover included by default. Optional variables
   include pressure-level winds for high-altitude mountaineering, AQI for planning around wildfire
-  smoke, low/mid/high cloud cover, and freezing level.</li>
+  smoke, detailed cloud cover with 8 levels, and freezing level.</li>
   <li>Weather forecasts from over 30 models including HRRR (3km), HRDPS (2.5km), ICON-D2 (2km),
   and MET Norway (1km). Automatically chooses the best model for your location.</li>
   <li>Compare forecasts from American, Canadian, and European forecast centers.</li>
