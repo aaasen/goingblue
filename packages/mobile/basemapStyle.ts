@@ -214,10 +214,18 @@ function stack(p: string, src: StackSources): LayerSpecification[] {
   ];
 }
 
-export const basemapStyle: StyleSpecification = {
-  version: 8,
-  glyphs: GLYPHS,
-  sources: {
+// One archive pair as { base, hs } pmtiles URLs (remote https or local file://).
+export interface ArchivePair {
+  base: string;
+  hs: string;
+}
+
+// The full style: the bundled global z6 pair (when its assets have resolved) UNDER the online
+// z10 archives. Every tier renders at all zooms — a z6 source overzooms past its data — so
+// whichever upper tiers can't load (offline, R2 unreachable) simply leave the coarser tier
+// beneath showing. Installed packs will slot in between the two as further stacks.
+export function buildBasemapStyle(bundled?: ArchivePair): StyleSpecification {
+  const sources: StyleSpecification['sources'] = {
     'online-base': {
       type: 'vector',
       url: `pmtiles://${BASEMAP_URL}/global-base.pmtiles`,
@@ -229,9 +237,15 @@ export const basemapStyle: StyleSpecification = {
       tileSize: 512,
       maxzoom: DATA_MAX_ZOOM,
     },
-  },
-  layers: [
+  };
+  const layers: LayerSpecification[] = [
     { id: 'background', type: 'background', paint: { 'background-color': WATER } },
-    ...stack('o-', { base: 'online-base', hillshade: 'online-hs' }),
-  ],
-};
+  ];
+  if (bundled) {
+    sources['bundled-base'] = { type: 'vector', url: `pmtiles://${bundled.base}`, maxzoom: 6 };
+    sources['bundled-hs'] = { type: 'raster', url: `pmtiles://${bundled.hs}`, tileSize: 512, maxzoom: 6 };
+    layers.push(...stack('g-', { base: 'bundled-base', hillshade: 'bundled-hs' }));
+  }
+  layers.push(...stack('o-', { base: 'online-base', hillshade: 'online-hs' }));
+  return { version: 8, glyphs: GLYPHS, sources, layers };
+}

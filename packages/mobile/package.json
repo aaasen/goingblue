@@ -11,6 +11,7 @@
     "@shopify/react-native-skia": "2.6.2",
     "@weather/protocol": "workspace:*",
     "expo": "~57.0.13",
+    "expo-asset": "^57.0.14",
     "expo-clipboard": "~57.0.1",
     "expo-constants": "~57.0.11",
     "expo-dev-client": "~57.0.12",
@@ -42,11 +43,12 @@
     }
   },
   "scripts": {
-    "eas-build-post-install": "pnpm --filter @weather/protocol build",
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
-    "test": "vitest run"
+    "eas-build-post-install": "pnpm --filter @weather/protocol build && node scripts/fetch-basemap.mjs",
+    "start": "node scripts/fetch-basemap.mjs && expo start",
+    "android": "node scripts/fetch-basemap.mjs && expo run:android",
+    "ios": "node scripts/fetch-basemap.mjs && expo run:ios",
+    "test": "vitest run",
+    "fetch-basemap": "node scripts/fetch-basemap.mjs"
   },
   "private": true
 }

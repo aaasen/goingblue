@@ -3,7 +3,8 @@ import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Camera, Images, Map, Marker, type CameraRef, type PressEvent } from '@maplibre/maplibre-react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import type { NativeSyntheticEvent } from 'react-native';
-import { basemapStyle, MAX_ZOOM, MIN_ZOOM } from './basemapStyle';
+import { MAX_ZOOM, MIN_ZOOM } from './basemapStyle';
+import { useBasemapStyle } from './useBasemapStyle';
 
 export interface LatLon {
   lat: number;
@@ -39,6 +40,7 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
   const [fullscreen, setFullscreen] = useState(false);
   const [mapRevision, setMapRevision] = useState(0);
   const interactive = onPick != null;
+  const mapStyle = useBasemapStyle();
   const initialViewState = coord ? { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM } : DEFAULT_VIEW;
 
   // A native map surface can lose its GL context while its parent has `display: none`. Recreate
@@ -65,11 +67,12 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
   // `pannable` is separate from `interactive`: an inline preview stays locked so it doesn't fight
   // the parent ScrollView, but the same map in the fullscreen modal has no scroll view to fight.
   function renderMap(ref: React.RefObject<CameraRef | null>, pannable: boolean, key?: number) {
+    if (!mapStyle) return null;
     return (
       <Map
         key={key}
         style={StyleSheet.absoluteFill}
-        mapStyle={basemapStyle}
+        mapStyle={mapStyle}
         onPress={onPress}
         dragPan={pannable}
         touchZoom={pannable}

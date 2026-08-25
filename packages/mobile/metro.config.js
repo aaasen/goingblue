@@ -19,6 +19,9 @@ config.watchFolders = [workspaceRoot];
 const escapedRoot = workspaceRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 config.resolver.blockList = [new RegExp(`^${escapedRoot}/data/`)];
 
+// The bundled basemap archives (assets/basemap) ship as binary assets.
+config.resolver.assetExts.push('pmtiles');
+
 // Resolve node_modules from both the app root and the workspace root,
 // so pnpm-hoisted packages (react, react-native, etc.) are found correctly
 config.resolver.nodeModulesPaths = [
