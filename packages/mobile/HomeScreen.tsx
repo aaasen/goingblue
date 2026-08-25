@@ -757,6 +757,12 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // off. Only the internet route has one — the other devices hand the request to another app and
   // are done with it.
   const inFlight = useRef<InFlight | null>(null);
+  // A fetch whose reply is in the decoder's hands. The spinner runs until the forecast is on
+  // screen, not until its bytes arrive: between those two moments sit the store load, the decode
+  // and the meteogram's first (heavy) render, and a spinner that stopped at the bytes left that
+  // whole stretch looking stalled. Set on a successful reply, cleared when the decode effect
+  // settles that text — whichever way it settles.
+  const fetchDecoding = useRef(false);
 
   // Drop the in-flight fetch, if there is one. The request itself is still valid — what's changed
   // is that its reply would come back in the wrong shape for the route now selected, so it's
@@ -768,6 +774,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     req.cancelled = true;
     req.controller.abort();
     inFlight.current = null;
+    fetchDecoding.current = false;
     setFetching(false);
   }
 
@@ -961,7 +968,15 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       // A reply that landed in the gap between the abort and this line answers a request the user
       // has already walked away from — hand it on and it draws a forecast for a route they left.
       if (req.cancelled) return;
-      onForecastDataChange(encoded);
+      if (encoded === forecastData) {
+        // The reply is the text already on screen, so nothing will re-decode — there is no
+        // settling to wait for. Just bring the forecast back into view.
+        pendingScroll.current = true;
+        scrollToForecast();
+      } else {
+        fetchDecoding.current = true;
+        onForecastDataChange(encoded);
+      }
     } catch (e) {
       if (req.cancelled) return;
       if (timedOut) Alert.alert('No connection', OFFLINE_MESSAGE);
@@ -972,7 +987,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       // request in this one's place — either way this reply is no longer the one on screen.
       if (inFlight.current === req) {
         inFlight.current = null;
-        setFetching(false);
+        if (!fetchDecoding.current) setFetching(false);
       }
     }
   }
@@ -1002,13 +1017,14 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       setError(null);
       setCollecting(null);
       suppressNextCache.current = false;
+      fetchDecoding.current = false;
       return;
     }
     (async () => {
-      // The store maps the message code → request context; load it before the (sync) decode.
-      await loadStore(token);
-      if (cancelled) return;
       try {
+        // The store maps the message code → request context; load it before the (sync) decode.
+        await loadStore(token);
+        if (cancelled) return;
         const msg = decodeAny(forecastData, token);
         setDecoded(msg);
         setError(null);
@@ -1062,6 +1078,15 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           // so a stale saved forecast never reaches here, and a reader in the field can neither
           // need an app update (the request carries the version they encoded with) nor get one.
           setError('Invalid forecast. Request a new forecast and paste the reply from your device.');
+        }
+      } finally {
+        // The reply this decode settled came off the wire — stop the spinner it was holding.
+        // Batched with the setDecoded/setError above, so the spinner leaves in the very commit
+        // that puts the forecast (or its error) on screen, and the scroll follows straight off
+        // that commit's layout.
+        if (fetchDecoding.current) {
+          fetchDecoding.current = false;
+          setFetching(false);
         }
       }
     })();
