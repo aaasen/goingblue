@@ -305,7 +305,7 @@ The Going Blue codec relies on the client and server having identical codebooks.
  - Added model attribution to the meteogram so that the switch between a high-resolution local model and a low-resolution global model is clear.
  - Expanded SMS alphabet from 85 to 124 characters by using almost all of GSM-7 instead of the intersection of GSM-7 and ASCII.
 
-#### In development: Codec v3 (App version 1.2.0)
+#### Codec v3 (App version 1.2.0)
 
  - Added ZOLEO support with 240 character messages (up from 160 on SMS/Garmin).
  - Added Garmin Messenger support for newer inReach devices.
