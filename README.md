@@ -1,13 +1,13 @@
 # Going Blue
 
-Going Blue is a weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom compression codec and decoder app to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, or iPhone satellite messaging. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
+Going Blue is a weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom compression codec and decoder app to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, ZOLEO, or iPhone satellite messaging. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
 
 <img src="packages/mobile/screenshots/readme.png" width="100%" alt="Four screenshots: a 13-day meteogram for Mont Blanc, the Builder tab's location, model and variable options, a Denali forecast with freezing level and pressure-level winds, and a forecast with air quality">
 
 ## How it works
 
 1. Build a forecast request in the app. Choose the location, model, and variables that you care about.
-2. Send the forecast request to Going Blue via the internet, SMS, Garmin inReach, or iPhone satellite messaging.
+2. Send the forecast request to Going Blue via the internet, SMS, Garmin inReach, ZOLEO, or iPhone satellite messaging.
 3. Receive an encoded message from Going Blue. Paste it into the app to see a detailed forecast.
 
 ## Features

@@ -198,8 +198,8 @@ const LANDING_BODY = `
 <p>${BRAND} is a weather app designed specifically for satellite messengers. It was built for a
 Denali ski expedition with one goal: to get you all the weather information you would have at
 home, wherever you are. ${BRAND} uses a custom compression codec and decoder app to pack hundreds
-of forecast data points into a single message that can be sent over SMS, Garmin inReach, or
-iPhone satellite messaging.</p>
+of forecast data points into a single message that can be sent over SMS, Garmin inReach, ZOLEO,
+or iPhone satellite messaging.</p>
 
 <div class=shots>
   <figure>
@@ -235,8 +235,8 @@ iPhone satellite messaging.</p>
 <ol>
   <li>Build a forecast request in the app. Choose the location, model, and variables that you
   care about.</li>
-  <li>Send the forecast request to ${BRAND} via the internet, SMS, Garmin inReach, or iPhone
-  satellite messaging.</li>
+  <li>Send the forecast request to ${BRAND} via the internet, SMS, Garmin inReach, ZOLEO, or
+  iPhone satellite messaging.</li>
   <li>Receive an encoded message from ${BRAND}. Paste it into the app to see a detailed
   forecast.</li>
 </ol>
