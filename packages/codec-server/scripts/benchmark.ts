@@ -62,7 +62,7 @@ const BENCHMARKS_DIR = join(REPO_ROOT, "data", "benchmarks"); // timestamped HTM
 
 // ── Collection config ────────────────────────────────────────────────────────────
 
-// Protocol variable groups mirroring the app's selector (BuilderTab.tsx); the report's toggles.
+// Protocol variable groups mirroring the app's selector (HomeScreen.tsx); the report's toggles.
 // The European-scale air-quality columns are on the wire but not in the report: each EU index
 // encodes at almost exactly the cost of its US counterpart, so their six rows doubled the
 // air-quality half of every table to say the same thing twice. The US scale stands in for both.
@@ -338,7 +338,7 @@ function requestUtcHour(windowStartUtcHour: number, utcOffsetHours: number, hour
   return firstLocalMidnight - utcOffsetHours + hour;
 }
 
-// Protocol variable groups, mirroring the app (BuilderTab.tsx). weathercode is always encoded by the
+// Protocol variable groups, mirroring the app (HomeScreen.tsx). weathercode is always encoded by the
 // protocol (not in a mask). BASE is always on; each toggleable group maps to protocol var bits.
 const BASE_VARS: string[] = [...ALWAYS_VARS];
 const GROUP_VARS: Record<GroupId, string[]> = {

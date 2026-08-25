@@ -46,7 +46,7 @@ export default function SetupScreen({
       <Text style={styles.brand}>Going Blue</Text>
       <Text style={styles.tagline}>Weather forecasts over satellite and SMS</Text>
 
-      {/* The same explanation the Builder tab's help sheet shows, so first run gets it without
+      {/* The same explanation the help sheet shows, so first run gets it without
           hunting for the help link. */}
       <GettingStarted />
 

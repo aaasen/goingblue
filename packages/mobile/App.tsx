@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
+import { View, StyleSheet, SafeAreaView } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import BuilderTab from './BuilderTab';
-import DecoderTab from './DecoderTab';
-import SettingsTab from './SettingsTab';
+import HomeScreen from './HomeScreen';
+import SettingsScreen from './SettingsScreen';
 import SetupScreen from './SetupScreen';
 import { loadToken, clearToken, deleteAccount } from './account';
 import { clearStore } from './cache';
@@ -16,8 +15,6 @@ import {
 import { DEFAULT_DEVICE, type Device } from './devices';
 import { configureTileCache } from './tileCache';
 
-type Tab = 'builder' | 'decoder' | 'settings';
-
 // Hold the launch image until the first screen can be drawn as it will finally look. It otherwise
 // hides the moment React mounts — which is before the stored token and preferences have come back
 // from AsyncStorage, so the app would show a spinner and then redraw once they arrived. Called at
@@ -26,16 +23,16 @@ type Tab = 'builder' | 'decoder' | 'settings';
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('builder');
   const [forecastData, setForecastData] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // undefined = still loading from storage; null = no account yet (show setup); string = ready.
   const [token, setToken] = useState<string | null | undefined>(undefined);
   const [units, setUnitsState] = useState<UnitPrefs>(defaultUnitPrefs('imperial'));
   const [timeFormat, setTimeFormatState] = useState<TimeFormat>('12h');
   const [aqiScale, setAqiScaleState] = useState<AqiScale>('us');
-  // Builder-only, but loaded here with the rest: the builder is the tab that comes up first, so
-  // reading it inside that tab would draw the action button as Get Forecast and rename it a frame
-  // later. Behind the splash, the stored device is already in hand.
+  // Belongs to the builder, but loaded here with the rest: the builder is the first thing on
+  // screen, so reading it there would draw the action button as Get Forecast and rename it a
+  // frame later. Behind the splash, the stored device is already in hand.
   const [device, setDeviceState] = useState<Device>(DEFAULT_DEVICE);
   // Loaded alongside the device, and for the same reason: it changes the builder's request, so
   // arriving late would mean the first request of a session could go out under the wrong budget.
@@ -95,11 +92,6 @@ export default function App() {
     saveTwoMessages(on);
   }
 
-  function onForecastReceived(encoded: string) {
-    setForecastData(encoded);
-    setTab('decoder');
-  }
-
   // Erase the account server-side, then drop this device's local state: the saved forecasts for
   // that account, then the token itself. Setup mints a fresh account on the way back in.
   //
@@ -112,7 +104,8 @@ export default function App() {
     await clearStore(token);
     await clearToken();
     setForecastData('');
-    setTab('builder');
+    // The delete lives inside the Settings sheet; close it so Setup isn't hiding under it.
+    setSettingsOpen(false);
     setToken(null);
   }
 
@@ -141,65 +134,35 @@ export default function App() {
   return (
     <View style={styles.root} onLayout={onLayoutRoot}>
       <StatusBar style="dark" />
-      {/* The safe area wraps only the header, so it picks up the top (and, in
-          landscape, side) inset while the tab content below runs all the way to
-          the physical bottom edge. Each tab pads its own scroll content so the
-          last row still clears the home indicator. */}
-      <SafeAreaView style={styles.header}>
-        <View style={styles.tabBar}>
-          <TabBtn label="Builder" active={tab === 'builder'} onPress={() => setTab('builder')} />
-          <TabBtn label="Decoder" active={tab === 'decoder'} onPress={() => setTab('decoder')} />
-          <TabBtn label="Settings" active={tab === 'settings'} onPress={() => setTab('settings')} />
-        </View>
-      </SafeAreaView>
-      <View
-        style={[styles.tabContent, tab !== 'builder' && styles.tabHidden]}
-        accessibilityElementsHidden={tab !== 'builder'}
-        importantForAccessibility={tab === 'builder' ? 'auto' : 'no-hide-descendants'}
-      >
-        <BuilderTab
-          token={token}
-          onForecastReceived={onForecastReceived}
-          active={tab === 'builder'}
-          device={device}
-          onDeviceChange={setDevice}
-          twoMessages={twoMessages}
-          onTwoMessagesChange={setTwoMessages}
-          aqiScale={aqiScale}
-          units={units}
-        />
-      </View>
-      <View
-        style={[styles.tabContent, tab !== 'decoder' && styles.tabHidden]}
-        accessibilityElementsHidden={tab !== 'decoder'}
-        importantForAccessibility={tab === 'decoder' ? 'auto' : 'no-hide-descendants'}
-      >
-        <DecoderTab token={token} forecastData={forecastData} onForecastDataChange={setForecastData} units={units} timeFormat={timeFormat} active={tab === 'decoder'} />
-      </View>
-      <View
-        style={[styles.tabContent, tab !== 'settings' && styles.tabHidden]}
-        accessibilityElementsHidden={tab !== 'settings'}
-        importantForAccessibility={tab === 'settings' ? 'auto' : 'no-hide-descendants'}
-      >
-        <SettingsTab
-          onDeleteAccount={handleDeleteAccount}
-          units={units}
-          onUnitsChange={setUnits}
-          timeFormat={timeFormat}
-          onTimeFormatChange={setTimeFormat}
-          aqiScale={aqiScale}
-          onAqiScaleChange={setAqiScale}
-        />
-      </View>
+      {/* One screen: the title row (and the door to Settings) lives inside the screen's own
+          scroll, and the scroll runs under the status bar — HomeScreen pads its resting content
+          by the status-bar inset, so the page seats below the clock and slides beneath it. It
+          pads the bottom of its content too, so the last row clears the home indicator. */}
+      <HomeScreen
+        token={token}
+        device={device}
+        onDeviceChange={setDevice}
+        twoMessages={twoMessages}
+        onTwoMessagesChange={setTwoMessages}
+        aqiScale={aqiScale}
+        units={units}
+        timeFormat={timeFormat}
+        forecastData={forecastData}
+        onForecastDataChange={setForecastData}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+      <SettingsScreen
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onDeleteAccount={handleDeleteAccount}
+        units={units}
+        onUnitsChange={setUnits}
+        timeFormat={timeFormat}
+        onTimeFormatChange={setTimeFormat}
+        aqiScale={aqiScale}
+        onAqiScaleChange={setAqiScale}
+      />
     </View>
-  );
-}
-
-function TabBtn({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={[styles.tab, active && styles.tabActive]} onPress={onPress} activeOpacity={0.7}>
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
-    </TouchableOpacity>
   );
 }
 
@@ -207,23 +170,4 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f2f2f7' },
   // Empty safe area: lays out to exactly the top inset, nothing more.
   topInset: { backgroundColor: '#f2f2f7' },
-  header: { backgroundColor: '#f2f2f7' },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#d1d1d6',
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  tabActive: { borderBottomColor: '#2a6bb5' },
-  tabText: { fontSize: 15, fontWeight: '500', color: '#8e8e93' },
-  tabTextActive: { color: '#2a6bb5' },
-  tabContent: { flex: 1 },
-  tabHidden: { display: 'none' },
 });

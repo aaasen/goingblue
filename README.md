@@ -318,6 +318,7 @@ The Going Blue codec relies on the client and server having identical codebooks.
  - Improved meteogram rendering speed.
  - Added offline maps with downloadable region packs. 
  - Added more options to the unit selector.
+ - Merged Builder and Decoder tabs into a single page.
 
 ## License
 

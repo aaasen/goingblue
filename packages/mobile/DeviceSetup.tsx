@@ -14,7 +14,7 @@ const CONTACT_VCF_URL = 'https://going.blue/contact.vcf';
 // Android needs this opted into before LayoutAnimation does anything; on iOS it's already on.
 if (Platform.OS === 'android') UIManager.setLayoutAnimationEnabledExperimental?.(true);
 
-// Per-device setup, shared by the first-run Setup screen and the Builder tab's help sheet — one
+// Per-device setup, shared by the first-run Setup screen and the help sheet — one
 // list of instructions, so the two can't drift apart.
 export default function DeviceSetup() {
   // The routes are separate sequences rather than one list with asides — a satellite user and a
@@ -92,7 +92,7 @@ function EarthmateSteps() {
 
       <Step n={2} title="Send the request">
         <Text style={styles.para}>
-          On the Builder tab, choose <Bold>inReach</Bold> as your device and tap{' '}
+          In Going Blue, choose <Bold>inReach</Bold> as your device and tap{' '}
           <Bold>Copy inReach Message</Bold>, then send the message to Going Blue through the Earthmate app.
         </Text>
       </Step>
@@ -133,7 +133,7 @@ function MessengerSteps() {
 
       <Step n={3} title="Send the request">
         <Text style={styles.para}>
-          On the Builder tab, choose <Bold>inReach</Bold> as your device and tap{' '}
+          In Going Blue, choose <Bold>inReach</Bold> as your device and tap{' '}
           <Bold>Copy inReach Message</Bold>, then send the message to Going Blue through the
           Messenger app.
         </Text>
@@ -163,7 +163,7 @@ function SmsSteps() {
 
       <Step n={2} title="Send the request">
         <Text style={styles.para}>
-          On the Builder tab, choose <Bold>SMS</Bold> as your device, tap <Bold>Send SMS</Bold>, and
+          In Going Blue, choose <Bold>SMS</Bold> as your device, tap <Bold>Send SMS</Bold>, and
           send the message.
         </Text>
       </Step>
@@ -174,7 +174,7 @@ function SmsSteps() {
 }
 
 // Same copy-across handoff as Earthmate: the ZOLEO app sends the message, the builder's button
-// only copies it. Choosing ZOLEO on the Builder tab is what earns the longer reply — the request's
+// only copies it. Choosing ZOLEO as the device is what earns the longer reply — the request's
 // d: token tells the server this route carries 240 characters to SMS's 160 (see devices.ts).
 function ZoleoSteps() {
   return (
@@ -189,7 +189,7 @@ function ZoleoSteps() {
 
       <Step n={2} title="Send the request">
         <Text style={styles.para}>
-          On the Builder tab, choose <Bold>ZOLEO</Bold> as your device and tap{' '}
+          In Going Blue, choose <Bold>ZOLEO</Bold> as your device and tap{' '}
           <Bold>Copy ZOLEO Message</Bold>, then paste the message into a new message to Going Blue
           in the ZOLEO app and send it.
         </Text>
@@ -234,14 +234,15 @@ function IPhoneSteps() {
   );
 }
 
-// The last step of every route: whatever carried the reply, the Decoder is the only thing that
-// reads it. One component rather than five copies — the five had already drifted into three
+// The last step of every route: whatever carried the reply, Paste Forecast is the only
+// thing that reads it. One component rather than five copies — the five had already drifted into three
 // different wordings.
 function ViewForecastStep({ n }: { n: number }) {
   return (
     <Step n={n} title="View the forecast">
       <Text style={styles.para}>
-        Copy the reply into the <Bold>Decoder</Bold> tab to visualize the forecast.
+        Copy the reply, then return to Going Blue and tap <Bold>Paste Forecast</Bold> to
+        visualize the forecast.
       </Text>
     </Step>
   );

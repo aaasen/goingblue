@@ -2,7 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import DeviceSetup from './DeviceSetup';
 
 // The getting-started explanation: what the three-step loop is, then the per-device instructions
-// for carrying it out. Shared by the first-run Setup screen and the Builder tab's help sheet, so
+// for carrying it out. Shared by the first-run Setup screen and the help sheet, so
 // the answer to "how do I get a forecast?" is the same one either way.
 export default function GettingStarted() {
   return (
@@ -11,8 +11,7 @@ export default function GettingStarted() {
 
       <Step n={1} title="Build a forecast request">
         <Text style={styles.para}>
-          On the <Bold>Builder</Bold> tab, set the location, weather model, and variables for your
-          forecast.
+          Set the location, weather model, and variables for your forecast.
         </Text>
       </Step>
       <Step n={2} title="Send the request to Going Blue">
@@ -22,7 +21,8 @@ export default function GettingStarted() {
       </Step>
       <Step n={3} title="View the forecast">
         <Text style={styles.para}>
-          Copy the reply into the <Bold>Decoder</Bold> tab to visualize the forecast.
+          Copy the reply, then return to Going Blue and tap <Bold>Paste Forecast</Bold> to
+          visualize the forecast.
         </Text>
       </Step>
 

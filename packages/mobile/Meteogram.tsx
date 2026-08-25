@@ -17,6 +17,7 @@ import {
 } from './cloudBand';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { precipMark, weatherGlyph, wmoName, type MoonPhase, type Prim, type PrecipMarkKind } from './weatherGlyph';
+import { pageInsets } from './insets';
 
 // ── Layout constants ───────────────────────────────────────────────────────
 // Rows are named by a narrow unit rail fixed to the left of the drawing (RowLegend). It sits
@@ -154,16 +155,15 @@ const FREEZE_PAD = 4;
 const FREEZE_MIN_SPAN_M = 700;
 const FREEZE_HEADROOM = 1.2;
 
-// Overview-strip band heights, stacked top to bottom: a per-day calendar header (weekday, day of
+// Overview-strip band heights, stacked top to bottom: a per-day calendar header (day of
 // month) over the mini temperature / precip / wind graphs.
 // Each header band is taller than its text so the rows breathe; the row tops are derived here so
 // the draw sites don't repeat the arithmetic.
 const STRIP_PAD_T = 8;
-const STRIP_DAY_H = 15;
 const STRIP_DATE_H = 18;
 const STRIP_GLYPH_H = 20;
 const STRIP_TVAL_H = 14;
-const STRIP_DATE_Y = STRIP_PAD_T + STRIP_DAY_H;
+const STRIP_DATE_Y = STRIP_PAD_T;
 const STRIP_HEAD_H = STRIP_DATE_Y + STRIP_DATE_H;
 // The day's summary glyph and high sit *on* the temperature silhouette rather than in a band of
 // their own: they annotate the curve, and stacking them above it spent 34px of a 132px strip on
@@ -172,7 +172,9 @@ const STRIP_HEAD_H = STRIP_DATE_Y + STRIP_DATE_H;
 // zone is deep enough that the curve still has room to move below the two lines of text.
 const STRIP_GLYPH_Y = STRIP_HEAD_H;
 const STRIP_TVAL_Y = STRIP_GLYPH_Y + STRIP_GLYPH_H;
-const STRIP_TEMP_H = 50;
+// Trimmed under the day's high rather than sized to the glyph stack alone: the glyph (20) and
+// high (14) end 34px in, leaving 8px of curve-only zone at the bottom of the band.
+const STRIP_TEMP_H = 42;
 const STRIP_PRECIP_H = 13;
 // Height of one precip mark, and the grid the marks sit on: every six hours that carry any
 // precipitation get a mark, whatever resolution the fill used there. The grid is fixed in time
@@ -198,6 +200,11 @@ const STRIP_RES_GAP = 1;
 // temperature zone is one of them now, so the window brackets the glyph and high along with it.
 const STRIP_GRAPH_H = STRIP_TEMP_H + STRIP_PRECIP_H + STRIP_WIND_H + STRIP_RES_H;
 const STRIP_H = STRIP_HEAD_H + STRIP_GRAPH_H;
+// Height of the docked assembly that floats beneath the parked location map: the overview strip
+// plus the pinned date plate. HomeScreen uses it to end the map's park at exactly the scroll
+// offset where this assembly's own clamp ends, so the whole stack — map slice, strip, plate —
+// starts riding off the screen together as a block's last rows run out.
+export const PINNED_STACK_H = STRIP_H + ROW_H.DATE;
 
 // ── Palette ──────────────────────────────────────────────────────────────--
 
@@ -1190,7 +1197,7 @@ interface Fonts {
   hour: SkFont; hourSuffix: SkFont;
   // The strip's header text is light-weight — at header size a thin face keeps the day columns
   // legible without competing with the glyphs below them.
-  strip: SkFont; stripSub: SkFont;
+  strip: SkFont;
   // Wind speeds sit on the ribbon's colored ground; a small light face keeps the numbers from
   // shouting over it in a short row.
   wind: SkFont;
@@ -1476,7 +1483,7 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
     els.push(<Line key="strip-now" p1={vec(mx, graphTop)} p2={vec(mx, STRIP_H)} color="rgba(255,69,58,0.85)" strokeWidth={1} />);
   }
 
-  // Per-day header: weekday and day of month in the calendar band, summary glyph and daily high
+  // Per-day header: day of month in the calendar band, summary glyph and daily high
   // over the temperature silhouette. The day columns are read from the header text alone — no
   // separators, so nothing cuts across the graphs below.
   //
@@ -1504,7 +1511,6 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
         {cloudGlyph(`glyi${d}`, 0, 0, ROW_H.CLOUD, code, false, 'full', true)}
       </Group>,
     );
-    els.push(centerText(`swk${d}`, DAYS[g.date.getUTCDay()].slice(0, 3).toUpperCase(), cx, STRIP_PAD_T + STRIP_DAY_H / 2, fonts.stripSub, SC.label));
     els.push(centerText(`sdm${d}`, String(g.date.getUTCDate()), cx, STRIP_DATE_Y + STRIP_DATE_H / 2, fonts.strip, SC.label));
     if (hi != null) {
       els.push(centerText(`shi${d}`, fmtTemp(hi, units), cx, STRIP_TVAL_Y + STRIP_TVAL_H / 2, fonts.strip, SC.label));
@@ -2775,7 +2781,13 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
 }) {
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<Tile>>(null);
-  const screenW = useWindowDimensions().width;
+  const { width: winW, height: winH } = useWindowDimensions();
+  // Where the strip docks and how much width the page spans are both orientation questions —
+  // portrait clears the status bar above (the parked map covers the band behind the clock),
+  // iPhone landscape clears the camera cutout at the sides instead (see insets.ts). The rail
+  // sits inside this width, which is what keeps the legend out of the cutout.
+  const { top: pinInset, side: sideInset } = pageInsets(winW, winH);
+  const screenW = winW - 2 * sideInset;
   // How much of the forecast is on screen at once: the rail is beside the scroll view, not over
   // it, so it comes off the viewport rather than merely covering part of it.
   const viewportW = screenW - LEGEND_W;
@@ -2789,23 +2801,32 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   const [rootY, setRootY] = useState<number | null>(null);
   const [stripH, setStripH] = useState<number | null>(null);
   const headerY = pinTop != null && rootY != null && stripH != null ? pinTop + rootY + stripH : null;
-  // The pinned copy of the date header: invisible until the drawn header reaches the top of the
-  // screen, then riding the page scroll so it holds that edge — and stopping at the block's
-  // bottom, where it slides off with its own rows rather than floating over the next block's.
+  // The floating assembly: the overview strip is the REAL element, translated to dock flush
+  // with the orientation's top inset (portrait: the status bar's bottom; iPhone landscape: the
+  // top of the screen — see insets.ts), while the pinned copy of the
+  // date header holds the line directly beneath it. Both dock at the same scroll instant: the
+  // strip's top reaching its dock line is exactly the drawn header's top reaching the strip's
+  // docked bottom, since the two are flush in the block — so one interpolation drives both, and
+  // the plate's hard opacity switch lands while the copy lies exactly over the drawn header.
+  // Both stop at the block's bottom, where the assembly slides off with its own rows rather
+  // than floating over the next block's.
   const pin = useMemo(() => {
     if (headerY == null) return null;
+    // The scroll offset at which the assembly docks: the strip's content-y top, less the dock
+    // line's height down the screen.
+    const dockY = headerY - stripH! - pinInset;
     const travel = totalH - ROW_H.DATE;
     return {
       translateY: scrollY.interpolate({
-        inputRange: [headerY, headerY + travel], outputRange: [0, travel], extrapolate: 'clamp',
+        inputRange: [dockY, dockY + travel], outputRange: [0, travel], extrapolate: 'clamp',
       }),
       // A hard switch, not a fade: below the pin point the copy would lie exactly over the drawn
       // header, hiding the night shading and the current-time marker it doesn't reproduce.
       opacity: scrollY.interpolate({
-        inputRange: [headerY - 1, headerY], outputRange: [0, 1], extrapolate: 'clamp',
+        inputRange: [dockY - 1, dockY], outputRange: [0, 1], extrapolate: 'clamp',
       }),
     };
-  }, [headerY, totalH, scrollY]);
+  }, [headerY, stripH, totalH, scrollY, pinInset]);
   // Memoized so tile objects keep their identity across re-renders: CanvasTile bails out by
   // reference equality, and a fresh array would repaint every mounted tile on each selection.
   const tiles = useMemo(() => Array.from({ length: Math.ceil(width / CANVAS_TILE_W) }, (_, index) => {
@@ -2967,9 +2988,15 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     <View onLayout={(e) => setRootY(e.nativeEvent.layout.y)}>
       {/* The strip spans the whole screen, rail and all: it is a map of the forecast rather than
           a row of it, and insetting it would spend 44px of an already coarse graph on nothing.
-          What it does share with the rows below is the viewport those rows are read through. */}
-      <OverviewStrip periods={periods} dates={dates} zoned={zoned} steps={steps} units={units} now={now}
-        width={screenW} viewportW={viewportW} flatListRef={flatListRef} scrollX={scrollX} fonts={fonts} paint={paint} />
+          What it does share with the rows below is the viewport those rows are read through.
+          The wrapper is what floats: the strip itself rides the pin translation (scrubber and
+          all — it is not a copy), over the rows that slide beneath it, docked flush with the
+          bottom of the status bar; the parked map above it (HomeScreen) owns the band the clock
+          sits on. */}
+      <Animated.View style={[styles.stripFloat, pin && { transform: [{ translateY: pin.translateY }] }]}>
+        <OverviewStrip periods={periods} dates={dates} zoned={zoned} steps={steps} units={units} now={now}
+          width={screenW} viewportW={viewportW} flatListRef={flatListRef} scrollX={scrollX} fonts={fonts} paint={paint} />
+      </Animated.View>
       <View style={{ height: totalH }} onLayout={(e) => setStripH(e.nativeEvent.layout.y)}>
       {/* Everything that scrolls, inset past the rail. The overlays inside here are positioned in
           viewport coordinates and ride the scroll; the rail and the section labels are siblings
@@ -3239,7 +3266,6 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY }: {
     hour: matchFont({ fontSize: 12, fontWeight: '400' }),
     hourSuffix: matchFont({ fontSize: 9.5, fontWeight: '400' }),
     strip: matchFont({ fontSize: 11, fontWeight: '300' }),
-    stripSub: matchFont({ fontSize: 9.5, fontWeight: '300' }),
     wind: matchFont({ fontSize: 11.5, fontWeight: '400' }),
     model: matchFont({ fontSize: 11, fontWeight: '600' }),
   }), []);
@@ -3668,6 +3694,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.divider,
   },
+  // The floating strip must draw over the rows that slide beneath it; its siblings render later
+  // and would otherwise paint on top. The plate never overlaps it — the assembly is contiguous.
+  stripFloat: { zIndex: 1 },
   // The scene's slice of the plate, inset past the rail and clipped like the scroll view it
   // shadows, so labels vanish at the rail edge rather than sliding over it.
   pinnedHeaderScene: { position: 'absolute', top: 0, bottom: 0, left: LEGEND_W, right: 0, overflow: 'hidden' },

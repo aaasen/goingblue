@@ -8,7 +8,7 @@ interface Props {
   onClose: () => void;
 }
 
-// Reached from the Builder tab's "How do I get a forecast?" link. Setup's steps only show on first
+// Reached from the home screen's "How do I get a forecast?" link. Setup's steps only show on first
 // run, so this is where that explanation lives afterwards — the same GettingStarted sections,
 // framed as a sheet.
 export default function HelpScreen({ visible, onClose }: Props) {
@@ -33,7 +33,7 @@ export default function HelpScreen({ visible, onClose }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f2f2f7' },
   // The safe area carries the status bar inset now that this runs the full height, so the header
-  // only needs the same 12pt the tab bar's rows use. It kept 24 as a page sheet, to clear the
+  // only needs the same 12pt the app header uses. It kept 24 as a page sheet, to clear the
   // rounded corners UIKit drew over the title.
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

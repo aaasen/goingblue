@@ -86,7 +86,7 @@ function encodeSeq(p: ForecastParams, h = HOURLY, times = TIMES) {
     encodeFillSeq(h, times, p, seq, p.lat!, p.lon!, 500, "US", codec);
 }
 
-// The context a client would store for this request (see BuilderTab), used to decode replies.
+// The context a client would store for this request (see HomeScreen), used to decode replies.
 const ctxFor = (mode: number): RequestContext => ({
   model: 1, // American (US)
   vars_mask: TEST_VARS,
