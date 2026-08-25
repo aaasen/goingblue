@@ -52,6 +52,15 @@ use appropriate judgment and additional sources for safety-critical decisions.</
 arising from your use of, or inability to use, the Service, including any reliance on
 forecast information.</p>
 
+<h2>Data sources</h2>
+<p>Weather forecasts are derived from data provided by <a href="https://open-meteo.com">Open-Meteo</a>.
+Maps are built from data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>
+contributors (via <a href="https://protomaps.com">Protomaps</a>), the
+<a href="https://overturemaps.org">Overture Maps Foundation</a>,
+<a href="https://mapterhorn.com">Mapterhorn</a> (Copernicus DEM), the
+<a href="https://land.copernicus.eu/en/products/global-dynamic-land-cover">Copernicus Global Land
+Service</a>, and <a href="https://www.naturalearthdata.com">Natural Earth</a>.</p>
+
 <h2>Trademarks</h2>
 <p>Apple and iPhone are trademarks of Apple Inc., registered in the U.S. and other countries.
 Garmin, inReach, Earthmate, and Messenger are trademarks of Garmin Ltd. or its subsidiaries.

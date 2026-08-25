@@ -241,6 +241,11 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
               ))}
             </View>
           )}
+          <Text style={styles.attribution}>
+            Map data © OpenStreetMap contributors, via Protomaps; place data from the Overture Maps
+            Foundation; terrain from Mapterhorn (Copernicus DEM); land cover from the Copernicus
+            Global Land Service; region boundaries from Natural Earth.
+          </Text>
         </ScrollView>
       </SafeAreaView>
     </Modal>
@@ -413,6 +418,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, height: 44, marginBottom: 12,
   },
   searchInput: { flex: 1, fontSize: 15, color: '#1c1c1e' },
+
+  attribution: { fontSize: 12, color: '#8e8e93', lineHeight: 17, marginTop: 28 },
 
   clear: { color: '#cc2222', fontSize: 15, fontWeight: '600' },
   clearDisabled: { color: '#c7c7cc' },

@@ -103,6 +103,7 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
       {!fullscreen && (
         <>
           {renderMap(cameraRef, interactive, mapRevision)}
+          {mapStyle && <Text style={styles.attribution}>© OpenStreetMap</Text>}
           <TouchableOpacity
             style={styles.fullscreenButton}
             onPress={() => setFullscreen(true)}
@@ -124,6 +125,7 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
         >
           <View style={styles.fullscreenWrap}>
             {renderMap(fullscreenCameraRef, true)}
+            {mapStyle && <Text style={styles.attribution}>© OpenStreetMap</Text>}
             <TouchableOpacity
               style={styles.doneButton}
               onPress={() => setFullscreen(false)}
@@ -166,6 +168,11 @@ const styles = StyleSheet.create({
   // Rotates with its parent, which a circle doesn't show. The rounded head is centred on the
   // square, so centring the dot centres it in the head.
   pinDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#ffffff' },
+  // The one credit that belongs on the map itself (ODbL); the full provider list is on the
+  // offline maps sheet and the terms page.
+  attribution: {
+    position: 'absolute', bottom: 4, right: 8, fontSize: 10, color: 'rgba(60,60,67,0.6)',
+  },
   fullscreenButton: {
     position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
     width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
