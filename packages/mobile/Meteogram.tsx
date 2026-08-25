@@ -2765,7 +2765,7 @@ function monotonicRange(knots: [input: number, output: number][]): { inputRange:
   return { inputRange, outputRange };
 }
 
-function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, elevation, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint, scrollY, pinTop }: {
+function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, elevation, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint, scrollY, pinTop, msg }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
   periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: UnitPrefs; timeFormat: TimeFormat; now: number; lat: number; lon: number; elevation: number; fonts: Fonts;
@@ -2779,9 +2779,18 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   // that page's scroll content — together they place the pinned date header. `pinTop` is null
   // until the layout chain above this component has reported in.
   scrollY: Animated.Value; pinTop: number | null;
+  // The decoded message this block renders. Only its identity is read here: a new message is a
+  // newly loaded forecast, which starts reading from its first period.
+  msg: ForecastMessage;
 }) {
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<Tile>>(null);
+  // A freshly loaded forecast starts at the beginning. The list persists across loads — blocks
+  // re-render in place — so without this it would keep the previous forecast's scroll position,
+  // which for a new message points at an unrelated stretch of time (or past the end entirely).
+  useEffect(() => {
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [msg]);
   const { width: winW, height: winH } = useWindowDimensions();
   // Where the strip docks and how much width the page spans are both orientation questions —
   // portrait clears the status bar above (the parked map covers the band behind the clock),
@@ -3331,7 +3340,7 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY, onD
             blockIndex={bi}
             selected={sel?.block === bi ? sel.period : null}
             onSelectColumn={selectColumn} paint={paint}
-            scrollY={scrollY}
+            scrollY={scrollY} msg={msg}
             pinTop={selfY != null && blockTops[bi] != null ? selfY + blockTops[bi] : null} />
           {bi < blocks.length - 1 && <View style={styles.sep} />}
         </View>
