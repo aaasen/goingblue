@@ -355,13 +355,26 @@ def catalog_entries(countries_path, states_path, maxzoom):
                for e in by_id.values()]
     continent_of = {e["id"]: e["continent"] for e in entries}
     if states_path:
+        subs = []
         for f in json.load(open(states_path))["features"]:
             p = f["properties"]
             if p["iso_a2"] not in SUBDIVIDE:
                 continue
-            entries.append({"id": p["iso_3166_2"].lower(), "name": p.get("name_en") or p["name"],
-                            "continent": continent_of[p["iso_a2"].lower()], "maxzoom": maxzoom,
-                            "parent": p["iso_a2"].lower(), "geometry": f["geometry"]})
+            subs.append({"id": p["iso_3166_2"].lower(), "name": p.get("name_en") or p["name"],
+                         "local_name": p["name"],
+                         "continent": continent_of[p["iso_a2"].lower()], "maxzoom": maxzoom,
+                         "parent": p["iso_a2"].lower(), "geometry": f["geometry"]})
+        # name_en is preferred (Québec -> Quebec) but can collide: Natural Earth's name_en for
+        # the District of Columbia is "Washington", the city — two Washingtons under the US.
+        # Where same-parent names collide, the plain `name` disambiguates.
+        counts = {}
+        for e in subs:
+            counts[(e["parent"], e["name"])] = counts.get((e["parent"], e["name"]), 0) + 1
+        for e in subs:
+            if counts[(e["parent"], e["name"])] > 1 and e["local_name"] != e["name"]:
+                e["name"] = e["local_name"]
+            del e["local_name"]
+        entries.extend(subs)
     return entries
 
 
