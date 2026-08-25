@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator, Alert, Linking, Modal, SafeAreaView, ScrollView, StyleSheet, Text,
   TouchableOpacity, View,
@@ -6,7 +6,8 @@ import {
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import PreferenceRows from './PreferenceRows';
 import OfflineMapsScreen, { downloadedPacks } from './OfflineMapsScreen';
-import { loadDownloadedPacks, saveDownloadedPacks } from './offlineMaps';
+import { downloadPack as storeDownloadPack, removePack as storeRemovePack, usePackState } from './packStore';
+import { findPack } from './catalog';
 import type { AqiScale, TimeFormat, UnitPrefs } from './settings';
 
 const TERMS_URL = 'https://going.blue/terms';
@@ -29,26 +30,20 @@ export default function SettingsScreen({
 }) {
   const [deleting, setDeleting] = useState(false);
   const [offlineMaps, setOfflineMaps] = useState(false);
-  // Read on mount, which is each time the sheet opens — the Modal unmounts its children while
-  // hidden, so the set is re-read fresh on every visit.
-  const [downloaded, setDownloaded] = useState<ReadonlySet<string>>(new Set());
+  // The pack store owns the set: ids appear once both archives are on disk, and the map's
+  // style rebuilds off the same subscription.
+  const { installed: downloaded } = usePackState();
   const held = downloadedPacks(downloaded);
 
-  useEffect(() => { loadDownloadedPacks().then(setDownloaded); }, []);
-
-  // Selection is the whole of a download for now — the packs aren't published, so choosing one
-  // records it and nothing is fetched. The downloader slots in here when they are.
-  function setPacks(next: Set<string>) {
-    setDownloaded(next);
-    saveDownloadedPacks(next);
-  }
   function downloadPack(id: string) {
-    setPacks(new Set([...downloaded, id]));
+    const pack = findPack(id);
+    if (!pack) return;
+    storeDownloadPack(pack).catch(() => {
+      Alert.alert(`Couldn’t download ${pack.name}`, 'Check your connection and try again.');
+    });
   }
   function removePack(id: string) {
-    const next = new Set(downloaded);
-    next.delete(id);
-    setPacks(next);
+    storeRemovePack(id);
   }
 
   const DELETE_MESSAGE = 'Deletion is permanent.';

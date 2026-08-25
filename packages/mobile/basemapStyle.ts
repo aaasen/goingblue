@@ -220,11 +220,18 @@ export interface ArchivePair {
   hs: string;
 }
 
-// The full style: the bundled global z6 pair (when its assets have resolved) UNDER the online
-// z10 archives. Every tier renders at all zooms — a z6 source overzooms past its data — so
-// whichever upper tiers can't load (offline, R2 unreachable) simply leave the coarser tier
-// beneath showing. Installed packs will slot in between the two as further stacks.
-export function buildBasemapStyle(bundled?: ArchivePair): StyleSpecification {
+// An installed offline pack: the pair on disk plus where it applies.
+export interface PackArchives extends ArchivePair {
+  id: string;
+  bounds: number[]; // W, S, E, N
+}
+
+// The full style: the bundled global z6 pair (when its assets have resolved) at the bottom,
+// each installed pack over it, the online z10 archives on top. Every tier renders at all
+// zooms — a source overzooms past its data — so whichever upper tiers can't load (offline,
+// R2 unreachable) simply leave the finest available tier beneath showing: pack detail where a
+// pack is installed, bundled overview elsewhere.
+export function buildBasemapStyle(bundled?: ArchivePair, packs: PackArchives[] = []): StyleSpecification {
   const sources: StyleSpecification['sources'] = {
     'online-base': {
       type: 'vector',
@@ -245,6 +252,20 @@ export function buildBasemapStyle(bundled?: ArchivePair): StyleSpecification {
     sources['bundled-base'] = { type: 'vector', url: `pmtiles://${bundled.base}`, maxzoom: 6 };
     sources['bundled-hs'] = { type: 'raster', url: `pmtiles://${bundled.hs}`, tileSize: 512, maxzoom: 6 };
     layers.push(...stack('g-', { base: 'bundled-base', hillshade: 'bundled-hs' }));
+  }
+  for (const pack of packs) {
+    // A pack is a z0-10 extract, but the bundled tier already covers 0-6 everywhere, so its
+    // sources start at 6; bounds keep the engine from asking it for tiles elsewhere.
+    const bounds = pack.bounds as [number, number, number, number];
+    sources[`pack-${pack.id}-base`] = {
+      type: 'vector', url: `pmtiles://${pack.base}`, minzoom: 6, maxzoom: DATA_MAX_ZOOM, bounds,
+    };
+    sources[`pack-${pack.id}-hs`] = {
+      type: 'raster', url: `pmtiles://${pack.hs}`, tileSize: 512, minzoom: 6, maxzoom: DATA_MAX_ZOOM, bounds,
+    };
+    layers.push(...stack(`p-${pack.id}-`, {
+      base: `pack-${pack.id}-base`, hillshade: `pack-${pack.id}-hs`, minzoom: 6,
+    }));
   }
   layers.push(...stack('o-', { base: 'online-base', hillshade: 'online-hs' }));
   return { version: 8, glyphs: GLYPHS, sources, layers };

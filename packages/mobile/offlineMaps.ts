@@ -1,10 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { findPack } from './catalog';
 
-// Which map packs this device holds, by catalog id. Nothing downloads yet — the packs aren't
-// published — so for now an id lands here the moment it's chosen and the list is the whole of
-// the feature. The downloader, when it exists, is what moves an id in here after the files are
-// on disk; the map's pack stacks and Settings both read this set.
+// Which map packs this device holds, by catalog id — the persisted half of packStore.ts, which
+// only writes an id here after both archives are on disk and reconciles the set against the
+// files at startup. The map's pack stacks and Settings read it through the store.
 
 const PACKS_KEY = 'offline_map_packs';
 

@@ -14,6 +14,10 @@ import { OfflineManager } from '@maplibre/maplibre-react-native';
 
 export const TILE_CACHE_MAX_BYTES = 500_000_000;
 
+// An emptied cache is still a SQLite file — header page, schema, region bookkeeping — of about
+// 100 KB. At or below this the cache holds no tiles worth reporting or clearing.
+export const TILE_CACHE_EMPTY_BYTES = 300_000;
+
 // Applied at launch: the cap persists in the cache database itself, but re-applying on every
 // start is what keeps it in step with the constant.
 export async function configureTileCache(): Promise<void> {

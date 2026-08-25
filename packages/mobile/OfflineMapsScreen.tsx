@@ -1,13 +1,14 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  ActivityIndicator, Alert, Linking, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput,
-  TouchableOpacity, View,
+  ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, SafeAreaView, ScrollView, StyleSheet,
+  Text, TextInput, TouchableOpacity, View, useWindowDimensions, type GestureResponderEvent,
 } from 'react-native';
 import * as Location from 'expo-location';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { CATALOG, findPack, formatBytes, formatTallyBytes, searchPacks, tally, type Pack } from './catalog';
+import { findPack, formatBytes, formatTallyBytes, searchPacks, tally, type Pack } from './catalog';
 import { regionsAt } from './outlines';
-import { clearTileCache, tileCacheSize } from './tileCache';
+import { usePackState } from './packStore';
+import { clearTileCache, tileCacheSize, TILE_CACHE_EMPTY_BYTES } from './tileCache';
 
 interface Props {
   visible: boolean;
@@ -17,10 +18,11 @@ interface Props {
   onRemove: (id: string) => void;
 }
 
-// Everything the map keeps on the phone: the packs for where the person is standing (the state
-// or province at full detail, the country as an overview), what they already hold, a search for
-// anywhere else — the full catalog is three hundred rows; nobody browses it — and the tile
-// cache the map fills on its own while online.
+// Everything the map keeps on the phone, holdings first: the tile cache the map fills on its
+// own while online and the downloaded regions. Then one download section: the packs for where
+// the person is standing (the state or province at full detail, the country as an overview)
+// with a search for anywhere else below — the full catalog is three hundred rows; nobody
+// browses it.
 
 // Where the phone is, as far as the sheet has got in finding out. `off` is a permission not
 // granted (the row offers to ask); `failed` is a granted permission and no fix.
@@ -36,6 +38,35 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
   // undefined = not read yet; null = couldn't be read.
   const [cacheBytes, setCacheBytes] = useState<number | null | undefined>(undefined);
   const [clearing, setClearing] = useState(false);
+  // Keyboard height as extra scroll room. automaticallyAdjustKeyboardInsets would do this, but
+  // it doesn't work inside a Modal (the keyboard frame is measured against the window), so the
+  // sheet tracks the keyboard itself. Android resizes the window instead.
+  const [keyboard, setKeyboard] = useState(0);
+  const [searching, setSearching] = useState(false);
+  const { height: windowHeight } = useWindowDimensions();
+  const scrollRef = useRef<ScrollView>(null);
+  const searchY = useRef(0);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    const show = Keyboard.addListener('keyboardWillShow', (e) => setKeyboard(e.endCoordinates.height));
+    const hide = Keyboard.addListener('keyboardWillHide', () => setKeyboard(0));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+
+  // While a search is underway, the content gets a viewport-sized tail: without it the scroll
+  // clamps — there isn't enough below the search box to bring it to the top — and the results
+  // end up under the keyboard. With it, the search pins to the top and the results own the band
+  // between it and the keyboard. The tail holds while the query is non-empty, not just while
+  // the field has focus: a tap on a result dismisses the keyboard, and if the tail collapsed on
+  // that blur the rows would move mid-press and the tap would cancel instead of downloading.
+  const bottomPad = searching || query.trim() ? windowHeight : keyboard > 0 ? keyboard + 12 : undefined;
+
+  function scrollToSearch() {
+    setSearching(true);
+    // After the keyboard animation and the padding render it needs.
+    setTimeout(() => scrollRef.current?.scrollTo({ y: searchY.current - 8, animated: true }), 300);
+  }
 
   // Look the position up on each open. Only when access was already granted: a permission
   // dialog on top of a sheet that just slid in asks before the person has seen what it's for —
@@ -92,8 +123,16 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
   }
 
   const held = downloadedPacks(downloaded);
-  const control = (pack: Pack) => (
-    <DownloadControl pack={pack} downloaded={downloaded} onDownload={onDownload} onRemove={(p) => confirmRemovePack(p, onRemove)} />
+  const heldBytes = tally(held.packs).bytes;
+  // In the suggestion and search lists the whole row acts and its icon is decoration — with the
+  // keyboard up a tap on a non-touchable row body only dismisses the keyboard, and an icon with
+  // its own press would fire the action twice.
+  const rowAction = (pack: Pack) => () =>
+    downloaded.has(pack.id) ? confirmRemovePack(pack, onRemove) : onDownload(pack.id);
+  // The skeleton of an emptied cache still has a file size; don't report it as content.
+  const cacheEmpty = cacheBytes != null && cacheBytes <= TILE_CACHE_EMPTY_BYTES;
+  const control = (pack: Pack, interactive = true) => (
+    <DownloadControl pack={pack} downloaded={downloaded} onDownload={onDownload} onRemove={(p) => confirmRemovePack(p, onRemove)} interactive={interactive} />
   );
   const results = searchPacks(query);
 
@@ -107,13 +146,47 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+        <ScrollView
+          ref={scrollRef}
+          style={styles.scroll}
+          contentContainerStyle={[styles.content, bottomPad != null && { paddingBottom: bottomPad }]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
           <Text style={styles.intro}>
             Going Blue comes with a low-resolution map of the world for displaying forecast location.
-            Download higher resolution maps for offline use.
+            Download maps for higher resolution while offline.
           </Text>
 
-          <Text style={styles.heading}>Where you are</Text>
+          <Text style={styles.heading}>{heldBytes ? `Offline maps · ${formatBytes(heldBytes)}` : 'Offline maps'}</Text>
+          <View style={styles.card}>
+            {held.packs.map((pack, i) => (
+              <Row key={pack.id} title={pack.name} subtitle={packDetails(pack)} divider={i > 0} trailing={control(pack)} />
+            ))}
+            <Row
+              divider={held.packs.length > 0}
+              title="Tile cache"
+              subtitle={cacheBytes === undefined ? 'Measuring…'
+                : cacheBytes === null ? 'Size unavailable'
+                : cacheEmpty ? 'Empty'
+                : formatBytes(cacheBytes)}
+              trailing={
+                <TouchableOpacity
+                  onPress={confirmClearCache}
+                  disabled={clearing || cacheEmpty || cacheBytes == null}
+                  activeOpacity={0.6}
+                  accessibilityRole="button"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  {clearing
+                    ? <ActivityIndicator color="#cc2222" />
+                    : <Text style={[styles.clear, (cacheEmpty || cacheBytes == null) && styles.clearDisabled]}>Clear</Text>}
+                </TouchableOpacity>
+              }
+            />
+          </View>
+
+          <Text style={[styles.heading, styles.headingGap]}>Download maps</Text>
           <View style={styles.card}>
             {here.kind === 'locating' && (
               <Row title="Finding your location…" subtitle="" trailing={<ActivityIndicator color="#8e8e93" />} />
@@ -138,23 +211,11 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
               <Row title="No map pack here" subtitle="You're outside every region the packs cover" />
             )}
             {here.kind === 'found' && here.packs.map((pack, i) => (
-              <Row key={pack.id} title={pack.name} subtitle={packDetails(pack)} divider={i > 0} trailing={control(pack)} />
+              <Row key={pack.id} title={pack.name} subtitle={packDetails(pack)} divider={i > 0} trailing={control(pack, false)} onPress={rowAction(pack)} />
             ))}
           </View>
 
-          {held.packs.length > 0 && (
-            <>
-              <Text style={[styles.heading, styles.headingGap]}>Downloaded</Text>
-              <View style={styles.card}>
-                {held.packs.map((pack, i) => (
-                  <Row key={pack.id} title={pack.name} subtitle={packDetails(pack)} divider={i > 0} trailing={control(pack)} />
-                ))}
-              </View>
-              <Text style={styles.note}>{held.summary}</Text>
-            </>
-          )}
-
-          <Text style={[styles.heading, styles.headingGap]}>Other regions</Text>
+          <View style={styles.searchGap} onLayout={(e) => { searchY.current = e.nativeEvent.layout.y; }} />
           <View style={styles.search}>
             <MaterialCommunityIcons name="magnify" size={20} color="#8e8e93" />
             <TextInput
@@ -165,6 +226,8 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
               placeholderTextColor="#8e8e93"
               autoCapitalize="words"
               autoCorrect={false}
+              onFocus={scrollToSearch}
+              onBlur={() => setSearching(false)}
               clearButtonMode="while-editing"
               returnKeyType="search"
               accessibilityLabel="Search regions"
@@ -174,30 +237,10 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
             <View style={styles.card}>
               {results.length === 0 && <Row title="No regions match" subtitle="" />}
               {results.map((pack, i) => (
-                <Row key={pack.id} title={pack.name} subtitle={packDetails(pack)} divider={i > 0} trailing={control(pack)} />
+                <Row key={pack.id} title={pack.name} subtitle={packDetails(pack)} divider={i > 0} trailing={control(pack, false)} onPress={rowAction(pack)} />
               ))}
             </View>
           )}
-          <Text style={[styles.heading, styles.headingGap]}>Tile cache</Text>
-          <View style={styles.card}>
-            <Row
-              title="Cached tiles"
-              subtitle={cacheBytes === undefined ? 'Measuring…' : cacheBytes === null ? 'Size unavailable' : formatBytes(cacheBytes)}
-              trailing={
-                <TouchableOpacity
-                  onPress={confirmClearCache}
-                  disabled={clearing || !cacheBytes}
-                  activeOpacity={0.6}
-                  accessibilityRole="button"
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  {clearing
-                    ? <ActivityIndicator color="#cc2222" />
-                    : <Text style={[styles.clear, !cacheBytes && styles.clearDisabled]}>Clear</Text>}
-                </TouchableOpacity>
-              }
-            />
-          </View>
         </ScrollView>
       </SafeAreaView>
     </Modal>
@@ -222,8 +265,35 @@ function Row({ title, subtitle, trailing, divider, onPress }: {
   divider?: boolean;
   onPress?: () => void;
 }) {
+  // With the keyboard up inside this Modal, the scroll view's keyboard-dismiss handling eats
+  // the press (keyboardShouldPersistTaps doesn't help on the new architecture), so the row
+  // recognizes taps itself from the raw touch events, which still arrive when the press is
+  // cancelled: touch down and up in nearly the same place, quickly, is a tap. The normal press
+  // path stays for feedback and accessibility; `fire` dedupes when both deliver.
+  const touch = useRef({ x: 0, y: 0, t: 0, firedAt: 0 });
+  const fire = () => {
+    const now = Date.now();
+    if (now - touch.current.firedAt < 400) return;
+    touch.current.firedAt = now;
+    onPress?.();
+  };
+  const raw = onPress
+    ? {
+        onTouchStart: (e: GestureResponderEvent) => {
+          touch.current.x = e.nativeEvent.pageX;
+          touch.current.y = e.nativeEvent.pageY;
+          touch.current.t = Date.now();
+        },
+        onTouchEnd: (e: GestureResponderEvent) => {
+          const { x, y, t } = touch.current;
+          const dx = e.nativeEvent.pageX - x;
+          const dy = e.nativeEvent.pageY - y;
+          if (Date.now() - t < 400 && dx * dx + dy * dy < 144) fire();
+        },
+      }
+    : undefined;
   const body = (
-    <View style={[styles.row, divider && styles.rowDivider]}>
+    <View style={[styles.row, divider && styles.rowDivider]} {...raw}>
       <View style={styles.rowText}>
         <Text style={styles.rowTitle}>{title}</Text>
         {subtitle ? <Text style={styles.rowSubtitle}>{subtitle}</Text> : null}
@@ -232,7 +302,11 @@ function Row({ title, subtitle, trailing, divider, onPress }: {
     </View>
   );
   return onPress
-    ? <TouchableOpacity onPress={onPress} activeOpacity={0.6} accessibilityRole="button">{body}</TouchableOpacity>
+    ? (
+      <TouchableOpacity onPress={fire} activeOpacity={0.6} accessibilityRole="button">
+        {body}
+      </TouchableOpacity>
+    )
     : body;
 }
 
@@ -257,15 +331,30 @@ export function downloadedPacks(downloaded: ReadonlySet<string>): { packs: Pack[
   return { packs, summary: joinDetails([`${t.packs} ${t.packs === 1 ? 'region' : 'regions'}`, formatTallyBytes(t)]) };
 }
 
-// The row's action: download, or — once downloaded — a check that offers removal. Shared with
-// the Settings list, where every row is the second kind.
-export function DownloadControl({ pack, downloaded, onDownload, onRemove }: {
+// The row's action: download (with its progress while running), or — once downloaded — a check
+// that offers removal. Shared with the Settings list, where every row is the second kind.
+export function DownloadControl({ pack, downloaded, onDownload, onRemove, interactive = true }: {
   pack: Pack;
   downloaded: ReadonlySet<string>;
   onDownload: (id: string) => void;
   onRemove: (pack: Pack) => void;
+  // false when the whole row is the button (suggestions, search results): the icon still shows
+  // the state but doesn't press, so a tap on it can't fire the action twice.
+  interactive?: boolean;
 }) {
+  const { progress } = usePackState();
+  const running = progress.get(pack.id);
+  if (running !== undefined) {
+    return (
+      <View style={progressStyles.wrap} accessibilityLabel={`Downloading ${pack.name}`}>
+        <Text style={progressStyles.pct}>{Math.round(running * 100)}%</Text>
+        <ActivityIndicator color="#2a6bb5" />
+      </View>
+    );
+  }
   const on = downloaded.has(pack.id);
+  const icon = <MaterialCommunityIcons name={on ? 'check-circle' : 'download-circle-outline'} size={26} color="#2a6bb5" />;
+  if (!interactive) return icon;
   return (
     <TouchableOpacity
       onPress={() => (on ? onRemove(pack) : onDownload(pack.id))}
@@ -274,15 +363,20 @@ export function DownloadControl({ pack, downloaded, onDownload, onRemove }: {
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       activeOpacity={0.6}
     >
-      <MaterialCommunityIcons name={on ? 'check-circle' : 'download-circle-outline'} size={26} color="#2a6bb5" />
+      {icon}
     </TouchableOpacity>
   );
 }
 
+const progressStyles = StyleSheet.create({
+  wrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  pct: { fontSize: 13, color: '#8e8e93', fontVariant: ['tabular-nums'] },
+});
+
 // The removal confirmation both lists use.
 export function confirmRemovePack(pack: Pack, onRemove: (id: string) => void) {
-  const size = pack.bytes == null ? '' : ` This frees ${formatBytes(pack.bytes)}.`;
-  Alert.alert(`Remove ${pack.name}?`, `The map keeps its bundled z${CATALOG.bundled.maxzoom} detail there.${size}`, [
+  const message = pack.bytes == null ? undefined : `This will free ${formatBytes(pack.bytes)} of storage.`;
+  Alert.alert(`Remove ${pack.name}?`, message, [
     { text: 'Cancel', style: 'cancel' },
     { text: 'Remove', style: 'destructive', onPress: () => onRemove(pack.id) },
   ]);
@@ -313,6 +407,7 @@ const styles = StyleSheet.create({
   rowTitle: { fontSize: 15, color: '#1c1c1e' },
   rowSubtitle: { fontSize: 13, color: '#8e8e93', marginTop: 2 },
 
+  searchGap: { height: 12 },
   search: {
     flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fff', borderRadius: 12,
     paddingHorizontal: 12, height: 44, marginBottom: 12,

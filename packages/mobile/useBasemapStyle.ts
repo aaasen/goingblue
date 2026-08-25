@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Asset } from 'expo-asset';
 import { LogManager, type StyleSpecification } from '@maplibre/maplibre-react-native';
-import { buildBasemapStyle } from './basemapStyle';
+import { buildBasemapStyle, type ArchivePair } from './basemapStyle';
+import { installedPacks, usePackState } from './packStore';
 
 // A tile or archive fetch failing is normal operation for this map — offline (or with R2
 // unreachable) the layout is DESIGNED to fall back to the bundled tier — but MapLibre logs every
@@ -19,9 +20,10 @@ LogManager.onLog((event) => {
 const BUNDLED_BASE = require('./assets/basemap/global-z6-base.pmtiles');
 const BUNDLED_HS = require('./assets/basemap/global-z6-hs.pmtiles');
 
-let cached: StyleSpecification | null = null;
+// undefined = not resolved yet; null = resolution failed, map runs online-only.
+let cachedBundled: ArchivePair | null | undefined;
 
-async function resolveStyle(): Promise<StyleSpecification> {
+async function resolveBundled(): Promise<ArchivePair | null> {
   try {
     // In a release build the assets are in the app binary and this is a local copy at most.
     // In a DEV build Metro serves assets over HTTP, so the very first resolve needs the dev
@@ -29,30 +31,35 @@ async function resolveStyle(): Promise<StyleSpecification> {
     const [base, hs] = await Asset.loadAsync([BUNDLED_BASE, BUNDLED_HS]);
     if (base.localUri && hs.localUri) {
       if (__DEV__) console.log(`bundled basemap: ${base.localUri} + ${hs.localUri}`);
-      return buildBasemapStyle({ base: base.localUri, hs: hs.localUri });
+      return { base: base.localUri, hs: hs.localUri };
     }
     throw new Error(`no localUri (base ${base.localUri}, hs ${hs.localUri})`);
   } catch (e) {
     // Online-only fallback. Loud in dev: a silently missing bundled tier looks like a subtly
     // broken offline mode rather than a load failure.
     console.warn(`bundled basemap unavailable, map is online-only: ${e}`);
+    return null;
   }
-  return buildBasemapStyle();
 }
 
-// The map style, once the bundled archives have resolved to local files; null on first render.
+// The map style: bundled tier + installed packs + online tier. Null only on the very first
+// render while the bundled archives resolve; rebuilt whenever a pack is installed or removed.
 export function useBasemapStyle(): StyleSpecification | null {
-  const [style, setStyle] = useState(cached);
+  const [bundled, setBundled] = useState(cachedBundled);
+  const { installed } = usePackState();
   useEffect(() => {
-    if (cached) return;
+    if (cachedBundled !== undefined) return;
     let live = true;
-    resolveStyle().then((s) => {
-      cached = s;
-      if (live) setStyle(s);
+    resolveBundled().then((pair) => {
+      cachedBundled = pair;
+      if (live) setBundled(pair);
     });
     return () => {
       live = false;
     };
   }, []);
-  return style;
+  return useMemo(() => {
+    if (bundled === undefined) return null;
+    return buildBasemapStyle(bundled ?? undefined, installedPacks());
+  }, [bundled, installed]);
 }
