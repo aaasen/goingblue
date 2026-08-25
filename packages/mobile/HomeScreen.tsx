@@ -81,6 +81,9 @@ const LOCATION_BLOCKED =
   'Location access is off for Going Blue. Turn it on in Settings or pick a forecast location ' +
   'on the map.';
 const LOCATION_FAILED = `Couldn’t get your current location. ${LOCATION_FALLBACK}`;
+// Shown under the greyed action button when custom mode has no usable coordinates — the field is
+// empty or unreadable. Whichever it is, the fix is the same, so one message covers both.
+const NO_LOCATION_MESSAGE = 'Choose a location to request a forecast';
 
 // A fix taken when the app was opened can be hours old by the time a request goes out, and a
 // forecast for where the phone used to be reads exactly like the right one. Sends re-fix beyond
@@ -1472,7 +1475,14 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         {/* Says why Get Forecast is greyed out, so it's shown only when that's the button on screen.
             Keyed on `offline` alone, not on fetchDisabled — a button greyed for want of a location is
             a different problem with a different fix. */}
-        {device === 'internet' && offline && <Text style={styles.offlineNote}>{OFFLINE_MESSAGE}</Text>}
+        {device === 'internet' && offline && <Text style={styles.actionNote}>{OFFLINE_MESSAGE}</Text>}
+        {/* The location half of that: custom mode with nothing usable in the field greys every
+            device's button, and the input sits a few sections up by the time the button is on
+            screen. Both notes can show at once — offline and no location are separate problems,
+            each with its own fix. */}
+        {locationMode === 'custom' && !coordsValid && (
+          <Text style={styles.actionNote}>{NO_LOCATION_MESSAGE}</Text>
+        )}
 
         <TouchableOpacity
           style={styles.helpLink}
@@ -1893,7 +1903,7 @@ const styles = StyleSheet.create({
   btnIcon: { marginRight: 8 },
   btnText: { fontSize: 16, fontWeight: '600' },
 
-  offlineNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, textAlign: 'center', marginTop: 10 },
+  actionNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, textAlign: 'center', marginTop: 10 },
   // A settings row: label left, switch right, the switch's own height setting the row's.
   switchRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
