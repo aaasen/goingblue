@@ -72,7 +72,7 @@ Configure rclone: `rclone config`
 
 Upload to R2:
 ```bash
-rclone copy /data/work-z10 r2:basemap --include 'global-*.pmtiles' --include 'packs/**' --include catalogue.json --progress
+rclone copy /data/work-z10 r2:basemap --include 'global-*.pmtiles' --include 'packs/**' --include catalog.json --progress
 ```
 
 5. Update the basemap bundled in the app.
@@ -81,7 +81,7 @@ Run this from your own machine, not the VM:
 
 ```bash
 gcloud compute scp --zone us-west1-b \
-  basemap:/data/work-z10/{catalogue.json,outlines.json,global-z6-base.pmtiles,global-z6-hs.pmtiles} \
+  basemap:/data/work-z10/{catalog.json,outlines.json,global-z6-base.pmtiles,global-z6-hs.pmtiles} \
   packages/mobile/assets/
 ```
 

@@ -1,17 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CATALOGUE, continentPackIds, continents, countryPackIds, downloadedTally, formatBytes,
-  formatTallyBytes, subdivisions, tally, type Catalogue, type Pack,
-} from '../catalogue';
+  CATALOG, continentPackIds, continents, countryPackIds, downloadedTally, formatBytes,
+  formatTallyBytes, subdivisions, tally, type Catalog, type Pack,
+} from '../catalog';
 
-// The bundled catalogue is the driver's output for the tracked Natural Earth polygons; these pin
+// The bundled catalog is the driver's output for the tracked Natural Earth polygons; these pin
 // the shape the screen relies on, so a rebuilt file that drops a field fails here, not on device.
-describe('bundled catalogue', () => {
+describe('bundled catalog', () => {
   it('lists the world to z6 and packs to z10', () => {
-    expect(CATALOGUE.bundled.maxzoom).toBe(6);
-    expect(CATALOGUE.maxzoom).toBe(10);
-    expect(CATALOGUE.packs.length).toBeGreaterThan(300);
-    for (const p of CATALOGUE.packs) {
+    expect(CATALOG.bundled.maxzoom).toBe(6);
+    expect(CATALOG.maxzoom).toBe(10);
+    expect(CATALOG.packs.length).toBeGreaterThan(300);
+    for (const p of CATALOG.packs) {
       expect(p.maxzoom).toBe(p.id === 'us' || p.id === 'ca' ? 9 : 10);
       expect(p.continent).toBeTruthy();
       expect(p.bounds).toHaveLength(4);
@@ -19,7 +19,7 @@ describe('bundled catalogue', () => {
   });
 
   it('subdivides exactly the US and Canada', () => {
-    const parents = new Set(CATALOGUE.packs.filter((p) => p.parent).map((p) => p.parent));
+    const parents = new Set(CATALOG.packs.filter((p) => p.parent).map((p) => p.parent));
     expect([...parents].sort()).toEqual(['ca', 'us']);
     expect(subdivisions('us')).toHaveLength(51);
     expect(subdivisions('ca')).toHaveLength(13);
@@ -45,8 +45,8 @@ const pack = (id: string, bytes: number | null, parent: string | null = null): P
   id, name: id, continent: 'Test', parent, maxzoom: 10, bounds: [0, 0, 1, 1], bytes,
   files: { base: `packs/${id}-base.pmtiles`, hs: `packs/${id}-hs.pmtiles` },
 });
-const cat: Catalogue = {
-  ...CATALOGUE,
+const cat: Catalog = {
+  ...CATALOG,
   packs: [pack('aa', 66_000_000), pack('bb', null), pack('aa-x', 8_500_000, 'aa'), pack('aa-y', 6_700_000, 'aa')],
 };
 
@@ -59,7 +59,7 @@ describe('tallies', () => {
     const downloaded = new Set(['aa-x', 'bb', 'zz']);
     expect(downloadedTally(countryPackIds('aa', cat), downloaded, cat)).toEqual({ packs: 1, bytes: 8_500_000, unsized: 0 });
     expect(downloadedTally(['bb'], downloaded, cat)).toEqual({ packs: 1, bytes: 0, unsized: 1 });
-    // An id the catalogue doesn't list counts for nothing.
+    // An id the catalog doesn't list counts for nothing.
     expect(downloadedTally(downloaded, downloaded, cat).packs).toBe(2);
   });
 });

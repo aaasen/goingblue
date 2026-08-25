@@ -1,10 +1,10 @@
-import bundled from './assets/catalogue.json';
+import bundled from './assets/catalog.json';
 
-// The offline-map catalogue: what the basemap build (maps/build/basemap.py) published, as the
+// The offline-map catalog: what the basemap build (maps/build/basemap.py) published, as the
 // app lists it. The world is bundled to z6; everything below is a pack — one per country, plus
 // states / provinces inside the US and Canada — cut to `maxzoom` from the same global archive.
 //
-// The copy in assets/ is the `catalogue` step's output from the tracked Natural Earth polygons:
+// The copy in assets/ is the `catalog` step's output from the tracked Natural Earth polygons:
 // the full list with no sizes, because the packs haven't been built. When they have, the
 // `packs` step writes the same file with `bytes` filled in and it replaces this one.
 
@@ -19,7 +19,7 @@ export interface Pack {
   files: { base: string; hs: string };
 }
 
-export interface Catalogue {
+export interface Catalog {
   version: number;
   maxzoom: number;
   bundled_maxzoom: number;
@@ -29,7 +29,7 @@ export interface Catalogue {
   packs: Pack[];
 }
 
-export const CATALOGUE: Catalogue = bundled;
+export const CATALOG: Catalog = bundled;
 
 export interface Continent {
   id: string;          // Natural Earth's name, verbatim — the key the packs carry
@@ -49,7 +49,7 @@ const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompar
 
 // The top level of the list: continents by name, with their countries by name. The islands group
 // goes last rather than alphabetically under O, since it's a catch-all rather than a place.
-export function continents(cat: Catalogue = CATALOGUE): Continent[] {
+export function continents(cat: Catalog = CATALOG): Continent[] {
   const groups = new Map<string, Pack[]>();
   for (const pack of cat.packs) {
     if (pack.parent) continue;
@@ -63,11 +63,11 @@ export function continents(cat: Catalogue = CATALOGUE): Continent[] {
 }
 
 // A country's states / provinces, by name; empty for the countries that aren't subdivided.
-export function subdivisions(countryId: string, cat: Catalogue = CATALOGUE): Pack[] {
+export function subdivisions(countryId: string, cat: Catalog = CATALOG): Pack[] {
   return cat.packs.filter((p) => p.parent === countryId).sort(byName);
 }
 
-export function findPack(id: string, cat: Catalogue = CATALOGUE): Pack | undefined {
+export function findPack(id: string, cat: Catalog = CATALOG): Pack | undefined {
   return cat.packs.find((p) => p.id === id);
 }
 
@@ -91,8 +91,8 @@ export function tally(packs: Iterable<Pack>): Tally {
 }
 
 // The packs from `ids` that are downloaded, as a tally. `ids` scopes it: a continent's countries,
-// a country's states, or the whole catalogue.
-export function downloadedTally(ids: Iterable<string>, downloaded: ReadonlySet<string>, cat: Catalogue = CATALOGUE): Tally {
+// a country's states, or the whole catalog.
+export function downloadedTally(ids: Iterable<string>, downloaded: ReadonlySet<string>, cat: Catalog = CATALOG): Tally {
   const packs: Pack[] = [];
   for (const id of ids) {
     if (!downloaded.has(id)) continue;
@@ -103,12 +103,12 @@ export function downloadedTally(ids: Iterable<string>, downloaded: ReadonlySet<s
 }
 
 // Every pack id under a country: the country itself and its subdivisions.
-export function countryPackIds(countryId: string, cat: Catalogue = CATALOGUE): string[] {
+export function countryPackIds(countryId: string, cat: Catalog = CATALOG): string[] {
   return [countryId, ...subdivisions(countryId, cat).map((p) => p.id)];
 }
 
 // Every pack id in a continent, countries and their subdivisions alike.
-export function continentPackIds(continent: Continent, cat: Catalogue = CATALOGUE): string[] {
+export function continentPackIds(continent: Continent, cat: Catalog = CATALOG): string[] {
   return continent.countries.flatMap((c) => countryPackIds(c.id, cat));
 }
 
@@ -117,7 +117,7 @@ export function continentPackIds(continent: Continent, cat: Catalogue = CATALOGU
 // word, which ranks over one inside a word, so "wa" lists Washington before Botswana. Ties by
 // name. A subdivision also matches its country's name ("united" finds the states too), after
 // the packs matching on their own name.
-export function searchPacks(query: string, limit = 12, cat: Catalogue = CATALOGUE): Pack[] {
+export function searchPacks(query: string, limit = 12, cat: Catalog = CATALOG): Pack[] {
   const q = fold(query);
   if (!q) return [];
   const names = new Map(cat.packs.map((p) => [p.id, p.name]));

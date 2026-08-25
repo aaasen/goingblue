@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import * as Location from 'expo-location';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { CATALOGUE, findPack, formatBytes, formatTallyBytes, searchPacks, tally, type Pack } from './catalogue';
+import { CATALOG, findPack, formatBytes, formatTallyBytes, searchPacks, tally, type Pack } from './catalog';
 import { regionsAt } from './outlines';
 import { clearTileCache, tileCacheSize } from './tileCache';
 
@@ -19,7 +19,7 @@ interface Props {
 
 // Everything the map keeps on the phone: the packs for where the person is standing (the state
 // or province at full detail, the country as an overview), what they already hold, a search for
-// anywhere else — the full catalogue is three hundred rows; nobody browses it — and the tile
+// anywhere else — the full catalog is three hundred rows; nobody browses it — and the tile
 // cache the map fills on its own while online.
 
 // Where the phone is, as far as the sheet has got in finding out. `off` is a permission not
@@ -282,7 +282,7 @@ export function DownloadControl({ pack, downloaded, onDownload, onRemove }: {
 // The removal confirmation both lists use.
 export function confirmRemovePack(pack: Pack, onRemove: (id: string) => void) {
   const size = pack.bytes == null ? '' : ` This frees ${formatBytes(pack.bytes)}.`;
-  Alert.alert(`Remove ${pack.name}?`, `The map keeps its bundled z${CATALOGUE.bundled.maxzoom} detail there.${size}`, [
+  Alert.alert(`Remove ${pack.name}?`, `The map keeps its bundled z${CATALOG.bundled.maxzoom} detail there.${size}`, [
     { text: 'Cancel', style: 'cancel' },
     { text: 'Remove', style: 'destructive', onPress: () => onRemove(pack.id) },
   ]);

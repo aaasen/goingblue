@@ -9,7 +9,7 @@
     basemap.py hillshade --work DIR --terrain SRC --maxzoom 10
     basemap.py regions  --work DIR                                   # Natural Earth polygons
     basemap.py packs    --work DIR [--maxzoom 10] [--only id,id]
-    basemap.py catalogue --work DIR [--maxzoom 10]                   # the list + outlines, no tiles
+    basemap.py catalog --work DIR [--maxzoom 10]                   # the list + outlines, no tiles
 
 SRC is a local .pmtiles or an https:// archive (then `pmtiles extract --maxzoom` pulls a
 z0-MAXZOOM copy into DIR first). Outputs in DIR:
@@ -21,8 +21,8 @@ z0-MAXZOOM copy into DIR first). Outputs in DIR:
     global-hs.pmtiles                prebaked hillshade (the online archive)
     global-z6-{base,hs}.pmtiles      z0-6 extract, bundled with the app
     regions/ne_{countries,states}.geojson  Natural Earth 10m admin-0 / admin-1 (regions step)
-    packs/<id>-{base,hs}.pmtiles     one pair per catalogue entry
-    catalogue.json                   what the app lists: id, name, continent, parent, maxzoom, bounds, bytes
+    packs/<id>-{base,hs}.pmtiles     one pair per catalog entry
+    catalog.json                   what the app lists: id, name, continent, parent, maxzoom, bounds, bytes
     outlines.json                    simplified pack polygons, for the app's "where you are" lookup
 
 Every step skips work whose output already exists, so a killed run (spot VM) resumes.
@@ -324,8 +324,8 @@ def merge_geometries(geoms):
     return {"type": "MultiPolygon", "coordinates": polys}
 
 
-def catalogue_entries(countries_path, states_path, maxzoom):
-    """Catalogue rows from Natural Earth admin-0 and admin-1: (id, name, continent, parent, maxzoom, geometry).
+def catalog_entries(countries_path, states_path, maxzoom):
+    """Catalog rows from Natural Earth admin-0 and admin-1: (id, name, continent, parent, maxzoom, geometry).
 
     `continent` is Natural Earth's (the app groups the list by it); a merged pack takes the
     owning unit's, a state its country's.
@@ -390,7 +390,7 @@ def extract(src, out, region=None, maxzoom=None):
     run_to(out, cmd)
 
 
-def catalogue_row(e, nbytes):
+def catalog_row(e, nbytes):
     return {"id": e["id"], "name": e["name"], "continent": e["continent"], "parent": e["parent"],
             "maxzoom": e["maxzoom"], "bounds": bounds_of(e["geometry"]), "bytes": nbytes,
             "files": {"base": f"packs/{e['id']}-base.pmtiles", "hs": f"packs/{e['id']}-hs.pmtiles"}}
@@ -411,8 +411,8 @@ def write_outlines(work, entries):
     log(f"outlines: {len(out)} packs, {(work / 'outlines.json').stat().st_size / 1e6:.2f} MB")
 
 
-def write_catalogue(work, rows, maxzoom):
-    """catalogue.json: the archives and every pack, with `bytes` null where the pack isn't built."""
+def write_catalog(work, rows, maxzoom):
+    """catalog.json: the archives and every pack, with `bytes` null where the pack isn't built."""
     rows.sort(key=lambda r: (r["parent"] or "", r["id"]))
     bundled = [work / f"global-z{BUNDLED_ZOOM}-{k}.pmtiles" for k in ("base", "hs")]
     cat = {"version": 1, "maxzoom": maxzoom, "bundled_maxzoom": BUNDLED_ZOOM,
@@ -422,16 +422,16 @@ def write_catalogue(work, rows, maxzoom):
            "bundled": {"base": bundled[0].name, "hs": bundled[1].name, "maxzoom": BUNDLED_ZOOM,
                        "bytes": sum(p.stat().st_size for p in bundled) if all(done(p) for p in bundled) else None},
            "packs": rows}
-    json.dump(cat, open(work / "catalogue.json", "w"), indent=1)
+    json.dump(cat, open(work / "catalog.json", "w"), indent=1)
     built = [r["bytes"] for r in rows if r["bytes"] is not None]
-    log(f"catalogue: {len(rows)} packs, {len(built)} built, {sum(built) / 1e9:.2f} GB")
+    log(f"catalog: {len(rows)} packs, {len(built)} built, {sum(built) / 1e9:.2f} GB")
 
 
-def build_catalogue(work, countries, states, maxzoom):
-    """The catalogue and outlines alone, before any tiles exist: every pack with `bytes` null. The
+def build_catalog(work, countries, states, maxzoom):
+    """The catalog and outlines alone, before any tiles exist: every pack with `bytes` null. The
     app bundles these so its offline-maps list can be built (and tested) ahead of the archives."""
-    entries = catalogue_entries(countries, states, maxzoom)
-    write_catalogue(work, [catalogue_row(e, None) for e in entries], maxzoom)
+    entries = catalog_entries(countries, states, maxzoom)
+    write_catalog(work, [catalog_row(e, None) for e in entries], maxzoom)
     write_outlines(work, entries)
 
 
@@ -446,7 +446,7 @@ def build_packs(work, base, hs, countries, states, maxzoom, only=None):
     extract(hs, work / f"global-z{BUNDLED_ZOOM}-hs.pmtiles", maxzoom=BUNDLED_ZOOM)
 
     rows = []
-    entries = catalogue_entries(countries, states, maxzoom)
+    entries = catalog_entries(countries, states, maxzoom)
     write_outlines(work, entries)
     if only:
         entries = [e for e in entries if e["id"] in only]
@@ -461,7 +461,7 @@ def build_packs(work, base, hs, countries, states, maxzoom, only=None):
                 extract(src, out, region=region, maxzoom=e["maxzoom"])
             except subprocess.CalledProcessError:
                 # A region with no tiles in the source (test runs on a regional source) yields
-                # no pack; the catalogue simply omits it.
+                # no pack; the catalog simply omits it.
                 log(f"no {kind} tiles for {e['id']}, skipping")
                 if out.exists():
                     out.unlink()
@@ -469,16 +469,16 @@ def build_packs(work, base, hs, countries, states, maxzoom, only=None):
             pair[kind] = out.stat().st_size
         if len(pair) < 2:
             continue
-        rows.append(catalogue_row(e, pair["base"] + pair["hs"]))
+        rows.append(catalog_row(e, pair["base"] + pair["hs"]))
         log(f"pack {i + 1}/{len(entries)} {e['id']}: {(pair['base'] + pair['hs']) / 1e6:.1f} MB")
-    write_catalogue(work, rows, maxzoom)
+    write_catalog(work, rows, maxzoom)
 
 
 # ---------------------------------------------------------------- main
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("step", choices=["all", "overture", "labels", "landcover", "vectors", "hillshade", "regions", "packs", "catalogue"])
+    ap.add_argument("step", choices=["all", "overture", "labels", "landcover", "vectors", "hillshade", "regions", "packs", "catalog"])
     ap.add_argument("--work", required=True, type=Path)
     ap.add_argument("--maxzoom", type=int, default=10)
     ap.add_argument("--vectors", default=DEFAULT_VECTORS, help="Protomaps archive (file or https)")
@@ -493,9 +493,9 @@ def main():
     a = ap.parse_args()
     a.work.mkdir(parents=True, exist_ok=True)
     a.overture = a.overture or a.work / "overture.duckdb"
-    if a.step == "catalogue":
+    if a.step == "catalog":
         # No tiles, no CLI tools: the tracked Natural Earth copies (or --countries/--states) suffice.
-        build_catalogue(a.work, a.countries, a.states, a.maxzoom)
+        build_catalog(a.work, a.countries, a.states, a.maxzoom)
         return
     for tool in ("pmtiles", "tippecanoe", "tile-join", "duckdb"):
         if not shutil.which(tool):

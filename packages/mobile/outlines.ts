@@ -1,8 +1,8 @@
 import outlines from './assets/outlines.json';
-import { CATALOGUE, type Pack } from './catalogue';
+import { CATALOG, type Pack } from './catalog';
 
 // Which packs a position falls in — the state or province and the country — from the simplified
-// pack polygons the build writes next to the catalogue (maps/build/basemap.py, `outlines.json`:
+// pack polygons the build writes next to the catalog (maps/build/basemap.py, `outlines.json`:
 // {id: [[exterior, hole, ...], ...]}, lon/lat, ~5 km tolerance).
 //
 // That tolerance means a coastal city can sit just outside its own coastline (Vancouver falls in
@@ -20,7 +20,7 @@ export interface RegionsAt {
   country?: Pack;
 }
 
-export function regionsAt(lat: number, lon: number, cat = CATALOGUE, shapes = OUTLINES): RegionsAt {
+export function regionsAt(lat: number, lon: number, cat = CATALOG, shapes = OUTLINES): RegionsAt {
   let country: { pack: Pack; d: number } | undefined;
   let state: { pack: Pack; d: number } | undefined;
   for (const pack of cat.packs) {

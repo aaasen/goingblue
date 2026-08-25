@@ -51,13 +51,13 @@ const here = location.origin + location.pathname.replace(/[^/]*$/, "");
 const params = new URLSearchParams(location.search);
 const work = here + (params.get("work") || "work") + "/";
 // ?remote=https://… — base URL for the archives that are too big to keep locally (the global
-// pair and the packs, i.e. everything except the bundled z6 pair and catalogue). With it set,
+// pair and the packs, i.e. everything except the bundled z6 pair and catalog). With it set,
 // this page previews the production layout: bundled tiles local, the rest streamed from R2.
 const remote = params.get("remote") ? params.get("remote").replace(/\/?$/, "/") : work;
 document.getElementById("which").textContent =
   work.replace(here, "") + (remote === work ? "" : " + " + new URL(remote).host);
 
-const cat = await (await fetch(work + "catalogue.json")).json();
+const cat = await (await fetch(work + "catalog.json")).json();
 const bundled = `z${cat.bundled_maxzoom}`;
 const sel = document.getElementById("pack");
 for (const p of cat.packs) {
