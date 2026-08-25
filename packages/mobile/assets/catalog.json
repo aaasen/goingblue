@@ -2,7 +2,7 @@
  "version": 1,
  "maxzoom": 10,
  "bundled_maxzoom": 6,
- "landcover_maxzoom": 7,
+ "landcover_maxzoom": 10,
  "global": {
   "base": "global-base.pmtiles",
   "hs": "global-hs.pmtiles"
@@ -11,7 +11,7 @@
   "base": "global-z6-base.pmtiles",
   "hs": "global-z6-hs.pmtiles",
   "maxzoom": 6,
-  "bytes": null
+  "bytes": 33091839
  },
  "packs": [
   {
@@ -21,12 +21,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    1.4148,
-    42.4345,
-    1.7402,
-    42.6427
+    1.4065,
+    42.4287,
+    1.7651,
+    42.6494
    ],
-   "bytes": null,
+   "bytes": 1181611,
    "files": {
     "base": "packs/ad-base.pmtiles",
     "hs": "packs/ad-hs.pmtiles"
@@ -39,12 +39,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    51.5684,
-    22.6215,
-    56.388,
-    26.0682
+    51.5693,
+    22.6209,
+    56.3836,
+    26.0748
    ],
-   "bytes": null,
+   "bytes": 1917786,
    "files": {
     "base": "packs/ae-base.pmtiles",
     "hs": "packs/ae-hs.pmtiles"
@@ -57,12 +57,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    60.4857,
-    29.3919,
-    74.8913,
-    38.4564
+    60.4868,
+    29.3866,
+    74.8923,
+    38.4737
    ],
-   "bytes": null,
+   "bytes": 27431701,
    "files": {
     "base": "packs/af-base.pmtiles",
     "hs": "packs/af-hs.pmtiles"
@@ -75,12 +75,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -61.8871,
-    16.9972,
-    -61.686,
-    17.7141
+    -62.3483,
+    16.932,
+    -61.6676,
+    17.7277
    ],
-   "bytes": null,
+   "bytes": 691791,
    "files": {
     "base": "packs/ag-base.pmtiles",
     "hs": "packs/ag-hs.pmtiles"
@@ -93,12 +93,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -63.16,
-    18.1714,
-    -62.9796,
-    18.2697
+    -63.4288,
+    18.1691,
+    -62.9257,
+    18.6013
    ],
-   "bytes": null,
+   "bytes": 653365,
    "files": {
     "base": "packs/ai-base.pmtiles",
     "hs": "packs/ai-hs.pmtiles"
@@ -111,12 +111,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    19.2807,
-    39.6535,
-    21.0311,
-    42.6479
+    19.272,
+    39.637,
+    21.0367,
+    42.6548
    ],
-   "bytes": null,
+   "bytes": 4338785,
    "files": {
     "base": "packs/al-base.pmtiles",
     "hs": "packs/al-hs.pmtiles"
@@ -129,12 +129,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    43.4395,
-    38.869,
-    46.5848,
-    41.291
+    43.4363,
+    38.8637,
+    46.6026,
+    41.2905
    ],
-   "bytes": null,
+   "bytes": 4215162,
    "files": {
     "base": "packs/am-base.pmtiles",
     "hs": "packs/am-hs.pmtiles"
@@ -147,12 +147,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    11.7431,
-    -18.0197,
-    24.0467,
-    -4.4289
+    11.6694,
+    -18.0314,
+    24.0617,
+    -4.3912
    ],
-   "bytes": null,
+   "bytes": 26484041,
    "files": {
     "base": "packs/ao-base.pmtiles",
     "hs": "packs/ao-hs.pmtiles"
@@ -165,12 +165,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -180,
-    -89.9989,
-    180,
-    -60.5209
+    -180.0,
+    -90.0,
+    180.0,
+    -60.5162
    ],
-   "bytes": null,
+   "bytes": 15505796,
    "files": {
     "base": "packs/aq-base.pmtiles",
     "hs": "packs/aq-hs.pmtiles"
@@ -183,12 +183,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -73.5763,
-    -55.0321,
-    -53.6686,
-    -21.8025
+    -73.5727,
+    -55.052,
+    -53.6616,
+    -21.7869
    ],
-   "bytes": null,
+   "bytes": 77367951,
    "files": {
     "base": "packs/ar-base.pmtiles",
     "hs": "packs/ar-hs.pmtiles"
@@ -201,12 +201,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -170.8205,
-    -14.3598,
-    -170.5681,
-    -14.2574
+    -171.0865,
+    -14.5329,
+    -168.1605,
+    -11.0514
    ],
-   "bytes": null,
+   "bytes": 489887,
    "files": {
     "base": "packs/as-base.pmtiles",
     "hs": "packs/as-hs.pmtiles"
@@ -219,12 +219,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    9.524,
-    46.3997,
-    17.1474,
-    49.0011
+    9.5212,
+    46.3786,
+    17.1483,
+    49.0098
    ],
-   "bytes": null,
+   "bytes": 11296006,
    "files": {
     "base": "packs/at-base.pmtiles",
     "hs": "packs/at-hs.pmtiles"
@@ -237,12 +237,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    96.8259,
-    -54.7492,
-    158.9589,
-    -10.0518
+    96.8215,
+    -54.7504,
+    159.1065,
+    -9.2402
    ],
-   "bytes": null,
+   "bytes": 133550740,
    "files": {
     "base": "packs/au-base.pmtiles",
     "hs": "packs/au-hs.pmtiles"
@@ -255,12 +255,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -70.0661,
-    12.423,
-    -69.8957,
-    12.6141
+    -70.0624,
+    12.4177,
+    -69.8768,
+    12.6321
    ],
-   "bytes": null,
+   "bytes": 685151,
    "files": {
     "base": "packs/aw-base.pmtiles",
     "hs": "packs/aw-hs.pmtiles"
@@ -273,12 +273,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    19.519,
-    60.0117,
-    20.6113,
-    60.4058
+    19.5132,
+    59.9045,
+    21.0967,
+    60.4808
    ],
-   "bytes": null,
+   "bytes": 1741698,
    "files": {
     "base": "packs/ax-base.pmtiles",
     "hs": "packs/ax-hs.pmtiles"
@@ -291,12 +291,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    44.7683,
-    38.3987,
-    50.3659,
-    41.891
+    44.7746,
+    38.3926,
+    50.6257,
+    41.8904
    ],
-   "bytes": null,
+   "bytes": 7513630,
    "files": {
     "base": "packs/az-base.pmtiles",
     "hs": "packs/az-hs.pmtiles"
@@ -309,12 +309,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    15.7366,
-    42.5597,
-    19.5838,
-    45.2766
+    15.7161,
+    42.5592,
+    19.6189,
+    45.2845
    ],
-   "bytes": null,
+   "bytes": 5805188,
    "files": {
     "base": "packs/ba-base.pmtiles",
     "hs": "packs/ba-hs.pmtiles"
@@ -327,12 +327,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -59.6467,
-    13.0622,
-    -59.4276,
-    13.3177
+    -59.6542,
+    13.0512,
+    -59.4269,
+    13.3445
    ],
-   "bytes": null,
+   "bytes": 644396,
    "files": {
     "base": "packs/bb-base.pmtiles",
     "hs": "packs/bb-hs.pmtiles"
@@ -345,12 +345,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    88.0234,
-    20.7904,
-    92.6316,
-    26.5715
+    88.0218,
+    20.7387,
+    92.6429,
+    26.6235
    ],
-   "bytes": null,
+   "bytes": 7458896,
    "files": {
     "base": "packs/bd-base.pmtiles",
     "hs": "packs/bd-hs.pmtiles"
@@ -363,12 +363,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    2.5249,
-    49.5109,
-    6.3645,
-    51.4911
+    2.5218,
+    49.4952,
+    6.3745,
+    51.4962
    ],
-   "bytes": null,
+   "bytes": 4403152,
    "files": {
     "base": "packs/be-base.pmtiles",
     "hs": "packs/be-hs.pmtiles"
@@ -381,12 +381,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -5.5235,
-    9.4247,
-    2.3892,
-    15.0779
+    -5.5226,
+    9.3919,
+    2.3902,
+    15.0799
    ],
-   "bytes": null,
+   "bytes": 9495346,
    "files": {
     "base": "packs/bf-base.pmtiles",
     "hs": "packs/bf-hs.pmtiles"
@@ -399,12 +399,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    22.344,
-    41.2436,
-    28.5854,
-    44.2378
+    22.345,
+    41.2381,
+    28.6035,
+    44.2284
    ],
-   "bytes": null,
+   "bytes": 8045182,
    "files": {
     "base": "packs/bg-base.pmtiles",
     "hs": "packs/bg-hs.pmtiles"
@@ -417,12 +417,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    50.4524,
-    25.8068,
-    50.6175,
-    26.2464
+    50.3805,
+    25.5799,
+    50.8199,
+    26.2874
    ],
-   "bytes": null,
+   "bytes": 918279,
    "files": {
     "base": "packs/bh-base.pmtiles",
     "hs": "packs/bh-hs.pmtiles"
@@ -435,12 +435,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    29.0142,
-    -4.4559,
-    30.8114,
-    -2.313
+    28.9869,
+    -4.4633,
+    30.834,
+    -2.3031
    ],
-   "bytes": null,
+   "bytes": 2474402,
    "files": {
     "base": "packs/bi-base.pmtiles",
     "hs": "packs/bi-hs.pmtiles"
@@ -453,15 +453,33 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    0.7634,
-    6.2168,
-    3.8345,
-    12.3838
+    0.7599,
+    6.2139,
+    3.8374,
+    12.3992
    ],
-   "bytes": null,
+   "bytes": 4515666,
    "files": {
     "base": "packs/bj-base.pmtiles",
     "hs": "packs/bj-hs.pmtiles"
+   }
+  },
+  {
+   "id": "bjn",
+   "name": "Bajo Nuevo Bank",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -79.9893,
+    15.7942,
+    -79.9864,
+    15.7962
+   ],
+   "bytes": 629537,
+   "files": {
+    "base": "packs/bjn-base.pmtiles",
+    "hs": "packs/bjn-hs.pmtiles"
    }
   },
   {
@@ -471,12 +489,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -62.8754,
-    17.8752,
-    -62.7997,
-    17.9223
+    -62.8673,
+    17.882,
+    -62.7917,
+    17.9291
    ],
-   "bytes": null,
+   "bytes": 638820,
    "files": {
     "base": "packs/bl-base.pmtiles",
     "hs": "packs/bl-hs.pmtiles"
@@ -489,12 +507,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -64.8628,
-    32.2596,
-    -64.6683,
-    32.3869
+    -64.886,
+    32.2481,
+    -64.6476,
+    32.3887
    ],
-   "bytes": null,
+   "bytes": 607662,
    "files": {
     "base": "packs/bm-base.pmtiles",
     "hs": "packs/bm-hs.pmtiles"
@@ -507,12 +525,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    114.0639,
-    4.024,
-    115.3268,
-    5.0224
+    113.9988,
+    4.0167,
+    115.3607,
+    5.0572
    ],
-   "bytes": null,
+   "bytes": 1134080,
    "files": {
     "base": "packs/bn-base.pmtiles",
     "hs": "packs/bn-hs.pmtiles"
@@ -525,12 +543,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -69.6457,
-    -22.8917,
-    -57.4957,
-    -9.7104
+    -69.6665,
+    -22.8973,
+    -57.4657,
+    -9.6798
    ],
-   "bytes": null,
+   "bytes": 25210495,
    "files": {
     "base": "packs/bo-base.pmtiles",
     "hs": "packs/bo-hs.pmtiles"
@@ -543,15 +561,33 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -74.0021,
-    -33.7422,
-    -34.8055,
-    5.258
+    -74.0185,
+    -33.7423,
+    -28.8771,
+    5.2672
    ],
-   "bytes": null,
+   "bytes": 183373826,
    "files": {
     "base": "packs/br-base.pmtiles",
     "hs": "packs/br-hs.pmtiles"
+   }
+  },
+  {
+   "id": "brt",
+   "name": "Bir Tawil",
+   "continent": "Africa",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    33.1811,
+    21.711,
+    34.0842,
+    21.9955
+   ],
+   "bytes": 1014339,
+   "files": {
+    "base": "packs/brt-base.pmtiles",
+    "hs": "packs/brt-hs.pmtiles"
    }
   },
   {
@@ -561,12 +597,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -78.9856,
-    20.9374,
-    -72.7473,
-    26.9401
+    -79.5943,
+    20.9124,
+    -72.7462,
+    26.9284
    ],
-   "bytes": null,
+   "bytes": 2030958,
    "files": {
     "base": "packs/bs-base.pmtiles",
     "hs": "packs/bs-hs.pmtiles"
@@ -579,12 +615,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    88.7388,
-    26.7016,
-    92.0834,
-    28.3112
+    88.7301,
+    26.6961,
+    92.0888,
+    28.3584
    ],
-   "bytes": null,
+   "bytes": 4445189,
    "files": {
     "base": "packs/bt-base.pmtiles",
     "hs": "packs/bt-hs.pmtiles"
@@ -597,12 +633,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    19.9773,
-    -26.8542,
-    29.3648,
-    -17.7876
+    19.9783,
+    -26.8918,
+    29.3501,
+    -17.7818
    ],
-   "bytes": null,
+   "bytes": 8179767,
    "files": {
     "base": "packs/bw-base.pmtiles",
     "hs": "packs/bw-hs.pmtiles"
@@ -615,12 +651,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    23.1751,
-    51.265,
-    32.7103,
-    56.1458
+    23.1656,
+    51.2352,
+    32.7195,
+    56.1568
    ],
-   "bytes": null,
+   "bytes": 12910503,
    "files": {
     "base": "packs/by-base.pmtiles",
     "hs": "packs/by-hs.pmtiles"
@@ -633,12 +669,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -89.2375,
-    15.8887,
-    -87.7886,
-    18.4823
+    -89.2365,
+    15.8797,
+    -87.7831,
+    18.4908
    ],
-   "bytes": null,
+   "bytes": 1772062,
    "files": {
     "base": "packs/bz-base.pmtiles",
     "hs": "packs/bz-hs.pmtiles"
@@ -651,12 +687,12 @@
    "parent": null,
    "maxzoom": 9,
    "bounds": [
-    -141.0021,
-    41.6749,
-    -52.6537,
-    83.1161
+    -141.0056,
+    41.6691,
+    -52.6166,
+    83.1165
    ],
-   "bytes": null,
+   "bytes": 261995727,
    "files": {
     "base": "packs/ca-base.pmtiles",
     "hs": "packs/ca-hs.pmtiles"
@@ -669,12 +705,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    12.2137,
-    -13.4538,
-    31.274,
-    5.3121
+    12.2105,
+    -13.4584,
+    31.2804,
+    5.3753
    ],
-   "bytes": null,
+   "bytes": 39698604,
    "files": {
     "base": "packs/cd-base.pmtiles",
     "hs": "packs/cd-hs.pmtiles"
@@ -687,12 +723,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    14.4312,
-    2.2701,
-    27.4033,
-    10.9962
+    14.3873,
+    2.2365,
+    27.4413,
+    11.0008
    ],
-   "bytes": null,
+   "bytes": 9547205,
    "files": {
     "base": "packs/cf-base.pmtiles",
     "hs": "packs/cf-hs.pmtiles"
@@ -705,12 +741,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    11.1302,
-    -5.0043,
-    18.6222,
-    3.6873
+    11.114,
+    -5.0196,
+    18.6424,
+    3.7083
    ],
-   "bytes": null,
+   "bytes": 7376423,
    "files": {
     "base": "packs/cg-base.pmtiles",
     "hs": "packs/cg-hs.pmtiles"
@@ -723,12 +759,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    5.97,
-    45.83,
-    10.4546,
-    47.7756
+    5.9548,
+    45.8207,
+    10.4666,
+    47.8012
    ],
-   "bytes": null,
+   "bytes": 7407245,
    "files": {
     "base": "packs/ch-base.pmtiles",
     "hs": "packs/ch-hs.pmtiles"
@@ -741,12 +777,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -8.6036,
-    4.3513,
-    -2.5059,
-    10.7241
+    -8.6187,
+    4.3441,
+    -2.5063,
+    10.7265
    ],
-   "bytes": null,
+   "bytes": 6021500,
    "files": {
     "base": "packs/ci-base.pmtiles",
     "hs": "packs/ci-hs.pmtiles"
@@ -759,12 +795,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -159.8425,
-    -21.2495,
-    -159.7369,
-    -21.1864
+    -165.8245,
+    -21.9389,
+    -157.3128,
+    -8.9467
    ],
-   "bytes": null,
+   "bytes": 502473,
    "files": {
     "base": "packs/ck-base.pmtiles",
     "hs": "packs/ck-hs.pmtiles"
@@ -777,12 +813,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -109.4341,
-    -55.8917,
-    -66.4358,
-    -17.5061
+    -109.4537,
+    -55.9185,
+    -66.4208,
+    -17.5066
    ],
-   "bytes": null,
+   "bytes": 44134160,
    "files": {
     "base": "packs/cl-base.pmtiles",
     "hs": "packs/cl-hs.pmtiles"
@@ -795,12 +831,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    8.5328,
-    1.6762,
-    16.1834,
-    13.0785
+    8.5051,
+    1.6546,
+    16.2077,
+    13.0811
    ],
-   "bytes": null,
+   "bytes": 11453758,
    "files": {
     "base": "packs/cm-base.pmtiles",
     "hs": "packs/cm-hs.pmtiles"
@@ -813,15 +849,33 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    73.6073,
-    18.2183,
-    134.7523,
-    53.5556
+    73.6023,
+    15.7754,
+    134.7726,
+    53.5694
    ],
-   "bytes": null,
+   "bytes": 349239627,
    "files": {
     "base": "packs/cn-base.pmtiles",
     "hs": "packs/cn-hs.pmtiles"
+   }
+  },
+  {
+   "id": "cnm",
+   "name": "United Nations Buffer Zone in Cyprus",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    32.5848,
+    34.9778,
+    34.022,
+    35.1994
+   ],
+   "bytes": 1328514,
+   "files": {
+    "base": "packs/cnm-base.pmtiles",
+    "hs": "packs/cnm-hs.pmtiles"
    }
   },
   {
@@ -831,12 +885,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -79.0254,
-    -4.2359,
-    -66.876,
-    12.4344
+    -81.7237,
+    -4.2365,
+    -66.8751,
+    13.5784
    ],
-   "bytes": null,
+   "bytes": 27526496,
    "files": {
     "base": "packs/co-base.pmtiles",
     "hs": "packs/co-hs.pmtiles"
@@ -849,12 +903,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -85.908,
-    8.0707,
-    -82.5636,
-    11.1895
+    -87.1177,
+    5.5151,
+    -82.5628,
+    11.2099
    ],
-   "bytes": null,
+   "bytes": 3119599,
    "files": {
     "base": "packs/cr-base.pmtiles",
     "hs": "packs/cr-hs.pmtiles"
@@ -867,12 +921,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -84.8872,
-    19.8555,
-    -74.1368,
-    23.1904
+    -84.9496,
+    19.8278,
+    -74.1329,
+    23.2656
    ],
-   "bytes": null,
+   "bytes": 4944017,
    "files": {
     "base": "packs/cu-base.pmtiles",
     "hs": "packs/cu-hs.pmtiles"
@@ -885,12 +939,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -25.3416,
-    14.8182,
-    -22.6819,
-    17.1937
+    -25.3604,
+    14.8039,
+    -22.6666,
+    17.1966
    ],
-   "bytes": null,
+   "bytes": 963963,
    "files": {
     "base": "packs/cv-base.pmtiles",
     "hs": "packs/cv-hs.pmtiles"
@@ -903,12 +957,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -69.1589,
-    12.0455,
-    -68.7511,
-    12.3803
+    -69.1717,
+    12.0413,
+    -68.7397,
+    12.3915
    ],
-   "bytes": null,
+   "bytes": 687957,
    "files": {
     "base": "packs/cw-base.pmtiles",
     "hs": "packs/cw-hs.pmtiles"
@@ -921,12 +975,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    32.301,
-    34.5696,
-    34.0502,
-    35.1827
+    32.2717,
+    34.625,
+    34.0991,
+    35.1871
    ],
-   "bytes": null,
+   "bytes": 1452333,
    "files": {
     "base": "packs/cy-base.pmtiles",
     "hs": "packs/cy-hs.pmtiles"
@@ -939,12 +993,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    32.7127,
-    35.0003,
-    34.5561,
-    35.6621
+    32.6019,
+    35.0027,
+    34.5925,
+    35.692
    ],
-   "bytes": null,
+   "bytes": 1398161,
    "files": {
     "base": "packs/cyn-base.pmtiles",
     "hs": "packs/cyn-hs.pmtiles"
@@ -957,12 +1011,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    12.0897,
-    48.5762,
-    18.8322,
-    51.0378
+    12.0761,
+    48.5579,
+    18.8374,
+    51.04
    ],
-   "bytes": null,
+   "bytes": 8635273,
    "files": {
     "base": "packs/cz-base.pmtiles",
     "hs": "packs/cz-hs.pmtiles"
@@ -975,12 +1029,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    5.8575,
-    47.2788,
-    15.0166,
-    55.0587
+    5.8525,
+    47.2711,
+    15.0221,
+    55.0653
    ],
-   "bytes": null,
+   "bytes": 27307657,
    "files": {
     "base": "packs/de-base.pmtiles",
     "hs": "packs/de-hs.pmtiles"
@@ -993,12 +1047,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    41.7646,
-    10.941,
-    43.4098,
-    12.7086
+    41.7491,
+    10.9298,
+    43.4187,
+    12.7079
    ],
-   "bytes": null,
+   "bytes": 1605046,
    "files": {
     "base": "packs/dj-base.pmtiles",
     "hs": "packs/dj-hs.pmtiles"
@@ -1011,12 +1065,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    8.1215,
-    54.6289,
-    15.1371,
-    57.7369
+    8.094,
+    54.5686,
+    15.1514,
+    57.7512
    ],
-   "bytes": null,
+   "bytes": 3915310,
    "files": {
     "base": "packs/dk-base.pmtiles",
     "hs": "packs/dk-hs.pmtiles"
@@ -1029,12 +1083,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -61.4812,
-    15.2273,
-    -61.2511,
-    15.6331
+    -61.4889,
+    15.2018,
+    -61.2493,
+    15.6339
    ],
-   "bytes": null,
+   "bytes": 699495,
    "files": {
     "base": "packs/dm-base.pmtiles",
     "hs": "packs/dm-hs.pmtiles"
@@ -1047,12 +1101,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -72.0004,
-    17.6356,
-    -68.3392,
-    19.914
+    -72.0098,
+    17.5456,
+    -68.3286,
+    19.9377
    ],
-   "bytes": null,
+   "bytes": 2790270,
    "files": {
     "base": "packs/do-base.pmtiles",
     "hs": "packs/do-hs.pmtiles"
@@ -1065,12 +1119,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -8.6834,
-    18.9866,
-    11.9679,
-    37.0924
+    -8.6824,
+    18.9756,
+    11.9689,
+    37.0939
    ],
-   "bytes": null,
+   "bytes": 22073948,
    "files": {
     "base": "packs/dz-base.pmtiles",
     "hs": "packs/dz-hs.pmtiles"
@@ -1083,12 +1137,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -91.6542,
-    -4.9906,
-    -75.2496,
-    1.4554
+    -92.0116,
+    -5.0114,
+    -75.2273,
+    1.6644
    ],
-   "bytes": null,
+   "bytes": 9400064,
    "files": {
     "base": "packs/ec-base.pmtiles",
     "hs": "packs/ec-hs.pmtiles"
@@ -1101,12 +1155,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    21.8545,
-    57.5255,
-    28.1511,
-    59.639
+    21.8324,
+    57.5158,
+    28.1865,
+    59.6709
    ],
-   "bytes": null,
+   "bytes": 3789920,
    "files": {
     "base": "packs/ee-base.pmtiles",
     "hs": "packs/ee-hs.pmtiles"
@@ -1119,12 +1173,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    24.7032,
-    21.9949,
-    36.8714,
-    31.655
+    24.6883,
+    21.9944,
+    36.8992,
+    31.6565
    ],
-   "bytes": null,
+   "bytes": 8516807,
    "files": {
     "base": "packs/eg-base.pmtiles",
     "hs": "packs/eg-hs.pmtiles"
@@ -1137,12 +1191,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -17.0988,
-    20.8062,
-    -8.6821,
-    27.6564
+    -17.1046,
+    20.7669,
+    -8.6808,
+    27.6615
    ],
-   "bytes": null,
+   "bytes": 1155234,
    "files": {
     "base": "packs/eh-base.pmtiles",
     "hs": "packs/eh-hs.pmtiles"
@@ -1155,12 +1209,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    36.4268,
-    12.3766,
-    43.1167,
-    18.0051
+    36.4236,
+    12.36,
+    43.1239,
+    18.0048
    ],
-   "bytes": null,
+   "bytes": 5633863,
    "files": {
     "base": "packs/er-base.pmtiles",
     "hs": "packs/er-hs.pmtiles"
@@ -1173,12 +1227,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -18.1605,
-    27.6464,
-    4.3221,
-    43.7646
+    -18.1672,
+    27.6422,
+    4.3371,
+    43.7934
    ],
-   "bytes": null,
+   "bytes": 30536535,
    "files": {
     "base": "packs/es-base.pmtiles",
     "hs": "packs/es-hs.pmtiles"
@@ -1191,12 +1245,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    32.9989,
-    3.4561,
-    47.9782,
-    14.8523
+    32.9898,
+    3.4033,
+    47.9792,
+    14.8795
    ],
-   "bytes": null,
+   "bytes": 29295038,
    "files": {
     "base": "packs/et-base.pmtiles",
     "hs": "packs/et-hs.pmtiles"
@@ -1209,12 +1263,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    20.6222,
-    59.816,
-    31.5365,
-    70.0648
+    20.6232,
+    59.8112,
+    31.5695,
+    70.0753
    ],
-   "bytes": null,
+   "bytes": 26851578,
    "files": {
     "base": "packs/fi-base.pmtiles",
     "hs": "packs/fi-hs.pmtiles"
@@ -1227,12 +1281,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -180,
-    -21.7059,
-    180,
-    -12.477
+    -180.0,
+    -21.7111,
+    180.0,
+    -12.4753
    ],
-   "bytes": null,
+   "bytes": 1506437,
    "files": {
     "base": "packs/fj-base.pmtiles",
     "hs": "packs/fj-hs.pmtiles"
@@ -1245,12 +1299,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -61.145,
-    -52.308,
-    -57.7918,
-    -51.2699
+    -61.3182,
+    -52.4065,
+    33.9215,
+    35.119
    ],
-   "bytes": null,
+   "bytes": 2061768,
    "files": {
     "base": "packs/fk-base.pmtiles",
     "hs": "packs/fk-hs.pmtiles"
@@ -1263,12 +1317,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    138.0619,
-    5.2772,
-    162.9935,
-    9.5933
+    138.0638,
+    0.9182,
+    163.0466,
+    9.7756
    ],
-   "bytes": null,
+   "bytes": 747282,
    "files": {
     "base": "packs/fm-base.pmtiles",
     "hs": "packs/fm-hs.pmtiles"
@@ -1281,12 +1335,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -7.4226,
-    61.4143,
-    -6.4061,
-    62.3557
+    -7.6442,
+    61.3941,
+    -6.2758,
+    62.3989
    ],
-   "bytes": null,
+   "bytes": 898585,
    "files": {
     "base": "packs/fo-base.pmtiles",
     "hs": "packs/fo-hs.pmtiles"
@@ -1299,12 +1353,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -61.7941,
-    -21.369,
-    55.8391,
-    51.0971
+    -109.2342,
+    -21.3708,
+    55.8545,
+    51.0875
    ],
-   "bytes": null,
+   "bytes": 41607301,
    "files": {
     "base": "packs/fr-base.pmtiles",
     "hs": "packs/fr-hs.pmtiles"
@@ -1317,12 +1371,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    8.7031,
-    -3.9163,
-    14.4806,
-    2.3022
+    8.6956,
+    -3.9369,
+    14.499,
+    2.3225
    ],
-   "bytes": null,
+   "bytes": 6263391,
    "files": {
     "base": "packs/ga-base.pmtiles",
     "hs": "packs/ga-hs.pmtiles"
@@ -1335,12 +1389,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -8.1448,
-    50.0214,
-    1.7466,
-    60.8319
+    -13.6913,
+    49.9096,
+    1.7712,
+    60.8479
    ],
-   "bytes": null,
+   "bytes": 19606058,
    "files": {
     "base": "packs/gb-base.pmtiles",
     "hs": "packs/gb-hs.pmtiles"
@@ -1353,12 +1407,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -61.7822,
-    12.0084,
-    -61.607,
-    12.237
+    -61.7905,
+    12.0028,
+    -61.4216,
+    12.5297
    ],
-   "bytes": null,
+   "bytes": 648798,
    "files": {
     "base": "packs/gd-base.pmtiles",
     "hs": "packs/gd-hs.pmtiles"
@@ -1371,12 +1425,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    39.9783,
-    41.0702,
-    46.6726,
-    43.5698
+    39.986,
+    41.0441,
+    46.6948,
+    43.5758
    ],
-   "bytes": null,
+   "bytes": 7076787,
    "files": {
     "base": "packs/ge-base.pmtiles",
     "hs": "packs/ge-hs.pmtiles"
@@ -1389,12 +1443,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -2.6461,
-    49.4287,
-    -2.5123,
-    49.5066
+    -2.6735,
+    49.4116,
+    -2.1703,
+    49.7314
    ],
-   "bytes": null,
+   "bytes": 675072,
    "files": {
     "base": "packs/gg-base.pmtiles",
     "hs": "packs/gg-hs.pmtiles"
@@ -1407,15 +1461,33 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -3.2439,
-    4.7625,
-    1.1872,
-    11.1669
+    -3.2625,
+    4.7371,
+    1.188,
+    11.1629
    ],
-   "bytes": null,
+   "bytes": 6683881,
    "files": {
     "base": "packs/gh-base.pmtiles",
     "hs": "packs/gh-hs.pmtiles"
+   }
+  },
+  {
+   "id": "gi",
+   "name": "Gibraltar",
+   "continent": "Europe",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -5.3584,
+    36.1105,
+    -5.3388,
+    36.1411
+   ],
+   "bytes": 742656,
+   "files": {
+    "base": "packs/gi-base.pmtiles",
+    "hs": "packs/gi-hs.pmtiles"
    }
   },
   {
@@ -1425,12 +1497,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -72.8181,
-    59.8155,
-    -11.4255,
-    83.5996
+    -73.0572,
+    59.7926,
+    -11.3768,
+    83.6341
    ],
-   "bytes": null,
+   "bytes": 106179285,
    "files": {
     "base": "packs/gl-base.pmtiles",
     "hs": "packs/gl-hs.pmtiles"
@@ -1443,12 +1515,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -16.8248,
-    13.0642,
-    -13.8267,
-    13.8121
+    -16.8297,
+    13.065,
+    -13.8187,
+    13.82
    ],
-   "bytes": null,
+   "bytes": 1479415,
    "files": {
     "base": "packs/gm-base.pmtiles",
     "hs": "packs/gm-hs.pmtiles"
@@ -1461,12 +1533,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -15.0512,
-    7.2159,
-    -7.6812,
-    12.6739
+    -15.0811,
+    7.1902,
+    -7.6624,
+    12.6734
    ],
-   "bytes": null,
+   "bytes": 8732304,
    "files": {
     "base": "packs/gn-base.pmtiles",
     "hs": "packs/gn-hs.pmtiles"
@@ -1479,12 +1551,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    8.4343,
-    0.9601,
-    11.3354,
-    3.7583
+    5.612,
+    -1.4757,
+    11.3363,
+    3.7724
    ],
-   "bytes": null,
+   "bytes": 1830024,
    "files": {
     "base": "packs/gq-base.pmtiles",
     "hs": "packs/gq-hs.pmtiles"
@@ -1497,12 +1569,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    19.6465,
-    34.9345,
-    28.2318,
-    41.7438
+    19.6265,
+    34.815,
+    28.2398,
+    41.7505
    ],
-   "bytes": null,
+   "bytes": 11826609,
    "files": {
     "base": "packs/gr-base.pmtiles",
     "hs": "packs/gr-hs.pmtiles"
@@ -1515,12 +1587,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -38.0174,
-    -58.4923,
-    -26.2599,
-    -53.9841
+    -38.087,
+    -59.4728,
+    -26.2393,
+    -53.9724
    ],
-   "bytes": null,
+   "bytes": 944723,
    "files": {
     "base": "packs/gs-base.pmtiles",
     "hs": "packs/gs-hs.pmtiles"
@@ -1533,12 +1605,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -92.2352,
-    13.7365,
-    -88.2283,
-    17.8164
+    -92.2463,
+    13.7314,
+    -88.2209,
+    17.816
    ],
-   "bytes": null,
+   "bytes": 5623738,
    "files": {
     "base": "packs/gt-base.pmtiles",
     "hs": "packs/gt-hs.pmtiles"
@@ -1551,12 +1623,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    144.6493,
-    13.2575,
-    144.9408,
-    13.6224
+    144.6242,
+    13.241,
+    144.9522,
+    13.6541
    ],
-   "bytes": null,
+   "bytes": 623458,
    "files": {
     "base": "packs/gu-base.pmtiles",
     "hs": "packs/gu-hs.pmtiles"
@@ -1569,12 +1641,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -16.7118,
-    10.9401,
-    -13.6735,
-    12.6799
+    -16.7284,
+    10.9276,
+    -13.6607,
+    12.6794
    ],
-   "bytes": null,
+   "bytes": 1961702,
    "files": {
     "base": "packs/gw-base.pmtiles",
     "hs": "packs/gw-hs.pmtiles"
@@ -1587,12 +1659,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -61.3908,
-    1.2012,
-    -56.4828,
-    8.5493
+    -61.3967,
+    1.1858,
+    -56.4818,
+    8.558
    ],
-   "bytes": null,
+   "bytes": 4317425,
    "files": {
     "base": "packs/gy-base.pmtiles",
     "hs": "packs/gy-hs.pmtiles"
@@ -1605,12 +1677,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    113.8389,
-    22.1952,
-    114.3353,
-    22.565
+    113.8373,
+    22.1771,
+    114.4013,
+    22.5639
    ],
-   "bytes": null,
+   "bytes": 1112061,
    "files": {
     "base": "packs/hk-base.pmtiles",
     "hs": "packs/hk-hs.pmtiles"
@@ -1623,12 +1695,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    73.2512,
-    -53.1846,
-    73.8378,
-    -52.9663
+    73.236,
+    -53.1926,
+    73.8122,
+    -52.9616
    ],
-   "bytes": null,
+   "bytes": 494993,
    "files": {
     "base": "packs/hm-base.pmtiles",
     "hs": "packs/hm-hs.pmtiles"
@@ -1641,12 +1713,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -89.3626,
-    12.9792,
-    -83.1575,
-    16.514
+    -89.3638,
+    12.9798,
+    -83.1304,
+    17.4186
    ],
-   "bytes": null,
+   "bytes": 6012298,
    "files": {
     "base": "packs/hn-base.pmtiles",
     "hs": "packs/hn-hs.pmtiles"
@@ -1659,12 +1731,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    13.5172,
-    42.4329,
-    19.401,
-    46.5346
+    13.5015,
+    42.4163,
+    19.4078,
+    46.547
    ],
-   "bytes": null,
+   "bytes": 6947453,
    "files": {
     "base": "packs/hr-base.pmtiles",
     "hs": "packs/hr-hs.pmtiles"
@@ -1677,12 +1749,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -74.4781,
-    18.0392,
-    -71.6453,
-    20.0937
+    -74.4892,
+    18.0259,
+    -71.6391,
+    20.0898
    ],
-   "bytes": null,
+   "bytes": 2426211,
    "files": {
     "base": "packs/ht-base.pmtiles",
     "hs": "packs/ht-hs.pmtiles"
@@ -1695,12 +1767,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    16.0931,
-    45.753,
-    22.8767,
-    48.5535
+    16.094,
+    45.7413,
+    22.8776,
+    48.5692
    ],
-   "bytes": null,
+   "bytes": 6257655,
    "files": {
     "base": "packs/hu-base.pmtiles",
     "hs": "packs/hu-hs.pmtiles"
@@ -1713,12 +1785,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    95.2066,
-    -10.9097,
-    140.9762,
-    5.907
+    95.0127,
+    -10.9226,
+    140.9776,
+    5.9101
    ],
-   "bytes": null,
+   "bytes": 47770574,
    "files": {
     "base": "packs/id-base.pmtiles",
     "hs": "packs/id-hs.pmtiles"
@@ -1731,12 +1803,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -10.3902,
-    51.4737,
-    -6.0274,
-    55.3658
+    -10.4782,
+    51.4457,
+    -5.9935,
+    55.3864
    ],
-   "bytes": null,
+   "bytes": 5059059,
    "files": {
     "base": "packs/ie-base.pmtiles",
     "hs": "packs/ie-hs.pmtiles"
@@ -1749,12 +1821,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    34.2453,
-    29.4773,
-    35.888,
-    33.4157
+    34.2484,
+    29.4897,
+    35.8881,
+    33.4067
    ],
-   "bytes": null,
+   "bytes": 2717741,
    "files": {
     "base": "packs/il-base.pmtiles",
     "hs": "packs/il-hs.pmtiles"
@@ -1767,12 +1839,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -4.7854,
-    54.0587,
-    -4.338,
-    54.4072
+    -4.7902,
+    54.057,
+    -4.3119,
+    54.419
    ],
-   "bytes": null,
+   "bytes": 770737,
    "files": {
     "base": "packs/im-base.pmtiles",
     "hs": "packs/im-hs.pmtiles"
@@ -1785,12 +1857,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    68.165,
-    6.7487,
-    97.3436,
-    35.4959
+    68.1434,
+    6.7456,
+    97.3623,
+    35.4954
    ],
-   "bytes": null,
+   "bytes": 87292809,
    "files": {
     "base": "packs/in-base.pmtiles",
     "hs": "packs/in-hs.pmtiles"
@@ -1803,12 +1875,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    72.3497,
-    -7.4354,
-    72.4985,
-    -7.2204
+    71.261,
+    -7.4322,
+    72.4946,
+    -5.227
    ],
-   "bytes": null,
+   "bytes": 510206,
    "files": {
     "base": "packs/io-base.pmtiles",
     "hs": "packs/io-hs.pmtiles"
@@ -1821,12 +1893,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    38.7735,
-    29.0637,
-    48.5465,
-    37.3719
+    38.7745,
+    29.0631,
+    48.5593,
+    37.3755
    ],
-   "bytes": null,
+   "bytes": 10387278,
    "files": {
     "base": "packs/iq-base.pmtiles",
     "hs": "packs/iq-hs.pmtiles"
@@ -1839,12 +1911,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    44.0232,
-    25.1021,
-    63.3052,
-    39.7686
+    44.0149,
+    25.0594,
+    63.3196,
+    39.7715
    ],
-   "bytes": null,
+   "bytes": 45649182,
    "files": {
     "base": "packs/ir-base.pmtiles",
     "hs": "packs/ir-hs.pmtiles"
@@ -1857,12 +1929,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -24.4757,
-    63.4067,
-    -13.5561,
-    66.5261
+    -24.5399,
+    63.3967,
+    -13.5029,
+    66.5642
    ],
-   "bytes": null,
+   "bytes": 10240197,
    "files": {
     "base": "packs/is-base.pmtiles",
     "hs": "packs/is-hs.pmtiles"
@@ -1875,12 +1947,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    6.6277,
-    36.6878,
-    18.4858,
-    47.0821
+    6.6027,
+    35.4892,
+    18.5174,
+    47.0852
    ],
-   "bytes": null,
+   "bytes": 24357084,
    "files": {
     "base": "packs/it-base.pmtiles",
     "hs": "packs/it-hs.pmtiles"
@@ -1893,12 +1965,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -2.2358,
-    49.1698,
-    -2.0099,
-    49.2664
+    -2.242,
+    49.1713,
+    -2.0083,
+    49.267
    ],
-   "bytes": null,
+   "bytes": 704472,
    "files": {
     "base": "packs/je-base.pmtiles",
     "hs": "packs/je-hs.pmtiles"
@@ -1911,12 +1983,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -78.3395,
-    17.7149,
-    -76.2108,
-    18.5222
+    -78.3747,
+    17.7032,
+    -76.188,
+    18.5251
    ],
-   "bytes": null,
+   "bytes": 1080561,
    "files": {
     "base": "packs/jm-base.pmtiles",
     "hs": "packs/jm-hs.pmtiles"
@@ -1929,12 +2001,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    34.9508,
-    29.1905,
-    39.2928,
-    33.3722
+    34.9494,
+    29.19,
+    39.292,
+    33.3717
    ],
-   "bytes": null,
+   "bytes": 2705623,
    "files": {
     "base": "packs/jo-base.pmtiles",
     "hs": "packs/jo-hs.pmtiles"
@@ -1947,12 +2019,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    123.6798,
-    24.2661,
-    145.833,
-    45.5095
+    122.9382,
+    24.2121,
+    153.9856,
+    45.5204
    ],
-   "bytes": null,
+   "bytes": 26592833,
    "files": {
     "base": "packs/jp-base.pmtiles",
     "hs": "packs/jp-hs.pmtiles"
@@ -1965,12 +2037,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    76.7669,
-    35.1099,
-    77.7994,
-    35.6617
+    76.7774,
+    35.1104,
+    77.8003,
+    35.6478
    ],
-   "bytes": null,
+   "bytes": 1807597,
    "files": {
     "base": "packs/kas-base.pmtiles",
     "hs": "packs/kas-hs.pmtiles"
@@ -1983,12 +2055,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    33.9,
-    -4.6924,
-    41.884,
-    5.4923
+    33.8905,
+    -4.6775,
+    41.885,
+    5.0304
    ],
-   "bytes": null,
+   "bytes": 12056874,
    "files": {
     "base": "packs/ke-base.pmtiles",
     "hs": "packs/ke-hs.pmtiles"
@@ -2001,12 +2073,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    69.2291,
-    39.2075,
-    80.2462,
-    43.2404
+    69.2263,
+    39.1892,
+    80.2576,
+    43.2617
    ],
-   "bytes": null,
+   "bytes": 15256555,
    "files": {
     "base": "packs/kg-base.pmtiles",
     "hs": "packs/kg-hs.pmtiles"
@@ -2019,12 +2091,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    102.3197,
-    10.4112,
-    107.6055,
-    14.7051
+    102.3134,
+    10.4158,
+    107.6105,
+    14.7046
    ],
-   "bytes": null,
+   "bytes": 5012070,
    "files": {
     "base": "packs/kh-base.pmtiles",
     "hs": "packs/kh-hs.pmtiles"
@@ -2037,12 +2109,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -174.5408,
-    -11.4568,
-    174.7789,
-    3.9235
+    -174.5434,
+    -11.4611,
+    176.8509,
+    4.7231
    ],
-   "bytes": null,
+   "bytes": 1145464,
    "files": {
     "base": "packs/ki-base.pmtiles",
     "hs": "packs/ki-hs.pmtiles"
@@ -2055,12 +2127,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    43.2267,
-    -12.3683,
-    44.5268,
-    -11.3685
+    43.2132,
+    -12.3803,
+    44.5291,
+    -11.3613
    ],
-   "bytes": null,
+   "bytes": 646373,
    "files": {
     "base": "packs/km-base.pmtiles",
     "hs": "packs/km-hs.pmtiles"
@@ -2073,12 +2145,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -62.8405,
-    17.1006,
-    -62.5322,
-    17.4026
+    -62.8611,
+    17.1005,
+    -62.5368,
+    17.4158
    ],
-   "bytes": null,
+   "bytes": 666225,
    "files": {
     "base": "packs/kn-base.pmtiles",
     "hs": "packs/kn-hs.pmtiles"
@@ -2091,12 +2163,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    124.3486,
-    37.719,
-    130.6873,
-    42.9981
+    124.2113,
+    37.6756,
+    130.7,
+    43.0103
    ],
-   "bytes": null,
+   "bytes": 10104837,
    "files": {
     "base": "packs/kp-base.pmtiles",
     "hs": "packs/kp-hs.pmtiles"
@@ -2109,12 +2181,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    126.0075,
-    33.2015,
-    130.9343,
-    38.6234
+    124.6136,
+    33.1976,
+    131.8625,
+    38.6243
    ],
-   "bytes": null,
+   "bytes": 8916240,
    "files": {
     "base": "packs/kr-base.pmtiles",
     "hs": "packs/kr-hs.pmtiles"
@@ -2127,12 +2199,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    46.5314,
-    28.5332,
-    48.4425,
-    30.0973
+    46.5324,
+    28.5335,
+    48.4328,
+    30.0982
    ],
-   "bytes": null,
+   "bytes": 1052815,
    "files": {
     "base": "packs/kw-base.pmtiles",
     "hs": "packs/kw-hs.pmtiles"
@@ -2145,12 +2217,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -81.4191,
-    19.2719,
-    -79.7423,
-    19.7657
+    -81.4165,
+    19.2639,
+    -79.7266,
+    19.7576
    ],
-   "bytes": null,
+   "bytes": 688590,
    "files": {
     "base": "packs/ky-base.pmtiles",
     "hs": "packs/ky-hs.pmtiles"
@@ -2163,12 +2235,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    46.6092,
-    40.6086,
-    87.3229,
-    55.3896
+    46.4783,
+    40.5847,
+    87.3238,
+    55.4346
    ],
-   "bytes": null,
+   "bytes": 55864752,
    "files": {
     "base": "packs/kz-base.pmtiles",
     "hs": "packs/kz-hs.pmtiles"
@@ -2181,12 +2253,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    100.1149,
-    13.9212,
-    107.6531,
-    22.4953
+    100.0971,
+    13.9155,
+    107.6644,
+    22.496
    ],
-   "bytes": null,
+   "bytes": 12601339,
    "files": {
     "base": "packs/la-base.pmtiles",
     "hs": "packs/la-hs.pmtiles"
@@ -2199,12 +2271,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    35.1086,
-    33.0757,
-    36.585,
-    34.6787
+    35.0996,
+    33.0556,
+    36.6041,
+    34.6875
    ],
-   "bytes": null,
+   "bytes": 2200524,
    "files": {
     "base": "packs/lb-base.pmtiles",
     "hs": "packs/lb-hs.pmtiles"
@@ -2217,12 +2289,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -61.0731,
-    13.7176,
-    -60.8868,
-    14.0934
+    -61.0785,
+    13.7147,
+    -60.883,
+    14.1119
    ],
-   "bytes": null,
+   "bytes": 691805,
    "files": {
     "base": "packs/lc-base.pmtiles",
     "hs": "packs/lc-hs.pmtiles"
@@ -2235,12 +2307,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    9.4795,
-    47.0574,
-    9.6105,
-    47.2708
+    9.4759,
+    47.0524,
+    9.6157,
+    47.2628
    ],
-   "bytes": null,
+   "bytes": 1163959,
    "files": {
     "base": "packs/li-base.pmtiles",
     "hs": "packs/li-hs.pmtiles"
@@ -2253,12 +2325,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    79.7078,
-    5.9494,
-    81.877,
-    9.8127
+    79.6558,
+    5.9237,
+    81.8903,
+    9.8296
    ],
-   "bytes": null,
+   "bytes": 2657791,
    "files": {
     "base": "packs/lk-base.pmtiles",
     "hs": "packs/lk-hs.pmtiles"
@@ -2271,12 +2343,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -11.5075,
-    4.3513,
-    -7.3999,
-    8.5377
+    -11.4762,
+    4.3472,
+    -7.3841,
+    8.5654
    ],
-   "bytes": null,
+   "bytes": 2464894,
    "files": {
     "base": "packs/lr-base.pmtiles",
     "hs": "packs/lr-hs.pmtiles"
@@ -2289,12 +2361,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    27.0518,
-    -30.6423,
-    29.3907,
-    -28.5817
+    27.0022,
+    -30.6588,
+    29.4359,
+    -28.5708
    ],
-   "bytes": null,
+   "bytes": 2638630,
    "files": {
     "base": "packs/ls-base.pmtiles",
     "hs": "packs/ls-hs.pmtiles"
@@ -2307,12 +2379,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    20.8998,
-    53.893,
-    26.7757,
-    56.4112
+    20.9246,
+    53.8868,
+    26.8007,
+    56.4426
    ],
-   "bytes": null,
+   "bytes": 6965315,
    "files": {
     "base": "packs/lt-base.pmtiles",
     "hs": "packs/lt-hs.pmtiles"
@@ -2325,12 +2397,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    5.725,
-    49.4455,
-    6.4938,
-    50.1672
+    5.7149,
+    49.4413,
+    6.5026,
+    50.175
    ],
-   "bytes": null,
+   "bytes": 1572105,
    "files": {
     "base": "packs/lu-base.pmtiles",
     "hs": "packs/lu-hs.pmtiles"
@@ -2343,12 +2415,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    21.0149,
-    55.6675,
-    28.2021,
-    58.0634
+    20.9686,
+    55.667,
+    28.2173,
+    58.0751
    ],
-   "bytes": null,
+   "bytes": 5157028,
    "files": {
     "base": "packs/lv-base.pmtiles",
     "hs": "packs/lv-hs.pmtiles"
@@ -2361,12 +2433,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    9.3103,
-    19.4966,
-    25.1505,
-    33.1819
+    9.2865,
+    19.4961,
+    25.1563,
+    33.1812
    ],
-   "bytes": null,
+   "bytes": 8182034,
    "files": {
     "base": "packs/ly-base.pmtiles",
     "hs": "packs/ly-hs.pmtiles"
@@ -2379,12 +2451,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -17.0031,
-    21.4207,
-    -1.0655,
-    35.9299
+    -17.0137,
+    21.42,
+    -1.032,
+    35.9265
    ],
-   "bytes": null,
+   "bytes": 14630982,
    "files": {
     "base": "packs/ma-base.pmtiles",
     "hs": "packs/ma-hs.pmtiles"
@@ -2397,12 +2469,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    7.3777,
-    43.7317,
-    7.4387,
-    43.7709
+    7.3658,
+    43.718,
+    7.4375,
+    43.7635
    ],
-   "bytes": null,
+   "bytes": 1012007,
    "files": {
     "base": "packs/mc-base.pmtiles",
     "hs": "packs/mc-hs.pmtiles"
@@ -2415,12 +2487,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    26.6189,
-    45.4504,
-    30.1311,
-    48.4777
+    26.6179,
+    45.4618,
+    30.1316,
+    48.486
    ],
-   "bytes": null,
+   "bytes": 3321265,
    "files": {
     "base": "packs/md-base.pmtiles",
     "hs": "packs/md-hs.pmtiles"
@@ -2433,12 +2505,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    18.4363,
-    41.8691,
-    20.3477,
-    43.5423
+    18.4335,
+    41.8524,
+    20.3552,
+    43.5479
    ],
-   "bytes": null,
+   "bytes": 2901967,
    "files": {
     "base": "packs/me-base.pmtiles",
     "hs": "packs/me-hs.pmtiles"
@@ -2451,12 +2523,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -63.123,
-    18.0689,
-    -63.0094,
-    18.1153
+    -63.1468,
+    18.0334,
+    -63.0107,
+    18.1221
    ],
-   "bytes": null,
+   "bytes": 642993,
    "files": {
     "base": "packs/mf-base.pmtiles",
     "hs": "packs/mf-hs.pmtiles"
@@ -2469,12 +2541,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    43.2571,
-    -25.5705,
-    50.4827,
-    -12.0796
+    43.2229,
+    -25.5986,
+    50.5039,
+    -11.9436
    ],
-   "bytes": null,
+   "bytes": 18326884,
    "files": {
     "base": "packs/mg-base.pmtiles",
     "hs": "packs/mg-hs.pmtiles"
@@ -2487,12 +2559,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    166.8447,
-    5.7998,
-    171.7568,
-    11.1687
+    165.2822,
+    4.5738,
+    172.0298,
+    14.6105
    ],
-   "bytes": null,
+   "bytes": 744920,
    "files": {
     "base": "packs/mh-base.pmtiles",
     "hs": "packs/mh-hs.pmtiles"
@@ -2505,12 +2577,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    20.4486,
-    40.8499,
-    23.0057,
-    42.3582
+    20.4442,
+    40.8494,
+    23.0096,
+    42.3703
    ],
-   "bytes": null,
+   "bytes": 4016474,
    "files": {
     "base": "packs/mk-base.pmtiles",
     "hs": "packs/mk-hs.pmtiles"
@@ -2523,12 +2595,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -12.2806,
-    10.1433,
-    4.2347,
-    24.9956
+    -12.2641,
+    10.1401,
+    4.2356,
+    24.9951
    ],
-   "bytes": null,
+   "bytes": 17738495,
    "files": {
     "base": "packs/ml-base.pmtiles",
     "hs": "packs/ml-hs.pmtiles"
@@ -2541,12 +2613,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    92.1796,
-    9.8754,
-    101.1473,
-    28.517
+    92.175,
+    9.7907,
+    101.1739,
+    28.5385
    ],
-   "bytes": null,
+   "bytes": 27230665,
    "files": {
     "base": "packs/mm-base.pmtiles",
     "hs": "packs/mm-hs.pmtiles"
@@ -2559,12 +2631,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    87.7432,
-    41.5955,
-    119.8979,
-    52.1173
+    87.7357,
+    41.5861,
+    119.907,
+    52.1296
    ],
-   "bytes": null,
+   "bytes": 34137990,
    "files": {
     "base": "packs/mn-base.pmtiles",
     "hs": "packs/mn-hs.pmtiles"
@@ -2577,12 +2649,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    113.4789,
-    22.1956,
-    113.5481,
-    22.2459
+    113.5199,
+    22.1054,
+    113.5875,
+    22.2208
    ],
-   "bytes": null,
+   "bytes": 957873,
    "files": {
     "base": "packs/mo-base.pmtiles",
     "hs": "packs/mo-hs.pmtiles"
@@ -2595,12 +2667,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    145.1521,
-    14.1113,
-    145.8354,
-    18.8068
+    144.9021,
+    14.1107,
+    145.8689,
+    20.5554
    ],
-   "bytes": null,
+   "bytes": 644913,
    "files": {
     "base": "packs/mp-base.pmtiles",
     "hs": "packs/mp-hs.pmtiles"
@@ -2613,12 +2685,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -17.064,
-    14.7454,
-    -4.8226,
-    27.2859
+    -17.0812,
+    14.7344,
+    -4.8216,
+    27.2854
    ],
-   "bytes": null,
+   "bytes": 6326885,
    "files": {
     "base": "packs/mr-base.pmtiles",
     "hs": "packs/mr-hs.pmtiles"
@@ -2631,12 +2703,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -62.223,
-    16.6812,
-    -62.1484,
-    16.8096
+    -62.2301,
+    16.6754,
+    -62.1405,
+    16.8193
    ],
-   "bytes": null,
+   "bytes": 642136,
    "files": {
     "base": "packs/ms-base.pmtiles",
     "hs": "packs/ms-hs.pmtiles"
@@ -2649,12 +2721,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    14.1804,
-    35.8202,
-    14.5662,
-    36.0758
+    14.1836,
+    35.8012,
+    14.5671,
+    36.0756
    ],
-   "bytes": null,
+   "bytes": 799815,
    "files": {
     "base": "packs/mt-base.pmtiles",
     "hs": "packs/mt-hs.pmtiles"
@@ -2667,12 +2739,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    57.3177,
-    -20.5132,
-    57.792,
-    -19.9899
+    56.5242,
+    -20.5173,
+    63.4939,
+    -10.3239
    ],
-   "bytes": null,
+   "bytes": 608170,
    "files": {
     "base": "packs/mu-base.pmtiles",
     "hs": "packs/mu-hs.pmtiles"
@@ -2685,12 +2757,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    73.382,
-    3.2294,
-    73.5283,
-    4.2477
+    72.6848,
+    -0.6886,
+    73.7532,
+    7.1072
    ],
-   "bytes": null,
+   "bytes": 1112732,
    "files": {
     "base": "packs/mv-base.pmtiles",
     "hs": "packs/mv-hs.pmtiles"
@@ -2703,12 +2775,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    32.6704,
-    -17.1311,
-    35.8928,
-    -9.395
+    32.6633,
+    -17.1353,
+    35.9043,
+    -9.3812
    ],
-   "bytes": null,
+   "bytes": 5775916,
    "files": {
     "base": "packs/mw-base.pmtiles",
     "hs": "packs/mw-hs.pmtiles"
@@ -2721,12 +2793,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -118.4014,
-    14.5454,
-    -86.6963,
-    32.7153
+    -118.3688,
+    14.5463,
+    -86.7006,
+    32.7128
    ],
-   "bytes": null,
+   "bytes": 56312959,
    "files": {
     "base": "packs/mx-base.pmtiles",
     "hs": "packs/mx-hs.pmtiles"
@@ -2739,12 +2811,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    99.6463,
-    0.862,
-    119.2663,
-    7.3517
+    99.6452,
+    0.8514,
+    119.2781,
+    7.3558
    ],
-   "bytes": null,
+   "bytes": 10884805,
    "files": {
     "base": "packs/my-base.pmtiles",
     "hs": "packs/my-hs.pmtiles"
@@ -2757,12 +2829,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    30.2218,
-    -26.8616,
-    40.8445,
-    -10.4644
+    30.2138,
+    -26.8603,
+    40.848,
+    -10.469
    ],
-   "bytes": null,
+   "bytes": 16826009,
    "files": {
     "base": "packs/mz-base.pmtiles",
     "hs": "packs/mz-hs.pmtiles"
@@ -2775,12 +2847,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    11.7217,
-    -28.9388,
-    25.2588,
-    -16.9677
+    11.7176,
+    -28.9594,
+    25.2598,
+    -16.9511
    ],
-   "bytes": null,
+   "bytes": 13203314,
    "files": {
     "base": "packs/na-base.pmtiles",
     "hs": "packs/na-hs.pmtiles"
@@ -2793,12 +2865,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    159.9282,
-    -22.6611,
-    168.1391,
-    -19.1146
+    163.6157,
+    -22.6707,
+    171.3438,
+    -19.6237
    ],
-   "bytes": null,
+   "bytes": 1433056,
    "files": {
     "base": "packs/nc-base.pmtiles",
     "hs": "packs/nc-hs.pmtiles"
@@ -2811,12 +2883,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    0.1639,
-    11.6963,
-    15.9632,
-    23.5179
+    0.1529,
+    11.6958,
+    15.9703,
+    23.5174
    ],
-   "bytes": null,
+   "bytes": 11021986,
    "files": {
     "base": "packs/ne-base.pmtiles",
     "hs": "packs/ne-hs.pmtiles"
@@ -2829,12 +2901,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    167.9062,
-    -29.0963,
-    167.9904,
-    -29.014
+    167.9121,
+    -29.08,
+    167.9963,
+    -28.9975
    ],
-   "bytes": null,
+   "bytes": 498175,
    "files": {
     "base": "packs/nf-base.pmtiles",
     "hs": "packs/nf-hs.pmtiles"
@@ -2847,12 +2919,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    2.686,
-    4.2774,
-    14.6271,
-    13.8729
+    2.6711,
+    4.2722,
+    14.6699,
+    13.8803
    ],
-   "bytes": null,
+   "bytes": 20736436,
    "files": {
     "base": "packs/ng-base.pmtiles",
     "hs": "packs/ng-hs.pmtiles"
@@ -2865,12 +2937,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -87.6702,
-    10.7354,
-    -83.1575,
-    15.0081
+    -87.6858,
+    10.7135,
+    -82.7257,
+    15.031
    ],
-   "bytes": null,
+   "bytes": 5630167,
    "files": {
     "base": "packs/ni-base.pmtiles",
     "hs": "packs/ni-hs.pmtiles"
@@ -2883,12 +2955,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -68.3711,
-    12.0321,
-    7.1973,
-    53.6255
+    -68.4174,
+    12.022,
+    7.1985,
+    53.5581
    ],
-   "bytes": null,
+   "bytes": 5603832,
    "files": {
     "base": "packs/nl-base.pmtiles",
     "hs": "packs/nl-hs.pmtiles"
@@ -2901,12 +2973,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -9.0989,
-    58.0209,
-    33.6293,
-    80.4778
+    -9.1174,
+    -54.4625,
+    33.6404,
+    80.7701
    ],
-   "bytes": null,
+   "bytes": 61263165,
    "files": {
     "base": "packs/no-base.pmtiles",
     "hs": "packs/no-hs.pmtiles"
@@ -2919,12 +2991,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    80.0517,
-    26.3603,
-    88.1615,
-    30.3875
+    80.0303,
+    26.3438,
+    88.1691,
+    30.4169
    ],
-   "bytes": null,
+   "bytes": 10566358,
    "files": {
     "base": "packs/np-base.pmtiles",
     "hs": "packs/np-hs.pmtiles"
@@ -2938,11 +3010,11 @@
    "maxzoom": 10,
    "bounds": [
     166.907,
-    -0.5508,
-    166.9584,
-    -0.4894
+    -0.5519,
+    166.9583,
+    -0.4904
    ],
-   "bytes": null,
+   "bytes": 501263,
    "files": {
     "base": "packs/nr-base.pmtiles",
     "hs": "packs/nr-hs.pmtiles"
@@ -2955,12 +3027,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -169.9483,
-    -19.1379,
-    -169.7934,
-    -18.966
+    -169.9504,
+    -19.1428,
+    -169.7829,
+    -18.964
    ],
-   "bytes": null,
+   "bytes": 449560,
    "files": {
     "base": "packs/nu-base.pmtiles",
     "hs": "packs/nu-hs.pmtiles"
@@ -2973,12 +3045,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -176.8477,
-    -52.5703,
-    178.5362,
-    -8.5465
+    -177.958,
+    -52.6003,
+    178.8439,
+    -8.5432
    ],
-   "bytes": null,
+   "bytes": 17774996,
    "files": {
     "base": "packs/nz-base.pmtiles",
     "hs": "packs/nz-hs.pmtiles"
@@ -2991,12 +3063,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    51.9776,
-    16.6484,
-    59.8375,
-    26.3563
+    51.9786,
+    16.6424,
+    59.8446,
+    26.386
    ],
-   "bytes": null,
+   "bytes": 4224760,
    "files": {
     "base": "packs/om-base.pmtiles",
     "hs": "packs/om-hs.pmtiles"
@@ -3009,12 +3081,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -83.0273,
-    7.2201,
-    -77.196,
-    9.5979
+    -83.0532,
+    7.2057,
+    -77.1633,
+    9.6293
    ],
-   "bytes": null,
+   "bytes": 3589626,
    "files": {
     "base": "packs/pa-base.pmtiles",
     "hs": "packs/pa-hs.pmtiles"
@@ -3027,12 +3099,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -81.3366,
-    -18.3456,
-    -68.6853,
-    -0.0417
+    -81.3376,
+    -18.3377,
+    -68.6843,
+    -0.0291
    ],
-   "bytes": null,
+   "bytes": 29664057,
    "files": {
     "base": "packs/pe-base.pmtiles",
     "hs": "packs/pe-hs.pmtiles"
@@ -3045,12 +3117,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -151.5124,
-    -20.8759,
-    -136.2939,
-    -8.7815
+    -154.537,
+    -27.6412,
+    -134.943,
+    -7.9501
    ],
-   "bytes": null,
+   "bytes": 1097343,
    "files": {
     "base": "packs/pf-base.pmtiles",
     "hs": "packs/pf-hs.pmtiles"
@@ -3063,15 +3135,33 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    140.8623,
-    -11.6306,
-    155.9576,
-    -1.3532
+    140.8492,
+    -11.6363,
+    155.9675,
+    -1.3464
    ],
-   "bytes": null,
+   "bytes": 11581481,
    "files": {
     "base": "packs/pg-base.pmtiles",
     "hs": "packs/pg-hs.pmtiles"
+   }
+  },
+  {
+   "id": "pga",
+   "name": "Wake Island",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    114.0277,
+    9.6795,
+    115.8488,
+    11.118
+   ],
+   "bytes": 702991,
+   "files": {
+    "base": "packs/pga-base.pmtiles",
+    "hs": "packs/pga-hs.pmtiles"
    }
   },
   {
@@ -3081,12 +3171,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    116.9695,
-    5.0602,
-    126.5934,
-    20.8413
+    116.9549,
+    4.6557,
+    126.6177,
+    21.1224
    ],
-   "bytes": null,
+   "bytes": 13484518,
    "files": {
     "base": "packs/ph-base.pmtiles",
     "hs": "packs/ph-hs.pmtiles"
@@ -3099,12 +3189,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    60.8434,
-    23.7534,
-    77.0486,
-    37.0367
+    60.8444,
+    23.6945,
+    77.049,
+    37.0545
    ],
-   "bytes": null,
+   "bytes": 30797702,
    "files": {
     "base": "packs/pk-base.pmtiles",
     "hs": "packs/pk-hs.pmtiles"
@@ -3117,12 +3207,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    14.1286,
-    49.0208,
-    24.1058,
-    54.8382
+    14.1239,
+    48.994,
+    24.1432,
+    54.8383
    ],
-   "bytes": null,
+   "bytes": 19918531,
    "files": {
     "base": "packs/pl-base.pmtiles",
     "hs": "packs/pl-hs.pmtiles"
@@ -3135,12 +3225,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -56.3869,
+    -56.3966,
     46.7528,
-    -56.1374,
-    47.099
+    -56.1448,
+    47.1413
    ],
-   "bytes": null,
+   "bytes": 752889,
    "files": {
     "base": "packs/pm-base.pmtiles",
     "hs": "packs/pm-hs.pmtiles"
@@ -3153,12 +3243,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -128.3502,
-    -24.4126,
-    -128.2901,
-    -24.3232
+    -130.7531,
+    -25.0771,
+    -124.7781,
+    -23.9244
    ],
-   "bytes": null,
+   "bytes": 448191,
    "files": {
     "base": "packs/pn-base.pmtiles",
     "hs": "packs/pn-hs.pmtiles"
@@ -3171,12 +3261,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -67.9371,
-    17.9473,
-    -65.2949,
-    18.5222
+    -67.9378,
+    17.9229,
+    -65.2446,
+    18.5228
    ],
-   "bytes": null,
+   "bytes": 1220694,
    "files": {
     "base": "packs/pr-base.pmtiles",
     "hs": "packs/pr-hs.pmtiles"
@@ -3189,12 +3279,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    34.1981,
-    31.2083,
-    35.5721,
-    32.5344
+    34.2003,
+    31.2114,
+    35.5725,
+    32.5426
    ],
-   "bytes": null,
+   "bytes": 1808799,
    "files": {
     "base": "packs/ps-base.pmtiles",
     "hs": "packs/ps-hs.pmtiles"
@@ -3207,12 +3297,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -31.283,
-    32.6483,
-    -6.2125,
-    42.1374
+    -31.2849,
+    30.0292,
+    -6.2059,
+    42.1536
    ],
-   "bytes": null,
+   "bytes": 8033511,
    "files": {
     "base": "packs/pt-base.pmtiles",
     "hs": "packs/pt-hs.pmtiles"
@@ -3225,12 +3315,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    131.135,
-    3.0219,
-    134.6596,
-    7.7121
+    131.1311,
+    2.949,
+    134.7273,
+    8.0966
    ],
-   "bytes": null,
+   "bytes": 753359,
    "files": {
     "base": "packs/pw-base.pmtiles",
     "hs": "packs/pw-hs.pmtiles"
@@ -3243,12 +3333,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -62.651,
-    -27.5538,
-    -54.2418,
-    -19.2862
+    -62.6504,
+    -27.5868,
+    -54.2453,
+    -19.2867
    ],
-   "bytes": null,
+   "bytes": 11131504,
    "files": {
     "base": "packs/py-base.pmtiles",
     "hs": "packs/py-hs.pmtiles"
@@ -3261,12 +3351,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    50.7546,
-    24.5646,
-    51.6089,
-    26.1533
+    50.751,
+    24.5599,
+    51.6165,
+    26.1601
    ],
-   "bytes": null,
+   "bytes": 947607,
    "files": {
     "base": "packs/qa-base.pmtiles",
     "hs": "packs/qa-hs.pmtiles"
@@ -3279,12 +3369,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    20.2418,
-    43.6708,
-    29.7059,
-    48.2635
+    20.2428,
+    43.65,
+    29.6996,
+    48.2748
    ],
-   "bytes": null,
+   "bytes": 14472054,
    "files": {
     "base": "packs/ro-base.pmtiles",
     "hs": "packs/ro-hs.pmtiles"
@@ -3297,12 +3387,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    18.8391,
-    42.2421,
-    22.9769,
-    46.1692
+    18.845,
+    42.2349,
+    22.9846,
+    46.1739
    ],
-   "bytes": null,
+   "bytes": 6907930,
    "files": {
     "base": "packs/rs-base.pmtiles",
     "hs": "packs/rs-hs.pmtiles"
@@ -3315,12 +3405,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -180,
-    41.1993,
-    180,
-    81.8542
+    -180.0,
+    41.1927,
+    180.0,
+    81.8587
    ],
-   "bytes": null,
+   "bytes": 832253321,
    "files": {
     "base": "packs/ru-base.pmtiles",
     "hs": "packs/ru-hs.pmtiles"
@@ -3333,12 +3423,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    28.8576,
-    -2.8086,
-    30.8766,
-    -1.0631
+    28.8572,
+    -2.8269,
+    30.8878,
+    -1.0587
    ],
-   "bytes": null,
+   "bytes": 2649091,
    "files": {
     "base": "packs/rw-base.pmtiles",
     "hs": "packs/rw-hs.pmtiles"
@@ -3351,12 +3441,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    34.6162,
-    16.3718,
-    55.641,
-    32.1245
+    34.5728,
+    16.371,
+    55.6376,
+    32.1213
    ],
-   "bytes": null,
+   "bytes": 18739746,
    "files": {
     "base": "packs/sa-base.pmtiles",
     "hs": "packs/sa-hs.pmtiles"
@@ -3369,12 +3459,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    155.6775,
-    -11.8322,
-    166.9292,
-    -6.6089
+    155.508,
+    -12.2906,
+    168.8259,
+    -6.5999
    ],
-   "bytes": null,
+   "bytes": 1956173,
    "files": {
     "base": "packs/sb-base.pmtiles",
     "hs": "packs/sb-hs.pmtiles"
@@ -3387,15 +3477,33 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    55.3834,
-    -4.7855,
-    55.543,
-    -4.5588
+    46.2074,
+    -9.7555,
+    56.2874,
+    -3.7911
    ],
-   "bytes": null,
+   "bytes": 567444,
    "files": {
     "base": "packs/sc-base.pmtiles",
     "hs": "packs/sc-hs.pmtiles"
+   }
+  },
+  {
+   "id": "scr",
+   "name": "Scarborough Shoal",
+   "continent": "Asia",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    117.7519,
+    15.1501,
+    117.7557,
+    15.1544
+   ],
+   "bytes": 665034,
+   "files": {
+    "base": "packs/scr-base.pmtiles",
+    "hs": "packs/scr-hs.pmtiles"
    }
   },
   {
@@ -3405,12 +3513,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    21.8253,
-    8.6656,
-    38.6095,
-    22.2024
+    21.8094,
+    8.6816,
+    38.6039,
+    22.227
    ],
-   "bytes": null,
+   "bytes": 24026075,
    "files": {
     "base": "packs/sd-base.pmtiles",
     "hs": "packs/sd-hs.pmtiles"
@@ -3423,15 +3531,33 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    11.1472,
-    55.3464,
-    24.1555,
-    69.0369
+    11.1082,
+    55.3427,
+    24.1634,
+    69.0364
    ],
-   "bytes": null,
+   "bytes": 32744845,
    "files": {
     "base": "packs/se-base.pmtiles",
     "hs": "packs/se-hs.pmtiles"
+   }
+  },
+  {
+   "id": "ser",
+   "name": "Serranilla Bank",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -78.6404,
+    15.8621,
+    -78.6369,
+    15.8673
+   ],
+   "bytes": 624042,
+   "files": {
+    "base": "packs/ser-base.pmtiles",
+    "hs": "packs/ser-hs.pmtiles"
    }
   },
   {
@@ -3441,12 +3567,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    103.6502,
-    1.2654,
-    103.9964,
-    1.4471
+    103.6404,
+    1.2643,
+    104.0034,
+    1.4486
    ],
-   "bytes": null,
+   "bytes": 956818,
    "files": {
     "base": "packs/sg-base.pmtiles",
     "hs": "packs/sg-hs.pmtiles"
@@ -3459,12 +3585,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -14.4149,
-    -16.004,
-    -5.6597,
-    -7.8826
+    -14.4177,
+    -40.3979,
+    -5.6504,
+    -7.8779
    ],
-   "bytes": null,
+   "bytes": 540116,
    "files": {
     "base": "packs/sh-base.pmtiles",
     "hs": "packs/sh-hs.pmtiles"
@@ -3477,12 +3603,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    13.3782,
-    45.4284,
-    16.5162,
-    46.8633
+    13.3653,
+    45.4236,
+    16.5153,
+    46.864
    ],
-   "bytes": null,
+   "bytes": 3595617,
    "files": {
     "base": "packs/si-base.pmtiles",
     "hs": "packs/si-hs.pmtiles"
@@ -3495,12 +3621,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    16.8627,
-    47.7634,
-    22.5387,
-    49.5977
+    16.8445,
+    47.75,
+    22.5396,
+    49.6018
    ],
-   "bytes": null,
+   "bytes": 5919792,
    "files": {
     "base": "packs/sk-base.pmtiles",
     "hs": "packs/sk-hs.pmtiles"
@@ -3513,12 +3639,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -13.2927,
-    6.9065,
-    -10.2832,
-    9.9965
+    -13.3011,
+    6.9194,
+    -10.2822,
+    9.996
    ],
-   "bytes": null,
+   "bytes": 2603546,
    "files": {
     "base": "packs/sl-base.pmtiles",
     "hs": "packs/sl-hs.pmtiles"
@@ -3531,12 +3657,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    12.3969,
-    43.8941,
-    12.5146,
-    43.9897
+    12.3856,
+    43.8921,
+    12.4924,
+    43.9826
    ],
-   "bytes": null,
+   "bytes": 1002133,
    "files": {
     "base": "packs/sm-base.pmtiles",
     "hs": "packs/sm-hs.pmtiles"
@@ -3549,12 +3675,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -17.5356,
-    12.328,
-    -11.3824,
-    16.6789
+    -17.536,
+    12.3056,
+    -11.3778,
+    16.6914
    ],
-   "bytes": null,
+   "bytes": 5037689,
    "files": {
     "base": "packs/sn-base.pmtiles",
     "hs": "packs/sn-hs.pmtiles"
@@ -3567,12 +3693,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    40.9645,
-    -1.6953,
-    51.3902,
-    11.9837
+    40.9654,
+    -1.6963,
+    51.417,
+    11.9891
    ],
-   "bytes": null,
+   "bytes": 6384759,
    "files": {
     "base": "packs/so-base.pmtiles",
     "hs": "packs/so-hs.pmtiles"
@@ -3585,15 +3711,33 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    42.6564,
-    7.9971,
-    48.9386,
-    11.4998
+    42.6472,
+    7.9965,
+    48.9391,
+    11.4989
    ],
-   "bytes": null,
+   "bytes": 4370755,
    "files": {
     "base": "packs/sol-base.pmtiles",
     "hs": "packs/sol-hs.pmtiles"
+   }
+  },
+  {
+   "id": "spi",
+   "name": "Southern Patagonian Ice Field",
+   "continent": "South America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -73.588,
+    -49.76,
+    -73.0574,
+    -49.2728
+   ],
+   "bytes": 1110578,
+   "files": {
+    "base": "packs/spi-base.pmtiles",
+    "hs": "packs/spi-hs.pmtiles"
    }
   },
   {
@@ -3603,12 +3747,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -58.0545,
-    1.8422,
-    -53.9905,
-    5.9935
+    -58.0677,
+    1.8335,
+    -53.9864,
+    6.0116
    ],
-   "bytes": null,
+   "bytes": 3478361,
    "files": {
     "base": "packs/sr-base.pmtiles",
     "hs": "packs/sr-hs.pmtiles"
@@ -3621,12 +3765,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    24.1474,
-    3.4907,
-    35.2684,
-    12.2231
+    24.1216,
+    3.4902,
+    35.9208,
+    12.2162
    ],
-   "bytes": null,
+   "bytes": 14294731,
    "files": {
     "base": "packs/ss-base.pmtiles",
     "hs": "packs/ss-hs.pmtiles"
@@ -3639,12 +3783,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    6.4682,
-    0.0474,
-    7.4523,
-    1.6991
+    6.4617,
+    0.0241,
+    7.4627,
+    1.6998
    ],
-   "bytes": null,
+   "bytes": 831725,
    "files": {
     "base": "packs/st-base.pmtiles",
     "hs": "packs/st-hs.pmtiles"
@@ -3657,12 +3801,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -90.1059,
-    13.164,
-    -87.7153,
-    14.4311
+    -90.1148,
+    13.1586,
+    -87.6932,
+    14.4454
    ],
-   "bytes": null,
+   "bytes": 2407660,
    "files": {
     "base": "packs/sv-base.pmtiles",
     "hs": "packs/sv-hs.pmtiles"
@@ -3675,12 +3819,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -63.1247,
-    18.0192,
-    -63.0112,
-    18.0689
+    -63.1189,
+    18.0191,
+    -63.0176,
+    18.0621
    ],
-   "bytes": null,
+   "bytes": 642993,
    "files": {
     "base": "packs/sx-base.pmtiles",
     "hs": "packs/sx-hs.pmtiles"
@@ -3693,12 +3837,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    35.7645,
-    32.3173,
-    42.3591,
-    37.2973
+    35.7234,
+    32.313,
+    42.3772,
+    37.3249
    ],
-   "bytes": null,
+   "bytes": 6362350,
    "files": {
     "base": "packs/sy-base.pmtiles",
     "hs": "packs/sy-hs.pmtiles"
@@ -3711,12 +3855,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    30.7875,
-    -27.31,
-    32.1129,
-    -25.743
+    30.7829,
+    -27.3163,
+    32.1174,
+    -25.736
    ],
-   "bytes": null,
+   "bytes": 1940174,
    "files": {
     "base": "packs/sz-base.pmtiles",
     "hs": "packs/sz-hs.pmtiles"
@@ -3729,12 +3873,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -72.3424,
-    21.7517,
-    -71.6369,
-    21.9519
+    -72.4813,
+    21.2901,
+    -71.1289,
+    21.9592
    ],
-   "bytes": null,
+   "bytes": 811607,
    "files": {
     "base": "packs/tc-base.pmtiles",
     "hs": "packs/tc-hs.pmtiles"
@@ -3747,12 +3891,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    13.4482,
-    7.4753,
-    23.9834,
-    23.4452
+    13.4492,
+    7.4556,
+    23.9844,
+    23.4447
    ],
-   "bytes": null,
+   "bytes": 17253947,
    "files": {
     "base": "packs/td-base.pmtiles",
     "hs": "packs/td-hs.pmtiles"
@@ -3765,12 +3909,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    51.6593,
-    -49.7099,
-    70.5555,
-    -46.3269
+    39.7283,
+    -49.7216,
+    77.5852,
+    -11.5506
    ],
-   "bytes": null,
+   "bytes": 1332472,
    "files": {
     "base": "packs/tf-base.pmtiles",
     "hs": "packs/tf-hs.pmtiles"
@@ -3783,12 +3927,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -0.0902,
-    6.0894,
-    1.7779,
-    11.1156
+    -0.1661,
+    6.1005,
+    1.7824,
+    11.135
    ],
-   "bytes": null,
+   "bytes": 3442929,
    "files": {
     "base": "packs/tg-base.pmtiles",
     "hs": "packs/tg-hs.pmtiles"
@@ -3801,12 +3945,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    97.3739,
-    5.6368,
-    105.641,
-    20.4244
+    97.3514,
+    5.6299,
+    105.651,
+    20.445
    ],
-   "bytes": null,
+   "bytes": 18163239,
    "files": {
     "base": "packs/th-base.pmtiles",
     "hs": "packs/th-hs.pmtiles"
@@ -3819,12 +3963,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    67.3496,
-    36.684,
-    75.1188,
-    41.0351
+    67.3427,
+    36.6786,
+    75.1641,
+    41.04
    ],
-   "bytes": null,
+   "bytes": 12735397,
    "files": {
     "base": "packs/tj-base.pmtiles",
     "hs": "packs/tj-hs.pmtiles"
@@ -3837,12 +3981,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    124.0363,
-    -9.5119,
-    127.2961,
-    -8.1399
+    124.03,
+    -9.5012,
+    127.3132,
+    -8.135
    ],
-   "bytes": null,
+   "bytes": 1311992,
    "files": {
     "base": "packs/tl-base.pmtiles",
     "hs": "packs/tl-hs.pmtiles"
@@ -3855,12 +3999,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    52.4938,
-    35.1708,
-    66.6293,
-    42.7785
+    52.4377,
+    35.1406,
+    66.6458,
+    42.7912
    ],
-   "bytes": null,
+   "bytes": 13592332,
    "files": {
     "base": "packs/tm-base.pmtiles",
     "hs": "packs/tm-hs.pmtiles"
@@ -3873,12 +4017,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    7.4956,
-    30.2294,
-    11.5359,
-    37.3404
+    7.4798,
+    30.2289,
+    11.5641,
+    37.3452
    ],
-   "bytes": null,
+   "bytes": 5375581,
    "files": {
     "base": "packs/tn-base.pmtiles",
     "hs": "packs/tn-hs.pmtiles"
@@ -3891,12 +4035,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -175.3624,
-    -21.4506,
-    -173.9219,
-    -18.5653
+    -176.2193,
+    -22.3388,
+    -173.9143,
+    -15.5595
    ],
-   "bytes": null,
+   "bytes": 559956,
    "files": {
     "base": "packs/to-base.pmtiles",
     "hs": "packs/to-hs.pmtiles"
@@ -3909,12 +4053,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    25.6689,
-    35.8314,
-    44.8172,
-    42.0933
+    25.6633,
+    35.8198,
+    44.807,
+    42.0988
    ],
-   "bytes": null,
+   "bytes": 39607525,
    "files": {
     "base": "packs/tr-base.pmtiles",
     "hs": "packs/tr-hs.pmtiles"
@@ -3927,12 +4071,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -61.9061,
-    10.0646,
-    -60.5255,
-    11.3254
+    -61.9287,
+    10.0421,
+    -60.5221,
+    11.3511
    ],
-   "bytes": null,
+   "bytes": 978648,
    "files": {
     "base": "packs/tt-base.pmtiles",
     "hs": "packs/tt-hs.pmtiles"
@@ -3945,12 +4089,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    179.1957,
-    -8.535,
-    179.2166,
-    -8.4663
+    176.1253,
+    -9.4207,
+    179.9067,
+    -5.6775
    ],
-   "bytes": null,
+   "bytes": 530523,
    "files": {
     "base": "packs/tv-base.pmtiles",
     "hs": "packs/tv-hs.pmtiles"
@@ -3963,12 +4107,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    118.2873,
-    21.925,
-    121.929,
-    25.2769
+    118.2796,
+    21.9046,
+    122.0054,
+    25.2874
    ],
-   "bytes": null,
+   "bytes": 3051153,
    "files": {
     "base": "packs/tw-base.pmtiles",
     "hs": "packs/tw-hs.pmtiles"
@@ -3981,12 +4125,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    29.3234,
-    -11.7162,
-    40.4636,
-    -0.9949
+    29.321,
+    -11.7313,
+    40.4494,
+    -0.9858
    ],
-   "bytes": null,
+   "bytes": 20230755,
    "files": {
     "base": "packs/tz-base.pmtiles",
     "hs": "packs/tz-hs.pmtiles"
@@ -3999,12 +4143,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    22.1318,
-    45.2341,
-    40.1283,
-    52.3536
+    22.1328,
+    45.2136,
+    40.1595,
+    52.3689
    ],
-   "bytes": null,
+   "bytes": 29680602,
    "files": {
     "base": "packs/ua-base.pmtiles",
     "hs": "packs/ua-hs.pmtiles"
@@ -4017,15 +4161,33 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    29.5619,
-    -1.4699,
-    34.9782,
-    4.2202
+    29.5485,
+    -1.4752,
+    35.0065,
+    4.2197
    ],
-   "bytes": null,
+   "bytes": 8264594,
    "files": {
     "base": "packs/ug-base.pmtiles",
     "hs": "packs/ug-hs.pmtiles"
+   }
+  },
+  {
+   "id": "um",
+   "name": "United States Minor Outlying Islands",
+   "continent": "North America",
+   "parent": null,
+   "maxzoom": 10,
+   "bounds": [
+    -177.3896,
+    -0.3888,
+    166.6524,
+    28.2153
+   ],
+   "bytes": 1024084,
+   "files": {
+    "base": "packs/um-base.pmtiles",
+    "hs": "packs/um-hs.pmtiles"
    }
   },
   {
@@ -4035,12 +4197,12 @@
    "parent": null,
    "maxzoom": 9,
    "bounds": [
-    -178.1945,
-    18.9639,
-    179.78,
-    71.4077
+    -179.1435,
+    18.9061,
+    179.7809,
+    71.4125
    ],
-   "bytes": null,
+   "bytes": 153822081,
    "files": {
     "base": "packs/us-base.pmtiles",
     "hs": "packs/us-hs.pmtiles"
@@ -4053,12 +4215,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -58.4381,
-    -34.9328,
-    -53.1256,
-    -30.1011
+    -58.4394,
+    -34.9734,
+    -53.1108,
+    -30.0969
    ],
-   "bytes": null,
+   "bytes": 6165399,
    "files": {
     "base": "packs/uy-base.pmtiles",
     "hs": "packs/uy-hs.pmtiles"
@@ -4071,12 +4233,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    55.9757,
-    37.1722,
-    73.1369,
-    45.5554
+    55.9758,
+    37.1851,
+    73.1486,
+    45.5587
    ],
-   "bytes": null,
+   "bytes": 14948433,
    "files": {
     "base": "packs/uz-base.pmtiles",
     "hs": "packs/uz-hs.pmtiles"
@@ -4089,12 +4251,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    12.4275,
-    41.8976,
-    12.4392,
-    41.9062
+    12.4527,
+    41.9028,
+    12.454,
+    41.9039
    ],
-   "bytes": null,
+   "bytes": 942649,
    "files": {
     "base": "packs/va-base.pmtiles",
     "hs": "packs/va-hs.pmtiles"
@@ -4107,12 +4269,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -61.3535,
-    12.6947,
-    -61.124,
-    13.3587
+    -61.4598,
+    12.5852,
+    -61.1239,
+    13.3808
    ],
-   "bytes": null,
+   "bytes": 673887,
    "files": {
     "base": "packs/vc-base.pmtiles",
     "hs": "packs/vc-hs.pmtiles"
@@ -4125,12 +4287,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -73.3662,
-    0.688,
-    -59.8289,
-    12.1779
+    -73.3911,
+    0.6493,
+    -59.8156,
+    15.7029
    ],
-   "bytes": null,
+   "bytes": 22704660,
    "files": {
     "base": "packs/ve-base.pmtiles",
     "hs": "packs/ve-hs.pmtiles"
@@ -4143,12 +4305,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -64.6951,
-    18.3991,
-    -64.2736,
-    18.7527
+    -64.774,
+    18.3347,
+    -64.2707,
+    18.7462
    ],
-   "bytes": null,
+   "bytes": 707748,
    "files": {
     "base": "packs/vg-base.pmtiles",
     "hs": "packs/vg-hs.pmtiles"
@@ -4161,12 +4323,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -65.0236,
-    17.7017,
-    -64.5805,
-    18.3852
+    -65.0415,
+    17.6828,
+    -64.5594,
+    18.3866
    ],
-   "bytes": null,
+   "bytes": 738048,
    "files": {
     "base": "packs/vi-base.pmtiles",
     "hs": "packs/vi-hs.pmtiles"
@@ -4179,12 +4341,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    102.1274,
-    8.5833,
-    109.4449,
-    23.3452
+    102.1187,
+    8.5656,
+    109.4724,
+    23.3663
    ],
-   "bytes": null,
+   "bytes": 17380374,
    "files": {
     "base": "packs/vn-base.pmtiles",
     "hs": "packs/vn-hs.pmtiles"
@@ -4197,12 +4359,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    166.5261,
-    -20.2418,
-    169.8963,
-    -13.7095
+    166.5205,
+    -20.2531,
+    169.8989,
+    -13.0649
    ],
-   "bytes": null,
+   "bytes": 999067,
    "files": {
     "base": "packs/vu-base.pmtiles",
     "hs": "packs/vu-hs.pmtiles"
@@ -4215,12 +4377,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -178.1944,
-    -14.3249,
-    -176.1281,
-    -13.2217
+    -178.1857,
+    -14.3194,
+    -176.1256,
+    -13.2089
    ],
-   "bytes": null,
+   "bytes": 464750,
    "files": {
     "base": "packs/wf-base.pmtiles",
     "hs": "packs/wf-hs.pmtiles"
@@ -4233,12 +4395,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    -172.7785,
-    -14.0473,
-    -171.4496,
-    -13.4652
+    -172.7826,
+    -14.0528,
+    -171.4377,
+    -13.4628
    ],
-   "bytes": null,
+   "bytes": 528367,
    "files": {
     "base": "packs/ws-base.pmtiles",
     "hs": "packs/ws-hs.pmtiles"
@@ -4251,12 +4413,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    20.0295,
-    41.8538,
-    21.7529,
-    43.2611
+    20.0248,
+    41.844,
+    21.7728,
+    43.2631
    ],
-   "bytes": null,
+   "bytes": 2550272,
    "files": {
     "base": "packs/xk-base.pmtiles",
     "hs": "packs/xk-hs.pmtiles"
@@ -4269,12 +4431,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    42.549,
-    12.319,
-    54.5111,
-    18.9961
+    42.5457,
+    12.1114,
+    54.5403,
+    18.9956
    ],
-   "bytes": null,
+   "bytes": 10373907,
    "files": {
     "base": "packs/ye-base.pmtiles",
     "hs": "packs/ye-hs.pmtiles"
@@ -4287,12 +4449,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    16.4476,
-    -46.9629,
-    37.8877,
-    -22.1463
+    16.47,
+    -46.9658,
+    37.9778,
+    -22.1265
    ],
-   "bytes": null,
+   "bytes": 31542910,
    "files": {
     "base": "packs/za-base.pmtiles",
     "hs": "packs/za-hs.pmtiles"
@@ -4305,12 +4467,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    21.9789,
-    -18.0415,
-    33.6615,
-    -8.1937
+    21.9799,
+    -18.0692,
+    33.6742,
+    -8.1941
    ],
-   "bytes": null,
+   "bytes": 16026114,
    "files": {
     "base": "packs/zm-base.pmtiles",
     "hs": "packs/zm-hs.pmtiles"
@@ -4323,12 +4485,12 @@
    "parent": null,
    "maxzoom": 10,
    "bounds": [
-    25.224,
-    -22.4021,
-    33.0067,
-    -15.6431
+    25.2194,
+    -22.3973,
+    33.0428,
+    -15.6148
    ],
-   "bytes": null,
+   "bytes": 12889339,
    "files": {
     "base": "packs/zw-base.pmtiles",
     "hs": "packs/zw-hs.pmtiles"
@@ -4342,11 +4504,11 @@
    "maxzoom": 10,
    "bounds": [
     -120.001,
-    48.9931,
-    -109.9994,
-    60.0011
+    48.9925,
+    -109.9993,
+    60.0001
    ],
-   "bytes": null,
+   "bytes": 26939133,
    "files": {
     "base": "packs/ca-ab-base.pmtiles",
     "hs": "packs/ca-ab-hs.pmtiles"
@@ -4359,12 +4521,12 @@
    "parent": "ca",
    "maxzoom": 10,
    "bounds": [
-    -139.0565,
-    48.3228,
-    -114.0506,
-    60.0016
+    -139.0602,
+    48.3061,
+    -114.0375,
+    60.0001
    ],
-   "bytes": null,
+   "bytes": 65962699,
    "files": {
     "base": "packs/ca-bc-base.pmtiles",
     "hs": "packs/ca-bc-hs.pmtiles"
@@ -4378,11 +4540,11 @@
    "maxzoom": 10,
    "bounds": [
     -102.0016,
-    48.9918,
-    -88.9485,
-    60.0018
+    48.9927,
+    -88.947,
+    60.0001
    ],
-   "bytes": null,
+   "bytes": 28162136,
    "files": {
     "base": "packs/ca-mb-base.pmtiles",
     "hs": "packs/ca-mb-hs.pmtiles"
@@ -4395,12 +4557,12 @@
    "parent": "ca",
    "maxzoom": 10,
    "bounds": [
-    -69.0537,
-    44.6289,
-    -63.8319,
-    48.067
+    -69.0636,
+    44.6028,
+    -63.7711,
+    48.0751
    ],
-   "bytes": null,
+   "bytes": 3775715,
    "files": {
     "base": "packs/ca-nb-base.pmtiles",
     "hs": "packs/ca-nb-hs.pmtiles"
@@ -4413,12 +4575,12 @@
    "parent": "ca",
    "maxzoom": 10,
    "bounds": [
-    -67.7615,
-    46.6283,
-    -52.6537,
-    60.306
+    -67.8081,
+    46.6184,
+    -52.6166,
+    60.3727
    ],
-   "bytes": null,
+   "bytes": 31994637,
    "files": {
     "base": "packs/ca-nl-base.pmtiles",
     "hs": "packs/ca-nl-hs.pmtiles"
@@ -4431,12 +4593,12 @@
    "parent": "ca",
    "maxzoom": 10,
    "bounds": [
-    -66.3241,
-    43.5181,
-    -59.7271,
-    47.0097
+    -66.3277,
+    43.4221,
+    -59.6886,
+    47.0348
    ],
-   "bytes": null,
+   "bytes": 3256702,
    "files": {
     "base": "packs/ca-ns-base.pmtiles",
     "hs": "packs/ca-ns-hs.pmtiles"
@@ -4450,11 +4612,11 @@
    "maxzoom": 10,
    "bounds": [
     -136.4454,
-    60.0011,
+    60.0001,
     -101.9866,
-    78.7578
+    78.7663
    ],
-   "bytes": null,
+   "bytes": 102470949,
    "files": {
     "base": "packs/ca-nt-base.pmtiles",
     "hs": "packs/ca-nt-hs.pmtiles"
@@ -4467,12 +4629,12 @@
    "parent": "ca",
    "maxzoom": 10,
    "bounds": [
-    -120.6819,
-    51.9449,
-    -61.2072,
-    83.1161
+    -120.6808,
+    51.9186,
+    -61.0855,
+    83.1165
    ],
-   "bytes": null,
+   "bytes": 227755519,
    "files": {
     "base": "packs/ca-nu-base.pmtiles",
     "hs": "packs/ca-nu-hs.pmtiles"
@@ -4485,12 +4647,12 @@
    "parent": "ca",
    "maxzoom": 10,
    "bounds": [
-    -95.1604,
-    41.6749,
-    -74.3404,
-    56.8513
+    -95.1612,
+    41.6691,
+    -74.3462,
+    56.8613
    ],
-   "bytes": null,
+   "bytes": 44003379,
    "files": {
     "base": "packs/ca-on-base.pmtiles",
     "hs": "packs/ca-on-hs.pmtiles"
@@ -4503,12 +4665,12 @@
    "parent": "ca",
    "maxzoom": 10,
    "bounds": [
-    -64.4031,
-    45.9669,
-    -62.0237,
-    47.0616
+    -64.4168,
+    45.9508,
+    -61.977,
+    47.0673
    ],
-   "bytes": null,
+   "bytes": 1165370,
    "files": {
     "base": "packs/ca-pe-base.pmtiles",
     "hs": "packs/ca-pe-hs.pmtiles"
@@ -4521,12 +4683,12 @@
    "parent": "ca",
    "maxzoom": 10,
    "bounds": [
-    -79.7139,
-    45.0039,
-    -57.1001,
-    62.5725
+    -79.7656,
+    44.998,
+    -57.1003,
+    62.5938
    ],
-   "bytes": null,
+   "bytes": 96196887,
    "files": {
     "base": "packs/ca-qc-base.pmtiles",
     "hs": "packs/ca-qc-hs.pmtiles"
@@ -4540,11 +4702,11 @@
    "maxzoom": 10,
    "bounds": [
     -110.0,
-    48.9931,
-    -101.3673,
-    60.0011
+    48.9926,
+    -101.3643,
+    60.0001
    ],
-   "bytes": null,
+   "bytes": 25403756,
    "files": {
     "base": "packs/ca-sk-base.pmtiles",
     "hs": "packs/ca-sk-hs.pmtiles"
@@ -4557,12 +4719,12 @@
    "parent": "ca",
    "maxzoom": 10,
    "bounds": [
-    -141.0021,
-    60.0011,
-    -123.8192,
-    69.6508
+    -141.0056,
+    60.0001,
+    -123.8191,
+    69.6542
    ],
-   "bytes": null,
+   "bytes": 42798891,
    "files": {
     "base": "packs/ca-yt-base.pmtiles",
     "hs": "packs/ca-yt-hs.pmtiles"
@@ -4575,12 +4737,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -178.1945,
-    51.6037,
-    -130.0141,
-    71.4077
+    -179.1435,
+    51.2154,
+    179.7809,
+    71.4125
    ],
-   "bytes": null,
+   "bytes": 123288176,
    "files": {
     "base": "packs/us-ak-base.pmtiles",
     "hs": "packs/us-ak-hs.pmtiles"
@@ -4594,11 +4756,11 @@
    "maxzoom": 10,
    "bounds": [
     -88.4862,
-    30.2309,
-    -84.9215,
-    35.025
+    30.2236,
+    -84.8979,
+    35.0097
    ],
-   "bytes": null,
+   "bytes": 5425546,
    "files": {
     "base": "packs/us-al-base.pmtiles",
     "hs": "packs/us-al-hs.pmtiles"
@@ -4611,12 +4773,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -94.6184,
-    33.012,
-    -89.6889,
-    36.5009
+    -94.6183,
+    33.0109,
+    -89.6673,
+    36.4998
    ],
-   "bytes": null,
+   "bytes": 4763537,
    "files": {
     "base": "packs/us-ar-base.pmtiles",
     "hs": "packs/us-ar-hs.pmtiles"
@@ -4629,12 +4791,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -114.836,
-    31.3242,
-    -109.0467,
-    37.0042
+    -114.8221,
+    31.3272,
+    -109.0466,
+    37.0031
    ],
-   "bytes": null,
+   "bytes": 11234222,
    "files": {
     "base": "packs/us-az-base.pmtiles",
     "hs": "packs/us-az-hs.pmtiles"
@@ -4647,12 +4809,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -124.3717,
-    32.5334,
-    -114.125,
-    42.0008
+    -124.4092,
+    32.5317,
+    -114.1191,
+    41.9995
    ],
-   "bytes": null,
+   "bytes": 19172587,
    "files": {
     "base": "packs/us-ca-base.pmtiles",
     "hs": "packs/us-ca-hs.pmtiles"
@@ -4665,12 +4827,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -109.0467,
-    37.0008,
-    -102.0128,
-    41.0009
+    -109.0466,
+    36.9998,
+    -102.0396,
+    40.9998
    ],
-   "bytes": null,
+   "bytes": 12154270,
    "files": {
     "base": "packs/us-co-base.pmtiles",
     "hs": "packs/us-co-hs.pmtiles"
@@ -4684,11 +4846,11 @@
    "maxzoom": 10,
    "bounds": [
     -73.723,
-    40.9919,
-    -71.7958,
-    42.0556
+    41.0011,
+    -71.7957,
+    42.0545
    ],
-   "bytes": null,
+   "bytes": 1608584,
    "files": {
     "base": "packs/us-ct-base.pmtiles",
     "hs": "packs/us-ct-hs.pmtiles"
@@ -4701,12 +4863,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -77.1221,
-    38.8065,
-    -76.9312,
-    39.0118
+    -77.1198,
+    38.8028,
+    -76.9093,
+    38.9961
    ],
-   "bytes": null,
+   "bytes": 1029415,
    "files": {
     "base": "packs/us-dc-base.pmtiles",
     "hs": "packs/us-dc-hs.pmtiles"
@@ -4719,12 +4881,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -75.7847,
-    38.4549,
-    -75.0359,
-    39.8434
+    -75.7886,
+    38.4533,
+    -75.044,
+    39.8386
    ],
-   "bytes": null,
+   "bytes": 1359942,
    "files": {
     "base": "packs/us-de-base.pmtiles",
     "hs": "packs/us-de-hs.pmtiles"
@@ -4737,12 +4899,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -87.6074,
-    24.5423,
-    -80.0413,
-    31.0017
+    -87.6269,
+    24.5425,
+    -80.0324,
+    31.0001
    ],
-   "bytes": null,
+   "bytes": 6408527,
    "files": {
     "base": "packs/us-fl-base.pmtiles",
     "hs": "packs/us-fl-hs.pmtiles"
@@ -4755,12 +4917,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -85.6236,
-    30.3714,
-    -80.8723,
-    35.0015
+    -85.6057,
+    30.3627,
+    -80.8357,
+    35.0004
    ],
-   "bytes": null,
+   "bytes": 6722249,
    "files": {
     "base": "packs/us-ga-base.pmtiles",
     "hs": "packs/us-ga-hs.pmtiles"
@@ -4773,12 +4935,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -177.3905,
-    18.9639,
-    -154.8042,
-    28.2212
+    -178.3044,
+    18.9061,
+    -154.8141,
+    28.4017
    ],
-   "bytes": null,
+   "bytes": 1137808,
    "files": {
     "base": "packs/us-hi-base.pmtiles",
     "hs": "packs/us-hi-hs.pmtiles"
@@ -4791,12 +4953,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -96.6268,
-    40.3794,
-    -90.1494,
-    43.5024
+    -96.638,
+    40.3795,
+    -90.1403,
+    43.501
    ],
-   "bytes": null,
+   "bytes": 5368292,
    "files": {
     "base": "packs/us-ia-base.pmtiles",
     "hs": "packs/us-ia-hs.pmtiles"
@@ -4809,12 +4971,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -117.2017,
-    42.0006,
-    -111.0503,
-    48.9931
+    -117.2154,
+    41.9995,
+    -111.0502,
+    48.9925
    ],
-   "bytes": null,
+   "bytes": 13823745,
    "files": {
     "base": "packs/us-id-base.pmtiles",
     "hs": "packs/us-id-hs.pmtiles"
@@ -4827,12 +4989,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -91.5017,
-    36.9921,
-    -87.0391,
-    42.513
+    -91.5189,
+    36.9783,
+    -87.0188,
+    42.5118
    ],
-   "bytes": null,
+   "bytes": 6275984,
    "files": {
     "base": "packs/us-il-base.pmtiles",
     "hs": "packs/us-il-hs.pmtiles"
@@ -4845,12 +5007,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -88.0953,
-    37.788,
-    -84.7896,
-    41.7608
+    -88.1119,
+    37.7819,
+    -84.784,
+    41.7597
    ],
-   "bytes": null,
+   "bytes": 4418259,
    "files": {
     "base": "packs/us-in-base.pmtiles",
     "hs": "packs/us-in-hs.pmtiles"
@@ -4863,12 +5025,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -102.0245,
-    37.0008,
-    -94.6181,
-    40.0015
+    -102.0513,
+    36.9998,
+    -94.6105,
+    40.0001
    ],
-   "bytes": null,
+   "bytes": 7863905,
    "files": {
     "base": "packs/us-ks-base.pmtiles",
     "hs": "packs/us-ks-hs.pmtiles"
@@ -4881,12 +5043,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -89.56,
-    36.4997,
-    -81.9653,
-    39.1289
+    -89.5779,
+    36.4986,
+    -81.9652,
+    39.1462
    ],
-   "bytes": null,
+   "bytes": 7095540,
    "files": {
     "base": "packs/us-ky-base.pmtiles",
     "hs": "packs/us-ky-hs.pmtiles"
@@ -4899,12 +5061,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -94.0433,
-    28.9813,
-    -88.8126,
-    33.0159
+    -94.0432,
+    28.9284,
+    -88.8109,
+    33.0143
    ],
-   "bytes": null,
+   "bytes": 4982997,
    "files": {
     "base": "packs/us-la-base.pmtiles",
     "hs": "packs/us-la-hs.pmtiles"
@@ -4917,12 +5079,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -73.5073,
-    41.2495,
-    -69.9338,
-    42.8816
+    -73.5072,
+    41.2393,
+    -69.9247,
+    42.8868
    ],
-   "bytes": null,
+   "bytes": 2211893,
    "files": {
     "base": "packs/us-ma-base.pmtiles",
     "hs": "packs/us-ma-hs.pmtiles"
@@ -4935,12 +5097,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -79.488,
-    37.954,
-    -75.0377,
-    39.7228
+    -79.4879,
+    37.9311,
+    -75.044,
+    39.7218
    ],
-   "bytes": null,
+   "bytes": 3534345,
    "files": {
     "base": "packs/us-md-base.pmtiles",
     "hs": "packs/us-md-hs.pmtiles"
@@ -4953,12 +5115,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -71.0845,
-    43.07,
-    -66.987,
-    47.463
+    -71.085,
+    43.0838,
+    -66.9773,
+    47.4597
    ],
-   "bytes": null,
+   "bytes": 4275200,
    "files": {
     "base": "packs/us-me-base.pmtiles",
     "hs": "packs/us-me-hs.pmtiles"
@@ -4971,12 +5133,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -90.4126,
-    41.7014,
-    -82.1379,
-    48.3031
+    -90.4125,
+    41.6968,
+    -82.1454,
+    48.3051
    ],
-   "bytes": null,
+   "bytes": 6627894,
    "files": {
     "base": "packs/us-mi-base.pmtiles",
     "hs": "packs/us-mi-hs.pmtiles"
@@ -4989,12 +5151,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -97.2257,
-    43.5012,
-    -89.4984,
-    49.3697
+    -97.2292,
+    43.5001,
+    -89.499,
+    49.3695
    ],
-   "bytes": null,
+   "bytes": 9651928,
    "files": {
     "base": "packs/us-mn-base.pmtiles",
     "hs": "packs/us-mn-hs.pmtiles"
@@ -5007,12 +5169,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -95.765,
-    35.9927,
-    -89.1225,
-    40.6247
+    -95.773,
+    35.9862,
+    -89.1189,
+    40.6188
    ],
-   "bytes": null,
+   "bytes": 9222278,
    "files": {
     "base": "packs/us-mo-base.pmtiles",
     "hs": "packs/us-mo-hs.pmtiles"
@@ -5025,12 +5187,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -91.6564,
-    30.1926,
-    -88.0848,
-    35.0011
+    -91.6573,
+    30.1815,
+    -88.0882,
+    35.0001
    ],
-   "bytes": null,
+   "bytes": 4070135,
    "files": {
     "base": "packs/us-ms-base.pmtiles",
     "hs": "packs/us-ms-hs.pmtiles"
@@ -5043,12 +5205,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -116.049,
-    44.3966,
-    -104.0048,
-    48.9931
+    -116.0489,
+    44.3766,
+    -104.0386,
+    48.9926
    ],
-   "bytes": null,
+   "bytes": 17319886,
    "files": {
     "base": "packs/us-mt-base.pmtiles",
     "hs": "packs/us-mt-hs.pmtiles"
@@ -5061,12 +5223,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -84.3247,
-    33.8767,
-    -75.4565,
-    36.6106
+    -84.3246,
+    33.848,
+    -75.4518,
+    36.6095
    ],
-   "bytes": null,
+   "bytes": 6650884,
    "files": {
     "base": "packs/us-nc-base.pmtiles",
     "hs": "packs/us-nc-hs.pmtiles"
@@ -5079,12 +5241,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -104.0339,
-    45.9428,
-    -96.5564,
-    48.9932
+    -104.0476,
+    45.9418,
+    -96.5563,
+    48.9927
    ],
-   "bytes": null,
+   "bytes": 6759556,
    "files": {
     "base": "packs/us-nd-base.pmtiles",
     "hs": "packs/us-nd-hs.pmtiles"
@@ -5097,12 +5259,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -104.0289,
-    40.0011,
-    -95.3467,
-    43.0014
+    -104.0537,
+    40.0001,
+    -95.3173,
+    43.0004
    ],
-   "bytes": null,
+   "bytes": 5721685,
    "files": {
     "base": "packs/us-ne-base.pmtiles",
     "hs": "packs/us-ne-hs.pmtiles"
@@ -5115,12 +5277,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -72.5528,
-    42.7025,
-    -70.7331,
-    45.294
+    -72.5562,
+    42.7009,
+    -70.7042,
+    45.3043
    ],
-   "bytes": null,
+   "bytes": 2183371,
    "files": {
     "base": "packs/us-nh-base.pmtiles",
     "hs": "packs/us-nh-hs.pmtiles"
@@ -5133,12 +5295,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -75.5242,
-    38.9411,
-    -73.9101,
-    41.3573
+    -75.5582,
+    38.9244,
+    -73.9071,
+    41.3563
    ],
-   "bytes": null,
+   "bytes": 2364129,
    "files": {
     "base": "packs/us-nj-base.pmtiles",
     "hs": "packs/us-nj-hs.pmtiles"
@@ -5151,12 +5313,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -109.0478,
-    31.3279,
-    -103.0003,
-    37.0008
+    -109.0474,
+    31.3274,
+    -103.0002,
+    36.9998
    ],
-   "bytes": null,
+   "bytes": 10710622,
    "files": {
     "base": "packs/us-nm-base.pmtiles",
     "hs": "packs/us-nm-hs.pmtiles"
@@ -5170,11 +5332,11 @@
    "maxzoom": 10,
    "bounds": [
     -120.0008,
-    34.9911,
-    -114.0403,
-    42.0011
+    35.0036,
+    -114.0402,
+    42.0001
    ],
-   "bytes": null,
+   "bytes": 12281453,
    "files": {
     "base": "packs/us-nv-base.pmtiles",
     "hs": "packs/us-nv-hs.pmtiles"
@@ -5188,11 +5350,11 @@
    "maxzoom": 10,
    "bounds": [
     -79.763,
-    40.5187,
-    -71.9032,
-    45.0054
+    40.4994,
+    -71.8574,
+    45.0101
    ],
-   "bytes": null,
+   "bytes": 7293595,
    "files": {
     "base": "packs/us-ny-base.pmtiles",
     "hs": "packs/us-ny-hs.pmtiles"
@@ -5205,12 +5367,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -84.8217,
-    38.415,
-    -80.5191,
-    42.3244
+    -84.8235,
+    38.4055,
+    -80.5202,
+    42.3238
    ],
-   "bytes": null,
+   "bytes": 5786852,
    "files": {
     "base": "packs/us-oh-base.pmtiles",
     "hs": "packs/us-oh-hs.pmtiles"
@@ -5224,11 +5386,11 @@
    "maxzoom": 10,
    "bounds": [
     -103.0008,
-    33.6484,
+    33.6474,
     -94.4391,
-    37.0008
+    36.9998
    ],
-   "bytes": null,
+   "bytes": 7683178,
    "files": {
     "base": "packs/us-ok-base.pmtiles",
     "hs": "packs/us-ok-hs.pmtiles"
@@ -5241,12 +5403,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -124.5396,
-    42.0006,
-    -116.477,
-    46.2255
+    -124.5668,
+    41.9995,
+    -116.455,
+    46.2559
    ],
-   "bytes": null,
+   "bytes": 12892174,
    "files": {
     "base": "packs/us-or-base.pmtiles",
     "hs": "packs/us-or-hs.pmtiles"
@@ -5259,12 +5421,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -80.5208,
-    39.7224,
-    -74.6991,
-    42.539
+    -80.5202,
+    39.721,
+    -74.6986,
+    42.5377
    ],
-   "bytes": null,
+   "bytes": 7058289,
    "files": {
     "base": "packs/us-pa-base.pmtiles",
     "hs": "packs/us-pa-hs.pmtiles"
@@ -5277,12 +5439,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -71.8424,
-    41.3309,
-    -71.2321,
-    42.0169
+    -71.8779,
+    41.1458,
+    -71.1219,
+    42.0164
    ],
-   "bytes": null,
+   "bytes": 1006702,
    "files": {
     "base": "packs/us-ri-base.pmtiles",
     "hs": "packs/us-ri-hs.pmtiles"
@@ -5295,12 +5457,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -83.3556,
-    32.0296,
-    -78.5643,
-    35.2109
+    -83.3555,
+    32.0325,
+    -78.5732,
+    35.2183
    ],
-   "bytes": null,
+   "bytes": 4006952,
    "files": {
     "base": "packs/us-sc-base.pmtiles",
     "hs": "packs/us-sc-hs.pmtiles"
@@ -5313,12 +5475,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -104.0372,
-    42.5113,
+    -104.0567,
+    42.5183,
     -96.4536,
-    45.9431
+    45.942
    ],
-   "bytes": null,
+   "bytes": 6382755,
    "files": {
     "base": "packs/us-sd-base.pmtiles",
     "hs": "packs/us-sd-hs.pmtiles"
@@ -5331,12 +5493,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -90.2938,
-    34.9881,
+    -90.3127,
+    34.9836,
     -81.6589,
-    36.693
+    36.6897
    ],
-   "bytes": null,
+   "bytes": 7072608,
    "files": {
     "base": "packs/us-tn-base.pmtiles",
     "hs": "packs/us-tn-hs.pmtiles"
@@ -5349,12 +5511,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -106.6683,
-    25.8705,
-    -93.5306,
-    36.5012
+    -106.6622,
+    25.8439,
+    -93.5148,
+    36.5002
    ],
-   "bytes": null,
+   "bytes": 21001657,
    "files": {
     "base": "packs/us-tx-base.pmtiles",
     "hs": "packs/us-tx-hs.pmtiles"
@@ -5367,12 +5529,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -114.0426,
-    37.0008,
-    -109.0464,
-    42.0011
+    -114.0425,
+    36.9998,
+    -109.0463,
+    42.0001
    ],
-   "bytes": null,
+   "bytes": 12211273,
    "files": {
     "base": "packs/us-ut-base.pmtiles",
     "hs": "packs/us-ut-hs.pmtiles"
@@ -5386,11 +5548,11 @@
    "maxzoom": 10,
    "bounds": [
     -83.6675,
-    36.5505,
-    -75.2258,
-    39.4519
+    36.5398,
+    -75.2433,
+    39.4508
    ],
-   "bytes": null,
+   "bytes": 7716135,
    "files": {
     "base": "packs/us-va-base.pmtiles",
     "hs": "packs/us-va-hs.pmtiles"
@@ -5403,12 +5565,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -73.4261,
-    42.7303,
-    -71.5102,
-    45.0076
+    -73.4385,
+    42.7293,
+    -71.5057,
+    45.0137
    ],
-   "bytes": null,
+   "bytes": 2339492,
    "files": {
     "base": "packs/us-vt-base.pmtiles",
     "hs": "packs/us-vt-hs.pmtiles"
@@ -5421,12 +5583,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -124.71,
-    45.5911,
-    -116.8965,
-    48.9931
+    -124.7346,
+    45.5663,
+    -116.8788,
+    48.9925
    ],
-   "bytes": null,
+   "bytes": 11617658,
    "files": {
     "base": "packs/us-wa-base.pmtiles",
     "hs": "packs/us-wa-hs.pmtiles"
@@ -5439,12 +5601,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -92.8965,
-    42.4928,
-    -86.2645,
-    47.3091
+    -92.9017,
+    42.4918,
+    -86.2506,
+    47.3081
    ],
-   "bytes": null,
+   "bytes": 7882206,
    "files": {
     "base": "packs/us-wi-base.pmtiles",
     "hs": "packs/us-wi-hs.pmtiles"
@@ -5457,12 +5619,12 @@
    "parent": "us",
    "maxzoom": 10,
    "bounds": [
-    -82.6195,
-    37.2081,
-    -77.7266,
-    40.647
+    -82.6374,
+    37.2048,
+    -77.7347,
+    40.6468
    ],
-   "bytes": null,
+   "bytes": 5463915,
    "files": {
     "base": "packs/us-wv-base.pmtiles",
     "hs": "packs/us-wv-hs.pmtiles"
@@ -5476,11 +5638,11 @@
    "maxzoom": 10,
    "bounds": [
     -111.0514,
-    41.0009,
-    -104.0217,
-    45.0011
+    40.9998,
+    -104.0524,
+    45.0001
    ],
-   "bytes": null,
+   "bytes": 8445178,
    "files": {
     "base": "packs/us-wy-base.pmtiles",
     "hs": "packs/us-wy-hs.pmtiles"
