@@ -35,3 +35,7 @@ deploy.env
 # Native build output under the mobile package: regenerable, and ~1 GB of iOS Pods/build.
 packages/mobile/ios/
 packages/mobile/android/
+
+# Basemap tooling/outputs and the R2-fetched bundled archives — no image build reads either.
+maps/
+packages/mobile/assets/basemap/

@@ -15,6 +15,16 @@ data/
 /*.jpeg
 /*.png
 
+# Basemap tooling and outputs. No cloud build reads these: the codec image copies only
+# protocol + codec-server, and the gateway image builds only protocol + server. The nested
+# maps/preview/.gitignore does not apply here (a hand-authored .gcloudignore disables all
+# gitignore handling), so without this line the preview screenshots and node_modules ride along.
+maps/
+
+# Bundled basemap archives, fetched from R2 by packages/mobile/scripts/fetch-basemap.mjs.
+# Only the Expo native/dev builds require() them; no cloud build does.
+packages/mobile/assets/basemap/
+
 # API keys
 .env
 
