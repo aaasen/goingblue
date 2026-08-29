@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { Animated, View, Text as RNText, StyleSheet, FlatList, PanResponder, Pressable, useWindowDimensions } from 'react-native';
+import { Animated, Platform, View, Text as RNText, StyleSheet, FlatList, PanResponder, Pressable, useWindowDimensions } from 'react-native';
 import {
   Canvas, DashPathEffect, Group, Paint, Rect, RoundedRect, Circle, Line, Path, Text,
   LinearGradient, Skia, vec, matchFont, type SkFont,
@@ -1213,6 +1213,49 @@ function centerText(key: string, text: string, cx: number, cy: number, font: SkF
   return <Text key={key} x={cx - w / 2} y={baseline(cy, font.getSize())} text={text} font={font} color={color} />;
 }
 
+// Direction arrows, drawn as paths: Android's sans-serif has none of the arrow glyphs, and Skia
+// draws with a single typeface, no per-glyph fallback. Both point east and rotate to where the wind
+// blows toward: dir index 0 (N wind) points south = +90° in screen coords.
+const arrowRotation = (di: number) => ((di * 45 + 90) % 360) * (Math.PI / 180);
+
+// Chunky solid arrow (shaft + triangular head) for the surface direction row.
+function dirArrow(key: string, cx: number, cy: number, di: number, scale: number, color: string): ReactNode {
+  const L = 14 * scale, SHAFT = 4.5 * scale, HEAD_L = 6.5 * scale, HEAD_W = 10.5 * scale;
+  const h = L / 2, s = SHAFT / 2, w = HEAD_W / 2;
+  const path = Skia.Path.Make();
+  path.moveTo(cx - h, cy - s);
+  path.lineTo(cx + h - HEAD_L, cy - s);
+  path.lineTo(cx + h - HEAD_L, cy - w);
+  path.lineTo(cx + h, cy);
+  path.lineTo(cx + h - HEAD_L, cy + w);
+  path.lineTo(cx + h - HEAD_L, cy + s);
+  path.lineTo(cx - h, cy + s);
+  path.close();
+  return (
+    <Group key={key} transform={[{ rotate: arrowRotation(di) }]} origin={vec(cx, cy)}>
+      <Path path={path} color={color} />
+    </Group>
+  );
+}
+
+// Hairline arrow (1px stroked shaft + open head) matching the ↗-style text glyph the aloft rows
+// drew before arrows became paths.
+function thinDirArrow(key: string, cx: number, cy: number, di: number, scale: number, color: string): ReactNode {
+  const L = 12 * scale, HEAD = 4 * scale;
+  const h = L / 2;
+  const path = Skia.Path.Make();
+  path.moveTo(cx - h, cy);
+  path.lineTo(cx + h, cy);
+  path.moveTo(cx + h - HEAD, cy - HEAD);
+  path.lineTo(cx + h, cy);
+  path.lineTo(cx + h - HEAD, cy + HEAD);
+  return (
+    <Group key={key} transform={[{ rotate: arrowRotation(di) }]} origin={vec(cx, cy)}>
+      <Path path={path} style="stroke" strokeWidth={1} strokeCap="round" strokeJoin="round" color={color} />
+    </Group>
+  );
+}
+
 // Hour label: the number carries the reading and the meridiem only disambiguates it, so AM/PM rides
 // a couple of sizes down. Both sit on the number's baseline, and the pair centers as one run.
 function centerHour(
@@ -2352,10 +2395,9 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           const cx = colCenter(i);
           if (kph == null) { els.push(centerText(`w${ri}-${i}`, '—', cx, mid, fonts.wind, C.nil)); continue; }
           const di = inlineArrow ? dirAt(i) : undefined;
-          const arrow = di != null ? ARROWS[CARDINALS[di] ?? 'N'] ?? '' : '';
           // Rows carrying an inline arrow split the (now shorter) row evenly above and below center.
-          els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, arrow ? mid - 6 : mid, fonts.wind, WIND_INK));
-          els.push(centerText(`wa${ri}-${i}`, arrow, cx, mid + 6, fonts.data, WIND_INK));
+          els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, di != null ? mid - 6 : mid, fonts.wind, WIND_INK));
+          if (di != null) els.push(thinDirArrow(`wa${ri}-${i}`, cx, mid + 6, di, 1, WIND_INK));
         }
         break;
       }
@@ -2450,30 +2492,10 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
       }
 
       case 'wind-dir': {
-        // Chunky solid arrow (shaft + triangular head), rotated per direction. Text glyphs are
-        // too thin at this size. Drawn pointing east and rotated to where the wind blows toward:
-        // dir index 0 (N wind) points south = +90° in screen coords.
-        const L = 14, SHAFT = 4.5, HEAD_L = 6.5, HEAD_W = 10.5;
-        const h = L / 2, s = SHAFT / 2, w = HEAD_W / 2;
         for (let i = c0; i < c1; i++) {
           const di = periods[i].wind_sfc_dir;
           if (di == null) continue;
-          const cx = colCenter(i);
-          const path = Skia.Path.Make();
-          path.moveTo(cx - h, mid - s);
-          path.lineTo(cx + h - HEAD_L, mid - s);
-          path.lineTo(cx + h - HEAD_L, mid - w);
-          path.lineTo(cx + h, mid);
-          path.lineTo(cx + h - HEAD_L, mid + w);
-          path.lineTo(cx + h - HEAD_L, mid + s);
-          path.lineTo(cx - h, mid + s);
-          path.close();
-          const rotate = ((di * 45 + 90) % 360) * (Math.PI / 180);
-          els.push(
-            <Group key={`wd${ri}-${i}`} transform={[{ rotate }]} origin={vec(cx, mid)}>
-              <Path path={path} color={C.dirArrow} />
-            </Group>,
-          );
+          els.push(dirArrow(`wd${ri}-${i}`, colCenter(i), mid, di, 1, C.dirArrow));
         }
         break;
       }
@@ -3274,16 +3296,22 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY, onD
   // Stable across renders so the memoized canvas tiles never see a new press handler.
   const selectColumn = useCallback((block: number, period: number) => setSelection({ block, period }), []);
 
-  const fonts = useMemo<Fonts>(() => ({
-    data: matchFont({ fontSize: 13 }),
-    small: matchFont({ fontSize: 10.5, fontWeight: '600' }),
-    date: matchFont({ fontSize: 14, fontWeight: '600' }),
-    hour: matchFont({ fontSize: 12, fontWeight: '400' }),
-    hourSuffix: matchFont({ fontSize: 9.5, fontWeight: '400' }),
-    strip: matchFont({ fontSize: 11, fontWeight: '300' }),
-    wind: matchFont({ fontSize: 11.5, fontWeight: '400' }),
-    model: matchFont({ fontSize: 11, fontWeight: '600' }),
-  }), []);
+  const fonts = useMemo<Fonts>(() => {
+    // matchFont's default family is "System", which Android's Skia font manager doesn't know —
+    // it returns a null typeface and every glyph silently draws as nothing.
+    const font = (style: Parameters<typeof matchFont>[0]) =>
+      matchFont({ fontFamily: Platform.select({ android: 'sans-serif', default: 'System' }), ...style });
+    return {
+      data: font({ fontSize: 13 }),
+      small: font({ fontSize: 10.5, fontWeight: '600' }),
+      date: font({ fontSize: 14, fontWeight: '600' }),
+      hour: font({ fontSize: 12, fontWeight: '400' }),
+      hourSuffix: font({ fontSize: 9.5, fontWeight: '400' }),
+      strip: font({ fontSize: 11, fontWeight: '300' }),
+      wind: font({ fontSize: 11.5, fontWeight: '400' }),
+      model: font({ fontSize: 11, fontWeight: '600' }),
+    };
+  }, []);
 
   const blocks = useMemo(() => msg.periods.map((periods, mi) => {
     const start = startDatetime(msg);
