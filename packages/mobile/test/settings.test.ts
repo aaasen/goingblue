@@ -9,6 +9,10 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 
+// devices.ts reads Platform.OS to hide the iPhone route on Android; react-native itself doesn't
+// parse under vitest.
+vi.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
+
 import { applyUnitSystem, defaultUnitPrefs, loadUnits, saveUnits } from '../settings';
 
 describe('unit preferences', () => {

@@ -38,9 +38,13 @@ export default function DeviceSetup() {
       <Device name="Garmin Earthmate" open={open === 'Garmin Earthmate'} onToggle={toggle}>
         <EarthmateSteps />
       </Device>
-      <Device name="iPhone satellite messaging" open={open === 'iPhone satellite messaging'} onToggle={toggle}>
-        <IPhoneSteps />
-      </Device>
+      {/* The iPhone route is hidden from the device selector on Android (see devices.ts), so its
+          setup steps go with it. */}
+      {Platform.OS !== 'android' && (
+        <Device name="iPhone satellite messaging" open={open === 'iPhone satellite messaging'} onToggle={toggle}>
+          <IPhoneSteps />
+        </Device>
+      )}
       <Device name="ZOLEO" open={open === 'ZOLEO'} onToggle={toggle}>
         <ZoleoSteps />
       </Device>

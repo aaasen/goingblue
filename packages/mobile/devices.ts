@@ -1,4 +1,5 @@
 import type { ComponentProps } from 'react';
+import { Platform } from 'react-native';
 import type MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import type { DeviceCode } from '@weather/protocol';
 
@@ -20,7 +21,7 @@ import type { DeviceCode } from '@weather/protocol';
 // protocol's devices.ts holds the measurements.
 export type Device = 'internet' | 'sms' | 'inreach' | 'zoleo' | 'iphone';
 
-export const DEVICES = [
+const ALL_DEVICES = [
   { value: 'internet', label: 'Internet', code: 'd', action: 'Get Forecast', icon: 'wifi' },
   { value: 'sms', label: 'SMS', code: 's', action: 'Send SMS', icon: 'message-text' },
   { value: 'inreach', label: 'inReach', code: 'g', action: 'Copy inReach Message', icon: 'satellite-variant' },
@@ -33,6 +34,13 @@ export const DEVICES = [
   action: string;
   icon: ComponentProps<typeof MaterialCommunityIcons>['name'];
 }[];
+
+// The iPhone route rides Apple's satellite relay, which only an iPhone has — on Android it can
+// never send. Filtered here so the selector, the help copy keyed off it, and the settings
+// restore (isDevice) all drop it together.
+export const DEVICES = Platform.OS === 'android'
+  ? ALL_DEVICES.filter((d) => d.value !== 'iphone')
+  : ALL_DEVICES;
 
 export const DEFAULT_DEVICE: Device = 'internet';
 

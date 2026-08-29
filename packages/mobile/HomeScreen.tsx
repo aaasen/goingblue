@@ -130,14 +130,15 @@ const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 const MODEL_HINT_NO_LOCATION = 'Set a location to see which models will be used.';
 
 // Device-selector help copy. Each line says how the forecast travels on that device, which is what
-// picks between them: the route a reader has left is usually the only one they have.
+// picks between them: the route a reader has left is usually the only one they have. Filtered
+// against DEVICES so a route the platform hides loses its help line with it.
 const DEVICE_INFO = [
   { name: 'Internet', desc: 'Fetches the forecast over a WiFi or cellular data connection.' },
   { name: 'SMS', desc: 'Sends the forecast over a text message for weak cell reception without data.' },
   { name: 'inReach', desc: 'Copies the message so that it can be pasted into the Garmin Earthmate or Messenger app and sent over inReach.' },
   { name: 'ZOLEO', desc: 'Copies the message so that it can be pasted into the ZOLEO app and sent over satellite.' },
   { name: 'iPhone', desc: 'Sends the forecast over a text message, and asks for the reply in a form that fits a single message over satellite. Choose this on an iPhone that can text without cell service.' },
-];
+].filter((info) => DEVICES.some((d) => d.label === info.name));
 
 // Id of the subgroup the air-quality toggles fold under — stable across a change of scale, which
 // its heading is not, so folding it open survives switching from one index to the other.
