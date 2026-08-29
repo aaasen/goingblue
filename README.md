@@ -114,17 +114,15 @@ The reason rANS works is that encoding a symbol multiplies the state by roughly 
 
 rANS gets us very close to the actual entropy of the data. For a more detailed explanation of how rANS works, see this excellent [post](https://kedartatwawadi.github.io/post--ANS/).
 
-### Cross-Variable Correlation
+For rANS and other entropy coders, both sides need to know the probability distribution of the data. The distributions are bundled into the app as part of each codec version. When the client makes its request, it sends a version at the beginning of the request and the server uses the corresponding distributions to encode the message.
 
-The same technique can be applied to other weather variables. Correlation between variables can also be used. For example, weathercodes are split into classes that give a general weather bucket: rainy, snowy, dry, etc. Weathercode is always included so this data can be used to condition other variables for free. Snow, rain, and precipitation probability are keyed off of weathercode class.
+### Entropy Reduction
 
-### Delta Encoding
+rANS allows us to transmit data at close to its actual entropy. To further compress the data, we need to reduce its entropy.
 
-For variables with large ranges, like temperature, we encode the starting temperature and then the delta of each forecast point. This avoids having a separate codebook for every possible temperature. It also allows the codec to more easily capture trends. For example, if the temperature rose 2°C in the last hour, it is likely still rising in the next hour. The delta provides more information about the next hour's temperature than the absolute temperature does.
+There are several ways that we can do this. The first is quantization, or reducing the precision of each variable. Going Blue aims to preserve perceptible differences while not wasting bits on unnecessary precision. For example, temperature is transmitted at 1°C precision because it's unlikely that a difference of <1°C is going to change the decision a person makes based on the forecast. Wind is encoded using the [Beaufort scale](https://en.wikipedia.org/wiki/Beaufort_scale), which is tuned for noticeable differences in wind speed, e.g. Beaufort 1 "Direction shown by smoke drift but not by wind vanes" versus Beaufort 2 "Wind felt on face; leaves rustle; wind vane moved by wind".
 
-### Sqrt Scale for Large Ranges
-
-For variables like snow and rain which are sparse but have large variability, we use a sqrt scale. This provides detail at small amounts while preserving range for larger values. With rain, we might have an hour with 0.1mm rain and a 12 hour period with 100mm of rain. A sqrt scale allows us to represent both extremes on a scale with only 64 values. Rain values range from 0.036mm to 144mm and snow from 0.05cm to 200cm in a single time period.
+For variables like snow and rain, which are sparse but have large variability, we use a sqrt scale. This provides detail at small amounts while preserving range for larger values. With rain, we might have an hour with 0.1mm rain and a 12 hour period with 100mm of rain. A sqrt scale allows us to represent both extremes on a scale with only 64 values. Rain values range from 0.036mm to 144mm and snow from 0.05cm to 200cm in a single time period.
 
 ```math
 \begin{aligned}
@@ -138,28 +136,13 @@ For variables like snow and rain which are sparse but have large variability, we
 | Rain (mm) | 0 | 0.036 | 0.145 | 0.327 | …  | 9.29 | 37.15 | 83.59 | …  | 139.47 | 144.00 |
 | Step      | — | 0.036 | 0.109 | 0.181 | …  | 1.13 | 2.29  | 3.45  | …  | 4.46   | 4.54   |
 
-### Forecast Packing
+For variables with large ranges, like temperature, we encode the starting temperature and then the delta of each forecast point. This avoids having a separate codebook for every possible temperature. It also allows the codec to more easily capture trends. For example, if the temperature rose 2°C in the last hour, it is likely still rising in the next hour. The delta provides more information about the next hour's temperature than the absolute temperature does.
 
-Going Blue uses an entropy coder which means that the forecast length is not predictable. It depends on the entropy of the forecast, with stable (low-entropy) conditions taking few bits to encode and variable (high-entropy) conditions taking many bits to encode. In practice, forecasts with the default variable set range between 40 and 225 time periods, with an average near 100.
+We can also use correlation between variables to reduce entropy. Weathercode is great for this because it is always included and it is a summary of the weather. If the current weathercode is clear, it's probably not raining. We can split weathercodes into buckets (rainy, snowy, dry, etc.) and use that to condition the precipitation variables (snow, rain, precip chance). Variables that have diurnal cycles, like temperature, can be conditioned by the local time of day. If it's solar noon, the temperature is more likely to be rising. Forecast resolution (1h, 3h, 6h, 12h) is also used since the forecast resolution affects the amount of accumulation and magnitude of change in each period.
 
-We can't promise a 3 day hourly forecast or a 10 day forecast at 3h resolution. At the minimum of 40 data points, we can choose between almost 2 days of hourly data or a 10 day forecast at 6h resolution. The app allows the user to select a fill priority: `detail`, `auto`, or `range`. The server fetches the forecast and then tries to fit as much data into the message as possible. At each step, it can either extend the range of the forecast (up to 13 days) or increase the detail (12h/6h/3h/1h resolution). The fill priority determines which it tries to do. These fill ladders are pre-defined and shared between the server and client. The server sends back a sequence number so that the client can derive the resolution of each forecast point. The server does a binary search of the sequence number to find the largest forecast that can fit within the character budget.
+All of these refinements are chosen to make the distribution of each codebook as skewed as possible and thus decrease the entropy of the data. More refinements could be done, but there is a cost to having more codebooks and a smaller sample size for each codebook.
 
-### Header Format
-
-To keep the message small, the server never sends the client information that it already has. When the client creates a request, it stores request metadata like forecast location, model, variables, priority mode, UTC offset, and request time in a local cache. The client sends a request index to the server and the server sends that index back in the response. The client can then recover all of the forecast metadata from that index. Using this, the entire header can be packed into just 5 characters:
-
-| Field     | Bits | Meaning                                                        |
-| -------   | ---- | -------------------------------------------------------------- |
-| `version` |    7 | base-85 index = protocol version; read before anything else    |
-| `index`   |    7 | message index the client stores its request context under      |
-| `seq`     |    8 | fill sequence number to derive forecast length and layout      |
-| `elev`    |    7 | elevation in 100 m steps                                       |
-
-### Strategy by Variable
-
-Each variable has a different quantization method and codebook strategy. Quantization is chosen to minimize the cost of each column while maintaining the useful information. For example, wind uses the Beaufort scale which is tuned for perceptible differences in wind speed like Beaufort 1 "Direction shown by smoke drift but not by wind vanes" versus Beaufort 2 "Wind felt on face; leaves rustle; wind vane moved by wind".
-
-The codebooks try to take advantage of correlated weather variables. For example, temperature is keyed by time of day since often it has a diurnal cycle. Snow and rain use the weathercode class (clear, rainy, snowy, etc.). Most variables use the forecast resolution (1h, 3h, 6h, 12h) since the forecast resolution affects the amount of accumulation and magnitude of change in each period. The goal of all of this is to make the probability distribution of each codebook heavily skewed so that the most common state can be encoded very cheaply.
+These are the units and techniques used for each variable:
 
 | Variable                        | Model | Unit                                               | Codebook keyed by                                             |
 | ------------------------------- | ----- | -------------------------------------------------- | ------------------------------------------------------------- |
@@ -177,6 +160,23 @@ The codebooks try to take advantage of correlated weather variables. For example
 | AQI, Ozone, NO₂ (diurnal cycle) | Delta | Air quality index (US: 0-500, EU: 0-100), 25 bands | Previous delta, time of day, forecast resolution              |
 | PM2.5, PM10, SO₂                | Delta | Air quality index (US: 0-500, EU: 0-100), 25 bands | Previous delta, forecast resolution                           |
 | Dominant pollutant              | Value | Pollutant (PM2.5, PM10, Ozone, SO₂, NO₂)           | Previous dominant pollutant                                   |
+
+### Forecast Packing
+
+Since Going Blue uses an entropy coder, the forecast length is not predictable. It depends on the entropy of the forecast, with stable (low-entropy) conditions taking few bits to encode and variable (high-entropy) conditions taking many bits to encode. In practice, forecasts with the default variable set range between 40 and 225 time periods, with an average near 100.
+
+We can't promise a 3 day hourly forecast or a 10 day forecast at 3h resolution. At the minimum of 40 data points, we can choose between almost 2 days of hourly data or a 10 day forecast at 6h resolution. The app allows the user to select a fill priority: `detail`, `auto`, or `range`. The server fetches the forecast and then tries to fit as much data into the message as possible. At each step, it can either extend the range of the forecast (up to 13 days) or increase the detail (12h/6h/3h/1h resolution). The fill priority determines which it tries to do. These fill ladders are pre-defined and shared between the server and client. The server sends back a sequence number so that the client can derive the resolution of each forecast point. The server does a binary search of the sequence number to find the largest forecast that can fit within the character budget.
+
+### Header Format
+
+To keep the message small, the server never sends the client information that it already has. When the client creates a request, it stores request metadata like forecast location, model, variables, priority mode, UTC offset, and request time in a local cache. The client sends a request index to the server and the server sends that index back in the response. The client can then recover all of the forecast metadata from that index. Using this, the entire header can be packed into just 5 characters:
+
+| Field     | Bits | Meaning                                                        |
+| -------   | ---- | -------------------------------------------------------------- |
+| `version` |    7 | base-85 index = protocol version; read before anything else    |
+| `index`   |    7 | message index the client stores its request context under      |
+| `seq`     |    8 | fill sequence number to derive forecast length and layout      |
+| `elev`    |    7 | elevation in 100 m steps                                       |
 
 ### Alphabet and Message Length
 
