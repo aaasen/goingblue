@@ -14,6 +14,7 @@ import {
 } from './settings';
 import { DEFAULT_DEVICE, type Device } from './devices';
 import { configureTileCache } from './tileCache';
+import { MODAL_TOP_INSET } from './insets';
 
 // Hold the launch image until the first screen can be drawn as it will finally look. It otherwise
 // hides the moment React mounts — which is before the stored token and preferences have come back
@@ -168,6 +169,7 @@ export default function App() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f2f2f7' },
-  // Empty safe area: lays out to exactly the top inset, nothing more.
-  topInset: { backgroundColor: '#f2f2f7' },
+  // Empty safe area: lays out to exactly the top inset, nothing more. On Android the safe area
+  // measures zero, so the padding carries it instead.
+  topInset: { backgroundColor: '#f2f2f7', paddingTop: MODAL_TOP_INSET },
 });

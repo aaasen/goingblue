@@ -7,6 +7,7 @@ import * as Location from 'expo-location';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { findPack, formatBytes, formatTallyBytes, searchPacks, tally, type Pack } from './catalog';
 import { regionsAt } from './outlines';
+import { MODAL_TOP_INSET } from './insets';
 import { usePackState } from './packStore';
 import { clearTileCache, tileCacheSize, TILE_CACHE_EMPTY_BYTES } from './tileCache';
 
@@ -388,7 +389,7 @@ export function confirmRemovePack(pack: Pack, onRemove: (id: string) => void) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f2f2f7' },
+  root: { flex: 1, backgroundColor: '#f2f2f7', paddingTop: MODAL_TOP_INSET },
   // The same frame as HelpScreen's.
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

@@ -6,7 +6,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import * as Network from 'expo-network';
-import { pageInsets } from './insets';
+import { MODAL_TOP_INSET, pageInsets } from './insets';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
@@ -1819,7 +1819,7 @@ const styles = StyleSheet.create({
 
   // Sheet frame, matching HelpScreen's. The safe area carries the status bar inset now that this
   // runs the full height, so the header only needs the same 12pt the app header uses.
-  sheet: { flex: 1, backgroundColor: '#fff' },
+  sheet: { flex: 1, backgroundColor: '#fff', paddingTop: MODAL_TOP_INSET },
   sheetHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
