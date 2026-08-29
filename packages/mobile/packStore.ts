@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
-import { createDownloadResumable, deleteAsync, documentDirectory, getInfoAsync, makeDirectoryAsync, moveAsync } from 'expo-file-system/legacy';
+import { createDownloadResumable, deleteAsync, documentDirectory, getInfoAsync, makeDirectoryAsync, moveAsync, type DownloadResumable } from 'expo-file-system/legacy';
+import { getNetworkStateAsync } from 'expo-network';
 import { BASEMAP_URL } from './basemapStyle';
 import { findPack, type Pack } from './catalog';
 import { loadDownloadedPacks, saveDownloadedPacks } from './offlineMaps';
@@ -80,22 +81,37 @@ export function usePackState(): PackState {
   return useSyncExternalStore(subscribePacks, getPackState);
 }
 
+// How long without a progress callback before a download is declared stalled. downloadAsync
+// never times out on its own: with no connectivity the OS task waits indefinitely, and the
+// promise that never settles would leave the progress spinner up forever.
+const STALL_MS = 20_000;
+
 // Both archives, sequentially, progress weighted by bytes across the pair (the catalog's
 // per-pack total). Throws on failure with nothing half-installed.
 export async function downloadPack(pack: Pack): Promise<void> {
   if (state.installed.has(pack.id) || state.progress.has(pack.id)) return;
   emit({ progress: new Map(state.progress).set(pack.id, 0) });
+  let current: DownloadResumable | null = null;
   const { base, hs } = fileUris(pack.id);
   const total = pack.bytes ?? 0;
   let written = 0;
   // The OS can deliver a final progress callback after the download resolves; once settling
   // starts, late callbacks must not resurrect the progress entry (it would spin forever).
   let settled = false;
+  let lastProgressAt = Date.now();
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastProgressAt > STALL_MS) current?.cancelAsync().catch(() => {});
+  }, 5_000);
   try {
+    // Airplane mode fails here in one round trip instead of waiting out the watchdog. Only a
+    // definite "not connected" blocks: an unreadable network state is no reason not to try.
+    const net = await getNetworkStateAsync().catch(() => null);
+    if (net?.isConnected === false) throw new Error('offline');
     await makeDirectoryAsync(DIR, { intermediates: true }).catch(() => {});
     for (const [file, remote] of [[base, pack.files.base], [hs, pack.files.hs]] as const) {
       const before = written;
       const download = createDownloadResumable(`${BASEMAP_URL}/${remote}`, `${file}.part`, {}, (p) => {
+        lastProgressAt = Date.now();
         if (settled) return;
         written = before + p.totalBytesWritten;
         const frac = Math.min(total > 0 ? written / total : 0, 0.999);
@@ -105,6 +121,7 @@ export async function downloadPack(pack: Pack): Promise<void> {
         if (frac - last < 0.01) return;
         emit({ progress: new Map(state.progress).set(pack.id, frac) });
       });
+      current = download;
       const result = await download.downloadAsync();
       if (!result || result.status !== 200) throw new Error(`HTTP ${result?.status ?? 'failure'} for ${remote}`);
     }
@@ -126,6 +143,8 @@ export async function downloadPack(pack: Pack): Promise<void> {
     progress.delete(pack.id);
     emit({ progress });
     throw e;
+  } finally {
+    clearInterval(watchdog);
   }
 }
 
