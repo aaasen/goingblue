@@ -6,3 +6,4 @@
  - Never update README.md without explicit review.
  - Use American English spellings.
  - Never make a commit without explicit permission.
+ - Do not use "—".

@@ -34,11 +34,36 @@ The service is written in TypeScript. There are four packages:
 
 ## Compression
 
-Going Blue uses a Markov model of weather combined with a [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) entropy coder. This is a similar entropy coder to what is used in modern compression codecs like [zstd](https://github.com/facebook/zstd) and [JPEG-XL](https://en.wikipedia.org/wiki/JPEG_XL).
+Going Blue uses a Markov model of weather combined with a [range Asymmetric Numeral Systems (rANS)](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) entropy coder. This is a similar entropy coder to what is used in modern compression codecs like [zstd](https://github.com/facebook/zstd) and [JPEG-XL](https://en.wikipedia.org/wiki/JPEG_XL).
 
-### Markov Model
+### Entropy 
 
-To see how this works, let's step through an example of encoding the weathercode, which is a general summary of weather conditions in a single symbol. There are 30 different weathercodes, so encoding weathercode without compression would take 5 bits. We can take advantage of the fact that the current weather is a good predictor of future weather. For example, if it is currently sunny, this is the probability distribution of the next hour's weather:
+First, we need to define an important concept: entropy. [Entropy](https://en.wikipedia.org/wiki/Entropy_(information_theory)) is a measure of the average level of uncertainty in a system. It is defined as the sum of the probability of each symbol multiplied by the logarithm of its probability:
+
+$$H(X) := -\sum_{x \in \mathcal{X}} p(x) \log_2 p(x)$$
+
+Here we use a base-2 logarithm to measure entropy in bits (Shannon entropy).
+
+Entropy depends on the probability distribution of symbols. For example, if we have two symbols that are equally likely (e.g. flipping a coin), then entropy is 1 bit:
+
+$$H(\text{coin}) = -\left(\tfrac{1}{2} \log_2 \tfrac{1}{2} + \tfrac{1}{2} \log_2 \tfrac{1}{2}\right) = 1 \text{ bit}$$
+
+If we have a coin that has two heads, the entropy is 0 since there is no uncertainty. 
+
+$$H(\text{two-headed coin}) = -1 \log_2 1 = 0 \text{ bits}$$
+
+Now, let's apply this to weather data with an example of encoding the weathercode, which is a general summary of weather conditions in a single symbol. There are 28 different weathercodes, so if weathercodes were uniformly distributed the entropy would be $\log_2 28 \approx 4.807 \text{ bits}$. Fortunately, weathercodes are not uniformly distributed:
+
+| Weathercode | Probability |
+|---|---|
+| ☁️ overcast | **32.25%** |
+| ☀️ clear sky | 31.13% |
+| 🌤️ mainly clear | 9.52% |
+| ⛅ partly cloudy | 7.73% |
+| 🌦️ light drizzle | 7.38% |
+| … everything else | 12.00% combined |
+
+The actual entropy of the weathercode is about 2.69 bits, far below the uniform distribution. To decrease the entropy even more, we can take advantage of the fact that the current weather is a good predictor of future weather. We can model weather as a series of state transitions with different probabilities, i.e. a Markov chain ☀️ -> ☀️ -> ⛅ -> ⛅ -> 🌦️. If it is currently sunny, this is the probability distribution of the next hour's weather:
 
 | Next hour | Probability |
 |---|---|
@@ -49,13 +74,13 @@ To see how this works, let's step through an example of encoding the weathercode
 | 🌦️ light drizzle | 0.458% |
 | … everything else | 0.192% combined |
 
-We can then represent a forecast as a series of state transitions with different probabilities i.e. a Markov chain: ☀️ -> ☀️ -> ⛅ -> ⛅ -> 🌦️.
+The entropy conditioned on the previous code is only 0.83 bits/symbol, 5.8x smaller than the uniform distribution!
 
-### Entropy Coding
+### Huffman Coding
 
-We can then feed this probability distribution into an entropy coder like a Huffman coder. In Huffman coding, each symbol is assigned a code based on its probability. The more likely a symbol is, the shorter its code:
+Now that we know the probability distribution and the entropy of the data, we can encode it. To start, we can use Huffman coding, which assigns codes to symbols based on their probability. More likely symbols get shorter codes, less likely symbols get longer ones, and the expected length of the code approaches the entropy of the data. 
 
-| conditions | P | bits | code |
+| Weathercode | P | Bits | Huffman Code |
 |---|---|---|---|
 | ☀️ clear sky | 85.40% | 1 | `0` |
 | 🌤️ mainly clear | 8.68% | 2 | `10` |
@@ -64,9 +89,30 @@ We can then feed this probability distribution into an entropy coder like a Huff
 | 🌦️ light drizzle | 0.458% | 5 | `11110` |
 | … everything else | 0.192% combined | 6+ | `111110…` |
 
-In this example, the clear -> clear transition is very likely so it gets a 1-bit code: `0`. The clear -> light drizzle transition is unlikely, so it gets a 5-bit code: `11110`. The expected length of the encoded forecast is only 1.248 bits/symbol, far below the 5 bits/symbol that would be required to encode any of the 30 different weathercodes. The actual encoded length may vary depending on the forecast. If it's completely clear for the entire forecast period, we will just use 1 bit per period. In more variable conditions, we will need more bits for each forecast period.
+In this example, the clear -> clear transition is very likely so it gets a 1-bit code: `0`. The clear -> light drizzle transition is unlikely, so it gets a 5-bit code: `11110`. The expected length of the encoded forecast is 1.25 bits/symbol, which is near the 0.83 bits/symbol entropy of the data. This is just the expected length, and the actual length can vary depending on the data. An all-clear forecast takes just 1 bit/symbol to encode while a forecast with rare weathercodes could take even more than 5 bits/symbol. 
 
-The actual entropy coder that Going Blue uses is [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems#Range_variants_(rANS)_and_streaming) which removes the 1-bit floor of Huffman coding by encoding the entire forecast into a single large number instead of going symbol by symbol. See this [post](https://kedartatwawadi.github.io/post--ANS/) for a great explanation of asymmetric numeral systems. With the Huffman coder, we can reach 1.248 bits/symbol. rANS brings us much closer to the actual entropy of the data, which is 0.833 bits/symbol.
+### range Asymmetric Numeral Systems (rANS)
+
+Huffman coding gets us near the entropy of the data, but it has a major flaw: each code takes at least one bit. Even though the entropy of weathercode is 0.83 bits/symbol, we can only reach 1.25 bits/symbol because of the one-bit floor.
+
+To get around this limitation and get closer to the actual entropy of the data, Going Blue uses [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems#Range_variants_(rANS)_and_streaming). 
+
+The basic idea of rANS is to encode the data in a single large integer. Each integer is mapped to a symbol based on its probability distribution. The mapping is set up so that encoding a likely symbol requires a small increase in the number and encoding a rare symbol requires a large increase. 
+
+Let's start with a simplified example. Say it is clear (`C`) 75% of the time and raining (`R`) 25% of the time. We can assign numbers to each state like this:
+
+```
+0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16 17 18 19 20 ...
+   C  C  C  R  C  C  C  R  C  C  C  R  C  C  C  R  C  C  C  R  ...
+```
+
+When encoding a symbol from state `x`, we find the `x`th occurrence of that symbol. For example, if we start at state 1 with symbol `R`, we find the first occurrence of `R` which is 4. To encode `C` from state 4, we find the 4th occurrence of `C`, which is 5. If we encode another `R`, we find the 5th occurrence of `R`, which is 20. The message `RCR` can be represented as the number 20. 
+
+To decode, we walk the process in reverse. At state 20, the symbol is `R` and it is the 5th `R`, so the previous state was 5. At state 5, the symbol is `C` and it is the 4th `C` so the previous state was 4. At 4, the symbol is `R` and it is the 1st `R` so the state goes to 1, which is the end of the message.
+
+The reason rANS works is that encoding a symbol multiplies the state by roughly $1/p$. For symbol `R`, it multiplies the state by $1/(1/4) = 4$, which is about 2 bits. For `C`, it multiplies the state by $1/(3/4) = 4/3$, which is about 0.4 bits. 
+
+rANS gets us very close to the actual entropy of the data. For a more detailed explanation of how rANS works, see this excellent [post](https://kedartatwawadi.github.io/post--ANS/).
 
 ### Cross-Variable Correlation
 
@@ -102,12 +148,12 @@ We can't promise a 3 day hourly forecast or a 10 day forecast at 3h resolution. 
 
 To keep the message small, the server never sends the client information that it already has. When the client creates a request, it stores request metadata like forecast location, model, variables, priority mode, UTC offset, and request time in a local cache. The client sends a request index to the server and the server sends that index back in the response. The client can then recover all of the forecast metadata from that index. Using this, the entire header can be packed into just 5 characters:
 
-| Field   | Bits | Meaning                                                        |
-| ------- | ---: | -------------------------------------------------------------- |
-| version |  7 | base-85 index = protocol version; read before anything else |
-| `index`  |    7 | message index the client stores its request context under        |
-| `seq`   |    8 | fill sequence number to derive forecast length and layout |
-| `elev`  |    7 | elevation in 100 m steps                                          |
+| Field     | Bits | Meaning                                                        |
+| -------   | ---- | -------------------------------------------------------------- |
+| `version` |    7 | base-85 index = protocol version; read before anything else    |
+| `index`   |    7 | message index the client stores its request context under      |
+| `seq`     |    8 | fill sequence number to derive forecast length and layout      |
+| `elev`    |    7 | elevation in 100 m steps                                       |
 
 ### Strategy by Variable
 
@@ -118,7 +164,7 @@ The codebooks try to take advantage of correlated weather variables. For example
 | Variable                        | Model | Unit                                               | Codebook keyed by                                             |
 | ------------------------------- | ----- | -------------------------------------------------- | ------------------------------------------------------------- |
 | Weathercode                     | Value | WMO Code                                           | Previous weathercode                                          |
-| Temperature                     | Delta | 1 °C (-100°C to 155°C)                                | Previous temperature delta, time of day, forecast resolution  |
+| Temperature                     | Delta | 1°C (-100°C to 155°C)                                | Previous temperature delta, time of day, forecast resolution  |
 | Precip chance                   | Value | % in 8 steps                                       | Previous value, weathercode class, forecast resolution        |
 | Snow                            | Value | cm, 64 sqrt-companded steps (0-200cm)              | Previous value bucket, weathercode class, forecast resolution |
 | Rain                            | Value | mm, 64 sqrt-companded steps (0-144mm)              | Previous value bucket, weathercode class, forecast resolution |
@@ -130,7 +176,7 @@ The codebooks try to take advantage of correlated weather variables. For example
 | Wind direction                  | Value | 8 cardinal directions                              | Previous direction, forecast resolution                       |
 | AQI, Ozone, NO₂ (diurnal cycle) | Delta | Air quality index (US: 0-500, EU: 0-100), 25 bands | Previous delta, time of day, forecast resolution              |
 | PM2.5, PM10, SO₂                | Delta | Air quality index (US: 0-500, EU: 0-100), 25 bands | Previous delta, forecast resolution                           |
-| Dominant pollutant              | Value | Pollutant (PM2.5, PM10, Ozone, SO2, NO2)           | Previous dominant pollutant                                   |
+| Dominant pollutant              | Value | Pollutant (PM2.5, PM10, Ozone, SO₂, NO₂)           | Previous dominant pollutant                                   |
 
 ### Alphabet and Message Length
 
@@ -164,7 +210,7 @@ Each device has a different character set and message length. Going Blue chooses
 
 Entropy coding requires having accurate statistics about the distribution of each symbol since sequences that aren't represented in the training data will be very expensive to encode. For example, if we trained the codebooks only on tropical weather forecasts, the encoder would assign very long symbols to snow and a forecast in the arctic would be very expensive.
 
-The encoder is trained on over 100k historical forecasts collected from the [Open-Meteo Historical Forecast API](https://open-meteo.com/en/docs/historical-forecast-api). These forecasts are sampled from 10,000 locations across the world. Forecast locations are not uniformly sampled across the globe since that would bias the forecasts strongly towards the ocean. Instead, the forecast points are allocated based on 30 Köppen climate classes based on the square-root of the area of the climate class. This ensures that rare climate classes have enough training data while still allocating more share to more common climate types. 
+The encoder is trained on over 100k historical forecasts collected from the [Open-Meteo Historical Forecast API](https://open-meteo.com/en/docs/historical-forecast-api). These forecasts are sampled from 10,000 locations across the world. Forecast locations are not uniformly sampled across the globe since that would bias the forecasts strongly towards the ocean. Instead, the forecast points are allocated based on 30 Köppen climate classes in proportion to the square-root of the area of the climate class. This ensures that rare climate classes have enough training data while still allocating more share to more common climate types. 
 
 Ocean locations are not included in Köppen but they are included in the training data with an 85/15 land/ocean split. This gives the ocean a similar weight to a high-level Köppen climate class (tropical, arid, temperate, continental, polar). Ocean locations are sampled from 6 30° latitude bands with the same `sqrt(area)` allocation as climate classes.
 
@@ -179,7 +225,7 @@ Training data is pulled from the two year window July 2024 - July 2026. 12 14-da
 Fill percentage is the main codec performance metric. 100% represents a forecast filled to maximum range and resolution (13 days, hourly data). Encoding improvements should increase this percentage. 
 
 Some interesting findings from the evaluation:
-1. The median forecast with auto priority has a 13 day range with 2 days at hourly resolution, 5 days at 3h, 3 days at 6h, and the last 3 days at 12h. The 1st-percentile forecast still has 10 days of data with 1 day hourly, 4 days at 3h, and 6 days of 12h.
+1. The median forecast with auto priority has a 13 day range with 2 days at hourly resolution, 5 days at 3h, 3 days at 6h, and the last 3 days at 12h. The 1st-percentile forecast still has 11 days of data with 1 day hourly, 4 days at 3h, and 6 days of 12h.
 1. Forecasts in polar climates (Köppen class E and ocean at 60°-90°N) are the cheapest to encode. Probably because of the polar high and lack of diurnal temperature swings.
 1. Forecasts in tropical climates (Köppen class A) are the most expensive to encode. Probably because of frequent afternoon precipitation, strong diurnal temperature swings, etc. There's a lot more weather happening in the tropics than there is in the arctic.
 1. Ocean forecasts are cheaper than every climate class except the arctic. There are no diurnal temperature swings over open water and winds are more consistent than they are on land. 
