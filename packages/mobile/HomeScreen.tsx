@@ -1127,7 +1127,12 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const pasteFromClipboard = useCallback(async () => {
     try {
       const text = await Clipboard.getStringAsync();
-      if (!text.trim()) return;
+      // An empty clipboard (or one holding an image, which reads back as '') still gets an
+      // outcome: a silent return here left the press looking like it did nothing.
+      if (!text.trim()) {
+        flash('Clipboard is empty', true);
+        return;
+      }
       // Both the merge and the label below ask whether a message belongs to a request this device
       // made, so the store has to be warm before either — it is loaded on mount, but a paste is
       // the first thing a reader does and needn't lose that race.
