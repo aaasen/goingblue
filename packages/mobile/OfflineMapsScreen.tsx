@@ -8,7 +8,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { findPack, formatBytes, formatTallyBytes, searchPacks, tally, type Pack } from './catalog';
 import { regionsAt } from './outlines';
 import { MODAL_TOP_INSET } from './insets';
-import { usePackState } from './packStore';
+import { cancelDownload, usePackState } from './packStore';
 import { clearTileCache, tileCacheSize, TILE_CACHE_EMPTY_BYTES } from './tileCache';
 
 interface Props {
@@ -351,11 +351,20 @@ export function DownloadControl({ pack, downloaded, onDownload, onRemove, intera
   const { progress } = usePackState();
   const running = progress.get(pack.id);
   if (running !== undefined) {
+    // Always pressable, whatever `interactive` says: while the download runs the row's own
+    // press is a no-op (downloadPack dedupes), so this can't fire an action twice.
     return (
-      <View style={progressStyles.wrap} accessibilityLabel={`Downloading ${pack.name}`}>
+      <TouchableOpacity
+        style={progressStyles.wrap}
+        onPress={() => cancelDownload(pack.id)}
+        accessibilityRole="button"
+        accessibilityLabel={`Cancel downloading ${pack.name}`}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        activeOpacity={0.6}
+      >
         <Text style={progressStyles.pct}>{Math.round(running * 100)}%</Text>
-        <ActivityIndicator color="#2a6bb5" />
-      </View>
+        <MaterialCommunityIcons name="stop-circle-outline" size={26} color="#2a6bb5" />
+      </TouchableOpacity>
     );
   }
   const on = downloaded.has(pack.id);

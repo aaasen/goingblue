@@ -782,6 +782,14 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     setFetching(false);
   }
 
+  // The busy action button's press: call off whichever wait is holding it, the GPS re-fix or
+  // the forecast fetch (only one can be running; both calls are no-ops when idle).
+  function cancelAction() {
+    locateGen.current++;
+    setLocating(false);
+    cancelFetch();
+  }
+
   const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
   // Expand the always-on variables plus any enabled groups for the stored request context. Only
   // configurable variables go in the message because the server adds the always-on set. Read off
@@ -846,10 +854,18 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     }
   }
 
+  // Which GPS wait is current. getCurrentPositionAsync can't be aborted, so cancelling one means
+  // abandoning it: the cancel bumps the generation, and a wait whose generation has passed
+  // returns null without alerting, its eventual fix ignored (though fetchPosition still stores
+  // it, which only makes the next send fresher).
+  const locateGen = useRef(0);
+
   async function requestCurrentLocation(): Promise<{ lat: number; lon: number } | null> {
+    const gen = ++locateGen.current;
     setLocating(true);
     try {
       const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+      if (locateGen.current !== gen) return null;
       if (status !== 'granted') {
         // Offer Settings only once the OS has stopped asking. While it still prompts, tapping
         // the button again is the shorter way back, and Settings isn't where a soft denial gets
@@ -863,12 +879,15 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         return null;
       }
       const coords = await fetchPosition();
+      if (locateGen.current !== gen) return null;
       // The error behind a missing fix names nothing useful, so don't put it in front of anyone —
       // the fallback is the same whatever it was.
       if (coords == null) Alert.alert('Location unavailable', LOCATION_FAILED);
       return coords;
     } finally {
-      setLocating(false);
+      // A cancelled wait has already had its spinner cleared, possibly by a newer wait that now
+      // owns it.
+      if (locateGen.current === gen) setLocating(false);
     }
   }
 
@@ -1467,6 +1486,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             icon={copied ? 'check' : deviceSpec.icon}
             label={copied ? 'Copied' : deviceSpec.action}
             onPress={action.onPress}
+            onCancel={cancelAction}
             disabled={action.disabled}
             busy={action.busy}
             variant={copied ? 'success' : 'primary'}
@@ -1722,16 +1742,18 @@ function Section({ label, info, children }: { label: string; info?: () => void; 
   );
 }
 
-// A full-width action button: icon and label, replaced by a spinner while the action resolves.
-// The variants differ only in fill, so one tint drives the icon and the label together — and a
-// disabled button is filled grey, which needs the light tint whatever its variant. Busy is the
-// exception: a button that is off resolving its own press is working, not unavailable, so it
-// keeps its variant's fill under the spinner — grey there made the GPS re-fix before a copy
-// flash as a grey beat in the middle of the press-to-Copied sequence.
-function ActionButton({ icon, label, onPress, disabled, busy, variant }: {
+// A full-width action button: icon and label, replaced by a spinner and Cancel while the action
+// resolves. The variants differ only in fill, so one tint drives the icon and the label together
+// — and a disabled button is filled grey, which needs the light tint whatever its variant. Busy
+// is the exception: a button that is off resolving its own press is working, not unavailable, so
+// it keeps its variant's fill under the spinner — grey there made the GPS re-fix before a copy
+// flash as a grey beat in the middle of the press-to-Copied sequence. While busy the button
+// stays pressable and the press calls the wait off instead of re-firing the action.
+function ActionButton({ icon, label, onPress, onCancel, disabled, busy, variant }: {
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   label: string;
   onPress: () => void;
+  onCancel: () => void;
   disabled: boolean;
   busy: boolean;
   variant: 'primary' | 'success';
@@ -1742,13 +1764,16 @@ function ActionButton({ icon, label, onPress, disabled, busy, variant }: {
   return (
     <Pressable
       style={({ pressed }) => [styles.btn, fill, greyed && styles.btnDisabled, pressed && styles.btnPressed]}
-      onPress={onPress}
-      disabled={disabled}
+      onPress={busy ? onCancel : onPress}
+      disabled={busy ? false : disabled}
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={busy ? 'Cancel' : label}
     >
       {busy ? (
-        <ActivityIndicator color={tint} />
+        <>
+          <ActivityIndicator color={tint} style={styles.btnIcon} />
+          <Text style={[styles.btnText, { color: tint }]} numberOfLines={1}>Cancel</Text>
+        </>
       ) : (
         <>
           <MaterialCommunityIcons name={icon} size={19} color={tint} style={styles.btnIcon} />

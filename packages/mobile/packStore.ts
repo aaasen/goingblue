@@ -86,12 +86,26 @@ export function usePackState(): PackState {
 // promise that never settles would leave the progress spinner up forever.
 const STALL_MS = 20_000;
 
+// The in-flight downloads by pack id, so a stalled or unwanted one can be called off. `cancelled`
+// marks a deliberate cancel (a tap on the progress control), which cleans up quietly; a watchdog
+// cancel is a failure and still throws.
+const inFlight = new Map<string, { download: DownloadResumable | null; cancelled: boolean }>();
+
+export function cancelDownload(id: string): void {
+  const entry = inFlight.get(id);
+  if (!entry) return;
+  entry.cancelled = true;
+  entry.download?.cancelAsync().catch(() => {});
+}
+
 // Both archives, sequentially, progress weighted by bytes across the pair (the catalog's
-// per-pack total). Throws on failure with nothing half-installed.
+// per-pack total). Throws on failure with nothing half-installed; resolves quietly when the
+// download was cancelled on purpose.
 export async function downloadPack(pack: Pack): Promise<void> {
   if (state.installed.has(pack.id) || state.progress.has(pack.id)) return;
   emit({ progress: new Map(state.progress).set(pack.id, 0) });
-  let current: DownloadResumable | null = null;
+  const entry: { download: DownloadResumable | null; cancelled: boolean } = { download: null, cancelled: false };
+  inFlight.set(pack.id, entry);
   const { base, hs } = fileUris(pack.id);
   const total = pack.bytes ?? 0;
   let written = 0;
@@ -100,7 +114,7 @@ export async function downloadPack(pack: Pack): Promise<void> {
   let settled = false;
   let lastProgressAt = Date.now();
   const watchdog = setInterval(() => {
-    if (Date.now() - lastProgressAt > STALL_MS) current?.cancelAsync().catch(() => {});
+    if (Date.now() - lastProgressAt > STALL_MS) entry.download?.cancelAsync().catch(() => {});
   }, 5_000);
   try {
     // Airplane mode fails here in one round trip instead of waiting out the watchdog. Only a
@@ -121,10 +135,12 @@ export async function downloadPack(pack: Pack): Promise<void> {
         if (frac - last < 0.01) return;
         emit({ progress: new Map(state.progress).set(pack.id, frac) });
       });
-      current = download;
+      entry.download = download;
       const result = await download.downloadAsync();
+      if (entry.cancelled) throw new Error('cancelled');
       if (!result || result.status !== 200) throw new Error(`HTTP ${result?.status ?? 'failure'} for ${remote}`);
     }
+    if (entry.cancelled) throw new Error('cancelled');
     settled = true;
     // Both parts are complete: land them and only then record the pack.
     await moveAsync({ from: `${base}.part`, to: base });
@@ -142,9 +158,10 @@ export async function downloadPack(pack: Pack): Promise<void> {
     const progress = new Map(state.progress);
     progress.delete(pack.id);
     emit({ progress });
-    throw e;
+    if (!entry.cancelled) throw e;
   } finally {
     clearInterval(watchdog);
+    inFlight.delete(pack.id);
   }
 }
 
