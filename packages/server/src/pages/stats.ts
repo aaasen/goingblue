@@ -126,7 +126,12 @@ export function parseFilters(q: (name: string) => string | undefined): StatsFilt
 // when the chart is ungrouped, null when the column itself is null (an internet request has no
 // number, an early row no version).
 export type DailyRow = { day: string; grp: string | null; requests: number };
-export type StatsTotals = { requests: number; users: number; failed: number };
+// avgPeriods / avgCodecMs are window means over served forecasts, null when no served row in
+// the window carries the column (it arrived 2026-08-31; older rows have nothing to average).
+export type StatsTotals = {
+  requests: number; users: number; failed: number;
+  avgPeriods: number | null; avgCodecMs: number | null;
+};
 // One raw request row, every stored column except the token: the surrogate account id exists
 // precisely so a request can be shown without its credential (db.ts), and this page keeps that.
 // `time` arrives formatted in Pacific. Account is non-null because rows without one are
@@ -148,6 +153,12 @@ export type RequestRow = {
   model: string | null;
   messages: number | null;
   vars: string[];
+  // What the reply carried (hours-per-period → count) and what serving it cost; null on
+  // failures and on rows older than the columns.
+  periods: Record<string, number> | null;
+  codecMs: number | null;
+  fetchMs: number | null;
+  encodeMs: number | null;
 };
 // One row of the group-totals table under the chart: a value of the selected group, its
 // requests, and how many distinct accounts carried them.
@@ -185,7 +196,10 @@ const COUNTS = `
   count(r.id) filter (where ${SERVED})                                             as requests,
   count(distinct r.account_id)                                                     as users,
   count(r.id) filter (where r.outcome in
-    ('missing_version', 'unsupported_version', 'unavailable'))                     as failed
+    ('missing_version', 'unsupported_version', 'unavailable'))                     as failed,
+  avg((select sum(value::int) from jsonb_each_text(r.periods)))
+    filter (where ${SERVED})                                                       as avg_periods,
+  avg(r.codec_ms) filter (where ${SERVED})                                         as avg_codec_ms
 `;
 
 // The WHERE clause and its parameters, built together so the placeholder numbers can never
@@ -250,7 +264,8 @@ const REQUESTS_LIMIT = 20;
 const requestRowsSql = (where: string) => `
   select r.id, to_char(r.created_at at time zone $1, 'FMMM/FMDD HH24:MI') as time,
          r.account_id, r.device, r.version, r.chars, r.outcome,
-         r.loc, r.lat::text as lat, r.lon::text as lon, r.mode, r.model, r.messages, r.vars
+         r.loc, r.lat::text as lat, r.lon::text as lon, r.mode, r.model, r.messages, r.vars,
+         r.periods, r.codec_ms, r.fetch_ms, r.encode_ms
     from requests r
    where ${where}
    order by r.created_at desc
@@ -294,7 +309,22 @@ const counts = (r: Record<string, unknown> | undefined): StatsTotals => ({
   requests: num(r?.["requests"]),
   users: num(r?.["users"]),
   failed: num(r?.["failed"]),
+  avgPeriods: r?.["avg_periods"] == null ? null : Math.round(num(r["avg_periods"])),
+  avgCodecMs: r?.["avg_codec_ms"] == null ? null : Math.round(num(r["avg_codec_ms"])),
 });
+
+// The periods jsonb as stored, coerced defensively: it arrived through the untrusted shape
+// header (bounded there by shapePeriods), so a row that somehow holds another shape reads as
+// "not reported" rather than rendering garbage.
+const periodsOf = (v: unknown): Record<string, number> | null => {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
+  const out: Record<string, number> = {};
+  for (const [k, val] of Object.entries(v)) {
+    if (typeof val !== "number" || !Number.isFinite(val)) return null;
+    out[k] = val;
+  }
+  return Object.keys(out).length ? out : null;
+};
 
 export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
   const filtered = requestsFilter(filters);
@@ -331,6 +361,10 @@ export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
       model: r["model"] == null ? null : String(r["model"]),
       messages: r["messages"] == null ? null : num(r["messages"]),
       vars: Array.isArray(r["vars"]) ? (r["vars"] as unknown[]).map(String) : [],
+      periods: periodsOf(r["periods"]),
+      codecMs: r["codec_ms"] == null ? null : num(r["codec_ms"]),
+      fetchMs: r["fetch_ms"] == null ? null : num(r["fetch_ms"]),
+      encodeMs: r["encode_ms"] == null ? null : num(r["encode_ms"]),
     })),
     totals: counts(totals.rows[0]),
     groups:
@@ -655,6 +689,24 @@ function groupBar(name: string, anchor: string, active: string | null, options: 
 // rather than as a column dump.
 function requestTable(requests: RequestRow[]): string {
   if (!requests.length) return `<p class=note>No requests in the window.</p>`;
+  // Periods render as the reply's total, with the per-resolution breakdown ("1h×130, 3h×56")
+  // in the hover title; timing as codec_ms, with the codec's own fetch/encode split in the
+  // title. The periods keys arrived through the untrusted shape header, so they are escaped
+  // like every other shape string.
+  const periodsCell = (p: RequestRow["periods"]): string => {
+    if (p === null) return "<td></td>";
+    const entries = Object.entries(p).sort((a, b) => Number(a[0]) - Number(b[0]));
+    const total = entries.reduce((n, [, v]) => n + v, 0);
+    return `<td title="${esc(entries.map(([h, v]) => `${h}h×${v}`).join(", "))}">${total}</td>`;
+  };
+  const msCell = (r: RequestRow): string => {
+    if (r.codecMs === null) return "<td></td>";
+    const split = [
+      ...(r.fetchMs === null ? [] : [`fetch ${r.fetchMs}`]),
+      ...(r.encodeMs === null ? [] : [`encode ${r.encodeMs}`]),
+    ].join(", ");
+    return `<td${split ? ` title="${split} ms"` : ""}>${r.codecMs}</td>`;
+  };
   const body = requests
     .map((r) => {
       const named = r.loc !== null && r.loc !== "current";
@@ -668,7 +720,8 @@ function requestTable(requests: RequestRow[]): string {
         `<td>${r.version ?? ""}</td><td>${place}</td>` +
         `<td>${r.mode === null ? "" : esc(r.mode)}</td>` +
         `<td>${r.model === null ? "" : esc(r.model)}</td>` +
-        `<td>${r.messages ?? ""}</td><td>${r.chars ?? ""}</td><td>${vars}</td>` +
+        `<td>${r.messages ?? ""}</td><td>${r.chars ?? ""}</td>` +
+        periodsCell(r.periods) + msCell(r) + `<td>${vars}</td>` +
         `<td>${r.outcome === null || r.outcome === "ok" ? `<span class=quiet>ok</span>` : esc(r.outcome)}</td></tr>`
       );
     })
@@ -677,7 +730,7 @@ function requestTable(requests: RequestRow[]): string {
 <table>
 <thead><tr><th>Id</th><th>Time</th><th>Account</th><th>Device</th><th>Version</th>
 <th>Location</th><th>Priority</th><th>Model</th><th>Messages</th><th>Chars</th>
-<th>Variables</th><th>Outcome</th></tr></thead>
+<th>Periods</th><th>Codec ms</th><th>Variables</th><th>Outcome</th></tr></thead>
 <tbody>${body}</tbody>
 </table>
 </div>`;
@@ -895,6 +948,8 @@ ${groupTotalRow}
   ${tile(totals.requests, "request")}
   ${tile(totals.users, "account", "distinct")}
   ${tile(totals.failed, "request", "failed")}
+  ${totals.avgPeriods === null ? "" : `<div><b>${totals.avgPeriods}</b><span>mean periods / forecast</span></div>`}
+  ${totals.avgCodecMs === null ? "" : `<div><b>${totals.avgCodecMs}</b><span>mean codec ms</span></div>`}
 </div>
 
 <h2>Requests per day</h2>

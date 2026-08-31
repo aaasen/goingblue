@@ -14,7 +14,8 @@ const cell = (day: string, requests: number, grp: string | null = ""): DailyRow 
 const row = (over: Partial<RequestRow> = {}): RequestRow => ({
   id: 1, time: "8/30 14:11", account: 29, device: "i", version: 3, chars: 155, outcome: "ok",
   loc: "current", lat: "63.06", lon: "-151.08", mode: "auto", model: "best", messages: 1,
-  vars: ["temp", "wind", "snow", "gust", "rain"], ...over,
+  vars: ["temp", "wind", "snow", "gust", "rain"],
+  periods: null, codecMs: null, fetchMs: null, encodeMs: null, ...over,
 });
 
 const data = (
@@ -43,6 +44,8 @@ const data = (
     requests: daily.reduce((n, c) => n + c.requests, 0),
     failed: 0,
     users: 0,
+    avgPeriods: null,
+    avgCodecMs: null,
     ...totals,
   },
 });
@@ -107,6 +110,19 @@ describe("renderStats", () => {
     expect(html).toContain("<b>3</b><span>distinct accounts</span>");
     // Singular, because the label is read together with the number beside it.
     expect(html).toContain("<b>1</b><span>failed request</span>");
+  });
+
+  it("shows the mean periods and codec time tiles only when the window has them", () => {
+    const html = renderStats(data(
+      [cell("2026-08-07", 6)],
+      { totals: { avgPeriods: 152, avgCodecMs: 940 } },
+    ));
+    expect(html).toContain("<b>152</b><span>mean periods / forecast</span>");
+    expect(html).toContain("<b>940</b><span>mean codec ms</span>");
+    // A window of rows older than the columns has nothing to average, and no tile.
+    const without = renderStats(data([cell("2026-08-07", 6)]));
+    expect(without).not.toContain("mean periods");
+    expect(without).not.toContain("mean codec ms");
   });
 
   // A day that served nothing but failed is still a day with traffic; the empty state must not
@@ -239,22 +255,26 @@ describe("renderStats — recent requests", () => {
       requests: [
         row({ id: 55, time: "8/30 14:11", account: 29, device: "i", version: 3, loc: "summit",
               lat: "63.07", lon: "-151.00", mode: "auto", model: "best", messages: 2, chars: 288,
-              vars: ["temp", "wind", "freeze", "cch", "ccm", "aq_o3", "w500"] }),
+              vars: ["temp", "wind", "freeze", "cch", "ccm", "aq_o3", "w500"],
+              periods: { "1": 130, "3": 56 }, codecMs: 1037, fetchMs: 1015, encodeMs: 18 }),
         row({ id: 54, time: "8/29 09:02", account: 12, device: "s", version: 2, loc: "current",
               lat: "47.62", lon: "-122.29", mode: "detail", model: "eu", messages: null,
               chars: null, vars: ["temp"] }),
       ],
     }));
     expect(html).toContain("Recent requests");
-    // Components fold to their families, deduplicated: cch+ccm are one clouds entry.
+    // Components fold to their families, deduplicated: cch+ccm are one clouds entry. Periods
+    // show the total with the resolution split in the title; codec ms carries its own split.
     expect(html).toContain(
       "<td>55</td><td>8/30 14:11</td><td>29</td><td>iPhone</td><td>3</td><td>summit</td>" +
-      "<td>auto</td><td>best</td><td>2</td><td>288</td><td>freeze, clouds, AQI, wind</td>");
+      "<td>auto</td><td>best</td><td>2</td><td>288</td>" +
+      `<td title="1h×130, 3h×56">186</td><td title="fetch 1015, encode 18 ms">1037</td>` +
+      "<td>freeze, clouds, AQI, wind</td>");
     // 'current' is not a name; the coordinates stand in, and all-default vars leave the cell
-    // empty.
+    // empty, as do the periods/timing columns the row predates.
     expect(html).toContain(
       "<td>54</td><td>8/29 09:02</td><td>12</td><td>SMS</td><td>2</td><td>47.62, -122.29</td>" +
-      "<td>detail</td><td>eu</td><td></td><td></td><td></td>");
+      "<td>detail</td><td>eu</td><td></td><td></td><td></td><td></td><td></td>");
   });
 
   // A failure has no shape: every codec-reported cell is empty, and the outcome says why.
