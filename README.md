@@ -366,6 +366,10 @@ The Going Blue codec relies on the client and server having identical codebooks.
  - Added more options to the unit selector.
  - Merged Builder and Decoder tabs into a single page.
 
+#### In development: Codec v4 (App version 1.3.0)
+
+ - Added Android support. 
+
 ## License
 
 Copyright 2025-2026 Lane Aasen
