@@ -19,19 +19,40 @@ const REPLY_UNSUPPORTED = "Invalid app version. Update the app at going.blue and
 // Transient service failure (codec unreachable, upstream data down): retrying is the fix.
 const REPLY_UNAVAILABLE = "Going Blue is not available right now. Please try again in a few minutes";
 
+// What a request can come to: a dispatch result, or the gateway's own rejection of a token
+// that names no account. The codec validates that a token is present and well-formed; whether
+// it maps to a real account only the gateway can know, since only the gateway has the database.
+type RequestResult = DispatchResult | { kind: "unknown_token" };
+
 // A codec returns its reply as one message per line — the gateway's whole knowledge of the
 // format. Splitting here rather than in the codec keeps the grammar out of the gateway (see
 // dispatch.ts): a reply that fits one message is one line and comes back as one message, which
 // is what every frozen codec image returns.
-function replyFor(result: DispatchResult): string | string[] {
+function replyFor(result: RequestResult): string | string[] {
   switch (result.kind) {
     case "ok": return result.encoded.split("\n");
     // A message with no version word isn't a request at all, so it reads as malformed here even
     // though the gateway detects it before dispatch.
     case "missing_version": return REPLY_MALFORMED;
     case "malformed": return REPLY_MALFORMED;
+    // A well-formed token from another environment, or from an account since deleted. The same
+    // reply as malformed: it is not a request this deployment can attribute, and the sender's
+    // fix is the same — get the app and its setup flow.
+    case "unknown_token": return REPLY_MALFORMED;
     case "unsupported_version": return REPLY_UNSUPPORTED;
     case "unavailable": return REPLY_UNAVAILABLE;
+  }
+}
+
+// Whether the token names an account, erring toward yes: a database outage must not become a
+// forecast outage when everything else about the request can still be served — the same
+// posture recordRequest takes on the way out.
+async function tokenKnown(token: string): Promise<boolean> {
+  try {
+    return await accountExists(token);
+  } catch (e) {
+    log.error("token.check_failed", { err: e });
+    return true;
   }
 }
 
@@ -50,8 +71,17 @@ async function logRequest(record: Parameters<typeof recordRequest>[0]): Promise<
 // still a person using the service, and the failures are the only signal that a version has
 // clients it can no longer answer. The per-version counts are also the sunset metric — a frozen
 // codec container is retired only once its version has gone quiet (VERSIONING.md).
-async function buildForecast(body: string): Promise<DispatchResult> {
+async function buildForecast(body: string): Promise<RequestResult> {
   const version = extractVersion(body);
+  const token = extractUserToken(body);
+  // The account check runs before dispatch, so a rejected request never costs a codec call or
+  // an upstream fetch. Only a present, well-formed token is checked here: a missing or mangled
+  // one goes to the codec, whose reply names what is wrong with it.
+  if (token !== null && !(await tokenKnown(token))) {
+    log.info("forecast.dispatch", { version, kind: "unknown_token" });
+    await logRequest({ token, chars: null, version, outcome: "unknown_token", codecMs: null, shape: null });
+    return { kind: "unknown_token" };
+  }
   const result = await dispatchForecast(body);
   log.info("forecast.dispatch", {
     version,
@@ -59,7 +89,7 @@ async function buildForecast(body: string): Promise<DispatchResult> {
     chars: result.kind === "ok" ? result.encoded.length : undefined,
   });
   await logRequest({
-    token: extractUserToken(body),
+    token,
     // A multi-message reply arrives one message per line; the newlines are gateway framing, not
     // reply characters, so they don't count.
     chars: result.kind === "ok" ? result.encoded.split("\n").join("").length : null,
@@ -79,6 +109,7 @@ export async function forecast(c: Context) {
     // The caller here is the app itself, so the codec's specific reason is more useful than the
     // human reply text.
     case "malformed": return c.text(result.reason, 400);
+    case "unknown_token": return c.text(REPLY_MALFORMED, 400);
     case "unsupported_version": return c.text(REPLY_UNSUPPORTED, 400);
     case "unavailable": return c.text(REPLY_UNAVAILABLE, 503);
   }
