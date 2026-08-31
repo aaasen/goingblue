@@ -1420,11 +1420,22 @@ export function encodeFillSeq(
   return msg === null ? null : codec.encode(msg, params.alphabet);
 }
 
+// A served forecast, alongside what producing it cost: the winning layout's periods bucketed
+// by resolution (hours-per-period → count, so the sum is the reply's total period count), and
+// the wall time the two halves of the work took. These ride to the gateway on the shape header
+// (index.ts) and answer what quality of forecast users actually see.
+export interface ForecastResult {
+  encoded: string;
+  periods: Record<number, number>;
+  fetchMs: number;
+  encodeMs: number;
+}
+
 // Duration-first fill: one upstream fetch covers every candidate layout, then a binary search
 // finds the largest fill-sequence number whose encoding fits the budget (encoded size grows
 // along the sequence — see layout.ts). Always returns at least the seq=1 layout (one day at 12h),
 // even if it exceeds the budget.
-export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<string> {
+export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<ForecastResult> {
   const { lat, lon, elev_m } = resolveLocation(params);
   const modelKey = firstModelKey(params.modelsMask);
 
@@ -1433,18 +1444,32 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   // local days (FILL_SLOTS covers both); +2 forecast days cover the offset shift past the last
   // UTC day boundary. Models whose horizon ends earlier (GEM: 10 days) return nulls for the
   // tail hours, which buildLayoutMessage treats as unservable — the seq search clamps to them.
+  const fetchStart = Date.now();
   const [h, times, elevation] = await fetchHourly(
     modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1, airQualityVarsFor(params.varsMask),
   );
+  const fetchMs = Date.now() - fetchStart;
 
+  // The search carries each candidate's periodHours along with its encoding so the winner's
+  // layout survives — the encoded string alone can't say what resolutions it holds.
+  const encodeStart = Date.now();
   const best = fitFillToBudget(
-    (seq) => encodeFillSeq(h, times, params, seq, lat, lon, elevation, modelKey, codec),
-    (encoded) => encoded.length,
+    (seq) => {
+      const msg = buildFillMessage(h, times, params, seq, lat, lon, elevation, modelKey);
+      return msg === null
+        ? null
+        : { encoded: codec.encode(msg, params.alphabet), periodHours: msg.periodHours };
+    },
+    (c) => c.encoded.length,
     maxFillSeq(params.mode),
     params.maxChars,
   );
+  const encodeMs = Date.now() - encodeStart;
   if (best === null) throw new Error("upstream data does not cover the requested window");
-  return best;
+
+  const periods: Record<number, number> = {};
+  for (const hours of best.periodHours) periods[hours] = (periods[hours] ?? 0) + 1;
+  return { encoded: best.encoded, periods, fetchMs, encodeMs };
 }
 
 // Binary-searches the largest fill-sequence number whose encoding fits `maxChars`, keeping the

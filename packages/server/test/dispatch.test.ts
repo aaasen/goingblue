@@ -60,7 +60,9 @@ describe("dispatchForecast", () => {
     const fetchSpy = vi.fn(async () => new Response("ENCODED", { status: 200 }));
     vi.stubGlobal("fetch", fetchSpy);
 
-    expect(await dispatchForecast(body)).toEqual({ kind: "ok", encoded: "ENCODED", shape: null });
+    expect(await dispatchForecast(body)).toEqual({
+      kind: "ok", encoded: "ENCODED", shape: null, codecMs: expect.any(Number),
+    });
     expect(fetchSpy).toHaveBeenCalledWith("http://codec-v1/encode", { method: "POST", body });
   });
 
@@ -72,25 +74,28 @@ describe("dispatchForecast", () => {
       new Response("ENCODED", { status: 200, headers: { "X-Request-Shape": JSON.stringify(header) } })));
 
     expect(await dispatchForecast("v1 p:d")).toEqual({
-      kind: "ok", encoded: "ENCODED",
+      kind: "ok", encoded: "ENCODED", codecMs: expect.any(Number),
       shape: { lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
-               model: "best", vars: ["temp"], maxChars: 160, messages: 1, device: null },
+               model: "best", vars: ["temp"], maxChars: 160, messages: 1, device: null,
+               periods: null, fetchMs: null, encodeMs: null },
     });
   });
 
   it("maps a codec 400 to malformed, carrying the codec's reason", async () => {
     process.env["CODEC_URL_V1"] = "http://codec-v1";
     vi.stubGlobal("fetch", vi.fn(async () => new Response("invalid request: missing u:", { status: 400 })));
-    expect(await dispatchForecast("v1 p:a")).toEqual({ kind: "malformed", reason: "invalid request: missing u:" });
+    expect(await dispatchForecast("v1 p:a")).toEqual({
+      kind: "malformed", reason: "invalid request: missing u:", codecMs: expect.any(Number),
+    });
   });
 
   it("maps codec 5xx and unreachable codecs to unavailable", async () => {
     process.env["CODEC_URL_V1"] = "http://codec-v1";
     vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 503 })));
-    expect(await dispatchForecast("v1 p:a")).toEqual({ kind: "unavailable" });
+    expect(await dispatchForecast("v1 p:a")).toEqual({ kind: "unavailable", codecMs: expect.any(Number) });
 
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("ECONNREFUSED"); }));
-    expect(await dispatchForecast("v1 p:a")).toEqual({ kind: "unavailable" });
+    expect(await dispatchForecast("v1 p:a")).toEqual({ kind: "unavailable", codecMs: expect.any(Number) });
   });
 });
 
@@ -101,12 +106,15 @@ describe("parseShapeHeader", () => {
   });
 
   it("keeps exactly the fields we store", () => {
-    expect(parseShapeHeader(shape({ device: "i" }))).toEqual({
+    expect(parseShapeHeader(shape({ device: "i", periods: { "3": 5, "12": 2 }, fetchMs: 480, encodeMs: 12 }))).toEqual({
       lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
       model: "best", vars: ["temp", "wind"], maxChars: 160, messages: 2, device: "i",
+      periods: { "3": 5, "12": 2 }, fetchMs: 480, encodeMs: 12,
     });
-    // Absent from containers frozen before the codec reported the route.
-    expect(parseShapeHeader(shape())).toMatchObject({ device: null });
+    // Absent from containers frozen before the codec reported them.
+    expect(parseShapeHeader(shape())).toMatchObject({
+      device: null, periods: null, fetchMs: null, encodeMs: null,
+    });
   });
 
   it("drops fields the codec invented rather than storing them", () => {
@@ -128,6 +136,7 @@ describe("parseShapeHeader", () => {
     expect(parseShapeHeader(shape({ lat: "63.06", lon: 999, mode: 7, maxChars: 1.5, messages: "2" }))).toEqual({
       lat: null, lon: null, loc: "current", mode: null,
       model: "best", vars: ["temp", "wind"], maxChars: null, messages: null, device: null,
+      periods: null, fetchMs: null, encodeMs: null,
     });
     expect(parseShapeHeader(shape({ models: "best", vars: [1, "temp", null] }))).toMatchObject({
       model: null, vars: ["temp"],
@@ -138,6 +147,12 @@ describe("parseShapeHeader", () => {
     expect(parseShapeHeader(shape({ maxChars: -1 }))).toMatchObject({ maxChars: null });
     expect(parseShapeHeader(shape({ maxChars: 2 ** 31 }))).toMatchObject({ maxChars: null });
     expect(parseShapeHeader(shape({ maxChars: 2 ** 31 - 1 }))).toMatchObject({ maxChars: 2 ** 31 - 1 });
+    // A periods dictionary that isn't a small digits→count map reads as "not reported".
+    for (const bad of [
+      [3, 5], { "3": "5" }, { "3": 0 }, { "3": 5000 }, { "-3": 5 }, { "3.5": 5 }, { note: 5 }, {},
+    ]) {
+      expect(parseShapeHeader(shape({ periods: bad }))).toMatchObject({ periods: null });
+    }
   });
 
   // The codec already rounds, but this is the last point before the value is stored, so the

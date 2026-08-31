@@ -105,7 +105,7 @@ for (const site of SITES) {
     k = (k + 1) % 128;
     recording = {};
     const params = parseRequest(request);
-    const parts = splitReplyFor(params, await fetchForecast(params, codec), codec.headerChars);
+    const parts = splitReplyFor(params, (await fetchForecast(params, codec)).encoded, codec.headerChars);
     const encoded = parts.join("\n");
     cases.push({ name: `${site.name}/${variant.name}`, request, responses: recording, encoded });
     console.log(`${site.name}/${variant.name}: ${encoded.length} chars in ${parts.length} message(s), ${Object.keys(recording).length} upstream responses`);

@@ -44,8 +44,13 @@ describe.skipIf(!goldens)("golden corpus (bit-exact encode)", () => {
       // server's /encode returns and verify-container diffs — so the split boundaries and part
       // labels are bit-frozen along with the encoding.
       const codec = CODECS[goldens!.protocolVersion];
-      const encoded = await fetchForecast(params, codec);
+      const { encoded, periods } = await fetchForecast(params, codec);
       expect(splitReplyFor(params, encoded, codec.headerChars).join("\n")).toBe(c.encoded);
+      // The tracking side of the result: every reply carries at least one period, and every
+      // bucket key is an hours-per-period count.
+      const total = Object.values(periods).reduce((a, b) => a + b, 0);
+      expect(total).toBeGreaterThan(0);
+      for (const hours of Object.keys(periods)) expect(Number(hours)).toBeGreaterThan(0);
     });
   }
 });

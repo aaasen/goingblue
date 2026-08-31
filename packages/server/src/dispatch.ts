@@ -26,16 +26,25 @@ export interface RequestShape {
   // gateway must not learn. Null for hand-typed messages and for containers frozen before the
   // header carried it.
   device: string | null;
+  // What the reply actually carries: hours-per-period → how many periods of that resolution,
+  // so the sum is the reply's total period count. Null from containers frozen before the codec
+  // reported it.
+  periods: Record<string, number> | null;
+  // The codec's own account of where its time went: the Open-Meteo fetch and the encode
+  // search. Their gap to codec_ms (measured here, around the whole call) is container
+  // overhead.
+  fetchMs: number | null;
+  encodeMs: number | null;
 }
 
 export type DispatchResult =
-  | { kind: "ok"; encoded: string; shape: RequestShape | null }
+  | { kind: "ok"; encoded: string; shape: RequestShape | null; codecMs: number }
   | { kind: "missing_version" }
   | { kind: "unsupported_version"; version: number }
   // The codec rejected the request (400): not a well-formed request of its version. The reason
   // is the codec's response body, kept for logs and the HTTP route, never sent over SMS.
-  | { kind: "malformed"; reason: string }
-  | { kind: "unavailable" };
+  | { kind: "malformed"; reason: string; codecMs: number }
+  | { kind: "unavailable"; codecMs: number };
 
 // First `vN` word in the body, or null. A version is required — there is no default, so a
 // request from any era either names a version we still run or gets a clear reply saying so.
@@ -90,6 +99,23 @@ function shapeList(v: unknown): string[] {
   return v.slice(0, SHAPE_LIST_MAX).map(shapeString).filter((s): s is string => s !== null);
 }
 
+// The periods dictionary (hours-per-period → count), validated shallowly: a small object whose
+// keys are short digit strings and whose values are small positive integers. Anything else —
+// wrong type, absurd keys, an entry count no real layout produces — reads as "not reported"
+// rather than being stored.
+function shapePeriods(v: unknown): Record<string, number> | null {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
+  const entries = Object.entries(v as Record<string, unknown>);
+  if (entries.length === 0 || entries.length > SHAPE_LIST_MAX) return null;
+  const out: Record<string, number> = {};
+  for (const [key, val] of entries) {
+    if (!/^\d{1,3}$/.test(key)) return null;
+    if (typeof val !== "number" || !Number.isInteger(val) || val < 1 || val > 1000) return null;
+    out[key] = val;
+  }
+  return out;
+}
+
 // Parse the codec's shape header into exactly the fields we store, dropping anything else.
 // Every failure mode — absent, oversized, malformed, wrong types — lands on null or an empty
 // field rather than an error: the forecast has already been produced by this point, and no
@@ -121,6 +147,9 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
     // single messages, but null records "not reported" rather than guessing.
     messages: shapeInt(o["messages"]),
     device: shapeString(o["device"]),
+    periods: shapePeriods(o["periods"]),
+    fetchMs: shapeInt(o["fetchMs"]),
+    encodeMs: shapeInt(o["encodeMs"]),
   };
 }
 
@@ -131,23 +160,29 @@ export async function dispatchForecast(body: string): Promise<DispatchResult> {
   const url = codecUrlFor(version);
   if (!url) return { kind: "unsupported_version", version };
 
+  // Wall time of the whole codec call, body included, on every path that actually reached one:
+  // the gateway's own view of response time, next to the codec's reported components.
+  const start = Date.now();
   try {
     const resp = await fetch(`${url}/encode`, { method: "POST", body });
     if (resp.ok) {
+      const encoded = await resp.text();
       return {
         kind: "ok",
-        encoded: await resp.text(),
+        encoded,
         shape: parseShapeHeader(resp.headers.get("X-Request-Shape")),
+        codecMs: Date.now() - start,
       };
     }
     const text = await resp.text();
     log.error("codec.error_response", { version, status: resp.status, body: text });
+    const codecMs = Date.now() - start;
     // A 400 is the codec's verdict on the request itself; anything else (503, unexpected
     // statuses) is a service problem the sender should retry.
-    if (resp.status === 400) return { kind: "malformed", reason: text.slice(0, 500) };
-    return { kind: "unavailable" };
+    if (resp.status === 400) return { kind: "malformed", reason: text.slice(0, 500), codecMs };
+    return { kind: "unavailable", codecMs };
   } catch (e) {
     log.error("codec.unreachable", { version, err: e });
-    return { kind: "unavailable" };
+    return { kind: "unavailable", codecMs: Date.now() - start };
   }
 }

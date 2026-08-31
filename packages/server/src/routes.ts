@@ -65,6 +65,7 @@ async function buildForecast(body: string): Promise<DispatchResult> {
     chars: result.kind === "ok" ? result.encoded.split("\n").join("").length : null,
     version,
     outcome: result.kind,
+    codecMs: "codecMs" in result ? result.codecMs : null,
     shape: result.kind === "ok" ? result.shape : null,
   });
   return result;

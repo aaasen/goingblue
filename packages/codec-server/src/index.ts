@@ -49,12 +49,13 @@ app.post("/encode", async (c) => {
   }
 
   try {
-    const encoded = await fetchForecast(params, codec);
+    const { encoded, periods, fetchMs, encodeMs } = await fetchForecast(params, codec);
     // The shape rides on a header rather than in the body so the body stays exactly the
     // encoded message lines: they are what a phone in the field decodes, and they are
-    // bit-frozen.
+    // bit-frozen. What the request asked for (describeRequest) travels next to what the reply
+    // actually carries and cost (periods by resolution, upstream and encode wall time).
     return c.text(splitReplyFor(params, encoded, codec.headerChars).join("\n"), 200, {
-      "X-Request-Shape": JSON.stringify(describeRequest(params)),
+      "X-Request-Shape": JSON.stringify({ ...describeRequest(params), periods, fetchMs, encodeMs }),
     });
   } catch (e) {
     log.error("encode.failed", { version: params.decoderVersion, err: e });

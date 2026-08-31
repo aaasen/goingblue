@@ -107,7 +107,11 @@ export async function migrate(): Promise<void> {
       vars        text[],
       max_chars   int,
       messages    int,
-      device      text
+      device      text,
+      periods     jsonb,
+      codec_ms    int,
+      fetch_ms    int,
+      encode_ms   int
     )
   `);
   // Backfill for databases created before the protocol version was recorded. Per-version
@@ -145,6 +149,19 @@ export async function migrate(): Promise<void> {
       add column if not exists max_chars int,
       add column if not exists messages int,
       add column if not exists device text
+  `);
+  // What the reply carried and what serving it cost. `periods` maps hours-per-period to how
+  // many periods of that resolution the reply held (its sum is the total period count — the
+  // quality users actually saw). `codec_ms` is the gateway's wall clock around the whole codec
+  // call; `fetch_ms` (Open-Meteo) and `encode_ms` (the fill search) are the codec's own
+  // components, so codec_ms minus their sum is container overhead. Codec-reported fields are
+  // null from containers frozen before the codec sent them.
+  await query(`
+    alter table requests
+      add column if not exists periods jsonb,
+      add column if not exists codec_ms int,
+      add column if not exists fetch_ms int,
+      add column if not exists encode_ms int
   `);
   // The sending number is not stored in any form; this drops the hash an earlier design kept
   // (see the header comment above).
