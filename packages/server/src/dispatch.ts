@@ -70,6 +70,7 @@ export function codecUrlFor(version: number): string | null {
 const MAX_SHAPE_BYTES = 2048;
 const SHAPE_STRING_MAX = 32; // longest plausible mode/location/variable name
 const SHAPE_LIST_MAX = 32;   // more entries than there are models or variables
+const SHAPE_INT_MAX = 2 ** 31 - 1; // Postgres `integer`, where every shape int lands
 
 // Coordinates are rounded to 0.01° by the codec (describeRequest). Re-round here rather than
 // trusting it: this is the last point before the value is stored, and the promise that we keep
@@ -103,8 +104,11 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
+  // Bounded like coord(): none of these is legitimately negative or near the column's range, and
+  // an out-of-range value must read as "not reported" rather than fail the insert — containers
+  // frozen before v4 report an uncapped budget as MAX_SAFE_INTEGER forever.
   const shapeInt = (v: unknown): number | null =>
-    typeof v === "number" && Number.isInteger(v) ? v : null;
+    typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= SHAPE_INT_MAX ? v : null;
   return {
     lat: coord(o["lat"], 90),
     lon: coord(o["lon"], 180),

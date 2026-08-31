@@ -25,6 +25,7 @@ import {
   MAX_MESSAGES,
   isDeviceCode,
   maxCharsFor,
+  UNCAPPED_MAX_CHARS,
   partBodyChars,
   splitReply,
   supportedVersions,
@@ -1229,7 +1230,10 @@ export interface RequestShape {
   mode: string;
   models: string[];
   vars: string[];
-  maxChars: number;
+  // Cap on the encoded reply, absent on routes without one (internet, d:d): "no cap" is the
+  // absence of a number, and the UNCAPPED_MAX_CHARS sentinel would overflow the gateway's
+  // integer column.
+  maxChars?: number;
   messages: number;
   // The `d:` route code, absent when the request named none. Reported here rather than parsed
   // by the gateway: the codes are part of this version's grammar, and the gateway's frozen
@@ -1275,7 +1279,7 @@ export function describeRequest(params: ForecastParams): RequestShape {
           (CONFIGURABLE_VAR_GROUPS.c as readonly string[]).includes(name) ? "clouds" : name,
         ),
     )],
-    maxChars: params.maxChars,
+    ...(params.maxChars !== UNCAPPED_MAX_CHARS ? { maxChars: params.maxChars } : {}),
     messages: params.messages,
     ...(params.device ? { device: params.device } : {}),
   };

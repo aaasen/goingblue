@@ -132,6 +132,12 @@ describe("parseShapeHeader", () => {
     expect(parseShapeHeader(shape({ models: "best", vars: [1, "temp", null] }))).toMatchObject({
       model: null, vars: ["temp"],
     });
+    // Ints must fit the Postgres integer columns they land in: pre-v4 containers report an
+    // uncapped budget as MAX_SAFE_INTEGER, which must read as "no cap", not fail the insert.
+    expect(parseShapeHeader(shape({ maxChars: Number.MAX_SAFE_INTEGER }))).toMatchObject({ maxChars: null });
+    expect(parseShapeHeader(shape({ maxChars: -1 }))).toMatchObject({ maxChars: null });
+    expect(parseShapeHeader(shape({ maxChars: 2 ** 31 }))).toMatchObject({ maxChars: null });
+    expect(parseShapeHeader(shape({ maxChars: 2 ** 31 - 1 }))).toMatchObject({ maxChars: 2 ** 31 - 1 });
   });
 
   // The codec already rounds, but this is the last point before the value is stored, so the

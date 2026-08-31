@@ -428,6 +428,12 @@ describe("describeRequest", () => {
     expect(JSON.stringify(shape)).not.toContain(token);
   });
 
+  it("omits the budget on uncapped routes rather than reporting the sentinel", () => {
+    // "No cap" is the absence of a number: the sentinel is not a real budget, and it would
+    // overflow the gateway's integer column (which drops it — see the gateway's shapeInt).
+    expect(describe_("d:d")).not.toHaveProperty("maxChars");
+  });
+
   // The gateway no longer reads `d:` itself; the shape header is how the device reaches the
   // usage record.
   it("names the device, omitted when the request named none", () => {
