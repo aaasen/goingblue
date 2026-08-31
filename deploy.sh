@@ -14,10 +14,9 @@ DB_USER="${DB_USER:-postgres}"
 
 # Cloud SQL connection. INSTANCE_CONNECTION_NAME is "project:region:instance" (see the
 # instance's "Connection name" in the console). Secrets are NOT here — DB_PASS (database
-# password), TWILIO_AUTH_TOKEN (verifies the inbound-SMS webhook signature), STATS_PASS (the
-# /stats dashboard's basic-auth password) and PHONE_PEPPER (the HMAC key that sending numbers
-# are hashed under) live in Secret Manager (see one-time setup in docs/private/DEPLOYMENT.md)
-# and are injected as env vars.
+# password), TWILIO_AUTH_TOKEN (verifies the inbound-SMS webhook signature) and STATS_PASS (the
+# /stats dashboard's basic-auth password) live in Secret Manager (see one-time setup in
+# docs/private/DEPLOYMENT.md) and are injected as env vars.
 INSTANCE_CONNECTION_NAME="${PROJECT}:${REGION}:${SQL_INSTANCE}"
 TWILIO_WEBHOOK_URL="${PUBLIC_URL}/sms"
 # Protocol version → codec-server service URL (deployed by deploy-codec.sh; see VERSIONING.md).
@@ -32,4 +31,4 @@ gcloud run deploy "$SERVICE" --project "$PROJECT" --source . --region "$REGION" 
   --allow-unauthenticated --platform managed \
   --add-cloudsql-instances "$INSTANCE_CONNECTION_NAME" \
   --set-env-vars "INSTANCE_CONNECTION_NAME=$INSTANCE_CONNECTION_NAME,DB_USER=$DB_USER,DB_NAME=$DB_NAME,TWILIO_WEBHOOK_URL=$TWILIO_WEBHOOK_URL,CODEC_URL_V1=$CODEC_URL_V1,CODEC_URL_V2=$CODEC_URL_V2,CODEC_URL_V3=$CODEC_URL_V3,CODEC_URL_V4=$CODEC_URL_V4" \
-  --set-secrets "DB_PASS=DB_PASS:latest,TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest,STATS_PASS=STATS_PASS:latest,PHONE_PEPPER=PHONE_PEPPER:latest"
+  --set-secrets "DB_PASS=DB_PASS:latest,TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest,STATS_PASS=STATS_PASS:latest"

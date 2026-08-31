@@ -427,4 +427,11 @@ describe("describeRequest", () => {
     expect(shape.maxChars).toBe(maxCharsFor("i", 2, WIRE_HEADER_CHARS));
     expect(JSON.stringify(shape)).not.toContain(token);
   });
+
+  // The gateway no longer reads `d:` itself; the shape header is how the device reaches the
+  // usage record.
+  it("names the device, omitted when the request named none", () => {
+    expect(describe_("d:i").device).toBe("i");
+    expect(describe_("p:a")).not.toHaveProperty("device");
+  });
 });

@@ -1,4 +1,4 @@
-import { isDeviceCode, isValidToken, normalizeToken, type DeviceCode } from "@weather/protocol";
+import { isValidToken, normalizeToken } from "@weather/protocol";
 import { log } from "./log.js";
 
 // Routes a forecast request to the codec server for its protocol version. The gateway's
@@ -22,6 +22,10 @@ export interface RequestShape {
   vars: string[];
   maxChars: number | null;
   messages: number | null;
+  // The `d:` route code, codec-reported: its codes belong to the versioned grammar, which the
+  // gateway must not learn. Null for hand-typed messages and for containers frozen before the
+  // header carried it.
+  device: string | null;
 }
 
 export type DispatchResult =
@@ -49,20 +53,6 @@ export function extractUserToken(body: string): string | null {
   for (const word of body.toLowerCase().trim().split(/\s+/)) {
     if (word.startsWith("u:") && isValidToken(word.slice(2))) {
       return normalizeToken(word.slice(2));
-    }
-  }
-  return null;
-}
-
-// Device code from the first valid `d:` word, or null when the request names none (hand-typed
-// messages, pre-`d:` clients). Like `vN` and `u:`, `d:` is part of the tiny frozen sliver of
-// the grammar the gateway may read: its codes are version-independent route names, and reading
-// it here means the device is recorded for every inbound message — including ones whose
-// dispatch fails, which no codec-reported value could cover.
-export function extractDevice(body: string): DeviceCode | null {
-  for (const word of body.toLowerCase().trim().split(/\s+/)) {
-    if (word.startsWith("d:") && isDeviceCode(word.slice(2))) {
-      return word.slice(2) as DeviceCode;
     }
   }
   return null;
@@ -126,6 +116,7 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
     // Absent from codec images frozen before message counts existed; those replies were all
     // single messages, but null records "not reported" rather than guessing.
     messages: shapeInt(o["messages"]),
+    device: shapeString(o["device"]),
   };
 }
 

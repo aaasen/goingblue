@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { dispatchForecast, extractDevice, extractUserToken, extractVersion, type DispatchResult } from "./dispatch.js";
+import { dispatchForecast, extractUserToken, extractVersion, type DispatchResult } from "./dispatch.js";
 import { ping } from "./db.js";
 import { createAccount, accountExists, deleteAccount, recordRequest } from "./accounts.js";
 import { isValidToken, normalizeToken } from "@weather/protocol";
@@ -50,7 +50,7 @@ async function logRequest(record: Parameters<typeof recordRequest>[0]): Promise<
 // still a person using the service, and the failures are the only signal that a version has
 // clients it can no longer answer. The per-version counts are also the sunset metric — a frozen
 // codec container is retired only once its version has gone quiet (VERSIONING.md).
-async function buildForecast(body: string, phone: string | null): Promise<DispatchResult> {
+async function buildForecast(body: string): Promise<DispatchResult> {
   const version = extractVersion(body);
   const result = await dispatchForecast(body);
   log.info("forecast.dispatch", {
@@ -60,22 +60,18 @@ async function buildForecast(body: string, phone: string | null): Promise<Dispat
   });
   await logRequest({
     token: extractUserToken(body),
-    phone,
     // A multi-message reply arrives one message per line; the newlines are gateway framing, not
     // reply characters, so they don't count.
     chars: result.kind === "ok" ? result.encoded.split("\n").join("").length : null,
     version,
     outcome: result.kind,
-    device: extractDevice(body),
     shape: result.kind === "ok" ? result.shape : null,
   });
   return result;
 }
 
-// Requests over the internet carry no sending address — the app posts them directly — so the
-// phone is always null here.
 export async function forecast(c: Context) {
-  const result = await buildForecast((await c.req.text()).trim(), null);
+  const result = await buildForecast((await c.req.text()).trim());
   switch (result.kind) {
     case "ok": return c.text(result.encoded, 200);
     case "missing_version": return c.text(REPLY_MALFORMED, 400);
@@ -117,7 +113,7 @@ export async function sms(c: Context) {
   // HELP, STOP and START never reach this webhook: Twilio's Advanced Opt-Out intercepts the
   // keywords and sends its own replies, configured in the Twilio console.
 
-  const result = await buildForecast(body.trim(), sender);
+  const result = await buildForecast(body.trim());
   return c.text(twiml(replyFor(result)), 200, { "Content-Type": "text/xml" });
 }
 

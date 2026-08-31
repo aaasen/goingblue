@@ -1231,6 +1231,10 @@ export interface RequestShape {
   vars: string[];
   maxChars: number;
   messages: number;
+  // The `d:` route code, absent when the request named none. Reported here rather than parsed
+  // by the gateway: the codes are part of this version's grammar, and the gateway's frozen
+  // sliver stays vN + u:.
+  device?: string;
 }
 
 const IDX_TO_LOCATION_NAME: Record<number, string> = Object.fromEntries(
@@ -1273,6 +1277,7 @@ export function describeRequest(params: ForecastParams): RequestShape {
     )],
     maxChars: params.maxChars,
     messages: params.messages,
+    ...(params.device ? { device: params.device } : {}),
   };
 }
 

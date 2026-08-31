@@ -14,10 +14,10 @@ import { log } from "./log.js";
 // In both cases set DB_USER, DB_PASS, DB_NAME.
 let pool: pg.Pool | null = null;
 
-// The zone every "day" in this system is bounded by — the shape table's date column and the
-// stats dashboard's daily buckets. Pacific, not UTC: an evening request should count on the
-// evening it happened, and UTC would push everything after 5pm into tomorrow. A named zone
-// rather than a fixed offset is what makes the boundary follow DST.
+// The zone every "day" in this system is bounded by — the stats dashboard's daily buckets.
+// Pacific, not UTC: an evening request should count on the evening it happened, and UTC would
+// push everything after 5pm into tomorrow. A named zone rather than a fixed offset is what
+// makes the boundary follow DST.
 export const DAY_TZ = "America/Los_Angeles";
 
 export function getPool(): pg.Pool {
@@ -52,20 +52,22 @@ export function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
 
 // Idempotent schema setup, run on server startup.
 //
-// What we know about a request is deliberately split across two tables that share no key:
+//   accounts  one row per user token.
+//   requests  one row per inbound message: who asked (token/account), how the attempt ended,
+//             and — for served forecasts — what was asked for, as the codec reported it in the
+//             shape header (approximate location, priority mode, model, variables, route).
+//             Quotas, the /stats dashboard and corpus work all read this one table.
 //
-//   accounts        one row per user token.
-//   requests        who asked and how much: the account, a hashed sending number, response
-//                   size, protocol version, outcome. This is the usage record — quotas and
-//                   the /stats dashboard read it.
-//   request_shapes  what was asked for: an approximate location, priority mode, model and
-//                   variables. Feeds encoding evaluation and corpus work.
+// The privacy line is that no phone number is stored, in any form. What remains is an anonymous
+// token tied to an approximate (~1 km) location, which is the accepted trade: the token maps to
+// no name, number or address anywhere in this system. The sending number and the full message
+// contents live in Twilio's own logs regardless — this table is deliberately not a second copy
+// of that correlation.
 //
-// The split is the point. Usage accounting needs to tell users apart; corpus work needs
-// locations; neither needs both, and joined together they would be a position history keyed to
-// a person. `request_shapes` therefore carries no request id, no token and no number, and its
-// timestamp is a date rather than a clock time — at this traffic volume a full timestamp would
-// re-link the two tables by matching times, which would make the separation cosmetic.
+// This replaces an earlier design that split identity (`requests`) from content
+// (`request_shapes`) into two unjoinable tables. At this traffic volume timestamps and
+// character counts joined them anyway, so the separation was cosmetic; dropping the stored
+// number is what actually protects the sensitive link.
 export async function migrate(): Promise<void> {
   await query(`
     create table if not exists accounts (
@@ -86,13 +88,26 @@ export async function migrate(): Promise<void> {
   await query(`
     create unique index if not exists accounts_id_idx on accounts (id)
   `);
+  // Coordinates are rounded to 0.01 degrees (~1 km) by the codec server before they ever reach
+  // this process, so numeric(4,2)/(5,2) is the full stored precision rather than a truncation.
   await query(`
     create table if not exists requests (
       id          bigserial primary key,
       token       text references accounts(token),
       created_at  timestamptz not null default now(),
       chars       int,
-      version     int
+      version     int,
+      account_id  bigint,
+      outcome     text,
+      lat         numeric(4,2),
+      lon         numeric(5,2),
+      loc         text,
+      mode        text,
+      model       text,
+      vars        text[],
+      max_chars   int,
+      messages    int,
+      device      text
     )
   `);
   // Backfill for databases created before the protocol version was recorded. Per-version
@@ -109,22 +124,35 @@ export async function migrate(): Promise<void> {
   await query(`
     alter table requests add column if not exists account_id bigint
   `);
-  // The sending number as an unkeyed HMAC (phone.ts), never the number itself. Enough to count
-  // distinct senders and to spot one token texting from several handsets; not enough to call
-  // anyone.
-  await query(`
-    alter table requests add column if not exists phone_hash bytea
-  `);
   // How the request ended: 'ok', a dispatch failure, or the non-forecast messages ('help',
   // 'probe'). Rows written before this column existed are all successes — read a null as 'ok'.
   await query(`
     alter table requests add column if not exists outcome text
   `);
-  // The device code the request named for itself (`d:` — iPhone, generic SMS, Zoleo, inReach,
-  // Garmin email), extracted by the gateway from its frozen sliver of the grammar
-  // (dispatch.ts). Null when the request named none: hand-typed messages and pre-`d:` clients.
+  // The shape columns: what a served request asked for, as the codec reported it in the
+  // X-Request-Shape header (dispatch.ts, parseShapeHeader). All null for failures and for
+  // containers frozen before the header existed. `device` is the `d:` route code, reported by
+  // the codec since 2026-08-31 (before that the gateway read it itself); `messages` and
+  // `max_chars` are the reply budget it implies.
   await query(`
-    alter table requests add column if not exists device text
+    alter table requests
+      add column if not exists lat numeric(4,2),
+      add column if not exists lon numeric(5,2),
+      add column if not exists loc text,
+      add column if not exists mode text,
+      add column if not exists model text,
+      add column if not exists vars text[],
+      add column if not exists max_chars int,
+      add column if not exists messages int,
+      add column if not exists device text
+  `);
+  // The sending number is not stored in any form; this drops the hash an earlier design kept
+  // (see the header comment above).
+  await query(`
+    drop index if exists requests_phone_created_idx
+  `);
+  await query(`
+    alter table requests drop column if exists phone_hash
   `);
   // One-time backfill for rows written before account_id existed. Rows whose token was already
   // nulled by an earlier deletion cannot be recovered: the token that linked them is gone.
@@ -138,52 +166,47 @@ export async function migrate(): Promise<void> {
   await query(`
     create index if not exists requests_account_created_idx on requests (account_id, created_at)
   `);
-  await query(`
-    create index if not exists requests_phone_created_idx on requests (phone_hash, created_at)
-  `);
-  // Coordinates are rounded to 0.01 degrees (~1 km) by the codec server before they ever reach
-  // this process, so numeric(4,2)/(5,2) is the full stored precision rather than a truncation.
-  await query(`
-    create table if not exists request_shapes (
-      id         bigserial primary key,
-      day        date not null,
-      version    int,
-      lat        numeric(4,2),
-      lon        numeric(5,2),
-      loc        text,
-      mode       text,
-      model      text,
-      vars       text[],
-      max_chars  int,
-      chars      int
-    )
-  `);
-  // How many messages the reply was allowed to spread over (`n:`, default 1) - part of what was
-  // asked for, alongside max_chars, which is derived from it.
-  await query(`
-    alter table request_shapes add column if not exists messages int
-  `);
-  // model replaces the original models text[] column, which only ever held one entry: the codec
-  // serves the first model named, however many the mask carries (forecast.ts, firstModelKey).
-  // The shape header still says "models" - frozen containers send that key forever - and the
-  // gateway stores its first entry (dispatch.ts, parseShapeHeader). The DO block folds existing
-  // rows over, guarded because a fresh database never has the old column.
-  await query(`
-    alter table request_shapes add column if not exists model text
-  `);
+  // Fold the retired request_shapes table into the shape columns above, then drop it. The two
+  // tables shared no key — that was the earlier design's point — so the fold re-derives the
+  // pairing the split withheld: a shape matches the served request from the same Pacific day
+  // with the same version and reply length, duplicates zipped in insertion order (both tables
+  // were written back-to-back per message, so both id orders are the arrival order). The whole
+  // block is guarded: it runs once against a database that still has the table, and never on a
+  // fresh one. The inner branch finishes the models→model rename for a database that predates
+  // it.
   await query(`
     do $$
     begin
-      if exists (select 1 from information_schema.columns
-                 where table_name = 'request_shapes' and column_name = 'models') then
-        update request_shapes set model = models[1] where model is null;
-        alter table request_shapes drop column models;
+      if to_regclass('request_shapes') is not null then
+        if exists (select 1 from information_schema.columns
+                   where table_name = 'request_shapes' and column_name = 'models') then
+          alter table request_shapes add column if not exists model text;
+          update request_shapes set model = models[1] where model is null;
+          alter table request_shapes drop column models;
+        end if;
+        with s as (
+          select *, row_number() over (partition by day, version, chars order by id) as k
+            from request_shapes
+        ), r as (
+          select id, (created_at at time zone '${DAY_TZ}')::date as day, version, chars,
+                 row_number() over (partition by (created_at at time zone '${DAY_TZ}')::date,
+                                    version, chars order by id) as k
+            from requests
+           where coalesce(outcome, 'ok') = 'ok'
+        )
+        update requests q
+           set lat = s.lat, lon = s.lon, loc = s.loc, mode = s.mode, model = s.model,
+               vars = s.vars, max_chars = s.max_chars, messages = s.messages
+          from s
+          join r on r.day = s.day
+                and r.version is not distinct from s.version
+                and r.chars is not distinct from s.chars
+                and r.k = s.k
+         where q.id = r.id;
+        drop table request_shapes;
       end if;
     end
     $$
-  `);
-  await query(`
-    create index if not exists request_shapes_day_idx on request_shapes (day)
   `);
 }
 

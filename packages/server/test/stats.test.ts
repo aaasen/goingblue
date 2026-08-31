@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDay, renderStats, type DailyRow, type StatsData } from "../src/pages/stats.js";
+import { formatDay, renderStats, type DailyRow, type RequestRow, type StatsData } from "../src/pages/stats.js";
 
 // Rendering is pure, so every case here feeds cells straight in — no Postgres, matching the rest
 // of the server tests. Assertions are on structure and numbers rather than exact markup, so
@@ -9,14 +9,19 @@ import { formatDay, renderStats, type DailyRow, type StatsData } from "../src/pa
 const cell = (day: string, requests: number, grp: string | null = ""): DailyRow =>
   ({ day, grp, requests });
 
+// One raw request row with every column a served default-forecast reply carries; tests override
+// what they exercise.
+const row = (over: Partial<RequestRow> = {}): RequestRow => ({
+  id: 1, time: "8/30 14:11", account: 29, device: "i", version: 3, chars: 155, outcome: "ok",
+  loc: "current", lat: "63.06", lon: "-151.08", mode: "auto", model: "best", messages: 1,
+  vars: ["temp", "wind", "snow", "gust", "rain"], ...over,
+});
+
 const data = (
   daily: DailyRow[],
   {
     groups = [] as StatsData["groups"],
-    shapeDaily = [] as StatsData["shapeDaily"],
-    shapeGroups = [] as StatsData["shapeGroups"],
-    shapeGroupComponents = [] as StatsData["shapeGroupComponents"],
-    shapeRows = [] as StatsData["shapeRows"],
+    groupComponents = [] as StatsData["groupComponents"],
     mapPoints = [] as StatsData["mapPoints"],
     requests = [] as StatsData["requests"],
     totals = {} as Partial<StatsData["totals"]>,
@@ -29,20 +34,15 @@ const data = (
     from: daily[0]?.day ?? "2026-08-01",
     to: daily[daily.length - 1]?.day ?? "2026-08-01",
     group: null,
-    shapeGroup: null,
     ...filters,
   },
   groups,
-  shapeDaily,
-  shapeGroups,
-  shapeGroupComponents,
-  shapeRows,
+  groupComponents,
   mapPoints,
   totals: {
     requests: daily.reduce((n, c) => n + c.requests, 0),
     failed: 0,
     users: 0,
-    senders: 0,
     ...totals,
   },
 });
@@ -101,22 +101,20 @@ describe("renderStats", () => {
   it("shows the window totals in the summary tiles", () => {
     const html = renderStats(data(
       [cell("2026-08-06", 4), cell("2026-08-07", 6)],
-      { totals: { requests: 10, users: 3, senders: 2, failed: 1 } },
+      { totals: { requests: 10, users: 3, failed: 1 } },
     ));
     expect(html).toContain("<b>10</b><span>requests</span>");
     expect(html).toContain("<b>3</b><span>distinct accounts</span>");
-    expect(html).toContain("<b>2</b><span>distinct numbers</span>");
     // Singular, because the label is read together with the number beside it.
     expect(html).toContain("<b>1</b><span>failed request</span>");
   });
 
-  // A day that served nothing but failed and was texted is still a day with traffic; the empty
-  // state must not claim otherwise.
+  // A day that served nothing but failed is still a day with traffic; the empty state must not
+  // claim otherwise.
   it("reports an empty window only when nothing at all happened", () => {
-    const failedOnly = renderStats(data([], { totals: { senders: 1, failed: 2 } }));
+    const failedOnly = renderStats(data([], { totals: { failed: 2 } }));
     expect(failedOnly).not.toContain("No requests in this window");
     expect(failedOnly).toContain("<b>2</b><span>failed requests</span>");
-    expect(failedOnly).toContain("<b>1</b><span>distinct number</span>");
   });
 
   it("keeps gridlines on whole numbers — these are counts, not measurements", () => {
@@ -151,16 +149,15 @@ describe("renderStats — grouped chart", () => {
     expect(html).toContain("<title>Aug 7 — 12 requests\nSMS: 7\ninReach: 5</title>");
   });
 
-  it("labels groups by kind — accounts as ids, numbers as hash prefixes", () => {
+  it("labels groups by kind — accounts as ids, versions prefixed, nulls as ?", () => {
     const accounts = renderStats(data([cell("2026-08-07", 3, "29")], { filters: { group: "account" } }));
     expect(accounts).toContain("</i>29</span>");
-    const numbers = renderStats(data(
-      [cell("2026-08-07", 3, "7e3eb5a930bf2b89"), cell("2026-08-07", 2, null)],
-      { filters: { group: "number" } },
+    const versions = renderStats(data(
+      [cell("2026-08-07", 3, "3"), cell("2026-08-07", 2, null)],
+      { filters: { group: "version" } },
     ));
-    expect(numbers).toContain("7e3eb5");
-    expect(numbers).not.toContain("…");
-    expect(numbers).toContain("No number");
+    expect(versions).toContain("</i>v3</span>");
+    expect(versions).toContain("</i>?</span>");
   });
 
   it("folds groups past the palette into a gray Other", () => {
@@ -176,13 +173,9 @@ describe("renderStats — grouped chart", () => {
     const html = renderStats(data([cell("2026-08-07", 5)]));
     expect(html).not.toContain("class=legend");
   });
-});
-
-describe("renderStats — devices and request shapes", () => {
-  const rows = [cell("2026-08-07", 12)];
 
   it("lists window totals for the selected group under the chart", () => {
-    const html = renderStats(data(rows, {
+    const html = renderStats(data([cell("2026-08-07", 12)], {
       filters: { group: "device" },
       groups: [
         { grp: "i", requests: 8, users: 2 },
@@ -196,78 +189,87 @@ describe("renderStats — devices and request shapes", () => {
     expect(html).toContain("<tfoot><tr><td>Total</td><td>12</td><td>0</td></tr></tfoot>");
   });
 
-  it("draws the shapes chart and its group table from the shape record", () => {
-    const html = renderStats(data([cell("2026-08-07", 5)], {
-      filters: { shapeGroup: "messages" },
-      shapeDaily: [cell("2026-08-07", 4, "1"), cell("2026-08-07", 2, "2")],
-      shapeGroups: [{ grp: "1", count: 4 }, { grp: "2", count: 2 }],
-    }));
-    expect(html).toContain("Shapes per day");
-    expect(html).toContain("By messages");
-    expect(html).toContain("<td>1</td><td>4</td>");
-    expect(html).toContain("<tfoot><tr><td>Total</td><td>6</td></tr></tfoot>");
-    // Shape tooltips carry the per-series lines like the requests chart's.
-    expect(html).toContain("<title>Aug 7 — 6 requests\n1: 4\n2: 2</title>");
-  });
-
-  it("relabels the quantity under the variable grouping and lists family components", () => {
-    const html = renderStats(data([cell("2026-08-07", 5)], {
-      filters: { shapeGroup: "variable" },
-      shapeDaily: [cell("2026-08-07", 5, "clouds"), cell("2026-08-07", 3, "aqi")],
-      shapeGroups: [{ grp: "clouds", count: 5 }, { grp: "aqi", count: 3 }],
-      shapeGroupComponents: [
-        { grp: "clouds", component: "cch", count: 5 },
-        { grp: "clouds", component: "ccm", count: 5 },
-        { grp: "aqi", component: "aq_pm25", count: 3 },
-        { grp: "aqi", component: "aqi", count: 2 },
-      ],
-    }));
-    // A request can sit in several families, so the stack's unit is variable requests.
-    expect(html).toContain("<title>Aug 7 — 8 variable requests\nclouds: 5\nAQI: 3</title>");
-    expect(html).toContain("By variable");
-    // The family row carries the distinct-request count; its components follow, indented.
-    expect(html).toContain("<tr><td>AQI</td><td>3</td></tr><tr class=quiet><td class=comp>aq_pm25</td><td>3</td></tr>");
-    expect(html).toContain("<td class=comp>cch</td><td>5</td>");
-  });
-
   it("shows no group table when the chart is ungrouped", () => {
-    const html = renderStats(data(rows, {
+    const html = renderStats(data([cell("2026-08-07", 12)], {
       groups: [{ grp: "", requests: 12, users: 3 }],
     }));
     expect(html).not.toContain("<th>Requests</th><th>Accounts</th>");
   });
 
-  // The shape header is untrusted input (dispatch.ts); a compromised codec must not be able to
-  // put markup on this page.
+  it("relabels the quantity under the variable grouping and lists family components", () => {
+    const html = renderStats(data(
+      [cell("2026-08-07", 5, "clouds"), cell("2026-08-07", 3, "aqi")],
+      {
+        filters: { group: "variable" },
+        groups: [{ grp: "clouds", requests: 5, users: 2 }, { grp: "aqi", requests: 3, users: 1 }],
+        groupComponents: [
+          { grp: "clouds", component: "cch", count: 5 },
+          { grp: "clouds", component: "ccm", count: 5 },
+          { grp: "aqi", component: "aq_pm25", count: 3 },
+          { grp: "aqi", component: "aqi", count: 2 },
+        ],
+      },
+    ));
+    // A request can sit in several families, so the stack's unit is variable requests.
+    expect(html).toContain("<title>Aug 7 — 8 variable requests\nclouds: 5\nAQI: 3</title>");
+    expect(html).toContain("By variable");
+    // The family row carries the distinct-request count; its components follow, indented.
+    expect(html).toContain("<tr><td>AQI</td><td>3</td><td>1</td></tr><tr class=quiet><td class=comp>aq_pm25</td><td>3</td><td></td></tr>");
+    expect(html).toContain("<td class=comp>cch</td><td>5</td>");
+  });
+
+  // The shape columns are untrusted input (dispatch.ts); a compromised codec must not be able
+  // to put markup on this page.
   it("escapes shape strings on the way into the markup", () => {
-    const html = renderStats(data(rows, {
-      filters: { shapeGroup: "mode" },
-      shapeDaily: [cell("2026-08-07", 1, "<script>alert(1)</script>")],
-      shapeGroups: [{ grp: "<script>alert(1)</script>", count: 1 }],
-    }));
+    const html = renderStats(data(
+      [cell("2026-08-07", 1, "<script>alert(1)</script>")],
+      {
+        filters: { group: "mode" },
+        groups: [{ grp: "<script>alert(1)</script>", requests: 1, users: 1 }],
+      },
+    ));
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("&lt;script&gt;");
   });
+});
 
-  it("lists recent shapes with named or coordinate locations and opt-in variables only", () => {
-    const html = renderStats(data(rows, {
-      shapeRows: [
-        { day: "8/30", loc: "summit", lat: "63.07", lon: "-151.00", mode: "auto", model: "best",
-          messages: 2, chars: 288, vars: ["temp", "wind", "freeze", "cch", "ccm", "aq_o3", "w500"] },
-        { day: "8/29", loc: "current", lat: "47.62", lon: "-122.29", mode: "detail", model: "eu",
-          messages: null, chars: null, vars: ["temp"] },
+describe("renderStats — recent requests", () => {
+  it("lists rows with named or coordinate locations and opt-in variables only", () => {
+    const html = renderStats(data([cell("2026-08-07", 2)], {
+      requests: [
+        row({ id: 55, time: "8/30 14:11", account: 29, device: "i", version: 3, loc: "summit",
+              lat: "63.07", lon: "-151.00", mode: "auto", model: "best", messages: 2, chars: 288,
+              vars: ["temp", "wind", "freeze", "cch", "ccm", "aq_o3", "w500"] }),
+        row({ id: 54, time: "8/29 09:02", account: 12, device: "s", version: 2, loc: "current",
+              lat: "47.62", lon: "-122.29", mode: "detail", model: "eu", messages: null,
+              chars: null, vars: ["temp"] }),
       ],
     }));
-    expect(html).toContain("Recent request shapes");
+    expect(html).toContain("Recent requests");
     // Components fold to their families, deduplicated: cch+ccm are one clouds entry.
-    expect(html).toContain("<td>8/30</td><td>summit</td><td>auto</td><td>best</td><td>2</td><td>288</td><td>freeze, clouds, AQI, wind</td>");
-    // 'current' is not a name; the coordinates stand in, and all-default vars leave the cell empty.
-    expect(html).toContain("<td>8/29</td><td>47.62, -122.29</td><td>detail</td><td>eu</td><td></td><td></td><td></td>");
+    expect(html).toContain(
+      "<td>55</td><td>8/30 14:11</td><td>29</td><td>iPhone</td><td>3</td><td>summit</td>" +
+      "<td>auto</td><td>best</td><td>2</td><td>288</td><td>freeze, clouds, AQI, wind</td>");
+    // 'current' is not a name; the coordinates stand in, and all-default vars leave the cell
+    // empty.
+    expect(html).toContain(
+      "<td>54</td><td>8/29 09:02</td><td>12</td><td>SMS</td><td>2</td><td>47.62, -122.29</td>" +
+      "<td>detail</td><td>eu</td><td></td><td></td><td></td>");
+  });
+
+  // A failure has no shape: every codec-reported cell is empty, and the outcome says why.
+  it("renders a failed request's shape cells empty and its outcome loud", () => {
+    const html = renderStats(data([cell("2026-08-07", 1)], {
+      requests: [row({ device: null, loc: null, lat: null, lon: null, mode: null, model: null,
+                       messages: null, chars: null, vars: [], outcome: "unsupported_version" })],
+    }));
+    expect(html).toContain("<td>unsupported_version</td>");
+    expect(html).not.toContain("<td>iPhone</td>");
   });
 
   it("says when nothing has been recorded rather than dropping the sections", () => {
-    const html = renderStats(data(rows));
-    expect(html).toContain("No request shapes recorded");
+    const html = renderStats(data([cell("2026-08-07", 1)]));
+    expect(html).toContain("No requests in the window");
     expect(html).toContain("No locations recorded");
   });
 });

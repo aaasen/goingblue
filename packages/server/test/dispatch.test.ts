@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateToken } from "@weather/protocol";
-import { codecUrlFor, dispatchForecast, extractDevice, extractUserToken, extractVersion, parseShapeHeader } from "../src/dispatch.js";
+import { codecUrlFor, dispatchForecast, extractUserToken, extractVersion, parseShapeHeader } from "../src/dispatch.js";
 
 // A real token so extraction exercises the same validity check parseRequest applies.
 const TOKEN = generateToken((n) => Uint8Array.from({ length: n }, (_, i) => i * 7 + 3));
@@ -34,19 +34,6 @@ describe("extractUserToken", () => {
   it("is null when absent or malformed", () => {
     expect(extractUserToken("v1 p:a")).toBeNull();
     expect(extractUserToken("v1 u:notatoken p:a")).toBeNull();
-  });
-});
-
-describe("extractDevice", () => {
-  it("finds the d: word anywhere in the body, case-insensitively", () => {
-    expect(extractDevice("v2 d:i n:2 p:a")).toBe("i");
-    expect(extractDevice("63.0630,-151.0810 D:G v2")).toBe("g");
-  });
-
-  it("is null when absent or not a device code — hand-typed and pre-d: requests name none", () => {
-    expect(extractDevice("v2 p:a")).toBeNull();
-    expect(extractDevice("v2 d:x")).toBeNull();
-    expect(extractDevice("v2 d:")).toBeNull();
   });
 });
 
@@ -87,7 +74,7 @@ describe("dispatchForecast", () => {
     expect(await dispatchForecast("v1 p:d")).toEqual({
       kind: "ok", encoded: "ENCODED",
       shape: { lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
-               model: "best", vars: ["temp"], maxChars: 160, messages: 1 },
+               model: "best", vars: ["temp"], maxChars: 160, messages: 1, device: null },
     });
   });
 
@@ -114,10 +101,12 @@ describe("parseShapeHeader", () => {
   });
 
   it("keeps exactly the fields we store", () => {
-    expect(parseShapeHeader(shape())).toEqual({
+    expect(parseShapeHeader(shape({ device: "i" }))).toEqual({
       lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
-      model: "best", vars: ["temp", "wind"], maxChars: 160, messages: 2,
+      model: "best", vars: ["temp", "wind"], maxChars: 160, messages: 2, device: "i",
     });
+    // Absent from containers frozen before the codec reported the route.
+    expect(parseShapeHeader(shape())).toMatchObject({ device: null });
   });
 
   it("drops fields the codec invented rather than storing them", () => {
@@ -138,7 +127,7 @@ describe("parseShapeHeader", () => {
   it("nulls individual fields of the wrong type or range", () => {
     expect(parseShapeHeader(shape({ lat: "63.06", lon: 999, mode: 7, maxChars: 1.5, messages: "2" }))).toEqual({
       lat: null, lon: null, loc: "current", mode: null,
-      model: "best", vars: ["temp", "wind"], maxChars: null, messages: null,
+      model: "best", vars: ["temp", "wind"], maxChars: null, messages: null, device: null,
     });
     expect(parseShapeHeader(shape({ models: "best", vars: [1, "temp", null] }))).toMatchObject({
       model: null, vars: ["temp"],
