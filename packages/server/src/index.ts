@@ -9,6 +9,7 @@ import { privacy } from "./pages/privacy.js";
 import { terms } from "./pages/terms.js";
 import { contactCard } from "./pages/contact-card.js";
 import { image, favicon } from "./assets.js";
+import { vendorAsset } from "./vendor.js";
 import { benchmark } from "./benchmark.js";
 import { stats } from "./pages/stats.js";
 import { migrate } from "./db.js";
@@ -25,6 +26,9 @@ app.get("/terms", terms);
 app.get("/contact.vcf", contactCard);
 app.get("/benchmark", benchmark);
 app.get("/img/:name", image);
+// Library bundles for the stats map. Not behind the stats auth: the bytes are public
+// open-source code, and keeping them here lets them cache independently of the login.
+app.get("/vendor/:v/:name", vendorAsset);
 app.get("/favicon.ico", favicon);
 app.use("/forecast", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/forecast", forecast);

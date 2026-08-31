@@ -15,7 +15,9 @@
     "@weather/protocol": "workspace:*",
     "base32768": "^5.0.1",
     "hono": "^4.13.2",
-    "pg": "^8.13.0"
+    "maplibre-gl": "^6.6.0",
+    "pg": "^8.13.0",
+    "pmtiles": "^4.5.0"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

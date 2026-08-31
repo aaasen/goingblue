@@ -1,7 +1,7 @@
 import { img } from "../assets.js";
 import { BRAND, LAST_UPDATED } from "../constants.js";
 
-type PageOpts = { showUpdated?: boolean; header?: string; css?: string };
+type PageOpts = { showUpdated?: boolean; header?: string; css?: string; head?: string };
 
 // The shell every public page is served in: the document, the icons, the typographic defaults, the
 // centered wrap, and the footer that carries the operator's name and the links between the pages.
@@ -11,8 +11,10 @@ type PageOpts = { showUpdated?: boolean; header?: string; css?: string };
 // (the landing page's photo band). Passing one replaces the plain <h1>, which the page's own header
 // is then responsible for carrying. `css` appends a page's own rules to the same <style> block,
 // which is what lets a page with its own layout — the landing page's hero and screenshot strip, the
-// stats dashboard's tables — share this shell instead of growing a second one.
-export const PAGE = (title: string, body: string, { showUpdated = true, header, css }: PageOpts = {}) => `<!doctype html>
+// stats dashboard's tables — share this shell instead of growing a second one. `head` is raw HTML
+// appended to <head>, for a page that needs more than styles there (the stats map's stylesheet
+// link).
+export const PAGE = (title: string, body: string, { showUpdated = true, header, css, head }: PageOpts = {}) => `<!doctype html>
 <html lang=en>
 <head>
 <meta charset=utf-8>
@@ -31,7 +33,7 @@ export const PAGE = (title: string, body: string, { showUpdated = true, header, 
   a { color: #0b62c4; }
   footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
 ${css ?? ""}</style>
-</head>
+${head ?? ""}</head>
 <body>
 ${header ?? ""}
 <div class=wrap>
