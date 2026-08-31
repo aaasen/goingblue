@@ -2,11 +2,11 @@ import { writeFileSync, mkdirSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 // Imports the built codec, so build the protocol first: `pnpm --filter @weather/protocol build`.
-import { v3Codec, V3_VERSION, layoutFor, type ForecastMessage } from "../dist/index.js";
+import { v4Codec, V4_VERSION, layoutFor, type ForecastMessage } from "../dist/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Every v3 variable bit, so the fixture exercises — and freezes — every column's encoding
+// Every v4 variable bit, so the fixture exercises — and freezes — every column's encoding
 // (precip, temp, snow, rain, freeze, surface wind + every pressure level, gust, the cloud band,
 // and all twelve air-quality indices). Bit 8 = gust (always-on since 2026-07-30). Bits 0..28 are
 // every allocated bit (25..28 are the lower wind levels, see VARS_BIT); 29 is free. With every
@@ -21,7 +21,7 @@ const vars_mask = (1 << 29) - 1;
 // band's resolution clamp (band symbols on the four fine periods only), and the 14k-camp
 // elevation freezes its level clamp (4267 m → four levels, 300..600 hPa); the seven requested
 // wind levels are all carried, clamp-free — see cloudBandPeriodCount / pressureLevelCount in
-// v3.ts. The request datetime, mode, and offset
+// v4.ts. The request datetime, mode, and offset
 // live in `request` so the test can rebuild the context the decoder needs (the year floats:
 // it is not on the wire, and the layout only depends on the hour-of-day).
 const request = { month: 6, day: 15, hour: 22, mode: 0 /* MODE_DETAIL */, utcOffsetHours: -9 };
@@ -31,7 +31,7 @@ const layout = layoutFor(request.mode, startMs / 3600000, request.utcOffsetHours
 const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
 
 const input: ForecastMessage = {
-  version: V3_VERSION,
+  version: V4_VERSION,
   code: 0,
   days: layout.days,
   models_mask: 0b0001, // Best Match only (bit 0)
@@ -77,9 +77,9 @@ const ctx = () => ({
   utcOffsetHours: request.utcOffsetHours,
 });
 
-const encoded = v3Codec.encode(input);
+const encoded = v4Codec.encode(input);
 // Round-trip to capture quantization so fixture.decoded is exactly what decode produces.
-const decoded = v3Codec.decode(encoded, ctx);
+const decoded = v4Codec.decode(encoded, ctx);
 
 const fixture = {
   description: "Detail-mode fill (seq 5: 3h/12h/12h), all variables, Denali 14k camp",
@@ -90,7 +90,7 @@ const fixture = {
 
 const outDir = join(__dirname, "../test/fixtures");
 mkdirSync(outDir, { recursive: true });
-const outPath = join(outDir, "v3.fixture.json");
+const outPath = join(outDir, "v4.fixture.json");
 writeFileSync(outPath, JSON.stringify(fixture, null, 2) + "\n");
 console.log(`Written: ${outPath}`);
 console.log(`Encoded: ${encoded}`);

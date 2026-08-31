@@ -19,7 +19,7 @@
  * value are context both sides already have, so none of this costs wire bits.
  *
  * Sequences are collected under calm gating (no direction symbol when the quantized speed is 0;
- * the context chain carries the last encoded direction), matching the wire behavior in v3.ts.
+ * the context chain carries the last encoded direction), matching the wire behavior in v4.ts.
  * The bootstrap table (a column's first encoded direction, no predecessor) is shared across
  * resolutions and levels — it fires once per column, so keying it isn't worth the tables.
  *
@@ -96,7 +96,7 @@ export function counter(): CellCounter {
         const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US", resIdx));
         const sp = Array.from({ length: NLEVEL }, (_, L) => periods.map((p) => qSpeed(speedOf(p, L))));
         const dr = Array.from({ length: NLEVEL }, (_, L) => periods.map((p) => (dirOf(p, L) ?? 0) % 8));
-        // Displayed dir under calm gating: last encoded dir, 0 before any (mirrors v3.ts).
+        // Displayed dir under calm gating: last encoded dir, 0 before any (mirrors v4.ts).
         const disp = sp.map((_, L) => {
           let eff = 0;
           return periods.map((_, p) => (sp[L][p] > CALM_MAX_FORCE ? (eff = dr[L][p]) : eff));

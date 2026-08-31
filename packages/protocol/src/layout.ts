@@ -1,7 +1,7 @@
 import { RESOLUTION_HOURS, MODEL_BIT } from "./constants.js";
 
-// Priority-mode fill layout (v3 of the fill scheme, protocol v3). v1 is shipped and frozen in
-// its own container, so changes here land in v3 and never move v1's bits (see VERSIONING.md).
+// Priority-mode fill layout (v3 of the fill scheme, protocol v4). v1 is shipped and frozen in
+// its own container, so changes here land in v4 and never move v1's bits (see VERSIONING.md).
 // The user picks a PRIORITY MODE (Detail / Auto / Range), not
 // a duration or resolution; the server fills the message budget by walking that mode's
 // refinement path and binary-searching the largest step whose encoding fits. The wire carries
@@ -71,7 +71,7 @@ const SHORT_HORIZON_MODELS = [MODEL_BIT.CA];
  * recovers it from the stored request (see RequestContext) and derives the period layout from
  * it. A request carries and a client stores the mode that was actually asked for; the
  * substitution is made where the message is built (parseRequest) and made again where it is
- * read (v3MessageFromString), against the same model, so both arrive at the same layout without
+ * read (v4MessageFromString), against the same model, so both arrive at the same layout without
  * the client needing to know this rule exists.
  *
  * Known limitation: it fixes Range, not the underlying clamp. Detail and Auto stay budget-bound

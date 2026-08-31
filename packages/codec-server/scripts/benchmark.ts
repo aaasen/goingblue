@@ -44,8 +44,8 @@ import { fileURLToPath } from "node:url";
 import { adjustPrecipPhase, buildFillMessage, fillCloudBand, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import {
   VARS_BIT, ALWAYS_VARS, WIND_LEVELS_HPA, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
-  fillProfile, maxFillSeq, v3EncodeBreakdown, V3_VERSION, type Alphabet,
-  type ForecastMessage, type V3Breakdown,
+  fillProfile, maxFillSeq, v4EncodeBreakdown, V4_VERSION, type Alphabet,
+  type ForecastMessage, type V4Breakdown,
 } from "@weather/protocol";
 
 import {
@@ -792,11 +792,11 @@ function baseComplete(h: HourlyData): boolean {
 interface Fit {
   seq: number;       // low seqs are the truncated 12h ramp (see layout.ts)
   periods: number;   // periods in the fitted message
-  breakdown: V3Breakdown;
+  breakdown: V4Breakdown;
 }
 
 // What the report keeps per fit after folding the column bits into the colBits arrays — the full
-// V3Breakdown per (cell × mode × combo) is what blew the heap on the full eval split.
+// V4Breakdown per (cell × mode × combo) is what blew the heap on the full eval split.
 interface StoredFit {
   seq: number;
   periods: number;
@@ -818,7 +818,7 @@ function fitFill(
       const msg = msgAt(seq);
       if (msg === null) return null; // upstream gap — unservable, same as in production
       const withVars: ForecastMessage = { ...msg, vars_mask: varsMask };
-      return { seq, periods: withVars.periods[0].length, breakdown: v3EncodeBreakdown(withVars, alphabet) };
+      return { seq, periods: withVars.periods[0].length, breakdown: v4EncodeBreakdown(withVars, alphabet) };
     },
     (fit) => fit.breakdown.chars,
     maxFillSeq(mode),
@@ -956,7 +956,7 @@ async function scanReport(args: Args, shard?: { index: number; total: number }):
       const params: ForecastParams = {
         locationIdx: 0, lat, lon, mode, utcOffsetHours,
         modelsMask: 1, varsMask: allMask, maxChars: args.maxChars,
-        decoderVersion: V3_VERSION, code: 0, startEpochHour, userToken: null,
+        decoderVersion: V4_VERSION, code: 0, startEpochHour, userToken: null,
       };
       const memo = new Map<number, ForecastMessage | null>();
       const msgAt = (seq: number): ForecastMessage | null => {

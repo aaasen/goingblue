@@ -1,7 +1,7 @@
 /**
  * The acceptance check for the cloud-band correction (docs/private/Cloud Band Correction.md).
  *
- * THE SYMPTOM. The v3 cloud band's eight `cloud_cover_XhPa` levels are not model cloud: they are
+ * THE SYMPTOM. The v4 cloud band's eight `cloud_cover_XhPa` levels are not model cloud: they are
  * Open-Meteo's own Sundqvist (1989) diagnostic over gridbox-mean relative humidity, and it has a
  * hard floor at each level's critical humidity. Stack the encoder's 3-bit deadband on top and the
  * band frequently renders empty for hours the weathercode calls cloudy. fillCloudBand

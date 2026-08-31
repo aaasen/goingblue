@@ -1,14 +1,14 @@
 /**
  * Derive the gust-delta codebooks (res-keyed) and the surface-wind-delta codebooks keyed by
  * (resolution, SAME-period gust delta bucket). The conditioning runs gust → surface (reversed
- * 2026-07-31, was surface → gust): gust decodes FIRST (WIND_COLUMNS order in v3.ts) and lends
+ * 2026-07-31, was surface → gust): gust decodes FIRST (WIND_COLUMNS order in v4.ts) and lends
  * its already-decoded same-period delta to the surface column for free — chosen so surface wind
  * can become an optional variable later (gusts are the column worth keeping; a gust envelope
  * implies most of the sustained story). Direction of conditioning is bit-neutral (held-out
  * 2.638 fwd vs 2.641 rev — analyze-wind-scale-heldout.ts); the option value decided it.
  *
  * Quantization is the shared extended Beaufort scale (forces 0..17, quantWind in derive-lib.ts,
- * must match v3.ts): deltas -17..17 (35 symbols), no escape needed. The surface fallback for
+ * must match v4.ts): deltas -17..17 (35 symbols), no escape needed. The surface fallback for
  * messages without gust in vars_mask is the [res][level 0] table in
  * derive-wind-speed-delta-codebooks.ts (which charges no wire cost for it — sfc's corpus cost
  * lives HERE, in the conditioned tables, since gust is always present when counting).
@@ -20,7 +20,7 @@
  * wind_gusts_10m series and are skipped.
  *
  * Training mirrors the wire exactly: local-midnight-aligned uniform windows per resolution, the
- * same quantizer as v3.ts. The 24h row (resolution index 0) is trained even though fill layouts
+ * same quantizer as v4.ts. The 24h row (resolution index 0) is trained even though fill layouts
  * never emit 24h periods — it keeps the [res][ctx][sym] shape uniform.
  *
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
@@ -35,7 +35,7 @@ import {
   type CellCounter, type DerivedTables,
 } from "./derive-lib.ts";
 
-const FORCE_MAX = 17;              // extended Beaufort domain, must match v3.ts
+const FORCE_MAX = 17;              // extended Beaufort domain, must match v4.ts
 const NSYM = 2 * FORCE_MAX + 1;    // 35: deltas -17..17
 const NRES = TABLE_RES_IDXS.length; // 12h/6h/3h/1h — the resolutions layouts emit, in row order
 const NBUCKET = 5;                 // upperDeltaBucket domain: ≤-2, -1, 0, +1, ≥+2

@@ -91,13 +91,13 @@ const ctxCount = (c: Column) => NPREV * (c.tod ? NTOD : 1);
 
 // Each headline's residual tables: the count-table name, the generated constant, the headline's
 // own column, and the three constituents that key it — in AQI_BASE_* bit order (pm2.5, ozone,
-// pm10), which is what makes `mask` here the same mask v3.ts derives from vars_mask.
+// pm10), which is what makes `mask` here the same mask v4.ts derives from vars_mask.
 // `masks` is the set the codec actually codes as residuals (AQI_*_RESIDUAL_MASKS in entropy.ts).
 // The other presence masks fall back to the headline's own deltas, so their table rows are never
 // looked up — counting them was ~9 of every 14 residual increments spent on rows nothing reads.
 // The rows still exist in the shipped table, uniform, because the mask indexes it directly; a
 // mode set that grew without a regeneration would ship a uniform row, which the codebook digest
-// catches (V3_CODEBOOKS carries the mode sets alongside the weights).
+// catches (V4_CODEBOOKS carries the mode sets alongside the weights).
 const RESIDUALS: {
   name: string; table: string; head: string;
   base: [string, string, string]; masks: ReadonlySet<number>;
@@ -157,7 +157,7 @@ export function counter(): CellCounter {
     // Each headline's residual against the max of its carried constituents, keyed by the 3-bit
     // presence mask and the resolution — within a mask the residual is a spike at zero, so a
     // richer context would only split it. Every mask is counted from the same periods; which of
-    // them the wire actually uses is v3.ts's call (AQI_*_RESIDUAL_MASKS).
+    // them the wire actually uses is v4.ts's call (AQI_*_RESIDUAL_MASKS).
     ...RESIDUALS.map((r) => ({ name: r.name, dims: [NMASK, NRES, NRESID] })),
     // [prev + 1][sym]: row 0 is the bootstrap (no predecessor), rows 1.. are order-1.
     ...DOMINANT.map((d) => ({ name: d.name, dims: [d.of.length + 2, d.of.length + 1] })),
@@ -195,7 +195,7 @@ export function counter(): CellCounter {
         const slice = ctx.atMidnight(TABLE_RES_IDXS[res]);
         if (!slice) continue;
         // Clamped to the horizon the WIRE encodes. Production stops every air-quality column at
-        // AQ_HORIZON_HOURS (aqPeriodCount in v3.ts), so periods past it are never emitted — and
+        // AQ_HORIZON_HOURS (aqPeriodCount in v4.ts), so periods past it are never emitted — and
         // at fine resolutions they were most of what got counted, a 12-day window being three
         // times the horizon. Training on them diluted the tables with lead times the encoder
         // never carries, and cost the scan the same 3x.

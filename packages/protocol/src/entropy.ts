@@ -1,5 +1,5 @@
 // All weight tables live in codebooks.gen.ts, written by the derive pipeline (`pnpm generate`)
-// — never edited by hand. They are wire format; see V3_CODEBOOKS at the bottom of this file.
+// — never edited by hand. They are wire format; see V4_CODEBOOKS at the bottom of this file.
 import {
   WEATHERCODE_BOOTSTRAP_WEIGHTS, WEATHERCODE_WEIGHTS,
   WIND_DIR_BOOTSTRAP_WEIGHTS, WIND_DIR_WEIGHTS_BY_RES, WIND_DIR_UPPER_WEIGHTS_BY_RES,
@@ -139,7 +139,7 @@ const NDIR = 8;
 // companded scales (held-out sfc+gust 2.638 vs 3.595 b/period under linear 5 kph — see
 // analyze-wind-scale-heldout.ts): Beaufort bands track perceptible wind differences, which is
 // also where the delta probability mass moves. Decoded values are band midpoints (kph); the
-// bounds are wire format and pinned in V3_CODEBOOKS below.
+// bounds are wire format and pinned in V4_CODEBOOKS below.
 export const BEAUFORT_KPH_LOWER: readonly number[] =
   [0, 1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118, 134, 150, 167, 184, 202];
 export const BEAUFORT_MAX = BEAUFORT_KPH_LOWER.length - 1; // 17
@@ -177,7 +177,7 @@ export function windGapClass(gap: number): number {
   return Math.min(Math.max(gap, 1), N_WIND_GAPS) - 1;
 }
 
-// must mirror the freeze column width in v3.ts (0..31)
+// must mirror the freeze column width in v4.ts (0..31)
 export const FREEZE_DELTA_MAX = 31;
 
 // Previous-value buckets for the accumulation columns: 0 | 1-3 | 4-9 | 10-20 | 21+.
@@ -196,7 +196,7 @@ const TEMP_DELTA_ESCAPE_BIAS = 1 << (TEMP_DELTA_ESCAPE_BITS - 1); // 32
 // The escape field's raw range. A delta outside it is NOT representable — encodeTempDelta (and
 // the coder's raw bypass beneath it) refuses to emit it rather than truncating, so the encoder
 // must clamp into this range and diff later periods against the clamped reconstruction
-// (see the temp column in v3.ts).
+// (see the temp column in v4.ts).
 export const TEMP_DELTA_MIN = -TEMP_DELTA_ESCAPE_BIAS;                      // -32
 export const TEMP_DELTA_MAX = (1 << TEMP_DELTA_ESCAPE_BITS) - 1 - TEMP_DELTA_ESCAPE_BIAS; // 31
 
@@ -227,7 +227,7 @@ function tempDeltaSym(delta: number): number {
 // difference between 400 and 500 US AQI changes nothing a reader would do. Symbol 0 covers an
 // isolated upstream null and a failed air-quality fetch alike — without it a missing hour would
 // have to encode as band 1, which reads as the cleanest air there is. These bounds are wire
-// format and pinned in V3_CODEBOOKS below.
+// format and pinned in V4_CODEBOOKS below.
 //
 // The two ladders are NOT interchangeable. The US EPA index runs 0-500 with its categories at
 // 50/100/150/200/300; the European index runs 0-100+ with categories every 20 and uses a 24h
@@ -369,7 +369,7 @@ export function aqiMid(sym: number, lower: readonly number[]): number | undefine
 }
 
 // ── The codebooks ───────────────────────────────────────────────────────────────
-// The complete set of table-lookup functions the v3 body codec keys symbols with, built once
+// The complete set of table-lookup functions the v4 body codec keys symbols with, built once
 // from the global (train-corpus-wide) tables in codebooks.gen.ts. (An EM-learned 8-class
 // selectable-table-set scheme lived here until 2026-08-20 — held-out it bought −2.4% body bits
 // for 8× encoder passes, ~4/5 of the shipped table bytes, and a second corpus-scan pipeline
@@ -413,7 +413,7 @@ export interface Books {
   // fill pins levels at exactly 0 for long runs, so "was clear" reshapes the whole next-step
   // distribution (held-out −27% vs unconditioned per-level deltas). Each model's first period
   // is a raw 3-bit anchor, not a symbol under these tables. Trained on the post-fillCloudBand
-  // stack at the band's serving resolutions only (3h/1h — see cloudBandPeriodCount in v3.ts).
+  // stack at the band's serving resolutions only (3h/1h — see cloudBandPeriodCount in v4.ts).
   // See codec-server/scripts/derive-cloud-delta-codebooks.ts.
   cloudBandBook(level: number, prev: number): CodeBook;
   // Order-1 codebooks over the wet columns' quantized VALUES (not deltas — zero is an absorbing
@@ -630,7 +630,7 @@ export function decodeTempDelta(src: SymSource, book: CodeBook): number {
 }
 
 // ── Book aliases ────────────────────────────────────────────────────────────────
-// The books under standalone names, for tests and analysis scripts. The v3 codec itself goes
+// The books under standalone names, for tests and analysis scripts. The v4 codec itself goes
 // through BOOKS.
 export const encodeWeathercode = BOOKS.encodeWeathercode;
 export const decodeWeathercode = BOOKS.decodeWeathercode;
@@ -646,7 +646,7 @@ export const rainBook = BOOKS.rainBook;
 export const tempDeltaBook = BOOKS.tempDeltaBook;
 
 // ── Wire-format freeze ──────────────────────────────────────────────────────────
-// Every table above is wire format: re-deriving any of them changes what already-encoded v3
+// Every table above is wire format: re-deriving any of them changes what already-encoded v4
 // messages mean, silently — a decode under drifted tables produces plausible garbage, not an
 // error. This bundle exists so test/codebooks.test.ts can pin a digest of it per protocol
 // version; change a table (or the temp escape geometry, or the coder geometry) and that test
@@ -731,7 +731,7 @@ const airQualityBundle = {
   usResidualMasks: [...AQI_US_RESIDUAL_MASKS].sort((a, b) => a - b),
   euResidualMasks: [...AQI_EU_RESIDUAL_MASKS].sort((a, b) => a - b),
 };
-export const V3_CODEBOOKS = {
+export const V4_CODEBOOKS = {
   rans: { probBits: RANS_PROB_BITS, stateLow: RANS_L, wordBits: RANS_WORD_BITS },
   ...bundleOf(BASE_TABLES),
   airQuality: airQualityBundle,

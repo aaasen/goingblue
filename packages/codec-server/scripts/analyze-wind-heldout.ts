@@ -24,7 +24,7 @@ const WIND_MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w
 // The three levels this scan was written against (the wire now carries any subset of the eight
 // WIND_LEVELS_HPA levels — see derive-wind-*-codebooks.ts for the gap-keyed training).
 const ALOFT_IDX = [500, 600, 700].map((l) => WIND_LEVELS_HPA.indexOf(l));
-// STALE (2026-07-31): this scan predates the extended-Beaufort wire (quantWind in v3.ts) and
+// STALE (2026-07-31): this scan predates the extended-Beaufort wire (quantWind in v4.ts) and
 // still quantizes linearly — its recorded conclusions stand, but re-derive the chains against
 // quantWind before trusting fresh numbers. See analyze-wind-scale-heldout.ts for the scale scan.
 const STEP_OF = [5, 5 * 1.609344, 5 * 1.609344, 5 * 1.609344];

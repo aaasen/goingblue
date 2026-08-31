@@ -64,7 +64,7 @@ const N_PRECIP_B = 3;
 
 // Wind quantizers. OLD = the pre-2026-07-31 wire (5 mph steps, 5-bit, every wind column); NEW =
 // the approved refinement (surface 5 kph/5-bit, gust 5 kph/6-bit; upper levels stay OLD). Same
-// float-dust epsilon as v3.ts windSpeed. Speed domains are bounded, so deltas need no clamp and
+// float-dust epsilon as v4.ts windSpeed. Speed domains are bounded, so deltas need no clamp and
 // q[p] − q[p−1] is exactly the delta the decoder reconstructs — no recon chain required.
 const OLD_STEP = 5 * 1.609344;
 const qw = (step: number, max: number) => (kph: number | undefined) =>

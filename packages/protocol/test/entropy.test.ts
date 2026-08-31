@@ -263,7 +263,7 @@ describe("freezing level delta entropy coding", () => {
 // eight copies of the test body.
 describe.each(CLOUD_BAND_LEVELS_HPA.map((hpa, li) => ({ hpa, li })))(
   "cloud band $hpa hPa entropy coding", ({ li }) => {
-    // Cost of a value column with the context threaded the way v3.ts threads it: each step's
+    // Cost of a value column with the context threaded the way v4.ts threads it: each step's
     // book keyed by the previous decoded step.
     const bitsFor = (steps: number[], first: number): number =>
       costOf((sink) => {
@@ -317,7 +317,7 @@ function allTempBooks(): CodeBook[] {
   return books;
 }
 
-// Cost of a delta sequence with the context threaded the way v3.ts threads it: each delta's
+// Cost of a delta sequence with the context threaded the way v4.ts threads it: each delta's
 // book keyed by the previous delta (bootstrap first), at a fixed resolution and time-of-day.
 function tempBits(deltas: number[]): number {
   return costOf((sink) => {
@@ -352,7 +352,7 @@ describe("temperature delta entropy coding", () => {
   it("throws on deltas outside the escape field's range instead of silently truncating", () => {
     // An unchecked encode of e.g. +40 would silently wrap in the 6-bit escape field and corrupt
     // every later temperature in the chain. The guard makes that impossible to emit;
-    // v3.ts clamps before calling (see the healing round-trip test in encoding.test.ts).
+    // v4.ts clamps before calling (see the healing round-trip test in encoding.test.ts).
     for (const d of [TEMP_DELTA_MAX + 1, TEMP_DELTA_MIN - 1, 40, -40, 100]) {
       expect(() => encodeTempDelta(makeBitSink(), tempDeltaBook(0, 0, null), d)).toThrow(/temp delta/);
     }

@@ -4,7 +4,7 @@
  * Measures, on the corpus, the candidate refinement paths for each mode: every step is either an
  * extend-move (cover one more day slot @12h) or a refine-move (one slot, one rung finer), and the
  * probe walks each candidate path encoding every intermediate layout through the production
- * aggregation + codec (buildLayoutMessage → v3EncodeBreakdown). Per step it reports fit % against
+ * aggregation + codec (buildLayoutMessage → v4EncodeBreakdown). Per step it reports fit % against
  * the char budget, the chars distribution, and the marginal model bits vs the previous step — the
  * exchange-rate data that decides where extend-steps sit relative to refine-steps in each mode's
  * final anchor table.
@@ -19,7 +19,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildLayoutMessage, type ForecastParams } from "../src/forecast.ts";
 import {
-  RESOLUTION_HOURS, VARS_BIT, v3EncodeBreakdown, V3_VERSION,
+  RESOLUTION_HOURS, VARS_BIT, v4EncodeBreakdown, V4_VERSION,
   type FillLayout, type ForecastMessage,
 } from "@weather/protocol";
 import { REPO_ROOT, dbLocations, listCells, loadCell, modelElevations, openDb } from "./corpus-db.ts";
@@ -31,7 +31,7 @@ import { REPO_ROOT, dbLocations, listCells, loadCell, modelElevations, openDb } 
 // duration D eats D+1 slots plus up to 23h of local-midnight alignment).
 const DURATION_DAYS = 12;
 const SLOTS = DURATION_DAYS + 1;
-const MAX_PERIODS = 256; // V3_MAX_PERIODS — every candidate layout must stay under it
+const MAX_PERIODS = 256; // V4_MAX_PERIODS — every candidate layout must stay under it
 
 const SOURCE = "best_match"; // what production serves; the only source with the sampled strata
 const MODEL_KEY = "BEST";    // center key for toFullPeriod (keeps every column)
@@ -269,7 +269,7 @@ function main(): void {
     const params: ForecastParams = {
       locationIdx: 0, lat: loc.lat, lon: loc.lon, mode: 1, utcOffsetHours,
       modelsMask: 1, varsMask: ALL_MASK, maxChars: args.maxChars,
-      decoderVersion: V3_VERSION, code: 0, startEpochHour, userToken: null,
+      decoderVersion: V4_VERSION, code: 0, startEpochHour, userToken: null,
     };
     const elevation = elevs.get(cell.locationId) ?? 0;
 
@@ -294,7 +294,7 @@ function main(): void {
     const bdFor = (p: Profile, comboId: string, mask: number) => {
       const k = `${comboId}:${profKey(p)}`;
       if (!bdMemo.has(k)) {
-        const bd = v3EncodeBreakdown({ ...msgFor(p)!, vars_mask: mask });
+        const bd = v4EncodeBreakdown({ ...msgFor(p)!, vars_mask: mask });
         bdMemo.set(k, { chars: bd.chars, modelBits: bd.bodyBits - bd.overheadBits });
       }
       return bdMemo.get(k)!;

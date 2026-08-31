@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  CODECS, V3_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
+  CODECS, V4_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, MODEL_BIT, IPHONE_MAX_CHARS,
-  V3_HEADER_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, maxCharsFor, reassembleReply,
+  V4_HEADER_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, maxCharsFor, reassembleReply,
   type RequestContext,
 } from "@weather/protocol";
 import {
@@ -71,7 +71,7 @@ function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
     varsMask: TEST_VARS,
     maxChars: 160,
     messages: 1,
-    decoderVersion: V3_VERSION,
+    decoderVersion: V4_VERSION,
     code: 7,
     startEpochHour: REQ_UTC_HOUR,
     userToken: null,
@@ -79,7 +79,7 @@ function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
   };
 }
 
-const codec = CODECS[V3_VERSION];
+const codec = CODECS[V4_VERSION];
 
 function encodeSeq(p: ForecastParams, h = HOURLY, times = TIMES) {
   return (seq: number) =>
@@ -157,12 +157,12 @@ describe("encodeFillSeq", () => {
       const wide = (bodyChars: number) => "#abcd" + "㐀".repeat(bodyChars);
 
       it("keeps the single-message fill unlabelled", () => {
-        expect(splitReplyFor(iphone, reply, V3_HEADER_CHARS)).toEqual([reply]);
+        expect(splitReplyFor(iphone, reply, V4_HEADER_CHARS)).toEqual([reply]);
       });
 
       it("keeps the full 45-character single-message body unlabelled", () => {
         const whole = wide(45);
-        expect(splitReplyFor(iphone, whole, V3_HEADER_CHARS)).toEqual([whole]);
+        expect(splitReplyFor(iphone, whole, V4_HEADER_CHARS)).toEqual([whole]);
       });
 
       it("collapses a two-message request whose content ran short to one plain bubble", () => {
@@ -170,14 +170,14 @@ describe("encodeFillSeq", () => {
           alphabet: "base32768",
           device: "i",
           messages: 2,
-          maxChars: maxCharsFor("i", 2, V3_HEADER_CHARS),
+          maxChars: maxCharsFor("i", 2, V4_HEADER_CHARS),
         });
         const short = wide(45);
-        expect(splitReplyFor(p, short, V3_HEADER_CHARS)).toEqual([short]);
+        expect(splitReplyFor(p, short, V4_HEADER_CHARS)).toEqual([short]);
       });
 
       it("still splits what one bubble cannot hold", () => {
-        const parts = splitReplyFor(iphone, wide(46), V3_HEADER_CHARS);
+        const parts = splitReplyFor(iphone, wide(46), V4_HEADER_CHARS);
         expect(parts).toHaveLength(2);
         expect(parts[0].startsWith("1/2 ")).toBe(true);
       });
@@ -190,11 +190,11 @@ describe("encodeFillSeq", () => {
         alphabet: "base32768",
         device: "i",
         messages: 2,
-        maxChars: maxCharsFor("i", 2, V3_HEADER_CHARS),
+        maxChars: maxCharsFor("i", 2, V4_HEADER_CHARS),
       });
       const encoded = fitFillToBudget(
         encodeSeq(p), (e) => e.length, maxFillSeq(MODE_AUTO), p.maxChars)!;
-      const parts = splitReplyFor(p, encoded, V3_HEADER_CHARS);
+      const parts = splitReplyFor(p, encoded, V4_HEADER_CHARS);
 
       it("sends exactly two, each inside a bubble", () => {
         expect(parts).toHaveLength(2);
@@ -207,15 +207,15 @@ describe("encodeFillSeq", () => {
       it("labels them and repeats the header", () => {
         expect(parts[0].startsWith("1/2 ")).toBe(true);
         expect(parts[1].startsWith("2/2 ")).toBe(true);
-        const header = (s: string) => s.slice(4, 4 + V3_HEADER_CHARS);
+        const header = (s: string) => s.slice(4, 4 + V4_HEADER_CHARS);
         expect(header(parts[0])).toBe(header(parts[1]));
       });
 
       it("decodes to a fuller forecast than one message, in any paste order", () => {
-        const whole = reassembleReply(parts.join("\n"), () => V3_HEADER_CHARS);
+        const whole = reassembleReply(parts.join("\n"), () => V4_HEADER_CHARS);
         expect(whole).toBe(encoded);
         const decoded = decodeMessage(whole, () => ctx);
-        const reversed = reassembleReply([...parts].reverse().join(" "), () => V3_HEADER_CHARS);
+        const reversed = reassembleReply([...parts].reverse().join(" "), () => V4_HEADER_CHARS);
         expect(decodeMessage(reversed, () => ctx)).toEqual(decoded);
         expect(decoded.periodHours!.length)
           .toBeGreaterThan(decodeMessage(reply, () => ctx).periodHours!.length);
@@ -242,15 +242,15 @@ describe("encodeFillSeq", () => {
 
     it("keeps a single message unlabelled, right up to the full 160", () => {
       expect(single.length).toBeLessThanOrEqual(SMS_MAX_CHARS);
-      expect(splitReplyFor(one, single, V3_HEADER_CHARS)).toEqual([single]);
-      const full = single.slice(0, V3_HEADER_CHARS) + "A".repeat(SMS_MAX_CHARS - V3_HEADER_CHARS);
-      expect(splitReplyFor(one, full, V3_HEADER_CHARS)).toEqual([full]);
+      expect(splitReplyFor(one, single, V4_HEADER_CHARS)).toEqual([single]);
+      const full = single.slice(0, V4_HEADER_CHARS) + "A".repeat(SMS_MAX_CHARS - V4_HEADER_CHARS);
+      expect(splitReplyFor(one, full, V4_HEADER_CHARS)).toEqual([full]);
     });
 
     it("never splits an SMS reply, whatever the count asked for", () => {
-      const sms = params({ alphabet: "base124", device: "s", messages: 2, maxChars: maxCharsFor("s", 2, V3_HEADER_CHARS) });
-      const long = single.slice(0, V3_HEADER_CHARS) + "A".repeat(300);
-      expect(splitReplyFor(sms, long, V3_HEADER_CHARS)).toEqual([long]);
+      const sms = params({ alphabet: "base124", device: "s", messages: 2, maxChars: maxCharsFor("s", 2, V4_HEADER_CHARS) });
+      const long = single.slice(0, V4_HEADER_CHARS) + "A".repeat(300);
+      expect(splitReplyFor(sms, long, V4_HEADER_CHARS)).toEqual([long]);
     });
 
     describe("spread over two messages", () => {
@@ -258,11 +258,11 @@ describe("encodeFillSeq", () => {
         alphabet: "base85",
         device: "g",
         messages: 2,
-        maxChars: maxCharsFor("g", 2, V3_HEADER_CHARS),
+        maxChars: maxCharsFor("g", 2, V4_HEADER_CHARS),
       });
       const encoded = fitFillToBudget(
         encodeSeq(p), (e) => e.length, maxFillSeq(MODE_AUTO), p.maxChars)!;
-      const parts = splitReplyFor(p, encoded, V3_HEADER_CHARS);
+      const parts = splitReplyFor(p, encoded, V4_HEADER_CHARS);
 
       it("sends exactly two, each one whole SMS at most, labelled and sharing the header", () => {
         expect(encoded.length).toBeGreaterThan(SMS_MAX_CHARS);
@@ -270,15 +270,15 @@ describe("encodeFillSeq", () => {
         for (const part of parts) expect(part.length).toBeLessThanOrEqual(SMS_MAX_CHARS);
         expect(parts[0].startsWith("1/2 ")).toBe(true);
         expect(parts[1].startsWith("2/2 ")).toBe(true);
-        const header = (s: string) => s.slice(4, 4 + V3_HEADER_CHARS);
+        const header = (s: string) => s.slice(4, 4 + V4_HEADER_CHARS);
         expect(header(parts[0])).toBe(header(parts[1]));
       });
 
       it("decodes to a fuller forecast than one message, in any paste order", () => {
-        const whole = reassembleReply(parts.join("\n"), () => V3_HEADER_CHARS);
+        const whole = reassembleReply(parts.join("\n"), () => V4_HEADER_CHARS);
         expect(whole).toBe(encoded);
         const decoded = decodeMessage(whole, () => ctx);
-        const reversed = reassembleReply([...parts].reverse().join(" "), () => V3_HEADER_CHARS);
+        const reversed = reassembleReply([...parts].reverse().join(" "), () => V4_HEADER_CHARS);
         expect(decodeMessage(reversed, () => ctx)).toEqual(decoded);
         expect(decoded.periodHours!.length)
           .toBeGreaterThan(decodeMessage(single, () => ctx).periodHours!.length);
@@ -293,11 +293,11 @@ describe("encodeFillSeq", () => {
       alphabet: "base85",
       device: "z",
       messages: 2,
-      maxChars: maxCharsFor("z", 2, V3_HEADER_CHARS),
+      maxChars: maxCharsFor("z", 2, V4_HEADER_CHARS),
     });
     const encoded = fitFillToBudget(
       encodeSeq(p), (e) => e.length, maxFillSeq(MODE_AUTO), p.maxChars)!;
-    const parts = splitReplyFor(p, encoded, V3_HEADER_CHARS);
+    const parts = splitReplyFor(p, encoded, V4_HEADER_CHARS);
 
     it("sends exactly two, each inside the 240-byte cap on its own", () => {
       expect(encoded.length).toBeGreaterThan(ZOLEO_MAX_CHARS);
@@ -307,7 +307,7 @@ describe("encodeFillSeq", () => {
     });
 
     it("reassembles and decodes", () => {
-      const whole = reassembleReply(parts.join("\n"), () => V3_HEADER_CHARS);
+      const whole = reassembleReply(parts.join("\n"), () => V4_HEADER_CHARS);
       expect(whole).toBe(encoded);
       expect(decodeMessage(whole, () => ctx).seq).toBe(decodeMessage(encoded, () => ctx).seq);
     });

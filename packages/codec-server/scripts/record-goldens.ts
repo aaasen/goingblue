@@ -31,7 +31,7 @@ const SITES = [
 ];
 
 // One variant per center so every upstream source shape is pinned, crossed with the three
-// priority modes, every device route (v3's `d:` picks the alphabet AND the budget — there is
+// priority modes, every device route (v4's `d:` picks the alphabet AND the budget — there is
 // no `c:` token anymore), the multi-message split shapes, and the configurable-variable
 // groups. The `ca` case also exercises the GEM horizon clamp (nulls past day 10 → seq search
 // clamps). The two `w:` cases cover all seven wind-aloft ladder rungs between them.

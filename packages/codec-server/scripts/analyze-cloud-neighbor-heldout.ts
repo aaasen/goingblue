@@ -7,7 +7,7 @@
  * Level 0 (300 hPa) has no level above and keeps its unconditioned row in every scheme.
  *
  * Only the serving resolutions are scanned: the wire clamps band symbols to ≤3h periods
- * (cloudBandPeriodCount in v3.ts), so 3h and 1h are the only spans a table will ever price.
+ * (cloudBandPeriodCount in v4.ts), so 3h and 1h are the only spans a table will ever price.
  *
  * Candidates (all available to the decoder before the target symbol):
  *   nbrΔ       — the level above's same-period delta, exact (15) or bucketed (upperDeltaBucket, 5)
