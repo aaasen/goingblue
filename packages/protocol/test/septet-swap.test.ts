@@ -3,8 +3,8 @@ import { ALPHABET, SEPTET_SWAP, foldSeptetSwap } from "../src/constants.js";
 import { CODECS, decodeMessage, peekHeader, encodeMessage } from "../src/registry.js";
 import { peekVersion, encodeVersion } from "../src/version.js";
 import { DEVICE_TRANSPORT } from "../src/devices.js";
-import type { ForecastMessage, RequestContext, DeviceCode } from "../src/index.js";
-import v4Fixture from "./fixtures/v4.fixture.json";
+import { WIRE_VERSION, type ForecastMessage, type RequestContext, type DeviceCode } from "../src/index.js";
+import wireFixture from "./fixtures/wire.fixture.json";
 
 // The inReach display swap: Garmin Messenger shows a base-85 reply's $ @ _ as ¤ ¡ § — the GSM-7
 // reading of the same three septets. Field-confirmed 2026-08-22 (a v2 reply on the shipped app:
@@ -12,8 +12,8 @@ import v4Fixture from "./fixtures/v4.fixture.json";
 // folds them back wherever the text is known to be base-85, and leaves an SMS body alone because
 // there the three are real base-124 symbols. See SEPTET_SWAP in constants.ts.
 
-const d = v4Fixture.decoded as ForecastMessage;
-const req = v4Fixture.request;
+const d = wireFixture.decoded as ForecastMessage;
+const req = wireFixture.request;
 const ctx = (device?: DeviceCode): RequestContext => ({
   model: 31 - Math.clz32(d.models_mask & -d.models_mask),
   vars_mask: d.vars_mask,
@@ -70,7 +70,7 @@ describe("decoding a swapped reply", () => {
   it("leaves an SMS body alone: there ¤ ¡ § are base-124's own characters", () => {
     const clean = encodeMessage(d, "base124");
     const resolve = () => ctx("s");
-    const header = clean.slice(0, CODECS[4].headerChars);
+    const header = clean.slice(0, CODECS[WIRE_VERSION].headerChars);
     const body = clean.slice(header.length);
     // Only the base-85 prefix may be folded. Swap the header (as Garmin would) but keep the body
     // exactly as the SMS route wrote it; the message must survive unchanged.

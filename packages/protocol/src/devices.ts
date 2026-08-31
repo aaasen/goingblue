@@ -93,7 +93,7 @@ const WIDE_CHAR_BYTES = 3;
 export const MAX_MESSAGES = 4;
 
 // Body characters that fit in ONE labelled part: the bubble's bytes, less the "i/N " label and the
-// repeated header, divided among three-byte characters. With v4's 5-character header that is 43,
+// repeated header, divided among three-byte characters. With the wire's 5-character header that is 43,
 // so a part is 52 code units — well inside the 70-unit cap, which never binds here.
 export function widePartBodyChars(headerChars: number): number {
   return Math.floor((BUBBLE_BYTES - PART_LABEL_CHARS - headerChars) / WIDE_CHAR_BYTES);
@@ -106,7 +106,7 @@ export function widePartBodyChars(headerChars: number): number {
 //
 // inReach, because a Garmin message is one 160-character SMS and nothing has shown the device
 // reassembling a concatenated pair; labelled parts assume nothing about that. Each part spends
-// its label and a repeated header out of the same 160 — 151 body characters with v4's header,
+// its label and a repeated header out of the same 160 — 151 body characters with the wire's header,
 // against 155 in a single unlabelled message — so one message is still the plain reply and the
 // split only starts when a reader asked for more than one.
 //

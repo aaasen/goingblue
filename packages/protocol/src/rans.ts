@@ -18,7 +18,7 @@ import { putInt, takeInt } from "./bits.js";
 //
 // rANS is LIFO: the decoder recovers symbols in the reverse of encode order. ransEncode therefore
 // walks the op list backwards and reverses the emitted words, so the decoder consumes the ops
-// forward — same order the message structure is walked in v4.ts.
+// forward — same order the message structure is walked in wire.ts.
 //
 // Serialized layout (bit array for encodeBodyLE): final state as two 16-bit fields (hi, lo), then
 // the renorm words in decode order. The state sits in the low-order bits, so encodeBodyLE's

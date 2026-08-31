@@ -10,5 +10,5 @@ export * from "./token.js";
 export * from "./model.js";
 export * from "./attribution.js";
 export * from "./layout.js";
-export * from "./versions/v4.js";
+export * from "./wire.js";
 export * from "./registry.js";

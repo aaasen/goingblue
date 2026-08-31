@@ -630,7 +630,7 @@ export function airQualityVarsFor(varsMask: number): string[] {
 // the codebooks were trained on. The two domains disagree sharply — Zurich reads 6.3 µg/m³ PM2.5
 // on europe against 37.6 on global — so changing this silently re-means every AQ symbol.
 // No `elevation`: terrain downscaling is a forecast-API knob and the AQ API rejects it.
-// 5 forecast days is what CAMS runs; the wire clamps to 4 anyway (AQ_HORIZON_HOURS in v4.ts).
+// 5 forecast days is what CAMS runs; the wire clamps to 4 anyway (AQ_HORIZON_HOURS in wire.ts).
 const AIR_QUALITY_FORECAST_DAYS = 5;
 async function fetchAirQuality(
   hourlyVars: string[], lat: number, lon: number, tz: string, pastDays: number,
@@ -868,7 +868,7 @@ export function representativeTemps(
 }
 
 // Aggregate hourly samples into one Row per window (a window is the hourly indices it covers).
-// Shared by the uniform-resolution keying above and the layout-driven windows (v4) below.
+// Shared by the uniform-resolution keying above and the layout-driven windows below.
 // `utcOffsetHours` defines the local days the representative temp selection works over; the
 // UTC-keyed aggregation paths (scripts/corpus) pass 0, matching their UTC-aligned windows.
 export function rowsFromWindows(
@@ -973,7 +973,7 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period
       ? { kph: r.wind_aloft_kph?.[li] ?? 0, dir: degToDirIdx(r.wind_aloft_deg?.[li]) }
       : null);
   }
-  // The v4 wire reads cloud_band; the low/mid/high fields stay filled because the derive
+  // The wire reads cloud_band; the low/mid/high fields stay filled because the derive
   // scripts (and any v2-era tooling) read Periods through this same function.
   if (varsMask & (1 << VARS_BIT.cch)) {
     p.cloud_high = Math.round(r.cloud_cover_high ?? 0);
@@ -983,7 +983,7 @@ export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period
   if (varsMask & (1 << VARS_BIT.ccl)) p.cloud_low   = Math.round(r.cloud_cover_low  ?? 0);
   // Air quality, left UNDEFINED rather than coalesced to 0 where the value is missing: 0 is the
   // cleanest air on either scale, so claiming it for an hour CAMS never forecast would be a lie.
-  // The codec encodes an absent value as its no-data symbol (see the AQ columns in v4.ts).
+  // The codec encodes an absent value as its no-data symbol (see the AQ columns in wire.ts).
   const aq = r as unknown as Record<string, number | null>;
   for (const [bit, cams, field] of AQ_BIT_VARS) {
     const v = aq[cams];

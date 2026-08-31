@@ -3,7 +3,7 @@
  * tables for the pressure-level columns — keyed by the ladder gap to the level they condition on.
  *
  * The quantized speed domain is the extended Beaufort scale, forces 0..17, for EVERY wind
- * column (see quantWind in derive-lib.ts / v4.ts — chosen 2026-07-31 over linear and other
+ * column (see quantWind in derive-lib.ts / wire.ts — chosen 2026-07-31 over linear and other
  * companded scales, analyze-wind-scale-heldout.ts). Deltas -17..17 (35 symbols) fit directly
  * in the alphabet — no escape needed.
  *
@@ -47,7 +47,7 @@ const NRES = TABLE_RES_IDXS.length; // 12h/6h/3h/1h — the resolutions layouts 
 const NLEVEL = 1 + WIND_LEVELS_HPA.length; // sfc, then the ladder (300 hPa … 1000 hPa)
 const NBUCKET = 5;                 // upper Δ buckets: ≤-2, -1, 0, +1, ≥+2
 const NGAP = N_WIND_GAPS;          // ladder gap to the conditioning level: 1, 2, 3+
-const SPEED_MAX = 17;              // extended Beaufort force domain, must match v4.ts
+const SPEED_MAX = 17;              // extended Beaufort force domain, must match wire.ts
 const NSYM = 2 * SPEED_MAX + 1;    // 35: deltas -17..17
 const WIND_MASK = (1 << VARS_BIT.wind) | WIND_LEVELS_MASK;
 const speedOf = (p: Period, L: number): number | undefined =>

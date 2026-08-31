@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, it, expect } from "vitest";
-import { V4_CODEBOOKS, V4_VERSION } from "../src/index.js";
+import { WIRE_CODEBOOKS, WIRE_VERSION } from "../src/index.js";
 
 // The entropy codebooks are wire format: a message encoded under one set of tables decodes to
 // plausible garbage — not an error — under another. So the tables are frozen per protocol
@@ -13,21 +13,21 @@ import { V4_CODEBOOKS, V4_VERSION } from "../src/index.js";
 //     below. Never overwrite an existing entry: that would re-freeze the old version's tables
 //     to new values, which is exactly the silent drift this test exists to catch.
 const FROZEN_DIGESTS: Record<number, string> = {
-  4: "23470346214fa62c", // pre-ship; re-recorded freely until v4 has real deployed clients
+  4: "23470346214fa62c", // pre-ship; re-recorded freely until this version has real deployed clients
 };
 
-const digest = createHash("sha256").update(JSON.stringify(V4_CODEBOOKS)).digest("hex").slice(0, 16);
+const digest = createHash("sha256").update(JSON.stringify(WIRE_CODEBOOKS)).digest("hex").slice(0, 16);
 
 describe("codebook wire-format freeze", () => {
   it("has a frozen digest recorded for the current protocol version", () => {
-    expect(FROZEN_DIGESTS[V4_VERSION],
-      `no frozen codebook digest for protocol v${V4_VERSION} — record "${digest}" in FROZEN_DIGESTS`,
+    expect(FROZEN_DIGESTS[WIRE_VERSION],
+      `no frozen codebook digest for protocol v${WIRE_VERSION} — record "${digest}" in FROZEN_DIGESTS`,
     ).toBeDefined();
   });
 
-  it(`v${V4_VERSION} codebooks match the digest frozen when the version shipped`, () => {
+  it(`v${WIRE_VERSION} codebooks match the digest frozen when the version shipped`, () => {
     expect(digest,
       "codebooks changed without a protocol version bump — see the comment on FROZEN_DIGESTS",
-    ).toBe(FROZEN_DIGESTS[V4_VERSION]);
+    ).toBe(FROZEN_DIGESTS[WIRE_VERSION]);
   });
 });

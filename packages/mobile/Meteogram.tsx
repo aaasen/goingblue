@@ -969,7 +969,7 @@ type CloudKind = keyof typeof CLOUD_KEYS;
 // Order runs headline first, then its components, US before Europe. The two particulate rows sit
 // together (PM2.5 then PM10, fine before coarse) because a reader comparing them is reading one
 // thing — how much of what is in the air — and splitting them around ozone made that a scroll.
-// This is DISPLAY order only; the wire encodes PM2.5, ozone, PM10 (see AQ_DELTA_COLUMNS in v4.ts,
+// This is DISPLAY order only; the wire encodes PM2.5, ozone, PM10 (see AQ_DELTA_COLUMNS in wire.ts,
 // where the three residual-keyable constituents lead so both headlines can read them).
 const AQ_KEYS = {
   'aqi': { field: 'aqi', label: 'AQI', scale: 'us' },
@@ -1078,7 +1078,7 @@ function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number): R
     rows.push({ kind: 'freeze', height: ROW_H.FREEZE, label: '', legend: frU });
   }
 
-  // The Windy-style vertical cloud band — v4 messages carry it in place of the low/mid/high
+  // The Windy-style vertical cloud band — the message carries it in place of the low/mid/high
   // trio below, so exactly one of these two cloud blocks renders for any given message. Its axis
   // is the ladder of wire levels the rail draws, each rung carrying its own unit.
   // The wire clamps the band to the leading ≤3h periods, so a message can carry it on some

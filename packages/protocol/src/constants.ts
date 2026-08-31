@@ -76,7 +76,7 @@ export const RESOLUTION_HOURS: Record<number, number> = { 0: 24, 1: 12, 2: 6, 3:
 // The resolutions fill layouts actually emit, as RESOLUTION_HOURS indices, in CODEBOOK TABLE ROW
 // ORDER: every resolution-keyed weight table carries exactly one row per entry (24h never occurs
 // in a layout, so no table trains or ships a row for it), and hours → table row is this array's
-// position (resTableIdx in v4.ts). The derive scripts iterate this same array, so the trained
+// position (resTableIdx in wire.ts). The derive scripts iterate this same array, so the trained
 // rows and the rows the codec reads cannot drift apart.
 export const TABLE_RES_IDXS = [1, 2, 3, 4] as const;
 
@@ -92,7 +92,7 @@ export const MODEL_NAMES: string[] = [
   "European (ECMWF)",
 ];
 
-// The cloud band's pressure levels, highest first — the order Period.cloud_band and the v4
+// The cloud band's pressure levels, highest first — the order Period.cloud_band and the wire.ts
 // cloud-band column both use. These are the eight levels every center's pressure product can
 // serve or bracket (ECMWF lacks 600/400; the server interpolates them in). 750/800 hPa are
 // deliberately absent for now: best_match zero-fills 750 where the serving model doesn't carry
@@ -107,8 +107,8 @@ export const CLOUD_BAND_LEVELS_HPA = [300, 400, 500, 600, 700, 850, 925, 1000] a
 export const WIND_LEVELS_HPA = CLOUD_BAND_LEVELS_HPA.slice(0, 7) as readonly number[];
 
 // International Standard Atmosphere, troposphere leg — the fixed scale that places the band's
-// pressure levels at altitudes. Good to a few tens of meters over the band's span. WIRE FORMAT
-// for v4: cloudBandLevelCount reads the ground pressure off it, so a coefficient change moves
+// pressure levels at altitudes. Good to a few tens of meters over the band's span. WIRE FORMAT:
+// cloudBandLevelCount reads the ground pressure off it, so a coefficient change moves
 // which levels a message carries. The app uses the same pair for the band's axis labels and
 // ground line, which is exactly why it lives here and not in two copies.
 export function pressureToMeters(hpa: number): number {
@@ -136,14 +136,14 @@ export const VARS_BIT: Record<string, number> = {
   w850: 27,
   w925: 28,
   gust: 8,   // surface (10m) wind gusts, speed only (bit formerly carried cc, total cloud cover)
-  cch: 9,    // v2: high cloud cover. v4: the whole cloud band (CLOUD_BAND_LEVELS_HPA) rides
-             // this one bit; 10/11 still arrive set by the `c` toggle but carry no v4 column.
+  cch: 9,    // v2: high cloud cover. Now the whole cloud band (CLOUD_BAND_LEVELS_HPA) rides
+             // this one bit; 10/11 still arrive set by the `c` toggle but carry no column.
   ccm: 10,   // mid cloud cover (v2 only)
   ccl: 11,   // low cloud cover (v2 only)
   rain: 12,  // liquid precipitation (rain + showers), mm
   // Air quality (CAMS), on two incompatible index scales — see the AQI ladders in entropy.ts.
   // Every one of these is model-independent: the `m:` center selection does not apply, and they
-  // reach only ~4 days (AQ_HORIZON_HOURS in v4.ts). Bit 13 is the slot tmin left when temp
+  // reach only ~4 days (AQ_HORIZON_HOURS in wire.ts). Bit 13 is the slot tmin left when temp
   // became a single representative sample per period.
   aq_pm25: 13,     // US AQI PM2.5 sub-index — the smoke column
   aq_o3: 14,       // US AQI ozone sub-index

@@ -1,4 +1,4 @@
-import { v4Codec } from "./versions/v4.js";
+import { wireCodec, WIRE_VERSION } from "./wire.js";
 import { peekVersion } from "./version.js";
 import type {
   ForecastMessage, MessageHeader, VersionedCodec, ContextResolver,
@@ -9,18 +9,18 @@ import { DEVICE_TRANSPORT } from "./devices.js";
 
 // The single source of truth mapping a protocol version number to its codec.
 //
-// Introducing a new version: add `versions/vN.ts`, then register it here. Nothing else in
-// the dispatch path changes — `decodeMessage` reads the version tag and routes to the codec
-// registered for it, and any version not present here is rejected with a clear error rather
-// than mis-decoded.
+// Main carries exactly one version: wire.ts is the current message grammar, and WIRE_VERSION
+// names it. `decodeMessage` reads the version tag and routes to the codec registered for it,
+// and any version not present here is rejected with a clear error rather than mis-decoded.
 //
-// Old versions are NOT kept: when vN+1 ships, `versions/vN.ts`, its codebooks, and its golden
-// fixtures are deleted from main — the frozen `codec-vN` container (built from the codec-vN git
-// tag) keeps serving clients still in the field, and the app treats a saved message it can no
-// longer decode as expired (past forecasts are a short-lived buffer, not long-term storage).
-// See VERSIONING.md for the freeze/sunset runbooks.
+// Old versions are NOT kept: when the next version ships, the outgoing grammar survives only
+// in its frozen `codec-vN` container (built from the codec-vN git tag), which keeps serving
+// clients still in the field; main bumps WIRE_VERSION, deletes the golden corpus, and moves
+// on. The app treats a saved message it can no longer decode as expired (past forecasts are
+// a short-lived buffer, not long-term storage). See VERSIONING.md for the freeze/sunset
+// runbooks.
 export const CODECS: Record<number, VersionedCodec> = {
-  4: v4Codec,
+  [WIRE_VERSION]: wireCodec,
 };
 
 export function supportedVersions(): number[] {

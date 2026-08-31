@@ -46,14 +46,14 @@ export interface Period {
   wind_aloft?: (WindAloft | null)[];
 
   // Cloud cover percentages.
-  cloud_high?: number;    // 8km+   (v2 and earlier; v4 carries the band below instead)
+  cloud_high?: number;    // 8km+   (v2 and earlier; the wire carries the band below instead)
   cloud_mid?: number;     // 3-8km
   cloud_low?: number;     // <3km
 
-  // Cloud cover by pressure level (v4): one percentage per LEADING entry of
+  // Cloud cover by pressure level: one percentage per LEADING entry of
   // CLOUD_BAND_LEVELS_HPA in constants.ts, highest level (300 hPa) first. Levels a center
   // doesn't serve are interpolated server-side before encoding, never left out — but the wire
-  // truncates the stack at one level below the forecast point (cloudBandLevelCount in v4.ts),
+  // truncates the stack at one level below the forecast point (cloudBandLevelCount in wire.ts),
   // so a decoded array's LENGTH is the band's floor. Present only on periods at ≤3h resolution
   // (cloudBandPeriodCount); on coarser periods `undefined` means "not forecast", never "clear".
   // Server-side, pre-encode, the array is always full-length (holes as null).
@@ -66,7 +66,7 @@ export interface Period {
   // US EPA index runs 0–500 with 50/100/150/200/300 category edges, the European index runs
   // 0–100+ with edges every 20. A 40 is "good" on one and "moderate" on the other, so they must
   // never share a palette or a threshold. Each is present only when its own vars_mask bit is set
-  // AND the period falls inside the CAMS horizon (AQ_HORIZON_HOURS in v4.ts) — periods past it
+  // AND the period falls inside the CAMS horizon (AQ_HORIZON_HOURS in wire.ts) — periods past it
   // carry no air-quality data at all, so `undefined` here means "not forecast", not "clean".
   // Each headline is EXACTLY the max over its own scale's sub-indices — measured over 52M corpus
   // periods, it exceeds that max in 0.00% of them — which is what lets it code as a residual.

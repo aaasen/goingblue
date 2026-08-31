@@ -1,6 +1,6 @@
 /**
  * Corpus round-trip sweep: encode + decode every cached forecast (data/raw/gfs) through the
- * production path (encodeFillSeq: layout windows → aggregation → toFullPeriod → the v4 codec)
+ * production path (encodeFillSeq: layout windows → aggregation → toFullPeriod → the wire codec)
  * at every fill-sequence number, and verify the codec is a fixpoint: decode must consume the
  * stream exactly (the rANS final-state integrity check throws otherwise), and re-encoding the
  * decoded message must reproduce the identical string (quantization is idempotent, so any
@@ -15,8 +15,8 @@
 import { encodeFillSeq, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import { eachForecast } from "./derive-lib.ts";
 import {
-  v4MessageToString, v4MessageFromString, layoutFor, maxFillSeq, DEFAULT_VARS_MASK,
-  ALWAYS_VARS_MASK, CODECS, V4_VERSION,
+  messageToString, messageFromString, layoutFor, maxFillSeq, DEFAULT_VARS_MASK,
+  ALWAYS_VARS_MASK, CODECS, WIRE_VERSION,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   type RequestContext,
 } from "@weather/protocol";
@@ -27,7 +27,7 @@ const ALL_VARS = ((1 << 18) - 1) & ~(1 << 8);
 const UTC_OFFSET = 0;
 // Request at midnight (whole day 0) and mid-afternoon (partial day 0) to cover both layouts.
 const REQUEST_HOURS_OF_DAY = [0, 13];
-const codec = CODECS[V4_VERSION];
+const codec = CODECS[WIRE_VERSION];
 
 // Every mode × seq × mask × request hour is ~800 messages per forecast, so the full corpus
 // (~100k train cells) is an hours-long run. The default stride samples an even spread that
@@ -59,7 +59,7 @@ await eachForecast((hourly: HourlyData, _runHour: number) => {
           locationIdx: 0, lat: 0, lon: 0,
           mode, utcOffsetHours: UTC_OFFSET,
           modelsMask: 1 << 1 /* GFS */, varsMask: mask,
-          maxChars: 160, decoderVersion: V4_VERSION, code: messages % 128,
+          maxChars: 160, decoderVersion: WIRE_VERSION, code: messages % 128,
           startEpochHour, userToken: null,
         };
         const ctx: RequestContext = {
@@ -76,10 +76,10 @@ await eachForecast((hourly: HourlyData, _runHour: number) => {
           try {
             const encoded = encodeFillSeq(hourly, times, params, seq, 0, 0, 0, "US", codec);
             if (encoded === null) throw new Error("data gap: layout not covered by corpus hours");
-            const decoded = v4MessageFromString(encoded, () => ctx); // assertDone throws on desync
+            const decoded = messageFromString(encoded, () => ctx); // assertDone throws on desync
             if (decoded.periods[0].length !== layout.periodHours.length)
               throw new Error(`period count ${decoded.periods[0].length} != ${layout.periodHours.length}`);
-            const reencoded = v4MessageToString(decoded);
+            const reencoded = messageToString(decoded);
             if (reencoded !== encoded)
               throw new Error(`re-encode drift:\n  ${encoded}\n  ${reencoded}`);
           } catch (e) {

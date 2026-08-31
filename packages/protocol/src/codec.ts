@@ -190,7 +190,7 @@ export function decodeBodyWide(s: string): number[] {
 //
 // This is the FALLBACK, not the answer. A reply's alphabet is a property of the request that
 // asked for it, and the decoder resolves that request before it reads the body (see
-// v4MessageFromString), so the alphabet is normally known rather than inferred. What is left for
+// messageFromString), so the alphabet is normally known rather than inferred. What is left for
 // this is a stored context from before the device was recorded — and such a context can only be
 // base-85 or base32768, the two this can tell apart with certainty.
 //

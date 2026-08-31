@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
-  v4MessageToString,
-  v4MessageFromString,
-  v4EncodeBreakdown,
-  V4_VERSION,
+  messageToString,
+  messageFromString,
+  encodeBreakdown,
+  WIRE_VERSION,
   encodeVersion,
   decodeMessage,
   type ForecastMessage,
@@ -30,7 +30,7 @@ import {
   AQI_US_LOWER,
   AQI_EU_LOWER,
   ALPHABET,
-  V4_HEADER_CHARS,
+  WIRE_HEADER_CHARS,
 } from "../src/index.js";
 
 // Wind speeds quantize to extended Beaufort forces; tests express speeds as forces and expect
@@ -42,7 +42,7 @@ const bmid = beaufortMidKph;
 const qSnow = (cm: number) => expandSqrt(compandSqrt(cm, SNOW_K, ACCUM_BITS), SNOW_K);
 const qRain = (mm: number) => expandSqrt(compandSqrt(mm, RAIN_K, ACCUM_BITS), RAIN_K);
 
-// Every v4 variable: bits 0..12 weather, 13..25 air quality (both indices in full).
+// Every variable: bits 0..12 weather, 13..25 air quality (both indices in full).
 const ALL_VARS = Object.values(VARS_BIT).reduce((m, b) => m | (1 << b), 0);
 // WIND_LEVELS_HPA ladder indices used below, and helpers to build wind_aloft stacks.
 const L500 = WIND_LEVELS_HPA.indexOf(500), L600 = WIND_LEVELS_HPA.indexOf(600);
@@ -144,7 +144,7 @@ function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean 
     ? { mode: MODE_RANGE, days: 1, seq: overrides.seq, hourOfDay: 0, stepHours: 12 }
     : uniformLayout(n, opts.hourly ?? false);
   return {
-    version: V4_VERSION,
+    version: WIRE_VERSION,
     code: 0,
     days,
     models_mask,
@@ -179,15 +179,15 @@ const ctxOf = (m: ForecastMessage): RequestContext => ({
 const noCtx = (): RequestContext | undefined => undefined;
 
 function roundTrip(m: ForecastMessage): ForecastMessage {
-  return v4MessageFromString(v4MessageToString(m), () => ctxOf(m));
+  return messageFromString(messageToString(m), () => ctxOf(m));
 }
 
-describe("v4 round-trip encoding", () => {
+describe("round-trip encoding", () => {
   it("preserves header fields", () => {
     // Three 12h periods → two slots of Range's ramp at seq 2; single model
     const original = msg({ models_mask: 0b001, month: 1, day: 31 });
     const decoded = roundTrip(original);
-    expect(decoded.version).toBe(V4_VERSION);
+    expect(decoded.version).toBe(WIRE_VERSION);
     expect(decoded.days).toBe(2);
     expect(decoded.seq).toBe(2);
     expect(decoded.mode).toBe(MODE_RANGE);
@@ -262,7 +262,7 @@ describe("v4 round-trip encoding", () => {
     // PERIOD the weathercode column can swing the class choice between the two encodings and
     // the per-column costs stop being comparable.
     const slim = { weathercode: PERIOD.weathercode, cloud_band: PERIOD.cloud_band };
-    const bits = (elevation: number) => v4EncodeBreakdown(msg(
+    const bits = (elevation: number) => encodeBreakdown(msg(
       { vars_mask: 1 << VARS_BIT.cch, elevation, periods: [Array(49).fill(slim)] },
       { hourly: true })).bodyBits;
     // 4267 m drops half the levels (8 → 4): anchors and their whole delta chains go with them.
@@ -293,7 +293,7 @@ describe("v4 round-trip encoding", () => {
     // (PERIOD itself sits one band above, so the round-trip tests cover a nonzero residual.)
     const led: Period = { ...PERIOD, aqi: PERIOD.aqi_pm25, aqi_eu: PERIOD.aqi_eu_o3 };
     const colBits = (name: string, varsMask: number) =>
-      v4EncodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
+      encodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
         .columns.find((c) => c.name === name)!.bits;
 
     // Only PM2.5, ozone and PM10 key the residual; the other constituents are never context, so
@@ -361,7 +361,7 @@ describe("v4 round-trip encoding", () => {
     // they are deliberately not part of the residual key.
     const led: Period = { ...PERIOD, aqi: PERIOD.aqi_pm25 };
     const aqiBits = (varsMask: number) =>
-      v4EncodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
+      encodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
         .columns.find((c) => c.name === "aqi")!.bits;
     const keyed = (1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25) | (1 << VARS_BIT.aq_o3);
     const plusUnkeyed = keyed | (1 << VARS_BIT.aq_no2) | (1 << VARS_BIT.aq_so2);
@@ -410,8 +410,8 @@ describe("v4 round-trip encoding", () => {
   it("charges nothing for the periods past the air-quality horizon", () => {
     // The clamp is derived from the layout on both sides, so it costs no header bits and emits
     // no symbols: a 13-day message pays for the same eight periods a 4-day one does.
-    const short = v4EncodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(8).fill(PERIOD)] }));
-    const long = v4EncodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(26).fill(PERIOD)] }));
+    const short = encodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(8).fill(PERIOD)] }));
+    const long = encodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(26).fill(PERIOD)] }));
     const aqBits = (b: typeof short) =>
       b.columns.filter((c) => c.name.startsWith("aq")).reduce((s, c) => s + c.bits, 0);
     expect(aqBits(long)).toBeCloseTo(aqBits(short), 6);
@@ -556,8 +556,8 @@ describe("v4 round-trip encoding", () => {
     const vars_mask = 1 << VARS_BIT.freeze;
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, freeze_m: 6 * 304.8 }));
     const swings = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, freeze_m: (i % 2 === 0 ? 2 : 13) * 304.8 }));
-    const flatLen = v4MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const swingsLen = v4MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
+    const flatLen = messageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
+    const swingsLen = messageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(swingsLen);
   });
 
@@ -567,8 +567,8 @@ describe("v4 round-trip encoding", () => {
     const swings = Array.from({ length: 64 }, (_, i) => ({
       ...PERIOD, cloud_band: Array.from({ length: 8 }, () => (i % 2 === 0 ? 0 : 100)),
     }));
-    const flatLen = v4MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const swingsLen = v4MessageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
+    const flatLen = messageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
+    const swingsLen = messageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(swingsLen);
   });
 
@@ -583,26 +583,28 @@ describe("v4 round-trip encoding", () => {
   });
 
   it("throws when decoding a different version's tag", () => {
-    // Swap the self-describing version prefix to v5; the v4 codec must reject it.
-    const encoded = v4MessageToString(msg());
-    const reTagged = encodeVersion(5) + encoded.slice(1);
-    expect(() => v4MessageFromString(reTagged, noCtx)).toThrow(/Version mismatch.*v5/);
+    // Swap the self-describing version prefix to the next version; the codec must reject it.
+    const encoded = messageToString(msg());
+    const reTagged = encodeVersion(WIRE_VERSION + 1) + encoded.slice(1);
+    expect(() => messageFromString(reTagged, noCtx))
+      .toThrow(new RegExp(`Version mismatch.*v${WIRE_VERSION + 1}`));
   });
 
   it("dispatches an unknown version to a clear error", () => {
-    const encoded = v4MessageToString(msg());
-    const reTagged = encodeVersion(7) + encoded.slice(1);
-    expect(() => decodeMessage(reTagged, noCtx)).toThrow(/Unsupported protocol version: v7/);
+    const encoded = messageToString(msg());
+    const reTagged = encodeVersion(WIRE_VERSION + 3) + encoded.slice(1);
+    expect(() => decodeMessage(reTagged, noCtx))
+      .toThrow(new RegExp(`Unsupported protocol version: v${WIRE_VERSION + 3}`));
   });
 
   it("throws on short message", () => {
-    // Valid v4 tag but no room for the header.
-    expect(() => v4MessageFromString(encodeVersion(V4_VERSION) + "abc", noCtx)).toThrow("Unexpected message length");
+    // A valid version tag but no room for the header.
+    expect(() => messageFromString(encodeVersion(WIRE_VERSION) + "abc", noCtx)).toThrow("Unexpected message length");
   });
 
   it("throws when the message code can't be resolved", () => {
-    const encoded = v4MessageToString(msg({ code: 5 }));
-    expect(() => v4MessageFromString(encoded, () => undefined)).toThrow(/Unknown forecast code 5/);
+    const encoded = messageToString(msg({ code: 5 }));
+    expect(() => messageFromString(encoded, () => undefined)).toThrow(/Unknown forecast code 5/);
   });
 
   it("round-trips the message code", () => {
@@ -648,8 +650,8 @@ describe("v4 round-trip encoding", () => {
   it("encodes a near-constant surface wind speed column smaller than a wide-swinging one", () => {
     const flat = Array.from({ length: 64 }, () => ({ weathercode: 0, wind_sfc_kph: bmid(7), wind_sfc_dir: 0 }));
     const swings = Array.from({ length: 64 }, (_, i) => ({ weathercode: 0, wind_sfc_kph: bmid(i % 2 === 0 ? 2 : 13), wind_sfc_dir: 0 }));
-    expect(v4MessageToString(windMsg(flat, { hourly: true })).length)
-      .toBeLessThan(v4MessageToString(windMsg(swings, { hourly: true })).length);
+    expect(messageToString(windMsg(flat, { hourly: true })).length)
+      .toBeLessThan(messageToString(windMsg(swings, { hourly: true })).length);
   });
 
   it("round-trips surface wind at 1h resolution (the resolution-keyed direction codebook)", () => {
@@ -692,7 +694,7 @@ describe("v4 round-trip encoding", () => {
     const forces = [4, 1, 0, 1, 6]; // force ≤ 1 (< 6 kph) is calm for direction purposes
     const build = (dirs: number[]) =>
       windMsg(forces.map((f, i) => ({ weathercode: 0, wind_sfc_kph: bmid(f), wind_sfc_dir: dirs[i] })));
-    expect(v4MessageToString(build(dirsA))).toBe(v4MessageToString(build(dirsB)));
+    expect(messageToString(build(dirsA))).toBe(messageToString(build(dirsB)));
   });
 
   it("calm periods display the last decoded direction (0 before any)", () => {
@@ -754,7 +756,7 @@ describe("v4 round-trip encoding", () => {
     const alone = msg({ ...sixHourly, vars_mask: 1 << VARS_BIT.w600,
       periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_aloft: aloftOnly(L600, { kph: bmid(6), dir: 6 }) }))] });
     const w600Bits = (m: ForecastMessage) =>
-      v4EncodeBreakdown(m).columns.find((c) => c.name === "w600")!.bits;
+      encodeBreakdown(m).columns.find((c) => c.name === "w600")!.bits;
     expect(w600Bits(both)).toBeLessThan(w600Bits(alone));
   });
 
@@ -814,7 +816,7 @@ describe("v4 round-trip encoding", () => {
       periods: [Array.from({ length: n }, (_, i) => ({ weathercode: 0,
         wind_sfc_kph: bmid(rising(i) + 2), wind_sfc_dir: 6 }))] });
     const windBits = (m: ForecastMessage) =>
-      v4EncodeBreakdown(m).columns.find((c) => c.name === "wind")!.bits;
+      encodeBreakdown(m).columns.find((c) => c.name === "wind")!.bits;
     expect(windBits(both)).toBeLessThan(windBits(alone));
   });
 
@@ -842,8 +844,8 @@ describe("delta temperature encoding", () => {
     const vars_mask = 1 << VARS_BIT.temp;
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, temp_c: 5 }));
     const spread = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, temp_c: i - 20 }));
-    const flatLen = v4MessageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const spreadLen = v4MessageToString(msg({ vars_mask, periods: [spread] }, { hourly: true })).length;
+    const flatLen = messageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
+    const spreadLen = messageToString(msg({ vars_mask, periods: [spread] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(spreadLen);
   });
 
@@ -899,14 +901,14 @@ describe("body decode desync detection", () => {
       { ...PERIOD, wind_aloft: withAloft(L925, { kph: 9, dir: 7 }) },
     ]];
     const m = msg({ periods });
-    const encoded = v4MessageToString(m);
+    const encoded = messageToString(m);
     // Resolve with a vars_mask missing that final column: the decoder reads every earlier column
     // identically, then stops with the 925 hPa bits unread — the shape of codebook or
     // request-store drift, which would otherwise return garbage values silently.
     const drifted = { ...ctxOf(m), vars_mask: m.vars_mask & ~(1 << VARS_BIT.w925) };
-    expect(() => v4MessageFromString(encoded, () => drifted)).toThrow(/desynced/);
+    expect(() => messageFromString(encoded, () => drifted)).toThrow(/desynced/);
     // The same message with the true context still decodes.
-    expect(() => v4MessageFromString(encoded, () => ctxOf(m))).not.toThrow();
+    expect(() => messageFromString(encoded, () => ctxOf(m))).not.toThrow();
   });
 });
 
@@ -918,21 +920,21 @@ describe("corrupt character rejection", () => {
 
   it("throws instead of decoding when a body character is not in the alphabet", () => {
     const m = msg({});
-    const encoded = v4MessageToString(m);
-    expect(() => v4MessageFromString(encoded, () => ctxOf(m))).not.toThrow();
+    const encoded = messageToString(m);
+    expect(() => messageFromString(encoded, () => ctxOf(m))).not.toThrow();
 
     // A body character, well past the header.
     const at = encoded.length - 3;
     for (const [ch, label] of CORRUPTIONS) {
       const damaged = encoded.slice(0, at) + ch + encoded.slice(at + 1);
-      expect(() => v4MessageFromString(damaged, () => ctxOf(m))).toThrow(
+      expect(() => messageFromString(damaged, () => ctxOf(m))).toThrow(
         /is not a base-85 character/,
       );
       // The message names the character, its code point and where it sits — a corruption
       // reported from the field has to be diagnosable from one pasted reply.
-      expect(() => v4MessageFromString(damaged, () => ctxOf(m))).toThrow(
+      expect(() => messageFromString(damaged, () => ctxOf(m))).toThrow(
         // The index counts from the body, which starts after the version tag and header.
-        new RegExp(`${label}\\) at ${at - V4_HEADER_CHARS} of the body`),
+        new RegExp(`${label}\\) at ${at - WIRE_HEADER_CHARS} of the body`),
       );
     }
   });
@@ -941,10 +943,10 @@ describe("corrupt character rejection", () => {
     // The header is the worse of the two: it is read MSB-first, so skipping a character used to
     // shift every later digit down a place and silently produce a different code and seq.
     const m = msg({});
-    const encoded = v4MessageToString(m);
+    const encoded = messageToString(m);
     for (const [ch] of CORRUPTIONS) {
       const damaged = encoded.slice(0, 2) + ch + encoded.slice(3);
-      expect(() => v4MessageFromString(damaged, () => ctxOf(m))).toThrow(
+      expect(() => messageFromString(damaged, () => ctxOf(m))).toThrow(
         /is not a base-85 character/,
       );
     }
@@ -954,7 +956,7 @@ describe("corrupt character rejection", () => {
     // The guard must not fire on the alphabet's own edges — the first and last characters of
     // ALPHABET are the ones an off-by-one in the lookup would drop.
     const m = msg({});
-    expect(() => v4MessageFromString(v4MessageToString(m), () => ctxOf(m))).not.toThrow();
+    expect(() => messageFromString(messageToString(m), () => ctxOf(m))).not.toThrow();
     expect(ALPHABET).toContain("!");
     expect(ALPHABET).toContain("z");
   });
@@ -976,8 +978,8 @@ describe("order-1 precipitation encoding", () => {
     // base-85 encoded char length) since a few bits of savings can land on either side of a char
     // boundary and not move the visible string length.
     const snowy = Array.from({ length: 72 }, () => snowPeriod(20));
-    const dryBits = v4EncodeBreakdown(msg({ vars_mask, periods: [dry] }, { hourly: true })).bodyBits;
-    const snowyBits = v4EncodeBreakdown(msg({ vars_mask, periods: [snowy] }, { hourly: true })).bodyBits;
+    const dryBits = encodeBreakdown(msg({ vars_mask, periods: [dry] }, { hourly: true })).bodyBits;
+    const snowyBits = encodeBreakdown(msg({ vars_mask, periods: [snowy] }, { hourly: true })).bodyBits;
     expect(dryBits).toBeLessThan(snowyBits);
   });
 
@@ -988,8 +990,8 @@ describe("order-1 precipitation encoding", () => {
     decoded.periods[0].forEach((p, i) => expect(p.snow_cm).toBeCloseTo(qSnow(vals[i]), 5));
     // Mostly-dry beats a column where every cell is nonzero and widely spread.
     const dense = Array.from({ length: 72 }, (_, i) => snowPeriod(3 * (i + 1)));
-    const sparseBits = v4EncodeBreakdown(msg({ vars_mask, periods }, { hourly: true })).bodyBits;
-    const denseBits = v4EncodeBreakdown(msg({ vars_mask, periods: [dense] }, { hourly: true })).bodyBits;
+    const sparseBits = encodeBreakdown(msg({ vars_mask, periods }, { hourly: true })).bodyBits;
+    const denseBits = encodeBreakdown(msg({ vars_mask, periods: [dense] }, { hourly: true })).bodyBits;
     expect(sparseBits).toBeLessThan(denseBits);
   });
 
@@ -1001,7 +1003,7 @@ describe("order-1 precipitation encoding", () => {
     const snowing = Array.from({ length: 72 }, () => ({ ...PERIOD, weathercode: 71, snow_cm: 6 }));
     const clear = snowing.map((p) => ({ ...p, weathercode: 0 }));
     const snowBits = (periods: Period[]) =>
-      v4EncodeBreakdown(msg({ vars_mask, periods: [periods] }, { hourly: true }))
+      encodeBreakdown(msg({ vars_mask, periods: [periods] }, { hourly: true }))
         .columns.find((c) => c.name === "snow")!.bits;
     expect(snowBits(snowing)).toBeLessThan(snowBits(clear));
   });

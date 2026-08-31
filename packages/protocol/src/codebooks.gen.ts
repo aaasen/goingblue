@@ -1,6 +1,6 @@
 // GENERATED FILE — do not edit by hand. Written by `pnpm generate`
 // (packages/codec-server/scripts/generate-codebooks.ts): integer weight tables derived from
-// the cached forecast corpus (data/raw/gfs). These tables are v4 wire format — regenerating
+// the cached forecast corpus (data/raw/gfs). These tables are wire format — regenerating
 // changes what already-encoded messages mean, so test/codebooks.test.ts pins their digest per
 // protocol version and fails until the version is bumped and the new digest recorded. See
 // packages/protocol/src/entropy.ts for how each table is used and the derive-*-codebooks.ts

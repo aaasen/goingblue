@@ -1,4 +1,4 @@
-// Helpers for the Windy-style vertical cloud band (v4's cloud column). The message carries
+// Helpers for the Windy-style vertical cloud band (the wire's cloud column). The message carries
 // coverage on a LEADING PREFIX of CLOUD_BAND_LEVELS_HPA (300 hPa first — see @weather/protocol):
 // the wire truncates the stack at one level below the forecast point (cloudBandLevelCount), so
 // a decoded array's LENGTH is the band's floor. Rendering wants a grid that is uniform in

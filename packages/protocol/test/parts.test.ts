@@ -4,11 +4,11 @@ import {
   chunkLines, collectingChunks, type ReplyOracles,
 } from "../src/parts.js";
 import { maxCharsFor, partBodyChars, widePartBodyChars, MAX_MESSAGES, UNCAPPED_MAX_CHARS } from "../src/devices.js";
-import { V4_HEADER_CHARS, v4Codec } from "../src/versions/v4.js";
+import { WIRE_HEADER_CHARS, wireCodec } from "../src/wire.js";
 import type { ForecastMessage } from "../src/model.js";
-import v4Fixture from "./fixtures/v4.fixture.json";
+import wireFixture from "./fixtures/wire.fixture.json";
 
-const H = V4_HEADER_CHARS;
+const H = WIRE_HEADER_CHARS;
 const headerCharsOf = () => H;
 const round = (parts: string[]) => reassembleReply(parts.join("\n"), headerCharsOf);
 
@@ -202,8 +202,8 @@ describe("the multi-message budget", () => {
 // relay says is impossible, on purpose: this path is what a wrong model falls back to, so it must
 // not contain one.
 describe("a reply the transport broke up", () => {
-  const d = v4Fixture.decoded as ForecastMessage;
-  const req = v4Fixture.request;
+  const d = wireFixture.decoded as ForecastMessage;
+  const req = wireFixture.request;
   const ctx = () => ({
     model: 31 - Math.clz32(d.models_mask & -d.models_mask),
     vars_mask: d.vars_mask,
@@ -214,7 +214,7 @@ describe("a reply the transport broke up", () => {
     utcOffsetHours: req.utcOffsetHours,
   });
 
-  const encoded = v4Codec.encode(d, "base85");
+  const encoded = wireCodec.encode(d, "base85");
   // A reader with two requests outstanding, which is what makes "a different reply" a case worth
   // having: both codes resolve, so both first messages are heads.
   const OTHER_CODE = (d.code + 1) % 128;
@@ -224,11 +224,11 @@ describe("a reply the transport broke up", () => {
   const oracles: ReplyOracles = {
     headerCharsOf,
     decodes: (reply) => {
-      try { v4Codec.decode(reassembleReply(reply, headerCharsOf), ctx); return true; }
+      try { wireCodec.decode(reassembleReply(reply, headerCharsOf), ctx); return true; }
       catch { return false; }
     },
     isHead: (chunk) => {
-      try { return requested.has(v4Codec.header(chunk).code); } catch { return false; }
+      try { return requested.has(wireCodec.header(chunk).code); } catch { return false; }
     },
   };
   const merge = (a: string, b: string) => mergeParts(a, b, oracles);
@@ -259,7 +259,7 @@ describe("a reply the transport broke up", () => {
       expect(collecting(held)).toBe(true);
     }
     held = merge(held, chunks[chunks.length - 1]);
-    expect(v4Codec.decode(reassembleReply(held, headerCharsOf), ctx)).toEqual(v4Fixture.decoded);
+    expect(wireCodec.decode(reassembleReply(held, headerCharsOf), ctx)).toEqual(wireFixture.decoded);
     // Finished, so no longer a collection — which is what takes the boxes off the screen.
     expect(collecting(held)).toBe(false);
   });
@@ -277,7 +277,7 @@ describe("a reply the transport broke up", () => {
   });
 
   it("starts over on the first message of a different reply", () => {
-    const otherHead = v4Codec
+    const otherHead = wireCodec
       .encode({ ...d, code: OTHER_CODE } as ForecastMessage, "base85").slice(0, 23);
     const held = merge(chunks[0], chunks[1]);
     // A head is only ever a first message, so it opens a collection rather than joining one.
@@ -291,7 +291,7 @@ describe("a reply the transport broke up", () => {
     // of the two mistakes available here: the alternative test, "does this look like a header",
     // would reset a collection on roughly one continuation message in eighty-five, always the
     // same one, putting that forecast permanently out of reach. See mergeChunks.
-    const strayHead = v4Codec
+    const strayHead = wireCodec
       .encode({ ...d, code: (d.code + 64) % 128 } as ForecastMessage, "base85").slice(0, 23);
     expect(oracles.isHead(strayHead)).toBe(false);
     expect(chunkLines(merge(chunks[0], strayHead))).toEqual([chunks[0], strayHead]);
@@ -330,8 +330,8 @@ describe("a reply the transport broke up", () => {
 });
 
 describe("a real message split in two", () => {
-  const d = v4Fixture.decoded as ForecastMessage;
-  const req = v4Fixture.request;
+  const d = wireFixture.decoded as ForecastMessage;
+  const req = wireFixture.request;
   const ctx = () => ({
     model: 31 - Math.clz32(d.models_mask & -d.models_mask),
     vars_mask: d.vars_mask,
@@ -342,7 +342,7 @@ describe("a real message split in two", () => {
     utcOffsetHours: req.utcOffsetHours,
   });
 
-  const encoded = v4Codec.encode(d, "base32768");
+  const encoded = wireCodec.encode(d, "base32768");
   const parts = splitReply(encoded, H, widePartBodyChars(H));
 
   it("gives every part a bubble's worth of bytes and code units", () => {
@@ -354,7 +354,7 @@ describe("a real message split in two", () => {
   });
 
   it("decodes after reassembly, in any order", () => {
-    expect(v4Codec.decode(round(parts), ctx)).toEqual(v4Fixture.decoded);
-    expect(v4Codec.decode(round([...parts].reverse()), ctx)).toEqual(v4Fixture.decoded);
+    expect(wireCodec.decode(round(parts), ctx)).toEqual(wireFixture.decoded);
+    expect(wireCodec.decode(round([...parts].reverse()), ctx)).toEqual(wireFixture.decoded);
   });
 });
