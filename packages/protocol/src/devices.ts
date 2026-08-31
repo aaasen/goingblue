@@ -18,8 +18,8 @@ export interface DeviceTransport {
 // of them (inReach's limit), so it is the safe shared default.
 export const SMS_MAX_CHARS = 160;
 
-// One ZOLEO message: the gateway truncates at exactly 240 raw UTF-8 bytes (measured 2026-08-18,
-// probes 15-17 — see docs/private/PROBES.md), which in an ASCII alphabet is 240 characters.
+// One ZOLEO message: the gateway truncates at exactly 240 raw UTF-8 bytes (measured in the
+// field), which in an ASCII alphabet is 240 characters.
 export const ZOLEO_MAX_CHARS = 240;
 
 // The internet route's budget, which is no budget: an HTTP response is not metered in characters,
@@ -32,7 +32,7 @@ export const ZOLEO_MAX_CHARS = 240;
 export const UNCAPPED_MAX_CHARS = Number.MAX_SAFE_INTEGER;
 
 // One iPhone satellite bubble. Apple's relay frames a bubble at min(70 UTF-16 code units,
-// ~140 bytes of compressed UTF-8) — both caps measured in the field, see docs/private/PROBES.md.
+// ~140 bytes of compressed UTF-8) — both caps measured in the field.
 // The reply spends 5 ASCII characters on the version tag and packed header (5 bytes, 5 units),
 // leaving 135 bytes; a k-character base32768 body costs 3k−1 bytes, so k = 45 fits at 139 bytes
 // and 46 would split at 142. 50 characters total, 675 body bits.
@@ -50,13 +50,13 @@ export const IPHONE_MAX_CHARS = 50;
 export const DEVICE_TRANSPORT: Record<DeviceCode, DeviceTransport> = {
   // iPhone messaging — the only route today whose pipe is wide enough to pay for base32768.
   i: { alphabet: "base32768", maxChars: IPHONE_MAX_CHARS },
-  // SMS spends the whole of GSM-7 basic, not just its ASCII half: probe 13 carried all 39 of the
-  // non-ASCII characters byte-exact to the phone, and probe 14 put 160 of them through as ONE
+  // SMS spends the whole of GSM-7 basic, not just its ASCII half: field tests carried all 39 of
+  // the non-ASCII characters byte-exact to the phone, and put 160 of them through as ONE
   // Twilio segment, so they cost a septet each exactly as the ASCII ones do. 6.954 bits a
   // character against 6.409 — a 155-character body goes 993 bits to 1078. See constants.ts for
   // the alphabet and what would be dropped if a route ever mangles it.
   s: { alphabet: "base124", maxChars: SMS_MAX_CHARS },
-  // ZOLEO's cap is raw UTF-8 BYTES, not septets or code units: probes 15-17 cut a compressible
+  // ZOLEO's cap is raw UTF-8 BYTES, not septets or code units: field tests cut a compressible
   // ruler and incompressible random at the same 240, and cut 240 wide characters at 80 (3 bytes
   // each). Silently — the extra just never arrives. A byte-counted pipe wants ASCII for the same
   // reason HTTP does (see `d` below), and it prices GSM-7's 39 non-ASCII characters at two bytes
@@ -111,7 +111,7 @@ export function widePartBodyChars(headerChars: number): number {
 // split only starts when a reader asked for more than one.
 //
 // ZOLEO, because its gateway reassembles concatenated segments and then TRUNCATES at 240 bytes
-// (probe 15) — so a longer reply can only reach the device as separate messages, each inside
+// (measured) — so a longer reply can only reach the device as separate messages, each inside
 // the cap on its own: 231 body characters a part.
 //
 // SMS is deliberately NOT here: its reply leaves as one string and its transport concatenates

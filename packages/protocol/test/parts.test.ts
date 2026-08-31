@@ -175,7 +175,7 @@ describe("the multi-message budget", () => {
   });
 
   it("gives ZOLEO labelled parts, each inside its 240-byte message", () => {
-    // A concatenated reply would be reassembled and then truncated at 240 bytes (probe 15), so
+    // A concatenated reply would be reassembled and then truncated at 240 bytes (measured), so
     // more forecast can only reach a ZOLEO as separate messages, each one inside the cap alone.
     expect(partBodyChars("z", H)).toBe(240 - PART_LABEL_CHARS - H);
     expect(maxCharsFor("z", 1, H)).toBe(240);

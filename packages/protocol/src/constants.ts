@@ -20,7 +20,7 @@ export const ALPHABET =
 // table order, because that split is the fallback (see SMS_ALPHABET).
 //
 // Latin-1: everything with an ISO-8859-1 equivalent. Measured intact end to end, in both
-// directions, by probe 13 (2026-08-16 — docs/private/PROBES.md round 3), including the three
+// directions, in the field, including the three
 // whose GSM septet positions collide with ASCII characters this alphabet already spends
 // (0x24 ¤ vs $, 0x40 ¡ vs @, 0x5F § vs _) and which a Latin-1 confusion would swap silently.
 export const GSM_LATIN1 = "£¥èéùìòÇØøÅåÆæßÉ¤¡ÄÖÑÜ§¿äöñüà";
@@ -41,7 +41,7 @@ export function foldSeptetSwap(s: string): string {
 }
 
 // Greek: the ten GSM-7 basic characters with NO ISO-8859-1 equivalent, and so the ten with
-// somewhere to fall. Probe 13 found a hop on the inbound SMS leg that transcodes through Latin-1
+// somewhere to fall. A field test found a hop on the inbound SMS leg that transcodes through Latin-1
 // and turns exactly these into C1 controls, deterministically — septet position q arriving as
 // U+0070+q. That leg is one a reply never travels, and the outbound leg carried all 39 byte-exact,
 // which is why they are spent. If a route ever mangles them outbound, the fallback is to drop

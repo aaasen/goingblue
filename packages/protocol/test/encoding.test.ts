@@ -913,7 +913,7 @@ describe("body decode desync detection", () => {
 });
 
 describe("corrupt character rejection", () => {
-  // U+0080 is what the field actually produces: probe 13 (2026-08-16) found a hop that turns
+  // U+0080 is what the field actually produces: a field test found a hop that turns
   // GSM-7's Greek characters into C1 controls, Δ at septet 0x10 arriving as U+0080. É stands for
   // the milder Latin-1 case. Both are single UTF-16 units, so they corrupt in place.
   const CORRUPTIONS = [["\u0080", "U\\+0080"], ["\u00C9", "U\\+00C9"]] as const;

@@ -70,7 +70,7 @@ const TEXT_DIGITS: Record<TextAlphabet, Digits> = {
 // rewrites one digit and leaves the length intact. Either way a damaged message yields a
 // plausible forecast instead of an error, and nothing downstream can tell.
 //
-// Which is not hypothetical. Probe 13 (2026-08-16, docs/private/PROBES.md round 3) found a hop
+// Which is not hypothetical. A field test found a hop
 // on the inbound SMS leg that deterministically turns the ten Greek characters of GSM-7 into C1
 // controls; the same transcode on somebody's outbound leg is exactly this failure. Naming the
 // character and where it sits is what makes the next such report diagnosable from one message.

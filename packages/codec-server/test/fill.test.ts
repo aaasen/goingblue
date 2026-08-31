@@ -125,7 +125,7 @@ describe("encodeFillSeq", () => {
 
   // The whole point of the wide alphabet: a reply an iPhone receives over satellite has to land
   // in ONE bubble, because Apple's relay splits anything larger and never reassembles it. The
-  // bubble is min(70 UTF-16 code units, ~140 bytes of compressed UTF-8) — see PROBES.md — so
+  // bubble is min(70 UTF-16 code units, ~140 bytes of compressed UTF-8), measured in the field, so
   // this measures the encoded reply against BOTH, in the units each cap is actually expressed in.
   describe("an iPhone reply fits one satellite bubble", () => {
     const iphone = params({ alphabet: "base32768", device: "i", maxChars: IPHONE_MAX_CHARS });

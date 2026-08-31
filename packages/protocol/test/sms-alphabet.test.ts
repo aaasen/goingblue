@@ -8,8 +8,7 @@ import type { ForecastMessage, RequestContext } from "../src/model.js";
 import wireFixture from "./fixtures/wire.fixture.json";
 
 // The SMS route's alphabet — GSM-7 basic in full rather than its intersection with ASCII. See
-// constants.ts for what each half survives and docs/private/PROBES.md round 3 for the field run
-// that decided it.
+// constants.ts for what each half survives, decided by a field run.
 
 const d = wireFixture.decoded as ForecastMessage;
 const req = wireFixture.request;

@@ -4,7 +4,6 @@ import { ping } from "./db.js";
 import { createAccount, accountExists, deleteAccount, recordRequest } from "./accounts.js";
 import { isValidToken, normalizeToken } from "@weather/protocol";
 import { twiml, validateTwilioSignature } from "./twilio.js";
-import { probeReply } from "./probes.js";
 import { log } from "./log.js";
 
 // Human-readable replies for requests that get no forecast, one per error class. These go back
@@ -117,17 +116,6 @@ export async function sms(c: Context) {
 
   // HELP, STOP and START never reach this webhook: Twilio's Advanced Opt-Out intercepts the
   // keywords and sends its own replies, configured in the Twilio console.
-
-  // Character-set field probes ("probe N"), answered without a forecast but still recorded
-  // (no version, size or shape): a number that only probes is still a person reaching the
-  // service. See probes.ts. Handled before forecast dispatch.
-  const probe = probeReply(body);
-  if (probe !== null) {
-    const parts = Array.isArray(probe) ? probe : [probe];
-    log.info("sms.probe_reply", { messages: parts.length, len: parts.join("").length, reply: parts });
-    await logRequest({ token: null, phone: sender, chars: null, version: null, outcome: "probe", device: null, shape: null });
-    return c.text(twiml(probe), 200, { "Content-Type": "text/xml" });
-  }
 
   const result = await buildForecast(body.trim(), sender);
   return c.text(twiml(replyFor(result)), 200, { "Content-Type": "text/xml" });

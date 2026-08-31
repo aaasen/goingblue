@@ -75,8 +75,8 @@ export interface RequestRecord {
   phone: string | null;
   chars: number | null;
   version: number | null;
-  // 'ok' for a served forecast, a DispatchResult failure kind, or 'help' / 'probe' for the
-  // messages that are answered without a forecast.
+  // 'ok' for a served forecast, a DispatchResult failure kind, or 'help' for the messages that
+  // are answered without a forecast. Old rows may also carry 'probe' (removed field probes).
   outcome: string;
   // The `d:` device code the request named, or null when it named none (dispatch.ts,
   // extractDevice).
