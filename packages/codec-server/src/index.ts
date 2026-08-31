@@ -19,7 +19,9 @@ import { log } from "./log.js";
 //          carries an X-Request-Shape header describing what was asked for (see
 //          describeRequest). The header is optional by contract — containers frozen before it
 //          existed don't send one and the gateway records no shape for them.
-//     400  the request is malformed (missing/unsupported version, bad parameters)
+//     400  the request is malformed (missing/unsupported version, or a missing/invalid
+//          component — the body names the problems). The gateway replies with its
+//          download-the-app text; the body is for logs and direct callers.
 //     503  upstream data unavailable — the gateway replies with its retry text
 const app = new Hono();
 
@@ -38,6 +40,12 @@ app.post("/encode", async (c) => {
   if (!codec) {
     const supported = supportedVersions().map((v) => `v${v}`).join(", ");
     return c.text(`unsupported protocol version v${params.decoderVersion} (supported: ${supported})`, 400);
+  }
+
+  // Requests are only ever written by the app, so validation is strict: a missing or invalid
+  // component is a malformed request, rejected before any forecast work (see parseRequest).
+  if (params.errors.length > 0) {
+    return c.text(`invalid request: ${params.errors.join("; ")}`, 400);
   }
 
   try {

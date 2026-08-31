@@ -1042,6 +1042,11 @@ export interface ForecastParams {
   // Normalized account token from a `u:` request word, or null when absent/malformed.
   // Phase 1 only records it; it does not yet gate the response.
   userToken: string | null;
+  // Validation problems found while parsing. Every request comes from the app, so a missing or
+  // invalid component means the message is not a well-formed request; a non-empty list rejects
+  // it (400) before any forecast work. The parsed values above still carry their defaults so
+  // callers that ignore errors (tests, tooling) keep working.
+  errors: string[];
 }
 
 // `p:` token values → priority modes; a missing or unknown token means Auto.
@@ -1063,6 +1068,8 @@ export function parseRequest(body: string): ForecastParams {
   let messages = 1; // from `n:`: how many messages the reply may be spread over
   let decoderVersion: number | null = null; // set from a `vN` token; required, no default
   let userToken: string | null = null; // set from a `u:` token in the request
+  const errors: string[] = []; // validation problems; non-empty rejects the request
+  const seen = new Set<string>(); // request keys encountered, for the required-key check
   let code = 0; // client message code (`k:` token); echoed in the response so the client can
                 // match it to the stored request and recover lat/lon/models/vars/duration
   let startEpochHour = NaN; // request time (`t:`, UTC hours since epoch); see below
@@ -1077,6 +1084,10 @@ export function parseRequest(body: string): ForecastParams {
     locationIdx = 0;
   }
 
+  // Known keys are validated strictly: every request comes from the app, so an unrecognized
+  // value is a malformed request, not a preference to default. Unknown BARE words stay ignored —
+  // gateways append text around the request body (Garmin's "Lat X Lon Y" footer) — as do unknown
+  // keys, which URLs in that appended text can produce ("https://...").
   for (const word of words) {
     const colonIdx = word.indexOf(":");
     if (colonIdx !== -1) {
@@ -1087,66 +1098,98 @@ export function parseRequest(body: string): ForecastParams {
           locationIdx = 0;
         } else if (val in LOCATION_NAME_TO_IDX) {
           locationIdx = LOCATION_NAME_TO_IDX[val];
+        } else {
+          errors.push(`unknown location "${val}"`);
         }
       } else if (key === "p") {
-        // Priority mode: p:d (Detail), p:a (Auto), p:r (Range). Unknown values keep Auto.
+        // Priority mode: p:d (Detail), p:a (Auto), p:r (Range).
+        seen.add(key);
         if (val in MODE_TOKENS) mode = MODE_TOKENS[val];
+        else errors.push(`invalid priority "p:${val}"`);
       } else if (key === "z") {
-        // The location's UTC offset in whole hours; out-of-range values are ignored.
+        // The location's UTC offset in whole hours.
+        seen.add(key);
         const n = parseInt(val);
         if (!isNaN(n) && n >= -12 && n <= 14) utcOffsetHours = n;
+        else errors.push(`invalid utc offset "z:${val}"`);
       } else if (key === "d") {
         // The sending device picks the response alphabet and, with `n:`, how much of it fits
-        // (see DEVICE_TRANSPORT). Unknown codes keep the defaults, which is the conservative
-        // direction: base-85 at one SMS segment reaches every device.
+        // (see DEVICE_TRANSPORT).
+        seen.add(key);
         if (isDeviceCode(val)) device = val;
+        else errors.push(`invalid device "d:${val}"`);
       } else if (key === "n") {
-        // How many messages the reply may be spread over. Out-of-range values clamp rather than
-        // reject: a reply that is one message too short still decodes, one too long does not.
+        // How many messages the reply may be spread over. Optional: omitted at one message.
         const n = parseInt(val);
-        if (!isNaN(n)) messages = Math.min(Math.max(n, 1), MAX_MESSAGES);
+        if (!isNaN(n) && n >= 1 && n <= MAX_MESSAGES) messages = n;
+        else errors.push(`invalid message count "n:${val}"`);
       } else if (key === "m") {
+        seen.add(key);
         let mask = 0;
         for (const m of val.split(",")) {
           if (m in MODEL_NAME_TO_BIT) mask |= 1 << MODEL_NAME_TO_BIT[m];
+          else errors.push(`unknown model "${m}"`);
         }
         if (mask) modelsMask = mask;
       } else if (key === "w") {
         // Pressure-level wind: the WIND_LEVELS_HPA ladder indices to carry (`w:234` = 500/600/
-        // 700 hPa). Unknown characters are ignored; nothing is on without this token.
-        varsMask |= windLevelsMaskFromToken(val);
+        // 700 hPa). Optional: nothing is on without this token.
+        if (val === "") errors.push('invalid wind levels "w:"');
+        for (const ch of val) {
+          const levelMask = windLevelsMaskFromToken(ch);
+          if (levelMask) varsMask |= levelMask;
+          else errors.push(`unknown wind level "${ch}"`);
+        }
       } else if (key === "v") {
         // Compact group codes need no delimiter (`v:pcf`, `v:aso`). The character class comes
         // from the group table itself, so a group added there can't be silently unparseable here.
-        // Keep accepting comma-separated and long-form protocol variable names for requests
+        // Comma-separated and long-form protocol variable names stay accepted for requests
         // produced by older clients.
         const requestedVars = COMPACT_VAR_CODES.test(val) ? [...val] : val.split(",");
         for (const v of requestedVars) {
           const group = CONFIGURABLE_VAR_GROUPS[
             v as keyof typeof CONFIGURABLE_VAR_GROUPS
           ];
+          if (!group && !(v in VARS_BIT)) {
+            errors.push(`unknown variable "${v}"`);
+            continue;
+          }
           for (const variable of group ?? [v]) {
             if (variable in VARS_BIT) varsMask |= 1 << VARS_BIT[variable];
           }
         }
       } else if (key === "u") {
-        // The body was lowercased above; normalizeToken restores canonical casing. Keep a
-        // valid token (check symbol matches), drop a malformed one as if absent.
+        // The body was lowercased above; normalizeToken restores canonical casing.
+        seen.add(key);
         if (isValidToken(val)) userToken = normalizeToken(val);
+        else errors.push("invalid account token");
       } else if (key === "k") {
+        seen.add(key);
         const n = parseInt(val);
         if (!isNaN(n) && n >= 0 && n <= 127) code = n; // 7-bit message code, 0..127
+        else errors.push(`invalid message code "k:${val}"`);
       } else if (key === "t") {
+        seen.add(key);
         const n = parseInt(val);
         if (!isNaN(n) && n >= 0) startEpochHour = n; // UTC forecast start, hours since epoch
+        else errors.push(`invalid request time "t:${val}"`);
       }
     } else if (/^v\d+$/.test(word)) {
       decoderVersion = parseInt(word.slice(1));
     }
   }
 
-  // Default the request time to "now", aligned down to the hour. The client normally supplies
-  // `t:` so the forecast window is fixed against delivery delay, but a missing one is safe.
+  // Required components: everything the app always sends (HomeScreen's buildMsg). A location is
+  // either coordinates or a named `l:`; the rest must each be present.
+  for (const key of ["p", "z", "m", "d", "u", "k", "t"]) {
+    if (!seen.has(key)) errors.push(`missing ${key}:`);
+  }
+  if (locationIdx === 0 && (lat === undefined || lon === undefined)) {
+    errors.push("missing coordinates");
+  }
+
+  // Default the request time to "now", aligned down to the hour. A missing `t:` rejects the
+  // request above; the default keeps callers that ignore errors on a usable window.
   if (isNaN(startEpochHour)) {
     startEpochHour = Math.floor(Date.now() / 3600000);
   }
@@ -1171,7 +1214,7 @@ export function parseRequest(body: string): ForecastParams {
   // route's limit and so the safe reading of an unidentified sender.
   const maxChars = maxCharsFor(device ?? "s", messages, headerChars);
 
-  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, alphabet, device: device ?? undefined, messages, decoderVersion, userToken, code, startEpochHour };
+  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, alphabet, device: device ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
 }
 
 // What a request asked for, in names rather than bits, for the gateway to record (see

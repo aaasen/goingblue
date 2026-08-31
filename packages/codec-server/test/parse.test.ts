@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
 import {
   MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
-  IPHONE_MAX_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, UNCAPPED_MAX_CHARS, MAX_MESSAGES, WIRE_HEADER_CHARS, maxCharsFor,
+  IPHONE_MAX_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, UNCAPPED_MAX_CHARS, MAX_MESSAGES, WIRE_HEADER_CHARS, WIRE_VERSION, maxCharsFor,
 } from "@weather/protocol";
 import { describeRequest, parseRequest } from "../src/forecast.js";
 
@@ -58,8 +58,9 @@ describe("parseRequest", () => {
   it("k: sets the message code, defaulting to 0", () => {
     expect(parseRequest("k:42").code).toBe(42);
     expect(parseRequest("").code).toBe(0);
-    // out-of-range (≥128) is ignored, leaving the default
+    // out-of-range (≥128) is a validation error, leaving the default
     expect(parseRequest("k:200").code).toBe(0);
+    expect(parseRequest("k:200").errors).toContain('invalid message code "k:200"');
   });
 
   it("t: sets the request time, defaulting to the current hour", () => {
@@ -74,10 +75,11 @@ describe("parseRequest", () => {
     expect(parseRequest("m:eu").modelsMask).toBe(EU);
   });
 
-  it("m: legacy model-name tokens are no longer recognized (mask unchanged)", () => {
+  it("m: legacy model-name tokens are rejected (mask keeps the default)", () => {
     expect(parseRequest("m:gfs").modelsMask).toBe(BEST);
-    expect(parseRequest("m:ecmwf").modelsMask).toBe(BEST);
-    expect(parseRequest("m:hres").modelsMask).toBe(BEST);
+    expect(parseRequest("m:gfs").errors).toContain('unknown model "gfs"');
+    expect(parseRequest("m:ecmwf").errors).toContain('unknown model "ecmwf"');
+    expect(parseRequest("m:hres").errors).toContain('unknown model "hres"');
   });
 
   it("m: multiple comma-separated centers", () => {
@@ -85,8 +87,11 @@ describe("parseRequest", () => {
     expect(parseRequest("m:us,ca,eu").modelsMask).toBe(US | CA | EU);
   });
 
-  it("m: unknown center name leaves mask unchanged", () => {
+  it("m: unknown center name is an error, mask unchanged for callers that ignore errors", () => {
     expect(parseRequest("m:bogus").modelsMask).toBe(BEST);
+    expect(parseRequest("m:bogus").errors).toContain('unknown model "bogus"');
+    // A known center alongside an unknown one still errors — the request is malformed.
+    expect(parseRequest("m:us,bogus").errors).toContain('unknown model "bogus"');
   });
 
   it("v: expands each single-character configurable variable group", () => {
@@ -107,9 +112,12 @@ describe("parseRequest", () => {
     expect(parseRequest("w:06").varsMask).toBe(
       ALWAYS_VARS_MASK | (1 << VARS_BIT["w300"]) | (1 << VARS_BIT["w925"]),
     );
-    // Out-of-ladder characters are ignored; an empty token adds nothing.
+    // Out-of-ladder characters and an empty token are validation errors; the mask gains nothing.
     expect(parseRequest("w:79x").varsMask).toBe(ALWAYS_VARS_MASK);
+    expect(parseRequest("w:79x").errors).toEqual(expect.arrayContaining(
+      ['unknown wind level "7"', 'unknown wind level "9"', 'unknown wind level "x"']));
     expect(parseRequest("w:").varsMask).toBe(ALWAYS_VARS_MASK);
+    expect(parseRequest("w:").errors).toContain('invalid wind levels "w:"');
     expect(parseRequest("v:f").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["freeze"]));
     expect(parseRequest("v:p").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["precip"]));
     // Air quality: one code per index, so a reader can ask for smoke without paying for ozone.
@@ -203,11 +211,12 @@ describe("parseRequest", () => {
     expect(parseRequest("v3").decoderVersion).toBe(3); // routed to a clear unsupported-version error
   });
 
-  it("p: sets the priority mode, defaulting to Auto; unknown values keep Auto", () => {
+  it("p: sets the priority mode, defaulting to Auto; unknown values are errors", () => {
     expect(parseRequest("p:d").mode).toBe(MODE_DETAIL);
     expect(parseRequest("p:a").mode).toBe(MODE_AUTO);
     expect(parseRequest("p:r").mode).toBe(MODE_RANGE);
     expect(parseRequest("p:x").mode).toBe(MODE_AUTO);
+    expect(parseRequest("p:x").errors).toContain('invalid priority "p:x"');
     expect(parseRequest("").mode).toBe(MODE_AUTO);
   });
 
@@ -225,22 +234,26 @@ describe("parseRequest", () => {
     expect(parseRequest("p:a m:ca").mode).toBe(MODE_AUTO);
   });
 
-  it("d: (the removed duration token) is ignored", () => {
+  it("d: with a non-device value (the removed duration token) is an error, not a duration", () => {
     expect(parseRequest("d:7").mode).toBe(MODE_AUTO);
+    expect(parseRequest("d:7").errors).toContain('invalid device "d:7"');
   });
 
-  it("z: sets the UTC offset in whole hours, ignoring out-of-range values", () => {
+  it("z: sets the UTC offset in whole hours; out-of-range values are errors", () => {
     expect(parseRequest("z:-9").utcOffsetHours).toBe(-9);
     expect(parseRequest("z:14").utcOffsetHours).toBe(14);
     expect(parseRequest("z:0").utcOffsetHours).toBe(0);
     expect(parseRequest("z:15").utcOffsetHours).toBe(0);
+    expect(parseRequest("z:15").errors).toContain('invalid utc offset "z:15"');
     expect(parseRequest("z:-13").utcOffsetHours).toBe(0);
+    expect(parseRequest("z:-13").errors).toContain('invalid utc offset "z:-13"');
     expect(parseRequest("").utcOffsetHours).toBe(0);
   });
 
-  it("ignores removed var tokens (tmin is no longer a variable)", () => {
+  it("rejects removed var tokens (tmin is no longer a variable)", () => {
     const p = parseRequest("p:d v:tmin");
     expect(p.varsMask).toBe(ALWAYS_VARS_MASK);
+    expect(p.errors).toContain('unknown variable "tmin"');
   });
 
   it("u: extracts a valid account token", () => {
@@ -254,9 +267,11 @@ describe("parseRequest", () => {
     expect(parseRequest(`u:${grouped}`).userToken).toBe(token);
   });
 
-  it("userToken is null when absent or malformed", () => {
+  it("userToken is null when absent or malformed, and a malformed one is an error", () => {
     expect(parseRequest("l:14k").userToken).toBeNull();
+    expect(parseRequest("l:14k").errors).toContain("missing u:");
     expect(parseRequest("u:not-a-real-token").userToken).toBeNull();
+    expect(parseRequest("u:not-a-real-token").errors).toContain("invalid account token");
     // Wrong length (15 chars, need 16) → rejected.
     expect(parseRequest("u:000000000000000").userToken).toBeNull();
     // Contains 'u', which is outside the Crockford alphabet → rejected.
@@ -279,12 +294,14 @@ describe("parseRequest", () => {
     expect(parseRequest("d:z")).toMatchObject({ alphabet: "base85", maxChars: ZOLEO_MAX_CHARS });
   });
 
-  it("d: absent or unknown keeps the base-85 SMS defaults", () => {
+  it("d: absent or unknown keeps the base-85 SMS defaults, and both are errors", () => {
     expect(parseRequest("").alphabet).toBeUndefined();
     expect(parseRequest("").maxChars).toBe(SMS_MAX_CHARS);
+    expect(parseRequest("").errors).toContain("missing d:");
     // An unknown code must not silently widen the alphabet: base-85 reaches every device.
     expect(parseRequest("d:x").alphabet).toBeUndefined();
     expect(parseRequest("d:x").maxChars).toBe(SMS_MAX_CHARS);
+    expect(parseRequest("d:x").errors).toContain('invalid device "d:x"');
   });
 
   // The length is derived, never stated: nothing in a request can widen the reply past what the
@@ -304,18 +321,52 @@ describe("parseRequest", () => {
     expect(parseRequest("d:i n:2").messages).toBe(2);
   });
 
-  it("n: defaults to one and clamps rather than rejecting", () => {
+  it("n: defaults to one; out-of-range values are errors, not clamped", () => {
     expect(parseRequest("").messages).toBe(1);
-    expect(parseRequest("d:i n:0").messages).toBe(1);
-    expect(parseRequest("d:i n:-4").messages).toBe(1);
-    expect(parseRequest("d:i n:99").messages).toBe(MAX_MESSAGES);
-    expect(parseRequest("d:i n:nonsense").messages).toBe(1);
+    for (const bad of ["n:0", "n:-4", "n:99", "n:nonsense"]) {
+      const p = parseRequest(`d:i ${bad}`);
+      expect(p.messages).toBe(1);
+      expect(p.errors).toContain(`invalid message count "${bad}"`);
+    }
+    expect(parseRequest(`d:i n:${MAX_MESSAGES}`).messages).toBe(MAX_MESSAGES);
   });
 
   it("n: is independent of the device, so token order never matters", () => {
     expect(parseRequest("n:2 d:i").maxChars).toBe(parseRequest("d:i n:2").maxChars);
     expect(parseRequest("n:2 d:g").maxChars).toBe(maxCharsFor("g", 2, WIRE_HEADER_CHARS));
     expect(parseRequest("n:2 d:s").maxChars).toBe(2 * SMS_MAX_CHARS);
+  });
+
+  // Requests are only ever written by the app, so every component it always sends is required
+  // and anything unrecognized in a known key is an error (see the gateway's malformed reply).
+  describe("strict validation", () => {
+    const token = newToken();
+    const full = `v${WIRE_VERSION} 63.0630,-151.0810 p:a z:-9 m:best d:s u:${token} k:1 t:480000`;
+
+    it("accepts a complete app-built request", () => {
+      expect(parseRequest(full).errors).toEqual([]);
+    });
+
+    it("accepts the optional tokens when valid", () => {
+      expect(parseRequest(`${full} v:pcf w:234 n:2`).errors).toEqual([]);
+    });
+
+    it("requires every always-sent token", () => {
+      expect(parseRequest("").errors).toEqual(expect.arrayContaining(
+        ["missing p:", "missing z:", "missing m:", "missing d:", "missing u:", "missing k:", "missing t:"]));
+    });
+
+    it("requires coordinates unless a named location is given", () => {
+      expect(parseRequest("p:a").errors).toContain("missing coordinates");
+      expect(parseRequest("l:14k").errors).not.toContain("missing coordinates");
+      expect(parseRequest("63.0630,-151.0810").errors).not.toContain("missing coordinates");
+      expect(parseRequest("l:nowhere").errors).toContain('unknown location "nowhere"');
+    });
+
+    it("still ignores extra bare words and unknown keys (gateway-appended text)", () => {
+      const appended = `${full} This message was sent via satellite https://example.com/x`;
+      expect(parseRequest(appended).errors).toEqual([]);
+    });
   });
 });
 

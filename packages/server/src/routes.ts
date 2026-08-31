@@ -7,25 +7,18 @@ import { twiml, validateTwilioSignature } from "./twilio.js";
 import { probeReply } from "./probes.js";
 import { log } from "./log.js";
 
-// Standard HELP keyword response. STOP/START are handled by Twilio's Advanced Opt-Out and never
-// reach this webhook; HELP is forwarded here so we control the reply text. Identifies the brand,
-// what the service does, that rates may apply, and how to opt out and get support — the
-// disclosures carriers expect in a HELP response. Kept short to fit a single SMS segment.
-const HELP_REPLY =
-  "Going Blue: weather forecasts by text, sent only in reply to a request you send. " +
-  "Msg&data rates may apply. Reply STOP to opt out. Help: help@going.blue";
-
-// Inbound bodies that should get the HELP response rather than a forecast. Matched as the whole
-// trimmed message, case-insensitively, so a forecast request is never mistaken for a keyword.
-const HELP_KEYWORDS = new Set(["help", "info"]);
-
-// Human-readable replies for requests the gateway cannot route. These go back over SMS, so
-// they must be short and tell a person in the field what to do next.
-const REPLY_MISSING_VERSION =
-  'Missing protocol version: include a version word (e.g. "v2") or update the Going Blue app.';
-const replyUnsupported = (v: number) =>
-  `Protocol v${v} is no longer supported. Please update the Going Blue app and resend.`;
-const REPLY_UNAVAILABLE = "Forecast unavailable, please try again.";
+// Human-readable replies for requests that get no forecast, one per error class. These go back
+// over SMS, so each must fit a single GSM-7 segment and tell the person what to do next.
+//
+// Malformed covers everything that isn't a well-formed request from the app — random texts to
+// the number, hand-typed attempts, requests with missing or invalid components. The sender may
+// have never heard of the service, so the reply says what it is and where the app lives.
+const REPLY_MALFORMED =
+  "Going Blue: expedition weather forecasts via satellite. Download the app at going.blue";
+// The request named a protocol version this deployment no longer serves.
+const REPLY_UNSUPPORTED = "Invalid app version. Update the app at going.blue and try again";
+// Transient service failure (codec unreachable, upstream data down): retrying is the fix.
+const REPLY_UNAVAILABLE = "Going Blue is not available right now. Please try again in a few minutes";
 
 // A codec returns its reply as one message per line — the gateway's whole knowledge of the
 // format. Splitting here rather than in the codec keeps the grammar out of the gateway (see
@@ -34,8 +27,11 @@ const REPLY_UNAVAILABLE = "Forecast unavailable, please try again.";
 function replyFor(result: DispatchResult): string | string[] {
   switch (result.kind) {
     case "ok": return result.encoded.split("\n");
-    case "missing_version": return REPLY_MISSING_VERSION;
-    case "unsupported_version": return replyUnsupported(result.version);
+    // A message with no version word isn't a request at all, so it reads as malformed here even
+    // though the gateway detects it before dispatch.
+    case "missing_version": return REPLY_MALFORMED;
+    case "malformed": return REPLY_MALFORMED;
+    case "unsupported_version": return REPLY_UNSUPPORTED;
     case "unavailable": return REPLY_UNAVAILABLE;
   }
 }
@@ -83,8 +79,11 @@ export async function forecast(c: Context) {
   const result = await buildForecast((await c.req.text()).trim(), null);
   switch (result.kind) {
     case "ok": return c.text(result.encoded, 200);
-    case "missing_version": return c.text(REPLY_MISSING_VERSION, 400);
-    case "unsupported_version": return c.text(replyUnsupported(result.version), 400);
+    case "missing_version": return c.text(REPLY_MALFORMED, 400);
+    // The caller here is the app itself, so the codec's specific reason is more useful than the
+    // human reply text.
+    case "malformed": return c.text(result.reason, 400);
+    case "unsupported_version": return c.text(REPLY_UNSUPPORTED, 400);
     case "unavailable": return c.text(REPLY_UNAVAILABLE, 503);
   }
 }
@@ -116,16 +115,12 @@ export async function sms(c: Context) {
   const sender = params["From"] ?? "";
   log.info("sms.inbound", { from: sender, len: body.length, text: body });
 
-  // HELP and the field probes are answered without a forecast, but they are still someone
-  // texting the service, so they are recorded too — with no version, no size and no shape. The
-  // question they answer is "how many distinct numbers reach us", which a forecast-only record
-  // would under-report.
-  if (HELP_KEYWORDS.has(body.trim().toLowerCase())) {
-    await logRequest({ token: null, phone: sender, chars: null, version: null, outcome: "help", device: null, shape: null });
-    return c.text(twiml(HELP_REPLY), 200, { "Content-Type": "text/xml" });
-  }
+  // HELP, STOP and START never reach this webhook: Twilio's Advanced Opt-Out intercepts the
+  // keywords and sends its own replies, configured in the Twilio console.
 
-  // Character-set field probes ("probe N") — see probes.ts. Handled before forecast dispatch.
+  // Character-set field probes ("probe N"), answered without a forecast but still recorded
+  // (no version, size or shape): a number that only probes is still a person reaching the
+  // service. See probes.ts. Handled before forecast dispatch.
   const probe = probeReply(body);
   if (probe !== null) {
     const parts = Array.isArray(probe) ? probe : [probe];

@@ -26,6 +26,9 @@ export type DispatchResult =
   | { kind: "ok"; encoded: string; shape: RequestShape | null }
   | { kind: "missing_version" }
   | { kind: "unsupported_version"; version: number }
+  // The codec rejected the request (400): not a well-formed request of its version. The reason
+  // is the codec's response body, kept for logs and the HTTP route, never sent over SMS.
+  | { kind: "malformed"; reason: string }
   | { kind: "unavailable" };
 
 // First `vN` word in the body, or null. A version is required — there is no default, so a
@@ -140,7 +143,11 @@ export async function dispatchForecast(body: string): Promise<DispatchResult> {
         shape: parseShapeHeader(resp.headers.get("X-Request-Shape")),
       };
     }
-    log.error("codec.error_response", { version, status: resp.status, body: await resp.text() });
+    const text = await resp.text();
+    log.error("codec.error_response", { version, status: resp.status, body: text });
+    // A 400 is the codec's verdict on the request itself; anything else (503, unexpected
+    // statuses) is a service problem the sender should retry.
+    if (resp.status === 400) return { kind: "malformed", reason: text.slice(0, 500) };
     return { kind: "unavailable" };
   } catch (e) {
     log.error("codec.unreachable", { version, err: e });

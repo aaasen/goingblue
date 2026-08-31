@@ -87,7 +87,13 @@ describe("dispatchForecast", () => {
     expect(await dispatchForecast("v1 p:d")).toEqual({ kind: "ok", encoded: "ENCODED", shape });
   });
 
-  it("maps codec errors and unreachable codecs to unavailable", async () => {
+  it("maps a codec 400 to malformed, carrying the codec's reason", async () => {
+    process.env["CODEC_URL_V1"] = "http://codec-v1";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("invalid request: missing u:", { status: 400 })));
+    expect(await dispatchForecast("v1 p:a")).toEqual({ kind: "malformed", reason: "invalid request: missing u:" });
+  });
+
+  it("maps codec 5xx and unreachable codecs to unavailable", async () => {
     process.env["CODEC_URL_V1"] = "http://codec-v1";
     vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 503 })));
     expect(await dispatchForecast("v1 p:a")).toEqual({ kind: "unavailable" });
