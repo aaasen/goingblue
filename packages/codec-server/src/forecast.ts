@@ -1218,10 +1218,16 @@ export function describeRequest(params: ForecastParams): RequestShape {
       .map(Number)
       .filter((bit) => params.modelsMask & (1 << bit))
       .map((bit) => BIT_TO_MODEL_NAME[bit]),
-    vars: Object.entries(VARS_BIT)
-      .filter(([, bit]) => params.varsMask & (1 << bit))
-      .sort((a, b) => a[1] - b[1])
-      .map(([name]) => name),
+    // The `c` toggle sets three legacy bits (cch/ccm/ccl) but carries one cloud band, so the
+    // record names the selection once.
+    vars: [...new Set(
+      Object.entries(VARS_BIT)
+        .filter(([, bit]) => params.varsMask & (1 << bit))
+        .sort((a, b) => a[1] - b[1])
+        .map(([name]) =>
+          (CONFIGURABLE_VAR_GROUPS.c as readonly string[]).includes(name) ? "clouds" : name,
+        ),
+    )],
     maxChars: params.maxChars,
     messages: params.messages,
   };

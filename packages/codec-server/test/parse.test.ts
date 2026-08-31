@@ -346,6 +346,16 @@ describe("describeRequest", () => {
     expect(describe_("w:234").vars).toEqual(expect.arrayContaining(["w500", "w600", "w700"]));
   });
 
+  it("reports the cloud selection as one variable", () => {
+    // The `c` toggle sets three legacy mask bits; the record names the selection once.
+    const vars = describe_("v:c").vars;
+    expect(vars).toContain("clouds");
+    expect(vars.filter((v) => v === "clouds")).toHaveLength(1);
+    expect(vars).not.toContain("cch");
+    expect(vars).not.toContain("ccm");
+    expect(vars).not.toContain("ccl");
+  });
+
   // The rounding lives here, in the stateless service, so a position precise enough to place
   // somebody's camp is never sent to the part of the system that has a database.
   it("rounds coordinates to ~1km", () => {

@@ -52,8 +52,8 @@ const SHAPE_GROUP_EXPRS: Record<Exclude<ShapeGroupKey, "variable">, string> = {
 
 // The variable grouping's vocabulary. The five variables every client sends by default say
 // nothing about what was chosen, so they are excluded outright. The rest fold into families:
-// the three legacy cloud bits are one clouds selection (v3 onward reports its single cloud band under
-// all three names — see VARS_BIT in the protocol), the AQ indices and constituents are one AQI
+// the codec now reports the cloud selection as a single 'clouds' var, and the cch/ccm/ccl arm
+// covers rows recorded before that change; the AQ indices and constituents are one AQI
 // selection, and the pressure-level winds are one wind selection (no collision with the surface
 // wind: it is a default, excluded before the CASE runs). Everything else stands alone under its
 // own name.
