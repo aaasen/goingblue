@@ -79,12 +79,16 @@ describe("dispatchForecast", () => {
 
   it("picks up the shape header when the codec sends one", async () => {
     process.env["CODEC_URL_V1"] = "http://codec-v1";
-    const shape = { lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
-                    models: ["best"], vars: ["temp"], maxChars: 160, messages: 1 };
+    const header = { lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
+                     models: ["best"], vars: ["temp"], maxChars: 160, messages: 1 };
     vi.stubGlobal("fetch", vi.fn(async () =>
-      new Response("ENCODED", { status: 200, headers: { "X-Request-Shape": JSON.stringify(shape) } })));
+      new Response("ENCODED", { status: 200, headers: { "X-Request-Shape": JSON.stringify(header) } })));
 
-    expect(await dispatchForecast("v1 p:d")).toEqual({ kind: "ok", encoded: "ENCODED", shape });
+    expect(await dispatchForecast("v1 p:d")).toEqual({
+      kind: "ok", encoded: "ENCODED",
+      shape: { lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
+               model: "best", vars: ["temp"], maxChars: 160, messages: 1 },
+    });
   });
 
   it("maps a codec 400 to malformed, carrying the codec's reason", async () => {
@@ -112,7 +116,7 @@ describe("parseShapeHeader", () => {
   it("keeps exactly the fields we store", () => {
     expect(parseShapeHeader(shape())).toEqual({
       lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
-      models: ["best"], vars: ["temp", "wind"], maxChars: 160, messages: 2,
+      model: "best", vars: ["temp", "wind"], maxChars: 160, messages: 2,
     });
   });
 
@@ -134,10 +138,10 @@ describe("parseShapeHeader", () => {
   it("nulls individual fields of the wrong type or range", () => {
     expect(parseShapeHeader(shape({ lat: "63.06", lon: 999, mode: 7, maxChars: 1.5, messages: "2" }))).toEqual({
       lat: null, lon: null, loc: "current", mode: null,
-      models: ["best"], vars: ["temp", "wind"], maxChars: null, messages: null,
+      model: "best", vars: ["temp", "wind"], maxChars: null, messages: null,
     });
     expect(parseShapeHeader(shape({ models: "best", vars: [1, "temp", null] }))).toMatchObject({
-      models: [], vars: ["temp"],
+      model: null, vars: ["temp"],
     });
   });
 

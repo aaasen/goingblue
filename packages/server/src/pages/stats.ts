@@ -26,7 +26,7 @@ const WINDOW_DAYS = 30;
 const MAX_RANGE_DAYS = 732;
 
 // What the requests chart can be broken down by. Every key is a column of `requests` — the
-// shape record's fields (messages, mode, models) cannot join this list, because the daily chart
+// shape record's fields (messages, mode, model) cannot join this list, because the daily chart
 // counts request rows and shapes share no key with them (db.ts).
 export type GroupKey = "account" | "device" | "number" | "version";
 const GROUP_EXPRS: Record<GroupKey, string> = {
@@ -36,17 +36,15 @@ const GROUP_EXPRS: Record<GroupKey, string> = {
   version: "r.version::text",
 };
 
-// The shape chart's groupings. models is an array in the schema but only ever holds one entry
-// (the app sends a single model), so its first element serves as a scalar. variable is the one
-// genuinely multi-valued grouping: it unnests vars, so a request can land in several groups and
-// the chart's quantity becomes variable requests rather than requests — the renderer relabels
-// the tooltip accordingly.
+// The shape chart's groupings. variable is the one multi-valued grouping: it unnests vars, so a
+// request can land in several groups and the chart's quantity becomes variable requests rather
+// than requests — the renderer relabels the tooltip accordingly.
 export type ShapeGroupKey = "mode" | "messages" | "model" | "variable" | "version";
 const SHAPE_GROUP_KEYS: readonly ShapeGroupKey[] = ["mode", "messages", "model", "variable", "version"];
 const SHAPE_GROUP_EXPRS: Record<Exclude<ShapeGroupKey, "variable">, string> = {
   mode: "s.mode",
   messages: "s.messages::text",
-  model: "s.models[1]",
+  model: "s.model",
   version: "s.version::text",
 };
 
@@ -152,7 +150,7 @@ export type RequestRow = {
 // One raw shape row for the recent-shapes table. Only a day exists to order by (the record
 // carries no clock time, by design), so "recent" is day-recency with the serial id as a
 // tiebreaker for a stable order within a day. Strings arrive through the untrusted shape
-// header; `model` is models[1], the only entry the array ever holds.
+// header.
 export type ShapeRow = {
   day: string;
   loc: string | null;
@@ -324,7 +322,7 @@ const SHAPE_VAR_COMPONENTS_SQL = `
 // insertion-ordered.
 const SHAPE_ROWS_SQL = `
   select to_char(s.day, 'FMMM/FMDD') as day, s.loc, s.lat::text as lat, s.lon::text as lon,
-         s.mode, s.models[1] as model, s.messages, s.chars, s.vars
+         s.mode, s.model, s.messages, s.chars, s.vars
     from request_shapes s where ${SHAPES_WINDOW}
    order by s.day desc, s.id desc
    limit ${REQUESTS_LIMIT}

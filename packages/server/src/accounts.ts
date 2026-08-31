@@ -110,9 +110,9 @@ export async function recordRequest(r: RequestRecord): Promise<void> {
   // usage record should still stand.
   if (!r.shape) return;
   await query(
-    `insert into request_shapes (day, version, lat, lon, loc, mode, models, vars, max_chars, chars, messages)
+    `insert into request_shapes (day, version, lat, lon, loc, mode, model, vars, max_chars, chars, messages)
      values ((now() at time zone $1)::date, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [DAY_TZ, r.version, r.shape.lat, r.shape.lon, r.shape.loc, r.shape.mode,
-     r.shape.models, r.shape.vars, r.shape.maxChars, r.chars, r.shape.messages],
+     r.shape.model, r.shape.vars, r.shape.maxChars, r.chars, r.shape.messages],
   );
 }

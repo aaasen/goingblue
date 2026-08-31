@@ -58,7 +58,7 @@ export function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
 //   requests        who asked and how much: the account, a hashed sending number, response
 //                   size, protocol version, outcome. This is the usage record — quotas and
 //                   the /stats dashboard read it.
-//   request_shapes  what was asked for: an approximate location, priority mode, models and
+//   request_shapes  what was asked for: an approximate location, priority mode, model and
 //                   variables. Feeds encoding evaluation and corpus work.
 //
 // The split is the point. Usage accounting needs to tell users apart; corpus work needs
@@ -69,14 +69,14 @@ export function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
 export async function migrate(): Promise<void> {
   await query(`
     create table if not exists accounts (
-      token        text primary key,
-      sms_consent  boolean not null default false,
-      created_at   timestamptz not null default now()
+      token       text primary key,
+      created_at  timestamptz not null default now()
     )
   `);
-  // Backfill the column for databases created before sms_consent existed.
+  // sms_consent was written during a two-day window in June 2026, before messaging opt-in
+  // became consumer-initiated (a user opts in by texting a request); nothing reads it.
   await query(`
-    alter table accounts add column if not exists sms_consent boolean not null default false
+    alter table accounts drop column if exists sms_consent
   `);
   // A surrogate key for the account, so a request can name its account without naming its
   // token. `bigserial` in ALTER creates the sequence and numbers the existing rows.
@@ -152,16 +152,35 @@ export async function migrate(): Promise<void> {
       lon        numeric(5,2),
       loc        text,
       mode       text,
-      models     text[],
+      model      text,
       vars       text[],
       max_chars  int,
       chars      int
     )
   `);
-  // How many messages the reply was allowed to spread over (`n:`, default 1) — part of what was
+  // How many messages the reply was allowed to spread over (`n:`, default 1) - part of what was
   // asked for, alongside max_chars, which is derived from it.
   await query(`
     alter table request_shapes add column if not exists messages int
+  `);
+  // model replaces the original models text[] column, which only ever held one entry: the codec
+  // serves the first model named, however many the mask carries (forecast.ts, firstModelKey).
+  // The shape header still says "models" - frozen containers send that key forever - and the
+  // gateway stores its first entry (dispatch.ts, parseShapeHeader). The DO block folds existing
+  // rows over, guarded because a fresh database never has the old column.
+  await query(`
+    alter table request_shapes add column if not exists model text
+  `);
+  await query(`
+    do $$
+    begin
+      if exists (select 1 from information_schema.columns
+                 where table_name = 'request_shapes' and column_name = 'models') then
+        update request_shapes set model = models[1] where model is null;
+        alter table request_shapes drop column models;
+      end if;
+    end
+    $$
   `);
   await query(`
     create index if not exists request_shapes_day_idx on request_shapes (day)

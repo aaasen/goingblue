@@ -16,7 +16,9 @@ export interface RequestShape {
   lon: number | null;
   loc: string | null;
   mode: string | null;
-  models: string[];
+  // The header's "models" key is a list (and stays one: frozen containers send it forever), but
+  // the codec only ever serves the first model named, so one name is what gets stored.
+  model: string | null;
   vars: string[];
   maxChars: number | null;
   messages: number | null;
@@ -118,7 +120,7 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
     lon: coord(o["lon"], 180),
     loc: shapeString(o["loc"]),
     mode: shapeString(o["mode"]),
-    models: shapeList(o["models"]),
+    model: shapeList(o["models"])[0] ?? null,
     vars: shapeList(o["vars"]),
     maxChars: shapeInt(o["maxChars"]),
     // Absent from codec images frozen before message counts existed; those replies were all
