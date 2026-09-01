@@ -58,7 +58,7 @@ const CODE_BITS = 7;
 const ELEV_BITS = 7;
 const ELEV_STEP_M = 100;
 // The elevation as the wire carries it — the value the DECODER will hand back. Every rule that
-// keys off elevation (pressureLevelCount) must read this, not the raw input, or the encoder
+// keys off elevation (cloudBandLevelRange) must read this, not the raw input, or the encoder
 // and decoder derive different structure from the same message.
 const quantElevM = (m: number): number =>
   Math.min(Math.max(Math.round(m / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1) * ELEV_STEP_M;
@@ -75,9 +75,9 @@ const HEADER_CHARS = nCharsForBits(WIRE_HEADER_BITS); // packed-header chars (ex
 // both entropy-coded) — surface and every WIND_LEVELS_HPA level, each carried whenever
 // requested (no elevation clamp)
 // gust: 5 = speed only, no direction
-// cloud band: VAR.clouds carries the CLOUD_BAND_LEVELS_HPA stack at 3 bits per level anchor —
-// clamped to the ≤3h periods and to one level below the forecast point, see
-// cloudBandPeriodCount / cloudBandLevelCount
+// cloud band: VAR.clouds carries an elevation-keyed run of the CLOUD_BAND_LEVELS_HPA stack at
+// 3 bits per level anchor — clamped to the ≤3h periods, see
+// cloudBandPeriodCount / cloudBandLevelRange
 // air quality: 5 bits each — a 26-symbol ladder (0 = no data, 1..25 bands), both scales
 
 const TEMP_OFFSET = 100;
@@ -168,25 +168,40 @@ export function cloudBandPeriodCount(periodHours: number[]): number {
   return n;
 }
 
-// Elevation: levels below the forecast point are air the model puts under the terrain — the
-// fill synthesizes readings there, and a reader standing on the point can't see them anyway —
-// so a pressure-level column carries every level above the ground plus ONE below (the slice the
-// point stands in, which is where an undercast shows). The count is a leading run of
-// CLOUD_BAND_LEVELS_HPA: the summit of Denali (~6200 m, ground ≈ 459 hPa) keeps
-// [200, 250, 300, 400, 500] — a 39k/34k/30k/24k/18k ladder — while anything under ~110 m keeps
-// all ten. Feed this the HEADER's elevation (quantElevM on the way in, the decoded value on the
-// way out). The floor of 2 keeps the cloud band a band (one slice) even for a bogus elevation
-// above every level; no terrain on Earth reaches 250 hPa, so real inputs never hit it. The wind
-// columns deliberately do NOT apply it: the reader picks wind levels one
-// by one and gets exactly those (a level under the terrain is the reader's call to leave out),
-// whereas the cloud band is all-or-nothing and so has to trim itself.
-export function pressureLevelCount(headerElevationM: number): number {
-  const ground = metersToPressure(headerElevationM);
+// Elevation: the band carries a RUN of CLOUD_BAND_LEVELS_HPA — ladder indices
+// [start, start + count) — derived from the header's elevation on both sides, so it costs no
+// wire bits. Feed this the header elevation in meters; it quantizes internally (quantElevM is
+// idempotent, so the decoder's already-quantized value lands on the same run).
+//
+// BOTTOM: levels below the forecast point are air the model puts under the terrain — the fill
+// synthesizes readings there, and a reader standing on the point can't see them anyway — so the
+// band carries every level above the ground plus TWO below (the slice the point stands in,
+// where an undercast shows, and one more). The two-below rule is strict: cropped low levels are
+// simply dropped, never folded upward.
+//
+// TOP: 300 hPa (30k) is the ceiling unless the bottom trim would leave fewer than
+// CLOUD_BAND_MIN_LEVELS, in which case the top extends toward 200 hPa to reach it — so low
+// country reads a 30k-topped band (fillCloudBand folds the higher cloud into the 300 slot) and
+// only high-elevation points spend levels on the 250/200 cirrus slots. Above ~7600 m even the
+// full ladder top leaves under 6 (Everest, ground ≈ 314 hPa: [200..500], five levels) — the
+// two-below rule wins and the band is just short.
+//
+// The min(cap, bottom - MIN) floor also covers a bogus elevation above every level: ground
+// under 200 hPa keeps [200, 250], the band's two-level minimum; no terrain on Earth reaches
+// 250 hPa, so real inputs never hit it. The wind columns deliberately do NOT apply any of this:
+// the reader picks wind levels one by one and gets exactly those (a level under the terrain is
+// the reader's call to leave out), whereas the cloud band is all-or-nothing and so has to trim
+// itself.
+const CLOUD_BAND_CAP_IDX = CLOUD_BAND_LEVELS_HPA.indexOf(300);
+const CLOUD_BAND_MIN_LEVELS = 6;
+export function cloudBandLevelRange(headerElevationM: number): { start: number; count: number } {
+  const ground = metersToPressure(quantElevM(headerElevationM));
   let n = 0;
   while (n < CLOUD_BAND_LEVELS_HPA.length && CLOUD_BAND_LEVELS_HPA[n] < ground) n++;
-  return Math.min(CLOUD_BAND_LEVELS_HPA.length, Math.max(2, n + 1));
+  const bottom = Math.min(CLOUD_BAND_LEVELS_HPA.length, n + 2);
+  const start = Math.max(0, Math.min(CLOUD_BAND_CAP_IDX, bottom - CLOUD_BAND_MIN_LEVELS));
+  return { start, count: bottom - start };
 }
-export const cloudBandLevelCount = pressureLevelCount;
 
 // ── Air quality ────────────────────────────────────────────────────────────────
 // Five columns over two incompatible index scales (see the AQI ladders in entropy.ts), all from
@@ -346,7 +361,7 @@ const VALUE_COLUMNS: {
 // they sit — the ladder gap between them keys the table, see windGapClass in entropy.ts); the
 // topmost requested level is unconditioned. The request is what both sides share, so the
 // conditioning graph costs no wire bits — and no elevation clamp applies (see
-// pressureLevelCount): every requested level is carried. Calm periods (force ≤ CALM_MAX_FORCE)
+// cloudBandLevelRange): every requested level is carried. Calm periods (force ≤ CALM_MAX_FORCE)
 // carry no direction symbol at all — see buildBody. `dir: false` marks a speed-only column (gusts). All speeds share the
 // extended-Beaufort quantization (see WIND_FORCE_BITS above); `level` indexes the
 // unconditioned windSpeedDelta table axis (0 = surface, also the surface fallback when gust is
@@ -537,20 +552,24 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
 
   // cloud band: level-major — for each carried pressure level, per model, a raw anchor (first
   // period, full width) then order-1 value symbols, each under the (level, previous step) book.
-  // Both clamps apply (see cloudBandPeriodCount / cloudBandLevelCount): only the leading ≤3h
-  // periods carry symbols, and only the levels down to one below the forecast point — keyed off
-  // the QUANTIZED elevation, since that is the value the decoder reads back out of the header.
+  // Both clamps apply (see cloudBandPeriodCount / cloudBandLevelRange): only the leading ≤3h
+  // periods carry symbols, and only the elevation-keyed run of levels. `cloud_band` here is
+  // that run already — highest carried level first, the same shape decode produces, so a
+  // decoded message re-encodes byte-identically (the server slices its full-ladder stack down
+  // to the run in buildLayoutMessage). The book index is the ABSOLUTE ladder index, so a summit
+  // message and a sea-level message price 500 hPa under the same table whatever their runs.
   if (msg.vars.has(VAR.clouds)) {
     before = em.cost;
     const nCb = cloudBandPeriodCount(msg.periodHours);
-    const nLev = nCb > 0 ? cloudBandLevelCount(quantElevM(msg.elevation)) : 0;
+    const { start, count } = cloudBandLevelRange(msg.elevation);
+    const nLev = nCb > 0 ? count : 0;
     for (let li = 0; li < nLev; li++) {
       for (let m = 0; m < nModels; m++) {
         let prev = quantCover(msg.periods[m][0].cloud_band?.[li]);
         em.raw(prev, CLOUD_ANCHOR_BITS);
         for (let p = 1; p < nCb; p++) {
           const cur = quantCover(msg.periods[m][p].cloud_band?.[li]);
-          em.sym(books.cloudBandBook(li, prev), cur);
+          em.sym(books.cloudBandBook(start + li, prev), cur);
           prev = cur;
         }
       }
@@ -941,20 +960,21 @@ function decodeBody(
   }
 
   // Cloud band mirrors buildBody, both clamps included: only the leading ≤3h periods and only
-  // the levels down to one below the header's elevation carry symbols — a raw anchor, then
-  // order-1 value symbols under the (level, previous step) book. The decoded array is exactly
-  // the carried levels — its LENGTH is how the app learns the band's floor — and a period past
-  // the resolution clamp is left without the field: "not forecast", never "clear", the same
-  // convention as the AQ horizon.
+  // the elevation-keyed run of levels carry symbols — a raw anchor, then order-1 value symbols
+  // under the (ABSOLUTE ladder index, previous step) book. The decoded array is exactly the
+  // carried run, highest carried level first — the app recovers which levels those are from the
+  // header's elevation (cloudBandLevelRange) — and a period past the resolution clamp is left
+  // without the field: "not forecast", never "clear", the same convention as the AQ horizon.
   if (vars.has(VAR.clouds)) {
     const nCb = cloudBandPeriodCount(periodHours);
-    const nLev = nCb > 0 ? cloudBandLevelCount(elevation) : 0;
+    const { start, count } = cloudBandLevelRange(elevation);
+    const nLev = nCb > 0 ? count : 0;
     for (let li = 0; li < nLev; li++) {
       for (let m = 0; m < nModels; m++) {
         let quant = rd.int(CLOUD_ANCHOR_BITS);
         (periods[m][0].cloud_band ??= new Array<number>(nLev).fill(0))[li] = Math.round((quant * 100) / 7);
         for (let p = 1; p < nCb; p++) {
-          quant = rd.sym(books.cloudBandBook(li, quant));
+          quant = rd.sym(books.cloudBandBook(start + li, quant));
           (periods[m][p].cloud_band ??= new Array<number>(nLev).fill(0))[li] = Math.round((quant * 100) / 7);
         }
       }

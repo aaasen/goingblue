@@ -126,7 +126,7 @@ function countPeriods(h: HourlyData, windows: number[][], off: number, s: Period
 }
 
 let cells = 0;
-await eachForecast((raw, _startHour, _loc, pos) => {
+await eachForecast((raw, _startHour, _loc, pos, _split, elevM) => {
   const wc = raw.weather_code as (number | null)[] | undefined;
   if (!wc || !pos) return;
   // Section A first — on the RAW cell, before the fill overwrites the served diagnostic.
@@ -145,7 +145,7 @@ await eachForecast((raw, _startHour, _loc, pos) => {
     }
   }
 
-  const filled = fillCloudBand(raw);
+  const filled = fillCloudBand(raw, elevM ?? 0);
   countHours(raw, wc, hourly0);
   countHours(filled, wc, hourly1);
 

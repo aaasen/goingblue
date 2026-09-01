@@ -40,9 +40,11 @@ function hourly(c: Case): HourlyData {
   return h as unknown as HourlyData;
 }
 
-// The filled band for the single hour, indexed by pressure level.
-function band(c: Case): Record<number, number | null> {
-  const out = fillCloudBand(hourly(c)) as unknown as Record<string, (number | null)[]>;
+// The filled band for the single hour, indexed by pressure level. `elevM` keys the high
+// placement's carried-level restriction (cloudBandLevelRange); the default sea level carries
+// [300..1000], so 250/200 are cropped and the integral folds into 300.
+function band(c: Case, elevM = 0): Record<number, number | null> {
+  const out = fillCloudBand(hourly(c), elevM) as unknown as Record<string, (number | null)[]>;
   return Object.fromEntries(
     CLOUD_BAND_LEVELS_HPA.map((l) => [l, out[`cloud_cover_${l}hPa`]?.[0] ?? null]),
   );
@@ -151,20 +153,29 @@ describe("fillCloudBand", () => {
       expect(band({ rh: { 300: 95 }, high: 20 })[300]).toBe(20);
     });
 
-    it("places the integral on the best-deficit cirrus level, clearing the rest", () => {
-      // All three cirrus levels served: 250 hPa clears its ~70% threshold (+2 pt) while 200 and
-      // 300 sit 30 pt under it, far outside the 5 pt window — so 250 alone carries the layer
-      // integral and the other two read clear, cirrus placed at its own altitude.
-      const b = band({ rh: { 200: 40, 250: 72, 300: 40 }, high: 55 });
+    it("places the integral on the best-deficit cirrus level a summit band carries", () => {
+      // A 6200 m point carries [200..600], so all three cirrus levels compete: 250 hPa clears
+      // its ~70% threshold (+2 pt) while 200 and 300 sit 30 pt under it, far outside the 5 pt
+      // window — so 250 alone carries the layer integral and the other two read clear, cirrus
+      // placed at its own altitude.
+      const b = band({ rh: { 200: 40, 250: 72, 300: 40 }, high: 55 }, 6200);
       expect(b[250]).toBe(55);
       expect(b[200]).toBe(0);
       expect(b[300]).toBe(0);
     });
 
+    it("folds the integral into 300 hPa when the band tops out there", () => {
+      // The same sky from low country: the wire carries [300..1000], so 250 — the level the
+      // humidity would pick — is cropped, and the whole integral lands on the carried top
+      // instead of vanishing with it.
+      const b = band({ rh: { 200: 40, 250: 72, 300: 40 }, high: 55 }, 0);
+      expect(b[300]).toBe(55);
+    });
+
     it("falls back to a slab when the band has cover but no humidity to place with", () => {
       // Served diagnostic covers, no humidity at any cirrus level: nothing ranks them, so every
-      // member carries the integral.
-      const b = band({ rh: { 850: 76 }, cover: { 200: 5, 250: 5, 300: 5 }, high: 60 });
+      // carried member gets the integral.
+      const b = band({ rh: { 850: 76 }, cover: { 200: 5, 250: 5, 300: 5 }, high: 60 }, 6200);
       expect(b[200]).toBe(60);
       expect(b[250]).toBe(60);
       expect(b[300]).toBe(60);
@@ -259,7 +270,7 @@ describe("fillCloudBand", () => {
       // An offline cell that carries only the diagnostic: nothing to recompute or place with, so
       // the band it already has is what it keeps.
       const h = hourly({ cover: { 850: 42 }, low: 90 });
-      expect(fillCloudBand(h)).toBe(h);
+      expect(fillCloudBand(h, 0)).toBe(h);
     });
 
     it("falls back to the served cover for a level with height but no humidity", () => {

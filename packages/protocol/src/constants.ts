@@ -105,15 +105,16 @@ export const CLOUD_BAND_LEVELS_HPA = [200, 250, 300, 400, 500, 600, 700, 850, 92
 // level (WIND_LEVEL_VARS), highest first — Period.wind_aloft is indexed by it. 1000 hPa is
 // ~110 m: the always-on 10 m wind already describes that air, and above ~110 m the level is
 // under the terrain, so it never earned a column (dropped 2026-08-22). 250/200 hPa are
-// cloud-band-only: the band is all-or-nothing so it carries the whole ladder, but each wind
-// level is its own column and the cirrus levels never earned one. Every center's pressure
+// cloud-band-only: the band carries an elevation-keyed run of the ladder (cloudBandLevelRange
+// in wire.ts), but each wind level is its own column and the cirrus levels never earned one.
+// Every center's pressure
 // product serves wind at all seven (verified 2026-08-22 against best_match, gfs_seamless,
 // gem_seamless and ecmwf_ifs025), so no level is gated per center.
 export const WIND_LEVELS_HPA = CLOUD_BAND_LEVELS_HPA.slice(2, 9) as readonly number[];
 
 // International Standard Atmosphere, troposphere leg — the fixed scale that places the band's
 // pressure levels at altitudes. Good to a few tens of meters over the band's span. WIRE FORMAT:
-// cloudBandLevelCount reads the ground pressure off it, so a coefficient change moves
+// cloudBandLevelRange reads the ground pressure off it, so a coefficient change moves
 // which levels a message carries. The app uses the same pair for the band's axis labels and
 // ground line, which is exactly why it lives here and not in two copies.
 export function pressureToMeters(hpa: number): number {

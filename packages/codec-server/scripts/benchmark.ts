@@ -943,7 +943,7 @@ async function scanReport(args: Args, shard?: { index: number; total: number }):
     // Same post-fetch hourly corrections production applies (src/forecast.ts), in the same order,
     // so the report encodes the distributions clients actually receive. fillCloudBand needs the
     // level humidity and geopotential, which the untargeted loadCell above already brings in.
-    const h = fillCloudBand(adjustPrecipPhase(raw, elevation));
+    const h = fillCloudBand(adjustPrecipPhase(raw, elevation), elevation ?? 0);
     const utcOffsetHours = utcOffsetFor(lon);
     const startEpochHour = requestUtcHour(
       Math.floor(Date.parse(cell.windowStart + "Z") / 3600000), utcOffsetHours, args.requestHour);

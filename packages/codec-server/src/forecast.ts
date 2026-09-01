@@ -30,7 +30,7 @@ import {
   partBodyChars,
   splitReply,
   WIRE_HEADER_CHARS,
-  CLOUD_BAND_LEVELS_HPA,
+  CLOUD_BAND_LEVELS_HPA, cloudBandLevelRange,
   WIND_LEVELS_HPA, WIND_LEVEL_VARS, windLevelVar,
   CLOUD_COVER_MIN_PCT,
   quantCover,
@@ -521,15 +521,23 @@ const CLOUD_BAND_TRIO = ["cloud_cover_low", "cloud_cover_mid", "cloud_cover_high
 /**
  * Recompute the ten cloud-band levels from pressure-level humidity, then fill any low/mid band
  * the humidity diagnostic reports as empty while the model's own layer cloud says otherwise, and
- * place the model's high-cloud integral onto the ≥8 km levels by humidity.
+ * place the model's high-cloud integral onto the CARRIED ≥8 km levels by humidity.
+ *
+ * `elevationM` is the forecast point's elevation, the same value the encoder's level clamp
+ * reads: high-cloud placement targets only the levels the wire will carry
+ * (cloudBandLevelRange), so a low-country message — whose band tops out at 300 hPa — gets the
+ * whole integral folded into its 300 slot instead of losing it to a cropped cirrus level. The
+ * bottom crop deliberately gets no such fold: cloud the low/mid placement puts under the
+ * carried floor is under the terrain and is simply dropped.
  *
  * Runs per hour, BEFORE the maxOf period aggregation and therefore before repairCloudBand:
  * per-hour is the only granularity at which humidity and geopotential exist without inventing
  * period aggregates for them, and interpolation should bridge holes in filled data, not raw. The
  * output keeps the `cloud_cover_XhPa` column names, so everything downstream is unchanged.
  */
-export function fillCloudBand(h: HourlyData): HourlyData {
+export function fillCloudBand(h: HourlyData, elevationM: number): HourlyData {
   const levels = CLOUD_BAND_LEVELS_HPA;
+  const carriedTop = cloudBandLevelRange(elevationM).start;
   const rh = CLOUD_BAND_RH_VARS.map((v) => h[v] as (number | null)[] | undefined);
   // No humidity anywhere in the stack: nothing to recompute or place with. Leave the band exactly
   // as it arrived, so an offline cell carrying only `cloud_cover_XhPa` still encodes what it has.
@@ -558,9 +566,13 @@ export function fillCloudBand(h: HourlyData): HourlyData {
     }
 
     for (let b = 0; b < CLOUD_BAND_TRIO.length; b++) {
-      const members: number[] = [];
+      let members: number[] = [];
       for (let li = 0; li < levels.length; li++)
         if (band[li] === b && cover[li] != null) members.push(li);
+      // High cloud lands only on levels the wire will carry: 300 hPa is always in the carried
+      // run for real terrain, so the integral is never dropped — the cropped cirrus levels
+      // (usually both of 250/200) just stop competing for it.
+      if (b === 2) members = members.filter((li) => li >= carriedTop);
       if (members.length === 0) continue; // whole band absent from this source — leave it to repair
       // Clamped because the normalization below takes a fractional power of (1 − C/100): an
       // out-of-range value from upstream would come back NaN rather than merely wrong.
@@ -707,7 +719,7 @@ async function fetchHourly(
       fetchOpenMeteo(center.surface, [...surfaceVars, ...pressureVars], nDays, lat, lon, tz, elev_m, pastDays),
       aqPromise,
     ]);
-    const adjusted = fillCloudBand(adjustPrecipPhase(withAirQuality(hourly, aq), elevation));
+    const adjusted = fillCloudBand(adjustPrecipPhase(withAirQuality(hourly, aq), elevation), elevation);
     return [adjusted, adjusted.time, elevation];
   }
 
@@ -719,7 +731,7 @@ async function fetchHourly(
     aqPromise,
   ]);
   const merged = withAirQuality(mergeHourly(surf.hourly, pres.hourly, pressureVars), aq);
-  const adjusted = fillCloudBand(adjustPrecipPhase(merged, surf.elevation));
+  const adjusted = fillCloudBand(adjustPrecipPhase(merged, surf.elevation), surf.elevation);
   return [adjusted, adjusted.time, surf.elevation];
 }
 
@@ -1368,6 +1380,16 @@ export function buildLayoutMessage(
   const rows = rowsFromWindows(h, times, windows, params.utcOffsetHours);
   const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
 
+  // The wire's cloud_band is the elevation-keyed run of the ladder, the same shape the decoder
+  // hands back; toFullPeriod builds the full stack (the derive scripts index it by ladder
+  // position), so the slice happens here, at the one point the header elevation is fixed.
+  const { start: cbStart, count: cbCount } = cloudBandLevelRange(elevation);
+  const toWirePeriod = (r: Row): Period => {
+    const p = toFullPeriod(r, params.vars, modelKey);
+    if (p.cloud_band) p.cloud_band = p.cloud_band.slice(cbStart, cbStart + cbCount);
+    return p;
+  };
+
   return {
     version: params.decoderVersion,
     code: params.code,
@@ -1380,7 +1402,7 @@ export function buildLayoutMessage(
     lat,
     lon,
     elevation,
-    periods: [rows.map((r) => toFullPeriod(r, params.vars, modelKey))],
+    periods: [rows.map(toWirePeriod)],
     seq: layout.seq,
     mode: params.mode,
     periodHours: layout.periodHours,

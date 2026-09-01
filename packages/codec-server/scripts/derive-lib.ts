@@ -254,7 +254,7 @@ export async function deriveCountsMulti(
 // derivation wants production's corrected stack, which is the default.
 export async function eachForecast(
   cb: (hourly: HourlyData, startHour: number, loc: string, pos?: { lat: number; lon: number },
-       split?: string) => void,
+       split?: string, elevM?: number) => void,
   split: "train" | "eval" | "all" = "train",
   vars: readonly string[] | null = DERIVE_VARS,
   shard?: { index: number; total: number },
@@ -300,12 +300,13 @@ export async function eachForecast(
     // trained on values no client ever receives. fillCloudBand returns `raw` untouched when the
     // cell carries no pressure-level humidity, so cells predating the level collection are
     // unaffected.
-    const corrected = adjustPrecipPhase(raw, elevs.get(locationId) ?? loc.elev_m ?? null);
-    const hourly = fillBand ? fillCloudBand(corrected) : corrected;
+    const elevM = elevs.get(locationId) ?? loc.elev_m ?? null;
+    const corrected = adjustPrecipPhase(raw, elevM);
+    const hourly = fillBand ? fillCloudBand(corrected, elevM ?? 0) : corrected;
     cells++;
     seen.add(locationId);
     cb(hourly, Math.floor(Date.parse(windowStart + "Z") / 3600000), locationId,
-      { lat: loc.lat, lon: loc.lon }, loc.split ?? undefined);
+      { lat: loc.lat, lon: loc.lon }, loc.split ?? undefined, elevM ?? undefined);
   }
   db.close();
   if (!shard)

@@ -11,6 +11,7 @@ import {
   type WindAloft,
   WIND_LEVELS_HPA,
   WIND_LEVEL_VARS,
+  cloudBandLevelRange,
   type RequestContext,
   CARDINALS,
   DEFAULT_VARS,
@@ -244,17 +245,30 @@ describe("round-trip encoding", () => {
     expect(p.cloud_band).toBeUndefined();
   });
 
-  it("round-trips the cloud band only on fine-resolution periods", () => {
-    const hourly = roundTrip(msg({ periods: [Array(49).fill(PERIOD)] }, { hourly: true }));
-    // quantized to 3 bits per level (0–7 steps), decoded back to nearest %; at 500 m the
-    // forecast point is under every level, so all ten are carried.
-    expect(hourly.periods[0][0].cloud_band).toEqual(
-      PERIOD.cloud_band!.map((v) => Math.round(Math.round(v * 7 / 100) * 100 / 7)));
+  it("keys the band's level run off the header elevation", () => {
+    // The run derives from the header on both sides, so it costs no wire bits: capped at
+    // 300 hPa, two levels below the ground, a 6-level minimum met by extending the top toward
+    // 200 — with the two-below rule winning where even the full top can't reach 6.
+    expect(cloudBandLevelRange(0)).toEqual({ start: 2, count: 8 });     // low country: [300..1000]
+    expect(cloudBandLevelRange(4267)).toEqual({ start: 1, count: 6 });  // 14k camp: [250..700]
+    expect(cloudBandLevelRange(6200)).toEqual({ start: 0, count: 6 });  // Denali summit: [200..600]
+    expect(cloudBandLevelRange(8850)).toEqual({ start: 0, count: 5 });  // Everest: [200..500]
+    expect(cloudBandLevelRange(12700)).toEqual({ start: 0, count: 2 }); // bogus header maximum
   });
 
-  it("truncates the band's levels to one below the forecast point", () => {
-    // 4267 m quantizes to 4300 m — ground ≈ 593 hPa, so 200/250/300/400/500 hPa sit above the
-    // point and 600 is the one carried below it. Everything under 600 never rides the wire.
+  it("round-trips the cloud band only on fine-resolution periods", () => {
+    const hourly = roundTrip(msg({ periods: [Array(49).fill(PERIOD)] }, { hourly: true }));
+    // quantized to 3 bits per level (0–7 steps), decoded back to nearest %. The wire's
+    // cloud_band is the elevation-keyed run: at 500 m that is the capped 8-level [300..1000],
+    // read positionally off the input's leading entries.
+    expect(hourly.periods[0][0].cloud_band).toEqual(
+      PERIOD.cloud_band!.slice(0, 8).map((v) => Math.round(Math.round(v * 7 / 100) * 100 / 7)));
+  });
+
+  it("carries the elevation-keyed run of levels at altitude", () => {
+    // 4267 m quantizes to 4300 m — ground ≈ 593 hPa, so 600 and 700 are the two carried below
+    // the point, and the 6-level minimum pulls the top past the 300 cap to 250: the run is
+    // [250..700], six entries read positionally off the input.
     const p = roundTrip(msg({ elevation: 4267, periods: [Array(49).fill(PERIOD)] }, { hourly: true }))
       .periods[0][0];
     expect(p.cloud_band).toEqual(
@@ -269,9 +283,9 @@ describe("round-trip encoding", () => {
     const bits = (elevation: number) => encodeBreakdown(msg(
       { vars: varSet(VAR.clouds), elevation, periods: [Array(49).fill(slim)] },
       { hourly: true })).bodyBits;
-    // 4267 m drops the four lowest levels (10 → 6): anchors and their whole delta chains go
-    // with them.
-    expect(bits(4267)).toBeLessThan(bits(0) * 0.85);
+    // 4267 m carries six levels to sea level's eight: two anchors and their whole delta chains
+    // go with them.
+    expect(bits(4267)).toBeLessThan(bits(0) * 0.95);
   });
 
   it("round-trips every air-quality column on its own scale", () => {

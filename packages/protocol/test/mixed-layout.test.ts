@@ -21,6 +21,7 @@ import {
   aqiMid,
   aqPeriodCount,
   cloudBandPeriodCount,
+  cloudBandLevelRange,
   CLOUD_BAND_MAX_HOURS,
   AQI_US_LOWER,
   AQI_EU_LOWER,
@@ -154,8 +155,12 @@ describe("mixed-layout round-trip encoding", () => {
       expect(d.freeze_m).toBeCloseTo(p.freeze_m!, 5);
       expect(d.wind_sfc_kph).toBeCloseTo(p.wind_sfc_kph!, 5);
       expect(d.wind_sfc_dir).toBe(p.wind_sfc_dir);
-      // The band rides only the ≤3h periods; the 6h tail decodes without the field.
-      if (original.periodHours[i] <= CLOUD_BAND_MAX_HOURS) expect(d.cloud_band).toEqual(p.cloud_band);
+      // The band rides only the ≤3h periods; the 6h tail decodes without the field. The wire's
+      // cloud_band is the elevation-keyed run of the ladder: the encoder reads the input's
+      // leading `count` entries as that run, and the decoder hands the same shape back.
+      const { count } = cloudBandLevelRange(original.elevation);
+      if (original.periodHours[i] <= CLOUD_BAND_MAX_HOURS)
+        expect(d.cloud_band).toEqual(p.cloud_band!.slice(0, count));
       else expect(d.cloud_band).toBeUndefined();
     });
   });
@@ -168,9 +173,11 @@ describe("mixed-layout round-trip encoding", () => {
       for (let seq = 1; seq <= maxFillSeq(mode); seq++) {
         const { original, decoded } = roundTrip(seq, mode);
         const nCb = cloudBandPeriodCount(original.periodHours);
+        const { count } = cloudBandLevelRange(original.elevation);
         original.periods[0].forEach((p, i) => {
           const d = decoded.periods[0][i];
-          if (i < nCb) expect(d.cloud_band, `${mode}/${seq}/${i}`).toEqual(p.cloud_band);
+          if (i < nCb)
+            expect(d.cloud_band, `${mode}/${seq}/${i}`).toEqual(p.cloud_band!.slice(0, count));
           else expect(d.cloud_band, `${mode}/${seq}/${i}`).toBeUndefined();
         });
       }

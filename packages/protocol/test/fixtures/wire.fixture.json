@@ -7,7 +7,7 @@
     "mode": 0,
     "utcOffsetHours": -9
   },
-  "encoded": "%!!'NH\"F$(L&d*\"WgX<fC&s'Q;QxS=gfg(f;55:YTumu(q=AaOvo0z-CNcSwIB=wD5++./thT!ni9NGH9qquqQym>xYFk;8XZ5_x>ED!v)7U6wTSoz\"mu=Vwh,!02wzw!6@h!cbD#g$IQmR;\"MQSfCbkPg1j=a!&RMkSD>0DFS9aKiejnR(QIq16/ub1j\"r9$z!&wA0/",
+  "encoded": "%!!'NX4j4GO6AF=$jml9>G4whJo'>;5v5=Z5egG<<WYPGq=AaOvo0z-CNcSwIB=wD5++./thT!ni9NGH9qquqQym>xYFk;8XZ5_x>ED!v)7U6wTSoz\"mu=Vwh,!02wzw!6@h!cbD#g$IQmR;\"MQSfCbkPg1j=a!&RMkSD>0DFS9aKiejnR(QIq16/ub1j\"r9$z!&wA0/",
   "decoded": {
     "version": 4,
     "code": 0,
@@ -56,10 +56,10 @@
           "freeze_m": 3048,
           "cloud_band": [
             71,
-            71,
             57,
             57,
             43,
+            29,
             29
           ],
           "aqi_pm25": 95,
@@ -118,10 +118,10 @@
           "temp_c": -4,
           "freeze_m": 2438.4,
           "cloud_band": [
-            100,
             86,
             86,
             86,
+            71,
             71,
             71
           ],
@@ -183,10 +183,10 @@
           "cloud_band": [
             100,
             100,
-            100,
             86,
             86,
-            86
+            86,
+            71
           ],
           "aqi_pm25": 170,
           "aqi_o3": 38,
@@ -244,12 +244,12 @@
           "temp_c": -6,
           "freeze_m": 2438.4,
           "cloud_band": [
-            86,
             71,
             71,
             71,
             57,
-            57
+            57,
+            43
           ],
           "aqi_pm25": 130,
           "aqi_o3": 43,

@@ -51,13 +51,16 @@ export interface Period {
   cloud_mid?: number;     // 3-8km
   cloud_low?: number;     // <3km
 
-  // Cloud cover by pressure level: one percentage per LEADING entry of
-  // CLOUD_BAND_LEVELS_HPA in constants.ts, highest level (200 hPa) first. Levels a center
-  // doesn't serve are interpolated server-side before encoding, never left out — but the wire
-  // truncates the stack at one level below the forecast point (cloudBandLevelCount in wire.ts),
-  // so a decoded array's LENGTH is the band's floor. Present only on periods at ≤3h resolution
+  // Cloud cover by pressure level: one percentage per carried entry of CLOUD_BAND_LEVELS_HPA
+  // in constants.ts, highest carried level first. Levels a center doesn't serve are interpolated
+  // server-side before encoding, never left out — but the wire carries only an elevation-keyed
+  // RUN of the ladder (cloudBandLevelRange in wire.ts): capped at 300 hPa for low country,
+  // reaching 250/200 only where the bottom trim leaves under six levels, and truncated two
+  // below the forecast point. Both the encoder's input and the decoder's output hold exactly
+  // that run (the server slices its full-ladder stack in buildLayoutMessage), so a decoded
+  // message re-encodes byte-identically; recompute the run from the header's elevation to
+  // learn which levels it names. Present only on periods at ≤3h resolution
   // (cloudBandPeriodCount); on coarser periods `undefined` means "not forecast", never "clear".
-  // Server-side, pre-encode, the array is always full-length (holes as null).
   cloud_band?: number[];
 
   // Visibility in kilometers.
