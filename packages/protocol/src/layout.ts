@@ -38,7 +38,8 @@ import { RESOLUTION_HOURS, MODEL_BIT } from "./constants.js";
 // discards earlier hours of today — the current period is a useful baseline, but the past is
 // not. Later slots always start at local midnight. A request at exactly local midnight
 // over-covers (its "remainder" is a whole day); accepted — a fixed slot count keeps the tables
-// independent of the request hour.
+// independent of the request hour. A model whose guaranteed reach falls short of the window
+// serves a truncated ladder over fewer slots (see FILL_REACH_HOURS and fillSlotsFor).
 
 export const FILL_HORIZON_DAYS = 12; // whole days ahead of the request day
 export const FILL_SLOTS = FILL_HORIZON_DAYS + 1;
@@ -50,37 +51,42 @@ export const MODE_RANGE = 2;
 export const DEFAULT_MODE = MODE_AUTO;
 export const MODE_NAMES = ["Detail", "Auto", "Range"] as const;
 
-// Centers whose deepest model stops short of the window, by MODEL_BIT. Canada's GDPS runs 240h
-// twice a day and lands ~7h after init, so a request is guaranteed only 240 - 12 - 7 = 221h,
-// about 9 days against a window of 288-312h. NOAA (GFS 384h) and ECMWF (IFS 360h) clear it, as
-// does every best_match branch (its shallowest bottoms out in a ≥360h global model).
-const SHORT_HORIZON_MODELS = [MODEL_BIT.CA];
+// Guaranteed forecast reach in hours from the request, for centers whose deepest model stops
+// short of the window, by MODEL_BIT. Worst case is horizon minus run interval minus publish
+// delay: Canada's GDPS runs 240h twice a day and lands ~7h after init, so a request is
+// guaranteed 240 - 12 - 7 = 221h against a window of 288-312h. NOAA (GFS 384h) and ECMWF
+// (IFS 360h) clear the window, as does every best_match branch (its shallowest bottoms out in
+// a ≥360h global model) — a model without an entry serves the full window.
+//
+// THIS TABLE IS WIRE FORMAT: fillSlotsFor reads it on both sides to derive the layout, so a
+// changed entry changes what already-encoded messages mean. Entries must err low — a reach
+// past the real data puts unservable periods inside every capped path. The guard test in
+// fill-reach.test.ts fails if an upstream horizon moves below a frozen entry.
+export const FILL_REACH_HOURS: Partial<Record<number, number>> = {
+  [MODEL_BIT.CA]: 221,
+};
 
 /**
- * The priority mode a request actually runs under.
+ * How many day slots of the fill window a model can serve: the slots whose end lies within the
+ * model's guaranteed reach, counted from a request at `requestUtcHour` (UTC epoch hours) with
+ * fixed local offset `utcOffsetHours`. A model without a FILL_REACH_HOURS entry serves the full
+ * window; the count depends on the request's local hour because a late-day request reaches
+ * further into its last slot.
  *
- * Range walks its whole coverage ramp at 12h before refining anything, so against a center that
- * can't fill the window it was the one mode that broke: a layout with a slot the model has no
- * data for is unservable, coverage only grows along a path, and the seq search therefore stopped
- * inside the 12h ramp — Canada asking for Range got 10 days at 12h with a third of the message
- * budget unspent. Auto interleaves refinement with coverage, so its servable steps already carry
- * finer periods; Detail likewise. Mapping Range onto Auto for those centers spends the budget
- * instead of stranding it.
+ * Every mode's path is truncated to this count (see pathFor), so a short-horizon center refines
+ * within the days it has instead of stranding budget against days it can never serve: a period
+ * past the model's data is unservable, coverage only grows along a path, and an uncapped seq
+ * search stops at the data cliff with the rest of the message budget unspent.
  *
- * THE SERVER AND THE DECODER MUST BOTH APPLY THIS. The mode is not on the wire — the decoder
- * recovers it from the stored request (see RequestContext) and derives the period layout from
- * it. A request carries and a client stores the mode that was actually asked for; the
- * substitution is made where the message is built (parseRequest) and made again where it is
- * read (messageFromString), against the same model, so both arrive at the same layout without
- * the client needing to know this rule exists.
- *
- * Known limitation: it fixes Range, not the underlying clamp. Detail and Auto stay budget-bound
- * only while the budget is around one 160-char message; a `c:` past roughly 200 chars runs them
- * into the same data cliff, wasting the excess. Capping the window per model (a per-center slot
- * cap that shortens every mode's path) is the general fix, deliberately not taken here.
+ * THE SERVER AND THE DECODER MUST BOTH APPLY THIS. The layout is derived, never transmitted —
+ * the decoder recovers model, `t:`, and `z:` from the stored request (see RequestContext) and
+ * computes the identical cap, without the client knowing this rule exists.
  */
-export function effectiveMode(mode: number, model: number): number {
-  return mode === MODE_RANGE && SHORT_HORIZON_MODELS.includes(model) ? MODE_AUTO : mode;
+export function fillSlotsFor(model: number, requestUtcHour: number, utcOffsetHours: number): number {
+  const reach = FILL_REACH_HOURS[model];
+  if (reach === undefined) return FILL_SLOTS;
+  const localHourOfDay = (((requestUtcHour + utcOffsetHours) % 24) + 24) % 24;
+  return Math.min(FILL_SLOTS, Math.max(1, Math.floor((localHourOfDay + reach) / 24)));
 }
 
 // Anchor profiles per mode: resolution index (1 = 12h … 4 = 1h, see RESOLUTION_HOURS) per
@@ -153,19 +159,35 @@ function compilePath(anchors: number[][]): number[][] {
   return path;
 }
 
-// seq → profile, per mode. seq is 1-based: PATHS[mode][seq - 1].
-const PATHS: number[][][] = ANCHORS.map(compilePath);
+// seq → profile, per (mode, slot cap). seq is 1-based: pathFor(mode, slots)[seq - 1]. A capped
+// path is the same ladder with every anchor truncated to the cap: truncation preserves anchor
+// nesting and profile monotonicity, and an anchor that collapses into its predecessor simply
+// contributes no interpolation steps, so a capped center walks the same ordering over the days
+// it has. THE TRUNCATION RULE IS WIRE FORMAT, like the anchors and the interpolation rule.
+const PATH_CACHE = new Map<string, number[][]>();
+function pathFor(mode: number, slots: number): number[][] {
+  const anchors = ANCHORS[mode];
+  if (!anchors) throw new Error(`layout: invalid mode ${mode}`);
+  if (!Number.isInteger(slots) || slots < 1 || slots > FILL_SLOTS)
+    throw new Error(`layout: slot cap ${slots} outside 1..${FILL_SLOTS}`);
+  const key = `${mode}:${slots}`;
+  let path = PATH_CACHE.get(key);
+  if (!path) {
+    path = compilePath(anchors.map((a) => a.slice(0, slots)));
+    PATH_CACHE.set(key, path);
+  }
+  return path;
+}
 
-// The 1-based seq of each anchor within its mode's path — the named waypoints of the ladder
-// (reports mark them on fill axes; nothing on the wire depends on them).
+// The 1-based seq of each anchor within its mode's full-window path — the named waypoints of
+// the ladder (reports mark them on fill axes; nothing on the wire depends on them).
 export const FILL_ANCHOR_SEQS: number[][] = ANCHORS.map((anchors, mode) =>
-  anchors.map((a) => PATHS[mode].findIndex((p) => p.length === a.length && p.every((r, i) => r === a[i])) + 1));
+  anchors.map((a) => pathFor(mode, FILL_SLOTS).findIndex((p) => p.length === a.length && p.every((r, i) => r === a[i])) + 1));
 
 // The per-slot resolution profile a seq denotes (a defensive copy). For consumers that need the
 // shape without the request-time period arithmetic (e.g. report strips).
-export function fillProfile(mode: number, seq: number): number[] {
-  const path = PATHS[mode];
-  if (!path) throw new Error(`layout: invalid mode ${mode}`);
+export function fillProfile(mode: number, seq: number, slots: number = FILL_SLOTS): number[] {
+  const path = pathFor(mode, slots);
   if (!Number.isInteger(seq) || seq < 1 || seq > path.length)
     throw new Error(`layout: seq ${seq} outside 1..${path.length} for mode ${mode}`);
   return [...path[seq - 1]];
@@ -185,23 +207,22 @@ export interface FillLayout {
   periodStartUtcHour: number[];
 }
 
-export function maxFillSeq(mode: number): number {
-  const path = PATHS[mode];
-  if (!path) throw new Error(`layout: invalid mode ${mode}`);
-  return path.length;
+export function maxFillSeq(mode: number, slots: number = FILL_SLOTS): number {
+  return pathFor(mode, slots).length;
 }
 
 // Derives the period layout for a fill-sequence number. `requestUtcHour` is the request time in
 // UTC hours since the epoch (aligned down to the hour — the `t:` request token); `utcOffsetHours`
-// is the location's fixed UTC offset in whole hours (the `z:` request token).
+// is the location's fixed UTC offset in whole hours (the `z:` request token); `slots` is the
+// model's slot cap (fillSlotsFor — both sides must pass the same value).
 export function layoutFor(
   mode: number,
   requestUtcHour: number,
   utcOffsetHours: number,
   seq: number,
+  slots: number = FILL_SLOTS,
 ): FillLayout {
-  const path = PATHS[mode];
-  if (!path) throw new Error(`layout: invalid mode ${mode}`);
+  const path = pathFor(mode, slots);
   if (!Number.isInteger(seq) || seq < 1 || seq > path.length)
     throw new Error(`layout: seq ${seq} outside 1..${path.length} for mode ${mode}`);
   if (!Number.isInteger(requestUtcHour) || requestUtcHour < 0)

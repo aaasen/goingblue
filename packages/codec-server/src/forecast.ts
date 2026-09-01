@@ -11,7 +11,7 @@ import {
   layoutFor,
   type FillLayout,
   maxFillSeq,
-  effectiveMode,
+  fillSlotsFor,
   FILL_SLOTS,
   DEFAULT_MODE,
   MODE_DETAIL,
@@ -1253,13 +1253,6 @@ export function parseRequest(body: string): ForecastParams {
     startEpochHour = Math.floor(Date.now() / 3600000);
   }
 
-  // Resolve the mode against the center before anything downstream sees it: Range collapses to
-  // Auto for a center that can't fill the window (see effectiveMode). Requests carry the mode
-  // that was asked for — clients don't apply this rule — so it belongs here, where params.mode
-  // becomes the mode the message is encoded under, and again in the decoder, which redoes it
-  // from the stored request to reach the same layout.
-  mode = effectiveMode(mode, MODEL_BIT[firstModelKey(modelsMask)]);
-
   // The reply budget, resolved last because it depends on three tokens at once. It is DERIVED,
   // never stated: `d:` and `n:` name the route and how many messages it may spend, and the length
   // follows from the one table both ends read. A multi-message wide reply repeats the header in
@@ -1367,7 +1360,8 @@ export function buildFillMessage(
   modelKey: string,
   agreement?: AgreementHourly | null,
 ): ForecastMessage | null {
-  const layout = layoutFor(params.mode, params.startEpochHour, params.utcOffsetHours, seq);
+  const slots = fillSlotsFor(MODEL_BIT[modelKey], params.startEpochHour, params.utcOffsetHours);
+  const layout = layoutFor(params.mode, params.startEpochHour, params.utcOffsetHours, seq, slots);
   return buildLayoutMessage(h, times, params, layout, lat, lon, elevation, modelKey, agreement);
 }
 
@@ -1408,10 +1402,11 @@ export function buildLayoutMessage(
   if (windows.some((w) => w.length === 0)) return null;
 
   // A period whose hours exist on the time axis but carry no data at all is an upstream
-  // horizon gap — Open-Meteo returns nulls past a model's last forecast day (GEM ends at 10;
-  // the fill horizon is 12). Treat the layout as unservable, exactly like a missing hour:
-  // coverage only grows along the fill path, so the seq search naturally clamps to the data
-  // the model actually has, with zero wire bits. Temperature is the sentinel (always fetched);
+  // horizon gap — Open-Meteo returns nulls past a model's last forecast hour. The slot cap
+  // (fillSlotsFor) keeps a model's ladder inside its guaranteed reach, so this is the backstop
+  // for data ending earlier than promised: treat the layout as unservable, exactly like a
+  // missing hour — coverage only grows along the fill path, so the seq search clamps to the
+  // data actually there, with zero wire bits. Temperature is the sentinel (always fetched);
   // scattered single-hour nulls inside an otherwise-populated period still aggregate fine.
   if (windows.some((w) => w.every((i) => h.temperature_2m[i] == null))) return null;
 
@@ -1519,8 +1514,9 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   // The window runs from local midnight of the request day (≤ 24h in the past for any UTC
   // offset — hence past_days=1) through the rest of that day plus up to FILL_HORIZON_DAYS full
   // local days (FILL_SLOTS covers both); +2 forecast days cover the offset shift past the last
-  // UTC day boundary. Models whose horizon ends earlier (GEM: 10 days) return nulls for the
-  // tail hours, which buildLayoutMessage treats as unservable — the seq search clamps to them.
+  // UTC day boundary. A short-horizon model's ladder is truncated to the slots it can serve
+  // (fillSlotsFor); nulls past a model's actual last forecast hour still make a layout
+  // unservable in buildLayoutMessage, and the seq search clamps to them.
   const fetchStart = Date.now();
   const [[h, times, elevation], agreement] = await Promise.all([
     fetchHourly(modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1, airQualityVarsFor(params.vars)),
@@ -1541,7 +1537,7 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
         : { encoded: codec.encode(msg, params.alphabet), periodHours: msg.periodHours };
     },
     (c) => c.encoded.length,
-    maxFillSeq(params.mode),
+    maxFillSeq(params.mode, fillSlotsFor(MODEL_BIT[modelKey], params.startEpochHour, params.utcOffsetHours)),
     params.maxChars,
   );
   const encodeMs = Date.now() - encodeStart;

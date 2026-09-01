@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  chunkLines, collectingChunks, decodeMessage, effectiveMode, maxFillSeq, mergeParts,
+  chunkLines, collectingChunks, decodeMessage, fillSlotsFor, maxFillSeq, mergeParts,
   peekHeader, readParts, reassembleReply, WIRE_HEADER_CHARS,
   type ForecastMessage, type ReplyOracles, type RequestContext, type Variable,
 } from '@weather/protocol';
@@ -132,7 +132,13 @@ function headOfStoredRequest(chunk: string, token: string): boolean {
   try {
     const { code, seq } = peekHeader(cleaned(chunk));
     const ctx = resolveContext(token, code);
-    return !!ctx && seq <= maxFillSeq(effectiveMode(ctx.mode, ctx.model));
+    if (!ctx) return false;
+    // A context stored without an offset can't compute the slot cap; accept the uncapped bound
+    // (decode is the final arbiter — an over-tight bound here would trap a valid reply).
+    const seqBound = ctx.utcOffsetHours == null
+      ? maxFillSeq(ctx.mode)
+      : maxFillSeq(ctx.mode, fillSlotsFor(ctx.model, Math.floor(ctx.start / 3600000), ctx.utcOffsetHours));
+    return seq <= seqBound;
   } catch {
     return false;
   }

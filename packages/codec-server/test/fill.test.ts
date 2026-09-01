@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  wireCodec, WIRE_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
+  wireCodec, WIRE_VERSION, layoutFor, maxFillSeq, fillSlotsFor, FILL_SLOTS,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   decodeMessage, DEFAULT_VARS, VAR, type Variable, MODEL_BIT, IPHONE_MAX_CHARS,
   WIRE_HEADER_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, maxCharsFor, reassembleReply,
@@ -403,10 +403,10 @@ describe("fitFillToBudget", () => {
     expect(decodeMessage(encoded, () => ctx).seq).toBe(1);
   });
 
-  // Why effectiveMode exists, end to end. GEM's data stops ~9 days out; Range's path covers the
-  // whole window at 12h before refining anything, so its servable layouts were all 12h and the
-  // search stopped with the budget mostly unspent.
-  describe("a Canadian request that asked for Range", () => {
+  // The short-horizon fix, end to end: GEM's data stops ~9 days out, and every mode's ladder is
+  // truncated to the slots it can serve (fillSlotsFor), so the seq search spends the budget on
+  // refinement within them instead of stranding it against the data cliff.
+  describe("a Canadian request", () => {
     // Nulls where GDPS's data stops: 240h from a run that can be 12h old and landed 7h after
     // init — the worst case a request is guaranteed.
     const lastHourWithData = REQ_UTC_HOUR + (240 - 12 - 7);
@@ -425,31 +425,31 @@ describe("fitFillToBudget", () => {
     const caCtx = (mode: number): RequestContext => ({
       ...ctxFor(mode), model: MODEL_BIT.CA, vars: caVars,
     });
+    const slots = fillSlotsFor(MODEL_BIT.CA, REQ_UTC_HOUR, UTC_OFFSET);
 
-    it("would strand a third of the budget as Range", () => {
-      // Measured on the encoded layouts rather than a decoded reply: with the substitution in
-      // place a CA message encoded under Range is unreachable — parseRequest resolves the mode
-      // before the encoder sees it, and the decoder resolves it the same way, so decoding one
-      // would (correctly) desync. This is the state the substitution removes.
-      const enc = caEncode(MODE_RANGE);
-      let best = 1;
-      for (let seq = 1; seq <= maxFillSeq(MODE_RANGE); seq++) {
-        const encoded = enc(seq);
-        if (encoded !== null && encoded.length <= 160) best = seq;
-      }
-      expect(fillProfile(MODE_RANGE, best).every((r) => r === 1)).toBe(true);
-      expect(enc(best)!.length).toBeLessThan(120); // nowhere near the 160 it was allowed
-    });
-
-    it("refines and spends the budget once resolved to Auto", () => {
-      const mode = effectiveMode(MODE_RANGE, MODEL_BIT.CA);
-      expect(mode).toBe(MODE_AUTO);
-      const encoded = fitFillToBudget(caEncode(mode), (e) => e.length, maxFillSeq(mode), 160)!;
-      const decoded = decodeMessage(encoded, () => caCtx(MODE_RANGE)); // client stored Range
+    it("spends a Range budget on refinement inside the capped window", () => {
+      const encoded = fitFillToBudget(
+        caEncode(MODE_RANGE), (e) => e.length, maxFillSeq(MODE_RANGE, slots), 160)!;
+      const decoded = decodeMessage(encoded, () => caCtx(MODE_RANGE));
       expect(encoded.length).toBeLessThanOrEqual(160);
       expect(encoded.length).toBeGreaterThan(140);
       expect(decoded.periodHours!.some((ph) => ph < 12)).toBe(true);
-      expect(decoded.mode).toBe(MODE_RANGE); // labelled as requested, laid out as Auto
+      expect(decoded.mode).toBe(MODE_RANGE);
+    });
+
+    it("reaches every mode's capped top on an internet-scale budget", () => {
+      expect(slots).toBe(9); // 13:00 local: 221h ends 6h short of slot 9's end
+      for (const mode of MODES) {
+        const top = maxFillSeq(mode, slots);
+        const encoded = fitFillToBudget(caEncode(mode), (e) => e.length, top, 100000)!;
+        const decoded = decodeMessage(encoded, () => caCtx(mode));
+        expect(decoded.seq, `mode ${mode}`).toBe(top);
+        expect(decoded.periodHours).toEqual(
+          layoutFor(mode, REQ_UTC_HOUR, UTC_OFFSET, top, slots).periodHours);
+        // More than a full hourly day: the budget deepens refinement past where the uncapped
+        // ladder's data cliff would have stopped the search.
+        expect(decoded.periodHours!.filter((ph) => ph === 1).length).toBeGreaterThan(24);
+      }
     });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { wireCodec, WIRE_VERSION, WIRE_HEADER_CHARS } from "../src/wire.js";
-import { layoutFor, maxFillSeq, MODE_AUTO, MODE_DETAIL, MODE_RANGE } from "../src/layout.js";
+import { layoutFor, maxFillSeq, fillSlotsFor, MODE_DETAIL, MODE_RANGE } from "../src/layout.js";
 import { DEFAULT_VARS, MODEL_BIT } from "../src/constants.js";
 import type { ForecastMessage, Period, RequestContext } from "../src/model.js";
 
@@ -12,8 +12,8 @@ const PERIOD: Period = {
 // Requested at local midnight (UTC offset 0) so day 0 is a complete day.
 const REQ_UTC_HOUR = Date.UTC(2026, 5, 15) / 3600000;
 
-function msgFor(mode: number, seq: number): ForecastMessage {
-  const layout = layoutFor(mode, REQ_UTC_HOUR, 0, seq);
+function msgFor(mode: number, seq: number, slots?: number): ForecastMessage {
+  const layout = layoutFor(mode, REQ_UTC_HOUR, 0, seq, slots);
   // hour must be the layout's first-period start: the encoder keys the temp time-of-day
   // codebooks off it, and the decoder derives the same value from the layout.
   const first = new Date(layout.periodStartUtcHour[0] * 3600000);
@@ -76,34 +76,39 @@ describe("seq header", () => {
     expect(() => wireCodec.encode({ ...m, seq: undefined as unknown as number })).toThrow(/seq/);
   });
 
-  // The server encodes a Canadian Range request under Auto (see effectiveMode). The mode isn't
-  // on the wire and the client stores what it asked for, so the decoder has to redo the
-  // substitution — otherwise it would lay an Auto message out along Range's path.
-  it("decodes a Canadian Range request against Auto's layout", () => {
-    const built = msgFor(MODE_AUTO, 20); // what the server produced
-    const stored: RequestContext = {
-      ...ctxOf(built), model: MODEL_BIT.CA, mode: MODE_RANGE, // what the client asked for
-    };
+  // A short-horizon model's ladder is truncated (see fillSlotsFor). The cap isn't on the wire —
+  // the decoder recomputes it from the stored model and request time — so the server-built
+  // capped layout and the decoder-derived one must be the same path.
+  it("decodes a Canadian request against the capped path", () => {
+    const slots = fillSlotsFor(MODEL_BIT.CA, REQ_UTC_HOUR, 0);
+    expect(slots).toBe(9); // a local-midnight request: 221h ends inside slot 9
+    const seq = maxFillSeq(MODE_RANGE, slots);
+    const built = msgFor(MODE_RANGE, seq, slots); // what the server produced
+    const stored: RequestContext = { ...ctxOf(built), model: MODEL_BIT.CA };
     const decoded = wireCodec.decode(wireCodec.encode(built), () => stored);
-    expect(decoded.periodHours).toEqual(built.periodHours); // laid out along Auto's path
+    expect(decoded.periodHours).toEqual(built.periodHours);
     expect(decoded.periods[0]).toHaveLength(built.periods[0].length);
-    expect(decoded.mode).toBe(MODE_RANGE); // but still labelled as what was asked for
-
-    // And a context that happens to hold the substituted mode already lands in the same place,
-    // so the rule is safe to apply anywhere on the read path.
-    const storedEffective = { ...stored, mode: MODE_AUTO };
-    expect(wireCodec.decode(wireCodec.encode(built), () => storedEffective).periodHours)
-      .toEqual(decoded.periodHours);
+    // The capped top is refined — the budget refines within the days Canada has, instead of
+    // stranding against slots it can't serve.
+    expect(decoded.periodHours).toContain(1);
   });
 
-  it("leaves a Range request on an unsubstituted model alone", () => {
+  it("leaves a full-window model's path uncapped", () => {
     const m = msgFor(MODE_RANGE, 20);
     const usCtx: RequestContext = { ...ctxOf(m), model: MODEL_BIT.US, mode: MODE_RANGE };
     const decoded = wireCodec.decode(wireCodec.encode(m), () => usCtx);
     expect(decoded.mode).toBe(MODE_RANGE);
-    expect(decoded.periodHours).toEqual(m.periodHours); // Range's own layout, not Auto's
-    expect(decoded.periodHours).not.toEqual(
-      layoutFor(MODE_AUTO, REQ_UTC_HOUR, 0, 20).periodHours);
+    expect(decoded.periodHours).toEqual(m.periodHours);
+  });
+
+  it("rejects a seq past the capped fill sequence", () => {
+    // Encoded at Range's uncapped top but resolved against a Canadian context: the capped path
+    // is shorter, so the seq can't be one the server produced.
+    const slots = fillSlotsFor(MODEL_BIT.CA, REQ_UTC_HOUR, 0);
+    expect(maxFillSeq(MODE_RANGE)).toBeGreaterThan(maxFillSeq(MODE_RANGE, slots));
+    const m = msgFor(MODE_RANGE, maxFillSeq(MODE_RANGE));
+    const caCtx = { ...ctxOf(m), model: MODEL_BIT.CA };
+    expect(() => wireCodec.decode(wireCodec.encode(m), () => caCtx)).toThrow(/fill sequence/);
   });
 
   it("rejects a decoded seq beyond the context mode's fill sequence", () => {

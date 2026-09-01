@@ -128,10 +128,8 @@ export interface ForecastMessage {
   // Fill-sequence number carried in the header; the period layout — count and per-period
   // resolution — is derived from it (see layout.ts).
   seq: number;
-  // Requested priority mode (MODE_DETAIL/MODE_AUTO/MODE_RANGE, from the request context) — what
-  // the reader asked for, which is what display should call it. Not necessarily the mode the
-  // layout was built along: against a center that can't fill the window, Range is served as Auto
-  // (see effectiveMode). Read periodHours for the shape; this field is for labelling.
+  // Requested priority mode (MODE_DETAIL/MODE_AUTO/MODE_RANGE, from the request context).
+  // Read periodHours for the shape; this field is for labelling.
   mode: number;
   // Span of each period in hours (periodHours.length === periods[m].length). Periods within
   // one message can span different resolutions.

@@ -14,7 +14,7 @@ import {
   ALWAYS_VARS, VAR_CODES, MODEL_BIT,
   WIND_LEVELS_HPA, WIND_LEVEL_VARS, varGroupCodesFor, windLevelsToken,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE, MODE_NAMES, DEFAULT_MODE,
-  predictCenter, estimatedLastFullRunMs, FILL_SLOTS, multiMessageOffered, startDatetime,
+  predictCenter, estimatedLastFullRunMs, fillSlotsFor, multiMessageOffered, startDatetime,
   type RequestContext, type Center, type ForecastMessage,
 } from '@weather/protocol';
 import { API_BASE } from './account';
@@ -401,14 +401,16 @@ function smsUrl(body: string): string {
   return `sms:${FORECAST_NUMBER_E164}${separator}body=${encodeURIComponent(body)}`;
 }
 
-// The last instant any forecast can reach: the end of the final day slot the fill path can cover
-// (see layout.ts — the remainder of the request day plus FILL_HORIZON_DAYS whole local days).
-// The maximum, not what a given request will get — how far the fill actually reaches depends on
-// the weather's entropy, which isn't knowable before the reply comes back.
-function forecastWindowEndMs(coords: { lat: number; lon: number }, startEpochHour: number): number {
+// The last instant a forecast from this model can reach: the end of the final day slot its fill
+// path can cover (see layout.ts — the remainder of the request day plus whole local days, capped
+// by the model's slot count for a short-horizon center). The maximum, not what a given request
+// will get — how far the fill actually reaches depends on the weather's entropy, which isn't
+// knowable before the reply comes back.
+function forecastWindowEndMs(model: string, coords: { lat: number; lon: number }, startEpochHour: number): number {
   const offset = requestOffsetHours(coords, startEpochHour);
   const day0 = Math.floor((startEpochHour + offset) / 24) * 24; // local midnight of the request day
-  return (day0 + 24 * FILL_SLOTS - offset) * 3600000;
+  const slots = fillSlotsFor(MODEL_BIT[model.toUpperCase()] ?? 0, startEpochHour, offset);
+  return (day0 + 24 * slots - offset) * 3600000;
 }
 
 // The models the selected option actually serves this location from, in the order they take over
@@ -432,7 +434,7 @@ function modelStackLabel(
   startEpochHour: number,
 ): string | null {
   const nowMs = startEpochHour * 3600000;
-  const windowEndMs = forecastWindowEndMs(coords, startEpochHour);
+  const windowEndMs = forecastWindowEndMs(model, coords, startEpochHour);
   const labels: string[] = [];
   let covered = 0;
   for (const spec of predictCenter(model as Center, coords.lat, coords.lon).models) {

@@ -3,7 +3,7 @@ import {
   metersToPressure, RESOLUTION_HOURS, TABLE_RES_IDXS,
   AGREEMENT_CENTERS, agreementLeadBucket,
 } from "./constants.js";
-import { layoutFor, maxFillSeq, effectiveMode } from "./layout.js";
+import { layoutFor, maxFillSeq, fillSlotsFor } from "./layout.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "./bits.js";
 import {
   encode, decode, encodeBodyLE, encodeBodyWide, decodeBodyAuto, nCharsForBits, type Alphabet,
@@ -908,19 +908,15 @@ export function messageFromString(s: string, resolve: ContextResolver): Forecast
   const { model, vars, lat, lon, start, mode, utcOffsetHours, device } = ctx;
   if (mode == null || utcOffsetHours == null)
     throw new Error(`Forecast code ${code} matches a request without a priority mode`);
-  // The mode the message was BUILT under, which for a short-horizon center isn't the one that
-  // was asked for (see effectiveMode). The stored request holds the requested mode — clients
-  // send and keep what the user picked — so the substitution is redone here against the same
-  // model the server resolved it against. Only the layout reads this; the message reports the
-  // requested mode, since that's what the reader chose and what the reply answers.
-  const layoutMode = effectiveMode(mode, model);
-  if (seq > maxFillSeq(layoutMode))
-    throw new Error(`seq ${seq} exceeds mode ${layoutMode}'s fill sequence`);
+  // The period layout is derived, not decoded: both sides compute it from the stored request,
+  // including the slot cap for a short-horizon model (see fillSlotsFor).
+  const requestUtcHour = Math.floor(start / 3600000);
+  const slots = fillSlotsFor(model, requestUtcHour, utcOffsetHours);
+  if (seq > maxFillSeq(mode, slots))
+    throw new Error(`seq ${seq} exceeds mode ${mode}'s fill sequence`);
   const models_mask = 1 << model; // a response carries exactly one model
 
-  // The period layout is derived, not decoded: both sides compute it from the stored request.
-  const requestUtcHour = Math.floor(start / 3600000);
-  const layout = layoutFor(layoutMode, requestUtcHour, utcOffsetHours, seq);
+  const layout = layoutFor(mode, requestUtcHour, utcOffsetHours, seq, slots);
 
   // month/day/hour describe the FIRST PERIOD's start (which precedes the request time — the
   // first period is the one containing it), so display code can lay periods out from it.

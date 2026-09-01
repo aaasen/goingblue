@@ -203,18 +203,15 @@ describe("parseRequest", () => {
     expect(parseRequest("").mode).toBe(MODE_AUTO);
   });
 
-  it("resolves Range to Auto for a Canadian request", () => {
-    // The center can't fill the window, so Range would clamp to a 12h-flat layout with the
-    // budget unspent (see effectiveMode). Resolved at parse, so a hand-typed request gets the
-    // same substitution the app applies before sending — and params.mode is what the reply is
-    // encoded under, which is what the decoder derives its layout from.
-    expect(parseRequest("p:r m:ca").mode).toBe(MODE_AUTO);
-    expect(parseRequest("p:r m:us").mode).toBe(MODE_RANGE);
-    expect(parseRequest("p:r m:eu").mode).toBe(MODE_RANGE);
-    expect(parseRequest("p:r").mode).toBe(MODE_RANGE); // best_match default
-    // Only Range moves.
-    expect(parseRequest("p:d m:ca").mode).toBe(MODE_DETAIL);
-    expect(parseRequest("p:a m:ca").mode).toBe(MODE_AUTO);
+  it("keeps the requested mode for every center", () => {
+    // A short-horizon center is handled by capping the fill ladder's slots (see fillSlotsFor),
+    // not by moving the mode: params.mode is what was asked for, and it's what describeRequest
+    // records.
+    for (const m of ["m:ca", "m:us", "m:eu", ""]) {
+      expect(parseRequest(`p:r ${m}`).mode, m).toBe(MODE_RANGE);
+      expect(parseRequest(`p:d ${m}`).mode, m).toBe(MODE_DETAIL);
+      expect(parseRequest(`p:a ${m}`).mode, m).toBe(MODE_AUTO);
+    }
   });
 
   it("d: with a non-device value (the removed duration token) is an error, not a duration", () => {
