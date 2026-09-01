@@ -9,7 +9,7 @@
  *
  * Quantization is the shared extended Beaufort scale (forces 0..17, quantWind in derive-lib.ts,
  * must match wire.ts): deltas -17..17 (35 symbols), no escape needed. The surface fallback for
- * messages without gust in vars_mask is the [res][level 0] table in
+ * messages without gust requested is the [res][level 0] table in
  * derive-wind-speed-delta-codebooks.ts (which charges no wire cost for it — sfc's corpus cost
  * lives HERE, in the conditioned tables, since gust is always present when counting).
  *
@@ -29,7 +29,7 @@
  *   pnpm exec tsx packages/codec-server/scripts/derive-gust-delta-codebooks.ts
  */
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
-import { VARS_BIT, upperDeltaBucket, TABLE_RES_IDXS, type Period } from "@weather/protocol";
+import { VAR, type Variable, upperDeltaBucket, TABLE_RES_IDXS, type Period } from "@weather/protocol";
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone, quantWind,
   type CellCounter, type DerivedTables,
@@ -39,7 +39,7 @@ const FORCE_MAX = 17;              // extended Beaufort domain, must match wire.
 const NSYM = 2 * FORCE_MAX + 1;    // 35: deltas -17..17
 const NRES = TABLE_RES_IDXS.length; // 12h/6h/3h/1h — the resolutions layouts emit, in row order
 const NBUCKET = 5;                 // upperDeltaBucket domain: ≤-2, -1, 0, +1, ≥+2
-const MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.gust);
+const WIND_VARS: ReadonlySet<Variable> = new Set([VAR.wind, VAR.gust]);
 
 const deltaSym = (delta: number): number => delta + FORCE_MAX; // -17..17 -> 0..34
 
@@ -77,7 +77,7 @@ export function counter(): CellCounter {
         const slice = ctx.atMidnight(TABLE_RES_IDXS[res]);
         if (!slice) continue;
         const { hpp, start: firstUtc, n } = slice;
-        const periods = slice.rows.map((r) => toFullPeriod(r, MASK, "US"));
+        const periods = slice.rows.map((r) => toFullPeriod(r, WIND_VARS, "US"));
 
         let prevGust = quantWind(periods[0].wind_gust_kph);
         let prevSfc = quantWind(periods[0].wind_sfc_kph);

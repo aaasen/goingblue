@@ -91,7 +91,7 @@ const ctxCount = (c: Column) => NPREV * (c.tod ? NTOD : 1);
 
 // Each headline's residual tables: the count-table name, the generated constant, the headline's
 // own column, and the three constituents that key it — in AQI_BASE_* bit order (pm2.5, ozone,
-// pm10), which is what makes `mask` here the same mask wire.ts derives from vars_mask.
+// pm10), which is what makes `mask` here the same mask wire.ts derives from the request.
 // `masks` is the set the codec actually codes as residuals (AQI_*_RESIDUAL_MASKS in entropy.ts).
 // The other presence masks fall back to the headline's own deltas, so their table rows are never
 // looked up — counting them was ~9 of every 14 residual increments spent on rows nothing reads.

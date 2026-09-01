@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   CODECS, chunkLines, collectingChunks, decodeMessage, effectiveMode, maxFillSeq, mergeParts,
   peekHeader, peekVersion, readParts, reassembleReply, supportedVersions,
-  type ForecastMessage, type ReplyOracles, type RequestContext,
+  type ForecastMessage, type ReplyOracles, type RequestContext, type Variable,
 } from '@weather/protocol';
 
 // The response is slim (see the protocol's message-code scheme): it omits lat/lon/models/vars/
@@ -27,6 +27,20 @@ interface Store {
   slots: Slot[];
 }
 
+// The persisted shape of a slot: JSON has no Set, so the context's vars travel as an array. A
+// stored slot that doesn't match (one written under a different context shape) fails isStoredSlot
+// and is dropped on load, the same expiry rule as a message that no longer decodes.
+type StoredContext = Omit<RequestContext, 'vars'> & { vars: string[] };
+type StoredSlot = Omit<Slot, 'context'> & { context: StoredContext };
+
+function storedSlot(s: Slot): StoredSlot {
+  return { ...s, context: { ...s.context, vars: [...s.context.vars] } };
+}
+
+function revivedSlot(s: StoredSlot): Slot {
+  return { ...s, context: { ...s.context, vars: new Set(s.context.vars as Variable[]) } };
+}
+
 // In-memory mirror of the persisted store. Decoding is synchronous and must resolve a code to its
 // context, so we keep the map in memory; callers load the store before decoding.
 const memos = new Map<string, Store>();
@@ -36,10 +50,11 @@ function storeKey(token: string): string {
   return `${STORE_KEY_PREFIX}${token}`;
 }
 
-function isSlot(x: unknown): x is Slot {
-  const s = x as Slot;
+function isStoredSlot(x: unknown): x is StoredSlot {
+  const s = x as StoredSlot;
   return !!s && typeof s.code === 'number' && typeof s.label === 'string'
-    && !!s.context && typeof s.context.vars_mask === 'number';
+    && !!s.context && Array.isArray(s.context.vars)
+    && s.context.vars.every((v) => typeof v === 'string');
 }
 
 function rebuild(token: string, store: Store): void {
@@ -51,9 +66,9 @@ export async function loadStore(token: string): Promise<Store> {
   try {
     const raw = await AsyncStorage.getItem(storeKey(token));
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<Store>;
+      const parsed = JSON.parse(raw) as { nextCode?: unknown; slots?: unknown[] };
       if (parsed && typeof parsed.nextCode === 'number' && Array.isArray(parsed.slots)) {
-        store = { nextCode: parsed.nextCode, slots: parsed.slots.filter(isSlot) };
+        store = { nextCode: parsed.nextCode, slots: parsed.slots.filter(isStoredSlot).map(revivedSlot) };
       }
     }
   } catch { /* keep whatever is in memory for this account */ }
@@ -65,7 +80,8 @@ export async function loadStore(token: string): Promise<Store> {
 async function persist(token: string, store: Store): Promise<void> {
   memos.set(token, store);
   rebuild(token, store);
-  try { await AsyncStorage.setItem(storeKey(token), JSON.stringify(store)); } catch { /* ignore */ }
+  const stored = { nextCode: store.nextCode, slots: store.slots.map(storedSlot) };
+  try { await AsyncStorage.setItem(storeKey(token), JSON.stringify(stored)); } catch { /* ignore */ }
 }
 
 // Synchronous resolver passed to the codec. Load the store first (loadStore) so the map is warm.

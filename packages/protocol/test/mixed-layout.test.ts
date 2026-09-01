@@ -12,6 +12,8 @@ import {
   MODE_RANGE,
   decodeMessage,
   type ForecastMessage,
+  VAR,
+  type Variable,
   type Period,
   type RequestContext,
   type FillLayout,
@@ -24,10 +26,13 @@ import {
   AQI_EU_LOWER,
 } from "../src/index.js";
 
-// Every variable (bit 8 is `gust`; bit 12 is `rain`; bits 13..17 are air quality — bits 18..21
-// are reserved for European sub-indices with no corpus yet, so nothing encodes them).
+// The variables periodAt supplies values for (the columns this test exercises).
 // periodAt sets no gust value, so the always-on gust column encodes as calm — harmless here.
-const ALL_VARS = (1 << 18) - 1;
+const ALL_VARS: ReadonlySet<Variable> = new Set([
+  VAR.precip, VAR.temp, VAR.snow, VAR.freeze, VAR.rain, VAR.wind, VAR.gust,
+  VAR.w300, VAR.w400, VAR.w500, VAR.clouds,
+  VAR.aq_pm25, VAR.aq_o3, VAR.aqi, VAR.aqi_eu, VAR.aqi_eu_pm25,
+]);
 
 // Request: 2026-07-12 at 13:00 local, UTC-9. Detail mode unless a test says otherwise — its
 // path has the richest resolution mixes (1h/3h/6h/12h in one message).
@@ -79,7 +84,7 @@ function msgFor(layout: FillLayout, overrides: Partial<ForecastMessage> = {}): F
     code: 42,
     days: layout.days,
     models_mask: 0b001,
-    vars_mask: ALL_VARS,
+    vars: ALL_VARS,
     month: first.getUTCMonth() + 1,
     day: first.getUTCDate(),
     hour: first.getUTCHours(),
@@ -97,7 +102,7 @@ function msgFor(layout: FillLayout, overrides: Partial<ForecastMessage> = {}): F
 
 const ctxFor = (mode: number): RequestContext => ({
   model: 0,
-  vars_mask: ALL_VARS,
+  vars: ALL_VARS,
   lat: 63.135,
   lon: -150.989,
   start: REQ_UTC_HOUR * 3600000,
@@ -127,7 +132,7 @@ describe("mixed-layout round-trip encoding", () => {
     expect(decoded.periods[0]).toHaveLength(original.periods[0].length);
     expect(decoded.elevation).toBe(500);
     expect(decoded.models_mask).toBe(0b001);
-    expect(decoded.vars_mask).toBe(ALL_VARS);
+    expect(decoded.vars).toEqual(ALL_VARS);
   });
 
   it("month/day/hour describe the first period's start, not the request time", () => {

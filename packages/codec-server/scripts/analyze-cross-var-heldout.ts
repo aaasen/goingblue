@@ -34,7 +34,7 @@
  */
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {
-  WMO2IDX, VARS_BIT, compandSqrt, SNOW_K, RAIN_K, ACCUM_BITS,
+  WMO2IDX, VAR, type Variable, compandSqrt, SNOW_K, RAIN_K, ACCUM_BITS,
   WEATHERCODE_CLASS, WC_CLASSES,
   tempDeltaBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_MIN, TEMP_DELTA_MAX,
   upperDeltaBucket, WIND_LEVELS_HPA,
@@ -72,7 +72,10 @@ const qw = (step: number, max: number) => (kph: number | undefined) =>
 const qOld = qw(OLD_STEP, 31), qSfc = qw(5, 31), qGust = qw(5, 63);
 const N_SFC_B = 5; // upperDeltaBucket domain: ≤-2, -1, 0, +1, ≥+2
 
-const ALL_MASK = (1 << 13) - 1; // bit 8 = gust (always-on since 2026-07-30)
+const ALL_VARS: ReadonlySet<Variable> = new Set([
+  VAR.precip, VAR.temp, VAR.snow, VAR.freeze, VAR.rain, VAR.wind, VAR.gust,
+  VAR.w300, VAR.w400, VAR.w500, VAR.clouds,
+]);
 
 // One uniform-resolution column: per-period quantized symbols/features, aligned by period index.
 // Everything is typed arrays: the full-corpus scan holds ~400k chains × ~20 fields in RAM, and
@@ -117,7 +120,7 @@ async function collectChains(): Promise<Chain[]> {
         windows.push(w);
       }
       const periods: Period[] = rowsFromWindows(h, h.time, windows, off)
-        .map((r) => toFullPeriod(r, ALL_MASK, "US"));
+        .map((r) => toFullPeriod(r, ALL_VARS, "US"));
 
       const c: Chain = {
         fold, res, n,

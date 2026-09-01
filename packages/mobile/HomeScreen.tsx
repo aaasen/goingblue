@@ -10,9 +10,9 @@ import { MODAL_TOP_INSET, pageInsets } from './insets';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
-  VARS_BIT, WIRE_VERSION,
-  ALWAYS_VARS_MASK, CONFIGURABLE_VAR_GROUPS, MODEL_BIT,
-  WIND_LEVELS_HPA,
+  VAR, type Variable, WIRE_VERSION,
+  ALWAYS_VARS, CONFIGURABLE_VAR_GROUPS, MODEL_BIT,
+  WIND_LEVELS_HPA, WIND_LEVEL_VARS, varGroupCodesFor, windLevelsToken,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE, MODE_NAMES, DEFAULT_MODE,
   predictCenter, estimatedLastFullRunMs, FILL_SLOTS, multiMessageOffered, startDatetime,
   type RequestContext, type Center, type ForecastMessage,
@@ -94,11 +94,11 @@ const GPS_FIX_MAX_AGE_MS = 60_000;
 // have no freezing-level product (Europe's pressure winds are filled from IFS 0.25°). The
 // air-quality variables never appear here: they come from CAMS, not from the weather center, so
 // the `m:` choice doesn't reach them.
-const MODEL_UNAVAIL_VARS: Record<string, string[]> = {
+const MODEL_UNAVAIL_VARS: Record<string, Variable[]> = {
   best: [],
   us: [],
-  ca: ['freeze'],
-  eu: ['freeze'],
+  ca: [VAR.freeze],
+  eu: [VAR.freeze],
 };
 
 type LocationMode = 'current' | 'custom';
@@ -156,7 +156,7 @@ interface VarGroup {
   // Help copy for this group, shown in the Extra Variables modal. Kept beside the label so the two
   // can't drift: a row and its explanation are written once, in one place.
   desc: string;
-  vars: readonly string[];
+  vars: readonly Variable[];
   // Set to fold this group into a collapsible sub-list under that subgroup's heading. Purely
   // display: the request carries each member's own code, and a subgroup is never toggled as a unit.
   subgroup?: string;
@@ -168,7 +168,7 @@ interface VarGroup {
 
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
 // protocol variables together (e.g. "Clouds" covers the pressure-level band, not total cover).
-// Order is display order only — the server ORs the `v:` codes into a mask, so the emitted
+// Order is display order only — the server unions the `v:` codes into the vars set, so the emitted
 // order carries no meaning. Precip chance sits last of the weather groups: it costs the most for
 // the least detail.
 // The air-quality entries are single variables rather than bundles: smoke and ozone are different
@@ -187,7 +187,7 @@ const VAR_GROUPS: VarGroup[] = [
   // reader's unit at render time (windLevelLabel). Every ticked level is carried — a reader on a
   // summit who ticks 925 hPa gets model air under the terrain, which is theirs to leave out.
   ...WIND_LEVELS_HPA.map((hpa, li): VarGroup => ({
-    value: `w${hpa}`, windLevel: li, label: `${hpa} hPa`, vars: [`w${hpa}`],
+    value: `w${hpa}`, windLevel: li, label: `${hpa} hPa`, vars: [WIND_LEVEL_VARS[li]],
     subgroup: WIND_SUBGROUP,
     desc: `Wind speed and direction at the ${hpa} hPa pressure level.`,
   })),
@@ -335,15 +335,18 @@ const DEFAULT_GROUPS = new Set<string>();
 // `z:` is the local-midnight UTC offset the period grid aligns to. `u:` carries the account token
 // so the server can attribute the request to the user. `k:` is the message code the slim response
 // echoes so the client can recover the request context (see cache.ts).
-function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, variableCodes: string[], windLevels: number[], device: Device, messages: number, code: number, startEpochHour: number): string {
+function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, vars: ReadonlySet<Variable>, device: Device, messages: number, code: number, startEpochHour: number): string {
   const parts: string[] = [`v${WIRE_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
   parts.push(`p:${PRIORITIES.find((m) => m.value === mode)!.token}`);
   parts.push(`z:${requestOffsetHours(coords, startEpochHour)}`);
   parts.push(`m:${model}`);
-  if (variableCodes.length) parts.push(`v:${variableCodes.join('')}`);
-  // Pressure-level wind: the ladder indices of the selected levels (`w:234` = 500/600/700 hPa).
-  if (windLevels.length) parts.push(`w:${windLevels.join('')}`);
+  // Both variable tokens are derived from the one selection set: `v:` carries the group codes,
+  // `w:` the ladder indices of the selected pressure levels (`w:234` = 500/600/700 hPa).
+  const groupCodes = varGroupCodesFor(vars);
+  if (groupCodes) parts.push(`v:${groupCodes}`);
+  const windLevels = windLevelsToken(vars);
+  if (windLevels) parts.push(`w:${windLevels}`);
   // `d:` is what tells the server which pipe the reply has to fit down — it picks the response
   // alphabet as well as its length. The length is derived from `d:` and `n:` at both ends, off
   // the one table in the protocol, so the request no longer spends characters restating it.
@@ -359,12 +362,12 @@ function buildMsg(token: string, coords: { lat: number; lon: number } | null, mo
 
 // The request context the client stores under the message code, mirroring how the server will
 // parse this request (so the recovered fields exactly match what the response was encoded with).
-function buildContext(coords: { lat: number; lon: number }, mode: number, model: string, varsMask: number, startEpochHour: number, device: Device): RequestContext {
+function buildContext(coords: { lat: number; lon: number }, mode: number, model: string, vars: ReadonlySet<Variable>, startEpochHour: number, device: Device): RequestContext {
   return {
     mode,
     utcOffsetHours: requestOffsetHours(coords, startEpochHour),
     model: MODEL_BIT[model.toUpperCase()] ?? 0, // single model index
-    vars_mask: varsMask,
+    vars,
     lat: coords.lat,
     lon: coords.lon,
     start: startEpochHour * 3600000, // UTC epoch ms
@@ -530,25 +533,25 @@ function cacheMetaLabel(slot: Slot, token: string, units: UnitPrefs, detailed = 
   }
 }
 
-const OPTIONAL_VARIABLE_ICONS = [
-  { vars: ['cch', 'ccm', 'ccl'], symbol: '☁️', label: 'Detailed clouds' },
-  { vars: WIND_LEVELS_HPA.map((l) => `w${l}`), symbol: '💨', label: 'Pressure-level winds' },
-  { vars: ['freeze'], symbol: '🌡️', label: 'Freezing level' },
+const OPTIONAL_VARIABLE_ICONS: { vars: readonly Variable[]; symbol: string; label: string }[] = [
+  { vars: [VAR.clouds], symbol: '☁️', label: 'Detailed clouds' },
+  { vars: WIND_LEVEL_VARS, symbol: '💨', label: 'Pressure-level winds' },
+  { vars: [VAR.freeze], symbol: '🌡️', label: 'Freezing level' },
   // One icon for the whole air-quality block: which index a request picked is the meteogram's
   // business, and five near-identical chips on a cache row would say less than one.
-  { vars: ['aqi', 'aq_pm25', 'aq_o3', 'aq_pm10', 'aq_no2', 'aq_so2',
-           'aqi_eu', 'aqi_eu_pm25', 'aqi_eu_o3', 'aqi_eu_pm10', 'aqi_eu_no2', 'aqi_eu_so2'],
+  { vars: [VAR.aqi, VAR.aq_pm25, VAR.aq_o3, VAR.aq_pm10, VAR.aq_no2, VAR.aq_so2,
+           VAR.aqi_eu, VAR.aqi_eu_pm25, VAR.aqi_eu_o3, VAR.aqi_eu_pm10, VAR.aqi_eu_no2, VAR.aqi_eu_so2],
     symbol: '🌫️', label: 'Air quality' },
 ];
 
-function variableIconsForMask(mask: number) {
+function variableIconsFor(selected: ReadonlySet<Variable>) {
   return OPTIONAL_VARIABLE_ICONS.filter(({ vars }) =>
-    vars.some((variable) => mask & (1 << VARS_BIT[variable])),
+    vars.some((variable) => selected.has(variable)),
   );
 }
 
 function cacheVariableIcons(slot: Slot, token: string) {
-  try { return variableIconsForMask(decodeAny(slot.encoded!, token).vars_mask); }
+  try { return variableIconsFor(decodeAny(slot.encoded!, token).vars); }
   catch { return []; }
 }
 
@@ -803,13 +806,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // What a closed subgroup counts. A group the model can't supply adds nothing to the request, so
   // it isn't reported as if it did — activeGroups has already dropped those.
   const activeValues = new Set(activeGroups.map((g) => g.value));
-  const configurableVars = activeGroups.flatMap((g) => g.vars);
-  const variableCodes = activeGroups.flatMap((g) => (g.code != null ? [g.code] : []));
-  const windLevels = activeGroups.flatMap((g) => (g.windLevel != null ? [g.windLevel] : []));
-  const varsMask = configurableVars.reduce(
-    (mask, v) => mask | (1 << (VARS_BIT[v] ?? -1)),
-    ALWAYS_VARS_MASK,
-  );
+  const vars = new Set<Variable>([...ALWAYS_VARS, ...activeGroups.flatMap((g) => g.vars)]);
   const modeName = PRIORITIES.find((m) => m.value === mode)!.label;
 
   // Whether the multi-message switch is on offer at all, and so how many messages the reply may
@@ -817,7 +814,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // worth asking about (multiMessageOffered states the rule per route); a switch left on from an
   // earlier selection counts only while it is showing, so narrowing the variables back down
   // returns to one message without the reader having to find and turn it off.
-  const multiMessageShown = multiMessageOffered(deviceCode(device), variableCodes, windLevels);
+  const multiMessageShown = multiMessageOffered(deviceCode(device), vars);
   const messages = multiMessageShown && twoMessages ? 2 : DEFAULT_MESSAGES;
 
   const parsedCustomCoords = parseLatLon(customCoords);
@@ -923,8 +920,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return null;
     const startHour = alignedStartEpochHour();
-    const code = await allocCode(token, buildContext(coords, mode, model, varsMask, startHour, device), `${modeName} · ${model.toUpperCase()}`);
-    return buildMsg(token, coords, mode, model, variableCodes, windLevels, device, messages, code, startHour);
+    const code = await allocCode(token, buildContext(coords, mode, model, vars, startHour, device), `${modeName} · ${model.toUpperCase()}`);
+    return buildMsg(token, coords, mode, model, vars, device, messages, code, startHour);
   }
 
   async function handleCopy() {

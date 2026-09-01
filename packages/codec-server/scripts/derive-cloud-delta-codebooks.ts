@@ -34,7 +34,7 @@
  */
 import { toFullPeriod } from "../src/forecast.ts";
 import {
-  CLOUD_BAND_LEVELS_HPA, VARS_BIT, quantCover,
+  CLOUD_BAND_LEVELS_HPA, VAR, type Variable, quantCover,
   RESOLUTION_HOURS, TABLE_RES_IDXS, CLOUD_BAND_MAX_HOURS,
 } from "@weather/protocol";
 import {
@@ -49,7 +49,7 @@ const NSYM = 1 << STEP_BITS;       // 8 value symbols
 const NPREV = NSYM;                // keyed by the previous step, exact
 // The spans the band actually rides — derived from the wire's own clamp so the two can't drift.
 const SERVING_RES_IDXS = TABLE_RES_IDXS.filter((r) => RESOLUTION_HOURS[r] <= CLOUD_BAND_MAX_HOURS);
-const CLOUD_MASK = 1 << VARS_BIT.cch; // the whole band rides this one bit
+const CLOUD_VARS: ReadonlySet<Variable> = new Set([VAR.clouds]); // the whole band rides this one variable
 
 export function counter(): CellCounter {
   const tables = [{ name: "cloudBand", dims: [NLEVEL, NPREV, NSYM] }];
@@ -81,7 +81,7 @@ export function counter(): CellCounter {
         if (!slice) continue;
         // toFullPeriod fills cloud_band through repairCloudBand, so levels a center leaves
         // empty are bridged here exactly as they are on the wire.
-        const periods = slice.rows.map((r) => toFullPeriod(r, CLOUD_MASK, "US"));
+        const periods = slice.rows.map((r) => toFullPeriod(r, CLOUD_VARS, "US"));
         for (let li = 0; li < NLEVEL; li++) {
           let prev = quantCover(periods[0].cloud_band?.[li]);
           for (let p = 1; p < periods.length; p++) {

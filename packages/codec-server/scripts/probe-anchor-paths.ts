@@ -19,7 +19,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildLayoutMessage, type ForecastParams } from "../src/forecast.ts";
 import {
-  RESOLUTION_HOURS, VARS_BIT, encodeBreakdown, WIRE_VERSION,
+  RESOLUTION_HOURS, VAR, VARIABLES, type Variable, encodeBreakdown, WIRE_VERSION,
   type FillLayout, type ForecastMessage,
 } from "@weather/protocol";
 import { REPO_ROOT, dbLocations, listCells, loadCell, modelElevations, openDb } from "./corpus-db.ts";
@@ -178,12 +178,13 @@ function baseComplete(h: any): boolean {
   return REQUIRED_BASE.every((anyOf) => anyOf.some(hasData));
 }
 
-const BASE_MASK = ["precip", "temp", "snow", "rain", "wind"]
-  .reduce((m, v) => m | (1 << VARS_BIT[v]), 0);
-const ALL_MASK = [...Object.values(VARS_BIT)].reduce((m, b) => m | (1 << b), BASE_MASK);
-const COMBOS: { id: string; mask: number }[] = [
-  { id: "base", mask: BASE_MASK },
-  { id: "all", mask: ALL_MASK },
+const BASE_VARS: ReadonlySet<Variable> = new Set<Variable>([
+  VAR.precip, VAR.temp, VAR.snow, VAR.rain, VAR.wind,
+]);
+const ALL_VARS: ReadonlySet<Variable> = new Set(VARIABLES);
+const COMBOS: { id: string; vars: ReadonlySet<Variable> }[] = [
+  { id: "base", vars: BASE_VARS },
+  { id: "all", vars: ALL_VARS },
 ];
 
 // ── Measurement ─────────────────────────────────────────────────────────────────
@@ -268,7 +269,7 @@ function main(): void {
       Math.floor(Date.parse(cell.windowStart + "Z") / 3600000), utcOffsetHours, args.requestHour);
     const params: ForecastParams = {
       locationIdx: 0, lat: loc.lat, lon: loc.lon, mode: 1, utcOffsetHours,
-      modelsMask: 1, varsMask: ALL_MASK, maxChars: args.maxChars,
+      modelsMask: 1, vars: ALL_VARS, maxChars: args.maxChars,
       decoderVersion: WIRE_VERSION, code: 0, startEpochHour, userToken: null,
     };
     const elevation = elevs.get(cell.locationId) ?? 0;
@@ -291,10 +292,10 @@ function main(): void {
 
     // breakdown memo shared across modes (paths overlap heavily at the bottom)
     const bdMemo = new Map<string, { chars: number; modelBits: number }>();
-    const bdFor = (p: Profile, comboId: string, mask: number) => {
+    const bdFor = (p: Profile, comboId: string, vars: ReadonlySet<Variable>) => {
       const k = `${comboId}:${profKey(p)}`;
       if (!bdMemo.has(k)) {
-        const bd = encodeBreakdown({ ...msgFor(p)!, vars_mask: mask });
+        const bd = encodeBreakdown({ ...msgFor(p)!, vars });
         bdMemo.set(k, { chars: bd.chars, modelBits: bd.bodyBits - bd.overheadBits });
       }
       return bdMemo.get(k)!;
@@ -304,7 +305,7 @@ function main(): void {
       const st = stats.get(`${mode}:${c.id}`)!;
       let prevBits: number | null = null;
       for (let i = 0; i < steps.length; i++) {
-        const bd = bdFor(steps[i].profile, c.id, c.mask);
+        const bd = bdFor(steps[i].profile, c.id, c.vars);
         if (bd.chars <= args.maxChars) st[i].fit++;
         st[i].chars.push(bd.chars);
         if (prevBits !== null) st[i].dBits.push(bd.modelBits - prevBits);

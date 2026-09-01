@@ -10,7 +10,7 @@
  * The surface column is conditioned on the gust column's same-period delta on the wire (gust
  * decodes first — see derive-gust-delta-codebooks.ts, which owns those tables and charges
  * sfc's wire cost); the [res][level 0] tables emitted here are sfc's FALLBACK for messages
- * without gust in vars_mask, so their costBits stay 0.
+ * without gust requested, so their costBits stay 0.
  *
  * Schemes compared held-out (5-fold, split by location, rANS cost — see analyze-wind-heldout.ts):
  *
@@ -35,7 +35,7 @@
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {
-  VARS_BIT, TABLE_RES_IDXS, WIND_LEVELS_HPA, WIND_LEVELS_MASK, N_WIND_GAPS, windGapClass,
+  VAR, type Variable, TABLE_RES_IDXS, WIND_LEVELS_HPA, WIND_LEVEL_VARS, N_WIND_GAPS, windGapClass,
   type Period,
 } from "@weather/protocol";
 import {
@@ -49,7 +49,7 @@ const NBUCKET = 5;                 // upper Δ buckets: ≤-2, -1, 0, +1, ≥+2
 const NGAP = N_WIND_GAPS;          // ladder gap to the conditioning level: 1, 2, 3+
 const SPEED_MAX = 17;              // extended Beaufort force domain, must match wire.ts
 const NSYM = 2 * SPEED_MAX + 1;    // 35: deltas -17..17
-const WIND_MASK = (1 << VARS_BIT.wind) | WIND_LEVELS_MASK;
+const WIND_VARS: ReadonlySet<Variable> = new Set([VAR.wind, ...WIND_LEVEL_VARS]);
 const speedOf = (p: Period, L: number): number | undefined =>
   L === 0 ? p.wind_sfc_kph : p.wind_aloft?.[L - 1]?.kph;
 // [res][level] wire cost: only the topmost level (300 hPa) encodes there in corpus conditions
@@ -90,7 +90,7 @@ export function counter(): CellCounter {
         const slice = ctx.atRequest(TABLE_RES_IDXS[resIdx]);
         if (!slice) continue;
         const { n, rows } = slice;
-        const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US", resIdx));
+        const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_VARS, "US", resIdx));
         const sp = Array.from({ length: NLEVEL }, (_, L) => periods.map((p) => qSpeed(speedOf(p, L))));
         for (let L = 0; L < NLEVEL; L++) {
           for (let p = 1; p < n; p++) {

@@ -36,7 +36,7 @@
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {
-  VARS_BIT, TABLE_RES_IDXS, WIND_LEVELS_HPA, WIND_LEVELS_MASK, N_WIND_GAPS, windGapClass,
+  VAR, type Variable, TABLE_RES_IDXS, WIND_LEVELS_HPA, WIND_LEVEL_VARS, N_WIND_GAPS, windGapClass,
   type Period,
 } from "@weather/protocol";
 import {
@@ -49,7 +49,7 @@ const NDIR = 8;
 const NRES = TABLE_RES_IDXS.length; // 12h/6h/3h/1h — the resolutions layouts emit, in row order
 const NGAP = N_WIND_GAPS;
 const NLEVEL = 1 + WIND_LEVELS_HPA.length; // sfc, then the ladder (300 hPa … 1000 hPa)
-const WIND_MASK = (1 << VARS_BIT.wind) | WIND_LEVELS_MASK;
+const WIND_VARS: ReadonlySet<Variable> = new Set([VAR.wind, ...WIND_LEVEL_VARS]);
 const speedOf = (p: Period, L: number): number | undefined =>
   L === 0 ? p.wind_sfc_kph : p.wind_aloft?.[L - 1]?.kph;
 const dirOf = (p: Period, L: number): number | undefined =>
@@ -93,7 +93,7 @@ export function counter(): CellCounter {
         const slice = ctx.atRequest(TABLE_RES_IDXS[resIdx]);
         if (!slice) continue;
         const { n, rows } = slice;
-        const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US", resIdx));
+        const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_VARS, "US", resIdx));
         const sp = Array.from({ length: NLEVEL }, (_, L) => periods.map((p) => qSpeed(speedOf(p, L))));
         const dr = Array.from({ length: NLEVEL }, (_, L) => periods.map((p) => (dirOf(p, L) ?? 0) % 8));
         // Displayed dir under calm gating: last encoded dir, 0 before any (mirrors wire.ts).

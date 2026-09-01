@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
 import {
-  MODEL_BIT, VARS_BIT, ALWAYS_VARS_MASK, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
+  MODEL_BIT, VAR, ALWAYS_VARS, type Variable, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   IPHONE_MAX_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, UNCAPPED_MAX_CHARS, MAX_MESSAGES, WIRE_HEADER_CHARS, WIRE_VERSION, maxCharsFor,
 } from "@weather/protocol";
+
+// The always-on core plus the given extras, as parseRequest builds its selection.
+const withAlways = (...extras: Variable[]) => new Set<Variable>([...ALWAYS_VARS, ...extras]);
 import { describeRequest, parseRequest } from "../src/forecast.js";
 
 const newToken = () => generateToken((n) => Uint8Array.from(randomBytes(n)));
@@ -17,7 +20,7 @@ describe("parseRequest", () => {
   it("defaults: Auto priority, UTC grid, Best Match, always-on vars, location 0", () => {
     const p = parseRequest("");
     expect(p).toMatchObject({ mode: MODE_AUTO, utcOffsetHours: 0, modelsMask: BEST, locationIdx: 0 });
-    expect(p.varsMask).toBe(ALWAYS_VARS_MASK);
+    expect(p.vars).toEqual(withAlways());
   });
 
   it("l: named location", () => {
@@ -95,60 +98,40 @@ describe("parseRequest", () => {
   });
 
   it("v: expands each single-character configurable variable group", () => {
-    expect(parseRequest("v:c").varsMask).toBe(
-      ALWAYS_VARS_MASK |
-      (1 << VARS_BIT["cch"]) |
-      (1 << VARS_BIT["ccm"]) |
-      (1 << VARS_BIT["ccl"]),
-    );
+    expect(parseRequest("v:c").vars).toEqual(withAlways(VAR.clouds));
     // Pressure-level wind is not a `v:` group: `v:w` is ignored, `w:` lists ladder indices.
-    expect(parseRequest("v:w").varsMask).toBe(ALWAYS_VARS_MASK);
-    expect(parseRequest("w:234").varsMask).toBe(
-      ALWAYS_VARS_MASK |
-      (1 << VARS_BIT["w500"]) |
-      (1 << VARS_BIT["w600"]) |
-      (1 << VARS_BIT["w700"]),
-    );
-    expect(parseRequest("w:06").varsMask).toBe(
-      ALWAYS_VARS_MASK | (1 << VARS_BIT["w300"]) | (1 << VARS_BIT["w925"]),
-    );
-    // Out-of-ladder characters and an empty token are validation errors; the mask gains nothing.
-    expect(parseRequest("w:79x").varsMask).toBe(ALWAYS_VARS_MASK);
+    expect(parseRequest("v:w").vars).toEqual(withAlways());
+    expect(parseRequest("w:234").vars).toEqual(withAlways(VAR.w500, VAR.w600, VAR.w700));
+    expect(parseRequest("w:06").vars).toEqual(withAlways(VAR.w300, VAR.w925));
+    // Out-of-ladder characters and an empty token are validation errors; the set gains nothing.
+    expect(parseRequest("w:79x").vars).toEqual(withAlways());
     expect(parseRequest("w:79x").errors).toEqual(expect.arrayContaining(
       ['unknown wind level "7"', 'unknown wind level "9"', 'unknown wind level "x"']));
-    expect(parseRequest("w:").varsMask).toBe(ALWAYS_VARS_MASK);
+    expect(parseRequest("w:").vars).toEqual(withAlways());
     expect(parseRequest("w:").errors).toContain('invalid wind levels "w:"');
-    expect(parseRequest("v:f").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["freeze"]));
-    expect(parseRequest("v:p").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["precip"]));
+    expect(parseRequest("v:f").vars).toEqual(withAlways(VAR.freeze));
+    expect(parseRequest("v:p").vars).toEqual(withAlways(VAR.precip));
     // Air quality: one code per index, so a reader can ask for smoke without paying for ozone.
-    expect(parseRequest("v:a").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi"]));
-    expect(parseRequest("v:s").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_pm25"]));
-    expect(parseRequest("v:o").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_o3"]));
-    expect(parseRequest("v:m").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_pm10"]));
-    expect(parseRequest("v:d").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_no2"]));
-    expect(parseRequest("v:u").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aq_so2"]));
-    expect(parseRequest("v:e").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu"]));
-    expect(parseRequest("v:2").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu_pm25"]));
-    expect(parseRequest("v:1").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu_pm10"]));
-    expect(parseRequest("v:3").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu_o3"]));
-    expect(parseRequest("v:n").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu_no2"]));
-    expect(parseRequest("v:q").varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["aqi_eu_so2"]));
+    expect(parseRequest("v:a").vars).toEqual(withAlways(VAR.aqi));
+    expect(parseRequest("v:s").vars).toEqual(withAlways(VAR.aq_pm25));
+    expect(parseRequest("v:o").vars).toEqual(withAlways(VAR.aq_o3));
+    expect(parseRequest("v:m").vars).toEqual(withAlways(VAR.aq_pm10));
+    expect(parseRequest("v:d").vars).toEqual(withAlways(VAR.aq_no2));
+    expect(parseRequest("v:u").vars).toEqual(withAlways(VAR.aq_so2));
+    expect(parseRequest("v:e").vars).toEqual(withAlways(VAR.aqi_eu));
+    expect(parseRequest("v:2").vars).toEqual(withAlways(VAR.aqi_eu_pm25));
+    expect(parseRequest("v:1").vars).toEqual(withAlways(VAR.aqi_eu_pm10));
+    expect(parseRequest("v:3").vars).toEqual(withAlways(VAR.aqi_eu_o3));
+    expect(parseRequest("v:n").vars).toEqual(withAlways(VAR.aqi_eu_no2));
+    expect(parseRequest("v:q").vars).toEqual(withAlways(VAR.aqi_eu_so2));
   });
 
   it("v: mixes air-quality codes into the compact form", () => {
     // The compact form is matched as a character class; a code missing from it would fall through
     // to the comma-separated path and silently request nothing.
-    expect(parseRequest("v:aso").varsMask).toBe(
-      ALWAYS_VARS_MASK |
-      (1 << VARS_BIT["aqi"]) |
-      (1 << VARS_BIT["aq_pm25"]) |
-      (1 << VARS_BIT["aq_o3"]),
-    );
-    expect(parseRequest("v:cfe2").varsMask).toBe(
-      ALWAYS_VARS_MASK |
-      (1 << VARS_BIT["cch"]) | (1 << VARS_BIT["ccm"]) | (1 << VARS_BIT["ccl"]) |
-      (1 << VARS_BIT["freeze"]) |
-      (1 << VARS_BIT["aqi_eu"]) | (1 << VARS_BIT["aqi_eu_pm25"]),
+    expect(parseRequest("v:aso").vars).toEqual(withAlways(VAR.aqi, VAR.aq_pm25, VAR.aq_o3));
+    expect(parseRequest("v:cfe2").vars).toEqual(
+      withAlways(VAR.clouds, VAR.freeze, VAR.aqi_eu, VAR.aqi_eu_pm25),
     );
   });
 
@@ -156,42 +139,41 @@ describe("parseRequest", () => {
     // CAMS serves it whatever the `m:` choice is, so unlike the freezing level it is never
     // dropped for GEM or ECMWF.
     for (const center of ["best", "us", "ca", "eu"]) {
-      expect(parseRequest(`m:${center} v:a`).varsMask & (1 << VARS_BIT["aqi"])).toBeTruthy();
+      expect(parseRequest(`m:${center} v:a`).vars.has(VAR.aqi)).toBe(true);
     }
   });
 
   it("precip is opt-in, not part of the always-on set", () => {
-    expect(ALWAYS_VARS_MASK & (1 << VARS_BIT["precip"])).toBe(0);
-    expect(parseRequest("l:14k").varsMask & (1 << VARS_BIT["precip"])).toBe(0);
+    expect(ALWAYS_VARS.includes(VAR.precip)).toBe(false);
+    expect(parseRequest("l:14k").vars.has(VAR.precip)).toBe(false);
   });
 
   it("v: combines configurable variable group codes without delimiters", () => {
     const p = parseRequest("v:pcf w:234");
-    expect(p.varsMask).toBe(
-      ALWAYS_VARS_MASK |
-      (1 << VARS_BIT["precip"]) |
-      (1 << VARS_BIT["cch"]) |
-      (1 << VARS_BIT["ccm"]) |
-      (1 << VARS_BIT["ccl"]) |
-      (1 << VARS_BIT["w500"]) |
-      (1 << VARS_BIT["w600"]) |
-      (1 << VARS_BIT["w700"]) |
-      (1 << VARS_BIT["freeze"]),
+    expect(p.vars).toEqual(
+      withAlways(VAR.precip, VAR.clouds, VAR.freeze, VAR.w500, VAR.w600, VAR.w700),
     );
   });
 
   it("v: continues to accept long-form protocol variable names", () => {
-    expect(parseRequest("v:cch,freeze").varsMask).toBe(
-      ALWAYS_VARS_MASK | (1 << VARS_BIT["cch"]) | (1 << VARS_BIT["freeze"]),
-    );
+    expect(parseRequest("v:clouds,freeze").vars).toEqual(withAlways(VAR.clouds, VAR.freeze));
+  });
+
+  it("rejects the retired v2 cloud names", () => {
+    // "ccm" is excluded: it spells the compact codes c+c+m, which the compact form wins.
+    for (const name of ["cch", "ccl"]) {
+      const p = parseRequest(`v:${name}`);
+      expect(p.vars).toEqual(withAlways());
+      expect(p.errors).toContain(`unknown variable "${name}"`);
+    }
   });
 
   it("v: continues to accept comma-separated group codes", () => {
-    expect(parseRequest("v:c,p,f").varsMask).toBe(parseRequest("v:cpf").varsMask);
+    expect(parseRequest("v:c,p,f").vars).toEqual(parseRequest("v:cpf").vars);
   });
 
   it("includes only the always-on variables when no configurable vars are specified", () => {
-    expect(parseRequest("l:14k m:eu").varsMask).toBe(ALWAYS_VARS_MASK);
+    expect(parseRequest("l:14k m:eu").vars).toEqual(withAlways());
   });
 
   it("full message parses all fields", () => {
@@ -202,7 +184,7 @@ describe("parseRequest", () => {
       utcOffsetHours: -9,
       modelsMask: EU,
     });
-    expect(p.varsMask).toBe(ALWAYS_VARS_MASK | (1 << VARS_BIT["freeze"]));
+    expect(p.vars).toEqual(withAlways(VAR.freeze));
   });
 
   it("vN token sets the decoder version; a missing token is null (no default)", () => {
@@ -252,7 +234,7 @@ describe("parseRequest", () => {
 
   it("rejects removed var tokens (tmin is no longer a variable)", () => {
     const p = parseRequest("p:d v:tmin");
-    expect(p.varsMask).toBe(ALWAYS_VARS_MASK);
+    expect(p.vars).toEqual(withAlways());
     expect(p.errors).toContain('unknown variable "tmin"');
   });
 
@@ -391,7 +373,7 @@ describe("describeRequest", () => {
   it("names the variables, always-on ones included", () => {
     // v: carries only the configurable additions; the core set is implicit in every request, and
     // the record should show what was actually asked for rather than what was typed.
-    expect(describe_("").vars).toEqual(["temp", "snow", "wind", "gust", "rain"]);
+    expect(describe_("").vars).toEqual(["temp", "snow", "rain", "wind", "gust"]);
     expect(describe_("v:pf").vars).toContain("precip");
     expect(describe_("v:pf").vars).toContain("freeze");
     expect(describe_("w:234").vars).toEqual(expect.arrayContaining(["w500", "w600", "w700"]));

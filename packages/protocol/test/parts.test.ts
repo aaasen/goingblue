@@ -5,7 +5,7 @@ import {
 } from "../src/parts.js";
 import { maxCharsFor, partBodyChars, widePartBodyChars, MAX_MESSAGES, UNCAPPED_MAX_CHARS } from "../src/devices.js";
 import { WIRE_HEADER_CHARS, wireCodec } from "../src/wire.js";
-import type { ForecastMessage } from "../src/model.js";
+import type { ForecastMessage, Variable } from "../src/model.js";
 import wireFixture from "./fixtures/wire.fixture.json";
 
 const H = WIRE_HEADER_CHARS;
@@ -202,11 +202,12 @@ describe("the multi-message budget", () => {
 // relay says is impossible, on purpose: this path is what a wrong model falls back to, so it must
 // not contain one.
 describe("a reply the transport broke up", () => {
-  const d = wireFixture.decoded as ForecastMessage;
+  const d = { ...wireFixture.decoded,
+  vars: new Set(wireFixture.decoded.vars as Variable[]) } as ForecastMessage;
   const req = wireFixture.request;
   const ctx = () => ({
     model: 31 - Math.clz32(d.models_mask & -d.models_mask),
-    vars_mask: d.vars_mask,
+    vars: d.vars,
     lat: d.lat,
     lon: d.lon,
     start: Date.UTC(new Date().getUTCFullYear(), req.month - 1, req.day, req.hour),
@@ -259,7 +260,7 @@ describe("a reply the transport broke up", () => {
       expect(collecting(held)).toBe(true);
     }
     held = merge(held, chunks[chunks.length - 1]);
-    expect(wireCodec.decode(reassembleReply(held, headerCharsOf), ctx)).toEqual(wireFixture.decoded);
+    expect(wireCodec.decode(reassembleReply(held, headerCharsOf), ctx)).toEqual(d);
     // Finished, so no longer a collection — which is what takes the boxes off the screen.
     expect(collecting(held)).toBe(false);
   });
@@ -330,11 +331,12 @@ describe("a reply the transport broke up", () => {
 });
 
 describe("a real message split in two", () => {
-  const d = wireFixture.decoded as ForecastMessage;
+  const d = { ...wireFixture.decoded,
+  vars: new Set(wireFixture.decoded.vars as Variable[]) } as ForecastMessage;
   const req = wireFixture.request;
   const ctx = () => ({
     model: 31 - Math.clz32(d.models_mask & -d.models_mask),
-    vars_mask: d.vars_mask,
+    vars: d.vars,
     lat: d.lat,
     lon: d.lon,
     start: Date.UTC(new Date().getUTCFullYear(), req.month - 1, req.day, req.hour),
@@ -354,7 +356,7 @@ describe("a real message split in two", () => {
   });
 
   it("decodes after reassembly, in any order", () => {
-    expect(wireCodec.decode(round(parts), ctx)).toEqual(wireFixture.decoded);
-    expect(wireCodec.decode(round([...parts].reverse()), ctx)).toEqual(wireFixture.decoded);
+    expect(wireCodec.decode(round(parts), ctx)).toEqual(d);
+    expect(wireCodec.decode(round([...parts].reverse()), ctx)).toEqual(d);
   });
 });

@@ -43,7 +43,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adjustPrecipPhase, buildFillMessage, fillCloudBand, fitFillToBudget, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import {
-  VARS_BIT, ALWAYS_VARS, WIND_LEVELS_HPA, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
+  VAR, type Variable, ALWAYS_VARS, WIND_LEVELS_HPA, RESOLUTION_HOURS, FILL_SLOTS, FILL_ANCHOR_SEQS, MODE_NAMES, MODE_AUTO,
   fillProfile, maxFillSeq, encodeBreakdown, WIRE_VERSION, type Alphabet,
   type ForecastMessage, type MessageBreakdown,
 } from "@weather/protocol";
@@ -338,23 +338,22 @@ function requestUtcHour(windowStartUtcHour: number, utcOffsetHours: number, hour
   return firstLocalMidnight - utcOffsetHours + hour;
 }
 
-// Protocol variable groups, mirroring the app (HomeScreen.tsx). weathercode is always encoded by the
-// protocol (not in a mask). BASE is always on; each toggleable group maps to protocol var bits.
-const BASE_VARS: string[] = [...ALWAYS_VARS];
-const GROUP_VARS: Record<GroupId, string[]> = {
-  clouds: ["cch", "ccm", "ccl"],
-  highwind: BENCH_WIND_LEVELS_HPA.map((l) => `w${l}`),
-  freeze: ["freeze"],
-  precip: ["precip"],
-  aqi: ["aqi"],
-  pm25: ["aq_pm25"],
-  ozone: ["aq_o3"],
-  pm10: ["aq_pm10"],
-  no2: ["aq_no2"],
-  so2: ["aq_so2"],
+// Protocol variable groups, mirroring the app (HomeScreen.tsx). weathercode is always encoded by
+// the protocol (not a selectable variable). BASE is always on; each toggleable group maps to
+// protocol variables.
+const BASE_VARS: readonly Variable[] = ALWAYS_VARS;
+const GROUP_VARS: Record<GroupId, Variable[]> = {
+  clouds: [VAR.clouds],
+  highwind: BENCH_WIND_LEVELS_HPA.map((l) => VAR[`w${l}` as keyof typeof VAR]),
+  freeze: [VAR.freeze],
+  precip: [VAR.precip],
+  aqi: [VAR.aqi],
+  pm25: [VAR.aq_pm25],
+  ozone: [VAR.aq_o3],
+  pm10: [VAR.aq_pm10],
+  no2: [VAR.aq_no2],
+  so2: [VAR.aq_so2],
 };
-const maskOf = (vars: string[]) => vars.reduce((m, v) => m | (1 << VARS_BIT[v]), 0);
-const BASE_MASK = maskOf(BASE_VARS);
 
 // The variable selections the report draws: the base set and each group on its own — ONE extra
 // group at a time, never in combination. This used to be the full power set (512 selections
@@ -362,12 +361,13 @@ const BASE_MASK = maskOf(BASE_VARS);
 // never rendered more than the singles (the frontier chart and the mode comparison both walk
 // base + `1 << i`, and the pooled line is explicitly the mean of those), so the all-groups view
 // was computed and thrown away. Bitmask numbering is unchanged, so the "mode:combo" view keys
-// still address the same selections. ALL_COMBO survives only as the LAYOUT mask: messages are
-// aggregated once with every column populated, then vars_mask is overridden per combo.
+// still address the same selections. ALL_COMBO survives only as the LAYOUT selection: messages
+// are aggregated once with every column populated, then the vars set is overridden per combo.
 const ALL_COMBO = (1 << GROUP_IDS.length) - 1;
 const COMBOS = [0, ...GROUP_IDS.map((_, i) => 1 << i)];
 const comboGroups = (c: number): GroupId[] => GROUP_IDS.filter((_, i) => c & (1 << i));
-const comboMask = (c: number) => BASE_MASK | maskOf(comboGroups(c).flatMap((g) => GROUP_VARS[g]));
+const comboVars = (c: number): Set<Variable> =>
+  new Set([...BASE_VARS, ...comboGroups(c).flatMap((g) => GROUP_VARS[g])]);
 const DEFAULT_COMBO = 0; // base variables only (no optional groups)
 
 // Base Open-Meteo series required for a usable forecast (a fully-null one would encode as a silent
@@ -809,7 +809,7 @@ interface StoredFit {
 function fitFill(
   msgAt: (seq: number) => ForecastMessage | null,
   mode: number,
-  varsMask: number,
+  vars: ReadonlySet<Variable>,
   maxChars: number,
   alphabet: Alphabet,
 ): Fit | null {
@@ -817,7 +817,7 @@ function fitFill(
     (seq) => {
       const msg = msgAt(seq);
       if (msg === null) return null; // upstream gap — unservable, same as in production
-      const withVars: ForecastMessage = { ...msg, vars_mask: varsMask };
+      const withVars: ForecastMessage = { ...msg, vars };
       return { seq, periods: withVars.periods[0].length, breakdown: encodeBreakdown(withVars, alphabet) };
     },
     (fit) => fit.breakdown.chars,
@@ -917,7 +917,7 @@ async function scanReport(args: Args, shard?: { index: number; total: number }):
   }
 
   const forecasts: { location: string }[] = [];
-  const allMask = comboMask(ALL_COMBO); // every group on — a bitmask, not an index into COMBOS
+  const allVars = comboVars(ALL_COMBO); // every group on — a selection, not an index into COMBOS
   let versionBits = 0, headerBits = 0, skipped = 0, short = 0, uncovered = 0;
 
   // Per-stratum breakdown bookkeeping: the group of each fitted cell, in push order per mode
@@ -950,12 +950,12 @@ async function scanReport(args: Args, shard?: { index: number; total: number }):
     forecasts.push({ location: locId });
 
     for (const mode of MODES) {
-      // Build layouts with every column populated (varsMask = allMask), then override vars_mask per
+      // Build layouts with every column populated (allVars), then override the vars set per
       // combo: columns encode independently, so one aggregation per seq serves every combo.
       // "US" (American center) keeps the pressure/freeze columns in toFullPeriod.
       const params: ForecastParams = {
         locationIdx: 0, lat, lon, mode, utcOffsetHours,
-        modelsMask: 1, varsMask: allMask, maxChars: args.maxChars,
+        modelsMask: 1, vars: allVars, maxChars: args.maxChars,
         decoderVersion: WIRE_VERSION, code: 0, startEpochHour, userToken: null,
       };
       const memo = new Map<number, ForecastMessage | null>();
@@ -978,7 +978,7 @@ async function scanReport(args: Args, shard?: { index: number; total: number }):
       groupLocs.get(cell.group)!.add(locId);
 
       for (const c of COMBOS) {
-        const fit = fitFill(msgAt, mode, comboMask(c), args.maxChars, args.alphabet)!; // seq=1 is covered
+        const fit = fitFill(msgAt, mode, comboVars(c), args.maxChars, args.alphabet)!; // seq=1 is covered
         const vk = vkey(mode, c);
         fitsFor.get(vk)!.push({
           seq: fit.seq, periods: fit.periods,

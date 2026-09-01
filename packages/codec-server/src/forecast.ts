@@ -1,9 +1,11 @@
 import {
   MODEL_BIT,
-  ALWAYS_VARS_MASK,
+  ALWAYS_VARS,
   CONFIGURABLE_VAR_GROUPS,
   VAR_GROUP_CODES,
-  VARS_BIT,
+  VAR,
+  VARIABLES,
+  type Variable,
   isValidToken,
   normalizeToken,
   layoutFor,
@@ -30,12 +32,12 @@ import {
   splitReply,
   supportedVersions,
   CLOUD_BAND_LEVELS_HPA,
-  WIND_LEVELS_HPA, WIND_LEVEL_BITS, WIND_LEVELS_MASK, windLevelsMaskFromToken,
+  WIND_LEVELS_HPA, WIND_LEVEL_VARS, windLevelVar,
   CLOUD_COVER_MIN_PCT,
   quantCover,
 } from "@weather/protocol";
 import { fetchWeatherApi } from "openmeteo";
-import { Variable } from "@openmeteo/sdk/variable.js";
+import { Variable as OmVariable } from "@openmeteo/sdk/variable.js";
 import type { VariableWithValues } from "@openmeteo/sdk/variable-with-values.js";
 import type { WeatherApiResponse } from "@openmeteo/sdk/weather-api-response.js";
 import { log } from "./log.js";
@@ -129,6 +131,9 @@ export const CLOUD_BAND_FETCH_VARS = [...CLOUD_BAND_RH_VARS, ...CLOUD_BAND_HEIGH
 // Matches a `v:` value written as bare group codes rather than variable names. Built from the
 // group table so it stays in step with it; the codes are all regex-safe single characters.
 const COMPACT_VAR_CODES = new RegExp(`^[${VAR_GROUP_CODES}]+$`);
+
+// Long-form `v:` values: the canonical variable names.
+const VAR_NAMES = new Set<string>(VARIABLES);
 
 function degToDirIdx(deg: number | null | undefined): number {
   if (deg == null) return 0;
@@ -235,36 +240,36 @@ export interface Row {
 // indices first, then the two headlines, which code as residuals against constituents that must
 // therefore already be decoded. Named once here because three paths have to agree on them: the
 // upstream request, the row aggregation, and the corpus derive.
-// Every air-quality column: its vars_mask bit, the Open-Meteo/CAMS variable it comes from (which
+// Every air-quality column: its variable, the Open-Meteo/CAMS variable it comes from (which
 // is also the Row field), and the Period field it decodes into. One table so the upstream request,
 // the row aggregation and the period fill cannot drift apart — a mismatch here is silent, and
 // costs an all-null column rather than an error (the `pm2p5` rewrite below is the same hazard).
-export const AQ_BIT_VARS: [bit: number, cams: string, period: keyof Period][] = [
-  [VARS_BIT.aq_pm25, "us_aqi_pm2_5", "aqi_pm25"],
-  [VARS_BIT.aq_o3, "us_aqi_ozone", "aqi_o3"],
-  [VARS_BIT.aq_pm10, "us_aqi_pm10", "aqi_pm10"],
-  [VARS_BIT.aq_no2, "us_aqi_nitrogen_dioxide", "aqi_no2"],
-  [VARS_BIT.aq_so2, "us_aqi_sulphur_dioxide", "aqi_so2"],
-  [VARS_BIT.aqi_eu_pm25, "european_aqi_pm2_5", "aqi_eu_pm25"],
-  [VARS_BIT.aqi_eu_o3, "european_aqi_ozone", "aqi_eu_o3"],
-  [VARS_BIT.aqi_eu_pm10, "european_aqi_pm10", "aqi_eu_pm10"],
-  [VARS_BIT.aqi_eu_no2, "european_aqi_nitrogen_dioxide", "aqi_eu_no2"],
-  [VARS_BIT.aqi_eu_so2, "european_aqi_sulphur_dioxide", "aqi_eu_so2"],
-  [VARS_BIT.aqi, "us_aqi", "aqi"],
-  [VARS_BIT.aqi_eu, "european_aqi", "aqi_eu"],
+export const AQ_COLUMN_VARS: [variable: Variable, cams: string, period: keyof Period][] = [
+  [VAR.aq_pm25, "us_aqi_pm2_5", "aqi_pm25"],
+  [VAR.aq_o3, "us_aqi_ozone", "aqi_o3"],
+  [VAR.aq_pm10, "us_aqi_pm10", "aqi_pm10"],
+  [VAR.aq_no2, "us_aqi_nitrogen_dioxide", "aqi_no2"],
+  [VAR.aq_so2, "us_aqi_sulphur_dioxide", "aqi_so2"],
+  [VAR.aqi_eu_pm25, "european_aqi_pm2_5", "aqi_eu_pm25"],
+  [VAR.aqi_eu_o3, "european_aqi_ozone", "aqi_eu_o3"],
+  [VAR.aqi_eu_pm10, "european_aqi_pm10", "aqi_eu_pm10"],
+  [VAR.aqi_eu_no2, "european_aqi_nitrogen_dioxide", "aqi_eu_no2"],
+  [VAR.aqi_eu_so2, "european_aqi_sulphur_dioxide", "aqi_eu_so2"],
+  [VAR.aqi, "us_aqi", "aqi"],
+  [VAR.aqi_eu, "european_aqi", "aqi_eu"],
 ];
 
-// Each headline: the bit that selects it, the Period field naming its dominant constituent, and
-// that scale's constituents IN WIRE ORDER (AQ_DOMINANT_US/_EU). The order is wire format — the
-// column transmits a position in this list. Selecting a headline fetches all of them, including
-// US carbon monoxide, which has no column of its own: the index maxes over it, so a truthful
-// answer to "which pollutant is this" has to be able to say so.
-export const AQ_DOMINANT_SOURCES: [bit: number, field: keyof Period, cams: string[]][] = [
-  [VARS_BIT.aqi, "aqi_dominant", [
+// Each headline: the variable that selects it, the Period field naming its dominant constituent,
+// and that scale's constituents IN WIRE ORDER (AQ_DOMINANT_US/_EU). The order is wire format —
+// the column transmits a position in this list. Selecting a headline fetches all of them,
+// including US carbon monoxide, which has no column of its own: the index maxes over it, so a
+// truthful answer to "which pollutant is this" has to be able to say so.
+export const AQ_DOMINANT_SOURCES: [variable: Variable, field: keyof Period, cams: string[]][] = [
+  [VAR.aqi, "aqi_dominant", [
     "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi_pm10",
     "us_aqi_nitrogen_dioxide", "us_aqi_sulphur_dioxide", "us_aqi_carbon_monoxide",
   ]],
-  [VARS_BIT.aqi_eu, "aqi_eu_dominant", [
+  [VAR.aqi_eu, "aqi_eu_dominant", [
     "european_aqi_pm2_5", "european_aqi_ozone", "european_aqi_pm10",
     "european_aqi_nitrogen_dioxide", "european_aqi_sulphur_dioxide",
   ]],
@@ -274,7 +279,7 @@ export const AQ_DOMINANT_SOURCES: [bit: number, field: keyof Period, cams: strin
 // the dominant-pollutant argmax needs (US carbon monoxide). Constituents first, headlines
 // last, matching the order the columns encode in.
 export const AIR_QUALITY_VARS: string[] = (() => {
-  const names = AQ_BIT_VARS.map(([, cams]) => cams);
+  const names = AQ_COLUMN_VARS.map(([, cams]) => cams);
   const extra = AQ_DOMINANT_SOURCES.flatMap(([, , cams]) => cams)
     .filter((v) => !names.includes(v));
   // Headlines encode last, so keep them at the tail when splicing the extras in.
@@ -293,7 +298,7 @@ export const AIR_QUALITY_VARS: string[] = (() => {
 // `pm2_5_total_organic_matter` already uses the API spelling; the `pm2p5` token can't match
 // inside it.) Mirrors the corpus collector's canonicalName in scripts/om-fetch.ts.
 function canonicalName(v: VariableWithValues): string {
-  const base = Variable[v.variable()].replace("pm2p5", "pm2_5");
+  const base = OmVariable[v.variable()].replace("pm2p5", "pm2_5");
   if (v.pressureLevel() !== 0) return `${base}_${v.pressureLevel()}hPa`;
   if (v.altitude() !== 0) return `${base}_${v.altitude()}m`;
   return base;
@@ -612,16 +617,16 @@ export function fillCloudBand(h: HourlyData): HourlyData {
   return filled as HourlyData;
 }
 
-// The air-quality variables a request needs, given its vars_mask — empty when it asked for none,
-// which is the common case and skips the upstream call entirely.
-export function airQualityVarsFor(varsMask: number): string[] {
+// The air-quality variables a request needs, given its selection — empty when it asked for
+// none, which is the common case and skips the upstream call entirely.
+export function airQualityVarsFor(vars: ReadonlySet<Variable>): string[] {
   const want = new Set(
-    AQ_BIT_VARS.filter(([bit]) => varsMask & (1 << bit)).map(([, name]) => name));
+    AQ_COLUMN_VARS.filter(([variable]) => vars.has(variable)).map(([, name]) => name));
   // A headline needs every constituent of its scale, not just the ones with columns — the
   // dominant-pollutant column is an argmax over all of them.
-  for (const [bit, , cams] of AQ_DOMINANT_SOURCES)
-    if (varsMask & (1 << bit)) for (const v of cams) want.add(v);
-  // Emitted in AIR_QUALITY_VARS order so the upstream request is stable across masks.
+  for (const [variable, , cams] of AQ_DOMINANT_SOURCES)
+    if (vars.has(variable)) for (const v of cams) want.add(v);
+  // Emitted in AIR_QUALITY_VARS order so the upstream request is stable across selections.
   return AIR_QUALITY_VARS.filter((v) => want.has(v));
 }
 
@@ -679,7 +684,7 @@ async function fetchHourly(
     ...CLOUD_BAND_FETCH_VARS,
   ];
   // Drop freezing_level_height from the request for centers that don't provide it (GEM, ECMWF);
-  // toFullPeriod also clears the freeze vars_mask bit so it never reaches the wire.
+  // toFullPeriod also drops freeze from the vars set so it never reaches the wire.
   const surfaceVars = center.freeze
     ? SURFACE_VARS
     : SURFACE_VARS.filter((v) => v !== "freezing_level_height");
@@ -955,48 +960,52 @@ export function repairCloudBand(vals: (number | null)[]): number[] {
   return (out as number[]).map((v) => Math.round(v));
 }
 
-export function toFullPeriod(r: Row, varsMask: number, modelKey: string): Period {
+export function toFullPeriod(r: Row, vars: ReadonlySet<Variable>, modelKey: string): Period {
   // Centers without a freezing-level product never carry that variable on the wire.
-  if (!CENTERS[modelKey].freeze) varsMask &= ~(1 << VARS_BIT.freeze);
+  if (!CENTERS[modelKey].freeze && vars.has(VAR.freeze)) {
+    const copy = new Set(vars);
+    copy.delete(VAR.freeze);
+    vars = copy;
+  }
   const p: Period = { weathercode: r.weathercode ?? 0 };
-  if (varsMask & (1 << VARS_BIT.precip)) p.precip     = r.precip ?? 0;
-  if (varsMask & (1 << VARS_BIT.temp))   p.temp_c     = r.temp_c ?? 0;
-  if (varsMask & (1 << VARS_BIT.snow))   p.snow_cm    = r.snow_cm ?? 0;
-  if (varsMask & (1 << VARS_BIT.rain))   p.rain_mm    = r.rain_mm ?? 0;
-  if (varsMask & (1 << VARS_BIT.freeze)) p.freeze_m   = r.freezing_level_m ?? 0;
-  if (varsMask & (1 << VARS_BIT.wind)) {
+  if (vars.has(VAR.precip)) p.precip     = r.precip ?? 0;
+  if (vars.has(VAR.temp))   p.temp_c     = r.temp_c ?? 0;
+  if (vars.has(VAR.snow))   p.snow_cm    = r.snow_cm ?? 0;
+  if (vars.has(VAR.rain))   p.rain_mm    = r.rain_mm ?? 0;
+  if (vars.has(VAR.freeze)) p.freeze_m   = r.freezing_level_m ?? 0;
+  if (vars.has(VAR.wind)) {
     p.wind_sfc_kph = r.wind_speed_10m ?? 0;
     p.wind_sfc_dir = degToDirIdx(r.wind_direction_10m);
   }
-  if (varsMask & (1 << VARS_BIT.gust)) p.wind_gust_kph = r.wind_gusts_10m ?? 0;
-  if (varsMask & WIND_LEVELS_MASK) {
-    p.wind_aloft = WIND_LEVEL_BITS.map((bit, li) => varsMask & (1 << bit)
+  if (vars.has(VAR.gust)) p.wind_gust_kph = r.wind_gusts_10m ?? 0;
+  if (WIND_LEVEL_VARS.some((v) => vars.has(v))) {
+    p.wind_aloft = WIND_LEVEL_VARS.map((v, li) => vars.has(v)
       ? { kph: r.wind_aloft_kph?.[li] ?? 0, dir: degToDirIdx(r.wind_aloft_deg?.[li]) }
       : null);
   }
   // The wire reads cloud_band; the low/mid/high fields stay filled because the derive
   // scripts (and any v2-era tooling) read Periods through this same function.
-  if (varsMask & (1 << VARS_BIT.cch)) {
+  if (vars.has(VAR.clouds)) {
     p.cloud_high = Math.round(r.cloud_cover_high ?? 0);
+    p.cloud_mid  = Math.round(r.cloud_cover_mid  ?? 0);
+    p.cloud_low  = Math.round(r.cloud_cover_low  ?? 0);
     p.cloud_band = repairCloudBand(r.cloud_band ?? []);
   }
-  if (varsMask & (1 << VARS_BIT.ccm)) p.cloud_mid   = Math.round(r.cloud_cover_mid  ?? 0);
-  if (varsMask & (1 << VARS_BIT.ccl)) p.cloud_low   = Math.round(r.cloud_cover_low  ?? 0);
   // Air quality, left UNDEFINED rather than coalesced to 0 where the value is missing: 0 is the
   // cleanest air on either scale, so claiming it for an hour CAMS never forecast would be a lie.
   // The codec encodes an absent value as its no-data symbol (see the AQ columns in wire.ts).
   const aq = r as unknown as Record<string, number | null>;
-  for (const [bit, cams, field] of AQ_BIT_VARS) {
+  for (const [variable, cams, field] of AQ_COLUMN_VARS) {
     const v = aq[cams];
-    if ((varsMask & (1 << bit)) && v != null) (p[field] as number) = v;
+    if (vars.has(variable) && v != null) (p[field] as number) = v;
   }
   // Which constituent each selected headline is reporting: the argmax over RAW concentrations,
   // not the banded sub-indices. At ladder resolution two pollutants share the top band ~8% of the
   // time, and raw values essentially never tie, so picking here means the wire never has to carry
   // a tiebreak rule. Left absent if any constituent is missing — there is then no honest answer,
   // and the codec skips the symbol for periods whose headline has no reading.
-  for (const [bit, field, cams] of AQ_DOMINANT_SOURCES) {
-    if (!(varsMask & (1 << bit))) continue;
+  for (const [variable, field, cams] of AQ_DOMINANT_SOURCES) {
+    if (!vars.has(variable)) continue;
     let best = -Infinity, bi = -1;
     for (let i = 0; i < cams.length; i++) {
       const v = aq[cams[i]];
@@ -1019,7 +1028,7 @@ export interface ForecastParams {
   mode: number;
   utcOffsetHours: number;
   modelsMask: number;
-  varsMask: number;
+  vars: ReadonlySet<Variable>;
   maxChars: number;
   // Character set for the response body, from the request's `d:` device token. Absent means
   // base-85, which is what every device but iPhone uses (see DEVICE_TRANSPORT).
@@ -1064,7 +1073,7 @@ export function parseRequest(body: string): ForecastParams {
   let utcOffsetHours = 0; // local-midnight offset, override with `z:` (whole hours east of UTC)
   let modelsMask = 1; // Best Match default (bit 0)
   // Core variables are implicit; `v:` carries only user-configurable additions.
-  let varsMask = ALWAYS_VARS_MASK;
+  const vars = new Set<Variable>(ALWAYS_VARS);
   let device: DeviceCode | null = null; // from `d:`; null keeps the base-85 SMS defaults
   let messages = 1; // from `n:`: how many messages the reply may be spread over
   let decoderVersion: number | null = null; // set from a `vN` token; required, no default
@@ -1137,8 +1146,8 @@ export function parseRequest(body: string): ForecastParams {
         // 700 hPa). Optional: nothing is on without this token.
         if (val === "") errors.push('invalid wind levels "w:"');
         for (const ch of val) {
-          const levelMask = windLevelsMaskFromToken(ch);
-          if (levelMask) varsMask |= levelMask;
+          const level = windLevelVar(ch);
+          if (level) vars.add(level);
           else errors.push(`unknown wind level "${ch}"`);
         }
       } else if (key === "v") {
@@ -1151,12 +1160,12 @@ export function parseRequest(body: string): ForecastParams {
           const group = CONFIGURABLE_VAR_GROUPS[
             v as keyof typeof CONFIGURABLE_VAR_GROUPS
           ];
-          if (!group && !(v in VARS_BIT)) {
+          if (group) {
+            for (const variable of group) vars.add(variable);
+          } else if (VAR_NAMES.has(v)) {
+            vars.add(v as Variable);
+          } else {
             errors.push(`unknown variable "${v}"`);
-            continue;
-          }
-          for (const variable of group ?? [v]) {
-            if (variable in VARS_BIT) varsMask |= 1 << VARS_BIT[variable];
           }
         }
       } else if (key === "u") {
@@ -1215,14 +1224,14 @@ export function parseRequest(body: string): ForecastParams {
   // route's limit and so the safe reading of an unidentified sender.
   const maxChars = maxCharsFor(device ?? "s", messages, headerChars);
 
-  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, varsMask, maxChars, alphabet, device: device ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
+  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, vars, maxChars, alphabet, device: device ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
 }
 
-// What a request asked for, in names rather than bits, for the gateway to record (see
-// `X-Request-Shape` in index.ts). This is the only description of the message grammar that
-// leaves a codec container, and it exists because the gateway must not learn the grammar: bit
-// assignments in `varsMask` and `modelsMask` belong to one protocol version, so a mask recorded
-// today would be silently misread after the next version bump. Names survive that.
+// What a request asked for, in names, for the gateway to record (see `X-Request-Shape` in
+// index.ts). This is the only description of the message grammar that leaves a codec container,
+// and it exists because the gateway must not learn the grammar: the variable and model
+// vocabularies belong to one protocol version, so anything version-specific recorded today
+// would be silently misread after the next version bump. Names survive that.
 export interface RequestShape {
   lat?: number;
   lon?: number;
@@ -1269,16 +1278,7 @@ export function describeRequest(params: ForecastParams): RequestShape {
       .map(Number)
       .filter((bit) => params.modelsMask & (1 << bit))
       .map((bit) => BIT_TO_MODEL_NAME[bit]),
-    // The `c` toggle sets three legacy bits (cch/ccm/ccl) but carries one cloud band, so the
-    // record names the selection once.
-    vars: [...new Set(
-      Object.entries(VARS_BIT)
-        .filter(([, bit]) => params.varsMask & (1 << bit))
-        .sort((a, b) => a[1] - b[1])
-        .map(([name]) =>
-          (CONFIGURABLE_VAR_GROUPS.c as readonly string[]).includes(name) ? "clouds" : name,
-        ),
-    )],
+    vars: VARIABLES.filter((v) => params.vars.has(v)),
     ...(params.maxChars !== UNCAPPED_MAX_CHARS ? { maxChars: params.maxChars } : {}),
     messages: params.messages,
     ...(params.device ? { device: params.device } : {}),
@@ -1372,14 +1372,14 @@ export function buildLayoutMessage(
     code: params.code,
     days: layout.days,
     models_mask: params.modelsMask,
-    vars_mask: params.varsMask,
+    vars: params.vars,
     month: firstStart.getUTCMonth() + 1,
     day: firstStart.getUTCDate(),
     hour: firstStart.getUTCHours(),
     lat,
     lon,
     elevation,
-    periods: [rows.map((r) => toFullPeriod(r, params.varsMask, modelKey))],
+    periods: [rows.map((r) => toFullPeriod(r, params.vars, modelKey))],
     seq: layout.seq,
     mode: params.mode,
     periodHours: layout.periodHours,
@@ -1446,7 +1446,7 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   // tail hours, which buildLayoutMessage treats as unservable — the seq search clamps to them.
   const fetchStart = Date.now();
   const [h, times, elevation] = await fetchHourly(
-    modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1, airQualityVarsFor(params.varsMask),
+    modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1, airQualityVarsFor(params.vars),
   );
   const fetchMs = Date.now() - fetchStart;
 

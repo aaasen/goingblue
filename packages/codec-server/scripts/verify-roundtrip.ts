@@ -15,15 +15,19 @@
 import { encodeFillSeq, type ForecastParams, type HourlyData } from "../src/forecast.ts";
 import { eachForecast } from "./derive-lib.ts";
 import {
-  messageToString, messageFromString, layoutFor, maxFillSeq, DEFAULT_VARS_MASK,
-  ALWAYS_VARS_MASK, CODECS, WIRE_VERSION,
+  messageToString, messageFromString, layoutFor, maxFillSeq, DEFAULT_VARS,
+  ALWAYS_VARS, VAR, type Variable, CODECS, WIRE_VERSION,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   type RequestContext,
 } from "@weather/protocol";
 
-// Bits 0..17 (bit 8, formerly cloud_total, is reserved). 13..17 are the air-quality columns,
-// which this run covers with real CAMS values — eachForecast joins them onto each cell.
-const ALL_VARS = ((1 << 18) - 1) & ~(1 << 8);
+// Every column the corpus covers (the air-quality columns carry real CAMS values —
+// eachForecast joins them onto each cell), minus gust, which the corpus lacks.
+const ALL_VARS: ReadonlySet<Variable> = new Set([
+  VAR.precip, VAR.temp, VAR.snow, VAR.freeze, VAR.rain, VAR.wind,
+  VAR.w300, VAR.w400, VAR.w500, VAR.clouds,
+  VAR.aq_pm25, VAR.aq_o3, VAR.aqi, VAR.aqi_eu, VAR.aqi_eu_pm25,
+]);
 const UTC_OFFSET = 0;
 // Request at midnight (whole day 0) and mid-afternoon (partial day 0) to cover both layouts.
 const REQUEST_HOURS_OF_DAY = [0, 13];
@@ -51,19 +55,19 @@ await eachForecast((hourly: HourlyData, _runHour: number) => {
 
   for (const hourOfDay of REQUEST_HOURS_OF_DAY) {
     const startEpochHour = day0 + hourOfDay;
-    // ALWAYS_VARS_MASK is what a bare request (no `v:` token) encodes with — the lean base set
+    // ALWAYS_VARS is what a bare request (no `v:` token) encodes with — the lean base set
     // including gust, with precip left out.
-    for (const mask of [ALL_VARS, DEFAULT_VARS_MASK, ALWAYS_VARS_MASK]) {
+    for (const vars of [ALL_VARS, new Set(DEFAULT_VARS), new Set(ALWAYS_VARS)]) {
       for (const mode of [MODE_DETAIL, MODE_AUTO, MODE_RANGE]) {
         const params: ForecastParams = {
           locationIdx: 0, lat: 0, lon: 0,
           mode, utcOffsetHours: UTC_OFFSET,
-          modelsMask: 1 << 1 /* GFS */, varsMask: mask,
+          modelsMask: 1 << 1 /* GFS */, vars,
           maxChars: 160, decoderVersion: WIRE_VERSION, code: messages % 128,
           startEpochHour, userToken: null,
         };
         const ctx: RequestContext = {
-          model: 1, vars_mask: mask, lat: 0, lon: 0,
+          model: 1, vars, lat: 0, lon: 0,
           start: startEpochHour * 3600000, mode, utcOffsetHours: UTC_OFFSET,
         };
 
@@ -85,7 +89,7 @@ await eachForecast((hourly: HourlyData, _runHour: number) => {
           } catch (e) {
             failures++;
             if (failures <= 10)
-              console.error(`FAIL mode=${mode} seq=${seq} hourOfDay=${hourOfDay} mask=${mask.toString(2)}: ${e}`);
+              console.error(`FAIL mode=${mode} seq=${seq} hourOfDay=${hourOfDay} vars=${[...vars].join(",")}: ${e}`);
           }
         }
       }

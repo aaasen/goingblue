@@ -3,7 +3,7 @@ import { ALPHABET, SEPTET_SWAP, foldSeptetSwap } from "../src/constants.js";
 import { CODECS, decodeMessage, peekHeader, encodeMessage } from "../src/registry.js";
 import { peekVersion, encodeVersion } from "../src/version.js";
 import { DEVICE_TRANSPORT } from "../src/devices.js";
-import { WIRE_VERSION, type ForecastMessage, type RequestContext, type DeviceCode } from "../src/index.js";
+import { WIRE_VERSION, type ForecastMessage, type RequestContext, type DeviceCode, type Variable } from "../src/index.js";
 import wireFixture from "./fixtures/wire.fixture.json";
 
 // The inReach display swap: Garmin Messenger shows a base-85 reply's $ @ _ as ¤ ¡ § — the GSM-7
@@ -12,11 +12,12 @@ import wireFixture from "./fixtures/wire.fixture.json";
 // folds them back wherever the text is known to be base-85, and leaves an SMS body alone because
 // there the three are real base-124 symbols. See SEPTET_SWAP in constants.ts.
 
-const d = wireFixture.decoded as ForecastMessage;
+const d = { ...wireFixture.decoded,
+  vars: new Set(wireFixture.decoded.vars as Variable[]) } as ForecastMessage;
 const req = wireFixture.request;
 const ctx = (device?: DeviceCode): RequestContext => ({
   model: 31 - Math.clz32(d.models_mask & -d.models_mask),
-  vars_mask: d.vars_mask,
+  vars: d.vars,
   lat: d.lat,
   lon: d.lon,
   start: Date.UTC(new Date().getUTCFullYear(), req.month - 1, req.day, req.hour),

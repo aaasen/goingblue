@@ -7,7 +7,7 @@
  * cooling one down. Held-out (5-fold by location, analyze-cross-var-heldout.ts, post 5-bit
  * widening): pooled 1.445 → res 1.393 → res × tempΔ 1.308 b/period.
  *
- * Temp is not guaranteed in vars_mask, so a res-keyed fallback table set (the tempΔ marginal)
+ * Temp is not guaranteed in the request, so a res-keyed fallback table set (the tempΔ marginal)
  * ships alongside — the same present/absent split the 600/700 hPa wind columns use for their
  * upper-level context.
  *
@@ -30,7 +30,7 @@
  */
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {
-  VARS_BIT, tempDeltaBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_MIN, TEMP_DELTA_MAX,
+  VAR, type Variable, tempDeltaBucket, TEMP_DELTA_PREV_BUCKETS, TEMP_DELTA_MIN, TEMP_DELTA_MAX,
   TABLE_RES_IDXS,
 } from "@weather/protocol";
 import {
@@ -44,7 +44,7 @@ const NSYM = 2 * STEP_MAX + 1;     // 63: deltas -31..31, no escape needed (alre
 const STEP_M = 304.8;              // 1000 ft, must match wire.ts
 const NRES = TABLE_RES_IDXS.length; // 12h/6h/3h/1h — the resolutions layouts emit, in row order
 const NBUCKET = TEMP_DELTA_PREV_BUCKETS;
-const MASK = (1 << VARS_BIT.temp) | (1 << VARS_BIT.freeze);
+const FREEZE_VARS: ReadonlySet<Variable> = new Set([VAR.temp, VAR.freeze]);
 
 // Same float-dust epsilon AND clamp as wire.ts quantFreeze (clampInt: [0, STEP_MAX]) — training
 // must quantize exactly like the wire. The lower clamp is load-bearing: the corpus holds
@@ -85,7 +85,7 @@ export function counter(): CellCounter {
         const slice = ctx.atMidnight(TABLE_RES_IDXS[res]);
         if (!slice) continue;
         const { hpp, start: firstUtc, n } = slice;
-        const periods = slice.rows.map((r) => toFullPeriod(r, MASK, "US"));
+        const periods = slice.rows.map((r) => toFullPeriod(r, FREEZE_VARS, "US"));
 
         let tempRecon = quantTemp(periods[0].temp_c ?? 0);
         let prevFreeze = quantFreeze(periods[0].freeze_m ?? 0);
@@ -102,7 +102,7 @@ export function counter(): CellCounter {
     tablesFrom(counts): DerivedTables {
       const byRes = resRows(counts);
       return {
-        // The tempΔ marginal per res — the fallback tables (temp absent from vars_mask), and the
+        // The tempΔ marginal per res — the fallback tables (temp absent from the request), and the
         // backstop for any empty (res, bucket) context.
         FREEZE_DELTA_WEIGHTS_BY_RES: byRes.map(({ marginal }) => scaledWeights(marginal)),
         FREEZE_DELTA_TEMP_WEIGHTS_BY_RES: byRes.map(({ rows, marginal }) =>

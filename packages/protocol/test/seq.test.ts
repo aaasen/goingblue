@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { wireCodec, WIRE_VERSION, WIRE_HEADER_CHARS } from "../src/wire.js";
 import { layoutFor, maxFillSeq, MODE_AUTO, MODE_DETAIL, MODE_RANGE } from "../src/layout.js";
-import { DEFAULT_VARS_MASK, MODEL_BIT } from "../src/constants.js";
+import { DEFAULT_VARS, MODEL_BIT } from "../src/constants.js";
 import type { ForecastMessage, Period, RequestContext } from "../src/model.js";
 
 const PERIOD: Period = {
@@ -22,7 +22,7 @@ function msgFor(mode: number, seq: number): ForecastMessage {
     code: 0,
     days: layout.days,
     models_mask: 0b0001,
-    vars_mask: DEFAULT_VARS_MASK,
+    vars: new Set(DEFAULT_VARS),
     month: first.getUTCMonth() + 1, day: first.getUTCDate(), hour: first.getUTCHours(),
     lat: 63.063, lon: -151.081, elevation: 4267,
     seq,
@@ -35,7 +35,7 @@ function msgFor(mode: number, seq: number): ForecastMessage {
 
 const ctxOf = (m: ForecastMessage): RequestContext => ({
   model: 0,
-  vars_mask: m.vars_mask, lat: m.lat, lon: m.lon,
+  vars: m.vars, lat: m.lat, lon: m.lon,
   start: REQ_UTC_HOUR * 3600000,
   mode: m.mode,
   utcOffsetHours: 0,

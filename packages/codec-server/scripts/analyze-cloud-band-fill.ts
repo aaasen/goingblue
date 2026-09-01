@@ -36,7 +36,7 @@ import {
   fillCloudBand, rhCritical, rowsFromWindows, sundqvistCover, toFullPeriod,
   HOURS_PER_PERIOD, type HourlyData,
 } from "../src/forecast.ts";
-import { CLOUD_BAND_LEVELS_HPA, VARS_BIT, quantCover } from "@weather/protocol";
+import { CLOUD_BAND_LEVELS_HPA, VAR, type Variable, quantCover } from "@weather/protocol";
 import { DERIVE_VARS, eachForecast } from "./derive-lib.ts";
 
 const LEVELS = CLOUD_BAND_LEVELS_HPA;
@@ -44,7 +44,7 @@ const NL = LEVELS.length;
 const CLOUD_VARS = LEVELS.map((l) => `cloud_cover_${l}hPa`);
 const RH_VARS = LEVELS.map((l) => `relative_humidity_${l}hPa`);
 const RES_IDXS = [1, 2, 3, 4]; // 12h/6h/3h/1h — the resolutions layouts actually emit
-const BAND_MASK = 1 << VARS_BIT.cch;
+const BAND_VARS: ReadonlySet<Variable> = new Set([VAR.clouds]);
 
 const args = process.argv.slice(2);
 const stride = Math.max(1, Number(args[args.indexOf("--stride") + 1]) || 50);
@@ -110,7 +110,7 @@ function countHours(h: HourlyData, wc: (number | null)[], s: HourStats): void {
 function countPeriods(h: HourlyData, windows: number[][], off: number, s: PeriodStats): void {
   // toFullPeriod already runs repairCloudBand over the aggregated stack, so cloud_band here is
   // exactly the eight values the encoder quantizes.
-  const periods = rowsFromWindows(h, h.time, windows, off).map((r) => toFullPeriod(r, BAND_MASK, "US"));
+  const periods = rowsFromWindows(h, h.time, windows, off).map((r) => toFullPeriod(r, BAND_VARS, "US"));
   for (let p = 0; p < periods.length; p++) {
     const stack = periods[p].cloud_band ?? [];
     let lit = 0;

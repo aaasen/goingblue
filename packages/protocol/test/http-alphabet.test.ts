@@ -4,18 +4,19 @@ import { ALPHABET, HTTP_ALPHABET, SMS_ALPHABET } from "../src/constants.js";
 import { wireCodec, messageToString } from "../src/wire.js";
 import { DEVICE_TRANSPORT, UNCAPPED_MAX_CHARS, maxCharsFor } from "../src/devices.js";
 import { WIRE_HEADER_CHARS } from "../src/wire.js";
-import type { ForecastMessage, RequestContext } from "../src/model.js";
+import type { ForecastMessage, RequestContext, Variable } from "../src/model.js";
 import wireFixture from "./fixtures/wire.fixture.json";
 
 // The internet route: the only one restricted by neither GSM-7 nor a character count, so it takes
 // every printable ASCII character and the whole forecast. See constants.ts for why the answer is
 // ASCII rather than something wider — over a byte-counted transport, wider is bigger.
 
-const d = wireFixture.decoded as ForecastMessage;
+const d = { ...wireFixture.decoded,
+  vars: new Set(wireFixture.decoded.vars as Variable[]) } as ForecastMessage;
 const req = wireFixture.request;
 const ctx = (device?: RequestContext["device"]): RequestContext => ({
   model: 31 - Math.clz32(d.models_mask & -d.models_mask),
-  vars_mask: d.vars_mask,
+  vars: d.vars,
   lat: d.lat,
   lon: d.lon,
   start: Date.UTC(new Date().getUTCFullYear(), req.month - 1, req.day, req.hour),

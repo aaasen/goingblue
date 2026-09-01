@@ -39,7 +39,7 @@
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {
-  VARS_BIT, compandSqrt, SNOW_K, RAIN_K, ACCUM_BITS,
+  VAR, type Variable, compandSqrt, SNOW_K, RAIN_K, ACCUM_BITS,
   WMO2IDX, WEATHERCODE_CLASS, WC_CLASSES, TABLE_RES_IDXS, type Period,
 } from "@weather/protocol";
 import {
@@ -66,21 +66,21 @@ const clampInt = (v: number, width: number) => Math.min(Math.max(v, 0), (1 << wi
 
 interface Var {
   name: string;
-  bit: number;
+  variable: Variable;
   nsym: number;
   nctx: number;                 // context rows per res: ctxOf(prev) × WC_CLASSES
   ctxOf(prev: number): number;  // prev symbol -> context id (identity or bucket)
   quant(p: Period): number;
 }
 const VARS: Var[] = [
-  { name: "precip", bit: VARS_BIT.precip, nsym: PRECIP_NSYM, nctx: PRECIP_NSYM * WC_CLASSES,
+  { name: "precip", variable: VAR.precip, nsym: PRECIP_NSYM, nctx: PRECIP_NSYM * WC_CLASSES,
     ctxOf: (p) => p, quant: (p) => clampInt(Math.round((p.precip ?? 0) * 7 / 100), 3) },
-  { name: "snow", bit: VARS_BIT.snow, nsym: ACCUM_NSYM, nctx: NBUCKET * WC_CLASSES,
+  { name: "snow", variable: VAR.snow, nsym: ACCUM_NSYM, nctx: NBUCKET * WC_CLASSES,
     ctxOf: bucketOf, quant: (p) => compandSqrt(p.snow_cm ?? 0, SNOW_K, ACCUM_BITS) },
-  { name: "rain", bit: VARS_BIT.rain, nsym: ACCUM_NSYM, nctx: NBUCKET * WC_CLASSES,
+  { name: "rain", variable: VAR.rain, nsym: ACCUM_NSYM, nctx: NBUCKET * WC_CLASSES,
     ctxOf: bucketOf, quant: (p) => compandSqrt(p.rain_mm ?? 0, RAIN_K, ACCUM_BITS) },
 ];
-const VARS_MASK = VARS.reduce((m, v) => m | (1 << v.bit), 0);
+const VAR_SET: ReadonlySet<Variable> = new Set(VARS.map((v) => v.variable));
 
 export function counter(): CellCounter {
   const tables = VARS.flatMap((v) => [
@@ -109,7 +109,7 @@ export function counter(): CellCounter {
         const slice = ctx.atRequest(TABLE_RES_IDXS[resIdx]);
         if (!slice) continue;
         const { n, rows } = slice;
-        const periods: Period[] = rows.map((r) => toFullPeriod(r, VARS_MASK, "US"));
+        const periods: Period[] = rows.map((r) => toFullPeriod(r, VAR_SET, "US"));
         // Class of the symbol the encoder would emit, not of the raw code — WMO2IDX maps an
         // unknown code to index 0, exactly as wire.ts's weathercode column does.
         const wc = periods.map((p) => WEATHERCODE_CLASS[WMO2IDX[p.weathercode] ?? 0]);

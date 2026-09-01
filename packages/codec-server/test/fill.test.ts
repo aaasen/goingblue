@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CODECS, WIRE_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
-  decodeMessage, DEFAULT_VARS_MASK, VARS_BIT, MODEL_BIT, IPHONE_MAX_CHARS,
+  decodeMessage, DEFAULT_VARS, VAR, type Variable, MODEL_BIT, IPHONE_MAX_CHARS,
   WIRE_HEADER_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, maxCharsFor, reassembleReply,
   type RequestContext,
 } from "@weather/protocol";
@@ -58,7 +58,7 @@ function syntheticHourly(startUtcHour: number, nHours: number): { h: HourlyData;
 const DATA_START = Math.floor(REQ_UTC_HOUR / 24) * 24 - 24;
 const { h: HOURLY, times: TIMES } = syntheticHourly(DATA_START, (FILL_SLOTS + 2) * 24);
 
-const TEST_VARS = DEFAULT_VARS_MASK | (1 << VARS_BIT.temp) | (1 << VARS_BIT.wind);
+const TEST_VARS: ReadonlySet<Variable> = new Set([...DEFAULT_VARS, VAR.temp, VAR.wind]);
 
 function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
   return {
@@ -68,7 +68,7 @@ function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
     mode: MODE_AUTO,
     utcOffsetHours: UTC_OFFSET,
     modelsMask: 0b010, // American (US): has freeze + pressure-level vars, so nothing is masked off
-    varsMask: TEST_VARS,
+    vars: TEST_VARS,
     maxChars: 160,
     messages: 1,
     decoderVersion: WIRE_VERSION,
@@ -89,7 +89,7 @@ function encodeSeq(p: ForecastParams, h = HOURLY, times = TIMES) {
 // The context a client would store for this request (see HomeScreen), used to decode replies.
 const ctxFor = (mode: number): RequestContext => ({
   model: 1, // American (US)
-  vars_mask: TEST_VARS,
+  vars: TEST_VARS,
   lat: 63.135,
   lon: -150.989,
   start: REQ_UTC_HOUR * 3600000,
@@ -416,14 +416,14 @@ describe("fitFillToBudget", () => {
         (v, i) => (DATA_START + i <= lastHourWithData ? v : null)),
     };
     // No freezing level: GEM has no such product, so toFullPeriod drops it anyway.
-    const caVars = TEST_VARS & ~(1 << VARS_BIT.freeze);
+    const caVars = new Set([...TEST_VARS].filter((v) => v !== VAR.freeze));
     const caEncode = (mode: number) => {
-      const p = params({ mode, modelsMask: 1 << MODEL_BIT.CA, varsMask: caVars });
+      const p = params({ mode, modelsMask: 1 << MODEL_BIT.CA, vars: caVars });
       return (seq: number) =>
         encodeFillSeq(gemLike, TIMES, p, seq, p.lat!, p.lon!, 500, "CA", codec);
     };
     const caCtx = (mode: number): RequestContext => ({
-      ...ctxFor(mode), model: MODEL_BIT.CA, vars_mask: caVars,
+      ...ctxFor(mode), model: MODEL_BIT.CA, vars: caVars,
     });
 
     it("would strand a third of the budget as Range", () => {

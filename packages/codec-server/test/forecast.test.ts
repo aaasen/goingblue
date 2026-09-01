@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { ALWAYS_VARS_MASK, DEFAULT_VARS_MASK, VARS_BIT } from "@weather/protocol";
+import { ALWAYS_VARS, DEFAULT_VARS, VAR, type Variable } from "@weather/protocol";
+
+// Selection shorthands mirroring what parseRequest builds.
+const defaultVars = (...extras: Variable[]) => new Set<Variable>([...DEFAULT_VARS, ...extras]);
+const withAlways = (...extras: Variable[]) => new Set<Variable>([...ALWAYS_VARS, ...extras]);
 import { Variable } from "@openmeteo/sdk/variable.js";
 import {
   aggregateRows,
@@ -160,52 +164,52 @@ function row(snow_cm: number): Row {
 
 describe("toFullPeriod — snow", () => {
   it("passes snow_cm through unchanged", () => {
-    expect(toFullPeriod(row(0.28), DEFAULT_VARS_MASK, "EU").snow_cm).toBe(0.28);
-    expect(toFullPeriod(row(5.08), DEFAULT_VARS_MASK, "EU").snow_cm).toBe(5.08);
-    expect(toFullPeriod(row(100), DEFAULT_VARS_MASK, "EU").snow_cm).toBe(100);
+    expect(toFullPeriod(row(0.28), defaultVars(), "EU").snow_cm).toBe(0.28);
+    expect(toFullPeriod(row(5.08), defaultVars(), "EU").snow_cm).toBe(5.08);
+    expect(toFullPeriod(row(100), defaultVars(), "EU").snow_cm).toBe(100);
   });
 });
 
 describe("toFullPeriod — gust", () => {
   it("passes the peak gust through when the gust bit is set", () => {
-    const p = toFullPeriod(row(0), DEFAULT_VARS_MASK | (1 << VARS_BIT.gust), "EU");
+    const p = toFullPeriod(row(0), defaultVars(VAR.gust), "EU");
     expect(p.wind_gust_kph).toBe(12);
   });
 
   it("omits gust when the bit is unset", () => {
-    expect(toFullPeriod(row(0), DEFAULT_VARS_MASK & ~(1 << VARS_BIT.gust), "EU").wind_gust_kph)
+    expect(toFullPeriod(row(0), defaultVars(), "EU").wind_gust_kph)
       .toBeUndefined();
   });
 });
 
 describe("toFullPeriod — air quality", () => {
-  const AQ_BITS = [
-    [VARS_BIT.aqi, "aqi", 118],
-    [VARS_BIT.aq_pm25, "aqi_pm25", 96],
-    [VARS_BIT.aq_o3, "aqi_o3", 42],
-    [VARS_BIT.aq_pm10, "aqi_pm10", 60],
-    [VARS_BIT.aq_no2, "aqi_no2", 18],
-    [VARS_BIT.aq_so2, "aqi_so2", 9],
-    [VARS_BIT.aqi_eu, "aqi_eu", 55],
-    [VARS_BIT.aqi_eu_pm25, "aqi_eu_pm25", 31],
-    [VARS_BIT.aqi_eu_o3, "aqi_eu_o3", 48],
-    [VARS_BIT.aqi_eu_pm10, "aqi_eu_pm10", 22],
-    [VARS_BIT.aqi_eu_no2, "aqi_eu_no2", 14],
-    [VARS_BIT.aqi_eu_so2, "aqi_eu_so2", 6],
+  const AQ_VARS = [
+    [VAR.aqi, "aqi", 118],
+    [VAR.aq_pm25, "aqi_pm25", 96],
+    [VAR.aq_o3, "aqi_o3", 42],
+    [VAR.aq_pm10, "aqi_pm10", 60],
+    [VAR.aq_no2, "aqi_no2", 18],
+    [VAR.aq_so2, "aqi_so2", 9],
+    [VAR.aqi_eu, "aqi_eu", 55],
+    [VAR.aqi_eu_pm25, "aqi_eu_pm25", 31],
+    [VAR.aqi_eu_o3, "aqi_eu_o3", 48],
+    [VAR.aqi_eu_pm10, "aqi_eu_pm10", 22],
+    [VAR.aqi_eu_no2, "aqi_eu_no2", 14],
+    [VAR.aqi_eu_so2, "aqi_eu_so2", 6],
   ] as const;
 
-  it("carries each index only under its own bit", () => {
-    for (const [bit, field, value] of AQ_BITS) {
-      const p = toFullPeriod(row(0), ALWAYS_VARS_MASK | (1 << bit), "EU");
+  it("carries each index only under its own variable", () => {
+    for (const [variable, field, value] of AQ_VARS) {
+      const p = toFullPeriod(row(0), withAlways(variable), "EU");
       expect(p[field], field).toBe(value);
-      for (const [, other] of AQ_BITS) if (other !== field) expect(p[other]).toBeUndefined();
+      for (const [, other] of AQ_VARS) if (other !== field) expect(p[other]).toBeUndefined();
     }
   });
 
   it("names the dominant pollutant by raw concentration, not by band", () => {
     // row() has PM2.5 96 leading the US constituents and ozone 48 leading the European ones —
     // indices into AQ_DOMINANT_US / AQ_DOMINANT_EU.
-    const p = toFullPeriod(row(0), ALWAYS_VARS_MASK | (1 << VARS_BIT.aqi) | (1 << VARS_BIT.aqi_eu), "EU");
+    const p = toFullPeriod(row(0), withAlways(VAR.aqi, VAR.aqi_eu), "EU");
     expect(p.aqi_dominant).toBe(0);
     expect(p.aqi_eu_dominant).toBe(1);
 
@@ -213,21 +217,21 @@ describe("toFullPeriod — air quality", () => {
     // when its concentration is higher. 100 and 96 are both US band 15 (100..119 → the same
     // symbol), and ozone must still be named.
     const ozoneLeads = { ...row(0), us_aqi_ozone: 100 };
-    expect(toFullPeriod(ozoneLeads, ALWAYS_VARS_MASK | (1 << VARS_BIT.aqi), "EU").aqi_dominant).toBe(1);
+    expect(toFullPeriod(ozoneLeads, withAlways(VAR.aqi), "EU").aqi_dominant).toBe(1);
   });
 
   it("leaves the dominant pollutant absent when a constituent is missing", () => {
     // With one constituent unknown there is no honest argmax — better to say nothing than to name
     // the worst of what happened to arrive.
     const partial = { ...row(0), us_aqi_ozone: null };
-    expect(toFullPeriod(partial, ALWAYS_VARS_MASK | (1 << VARS_BIT.aqi), "EU").aqi_dominant)
+    expect(toFullPeriod(partial, withAlways(VAR.aqi), "EU").aqi_dominant)
       .toBeUndefined();
   });
 
   it("is served on every center — CAMS doesn't depend on the weather model", () => {
     // The freezing level gets cleared for GEM and ECMWF; air quality never does.
     for (const center of ["BEST", "US", "CA", "EU"]) {
-      const p = toFullPeriod(row(0), ALWAYS_VARS_MASK | (1 << VARS_BIT.aqi), center);
+      const p = toFullPeriod(row(0), withAlways(VAR.aqi), center);
       expect(p.aqi, center).toBe(118);
     }
   });
@@ -235,23 +239,23 @@ describe("toFullPeriod — air quality", () => {
   it("leaves a missing value absent instead of reading it as zero", () => {
     // 0 is the cleanest air on either scale, so an hour CAMS didn't forecast must not claim it.
     const missing = { ...row(0), us_aqi: null };
-    const p = toFullPeriod(missing, ALWAYS_VARS_MASK | (1 << VARS_BIT.aqi), "EU");
+    const p = toFullPeriod(missing, withAlways(VAR.aqi), "EU");
     expect(p.aqi).toBeUndefined();
   });
 });
 
 describe("airQualityVarsFor", () => {
   it("asks upstream for exactly the indices the request selected", () => {
-    expect(airQualityVarsFor(ALWAYS_VARS_MASK)).toEqual([]);
-    expect(airQualityVarsFor(1 << VARS_BIT.aq_pm25)).toEqual(["us_aqi_pm2_5"]);
+    expect(airQualityVarsFor(withAlways())).toEqual([]);
+    expect(airQualityVarsFor(new Set([VAR.aq_pm25]))).toEqual(["us_aqi_pm2_5"]);
     // A headline drags in every constituent of its scale — the dominant-pollutant column is an
     // argmax over all of them, including US carbon monoxide, which has no column of its own.
-    expect(airQualityVarsFor(1 << VARS_BIT.aqi)).toEqual([
+    expect(airQualityVarsFor(new Set([VAR.aqi]))).toEqual([
       "us_aqi_pm2_5", "us_aqi_ozone", "us_aqi_pm10",
       "us_aqi_nitrogen_dioxide", "us_aqi_sulphur_dioxide", "us_aqi_carbon_monoxide",
       "us_aqi",
     ]);
-    expect(airQualityVarsFor(1 << VARS_BIT.aqi_eu)).toEqual([
+    expect(airQualityVarsFor(new Set([VAR.aqi_eu]))).toEqual([
       "european_aqi_pm2_5", "european_aqi_ozone", "european_aqi_pm10",
       "european_aqi_nitrogen_dioxide", "european_aqi_sulphur_dioxide",
       "european_aqi",
@@ -260,15 +264,15 @@ describe("airQualityVarsFor", () => {
 });
 
 describe("toFullPeriod — temp", () => {
-  const maskWithTemp = DEFAULT_VARS_MASK | (1 << VARS_BIT.temp);
+  const varsWithTemp = defaultVars(VAR.temp);
 
   it("passes the representative temp through when the temp bit is set", () => {
-    const p = toFullPeriod(row(0), maskWithTemp, "EU");
+    const p = toFullPeriod(row(0), varsWithTemp, "EU");
     expect(p.temp_c).toBe(-10);
   });
 
   it("omits temp when the bit is unset", () => {
-    expect(toFullPeriod(row(0), DEFAULT_VARS_MASK, "EU").temp_c).toBeUndefined();
+    expect(toFullPeriod(row(0), defaultVars(), "EU").temp_c).toBeUndefined();
   });
 });
 
@@ -300,7 +304,7 @@ describe("aggregateRows — 1h resolution", () => {
   it("toFullPeriod passes snow_cm through from row", () => {
     const idx = fixture.hourly.snowfall.findIndex((v) => v === 0.28);
     expect(idx).toBeGreaterThanOrEqual(0);
-    const p = toFullPeriod(rows[idx], DEFAULT_VARS_MASK, "EU");
+    const p = toFullPeriod(rows[idx], defaultVars(), "EU");
     expect(p.snow_cm).toBe(0.28);
   });
 });
@@ -341,7 +345,7 @@ describe("aggregateRows — daily resolution", () => {
   });
 
   it("toFullPeriod passes daily snow_cm through from row", () => {
-    const p = toFullPeriod(rows[0], DEFAULT_VARS_MASK, "EU");
+    const p = toFullPeriod(rows[0], defaultVars(), "EU");
     expect(p.snow_cm).toBe(rows[0].snow_cm);
   });
 });

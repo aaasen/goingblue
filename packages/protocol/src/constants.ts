@@ -99,7 +99,7 @@ export const MODEL_NAMES: string[] = [
 // it, which reads as clear sky, and neither is in the training corpus.
 export const CLOUD_BAND_LEVELS_HPA = [300, 400, 500, 600, 700, 850, 925, 1000] as const;
 // Pressure-level wind uses the same ladder minus its 1000 hPa floor, one selectable column per
-// level (WIND_LEVEL_BITS), highest first — Period.wind_aloft is indexed by it. 1000 hPa is
+// level (WIND_LEVEL_VARS), highest first — Period.wind_aloft is indexed by it. 1000 hPa is
 // ~110 m: the always-on 10 m wind already describes that air, and above ~110 m the level is
 // under the terrain, so it never earned a column (dropped 2026-08-22). Every center's pressure
 // product serves wind at all seven (verified 2026-08-22 against best_match, gfs_seamless,
@@ -118,112 +118,115 @@ export function metersToPressure(m: number): number {
   return 1013.25 * Math.pow(1 - m / 44330.77, 1 / 0.190263);
 }
 
-// vars_mask bit indices
-export const VARS_BIT: Record<string, number> = {
-  precip: 0,
-  temp: 1,   // representative temperature sample (see Period.temp_c in model.ts)
-  snow: 2,
-  freeze: 3,
-  wind: 4,   // surface (10m) wind
-  // Pressure-level wind, one bit per WIND_LEVELS_HPA entry (see WIND_LEVEL_BITS): the three
-  // slots the old fixed 500/600/700 trio held plus 25..28. Selected per level by the `w:`
-  // request token, never on by default.
-  w300: 5,
-  w400: 6,
-  w500: 7,
-  w600: 25,
-  w700: 26,
-  w850: 27,
-  w925: 28,
-  gust: 8,   // surface (10m) wind gusts, speed only (bit formerly carried cc, total cloud cover)
-  cch: 9,    // v2: high cloud cover. Now the whole cloud band (CLOUD_BAND_LEVELS_HPA) rides
-             // this one bit; 10/11 still arrive set by the `c` toggle but carry no column.
-  ccm: 10,   // mid cloud cover (v2 only)
-  ccl: 11,   // low cloud cover (v2 only)
-  rain: 12,  // liquid precipitation (rain + showers), mm
+// Canonical wire variable names. Always spell a variable through VAR (VAR.w500, never the
+// literal "w500"): the constant is the single spelling of each name, so a typo is a compile
+// error instead of a silently empty selection. A message's selection travels as a
+// ReadonlySet<Variable> (see ForecastMessage.vars / RequestContext.vars in model.ts).
+export const VAR = {
+  precip: "precip",
+  temp: "temp",   // representative temperature sample (see Period.temp_c in model.ts)
+  snow: "snow",
+  freeze: "freeze",
+  rain: "rain",   // liquid precipitation (rain + showers), mm
+  wind: "wind",   // surface (10m) wind
+  gust: "gust",   // surface (10m) wind gusts, speed only
+  // Pressure-level wind, one variable per WIND_LEVELS_HPA entry (see WIND_LEVEL_VARS). Selected
+  // per level by the `w:` request token, never on by default.
+  w300: "w300",
+  w400: "w400",
+  w500: "w500",
+  w600: "w600",
+  w700: "w700",
+  w850: "w850",
+  w925: "w925",
+  // The whole pressure-level cloud band (CLOUD_BAND_LEVELS_HPA) rides this one variable.
+  clouds: "clouds",
   // Air quality (CAMS), on two incompatible index scales — see the AQI ladders in entropy.ts.
   // Every one of these is model-independent: the `m:` center selection does not apply, and they
-  // reach only ~4 days (AQ_HORIZON_HOURS in wire.ts). Bit 13 is the slot tmin left when temp
-  // became a single representative sample per period.
-  aq_pm25: 13,     // US AQI PM2.5 sub-index — the smoke column
-  aq_o3: 14,       // US AQI ozone sub-index
-  aqi: 15,         // US AQI, the headline index (max over every sub-index)
-  aqi_eu: 16,      // European AQI, the headline index
-  aqi_eu_pm25: 17, // European AQI PM2.5 sub-index (a 24h running mean upstream, so it's smooth)
-  // The remaining constituents, added once the 2026-08-15 CAMS pull carried them. Bits 18..21
-  // and their codes were held open for the European four while only european_aqi and
-  // european_aqi_pm2_5 existed in the corpus; the US three follow at 22..24.
+  // reach only ~4 days (AQ_HORIZON_HOURS in wire.ts).
   //
   // The two scales deliberately offer the SAME FIVE constituents. The US index also defines a
   // carbon monoxide sub-index and the European one does not, but CO leads the US headline in
   // 0.0% of corpus periods — it is never the pollutant a reader is being warned about — so
   // carrying it would have bought a column that says nothing and made the two scales' menus
-  // differ for no reader-visible gain. Bit 29 is the next free one if that judgement changes.
-  aqi_eu_pm10: 18, // European AQI PM10 sub-index
-  aqi_eu_no2: 19,  // European AQI nitrogen dioxide sub-index
-  aqi_eu_o3: 20,   // European AQI ozone sub-index — leads this scale 68.6% of the time
-  aqi_eu_so2: 21,  // European AQI sulphur dioxide sub-index
-  aq_pm10: 22,     // US AQI PM10 sub-index
-  aq_no2: 23,      // US AQI nitrogen dioxide sub-index
-  aq_so2: 24,      // US AQI sulphur dioxide sub-index
-};
+  // differ for no reader-visible gain.
+  aqi: "aqi",                 // US AQI, the headline index (max over every sub-index)
+  aq_pm25: "aq_pm25",         // US AQI PM2.5 sub-index — the smoke column
+  aq_o3: "aq_o3",             // US AQI ozone sub-index
+  aq_pm10: "aq_pm10",         // US AQI PM10 sub-index
+  aq_no2: "aq_no2",           // US AQI nitrogen dioxide sub-index
+  aq_so2: "aq_so2",           // US AQI sulphur dioxide sub-index
+  aqi_eu: "aqi_eu",           // European AQI, the headline index
+  aqi_eu_pm25: "aqi_eu_pm25", // European AQI PM2.5 sub-index (a 24h running mean upstream)
+  aqi_eu_o3: "aqi_eu_o3",     // European AQI ozone sub-index — leads this scale 68.6% of the time
+  aqi_eu_pm10: "aqi_eu_pm10", // European AQI PM10 sub-index
+  aqi_eu_no2: "aqi_eu_no2",   // European AQI nitrogen dioxide sub-index
+  aqi_eu_so2: "aqi_eu_so2",   // European AQI sulphur dioxide sub-index
+} as const;
+export type Variable = (typeof VAR)[keyof typeof VAR];
 
-// vars_mask bit of each WIND_LEVELS_HPA level, ladder order (300 hPa first).
-export const WIND_LEVEL_BITS: readonly number[] = WIND_LEVELS_HPA.map((l) => VARS_BIT[`w${l}`]);
-export const WIND_LEVELS_MASK = WIND_LEVEL_BITS.reduce((m, b) => m | (1 << b), 0);
+// Every variable, in canonical order: the order selections are reported in (describeRequest).
+// Order carries no wire meaning; the body's column order is fixed by the tables in wire.ts.
+export const VARIABLES: readonly Variable[] = Object.values(VAR);
+
+// The pressure-level wind variable of each WIND_LEVELS_HPA level, ladder order (300 hPa first).
+export const WIND_LEVEL_VARS: readonly Variable[] =
+  WIND_LEVELS_HPA.map((l) => VAR[`w${l}` as keyof typeof VAR]);
 // The `w:` request token: ladder indices of the selected levels, e.g. `w:234` = 500/600/700 hPa.
-export function windLevelsToken(mask: number): string {
-  return WIND_LEVEL_BITS.map((b, i) => (mask & (1 << b) ? String(i) : "")).join("");
+export function windLevelsToken(vars: ReadonlySet<Variable>): string {
+  return WIND_LEVEL_VARS.map((v, i) => (vars.has(v) ? String(i) : "")).join("");
 }
-export function windLevelsMaskFromToken(token: string): number {
-  let mask = 0;
-  for (const ch of token) {
-    const i = ch.charCodeAt(0) - 48;
-    if (i >= 0 && i < WIND_LEVEL_BITS.length) mask |= 1 << WIND_LEVEL_BITS[i];
-  }
-  return mask;
+// The wind variable one `w:` token character names, or null for a character off the ladder.
+export function windLevelVar(ch: string): Variable | null {
+  const i = ch.charCodeAt(0) - 48;
+  return i >= 0 && i < WIND_LEVEL_VARS.length ? WIND_LEVEL_VARS[i] : null;
 }
 
 // Core forecast variables are implicit in every request. The request's `v:` token only carries
 // user-configurable additions, which keeps the satellite message body as short as possible.
-export const ALWAYS_VARS = ["temp", "snow", "rain", "wind", "gust"] as const;
-export const ALWAYS_VARS_MASK = ALWAYS_VARS.reduce(
-  (mask, variable) => mask | (1 << VARS_BIT[variable]),
-  0,
-);
+export const ALWAYS_VARS: readonly Variable[] = [VAR.temp, VAR.snow, VAR.rain, VAR.wind, VAR.gust];
 
 // Single-character request codes for the user-configurable variable groups. A group is however
-// many protocol variables one toggle turns on together: the cloud toggle covers three, while
-// every air-quality index is its own toggle — the pollutants behave differently enough (smoke vs
-// photochemical smog vs traffic NO2) that a reader wants them separately, and each costs its own
-// share of the message budget. Pressure-level wind is not a group: its levels travel in the
-// `w:` token (windLevelsToken), one ladder index per selected level.
+// many protocol variables one toggle turns on together; every group is a single variable
+// today. Every air-quality index is its own toggle: the pollutants behave differently enough
+// (smoke vs photochemical smog vs traffic NO2) that a reader wants them separately, and each
+// costs its own share of the message budget. Pressure-level wind is not a group: its levels
+// travel in the `w:` token (windLevelsToken), one ladder index per selected level.
 export const CONFIGURABLE_VAR_GROUPS = {
-  p: ["precip"],
-  c: ["cch", "ccm", "ccl"],
-  f: ["freeze"],
-  a: ["aqi"],           // US Air Quality Index
-  s: ["aq_pm25"],       // smoke
-  o: ["aq_o3"],         // ozone
-  m: ["aq_pm10"],       // US PM10 sub-index
-  d: ["aq_no2"],        // US nitrogen dioxide sub-index
-  u: ["aq_so2"],        // US sulphur dioxide sub-index
-  e: ["aqi_eu"],        // European AQI
-  "2": ["aqi_eu_pm25"], // European PM2.5 sub-index
-  "1": ["aqi_eu_pm10"], // European PM10 sub-index
-  n: ["aqi_eu_no2"],    // European nitrogen dioxide sub-index
-  "3": ["aqi_eu_o3"],   // European ozone sub-index
-  q: ["aqi_eu_so2"],    // European sulphur dioxide sub-index
+  p: [VAR.precip],
+  c: [VAR.clouds],
+  f: [VAR.freeze],
+  a: [VAR.aqi],           // US Air Quality Index
+  s: [VAR.aq_pm25],       // smoke
+  o: [VAR.aq_o3],         // ozone
+  m: [VAR.aq_pm10],       // US PM10 sub-index
+  d: [VAR.aq_no2],        // US nitrogen dioxide sub-index
+  u: [VAR.aq_so2],        // US sulphur dioxide sub-index
+  e: [VAR.aqi_eu],        // European AQI
+  "2": [VAR.aqi_eu_pm25], // European PM2.5 sub-index
+  "1": [VAR.aqi_eu_pm10], // European PM10 sub-index
+  n: [VAR.aqi_eu_no2],    // European nitrogen dioxide sub-index
+  "3": [VAR.aqi_eu_o3],   // European ozone sub-index
+  q: [VAR.aqi_eu_so2],    // European sulphur dioxide sub-index
 } as const;
 
 // The request codes above, as a character class for the compact `v:` token (`v:aso`). Derived
 // rather than written out so a new group can't be added without the parser accepting it.
 export const VAR_GROUP_CODES = Object.keys(CONFIGURABLE_VAR_GROUPS).join("");
 
+// A selection's `v:` token value: the code of every group whose variables are all selected.
+// Emitted in group-table order; the server unions the codes, so order carries no meaning.
+export function varGroupCodesFor(vars: ReadonlySet<Variable>): string {
+  return Object.entries(CONFIGURABLE_VAR_GROUPS)
+    .filter(([, groupVars]) => groupVars.every((v) => vars.has(v)))
+    .map(([code]) => code)
+    .join("");
+}
+
 export const WMO_BITS = 5;
 
-export const DEFAULT_VARS_MASK = (1 << 0) | (1 << 2) | (1 << 3);
-// precip + snow + freeze — pressure-level wind is opt-in, level by level
+export const DEFAULT_VARS: readonly Variable[] = [VAR.precip, VAR.snow, VAR.freeze];
+// pressure-level wind is opt-in, level by level
 
 // The symbol alphabet. A code's INDEX here is its wire symbol (WMO2IDX in model.ts is just this
 // list inverted), so codes are APPENDED, never inserted in numeric order — inserting renumbers

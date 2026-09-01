@@ -310,7 +310,8 @@ export const AQI_BASE_MASKS = 8; // 0..7; mask 0 (none carried) has no residual 
 //   ozone+pm10        2.501  ✗          0.978  ✓
 //   all three         0.036  ✓          0.040  ✓
 //
-// Both sides derive the mask from vars_mask, so choosing the mode costs zero wire bits — the same
+// Both sides derive the mask from the request's vars, so choosing the mode costs zero wire bits
+// — the same
 // context-availability switch freezeDeltaBook (temp present/absent) and sfcSpeedBook (gust
 // present/absent) use, with 8 states instead of 2. Pinned here rather than emitted by the derive
 // pipeline so a regeneration can't silently flip a mode and change the wire format; the closest
@@ -320,7 +321,8 @@ export const AQI_BASE_MASKS = 8; // 0..7; mask 0 (none carried) has no residual 
 // in this list, so the order is wire format. The first three are the ones that ever lead (and the
 // ones the residual keys on); the rest are here because the headline's max is taken over them and
 // a symbol that could never be emitted would be a lie about what the index means. US carbon
-// monoxide has NO column of its own (see VARS_BIT) but keeps its symbol for exactly that reason.
+// monoxide has NO column of its own (see VAR in constants.ts) but keeps its symbol for exactly
+// that reason.
 export const AQ_DOMINANT_US: readonly string[] = ["pm2.5", "ozone", "pm10", "no2", "so2", "co"];
 export const AQ_DOMINANT_EU: readonly string[] = ["pm2.5", "ozone", "pm10", "no2", "so2"];
 
@@ -398,10 +400,10 @@ export interface Books {
   gustDeltaBook(res: number): CodeBook;
   // The codebook for one SURFACE wind speed delta. `gustDelta` is the gust column's same-period
   // decoded delta (free context — gusts and sustained wind move together), or null when gust is
-  // absent from vars_mask, which falls back to the unconditioned [res][level 0] wind table.
+  // absent from the request, which falls back to the unconditioned [res][level 0] wind table.
   sfcSpeedBook(res: number, gustDelta: number | null): CodeBook;
   // The codebook for one freeze delta. `tempDelta` is the same period's decoded temp delta (the
-  // post-clamp reconstruction, never the raw input), or null when temp is absent from vars_mask
+  // post-clamp reconstruction, never the raw input), or null when temp is absent from the request
   // — the res-keyed fallback (the tempΔ marginal). The freezing level is where the 0°C isotherm
   // sits, so it moves with the airmass temperature, and temp decodes first, making its delta
   // free context. See codec-server/scripts/derive-freeze-delta-codebooks.ts.
@@ -450,7 +452,7 @@ export interface Books {
   aqiDeltaBook(res: number, tod: number, prevDelta: number | null): CodeBook;
   aqiEuBook(res: number, tod: number, prevDelta: number | null): CodeBook;
   // Each headline's conditioned column: the residual against the max of whichever of
-  // {pm2.5, ozone, pm10} vars_mask carries, keyed by that 3-bit presence mask and the
+  // {pm2.5, ozone, pm10} the request carries, keyed by that 3-bit presence mask and the
   // resolution. The residual is a spike at zero, so a richer context would only split it.
   aqiResidualBook(res: number, baseMask: number): CodeBook;
   aqiEuResidualBook(res: number, baseMask: number): CodeBook;

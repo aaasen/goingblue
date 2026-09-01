@@ -1,5 +1,5 @@
 import { encode as wideEncode, decode as wideDecode } from "base32768";
-import { ALPHABET, SMS_ALPHABET, HTTP_ALPHABET, WMO_BITS } from "./constants.js";
+import { ALPHABET, SMS_ALPHABET, HTTP_ALPHABET } from "./constants.js";
 
 // The header's radix is the base-85 alphabet's size (see constants.ts). Bodies carry their own —
 // only the header is pinned to base-85.
@@ -32,14 +32,6 @@ export const ALPHABET_CHARS: Record<TextAlphabet, string> = {
 export function nCharsForBits(nBits: number): number {
   if (nBits === 0) return 0;
   return Math.ceil((nBits * Math.log(2)) / Math.log(BASE));
-}
-
-export function periodBitsForMask(varsMask: number, varBits: number[]): number {
-  let bits = WMO_BITS;
-  for (let i = 0; i < varBits.length; i++) {
-    if (varsMask & (1 << i)) bits += varBits[i];
-  }
-  return bits;
 }
 
 // Character → digit, one map per alphabet, built once. `radix` carries the alphabet's size

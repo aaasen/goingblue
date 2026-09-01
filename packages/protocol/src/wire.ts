@@ -1,6 +1,6 @@
 import {
-  WMO_CODES, VARS_BIT, CLOUD_BAND_LEVELS_HPA, WIND_LEVELS_HPA, WIND_LEVEL_BITS, metersToPressure,
-  RESOLUTION_HOURS, TABLE_RES_IDXS,
+  WMO_CODES, VAR, type Variable, CLOUD_BAND_LEVELS_HPA, WIND_LEVELS_HPA, WIND_LEVEL_VARS,
+  metersToPressure, RESOLUTION_HOURS, TABLE_RES_IDXS,
 } from "./constants.js";
 import { layoutFor, maxFillSeq, effectiveMode } from "./layout.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "./bits.js";
@@ -67,25 +67,18 @@ export const WIRE_HEADER_BITS = CODE_BITS + WIRE_SEQ_BITS + ELEV_BITS; // 22
 export const WIRE_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(WIRE_HEADER_BITS); // 1 + 4 = 5
 const HEADER_CHARS = nCharsForBits(WIRE_HEADER_BITS); // packed-header chars (excludes version prefix)
 
+// Per-column anchor widths (the entropy-coded symbols that follow each anchor are keyed by
+// context, not by these):
 // temp: 8 bits, 1°C steps, offset -100°C → -100°C to +155°C
-// snow/rain: 6 bits each, sqrt-companded (see ACCUM_* below). rain is bit 12, the slot
-// formerly reserved for the removed `vis`; bit 13 (formerly tmin) is reserved.
-// wind: 8 = 5-bit speed (extended Beaufort force 0..17) + 3-bit direction (raw-width
-// equivalent; both entropy-coded) — surface (bit 4) and every WIND_LEVELS_HPA level (bits 5..7
-// and 25..28, see WIND_LEVEL_BITS), each carried whenever requested (no elevation clamp).
-// gust: 5 = speed only, no direction (bit 8, formerly cloud_total).
-// cloud band: bit 9 (v2's cch) carries the CLOUD_BAND_LEVELS_HPA stack at 3 bits per level
-// anchor — clamped to the ≤3h periods and to one level below the forecast point, see
-// cloudBandPeriodCount / cloudBandLevelCount; bits 10/11 (v2's ccm/ccl) carry nothing today
-// but stay in the table so the `c` toggle's mask decodes identically.
-// air quality: 5 bits each — a 26-symbol ladder (0 = no data, 1..25 bands), both scales.
-export const VAR_WIDTHS = [
-  3, 8, 6, 5, 8, 8, 8, 8, 5, 3, 3, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 8, 8, 8, 8,
-];
-//  ^p ^t ^s ^f ^w ^w300 ^w400 ^w500 ^g ^cband ^(10/11 unused) ^rain
-//                                   ^aq_pm25 ^aq_o3 ^aqi ^aqi_eu ^aqi_eu_pm25
-//                    ^aqi_eu_pm10 ^aqi_eu_no2 ^aqi_eu_o3 ^aqi_eu_so2 ^aq_pm10 ^aq_no2 ^aq_so2
-//                                                  ^w600 ^w700 ^w850 ^w925
+// snow/rain: 6 bits each, sqrt-companded (see ACCUM_* below)
+// wind: 5-bit speed (extended Beaufort force 0..17) + 3-bit direction (raw-width equivalent;
+// both entropy-coded) — surface and every WIND_LEVELS_HPA level, each carried whenever
+// requested (no elevation clamp)
+// gust: 5 = speed only, no direction
+// cloud band: VAR.clouds carries the CLOUD_BAND_LEVELS_HPA stack at 3 bits per level anchor —
+// clamped to the ≤3h periods and to one level below the forecast point, see
+// cloudBandPeriodCount / cloudBandLevelCount
+// air quality: 5 bits each — a 26-symbol ladder (0 = no data, 1..25 bands), both scales
 
 const TEMP_OFFSET = 100;
 
@@ -110,30 +103,30 @@ function clampInt(v: number, width: number): number {
 
 // temp: entropy-coded period-over-period deltas (see TEMP_DELTA_* in entropy.ts), not a plain
 // scalar column — each model's first period is an anchor at full width, quantized the same way.
-const TEMP_ANCHOR_BITS = VAR_WIDTHS[VARS_BIT.temp];
+const TEMP_ANCHOR_BITS = 8;
 const quantTemp = (p: Period, field: "temp_c"): number =>
   clampInt(Math.round((p[field] ?? 0) + TEMP_OFFSET), TEMP_ANCHOR_BITS);
-const TEMP_DELTA_COLUMNS: [bit: number, field: "temp_c", name: string][] = [
-  [VARS_BIT.temp, "temp_c", "temp"],
+const TEMP_DELTA_COLUMNS: [variable: Variable, field: "temp_c"][] = [
+  [VAR.temp, "temp_c"],
 ];
 
 // freeze: entropy-coded period-over-period deltas under tables keyed by (the arriving period's
 // resolution, the SAME period's temp delta) — the 0°C isotherm moves with the airmass
 // temperature, and temp decodes first, so its delta is free context; a res-keyed fallback covers
-// messages without temp in vars_mask (see freezeDeltaBook in entropy.ts — no per-message
+// messages without temp requested (see freezeDeltaBook in entropy.ts — no per-message
 // selector; a held-out cheapest-of-16 measured worse than a shared table). Not a plain scalar
 // column. 304.8 m (1000 ft) steps, 0..31
 // (0-31000 ft) — tropical and subtropical high country (the Andes, central Mexico) sits above
 // 15000 ft nearly year-round, and the corpus tops out at 21200 ft, so the domain has to reach
 // well past that to stop clipping.
 const FREEZE_STEP_M = 304.8;
-const FREEZE_ANCHOR_BITS = VAR_WIDTHS[VARS_BIT.freeze];
+const FREEZE_ANCHOR_BITS = 5;
 // The 1e-9 rescues float dust only (14 × 304.8 / 304.8 = 13.999999999999998 → 13 without it, so
 // a decoded value would re-quantize one step down); genuine sub-step values still floor down.
 const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0) / FREEZE_STEP_M + 1e-9), FREEZE_ANCHOR_BITS);
 
-// cloud band: coverage at each CLOUD_BAND_LEVELS_HPA pressure level, all riding the single cch
-// bit — the replacement for the v2 low/mid/high trio. Per level: a 3-bit anchor (first
+// cloud band: coverage at each CLOUD_BAND_LEVELS_HPA pressure level, all riding the single
+// clouds variable. Per level: a 3-bit anchor (first
 // period), then ORDER-1 VALUE symbols — each step coded under the (level, previous step) book,
 // the same model the wet columns use. The previous value is the band's dominant context (the
 // RH-diagnostic fill pins levels at exactly 0 for long runs; held-out −27% vs unconditioned
@@ -141,7 +134,7 @@ const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0)
 // out; see analyze-cloud-neighbor-heldout.ts). Tables are trained on the post-fillCloudBand
 // stack at the band's serving resolutions only — see
 // codec-server/scripts/derive-cloud-delta-codebooks.ts.
-const CLOUD_ANCHOR_BITS = VAR_WIDTHS[VARS_BIT.cch]; // 3
+const CLOUD_ANCHOR_BITS = 3;
 const CLOUD_STEPS = (1 << CLOUD_ANCHOR_BITS) - 1;    // 7: the top step of the quantized scale
 export const quantCover = (pct: number | undefined): number =>
   clampInt(Math.round((pct ?? 0) * CLOUD_STEPS / 100), CLOUD_ANCHOR_BITS);
@@ -208,7 +201,7 @@ export const cloudBandLevelCount = pressureLevelCount;
 // on. Periods past the clamp carry no AQ symbols at all and decode with the fields absent —
 // "not forecast", which is what the app draws as an empty cell.
 export const AQ_HORIZON_HOURS = 96;
-const AQ_ANCHOR_BITS = VAR_WIDTHS[VARS_BIT.aqi]; // 5; every AQ column shares the width
+const AQ_ANCHOR_BITS = 5; // every AQ column shares the width
 
 // How many leading periods an AQ column covers. Always ≥ 1 (the first period starts at offset 0).
 export function aqPeriodCount(periodHours: number[]): number {
@@ -233,41 +226,41 @@ type AqField =
   | "aqi_pm25" | "aqi_o3" | "aqi_pm10" | "aqi_no2" | "aqi_so2"
   | "aqi_eu_pm25" | "aqi_eu_o3" | "aqi_eu_pm10" | "aqi_eu_no2" | "aqi_eu_so2";
 const AQ_DELTA_COLUMNS: {
-  bit: number;
+  variable: Variable;
   field: AqField;
   lower: readonly number[];
   bookOf(bk: Books): (res: number, tod: number, prevDelta: number | null) => CodeBook;
 }[] = [
-  { bit: VARS_BIT.aq_pm25, field: "aqi_pm25", lower: AQI_US_LOWER,
+  { variable: VAR.aq_pm25, field: "aqi_pm25", lower: AQI_US_LOWER,
     bookOf: (bk) => (res, _tod, prev) => bk.aqPm25Book(res, prev) },
-  { bit: VARS_BIT.aq_o3, field: "aqi_o3", lower: AQI_US_LOWER,
+  { variable: VAR.aq_o3, field: "aqi_o3", lower: AQI_US_LOWER,
     bookOf: (bk) => (res, tod, prev) => bk.aqO3Book(res, tod, prev) },
-  { bit: VARS_BIT.aq_pm10, field: "aqi_pm10", lower: AQI_US_LOWER,
+  { variable: VAR.aq_pm10, field: "aqi_pm10", lower: AQI_US_LOWER,
     bookOf: (bk) => (res, _tod, prev) => bk.aqPm10Book(res, prev) },
-  { bit: VARS_BIT.aq_no2, field: "aqi_no2", lower: AQI_US_LOWER,
+  { variable: VAR.aq_no2, field: "aqi_no2", lower: AQI_US_LOWER,
     bookOf: (bk) => (res, tod, prev) => bk.aqNo2Book(res, tod, prev) },
-  { bit: VARS_BIT.aq_so2, field: "aqi_so2", lower: AQI_US_LOWER,
+  { variable: VAR.aq_so2, field: "aqi_so2", lower: AQI_US_LOWER,
     bookOf: (bk) => (res, _tod, prev) => bk.aqSo2Book(res, prev) },
-  { bit: VARS_BIT.aqi_eu_pm25, field: "aqi_eu_pm25", lower: AQI_EU_LOWER,
+  { variable: VAR.aqi_eu_pm25, field: "aqi_eu_pm25", lower: AQI_EU_LOWER,
     bookOf: (bk) => (res, _tod, prev) => bk.aqiEuPm25Book(res, prev) },
-  { bit: VARS_BIT.aqi_eu_o3, field: "aqi_eu_o3", lower: AQI_EU_LOWER,
+  { variable: VAR.aqi_eu_o3, field: "aqi_eu_o3", lower: AQI_EU_LOWER,
     bookOf: (bk) => (res, tod, prev) => bk.aqiEuO3Book(res, tod, prev) },
-  { bit: VARS_BIT.aqi_eu_pm10, field: "aqi_eu_pm10", lower: AQI_EU_LOWER,
+  { variable: VAR.aqi_eu_pm10, field: "aqi_eu_pm10", lower: AQI_EU_LOWER,
     bookOf: (bk) => (res, _tod, prev) => bk.aqiEuPm10Book(res, prev) },
-  { bit: VARS_BIT.aqi_eu_no2, field: "aqi_eu_no2", lower: AQI_EU_LOWER,
+  { variable: VAR.aqi_eu_no2, field: "aqi_eu_no2", lower: AQI_EU_LOWER,
     bookOf: (bk) => (res, tod, prev) => bk.aqiEuNo2Book(res, tod, prev) },
-  { bit: VARS_BIT.aqi_eu_so2, field: "aqi_eu_so2", lower: AQI_EU_LOWER,
+  { variable: VAR.aqi_eu_so2, field: "aqi_eu_so2", lower: AQI_EU_LOWER,
     bookOf: (bk) => (res, _tod, prev) => bk.aqiEuSo2Book(res, prev) },
 ];
 
 // One headline's residual wiring: which sub-index columns can form its baseline, and which
 // presence masks are actually cheaper as a residual than as the headline's own deltas.
 interface AqHeadline {
-  bit: number;
+  variable: Variable;
   field: "aqi" | "aqi_eu";
   lower: readonly number[];
   // The three constituents that ever lead this index, in AQI_BASE_* bit order.
-  baseBits: [pm25: number, o3: number, pm10: number];
+  baseVars: [pm25: Variable, o3: Variable, pm10: Variable];
   residualMasks: ReadonlySet<number>;
   residualBook(bk: Books, res: number, baseMask: number): CodeBook;
   deltaBook(bk: Books, res: number, tod: number, prevDelta: number | null): CodeBook;
@@ -279,8 +272,8 @@ interface AqHeadline {
 }
 const AQ_HEADLINES: AqHeadline[] = [
   {
-    bit: VARS_BIT.aqi, field: "aqi", lower: AQI_US_LOWER,
-    baseBits: [VARS_BIT.aq_pm25, VARS_BIT.aq_o3, VARS_BIT.aq_pm10],
+    variable: VAR.aqi, field: "aqi", lower: AQI_US_LOWER,
+    baseVars: [VAR.aq_pm25, VAR.aq_o3, VAR.aq_pm10],
     residualMasks: AQI_US_RESIDUAL_MASKS,
     residualBook: (bk, res, m) => bk.aqiResidualBook(res, m),
     deltaBook: (bk, res, tod, prev) => bk.aqiDeltaBook(res, tod, prev),
@@ -289,8 +282,8 @@ const AQ_HEADLINES: AqHeadline[] = [
     dominantBook: (bk, prev) => bk.aqDominantBook(prev),
   },
   {
-    bit: VARS_BIT.aqi_eu, field: "aqi_eu", lower: AQI_EU_LOWER,
-    baseBits: [VARS_BIT.aqi_eu_pm25, VARS_BIT.aqi_eu_o3, VARS_BIT.aqi_eu_pm10],
+    variable: VAR.aqi_eu, field: "aqi_eu", lower: AQI_EU_LOWER,
+    baseVars: [VAR.aqi_eu_pm25, VAR.aqi_eu_o3, VAR.aqi_eu_pm10],
     residualMasks: AQI_EU_RESIDUAL_MASKS,
     residualBook: (bk, res, m) => bk.aqiEuResidualBook(res, m),
     deltaBook: (bk, res, tod, prev) => bk.aqiEuBook(res, tod, prev),
@@ -300,13 +293,14 @@ const AQ_HEADLINES: AqHeadline[] = [
   },
 ];
 
-// Which of a headline's three keyable constituents vars_mask carries, as an AQI_BASE_* mask.
-// Derived identically on both sides, so selecting the mode costs no wire bits.
-const aqBaseMask = (h: AqHeadline, varsMask: number): number => {
-  const [pm25, o3, pm10] = h.baseBits;
-  return (varsMask & (1 << pm25) ? AQI_BASE_PM25 : 0)
-    | (varsMask & (1 << o3) ? AQI_BASE_O3 : 0)
-    | (varsMask & (1 << pm10) ? AQI_BASE_PM10 : 0);
+// Which of a headline's three keyable constituents the request carries, as an AQI_BASE_* mask
+// (the residual codebooks are keyed by this 3-bit presence mask, see entropy.ts). Derived
+// identically on both sides, so selecting the mode costs no wire bits.
+const aqBaseMask = (h: AqHeadline, vars: ReadonlySet<Variable>): number => {
+  const [pm25, o3, pm10] = h.baseVars;
+  return (vars.has(pm25) ? AQI_BASE_PM25 : 0)
+    | (vars.has(o3) ? AQI_BASE_O3 : 0)
+    | (vars.has(pm10) ? AQI_BASE_PM10 : 0);
 };
 
 // Value columns (precip chance, snow, rain), in body (column-major) order: each cell's quantized
@@ -319,21 +313,21 @@ const aqBaseMask = (h: AqHeadline, varsMask: number): number => {
 // because zero is an absorbing regime: "still dry" is the single strongest signal these columns
 // carry, and a delta of 0 would conflate it with "steady heavy snowfall". This replaced the
 // adaptive best-of (raw / FOR / sparse / empty + 2-bit selector) scheme — sparse charged a full
-// bit per dry period where the order-1 tables charge a small fraction of one. temp (bit 1),
-// freeze (bit 3) and the cloud band (bit 9) are handled separately in buildBody/decode below.
+// bit per dry period where the order-1 tables charge a small fraction of one. temp, freeze and
+// the cloud band are handled separately in buildBody/decode below.
 const VALUE_COLUMNS: {
-  bit: number;
+  variable: Variable;
   bookOf(bk: Books): (res: number, wcClass: number, prev: number | null) => CodeBook;
   get(p: Period): number;          // quantized value symbol
   set(p: Period, v: number): void; // dequantize the symbol back onto the period
 }[] = [
-  { bit: 0, bookOf: (bk) => bk.precipBook,
+  { variable: VAR.precip, bookOf: (bk) => bk.precipBook,
     get: (p) => clampInt(Math.round((p.precip ?? 0) * 7 / 100), 3),
     set: (p, v) => { p.precip = Math.round(v * 100 / 7); } },
-  { bit: 2, bookOf: (bk) => bk.snowBook,
+  { variable: VAR.snow, bookOf: (bk) => bk.snowBook,
     get: (p) => compandSqrt(p.snow_cm ?? 0, SNOW_K, ACCUM_BITS),
     set: (p, v) => { p.snow_cm = expandSqrt(v, SNOW_K); } },
-  { bit: 12, bookOf: (bk) => bk.rainBook,
+  { variable: VAR.rain, bookOf: (bk) => bk.rainBook,
     get: (p) => compandSqrt(p.rain_mm ?? 0, RAIN_K, ACCUM_BITS),
     set: (p, v) => { p.rain_mm = expandSqrt(v, RAIN_K); } },
 ];
@@ -342,8 +336,8 @@ const VALUE_COLUMNS: {
 // direction per cell, both entropy-coded under tables keyed by context both sides already have
 // — each period's resolution, the column's level, and another column's already-decoded
 // same-period values (see gustDeltaBook/sfcSpeedBook/windSpeedBook/windDirBook in entropy.ts).
-// `upperBit` names the column conditioned on, applied only when that column is present in
-// vars_mask (conditioning columns encode/decode first in this array's order). GUST LEADS: it
+// `upper` names the column conditioned on, applied only when that column is requested
+// (conditioning columns encode/decode first in this array's order). GUST LEADS: it
 // carries the peak-wind story and conditions the surface column — not the reverse — so surface
 // wind can one day leave the always-on set without touching gust (direction of conditioning is
 // bit-neutral; the option value decided it, 2026-07-31). Each pressure level conditions on the
@@ -357,8 +351,7 @@ const VALUE_COLUMNS: {
 // unconditioned windSpeedDelta table axis (0 = surface, also the surface fallback when gust is
 // absent; 1 + ladder index for the pressure levels).
 interface WindColumn {
-  bit: number;
-  name: string;
+  variable: Variable;
   level: number;
   // ladder index of the pressure level, -1 for the surface columns
   li: number;
@@ -369,14 +362,14 @@ interface WindColumn {
 }
 const aloft = (p: Period, li: number) => p.wind_aloft?.[li] ?? undefined;
 const WIND_COLUMNS: WindColumn[] = [
-  { bit: VARS_BIT.gust, name: "gust", level: 0, li: -1, dir: false,
+  { variable: VAR.gust, level: 0, li: -1, dir: false,
     getKph: (p) => p.wind_gust_kph, getDir: () => undefined,
     set: (p, kph) => { p.wind_gust_kph = kph; } },
-  { bit: VARS_BIT.wind, name: "wind", level: 0, li: -1, dir: true,
+  { variable: VAR.wind, level: 0, li: -1, dir: true,
     getKph: (p) => p.wind_sfc_kph, getDir: (p) => p.wind_sfc_dir,
     set: (p, kph, dir) => { p.wind_sfc_kph = kph; p.wind_sfc_dir = dir ?? 0; } },
-  ...WIND_LEVELS_HPA.map((hpa, li): WindColumn => ({
-    bit: WIND_LEVEL_BITS[li], name: `w${hpa}`, level: 1 + li, li, dir: true,
+  ...WIND_LEVELS_HPA.map((_, li): WindColumn => ({
+    variable: WIND_LEVEL_VARS[li], level: 1 + li, li, dir: true,
     getKph: (p) => aloft(p, li)?.kph, getDir: (p) => aloft(p, li)?.dir,
     set: (p, kph, dir) => {
       p.wind_aloft ??= WIND_LEVELS_HPA.map(() => null);
@@ -386,13 +379,13 @@ const WIND_COLUMNS: WindColumn[] = [
 // The wind columns a message carries, with each one's conditioning column resolved: the
 // surface column leans on gust when present; a pressure level on the nearest requested level
 // above it.
-function requestedWindColumns(vars_mask: number): { col: WindColumn; upper: WindColumn | null }[] {
+function requestedWindColumns(vars: ReadonlySet<Variable>): { col: WindColumn; upper: WindColumn | null }[] {
   const out: { col: WindColumn; upper: WindColumn | null }[] = [];
   let lastLevel: WindColumn | null = null;
   for (const col of WIND_COLUMNS) {
-    if (!(vars_mask & (1 << col.bit))) continue;
+    if (!vars.has(col.variable)) continue;
     let upper: WindColumn | null = null;
-    if (col.bit === VARS_BIT.wind) upper = out.find((e) => e.col.bit === VARS_BIT.gust)?.col ?? null;
+    if (col.variable === VAR.wind) upper = out.find((e) => e.col.variable === VAR.gust)?.col ?? null;
     else if (col.li >= 0) { upper = lastLevel; lastLevel = col; }
     out.push({ col, upper });
   }
@@ -459,11 +452,6 @@ function eachCell(nPeriods: number, nModels: number, fn: (p: number, m: number) 
 
 // ── Top-level codec ────────────────────────────────────────────────────────────
 
-// Column-name map (bit → var label from VARS_BIT), for the instrumented breakdown below.
-const BIT_NAME: Record<number, string> = Object.fromEntries(
-  Object.entries(VARS_BIT).map(([name, bit]) => [bit, name]),
-);
-
 // Callback receiving each column's contribution as it is emitted: label and bit cost.
 type ColumnSink = (name: string, bits: number) => void;
 
@@ -509,8 +497,8 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
   // codebooks below, and keeping the CLAMPED value (what the decoder reconstructs) rather than
   // the raw input difference is what keeps the two sides' freeze contexts identical.
   let tempDeltas: number[][] | null = null;
-  for (const [bit, field, name] of TEMP_DELTA_COLUMNS) {
-    if (!(msg.vars_mask & (1 << bit))) continue;
+  for (const [variable, field] of TEMP_DELTA_COLUMNS) {
+    if (!msg.vars.has(variable)) continue;
     before = em.cost;
     const deltas: number[][] = msg.periods.map(() => []);
     for (let m = 0; m < nModels; m++) {
@@ -526,15 +514,15 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
         deltas[m][p] = delta;
       }
     }
-    if (bit === VARS_BIT.temp) tempDeltas = deltas;
-    mark(name, before);
+    if (variable === VAR.temp) tempDeltas = deltas;
+    mark(variable, before);
   }
 
   // freeze: per model, an anchor (first period, full width) followed by entropy-coded
   // period-over-period deltas, each under a table keyed by (the arriving period's resolution,
   // the same period's temp delta) — or the res-keyed fallback when temp is absent (see
   // freezeDeltaBook in entropy.ts).
-  if (msg.vars_mask & (1 << VARS_BIT.freeze)) {
+  if (msg.vars.has(VAR.freeze)) {
     before = em.cost;
     for (let m = 0; m < nModels; m++) {
       em.raw(quantFreeze(msg.periods[m][0]), FREEZE_ANCHOR_BITS);
@@ -551,7 +539,7 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
   // Both clamps apply (see cloudBandPeriodCount / cloudBandLevelCount): only the leading ≤3h
   // periods carry symbols, and only the levels down to one below the forecast point — keyed off
   // the QUANTIZED elevation, since that is the value the decoder reads back out of the header.
-  if (msg.vars_mask & (1 << VARS_BIT.cch)) {
+  if (msg.vars.has(VAR.clouds)) {
     before = em.cost;
     const nCb = cloudBandPeriodCount(msg.periodHours);
     const nLev = nCb > 0 ? cloudBandLevelCount(quantElevM(msg.elevation)) : 0;
@@ -575,9 +563,9 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
   // previous delta in the same column. Quantized values (not the raw index) are kept so the
   // headline column below can take its residual against exactly what the decoder will reconstruct.
   const nAq = aqPeriodCount(msg.periodHours);
-  const aqQuant = new Map<number, number[][]>();
+  const aqQuant = new Map<Variable, number[][]>();
   for (const col of AQ_DELTA_COLUMNS) {
-    if (!(msg.vars_mask & (1 << col.bit))) continue;
+    if (!msg.vars.has(col.variable)) continue;
     before = em.cost;
     const book = col.bookOf(books);
     const q: number[][] = msg.periods.map((rows) =>
@@ -591,8 +579,8 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
         prevDelta = delta;
       }
     }
-    aqQuant.set(col.bit, q);
-    mark(BIT_NAME[col.bit], before);
+    aqQuant.set(col.variable, q);
+    mark(col.variable, before);
   }
 
   // The headlines, each after its own scale's constituents. With enough of {pm2.5, ozone, pm10}
@@ -606,20 +594,20 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
   // pairs that miss too much leadership mass — see AQI_*_RESIDUAL_MASKS) the column falls back to
   // its own delta series instead.
   for (const h of AQ_HEADLINES) {
-    if (!(msg.vars_mask & (1 << h.bit))) continue;
+    if (!msg.vars.has(h.variable)) continue;
     before = em.cost;
     const q: number[][] = msg.periods.map((rows) =>
       rows.slice(0, nAq).map((c) => quantAqi(c[h.field], h.lower)));
-    const baseMask = aqBaseMask(h, msg.vars_mask);
+    const baseMask = aqBaseMask(h, msg.vars);
     // What the DECODER will reconstruct, which is not always q: the residual is clamped
     // non-negative, so a headline below its own baseline comes back as the baseline. The
     // dominant-pollutant pass below gates on this, so both sides agree on which periods carry a
     // symbol without spending a bit saying so.
     const recon: number[][] = msg.periods.map(() => new Array<number>(nAq).fill(0));
     if (h.residualMasks.has(baseMask)) {
-      const bases = h.baseBits
+      const bases = h.baseVars
         .filter((_, i) => baseMask & (1 << i))
-        .map((bit) => aqQuant.get(bit)!);
+        .map((v) => aqQuant.get(v)!);
       for (let m = 0; m < nModels; m++) {
         for (let p = 0; p < nAq; p++) {
           let base = 0;
@@ -656,7 +644,7 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
         prevDom = dom;
       }
     }
-    mark(BIT_NAME[h.bit], before);
+    mark(h.variable, before);
   }
 
   // Value columns (precip chance, snow, rain): each cell's quantized value entropy-coded under a
@@ -664,7 +652,7 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
   // encoded value) — bootstrap for the column's first cell. The chain carries across model
   // boundaries, like weathercode.
   for (const col of VALUE_COLUMNS) {
-    if (!(msg.vars_mask & (1 << col.bit))) continue;
+    if (!msg.vars.has(col.variable)) continue;
     before = em.cost;
     const book = col.bookOf(books);
     let prev: number | null = null;
@@ -673,19 +661,19 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
       em.sym(book(res[p], WEATHERCODE_CLASS[wcSym[m][p]], prev), v);
       prev = v;
     });
-    mark(BIT_NAME[col.bit], before);
+    mark(col.variable, before);
   }
   // Both sides quantize identically: a decoded band midpoint re-quantizes to its force.
   const windSpeed = (c: Period, col: WindColumn) => quantWind(col.getKph(c) ?? 0);
-  // Quantized speeds and displayed directions of already-encoded wind columns, keyed by var
-  // bit — the cross-column context for the surface (← gust) and pressure-level (← nearest
+  // Quantized speeds and displayed directions of already-encoded wind columns, keyed by
+  // variable — the cross-column context for the surface (← gust) and pressure-level (← nearest
   // requested level above) columns; conditioning columns encode first.
-  const spdByBit = new Map<number, number[][]>();
-  const dispByBit = new Map<number, number[][]>();
-  for (const { col, upper: upperCol } of requestedWindColumns(msg.vars_mask)) {
+  const spdByVar = new Map<Variable, number[][]>();
+  const dispByVar = new Map<Variable, number[][]>();
+  for (const { col, upper: upperCol } of requestedWindColumns(msg.vars)) {
     before = em.cost;
     const upper = upperCol
-      ? { spd: spdByBit.get(upperCol.bit)!, disp: dispByBit.get(upperCol.bit)! }
+      ? { spd: spdByVar.get(upperCol.variable)!, disp: dispByVar.get(upperCol.variable)! }
       : null;
     // Direction context only exists when the conditioning column HAS a direction stream —
     // gust doesn't, so the surface column's dir tables stay unconditioned.
@@ -703,8 +691,8 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
       em.raw(spd[m][0], WIND_FORCE_BITS);
       for (let p = 1; p < nPeriods; p++) {
         const upperDelta = upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null;
-        const book = col.bit === VARS_BIT.gust ? books.gustDeltaBook(res[p])
-          : col.bit === VARS_BIT.wind ? books.sfcSpeedBook(res[p], upperDelta)
+        const book = col.variable === VAR.gust ? books.gustDeltaBook(res[p])
+          : col.variable === VAR.wind ? books.sfcSpeedBook(res[p], upperDelta)
           : books.windSpeedBook(res[p], col.level, upperDelta, gap);
         encodeWindSpeedDelta(em, book, spd[m][p] - spd[m][p - 1]);
       }
@@ -731,10 +719,10 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
         disp[m][p] = eff[m];
       });
     }
-    spdByBit.set(col.bit, spd);
-    dispByBit.set(col.bit, disp);
+    spdByVar.set(col.variable, spd);
+    dispByVar.set(col.variable, disp);
 
-    mark(col.name, before);
+    mark(col.variable, before);
   }
 
   return em;
@@ -829,7 +817,7 @@ export function messageFromString(s: string, resolve: ContextResolver): Forecast
   // Recover the request-echo fields the slim header omits.
   const ctx = resolve(code);
   if (!ctx) throw new Error(`Unknown forecast code ${code}: no matching request in the store`);
-  const { model, vars_mask, lat, lon, start, mode, utcOffsetHours, device } = ctx;
+  const { model, vars, lat, lon, start, mode, utcOffsetHours, device } = ctx;
   if (mode == null || utcOffsetHours == null)
     throw new Error(`Forecast code ${code} matches a request without a priority mode`);
   // The mode the message was BUILT under, which for a short-horizon center isn't the one that
@@ -851,7 +839,7 @@ export function messageFromString(s: string, resolve: ContextResolver): Forecast
   const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
 
   // The body has no length field: the rANS stream is self-delimiting given the known structure
-  // (nPeriods, nModels, vars_mask). decodeBodyAuto materializes the meaningful low bits, in
+  // (nPeriods, nModels, vars). decodeBodyAuto materializes the meaningful low bits, in
   // whichever alphabet the body arrived in; renorm words past them read as 0 — exactly the
   // trailing zero words the body encoder dropped. The first period's UTC start hour and the UTC
   // offset key the temp time-of-day tables — the identical values the encoder used (msg.hour is
@@ -864,7 +852,7 @@ export function messageFromString(s: string, resolve: ContextResolver): Forecast
   // alphabet older than that context.
   const periods = decodeBody(
     decodeBodyAuto(rest.slice(HEADER_CHARS), device && DEVICE_TRANSPORT[device].alphabet),
-    BOOKS, vars_mask,
+    BOOKS, vars,
     layout.periodHours, firstStart.getUTCHours(), utcOffsetHours, elevation, 1);
 
   return {
@@ -872,7 +860,7 @@ export function messageFromString(s: string, resolve: ContextResolver): Forecast
     code,
     days: layout.days,
     models_mask,
-    vars_mask,
+    vars,
     month: firstStart.getUTCMonth() + 1,
     day: firstStart.getUTCDate(),
     hour: firstStart.getUTCHours(),
@@ -892,7 +880,7 @@ export function messageFromString(s: string, resolve: ContextResolver): Forecast
 // `elevation` is the header's, which keys the cloud band's level count). Throws unless the
 // stream is consumed exactly (see SymSource.assertDone).
 function decodeBody(
-  bodyBits: number[], books: Books, vars_mask: number, periodHours: number[],
+  bodyBits: number[], books: Books, vars: ReadonlySet<Variable>, periodHours: number[],
   firstHour: number, utcOffsetHours: number, elevation: number, nModels: number,
 ): Period[][] {
   const nPeriods = periodHours.length;
@@ -920,8 +908,8 @@ function decodeBody(
   // The decoded temp deltas ([model][period], p ≥ 1) are kept — they key the freeze column's
   // codebooks below, mirroring buildBody.
   let tempDeltas: number[][] | null = null;
-  for (const [bit, field] of TEMP_DELTA_COLUMNS) {
-    if (!(vars_mask & (1 << bit))) continue;
+  for (const [variable, field] of TEMP_DELTA_COLUMNS) {
+    if (!vars.has(variable)) continue;
     const deltas: number[][] = periods.map(() => []);
     for (let m = 0; m < nModels; m++) {
       let quant = rd.int(TEMP_ANCHOR_BITS);
@@ -935,12 +923,12 @@ function decodeBody(
         deltas[m][p] = delta;
       }
     }
-    if (bit === VARS_BIT.temp) tempDeltas = deltas;
+    if (variable === VAR.temp) tempDeltas = deltas;
   }
 
   // Freeze mirrors buildBody exactly: each delta's table keyed by (the arriving period's
   // resolution, the same period's decoded temp delta), or the res-keyed fallback without temp.
-  if (vars_mask & (1 << VARS_BIT.freeze)) {
+  if (vars.has(VAR.freeze)) {
     for (let m = 0; m < nModels; m++) {
       let quant = rd.int(FREEZE_ANCHOR_BITS);
       periods[m][0].freeze_m = quant * FREEZE_STEP_M;
@@ -957,7 +945,7 @@ function decodeBody(
   // the carried levels — its LENGTH is how the app learns the band's floor — and a period past
   // the resolution clamp is left without the field: "not forecast", never "clear", the same
   // convention as the AQ horizon.
-  if (vars_mask & (1 << VARS_BIT.cch)) {
+  if (vars.has(VAR.clouds)) {
     const nCb = cloudBandPeriodCount(periodHours);
     const nLev = nCb > 0 ? cloudBandLevelCount(elevation) : 0;
     for (let li = 0; li < nLev; li++) {
@@ -976,9 +964,9 @@ function decodeBody(
   // aqPeriodCount periods carry symbols, and the periods past it are left without the fields —
   // absent means "not forecast", never "clean". A decoded no-data symbol is likewise left absent.
   const nAq = aqPeriodCount(periodHours);
-  const aqQuant = new Map<number, number[][]>();
+  const aqQuant = new Map<Variable, number[][]>();
   for (const col of AQ_DELTA_COLUMNS) {
-    if (!(vars_mask & (1 << col.bit))) continue;
+    if (!vars.has(col.variable)) continue;
     const book = col.bookOf(books);
     const q: number[][] = Array.from({ length: nModels }, () => new Array<number>(nAq).fill(0));
     for (let m = 0; m < nModels; m++) {
@@ -994,19 +982,19 @@ function decodeBody(
         prevDelta = delta;
       }
     }
-    aqQuant.set(col.bit, q);
+    aqQuant.set(col.variable, q);
   }
 
   // The headlines mirror buildBody: residual against the max of whichever keyable constituents
-  // vars_mask carries, or the column's own deltas for the masks where that is cheaper.
+  // the request carries, or the column's own deltas for the masks where that is cheaper.
   for (const h of AQ_HEADLINES) {
-    if (!(vars_mask & (1 << h.bit))) continue;
-    const baseMask = aqBaseMask(h, vars_mask);
+    if (!vars.has(h.variable)) continue;
+    const baseMask = aqBaseMask(h, vars);
     const recon: number[][] = Array.from({ length: nModels }, () => new Array<number>(nAq).fill(0));
     if (h.residualMasks.has(baseMask)) {
-      const bases = h.baseBits
+      const bases = h.baseVars
         .filter((_, i) => baseMask & (1 << i))
-        .map((bit) => aqQuant.get(bit)!);
+        .map((v) => aqQuant.get(v)!);
       for (let m = 0; m < nModels; m++) {
         for (let p = 0; p < nAq; p++) {
           const resid = rd.sym(h.residualBook(books, res[p], baseMask));
@@ -1046,7 +1034,7 @@ function decodeBody(
   // resolution, the cell's decoded weathercode class, the previously decoded value), bootstrap
   // first, chained across model boundaries.
   for (const col of VALUE_COLUMNS) {
-    if (!(vars_mask & (1 << col.bit))) continue;
+    if (!vars.has(col.variable)) continue;
     const book = col.bookOf(books);
     let prev: number | null = null;
     eachCell(nPeriods, nModels, (p, m) => {
@@ -1057,11 +1045,11 @@ function decodeBody(
   }
   // Wind columns mirror buildBody exactly: speeds first (anchors + deltas), then calm-gated
   // directions, with the upper column's already-decoded values as cross-level context.
-  const spdByBit = new Map<number, number[][]>();
-  const dispByBit = new Map<number, number[][]>();
-  for (const { col, upper: upperCol } of requestedWindColumns(vars_mask)) {
+  const spdByVar = new Map<Variable, number[][]>();
+  const dispByVar = new Map<Variable, number[][]>();
+  for (const { col, upper: upperCol } of requestedWindColumns(vars)) {
     const upper = upperCol
-      ? { spd: spdByBit.get(upperCol.bit)!, disp: dispByBit.get(upperCol.bit)! }
+      ? { spd: spdByVar.get(upperCol.variable)!, disp: dispByVar.get(upperCol.variable)! }
       : null;
     const upperDir = upper && upperCol!.dir ? upper.disp : null;
     const gap = upperCol && col.li >= 0 ? col.li - upperCol.li : 0;
@@ -1071,8 +1059,8 @@ function decodeBody(
       spd[m][0] = speed;
       for (let p = 1; p < nPeriods; p++) {
         const upperDelta = upper ? upper.spd[m][p] - upper.spd[m][p - 1] : null;
-        const book = col.bit === VARS_BIT.gust ? books.gustDeltaBook(res[p])
-          : col.bit === VARS_BIT.wind ? books.sfcSpeedBook(res[p], upperDelta)
+        const book = col.variable === VAR.gust ? books.gustDeltaBook(res[p])
+          : col.variable === VAR.wind ? books.sfcSpeedBook(res[p], upperDelta)
           : books.windSpeedBook(res[p], col.level, upperDelta, gap);
         speed += rd.windSpeedDelta(book);
         spd[m][p] = speed;
@@ -1097,8 +1085,8 @@ function decodeBody(
     }
     eachCell(nPeriods, nModels, (p, m) =>
       col.set(periods[m][p], beaufortMidKph(spd[m][p]), col.dir ? disp[m][p] : null));
-    spdByBit.set(col.bit, spd);
-    dispByBit.set(col.bit, disp);
+    spdByVar.set(col.variable, spd);
+    dispByVar.set(col.variable, disp);
   }
 
   // Column reads that desynced from what the encoder wrote — codebook drift or a corrupted

@@ -61,7 +61,7 @@ export const EXTRA_SOURCE_VARS: Record<string, readonly string[]> = {
   cams: [
     "us_aqi", "us_aqi_pm2_5", "us_aqi_ozone", "european_aqi", "european_aqi_pm2_5",
     "us_aqi_pm10", "us_aqi_nitrogen_dioxide", "us_aqi_sulphur_dioxide",
-    // Not a wire column (see VARS_BIT), but the US headline's max is taken over it, so any
+    // Not a wire column (see VAR in constants.ts), but the US headline's max is taken over it, so any
     // analysis of WHICH pollutant leads has to be able to read it.
     "us_aqi_carbon_monoxide",
     "european_aqi_pm10", "european_aqi_nitrogen_dioxide", "european_aqi_ozone",

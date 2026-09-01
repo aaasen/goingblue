@@ -2,17 +2,15 @@ import { writeFileSync, mkdirSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 // Imports the built codec, so build the protocol first: `pnpm --filter @weather/protocol build`.
-import { wireCodec, WIRE_VERSION, layoutFor, type ForecastMessage } from "../dist/index.js";
+import { wireCodec, WIRE_VERSION, layoutFor, VARIABLES, type ForecastMessage } from "../dist/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Every variable bit, so the fixture exercises — and freezes — every column's encoding
+// Every variable, so the fixture exercises — and freezes — every column's encoding
 // (precip, temp, snow, rain, freeze, surface wind + every pressure level, gust, the cloud band,
-// and all twelve air-quality indices). Bit 8 = gust (always-on since 2026-07-30). Bits 0..28 are
-// every allocated bit (25..28 are the lower wind levels, see VARS_BIT); 29 is free. With every
-// sub-index present, BOTH headlines encode under their all-three residual mask, which is the mode
-// a real request most wants frozen.
-const vars_mask = (1 << 29) - 1;
+// and all twelve air-quality indices). With every sub-index present, BOTH headlines encode under
+// their all-three residual mask, which is the mode a real request most wants frozen.
+const vars = new Set(VARIABLES);
 
 // Priority-mode fill: Detail mode requested at 13:00 local (UTC-9). seq 5 on the Detail path
 // is |3h|12h|12h| — slot 0 at 3h (partial: four periods from 12:00), two whole days at 12h — a
@@ -35,7 +33,7 @@ const input: ForecastMessage = {
   code: 0,
   days: layout.days,
   models_mask: 0b0001, // Best Match only (bit 0)
-  vars_mask,
+  vars,
   month: firstStart.getUTCMonth() + 1,
   day: firstStart.getUTCDate(),
   hour: firstStart.getUTCHours(),
@@ -69,7 +67,7 @@ if (input.periods[0].length !== layout.periodHours.length)
 // them from the request context (keyed by code). Mirror what test/fixture.test.ts builds.
 const ctx = () => ({
   model: 31 - Math.clz32(input.models_mask & -input.models_mask),
-  vars_mask: input.vars_mask,
+  vars: input.vars,
   lat: input.lat,
   lon: input.lon,
   start: startMs,
@@ -91,6 +89,7 @@ const fixture = {
 const outDir = join(__dirname, "../test/fixtures");
 mkdirSync(outDir, { recursive: true });
 const outPath = join(outDir, "wire.fixture.json");
-writeFileSync(outPath, JSON.stringify(fixture, null, 2) + "\n");
+// vars is a Set; it persists as a sorted array and the tests revive it.
+writeFileSync(outPath, JSON.stringify(fixture, (_k, v) => (v instanceof Set ? [...v].sort() : v), 2) + "\n");
 console.log(`Written: ${outPath}`);
 console.log(`Encoded: ${encoded}`);

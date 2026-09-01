@@ -27,7 +27,7 @@
  */
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD, type HourlyData } from "../src/forecast.ts";
 import {
-  WMO_CODES, WMO2IDX, compandSqrt, SNOW_K, RAIN_K, ACCUM_BITS,
+  VAR, type Variable, WMO_CODES, WMO2IDX, compandSqrt, SNOW_K, RAIN_K, ACCUM_BITS,
   WEATHERCODE_CLASS, WC_CLASSES, type Period,
 } from "@weather/protocol";
 import { eachForecast, foldOf, N_FOLDS, scaledWeights } from "./derive-lib.ts";
@@ -36,7 +36,10 @@ import { aggregateWeathercode, drySkyCode, isDryWindow, WMO_MIX_LIGHT, WMO_MIX_H
 const RES_IDXS = [1, 2, 3, 4]; // 12h/6h/3h/1h — layouts never emit 24h
 const NRES = RES_IDXS.length;
 const resPos: Record<number, number> = Object.fromEntries(RES_IDXS.map((r, i) => [r, i]));
-const ALL_MASK = (1 << 13) - 1;
+const ALL_VARS: ReadonlySet<Variable> = new Set([
+  VAR.precip, VAR.temp, VAR.snow, VAR.freeze, VAR.rain, VAR.wind, VAR.gust,
+  VAR.w300, VAR.w400, VAR.w500, VAR.clouds,
+]);
 
 // eachForecast runs adjustPrecipPhase before the callback, which needs temperature_2m and
 // freezing_level_height — omit them and the phase correction silently no-ops. The rest is what
@@ -115,7 +118,7 @@ async function collectChains(): Promise<Chain[]> {
         windows.push(w);
       }
       const rows = rowsFromWindows(h, h.time, windows, off);
-      const periods: Period[] = rows.map((r) => toFullPeriod(r, ALL_MASK, "US"));
+      const periods: Period[] = rows.map((r) => toFullPeriod(r, ALL_VARS, "US"));
 
       const wcBase = new Uint8Array(n);
       const wcCand = new Uint8Array(n);

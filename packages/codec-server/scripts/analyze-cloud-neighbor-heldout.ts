@@ -25,7 +25,7 @@
  */
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {
-  CLOUD_BAND_LEVELS_HPA, VARS_BIT, quantCover, upperDeltaBucket, type Period,
+  CLOUD_BAND_LEVELS_HPA, VAR, type Variable, quantCover, upperDeltaBucket, type Period,
 } from "@weather/protocol";
 import { eachForecast, foldOf, N_FOLDS, scaledWeights } from "./derive-lib.ts";
 
@@ -36,7 +36,7 @@ const RES_IDXS = [3, 4]; // 3h/1h — the band's resolution clamp makes these th
 const NRES = RES_IDXS.length;
 const NLEVEL = CLOUD_BAND_LEVELS_HPA.length;
 const NSYM = 15; // deltas -7..7
-const CLOUD_MASK = 1 << VARS_BIT.cch;
+const CLOUD_VARS: ReadonlySet<Variable> = new Set([VAR.clouds]);
 
 const N_NBR_B = 5; // upperDeltaBucket domain: ≤-2, -1, 0, +1, ≥+2
 const prevOwnBucket = (q: number) => (q === 0 ? 0 : q <= 3 ? 1 : 2);
@@ -63,7 +63,7 @@ await eachForecast((h, _startHour, loc, pos) => {
       windows.push(w);
     }
     const periods: Period[] = rowsFromWindows(h, h.time, windows, off)
-      .map((r) => toFullPeriod(r, CLOUD_MASK, "US"));
+      .map((r) => toFullPeriod(r, CLOUD_VARS, "US"));
     chains.push({
       fold, res, n,
       q: Array.from({ length: NLEVEL }, (_, li) =>

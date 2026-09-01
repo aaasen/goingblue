@@ -28,13 +28,13 @@
  *   node --max-old-space-size=12288 packages/codec-server/scripts/analyze-wind-scale-heldout.ts
  */
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
-import { VARS_BIT, upperDeltaBucket } from "@weather/protocol";
+import { VAR, type Variable, upperDeltaBucket } from "@weather/protocol";
 import { eachForecast, foldOf, N_FOLDS, scaledWeights } from "./derive-lib.ts";
 
 const RES_IDXS = [1, 2, 3, 4]; // 12h/6h/3h/1h — layouts never emit 24h
 const NRES = RES_IDXS.length;
 const resPos: Record<number, number> = Object.fromEntries(RES_IDXS.map((r, i) => [r, i]));
-const MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.gust);
+const WIND_VARS: ReadonlySet<Variable> = new Set([VAR.wind, VAR.gust]);
 
 // One (forecast × resolution) column of raw aggregated speeds; quantization happens per scheme.
 interface Chain { fold: number; res: number; n: number; sfc: Float32Array; gust: Float32Array }
@@ -58,7 +58,7 @@ await eachForecast((h, _startHour, loc, pos) => {
       for (let eh = firstUtc + p * hpp; eh < firstUtc + (p + 1) * hpp; eh++) w.push(eh - dataStart);
       windows.push(w);
     }
-    const periods = rowsFromWindows(h, h.time, windows, off).map((r) => toFullPeriod(r, MASK, "US"));
+    const periods = rowsFromWindows(h, h.time, windows, off).map((r) => toFullPeriod(r, WIND_VARS, "US"));
     chains.push({
       fold, res, n,
       sfc: Float32Array.from(periods, (p) => p.wind_sfc_kph ?? 0),

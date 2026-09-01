@@ -10,11 +10,13 @@ import {
   type Period,
   type WindAloft,
   WIND_LEVELS_HPA,
-  WIND_LEVELS_MASK,
+  WIND_LEVEL_VARS,
   type RequestContext,
   CARDINALS,
-  DEFAULT_VARS_MASK,
-  VARS_BIT,
+  DEFAULT_VARS,
+  VAR,
+  VARIABLES,
+  type Variable,
   AQI_US_RESIDUAL_MASKS,
   AQI_EU_RESIDUAL_MASKS,
   MODE_DETAIL,
@@ -42,8 +44,10 @@ const bmid = beaufortMidKph;
 const qSnow = (cm: number) => expandSqrt(compandSqrt(cm, SNOW_K, ACCUM_BITS), SNOW_K);
 const qRain = (mm: number) => expandSqrt(compandSqrt(mm, RAIN_K, ACCUM_BITS), RAIN_K);
 
-// Every variable: bits 0..12 weather, 13..25 air quality (both indices in full).
-const ALL_VARS = Object.values(VARS_BIT).reduce((m, b) => m | (1 << b), 0);
+// Every variable, weather and both air-quality indices in full.
+const ALL_VARS: ReadonlySet<Variable> = new Set(VARIABLES);
+// Shorthand for a request's selection.
+const varSet = (...vs: Variable[]): Set<Variable> => new Set(vs);
 // WIND_LEVELS_HPA ladder indices used below, and helpers to build wind_aloft stacks.
 const L500 = WIND_LEVELS_HPA.indexOf(500), L600 = WIND_LEVELS_HPA.indexOf(600);
 const L700 = WIND_LEVELS_HPA.indexOf(700), L925 = WIND_LEVELS_HPA.indexOf(925);
@@ -51,22 +55,22 @@ const withAloft = (li: number, w: WindAloft): (WindAloft | null)[] =>
   PERIOD.wind_aloft!.map((v, i) => (i === li ? w : v));
 const aloftOnly = (li: number, w: WindAloft): (WindAloft | null)[] =>
   WIND_LEVELS_HPA.map((_, i) => (i === li ? w : null));
-// Every air-quality column: its VARS_BIT name, its Period field, and which ladder it decodes on.
-const AQ_CASES: [bit: string, field: keyof Period, scale: "us" | "eu"][] = [
-  ["aq_pm25", "aqi_pm25", "us"],
-  ["aq_o3", "aqi_o3", "us"],
-  ["aq_pm10", "aqi_pm10", "us"],
-  ["aq_no2", "aqi_no2", "us"],
-  ["aq_so2", "aqi_so2", "us"],
-  ["aqi", "aqi", "us"],
-  ["aqi_eu_pm25", "aqi_eu_pm25", "eu"],
-  ["aqi_eu_o3", "aqi_eu_o3", "eu"],
-  ["aqi_eu_pm10", "aqi_eu_pm10", "eu"],
-  ["aqi_eu_no2", "aqi_eu_no2", "eu"],
-  ["aqi_eu_so2", "aqi_eu_so2", "eu"],
-  ["aqi_eu", "aqi_eu", "eu"],
+// Every air-quality column: its variable, its Period field, and which ladder it decodes on.
+const AQ_CASES: [variable: Variable, field: keyof Period, scale: "us" | "eu"][] = [
+  [VAR.aq_pm25, "aqi_pm25", "us"],
+  [VAR.aq_o3, "aqi_o3", "us"],
+  [VAR.aq_pm10, "aqi_pm10", "us"],
+  [VAR.aq_no2, "aqi_no2", "us"],
+  [VAR.aq_so2, "aqi_so2", "us"],
+  [VAR.aqi, "aqi", "us"],
+  [VAR.aqi_eu_pm25, "aqi_eu_pm25", "eu"],
+  [VAR.aqi_eu_o3, "aqi_eu_o3", "eu"],
+  [VAR.aqi_eu_pm10, "aqi_eu_pm10", "eu"],
+  [VAR.aqi_eu_no2, "aqi_eu_no2", "eu"],
+  [VAR.aqi_eu_so2, "aqi_eu_so2", "eu"],
+  [VAR.aqi_eu, "aqi_eu", "eu"],
 ];
-const AQ_VARS = AQ_CASES.reduce((m, [bit]) => m | (1 << VARS_BIT[bit]), 0);
+const AQ_VARS: ReadonlySet<Variable> = new Set(AQ_CASES.map(([v]) => v));
 
 const PERIOD: Period = {
   weathercode: 73,
@@ -148,7 +152,7 @@ function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean 
     code: 0,
     days,
     models_mask,
-    vars_mask: ALL_VARS,
+    vars: ALL_VARS,
     month: 5,
     day: 20,
     hour: hourOfDay,
@@ -169,7 +173,7 @@ function msg(overrides: Partial<ForecastMessage> = {}, opts: { hourly?: boolean 
 // built (UTC) from m/d/h — valid because msg() anchors the request at the first period's start.
 const ctxOf = (m: ForecastMessage): RequestContext => ({
   model: 31 - Math.clz32(m.models_mask & -m.models_mask),
-  vars_mask: m.vars_mask,
+  vars: m.vars,
   lat: m.lat,
   lon: m.lon,
   start: Date.UTC(new Date().getUTCFullYear(), m.month - 1, m.day, m.hour),
@@ -193,7 +197,7 @@ describe("round-trip encoding", () => {
     expect(decoded.mode).toBe(MODE_RANGE);
     expect(decoded.periodHours).toEqual([12, 12, 12]);
     expect(decoded.models_mask).toBe(0b001);
-    expect(decoded.vars_mask).toBe(ALL_VARS);
+    expect(decoded.vars).toEqual(ALL_VARS);
     expect(decoded.month).toBe(1);
     expect(decoded.day).toBe(31);
     expect(decoded.hour).toBe(12);
@@ -263,14 +267,14 @@ describe("round-trip encoding", () => {
     // the per-column costs stop being comparable.
     const slim = { weathercode: PERIOD.weathercode, cloud_band: PERIOD.cloud_band };
     const bits = (elevation: number) => encodeBreakdown(msg(
-      { vars_mask: 1 << VARS_BIT.cch, elevation, periods: [Array(49).fill(slim)] },
+      { vars: varSet(VAR.clouds), elevation, periods: [Array(49).fill(slim)] },
       { hourly: true })).bodyBits;
     // 4267 m drops half the levels (8 → 4): anchors and their whole delta chains go with them.
     expect(bits(4267)).toBeLessThan(bits(0) * 0.8);
   });
 
   it("round-trips every air-quality column on its own scale", () => {
-    const p = roundTrip(msg({ vars_mask: AQ_VARS })).periods[0][0];
+    const p = roundTrip(msg({ vars: AQ_VARS })).periods[0][0];
     // The European values go through the EU ladder — a scale with different band edges, so a
     // value quantized against the US ladder here would come back a different number.
     for (const [, field, scale] of AQ_CASES)
@@ -278,10 +282,10 @@ describe("round-trip encoding", () => {
   });
 
   it("round-trips each air-quality variable selected alone", () => {
-    const cases: [number, keyof Period, (v: number) => number | undefined][] =
-      AQ_CASES.map(([bit, field, scale]) => [VARS_BIT[bit], field, scale === "eu" ? qEu : qUs]);
-    for (const [bit, field, q] of cases) {
-      const p = roundTrip(msg({ vars_mask: 1 << bit })).periods[0][0];
+    const cases: [Variable, keyof Period, (v: number) => number | undefined][] =
+      AQ_CASES.map(([variable, field, scale]) => [variable, field, scale === "eu" ? qEu : qUs]);
+    for (const [variable, field, q] of cases) {
+      const p = roundTrip(msg({ vars: varSet(variable) })).periods[0][0];
       expect(p[field], `${field} alone`).toBe(q(PERIOD[field] as number));
       // Nothing else in the air-quality block rides along on one bit.
       for (const [, other] of cases) if (other !== field) expect(p[other]).toBeUndefined();
@@ -292,22 +296,21 @@ describe("round-trip encoding", () => {
     // A headline exactly equals its worst sub-index here — the case the residual coding is for.
     // (PERIOD itself sits one band above, so the round-trip tests cover a nonzero residual.)
     const led: Period = { ...PERIOD, aqi: PERIOD.aqi_pm25, aqi_eu: PERIOD.aqi_eu_o3 };
-    const colBits = (name: string, varsMask: number) =>
-      encodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
+    const colBits = (name: string, vars: ReadonlySet<Variable>) =>
+      encodeBreakdown(msg({ vars, periods: [[led, led, led]] }))
         .columns.find((c) => c.name === name)!.bits;
 
     // Only PM2.5, ozone and PM10 key the residual; the other constituents are never context, so
     // adding them can't move the headline's cost. Each scale's mode set is measured, not assumed
     // — see AQI_US_RESIDUAL_MASKS in entropy.ts for the held-out ladder behind these.
     for (const [head, base, residualMasks] of [
-      ["aqi", ["aq_pm25", "aq_o3", "aq_pm10"], AQI_US_RESIDUAL_MASKS],
-      ["aqi_eu", ["aqi_eu_pm25", "aqi_eu_o3", "aqi_eu_pm10"], AQI_EU_RESIDUAL_MASKS],
+      [VAR.aqi, [VAR.aq_pm25, VAR.aq_o3, VAR.aq_pm10], AQI_US_RESIDUAL_MASKS],
+      [VAR.aqi_eu, [VAR.aqi_eu_pm25, VAR.aqi_eu_o3, VAR.aqi_eu_pm10], AQI_EU_RESIDUAL_MASKS],
     ] as const) {
-      const alone = colBits(head, 1 << VARS_BIT[head]);
+      const alone = colBits(head, varSet(head));
       for (let mask = 1; mask < 8; mask++) {
-        const varsMask = base.reduce(
-          (m, b, i) => (mask & (1 << i) ? m | (1 << VARS_BIT[b]) : m), 1 << VARS_BIT[head]);
-        const bits = colBits(head, varsMask);
+        const vars = varSet(head, ...base.filter((_, i) => mask & (1 << i)));
+        const bits = colBits(head, vars);
         if (residualMasks.has(mask)) {
           // The headline is the max of the carried constituents plus a residual of zero — far
           // cheaper than carrying its own anchor and deltas.
@@ -323,24 +326,23 @@ describe("round-trip encoding", () => {
 
   it("names the dominant pollutant for every period a headline reports", () => {
     // The identity rides the headline's own bit — asking for AQI alone is enough to get it.
-    for (const [bit, field, expected] of [
-      [VARS_BIT.aqi, "aqi_dominant", PERIOD.aqi_dominant],
-      [VARS_BIT.aqi_eu, "aqi_eu_dominant", PERIOD.aqi_eu_dominant],
+    for (const [variable, field, expected] of [
+      [VAR.aqi, "aqi_dominant", PERIOD.aqi_dominant],
+      [VAR.aqi_eu, "aqi_eu_dominant", PERIOD.aqi_eu_dominant],
     ] as const) {
-      const decoded = roundTrip(msg({ vars_mask: 1 << bit }));
+      const decoded = roundTrip(msg({ vars: varSet(variable) }));
       for (let p = 0; p < decoded.periods[0].length; p++)
         expect(decoded.periods[0][p][field], `${field} period ${p}`).toBe(expected);
     }
   });
 
   it("carries the dominant pollutant independently of the headline's coding mode", () => {
-    // Whether the headline codes as a residual or as its own deltas is a function of vars_mask;
-    // the pollutant it names must not change with it.
-    const withAll = (1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25)
-      | (1 << VARS_BIT.aq_o3) | (1 << VARS_BIT.aq_pm10);
-    for (const varsMask of [1 << VARS_BIT.aqi, withAll]) {
-      const d = roundTrip(msg({ vars_mask: varsMask })).periods[0][0];
-      expect(d.aqi_dominant, `mask ${varsMask}`).toBe(PERIOD.aqi_dominant);
+    // Whether the headline codes as a residual or as its own deltas is a function of the
+    // selection; the pollutant it names must not change with it.
+    const withAll = varSet(VAR.aqi, VAR.aq_pm25, VAR.aq_o3, VAR.aq_pm10);
+    for (const vars of [varSet(VAR.aqi), withAll]) {
+      const d = roundTrip(msg({ vars })).periods[0][0];
+      expect(d.aqi_dominant, `vars ${[...vars].join(",")}`).toBe(PERIOD.aqi_dominant);
     }
   });
 
@@ -349,7 +351,7 @@ describe("round-trip encoding", () => {
     // knows which periods those are because it reads the headline first.
     const gap: Period = { ...PERIOD, aqi: undefined };
     const periods = [[PERIOD, gap, PERIOD]];
-    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.aqi, periods }));
+    const decoded = roundTrip(msg({ vars: varSet(VAR.aqi), periods }));
     expect(decoded.periods[0][0].aqi_dominant).toBe(PERIOD.aqi_dominant);
     expect(decoded.periods[0][1].aqi).toBeUndefined();
     expect(decoded.periods[0][1].aqi_dominant).toBeUndefined();
@@ -360,11 +362,11 @@ describe("round-trip encoding", () => {
     // NO2 and SO2 measured bit-for-bit identical in the US baseline whether present or not, so
     // they are deliberately not part of the residual key.
     const led: Period = { ...PERIOD, aqi: PERIOD.aqi_pm25 };
-    const aqiBits = (varsMask: number) =>
-      encodeBreakdown(msg({ vars_mask: varsMask, periods: [[led, led, led]] }))
+    const aqiBits = (vars: ReadonlySet<Variable>) =>
+      encodeBreakdown(msg({ vars, periods: [[led, led, led]] }))
         .columns.find((c) => c.name === "aqi")!.bits;
-    const keyed = (1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25) | (1 << VARS_BIT.aq_o3);
-    const plusUnkeyed = keyed | (1 << VARS_BIT.aq_no2) | (1 << VARS_BIT.aq_so2);
+    const keyed = varSet(VAR.aqi, VAR.aq_pm25, VAR.aq_o3);
+    const plusUnkeyed = varSet(...keyed, VAR.aq_no2, VAR.aq_so2);
     expect(aqiBits(plusUnkeyed)).toBeCloseTo(aqiBits(keyed), 6);
   });
 
@@ -373,8 +375,8 @@ describe("round-trip encoding", () => {
     // residual is non-negative by construction, so that clamps to "equal to the worst sub-index"
     // — the best estimate available, and never a fabricated 0.
     const gap: Period = { ...PERIOD, aqi: undefined };
-    const varsMask = (1 << VARS_BIT.aqi) | (1 << VARS_BIT.aq_pm25) | (1 << VARS_BIT.aq_o3);
-    const p = roundTrip(msg({ vars_mask: varsMask, periods: [[gap, gap, gap]] })).periods[0][0];
+    const vars = varSet(VAR.aqi, VAR.aq_pm25, VAR.aq_o3);
+    const p = roundTrip(msg({ vars, periods: [[gap, gap, gap]] })).periods[0][0];
     expect(p.aqi).toBe(qUs(PERIOD.aqi_pm25!)); // pm25 (96) outranks o3 (42)
   });
 
@@ -383,7 +385,7 @@ describe("round-trip encoding", () => {
     // absent field — "not forecast", not "the cleanest air there is".
     const gap: Period = { ...PERIOD, aqi_eu: undefined };
     const periods = [[PERIOD, gap, PERIOD]];
-    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.aqi_eu, periods }));
+    const decoded = roundTrip(msg({ vars: varSet(VAR.aqi_eu), periods }));
     expect(decoded.periods[0][0].aqi_eu).toBe(qEu(PERIOD.aqi_eu!));
     expect(decoded.periods[0][1].aqi_eu).toBeUndefined();
     expect(decoded.periods[0][2].aqi_eu).toBe(qEu(PERIOD.aqi_eu!));
@@ -394,7 +396,7 @@ describe("round-trip encoding", () => {
     // 96 hours — eight periods — and the rest carry no air-quality symbols at all.
     const periods = [Array(26).fill(PERIOD)];
     // Temp rides along so the last period can show the clamp is per-column, not per-message.
-    const decoded = roundTrip(msg({ vars_mask: AQ_VARS | (1 << VARS_BIT.temp), periods }));
+    const decoded = roundTrip(msg({ vars: varSet(...AQ_VARS, VAR.temp), periods }));
     const row = decoded.periods[0];
     expect(row).toHaveLength(26);
     for (let p = 0; p < 8; p++) expect(row[p].aqi_pm25, `period ${p}`).toBe(qUs(PERIOD.aqi_pm25!));
@@ -410,15 +412,15 @@ describe("round-trip encoding", () => {
   it("charges nothing for the periods past the air-quality horizon", () => {
     // The clamp is derived from the layout on both sides, so it costs no header bits and emits
     // no symbols: a 13-day message pays for the same eight periods a 4-day one does.
-    const short = encodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(8).fill(PERIOD)] }));
-    const long = encodeBreakdown(msg({ vars_mask: AQ_VARS, periods: [Array(26).fill(PERIOD)] }));
+    const short = encodeBreakdown(msg({ vars: AQ_VARS, periods: [Array(8).fill(PERIOD)] }));
+    const long = encodeBreakdown(msg({ vars: AQ_VARS, periods: [Array(26).fill(PERIOD)] }));
     const aqBits = (b: typeof short) =>
       b.columns.filter((c) => c.name.startsWith("aq")).reduce((s, c) => s + c.bits, 0);
     expect(aqBits(long)).toBeCloseTo(aqBits(short), 6);
   });
 
-  it("omits all optional fields when vars_mask=0", () => {
-    const decoded = roundTrip(msg({ vars_mask: 0 }));
+  it("omits all optional fields when no vars are selected", () => {
+    const decoded = roundTrip(msg({ vars: varSet() }));
     const p = decoded.periods[0][0];
     expect(p.aqi).toBeUndefined();
     expect(p.aqi_eu).toBeUndefined();
@@ -434,8 +436,7 @@ describe("round-trip encoding", () => {
   });
 
   it("only includes selected vars", () => {
-    const varsMask = (1 << VARS_BIT.precip) | (1 << VARS_BIT.freeze);
-    const decoded = roundTrip(msg({ vars_mask: varsMask }));
+    const decoded = roundTrip(msg({ vars: varSet(VAR.precip, VAR.freeze) }));
     const p = decoded.periods[0][0];
     expect(p.precip).toBe(Math.round(Math.round(75 * 7 / 100) * 100 / 7));
     expect(p.freeze_m).toBeCloseTo(6 * 304.8, 5);
@@ -444,20 +445,21 @@ describe("round-trip encoding", () => {
     expect(p.wind_aloft).toBeUndefined();
   });
 
-  it("temp round-trips on its own bit", () => {
-    const tempOnly = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp }));
+  it("temp round-trips selected alone", () => {
+    const tempOnly = roundTrip(msg({ vars: varSet(VAR.temp) }));
     expect(tempOnly.periods[0][0].temp_c).toBe(PERIOD.temp_c);
     expect(tempOnly.periods[0][0].precip).toBeUndefined();
   });
 
-  it("default vars mask includes expected vars", () => {
-    expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.precip)).toBeTruthy();
-    expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.snow)).toBeTruthy();
-    expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.freeze)).toBeTruthy();
+  it("default vars include expected vars", () => {
+    const defaults = new Set(DEFAULT_VARS);
+    expect(defaults.has(VAR.precip)).toBe(true);
+    expect(defaults.has(VAR.snow)).toBe(true);
+    expect(defaults.has(VAR.freeze)).toBe(true);
     // Pressure-level wind is opt-in, level by level (`w:` token) — none on by default.
-    expect(DEFAULT_VARS_MASK & WIND_LEVELS_MASK).toBe(0);
-    expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.temp)).toBeFalsy();
-    expect(DEFAULT_VARS_MASK & (1 << VARS_BIT.wind)).toBeFalsy();
+    expect(WIND_LEVEL_VARS.some((v) => defaults.has(v))).toBe(false);
+    expect(defaults.has(VAR.temp)).toBe(false);
+    expect(defaults.has(VAR.wind)).toBe(false);
   });
 
   it("handles all 8 wind directions", () => {
@@ -553,22 +555,22 @@ describe("round-trip encoding", () => {
   });
 
   it("encodes a near-constant freeze-level column smaller than a wide-swinging one (Huffman-coded deltas)", () => {
-    const vars_mask = 1 << VARS_BIT.freeze;
+    const vars = varSet(VAR.freeze);
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, freeze_m: 6 * 304.8 }));
     const swings = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, freeze_m: (i % 2 === 0 ? 2 : 13) * 304.8 }));
-    const flatLen = messageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const swingsLen = messageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
+    const flatLen = messageToString(msg({ vars, periods: [flat] }, { hourly: true })).length;
+    const swingsLen = messageToString(msg({ vars, periods: [swings] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(swingsLen);
   });
 
   it("encodes a near-constant cloud band smaller than a wide-swinging one (Huffman-coded deltas)", () => {
-    const vars_mask = 1 << VARS_BIT.cch;
+    const vars = varSet(VAR.clouds);
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, cloud_band: [40, 40, 40, 40, 40, 40, 40, 40] }));
     const swings = Array.from({ length: 64 }, (_, i) => ({
       ...PERIOD, cloud_band: Array.from({ length: 8 }, () => (i % 2 === 0 ? 0 : 100)),
     }));
-    const flatLen = messageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const swingsLen = messageToString(msg({ vars_mask, periods: [swings] }, { hourly: true })).length;
+    const flatLen = messageToString(msg({ vars, periods: [flat] }, { hourly: true })).length;
+    const swingsLen = messageToString(msg({ vars, periods: [swings] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(swingsLen);
   });
 
@@ -613,10 +615,10 @@ describe("round-trip encoding", () => {
   });
 
   it("round-trips a minimal weathercode-only, all-clear message (self-delimiting body)", () => {
-    // vars_mask=0 leaves only the weathercode column; all-clear may pack to a near-empty body,
-    // exercising the little-endian self-terminating path (trailing zero bits dropped).
+    // An empty selection leaves only the weathercode column; all-clear may pack to a near-empty
+    // body, exercising the little-endian self-terminating path (trailing zero bits dropped).
     const clear = Array.from({ length: 8 }, () => ({ weathercode: 0 }));
-    const decoded = roundTrip(msg({ vars_mask: 0, periods: [clear] }));
+    const decoded = roundTrip(msg({ vars: varSet(), periods: [clear] }));
     expect(decoded.periods[0]).toHaveLength(8);
     decoded.periods[0].forEach((p) => expect(p.weathercode).toBe(0));
   });
@@ -628,7 +630,7 @@ describe("round-trip encoding", () => {
   // 12h periods: these columns are shorter than the 49 periods any all-1h layout must have (see
   // uniformLayout). The 1h wind path is covered separately below.
   const windMsg = (periods: Period[], opts: { hourly?: boolean } = {}) =>
-    msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] }, opts);
+    msg({ vars: varSet(VAR.wind), periods: [periods] }, opts);
 
   it("round-trips varied surface wind speeds (entropy-coded deltas) and directions", () => {
     const forces = [3, 5, 4, 6, 7, 4, 5, 3, 6, 5];
@@ -663,7 +665,7 @@ describe("round-trip encoding", () => {
       wind_sfc_dir: i % 8,
     }));
     const decoded = roundTrip(
-      msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] }, { hourly: true }));
+      msg({ vars: varSet(VAR.wind), periods: [periods] }, { hourly: true }));
     expect(decoded.periodHours).toEqual(Array(49).fill(1));
     decoded.periods[0].forEach((p, i) => {
       expect(p.wind_sfc_kph).toBeCloseTo(bmid(4 + (i % 5)), 3);
@@ -706,11 +708,11 @@ describe("round-trip encoding", () => {
   });
 
   it("round-trips w600 alone (no upper-level context available)", () => {
-    const vars_mask = 1 << VARS_BIT.w600;
+    const vars = varSet(VAR.w600);
     const forces = [10, 12, 11, 13, 12];
     const dirs = [2, 2, 3, 3, 4];
     const periods = [forces.map((f, i) => ({ weathercode: 0, wind_aloft: aloftOnly(L600, { kph: bmid(f), dir: dirs[i] }) }))];
-    const decoded = roundTrip(msg({ vars_mask, periods }));
+    const decoded = roundTrip(msg({ vars, periods }));
     decoded.periods[0].forEach((p, i) => {
       expect(p.wind_aloft![L600]!.kph).toBeCloseTo(bmid(forces[i]), 3);
       expect(p.wind_aloft![L600]!.dir).toBe(dirs[i]);
@@ -720,11 +722,11 @@ describe("round-trip encoding", () => {
   });
 
   it("round-trips a non-adjacent selection (500 + 700 hPa, conditioning across a skipped rung)", () => {
-    const vars_mask = (1 << VARS_BIT.w500) | (1 << VARS_BIT.w700);
+    const vars = varSet(VAR.w500, VAR.w700);
     const forces = [10, 12, 11, 13, 12];
     const periods = [forces.map((f, i) => ({ weathercode: 0, wind_aloft: WIND_LEVELS_HPA.map((_, li) =>
       li === L500 ? { kph: bmid(f + 2), dir: i % 8 } : li === L700 ? { kph: bmid(f), dir: (i + 1) % 8 } : null) }))];
-    const decoded = roundTrip(msg({ vars_mask, periods }));
+    const decoded = roundTrip(msg({ vars, periods }));
     decoded.periods[0].forEach((p, i) => {
       expect(p.wind_aloft![L500]!.kph).toBeCloseTo(bmid(forces[i] + 2), 3);
       expect(p.wind_aloft![L700]!.kph).toBeCloseTo(bmid(forces[i]), 3);
@@ -750,10 +752,10 @@ describe("round-trip encoding", () => {
     const sixHourly: Partial<ForecastMessage> = {
       seq: 48, mode: MODE_RANGE, hour: 0, periodHours: Array(n).fill(6),
     };
-    const both = msg({ ...sixHourly, vars_mask: (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600),
+    const both = msg({ ...sixHourly, vars: varSet(VAR.w500, VAR.w600),
       periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_aloft: WIND_LEVELS_HPA.map((_, li) =>
         li === L500 ? { kph: bmid(8), dir: 6 } : li === L600 ? { kph: bmid(6), dir: 6 } : null) }))] });
-    const alone = msg({ ...sixHourly, vars_mask: 1 << VARS_BIT.w600,
+    const alone = msg({ ...sixHourly, vars: varSet(VAR.w600),
       periods: [Array.from({ length: n }, () => ({ weathercode: 0, wind_aloft: aloftOnly(L600, { kph: bmid(6), dir: 6 }) }))] });
     const w600Bits = (m: ForecastMessage) =>
       encodeBreakdown(m).columns.find((c) => c.name === "w600")!.bits;
@@ -761,7 +763,7 @@ describe("round-trip encoding", () => {
   });
 
   // Gusts are a speed-only wind column (no direction stream). Gust decodes FIRST and lends its
-  // same-period delta to the surface column when both are in vars_mask.
+  // same-period delta to the surface column when both are requested.
   it("round-trips gust speeds (speed-only column, no direction symbols)", () => {
     const gustForces = [8, 10, 9, 12, 14, 11, 10, 8, 13, 12];
     const periods = gustForces.map((g, i) => ({
@@ -771,7 +773,7 @@ describe("round-trip encoding", () => {
       wind_gust_kph: bmid(g),
     }));
     const decoded = roundTrip(msg({
-      vars_mask: (1 << VARS_BIT.wind) | (1 << VARS_BIT.gust), periods: [periods],
+      vars: varSet(VAR.wind, VAR.gust), periods: [periods],
     }));
     decoded.periods[0].forEach((p, i) => {
       expect(p.wind_gust_kph).toBeCloseTo(bmid(gustForces[i]), 3);
@@ -783,17 +785,17 @@ describe("round-trip encoding", () => {
     const forces = [3, 5, 4, 6, 5];
     const dirs = [2, 2, 3, 3, 4];
     const periods = forces.map((f, i) => ({ weathercode: 0, wind_sfc_kph: bmid(f), wind_sfc_dir: dirs[i] }));
-    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.wind, periods: [periods] }));
+    const decoded = roundTrip(msg({ vars: varSet(VAR.wind), periods: [periods] }));
     decoded.periods[0].forEach((p, i) => {
       expect(p.wind_sfc_kph).toBeCloseTo(bmid(forces[i]), 3);
       expect(p.wind_gust_kph).toBeUndefined();
     });
   });
 
-  it("round-trips gusts alone (surface wind absent from the mask)", () => {
+  it("round-trips gusts alone (surface wind absent from the selection)", () => {
     const gustForces = [8, 10, 9, 12, 14];
     const periods = gustForces.map((g) => ({ weathercode: 0, wind_gust_kph: bmid(g) }));
-    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.gust, periods: [periods] }));
+    const decoded = roundTrip(msg({ vars: varSet(VAR.gust), periods: [periods] }));
     decoded.periods[0].forEach((p, i) => {
       expect(p.wind_gust_kph).toBeCloseTo(bmid(gustForces[i]), 3);
       expect(p.wind_sfc_kph).toBeUndefined();
@@ -802,17 +804,17 @@ describe("round-trip encoding", () => {
 
   it("a gust column that moves with the surface wind makes the surface column cheaper (cross-column context)", () => {
     // Mirrors the w500/w600 test above: surface rising in step with the gusts, encoded with vs
-    // without the gust column present in the mask. Encode-only (seq-pinned 6h).
+    // without the gust column present in the selection. Encode-only (seq-pinned 6h).
     const n = 12;
     const sixHourly: Partial<ForecastMessage> = {
       seq: 48, mode: MODE_RANGE, hour: 0, periodHours: Array(n).fill(6),
     };
     const rising = (i: number) => i; // force deltas of +1, matching the gust column's
-    const both = msg({ ...sixHourly, vars_mask: (1 << VARS_BIT.wind) | (1 << VARS_BIT.gust),
+    const both = msg({ ...sixHourly, vars: varSet(VAR.wind, VAR.gust),
       periods: [Array.from({ length: n }, (_, i) => ({ weathercode: 0,
         wind_sfc_kph: bmid(rising(i) + 2), wind_sfc_dir: 6,
         wind_gust_kph: bmid(rising(i) + 4) }))] });
-    const alone = msg({ ...sixHourly, vars_mask: 1 << VARS_BIT.wind,
+    const alone = msg({ ...sixHourly, vars: varSet(VAR.wind),
       periods: [Array.from({ length: n }, (_, i) => ({ weathercode: 0,
         wind_sfc_kph: bmid(rising(i) + 2), wind_sfc_dir: 6 }))] });
     const windBits = (m: ForecastMessage) =>
@@ -825,7 +827,7 @@ describe("round-trip encoding", () => {
     const gustForces = [12, 14, 16, 17];
     const periods = gustForces.map((g) => ({ weathercode: 0, wind_gust_kph: bmid(g) }));
     periods.push({ weathercode: 0, wind_gust_kph: 400 }); // clamps into the top band
-    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.gust, periods: [periods] }));
+    const decoded = roundTrip(msg({ vars: varSet(VAR.gust), periods: [periods] }));
     gustForces.forEach((g, i) =>
       expect(decoded.periods[0][i].wind_gust_kph).toBeCloseTo(bmid(g), 3));
     expect(decoded.periods[0][4].wind_gust_kph).toBeCloseTo(bmid(17), 3);
@@ -836,16 +838,16 @@ describe("delta temperature encoding", () => {
   it("round-trips a clustered temperature column exactly", () => {
     const temps = [-5, -4, -3, 0, 2, 5, 3, 1, -2, 4];
     const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
-    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }));
+    const decoded = roundTrip(msg({ vars: varSet(VAR.temp), periods }));
     decoded.periods[0].forEach((p, i) => expect(p.temp_c).toBe(temps[i]));
   });
 
   it("encodes a constant column smaller than a wide-spread one (FOR offset width)", () => {
-    const vars_mask = 1 << VARS_BIT.temp;
+    const vars = varSet(VAR.temp);
     const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, temp_c: 5 }));
     const spread = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, temp_c: i - 20 }));
-    const flatLen = messageToString(msg({ vars_mask, periods: [flat] }, { hourly: true })).length;
-    const spreadLen = messageToString(msg({ vars_mask, periods: [spread] }, { hourly: true })).length;
+    const flatLen = messageToString(msg({ vars, periods: [flat] }, { hourly: true })).length;
+    const spreadLen = messageToString(msg({ vars, periods: [spread] }, { hourly: true })).length;
     expect(flatLen).toBeLessThan(spreadLen);
   });
 
@@ -853,7 +855,7 @@ describe("delta temperature encoding", () => {
     // ±31 is the largest delta the escape payload can carry — no clamping yet.
     const temps = [-15, 16, 14, 15, -16, -14];
     const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
-    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }));
+    const decoded = roundTrip(msg({ vars: varSet(VAR.temp), periods }));
     decoded.periods[0].forEach((p, i) => expect(p.temp_c).toBe(temps[i]));
   });
 
@@ -866,7 +868,7 @@ describe("delta temperature encoding", () => {
       const start = swing > 0 ? -30 : 30;
       const temps = [start, start + swing, start + swing + 2, start + swing + 1, start + swing + 3];
       const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
-      const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }));
+      const decoded = roundTrip(msg({ vars: varSet(VAR.temp), periods }));
       const out = decoded.periods[0].map((p) => p.temp_c!);
       expect(out[0]).toBe(temps[0]);
       expect(out[1]).toBe(start + Math.min(Math.max(swing, -32), 31)); // clamped
@@ -884,7 +886,7 @@ describe("delta temperature encoding", () => {
     temps.push(temps[11] + 40);                                 // +40 jump → clamped to +31
     for (let i = 13; i < 49; i++) temps.push(temps[i - 1] - 1); // post-jump decline
     const periods = [temps.map((t) => ({ ...PERIOD, temp_c: t }))];
-    const decoded = roundTrip(msg({ vars_mask: 1 << VARS_BIT.temp, periods }, { hourly: true }));
+    const decoded = roundTrip(msg({ vars: varSet(VAR.temp), periods }, { hourly: true }));
     const out = decoded.periods[0].map((p) => p.temp_c!);
     expect(out[12]).toBe(temps[11] + 31); // clamped
     for (let i = 13; i < 49; i++) expect(out[i]).toBe(temps[i]); // healed, contexts in sync
@@ -902,10 +904,10 @@ describe("body decode desync detection", () => {
     ]];
     const m = msg({ periods });
     const encoded = messageToString(m);
-    // Resolve with a vars_mask missing that final column: the decoder reads every earlier column
+    // Resolve with a selection missing that final column: the decoder reads every earlier column
     // identically, then stops with the 925 hPa bits unread — the shape of codebook or
     // request-store drift, which would otherwise return garbage values silently.
-    const drifted = { ...ctxOf(m), vars_mask: m.vars_mask & ~(1 << VARS_BIT.w925) };
+    const drifted = { ...ctxOf(m), vars: new Set([...m.vars].filter((v) => v !== VAR.w925)) };
     expect(() => messageFromString(encoded, () => drifted)).toThrow(/desynced/);
     // The same message with the true context still decodes.
     expect(() => messageFromString(encoded, () => ctxOf(m))).not.toThrow();
@@ -963,7 +965,7 @@ describe("corrupt character rejection", () => {
 });
 
 describe("order-1 precipitation encoding", () => {
-  const vars_mask = 1 << VARS_BIT.snow;
+  const vars = varSet(VAR.snow);
   // The snow codebooks key on the same period's weathercode class, so a period must carry a
   // weathercode consistent with its snowfall — "snowing hard, zero accumulation" is a
   // contradiction the tables (rightly) charge for, and it isn't what these tests are about.
@@ -971,27 +973,27 @@ describe("order-1 precipitation encoding", () => {
 
   it("collapses an all-dry snow column to almost nothing and round-trips to zero", () => {
     const dry = Array.from({ length: 72 }, () => snowPeriod(0));
-    const decoded = roundTrip(msg({ vars_mask, periods: [dry] }, { hourly: true }));
+    const decoded = roundTrip(msg({ vars, periods: [dry] }, { hourly: true }));
     decoded.periods[0].forEach((p) => expect(p.snow_cm).toBe(0));
     // A dry run is the order-1 tables' cheapest input (P(0 | prev=0, clear) is near 1), so the
     // all-dry column must undercut one with snow every period. Compare exact body bits (not the
     // base-85 encoded char length) since a few bits of savings can land on either side of a char
     // boundary and not move the visible string length.
     const snowy = Array.from({ length: 72 }, () => snowPeriod(20));
-    const dryBits = encodeBreakdown(msg({ vars_mask, periods: [dry] }, { hourly: true })).bodyBits;
-    const snowyBits = encodeBreakdown(msg({ vars_mask, periods: [snowy] }, { hourly: true })).bodyBits;
+    const dryBits = encodeBreakdown(msg({ vars, periods: [dry] }, { hourly: true })).bodyBits;
+    const snowyBits = encodeBreakdown(msg({ vars, periods: [snowy] }, { hourly: true })).bodyBits;
     expect(dryBits).toBeLessThan(snowyBits);
   });
 
   it("round-trips a mostly-zero snow column exactly", () => {
     const vals = Array.from({ length: 72 }, (_, i) => (i % 12 === 0 ? 10 : 0));
     const periods = [vals.map(snowPeriod)];
-    const decoded = roundTrip(msg({ vars_mask, periods }, { hourly: true }));
+    const decoded = roundTrip(msg({ vars, periods }, { hourly: true }));
     decoded.periods[0].forEach((p, i) => expect(p.snow_cm).toBeCloseTo(qSnow(vals[i]), 5));
     // Mostly-dry beats a column where every cell is nonzero and widely spread.
     const dense = Array.from({ length: 72 }, (_, i) => snowPeriod(3 * (i + 1)));
-    const sparseBits = encodeBreakdown(msg({ vars_mask, periods }, { hourly: true })).bodyBits;
-    const denseBits = encodeBreakdown(msg({ vars_mask, periods: [dense] }, { hourly: true })).bodyBits;
+    const sparseBits = encodeBreakdown(msg({ vars, periods }, { hourly: true })).bodyBits;
+    const denseBits = encodeBreakdown(msg({ vars, periods: [dense] }, { hourly: true })).bodyBits;
     expect(sparseBits).toBeLessThan(denseBits);
   });
 
@@ -1003,7 +1005,7 @@ describe("order-1 precipitation encoding", () => {
     const snowing = Array.from({ length: 72 }, () => ({ ...PERIOD, weathercode: 71, snow_cm: 6 }));
     const clear = snowing.map((p) => ({ ...p, weathercode: 0 }));
     const snowBits = (periods: Period[]) =>
-      encodeBreakdown(msg({ vars_mask, periods: [periods] }, { hourly: true }))
+      encodeBreakdown(msg({ vars, periods: [periods] }, { hourly: true }))
         .columns.find((c) => c.name === "snow")!.bits;
     expect(snowBits(snowing)).toBeLessThan(snowBits(clear));
   });

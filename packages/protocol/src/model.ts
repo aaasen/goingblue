@@ -1,4 +1,5 @@
-import { WMO_CODES } from "./constants.js";
+import { WMO_CODES, type Variable } from "./constants.js";
+export type { Variable } from "./constants.js";
 import type { Alphabet } from "./codec.js";
 import type { DeviceCode } from "./devices.js";
 
@@ -65,7 +66,7 @@ export interface Period {
   // Air quality indices, worst value over the period. Two scales that share no arithmetic: the
   // US EPA index runs 0–500 with 50/100/150/200/300 category edges, the European index runs
   // 0–100+ with edges every 20. A 40 is "good" on one and "moderate" on the other, so they must
-  // never share a palette or a threshold. Each is present only when its own vars_mask bit is set
+  // never share a palette or a threshold. Each is present only when its variable was requested
   // AND the period falls inside the CAMS horizon (AQ_HORIZON_HOURS in wire.ts) — periods past it
   // carry no air-quality data at all, so `undefined` here means "not forecast", not "clean".
   // Each headline is EXACTLY the max over its own scale's sub-indices — measured over 52M corpus
@@ -104,7 +105,7 @@ export interface ForecastMessage {
   // have run).
   days: number;
   models_mask: number;
-  vars_mask: number;
+  vars: ReadonlySet<Variable>;
   // The FIRST PERIOD's start datetime (UTC) — at local midnight or earlier than the request
   // time, since the first period is the one containing it (see layout.ts).
   month: number;
@@ -138,7 +139,7 @@ export interface RequestContext {
   // A response carries exactly one model, identified by index (0..3 → MODEL_NAMES). The decoded
   // message exposes it as a single-bit models_mask for display.
   model: number;
-  vars_mask: number;
+  vars: ReadonlySet<Variable>;
   lat: number;
   lon: number;
   // Request time as UTC epoch milliseconds, aligned to the hour. The client chooses it (so

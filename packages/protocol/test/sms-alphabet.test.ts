@@ -4,17 +4,18 @@ import { encodeBodyLE, decodeBodyLE, decodeBodyAuto, bodyAlphabet } from "../src
 import { ALPHABET, GSM_LATIN1, GSM_GREEK, SMS_ALPHABET } from "../src/constants.js";
 import { wireCodec, messageToString, WIRE_HEADER_CHARS } from "../src/wire.js";
 import { DEVICE_TRANSPORT } from "../src/devices.js";
-import type { ForecastMessage, RequestContext } from "../src/model.js";
+import type { ForecastMessage, RequestContext, Variable } from "../src/model.js";
 import wireFixture from "./fixtures/wire.fixture.json";
 
 // The SMS route's alphabet — GSM-7 basic in full rather than its intersection with ASCII. See
 // constants.ts for what each half survives, decided by a field run.
 
-const d = wireFixture.decoded as ForecastMessage;
+const d = { ...wireFixture.decoded,
+  vars: new Set(wireFixture.decoded.vars as Variable[]) } as ForecastMessage;
 const req = wireFixture.request;
 const ctx = (device?: RequestContext["device"]): RequestContext => ({
   model: 31 - Math.clz32(d.models_mask & -d.models_mask),
-  vars_mask: d.vars_mask,
+  vars: d.vars,
   lat: d.lat,
   lon: d.lon,
   start: Date.UTC(new Date().getUTCFullYear(), req.month - 1, req.day, req.hour),

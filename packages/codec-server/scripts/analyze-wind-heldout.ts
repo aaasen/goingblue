@@ -18,9 +18,9 @@
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD, type HourlyData } from "../src/forecast.ts";
 import { eachForecast, foldOf, N_FOLDS, scaledWeights } from "./derive-lib.ts";
-import { quantizeFreqs, RANS_PROB_BITS, VARS_BIT, WIND_LEVELS_HPA, type Period } from "@weather/protocol";
+import { quantizeFreqs, RANS_PROB_BITS, VAR, type Variable, WIND_LEVELS_HPA, type Period } from "@weather/protocol";
 
-const WIND_MASK = (1 << VARS_BIT.wind) | (1 << VARS_BIT.w500) | (1 << VARS_BIT.w600) | (1 << VARS_BIT.w700);
+const WIND_VARS: ReadonlySet<Variable> = new Set([VAR.wind, VAR.w500, VAR.w600, VAR.w700]);
 // The three levels this scan was written against (the wire now carries any subset of the eight
 // WIND_LEVELS_HPA levels — see derive-wind-*-codebooks.ts for the gap-keyed training).
 const ALOFT_IDX = [500, 600, 700].map((l) => WIND_LEVELS_HPA.indexOf(l));
@@ -67,7 +67,7 @@ await eachForecast((hourly: HourlyData, runHour: number, loc: string) => {
     const n = Math.min(256, Math.floor(hourly.time.length / hpp));
     if (n < 2) continue;
     const rows = aggregateHourly(hourly, hourly.time, n, resIdx, start);
-    const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_MASK, "US"));
+    const periods: Period[] = rows.map((r) => toFullPeriod(r, WIND_VARS, "US"));
     const sp = LEVELS.map((_, L) => periods.map((p) => qSpeed(speedOf(p, L), L)));
     const dr = LEVELS.map((_, L) => periods.map((p) => (dirOf(p, L) ?? 0) % 8));
     // Displayed dir under calm gating: last encoded dir, 0 before any.

@@ -48,7 +48,7 @@ export function counter(): CellCounter {
       // request hour, so neither shared slice fits.
       const { hourly: h, startHour } = ctx;
       const n = Math.min(128, Math.floor(h.time.length / HOURS_PER_PERIOD[RES_IDX]));
-      const periods = aggregateHourly(h, h.time, n, RES_IDX, startHour).map((r) => toFullPeriod(r, 0, "US", RES_IDX));
+      const periods = aggregateHourly(h, h.time, n, RES_IDX, startHour).map((r) => toFullPeriod(r, new Set(), "US", RES_IDX));
       if (periods.length === 0) return;
       const seq = periods.map((p) => WMO2IDX[p.weathercode] ?? 0);
       add(BOOT + seq[0]);

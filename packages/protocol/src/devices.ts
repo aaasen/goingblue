@@ -1,4 +1,5 @@
 import type { Alphabet } from "./codec.js";
+import { ALWAYS_VARS, VAR, type Variable } from "./constants.js";
 import { PART_LABEL_CHARS } from "./parts.js";
 
 // The device a request came from, carried as the request's `d:` token. It is the one knob that
@@ -162,17 +163,17 @@ export function maxCharsFor(code: DeviceCode, messages: number, headerChars: num
 //   inReach, SMS   when any extra variable is on. Base fills a 160-character message to about
 //            ten days on its own; the first extra column is what starts cutting coverage.
 //   ZOLEO    when clouds are on, or two or more other extras. 240 bytes covers the base forecast
-//            with room to spare; clouds is three columns and the one single toggle that spends
-//            that room by itself.
+//            with room to spare; clouds is the whole pressure-level band and the one single
+//            toggle that spends that room by itself.
 //
-// `variableCodes` are the request's `v:` group codes (see CONFIGURABLE_VAR_GROUPS — "c" is the
-// cloud toggle, every other code is one column) and `windLevels` the `w:` ladder indices, one
-// column each. The selections count, not the model: a group the model can't supply is already
-// dropped by the builder before it gets here.
-export function multiMessageOffered(code: DeviceCode, variableCodes: readonly string[], windLevels: readonly number[]): boolean {
+// `vars` is the request's full selection. Only the extras beyond ALWAYS_VARS count, clouds
+// separately from the rest, and the selection counts, not the model: a variable the model can't
+// supply is already dropped by the builder before it gets here.
+export function multiMessageOffered(code: DeviceCode, vars: ReadonlySet<Variable>): boolean {
   if (!supportsMessages(code)) return false;
-  const clouds = variableCodes.includes("c");
-  const others = variableCodes.filter((c) => c !== "c").length + windLevels.length;
+  const clouds = vars.has(VAR.clouds);
+  const others = [...vars]
+    .filter((v) => v !== VAR.clouds && !ALWAYS_VARS.includes(v)).length;
   switch (code) {
     case "i": return true;
     case "z": return clouds || others >= 2;

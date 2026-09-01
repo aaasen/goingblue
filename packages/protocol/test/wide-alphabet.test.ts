@@ -5,14 +5,15 @@ import {
 import { wireCodec, WIRE_HEADER_CHARS } from "../src/wire.js";
 import { decodeMessage } from "../src/registry.js";
 import { IPHONE_MAX_CHARS, DEVICE_TRANSPORT } from "../src/devices.js";
-import type { ForecastMessage } from "../src/model.js";
+import type { ForecastMessage, Variable } from "../src/model.js";
 import wireFixture from "./fixtures/wire.fixture.json";
 
-const d = wireFixture.decoded as ForecastMessage;
+const d = { ...wireFixture.decoded,
+  vars: new Set(wireFixture.decoded.vars as Variable[]) } as ForecastMessage;
 const req = wireFixture.request;
 const ctx = () => ({
   model: 31 - Math.clz32(d.models_mask & -d.models_mask),
-  vars_mask: d.vars_mask,
+  vars: d.vars,
   lat: d.lat,
   lon: d.lon,
   start: Date.UTC(new Date().getUTCFullYear(), req.month - 1, req.day, req.hour),
@@ -94,11 +95,11 @@ describe("messages in base32768", () => {
   it("decodes to the same message the base-85 encoding does", () => {
     const wide = wireCodec.encode(d, "base32768");
     expect(wide).not.toBe(wireFixture.encoded);
-    expect(wireCodec.decode(wide, ctx)).toEqual(wireFixture.decoded);
+    expect(wireCodec.decode(wide, ctx)).toEqual(d);
   });
 
   it("dispatches by version tag with no knowledge of the alphabet", () => {
-    expect(decodeMessage(wireCodec.encode(d, "base32768"), ctx)).toEqual(wireFixture.decoded);
+    expect(decodeMessage(wireCodec.encode(d, "base32768"), ctx)).toEqual(d);
   });
 
   it("defaults to base-85, so an unmarked request is unaffected", () => {
