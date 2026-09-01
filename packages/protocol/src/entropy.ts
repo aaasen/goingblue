@@ -19,7 +19,11 @@ import {
   AQI_EU_RESIDUAL_WEIGHTS_BY_MASK_RES,
   AQ_DOMINANT_BOOTSTRAP_WEIGHTS, AQ_DOMINANT_WEIGHTS,
   AQ_DOMINANT_EU_BOOTSTRAP_WEIGHTS, AQ_DOMINANT_EU_WEIGHTS,
+  AGREEMENT_WEIGHTS_BY_LEAD,
 } from "./codebooks.gen.js";
+import {
+  AGREEMENT_CUTS, AGREEMENT_LEAD_EDGES, AGREEMENT_CENTERS,
+} from "./constants.js";
 import {
   buildRansTable, symCostBits, ransEncode, ransReader, quantizeFreqs,
   RANS_PROB_BITS, RANS_L, RANS_WORD_BITS,
@@ -462,6 +466,13 @@ export interface Books {
   // (null for the column's first, which uses the bootstrap table).
   aqDominantBook(prev: number | null): CodeBook;
   aqDominantEuBook(prev: number | null): CodeBook;
+  // One model-agreement level symbol (0..3 levels + no-data, AGREEMENT_NSYM), keyed by the
+  // period's lead-time bucket (agreementLeadBucket in constants.ts — agreement decays with
+  // lead, which is the strongest context this column has) and the pair's previously decoded
+  // symbol (null for the pair's first — bootstrap row). Pairs never condition on each other,
+  // and the tables are shared across pairs. See
+  // codec-server/scripts/derive-agreement-codebooks.ts.
+  agreementBook(lead: number, prev: number | null): CodeBook;
 }
 
 // The cloud-band tables cover CLOUD_BAND_LEVELS_HPA from this index down: [300..1000], the
@@ -537,8 +548,22 @@ function buildBooks(t: typeof BASE_TABLES): Books {
       return tempDeltaTablesByRes[res][tempDeltaBucket(prevDelta) * TEMP_DELTA_TOD_BUCKETS + tod];
     },
     ...AQ_BOOKS,
+    ...AGREEMENT_BOOKS,
   };
 }
+
+// ── Model-agreement books ───────────────────────────────────────────────────────
+// Symbols: the four wire levels plus a no-data escape for ragged upstream edges inside a pair's
+// horizon clamp. Tables are [leadBucket][prevRow][sym], prevRow 0 = bootstrap (a pair's first
+// symbol), 1..AGREEMENT_NSYM = previous symbol + 1. Class-independent and pair-independent.
+export const AGREEMENT_NSYM = 5;
+export const AGREEMENT_NO_DATA = 4;
+const agreementTables = AGREEMENT_WEIGHTS_BY_LEAD.map((rows) => rows.map(buildTable));
+const AGREEMENT_BOOKS = {
+  agreementBook(lead: number, prev: number | null): CodeBook {
+    return agreementTables[lead][prev === null ? 0 : prev + 1];
+  },
+};
 
 // ── Air-quality books ───────────────────────────────────────────────────────────
 // Built alongside the weather books; kept as their own block only because their builders share
@@ -744,6 +769,16 @@ export const WIRE_CODEBOOKS = {
   rans: { probBits: RANS_PROB_BITS, stateLow: RANS_L, wordBits: RANS_WORD_BITS },
   ...bundleOf(BASE_TABLES),
   airQuality: airQualityBundle,
+  // Model agreement: the geometry travels with the weights — the cuts give a level its meaning
+  // (like an AQI ladder), the lead edges key the tables, and the center order + horizons define
+  // which pair each series is and where its free clamp ends.
+  agreement: {
+    byLead: AGREEMENT_WEIGHTS_BY_LEAD.map((rows) => rows.map(qf)),
+    cuts: AGREEMENT_CUTS,
+    leadEdges: AGREEMENT_LEAD_EDGES,
+    centers: AGREEMENT_CENTERS.map((c) => ({ bit: c.bit, horizonHours: c.horizonHours })),
+    noData: AGREEMENT_NO_DATA,
+  },
   weathercodeClassOf: WEATHERCODE_CLASS, // keys the wet columns' tables — drift desyncs them silently
   beaufortKphLower: BEAUFORT_KPH_LOWER,  // wind quantization geometry — drift re-means every speed symbol
 } as const;

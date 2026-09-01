@@ -66,6 +66,13 @@ export interface Period {
   // Visibility in kilometers.
   vis_km?: number;        // 0–15 km
 
+  // Model agreement: one level (0 = strong disagreement .. 3 = strong agreement, see
+  // AGREEMENT_CUTS in constants.ts) per AGREEMENT_CENTERS entry, in that order. null where the
+  // pair carries no reading: the center IS the served model, the period is past that center's
+  // horizon clamp, or the center's data had a ragged edge (the wire's no-data symbol). Absent
+  // altogether when the variable wasn't requested.
+  agreement?: (number | null)[];
+
   // Air quality indices, worst value over the period. Two scales that share no arithmetic: the
   // US EPA index runs 0–500 with 50/100/150/200/300 category edges, the European index runs
   // 0–100+ with edges every 20. A 40 is "good" on one and "moderate" on the other, so they must

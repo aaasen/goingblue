@@ -1,6 +1,7 @@
 import {
   WMO_CODES, VAR, type Variable, CLOUD_BAND_LEVELS_HPA, WIND_LEVELS_HPA, WIND_LEVEL_VARS,
   metersToPressure, RESOLUTION_HOURS, TABLE_RES_IDXS,
+  AGREEMENT_CENTERS, agreementLeadBucket,
 } from "./constants.js";
 import { layoutFor, maxFillSeq, effectiveMode } from "./layout.js";
 import { putInt, takeInt, compandSqrt, expandSqrt } from "./bits.js";
@@ -22,6 +23,7 @@ import {
   AQ_DOMINANT_US, AQ_DOMINANT_EU, AQI_NO_DATA, aqDominantUnknown, aqDominantNSym,
   encodeTempDelta, decodeTempDelta, tempTodBucket,
   TEMP_DELTA_MIN, TEMP_DELTA_MAX,
+  AGREEMENT_NSYM, AGREEMENT_NO_DATA,
   makeBitSink, makeBitSource, type CodeBook,
 } from "./entropy.js";
 
@@ -229,6 +231,49 @@ export function aqPeriodCount(periodHours: number[]): number {
     start += h;
   }
   return n;
+}
+
+// ── Model agreement ────────────────────────────────────────────────────────────
+// One 4-level series per AGREEMENT_CENTERS pair (plus a no-data escape), each pair fully
+// independent: order-1 on its own previous symbol, keyed by the period's lead-time bucket.
+// Two free clamps, both derived identically on both sides: the pair whose center IS the served
+// model is never carried (agreementPairIdxs — the reader is already looking at that opinion),
+// and each pair stops at its center's horizon (agreementPeriodCount, the AQ-clamp idea with a
+// per-center horizon). No anchors: the first symbol codes under the bootstrap row.
+
+// Indices into AGREEMENT_CENTERS of the pairs a message carries, in fixed order. models_mask
+// carries exactly one model (see decode); best_match (bit 0) matches no center, so it carries
+// all three.
+export function agreementPairIdxs(modelsMask: number): number[] {
+  const out: number[] = [];
+  AGREEMENT_CENTERS.forEach((c, i) => {
+    if (!(modelsMask & (1 << c.bit))) out.push(i);
+  });
+  return out;
+}
+
+// How many leading periods a pair covers: those starting inside the center's horizon.
+export function agreementPeriodCount(periodHours: number[], horizonHours: number): number {
+  let start = 0;
+  let n = 0;
+  for (const h of periodHours) {
+    if (start >= horizonHours) break;
+    n++;
+    start += h;
+  }
+  return n;
+}
+
+// Each period's start offset in hours from the first period's start — the lead-time axis the
+// agreement codebooks are keyed by (agreementLeadBucket in constants.ts).
+function periodStartOffsets(periodHours: number[]): number[] {
+  const out = new Array<number>(periodHours.length);
+  let start = 0;
+  for (let p = 0; p < periodHours.length; p++) {
+    out[p] = start;
+    start += periodHours[p];
+  }
+  return out;
 }
 
 // The eleven plain anchor+delta AQ columns, in body order — every constituent of both indices.
@@ -745,6 +790,29 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
     mark(col.variable, before);
   }
 
+  // Model agreement: per carried pair, order-1 symbols keyed by the period's lead bucket —
+  // no anchor, no cross-pair context, clamped per pair at its center's horizon. A null level
+  // inside the clamp (ragged upstream edge) codes as the no-data symbol, and the context chains
+  // it, so both sides stay in step whatever the server could compute.
+  if (msg.vars.has(VAR.agreement)) {
+    before = em.cost;
+    const starts = periodStartOffsets(msg.periodHours);
+    for (const ci of agreementPairIdxs(msg.models_mask)) {
+      const nAg = agreementPeriodCount(msg.periodHours, AGREEMENT_CENTERS[ci].horizonHours);
+      for (let m = 0; m < nModels; m++) {
+        let prev: number | null = null;
+        for (let p = 0; p < nAg; p++) {
+          const raw = msg.periods[m][p].agreement?.[ci];
+          const sym = raw == null ? AGREEMENT_NO_DATA
+            : Math.min(Math.max(Math.round(raw), 0), AGREEMENT_NSYM - 2);
+          em.sym(books.agreementBook(agreementLeadBucket(starts[p]), prev), sym);
+          prev = sym;
+        }
+      }
+    }
+    mark(VAR.agreement, before);
+  }
+
   return em;
 }
 
@@ -873,7 +941,7 @@ export function messageFromString(s: string, resolve: ContextResolver): Forecast
   const periods = decodeBody(
     decodeBodyAuto(rest.slice(HEADER_CHARS), device && DEVICE_TRANSPORT[device].alphabet),
     BOOKS, vars,
-    layout.periodHours, firstStart.getUTCHours(), utcOffsetHours, elevation, 1);
+    layout.periodHours, firstStart.getUTCHours(), utcOffsetHours, elevation, 1, models_mask);
 
   return {
     version,
@@ -902,6 +970,7 @@ export function messageFromString(s: string, resolve: ContextResolver): Forecast
 function decodeBody(
   bodyBits: number[], books: Books, vars: ReadonlySet<Variable>, periodHours: number[],
   firstHour: number, utcOffsetHours: number, elevation: number, nModels: number,
+  modelsMask: number,
 ): Period[][] {
   const nPeriods = periodHours.length;
   const rd = reader(bodyBits, books);
@@ -1108,6 +1177,28 @@ function decodeBody(
       col.set(periods[m][p], beaufortMidKph(spd[m][p]), col.dir ? disp[m][p] : null));
     spdByVar.set(col.variable, spd);
     dispByVar.set(col.variable, disp);
+  }
+
+  // Model agreement mirrors buildBody exactly: per carried pair, order-1 lead-keyed symbols up
+  // to the pair's horizon clamp. Every period gets the full-length array (null-filled) so the
+  // app indexes it by AGREEMENT_CENTERS position; a no-data symbol, the self pair, and periods
+  // past a clamp all stay null — "no reading", never "disagreement".
+  if (vars.has(VAR.agreement)) {
+    const starts = periodStartOffsets(periodHours);
+    eachCell(nPeriods, nModels, (p, m) => {
+      periods[m][p].agreement = new Array<number | null>(AGREEMENT_CENTERS.length).fill(null);
+    });
+    for (const ci of agreementPairIdxs(modelsMask)) {
+      const nAg = agreementPeriodCount(periodHours, AGREEMENT_CENTERS[ci].horizonHours);
+      for (let m = 0; m < nModels; m++) {
+        let prev: number | null = null;
+        for (let p = 0; p < nAg; p++) {
+          const sym = rd.sym(books.agreementBook(agreementLeadBucket(starts[p]), prev));
+          if (sym !== AGREEMENT_NO_DATA) periods[m][p].agreement![ci] = sym;
+          prev = sym;
+        }
+      }
+    }
   }
 
   // Column reads that desynced from what the encoder wrote — codebook drift or a corrupted

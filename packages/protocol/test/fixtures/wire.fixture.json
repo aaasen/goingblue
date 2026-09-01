@@ -7,13 +7,14 @@
     "mode": 0,
     "utcOffsetHours": -9
   },
-  "encoded": "%!!'NX4j4GO6AF=$jml9>G4whJo'>;5v5=Z5egG<<WYPGq=AaOvo0z-CNcSwIB=wD5++./thT!ni9NGH9qquqQym>xYFk;8XZ5_x>ED!v)7U6wTSoz\"mu=Vwh,!02wzw!6@h!cbD#g$IQmR;\"MQSfCbkPg1j=a!&RMkSD>0DFS9aKiejnR(QIq16/ub1j\"r9$z!&wA0/",
+  "encoded": "%!!'Ns>@nZA>byGshsEKd/XQDk*3MVBrw9g*=VLWARO2EYM_/frgK<+>LARcbI&K+6@=!V&p>pHQgn$?9FfkkpvMGfU*s=m\"uDl,Gxm/2CM88!ufFYa\";piJt.?.RxaIbe62YdIcc;Ft-j8Mp9:5p)8)Ecu@<Z92zI(/6DQW5SZT1LcF'Ixmej/_qN7o&'/>e@GI(yGF*<2.8htHUCH4\"",
   "decoded": {
     "version": 4,
     "code": 0,
     "days": 3,
     "models_mask": 1,
     "vars": [
+      "agreement",
       "aq_no2",
       "aq_o3",
       "aq_pm10",
@@ -111,6 +112,11 @@
               "kph": 16,
               "dir": 3
             }
+          ],
+          "agreement": [
+            null,
+            null,
+            null
           ]
         },
         {
@@ -174,6 +180,11 @@
               "kph": 24.5,
               "dir": 4
             }
+          ],
+          "agreement": [
+            null,
+            null,
+            null
           ]
         },
         {
@@ -237,6 +248,11 @@
               "kph": 24.5,
               "dir": 4
             }
+          ],
+          "agreement": [
+            null,
+            null,
+            null
           ]
         },
         {
@@ -300,6 +316,11 @@
               "kph": 16,
               "dir": 3
             }
+          ],
+          "agreement": [
+            null,
+            null,
+            null
           ]
         },
         {
@@ -355,6 +376,11 @@
               "kph": 3.5,
               "dir": 3
             }
+          ],
+          "agreement": [
+            null,
+            null,
+            null
           ]
         },
         {
@@ -410,6 +436,11 @@
               "kph": 9,
               "dir": 4
             }
+          ],
+          "agreement": [
+            null,
+            null,
+            null
           ]
         },
         {
@@ -465,6 +496,11 @@
               "kph": 16,
               "dir": 2
             }
+          ],
+          "agreement": [
+            null,
+            null,
+            null
           ]
         },
         {
@@ -520,6 +556,11 @@
               "kph": 24.5,
               "dir": 1
             }
+          ],
+          "agreement": [
+            null,
+            null,
+            null
           ]
         }
       ]

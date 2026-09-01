@@ -147,11 +147,11 @@ These are the units and techniques used for each variable:
 | Variable                        | Model | Unit                                               | Codebook keyed by                                             |
 | ------------------------------- | ----- | -------------------------------------------------- | ------------------------------------------------------------- |
 | Weathercode                     | Value | WMO Code                                           | Previous weathercode                                          |
-| Temperature                     | Delta | 1°C (-100°C to 155°C)                                | Previous temperature delta, time of day, forecast resolution  |
+| Temperature                     | Delta | 1°C (-100°C to 155°C)                              | Previous temperature delta, time of day, forecast resolution  |
 | Precip chance                   | Value | % in 8 steps                                       | Previous value, weathercode class, forecast resolution        |
 | Snow                            | Value | cm, 64 sqrt-companded steps (0-200cm)              | Previous value bucket, weathercode class, forecast resolution |
 | Rain                            | Value | mm, 64 sqrt-companded steps (0-144mm)              | Previous value bucket, weathercode class, forecast resolution |
-| Freezing level                  | Delta | 1000ft steps (0-31,000ft)                         | Temperature delta bucket, forecast resolution                 |
+| Freezing level                  | Delta | 1000ft steps (0-31,000ft)                          | Temperature delta bucket, forecast resolution                 |
 | Cloud band                      | Value | % in 8 steps                                       | Previous value, pressure level                                |
 | Wind gust                       | Delta | Extended Beaufort force (0-17)                     | Forecast resolution                                           |
 | Surface wind speed              | Delta | Extended Beaufort force (0-17)                     | Wind gust delta, forecast resolution                          |
@@ -160,6 +160,7 @@ These are the units and techniques used for each variable:
 | AQI, Ozone, NO₂ (diurnal cycle) | Delta | Air quality index (US: 0-500, EU: 0-100), 25 bands | Previous delta, time of day, forecast resolution              |
 | PM2.5, PM10, SO₂                | Delta | Air quality index (US: 0-500, EU: 0-100), 25 bands | Previous delta, forecast resolution                           |
 | Dominant pollutant              | Value | Pollutant (PM2.5, PM10, Ozone, SO₂, NO₂)           | Previous dominant pollutant                                   |
+| Model agreement                 | Value | 4 levels, strong disagreement to strong agreement  | Previous agreement, lead time                                 |
 
 ### Forecast Packing
 

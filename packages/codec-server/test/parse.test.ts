@@ -111,6 +111,7 @@ describe("parseRequest", () => {
     expect(parseRequest("w:").errors).toContain('invalid wind levels "w:"');
     expect(parseRequest("v:f").vars).toEqual(withAlways(VAR.freeze));
     expect(parseRequest("v:p").vars).toEqual(withAlways(VAR.precip));
+    expect(parseRequest("v:g").vars).toEqual(withAlways(VAR.agreement));
     // Air quality: one code per index, so a reader can ask for smoke without paying for ozone.
     expect(parseRequest("v:a").vars).toEqual(withAlways(VAR.aqi));
     expect(parseRequest("v:s").vars).toEqual(withAlways(VAR.aq_pm25));

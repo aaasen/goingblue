@@ -7,7 +7,7 @@ import {
 } from '@shopify/react-native-skia';
 import {
   CARDINALS, RAIN_K, modelsFromMask, startDatetime, predictCenter, attributeHour,
-  AQ_DOMINANT_US, AQ_DOMINANT_EU, WIND_LEVELS_HPA, quantWind,
+  AQ_DOMINANT_US, AQ_DOMINANT_EU, WIND_LEVELS_HPA, quantWind, AGREEMENT_CENTERS,
   type Center, type ForecastMessage, type ModelSpec, type Period,
 } from '@weather/protocol';
 import type { AltitudeUnit, TimeFormat, UnitPrefs } from './settings';
@@ -460,6 +460,16 @@ const AQ_BANDS: Record<'us' | 'eu', AqBand[]> = {
 };
 const aqBand = (value: number, scale: 'us' | 'eu'): AqBand =>
   AQ_BANDS[scale].find((b) => value < b.max) ?? AQ_BANDS[scale][AQ_BANDS[scale].length - 1];
+
+// Model agreement's four wire levels: red (disagreement) to green (agreement), the weak middle
+// levels translucent so strength reads as saturation. The colors carry the drawing; the words
+// are the detail panel's readout of the same levels.
+const AGREEMENT_LEVEL_NAMES = [
+  'Strong disagreement', 'Weak disagreement', 'Weak agreement', 'Strong agreement',
+] as const;
+const AGREEMENT_LEVEL_COLORS = [
+  'rgba(214,69,65,0.92)', 'rgba(214,69,65,0.42)', 'rgba(46,160,83,0.42)', 'rgba(46,160,83,0.92)',
+] as const;
 
 // Which CAMS domain served, predicted from the location the way the model row predicts the
 // weather centers — the response carries no domain id, and it isn't worth wire bits. Open-Meteo's
@@ -930,7 +940,7 @@ type RowKind =
   | 'aqi' | 'aqi-pm25' | 'aqi-o3' | 'aqi-pm10' | 'aqi-no2' | 'aqi-so2'
   | 'aqi-dominant' | 'aqi-eu-dominant'
   | 'aqi-eu' | 'aqi-eu-pm25' | 'aqi-eu-o3' | 'aqi-eu-pm10' | 'aqi-eu-no2' | 'aqi-eu-so2'
-  | 'wind-aloft' | 'model' | 'section' | 'cloud-band';
+  | 'wind-aloft' | 'model' | 'section' | 'cloud-band' | 'agreement';
 
 interface Row {
   kind: RowKind;
@@ -1111,6 +1121,22 @@ function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number, el
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: `Pressure-level winds (${wU})`, legend: '' });
     for (const li of aloftLevels) {
       rows.push({ kind: 'wind-aloft', height: ROW_H.WIND_UPPER, label: '', legend: ladderLabel(WIND_LEVELS_HPA[li], u.level), level: li });
+    }
+  }
+
+  // Model agreement: one row per center pair the message carries, in AGREEMENT_CENTERS order.
+  // Presence is per pair — the served center's own pair is all-null on the wire (the reader is
+  // already looking at that opinion) and a center whose data was unavailable decodes all-null
+  // too, so a row earns its place by holding at least one reading, like the precip amounts do.
+  // Rows are color fields (red = disagree, green = agree, weak shades translucent); the words
+  // live in the detail panel.
+  const agreementRows = AGREEMENT_CENTERS
+    .map((c, ci) => ({ ci, label: c.label }))
+    .filter(({ ci }) => has((p) => p.agreement?.[ci]));
+  if (agreementRows.length) {
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Model agreement', legend: '' });
+    for (const { ci, label } of agreementRows) {
+      rows.push({ kind: 'agreement', height: ROW_H.WIND, label: '', legend: label, level: ci });
     }
   }
 
@@ -2531,6 +2557,19 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         }
         break;
       }
+
+      case 'agreement': {
+        // A color field per period: the level's red/green shade, or the day divider's grey where
+        // the pair has no reading (past the center's horizon, or no data) — absence, never
+        // disagreement, the same convention as the air-quality tail.
+        const ci = row.level!;
+        for (let i = c0; i < c1; i++) {
+          const lv = periods[i].agreement?.[ci];
+          els.push(<Rect key={`agr${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W}
+            height={row.height} color={lv == null ? C.divider : AGREEMENT_LEVEL_COLORS[lv]} />);
+        }
+        break;
+      }
     }
   });
 
@@ -3530,6 +3569,7 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
   const wind: [string, string][] = [];
   const clouds: [string, string][] = [];
   const air: [string, string][] = [];
+  const agreement: [string, string][] = [];
 
   if (has((q) => q.temp_c))
     thermal.push(['Temperature', p.temp_c != null ? `${fmtTemp(p.temp_c, units)}${units.temp === 'f' ? 'F' : 'C'}` : '—']);
@@ -3596,6 +3636,14 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
     air.push(['Dominant pollutant', pollutantName(dk.scale, p[dk.field] as number | undefined) ?? '—']);
   }
 
+  // Model agreement reads out in words — the drawing carries only the colors. A pair the
+  // message carries but this period doesn't reach (past that center's horizon) says so.
+  AGREEMENT_CENTERS.forEach((c, ci) => {
+    if (!has((q) => q.agreement?.[ci])) return;
+    const lv = p.agreement?.[ci];
+    agreement.push([`${c.label} agreement`, lv != null ? AGREEMENT_LEVEL_NAMES[lv] : 'Not forecast']);
+  });
+
   // The astronomy group answers for the whole day, not the selected period. It needs no header of
   // its own — the panel's header already names the day, and now the same rule that separates
   // every other group sets it apart.
@@ -3605,6 +3653,7 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
     { key: 'wind', rows: wind },
     { key: 'clouds', rows: clouds },
     { key: 'air', rows: air },
+    { key: 'agreement', rows: agreement },
     { key: 'astro', rows: astro },
   ].filter((g) => g.rows.length > 0);
 

@@ -34,6 +34,7 @@ import {
   WIND_LEVELS_HPA, WIND_LEVEL_VARS, windLevelVar,
   CLOUD_COVER_MIN_PCT,
   quantCover,
+  AGREEMENT_CENTERS,
 } from "@weather/protocol";
 import { fetchWeatherApi } from "openmeteo";
 import { Variable as OmVariable } from "@openmeteo/sdk/variable.js";
@@ -41,6 +42,7 @@ import type { VariableWithValues } from "@openmeteo/sdk/variable-with-values.js"
 import type { WeatherApiResponse } from "@openmeteo/sdk/weather-api-response.js";
 import { log } from "./log.js";
 import { aggregateWeathercode } from "./weathercode.js";
+import { AGREEMENT_FETCH_VARS, computeAgreementLevels } from "./agreement.js";
 
 // Each forecast center resolves to a pair of Open-Meteo model ids: one for surface variables and
 // one for pressure-level variables (500/600/700 hPa wind + temp). They're the same id except for
@@ -735,6 +737,37 @@ async function fetchHourly(
   return [adjusted, adjusted.time, surf.elevation];
 }
 
+// ── Model agreement fetch ──────────────────────────────────────────────────────
+// The other centers' hourly data for the agreement column, indexed by AGREEMENT_CENTERS order
+// (null = the served center itself, or a center whose fetch failed — its pair rides the wire's
+// no-data symbol rather than failing the request). Surface sources only: every agreement input
+// is a surface variable, so Europe needs no pressure-level split here. Each center gets the
+// same phase correction the served pipeline applies, so a summit's rain-vs-snow bookkeeping
+// can't read as disagreement.
+export type AgreementHourly = ({ h: HourlyData; times: string[] } | null)[];
+
+const AGREEMENT_CENTER_KEYS = AGREEMENT_CENTERS.map(
+  (c) => Object.keys(MODEL_BIT).find((k) => MODEL_BIT[k] === c.bit)!,
+);
+
+async function fetchAgreementHourly(
+  servedModelKey: string, nDays: number, lat: number, lon: number, tz: string,
+  elev_m?: number, pastDays = 0,
+): Promise<AgreementHourly> {
+  return Promise.all(AGREEMENT_CENTER_KEYS.map(async (key) => {
+    if (key === servedModelKey) return null;
+    try {
+      const { hourly, elevation } = await fetchOpenMeteo(
+        CENTERS[key].surface, AGREEMENT_FETCH_VARS, nDays, lat, lon, tz, elev_m, pastDays);
+      const adjusted = adjustPrecipPhase(hourly, elevation);
+      return { h: adjusted, times: adjusted.time };
+    } catch (err) {
+      log.error("agreement.fetch_failed", { center: key, error: String(err) });
+      return null;
+    }
+  }));
+}
+
 
 export async function aggregateRows(
   modelKey: string,
@@ -1332,9 +1365,10 @@ export function buildFillMessage(
   lon: number,
   elevation: number,
   modelKey: string,
+  agreement?: AgreementHourly | null,
 ): ForecastMessage | null {
   const layout = layoutFor(params.mode, params.startEpochHour, params.utcOffsetHours, seq);
-  return buildLayoutMessage(h, times, params, layout, lat, lon, elevation, modelKey);
+  return buildLayoutMessage(h, times, params, layout, lat, lon, elevation, modelKey, agreement);
 }
 
 // buildFillMessage with the layout supplied directly instead of derived from a seq. The request
@@ -1349,24 +1383,28 @@ export function buildLayoutMessage(
   lon: number,
   elevation: number,
   modelKey: string,
+  agreement?: AgreementHourly | null,
 ): ForecastMessage | null {
   // The /encode route resolves the codec (and therefore the version) before building anything,
   // so a null here means a caller skipped that validation.
   if (params.decoderVersion === null) throw new Error("decoderVersion is required to build a message");
 
   // Hourly samples are keyed by UTC epoch hour; each period's window is just its hour range.
-  const idxByHour = new Map<number, number>();
-  for (let i = 0; i < times.length; i++) {
-    idxByHour.set(Math.floor(Date.parse(`${times[i]}:00Z`) / 3600000), i);
-  }
-  const windows: number[][] = layout.periodStartUtcHour.map((start, p) => {
-    const idx: number[] = [];
-    for (let eh = start; eh < start + layout.periodHours[p]; eh++) {
-      const i = idxByHour.get(eh);
-      if (i !== undefined) idx.push(i);
+  const windowsFor = (ts: string[]): number[][] => {
+    const idxByHour = new Map<number, number>();
+    for (let i = 0; i < ts.length; i++) {
+      idxByHour.set(Math.floor(Date.parse(`${ts[i]}:00Z`) / 3600000), i);
     }
-    return idx;
-  });
+    return layout.periodStartUtcHour.map((start, p) => {
+      const idx: number[] = [];
+      for (let eh = start; eh < start + layout.periodHours[p]; eh++) {
+        const i = idxByHour.get(eh);
+        if (i !== undefined) idx.push(i);
+      }
+      return idx;
+    });
+  };
+  const windows = windowsFor(times);
   if (windows.some((w) => w.length === 0)) return null;
 
   // A period whose hours exist on the time axis but carry no data at all is an upstream
@@ -1380,13 +1418,29 @@ export function buildLayoutMessage(
   const rows = rowsFromWindows(h, times, windows, params.utcOffsetHours);
   const firstStart = new Date(layout.periodStartUtcHour[0] * 3600000);
 
+  // Model agreement: aggregate each center's hourly data through the IDENTICAL window layout
+  // (aggregate-then-score — the score compares the period values the reader sees), then one
+  // level per (center, period). A center with no usable data yields nulls, which the wire
+  // codes as no-data symbols inside that pair's horizon clamp.
+  const agreementLevels: (number | null)[][] | null =
+    params.vars.has(VAR.agreement) && agreement
+      ? agreement.map((ah) => {
+        if (!ah) return rows.map(() => null);
+        const cw = windowsFor(ah.times);
+        if (cw.some((w) => w.length === 0)) return rows.map(() => null);
+        const centerRows = rowsFromWindows(ah.h, ah.times, cw, params.utcOffsetHours);
+        return computeAgreementLevels(rows, centerRows, layout.periodHours);
+      })
+      : null;
+
   // The wire's cloud_band is the elevation-keyed run of the ladder, the same shape the decoder
   // hands back; toFullPeriod builds the full stack (the derive scripts index it by ladder
   // position), so the slice happens here, at the one point the header elevation is fixed.
   const { start: cbStart, count: cbCount } = cloudBandLevelRange(elevation);
-  const toWirePeriod = (r: Row): Period => {
+  const toWirePeriod = (r: Row, pi: number): Period => {
     const p = toFullPeriod(r, params.vars, modelKey);
     if (p.cloud_band) p.cloud_band = p.cloud_band.slice(cbStart, cbStart + cbCount);
+    if (agreementLevels) p.agreement = agreementLevels.map((lv) => lv[pi]);
     return p;
   };
 
@@ -1468,9 +1522,12 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   // UTC day boundary. Models whose horizon ends earlier (GEM: 10 days) return nulls for the
   // tail hours, which buildLayoutMessage treats as unservable — the seq search clamps to them.
   const fetchStart = Date.now();
-  const [h, times, elevation] = await fetchHourly(
-    modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1, airQualityVarsFor(params.vars),
-  );
+  const [[h, times, elevation], agreement] = await Promise.all([
+    fetchHourly(modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1, airQualityVarsFor(params.vars)),
+    params.vars.has(VAR.agreement)
+      ? fetchAgreementHourly(modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1)
+      : Promise.resolve(null),
+  ]);
   const fetchMs = Date.now() - fetchStart;
 
   // The search carries each candidate's periodHours along with its encoding so the winner's
@@ -1478,7 +1535,7 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   const encodeStart = Date.now();
   const best = fitFillToBudget(
     (seq) => {
-      const msg = buildFillMessage(h, times, params, seq, lat, lon, elevation, modelKey);
+      const msg = buildFillMessage(h, times, params, seq, lat, lon, elevation, modelKey, agreement);
       return msg === null
         ? null
         : { encoded: codec.encode(msg, params.alphabet), periodHours: msg.periodHours };

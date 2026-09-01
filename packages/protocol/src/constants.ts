@@ -92,6 +92,43 @@ export const MODEL_NAMES: string[] = [
   "European (ECMWF)",
 ];
 
+// ── Model agreement (VAR.agreement) ─────────────────────────────────────────────
+// Pairwise agreement between the served forecast and each other center, one series per pair in
+// this fixed order. WIRE FORMAT: the order indexes Period.agreement, and horizonHours is a free
+// clamp (like AQ_HORIZON_HOURS in wire.ts) — periods whose start offset reaches a center's
+// horizon carry no symbols for that pair, derived identically on both sides from the layout.
+// The pair whose center IS the served model is never carried (agreementPairs in wire.ts); the
+// default best_match serve carries all three. Horizons are hours from the FIRST PERIOD's start,
+// deliberately inside each center's real reach; a ragged upstream edge inside the clamp falls
+// back to the no-data symbol (AGREEMENT_NO_DATA in entropy.ts).
+export const AGREEMENT_CENTERS = [
+  { bit: 1, label: "US", horizonHours: 16 * 24 }, // MODEL_BIT.US — GFS seamless
+  { bit: 2, label: "CA", horizonHours: 10 * 24 }, // MODEL_BIT.CA — GEM seamless
+  { bit: 3, label: "EU", horizonHours: 15 * 24 }, // MODEL_BIT.EU — ECMWF IFS
+] as const;
+
+// The wire's four agreement levels (0 = strong disagreement .. 3 = strong agreement), cut from
+// the continuous 0..1 score at these thresholds. WIRE FORMAT (digest-pinned): the cuts give a
+// level its physical meaning, exactly like an AQI ladder — provisional quartiles of the
+// 2026-09-01 live multi-model snapshot, to be re-derived as snapshots accumulate.
+export const AGREEMENT_LEVELS = 4;
+export const AGREEMENT_CUTS = [0.32, 0.61, 0.82] as const;
+export function quantAgreement(score: number): number {
+  let lv = 0;
+  while (lv < AGREEMENT_CUTS.length && score >= AGREEMENT_CUTS[lv]) lv++;
+  return lv;
+}
+
+// Codebook lead-time axis: agreement decays with forecast lead, so the tables are keyed by the
+// period's start offset (hours from the first period's start) bucketed at these edges.
+export const AGREEMENT_LEAD_EDGES = [48, 120, 240] as const;
+export const AGREEMENT_LEAD_BUCKETS = AGREEMENT_LEAD_EDGES.length + 1; // 4
+export function agreementLeadBucket(startHourOffset: number): number {
+  let b = 0;
+  while (b < AGREEMENT_LEAD_EDGES.length && startHourOffset >= AGREEMENT_LEAD_EDGES[b]) b++;
+  return b;
+}
+
 // The cloud band's pressure levels, highest first — the order Period.cloud_band and the wire.ts
 // cloud-band column both use. These are the ten levels every center's pressure product can
 // serve or bracket (ECMWF lacks 600/400; the server interpolates them in). 750/800 hPa are
@@ -147,6 +184,10 @@ export const VAR = {
   w925: "w925",
   // The whole pressure-level cloud band (CLOUD_BAND_LEVELS_HPA) rides this one variable.
   clouds: "clouds",
+  // Model agreement: per period, how the served forecast agrees with each other center
+  // (AGREEMENT_CENTERS below) — one 2-bit level per pair, computed server-side from the
+  // centers' own forecasts (see codec-server/src/agreement.ts). Rides this one variable.
+  agreement: "agreement",
   // Air quality (CAMS), on two incompatible index scales — see the AQI ladders in entropy.ts.
   // Every one of these is model-independent: the `m:` center selection does not apply, and they
   // reach only ~4 days (AQ_HORIZON_HOURS in wire.ts).
@@ -202,6 +243,7 @@ export const VAR_CODES = {
   p: VAR.precip,
   c: VAR.clouds,
   f: VAR.freeze,
+  g: VAR.agreement,     // model aGreement (pairwise, vs the other centers)
   a: VAR.aqi,           // US Air Quality Index
   s: VAR.aq_pm25,       // smoke
   o: VAR.aq_o3,         // ozone

@@ -196,6 +196,10 @@ const VAR_GROUPS: VarGroup[] = [
     desc: 'Altitude at which atmospheric temperature drops to 0°C.',
   },
   {
+    value: 'agreement', code: 'g', label: 'Model Agreement', vars: [VAR_CODES.g],
+    desc: 'How well the other forecast centers agree with this forecast, period by period.',
+  },
+  {
     value: 'precip', code: 'p', label: 'Precip Chance', vars: [VAR_CODES.p],
     desc: 'Chance of measurable precipitation during the period.',
   },
@@ -537,6 +541,7 @@ const OPTIONAL_VARIABLE_ICONS: { vars: readonly Variable[]; symbol: string; labe
   { vars: [VAR.clouds], symbol: '☁️', label: 'Detailed clouds' },
   { vars: WIND_LEVEL_VARS, symbol: '💨', label: 'Pressure-level winds' },
   { vars: [VAR.freeze], symbol: '🌡️', label: 'Freezing level' },
+  { vars: [VAR.agreement], symbol: '🤝', label: 'Model agreement' },
   // One icon for the whole air-quality block: which index a request picked is the meteogram's
   // business, and five near-identical chips on a cache row would say less than one.
   { vars: [VAR.aqi, VAR.aq_pm25, VAR.aq_o3, VAR.aq_pm10, VAR.aq_no2, VAR.aq_so2,
