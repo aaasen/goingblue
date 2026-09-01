@@ -293,13 +293,12 @@ Going Blue reports the headline AQI in addition to the dominant pollutant. It ca
 
 Going Blue computes a model agreement score that indicates how well the current forecast agrees with the American, Canadian, European, and German centers. This is useful for judging forecast confidence.
 
-An agreement score is calculated for each forecast center. The score has 4 levels from 0 (strong disagreement) to 3 (strong agreement). Agreement takes into account temperature, precipitation, wind, and cloud cover. For each variable, the agreement is calculated as a score between 0 (disagreement) and 1 (agreement) like this:
+An agreement score is calculated for each forecast center. The score has 4 levels from 0 (strong disagreement) to 3 (strong agreement). Agreement takes into account temperature, precipitation, and wind. For each variable, the agreement is calculated as a score between 0 (disagreement) and 1 (agreement) like this:
 1. **Temperature**: Absolute difference in °C. Identical temperatures score 1, with a linear scale to total disagreement at 5 °C difference.
 2. **Wind**: Speed is converted to a continuous Beaufort force. Less than 0.5 force difference is 1 with a linear scale to total disagreement at a 3 force difference. Direction is also used if both models report a force of at least 2, since direction means little at low wind speeds. For direction, agreement is a cosine scale from 0° to 180°. The minimum score of direction and speed is used as the total wind score.
 3. **Precipitation**: Precipitation is scored on total water equivalent, combining rain and snow. A period is considered wet if the amount of liquid exceeds a trace amount. If both models report dry, the score is 1. If both report wet, the amounts `a` and `b` are scored like `sqrt(min(a, b) / max(a, b))` so that equal amounts are scored as 1 and large differences approach 0. If one model reports wet and one reports dry, the agreement score ranges from 0.55 (one model dry, one model at trace precip) to 0 (one model dry, one model with significant precip). 
-4. **Cloud cover**: Total cloud cover is noisy and large differences can be insignificant. The main reason it is included is to get some signal of disagreement if one model reports clear conditions and the other reports significant clouds. Clouds use a similar cloudy/clear split as precip. Less than 20% is considered clear and total disagreement is when one model reports clear and the other reports 80%+ clouds.
 
-The components are combined using a weighted soft min with precip at 50%, wind 30%, temp 15%, and cloud 5%. 
+The components are combined using a weighted soft min with precip at 60%, wind at 30%, and temperature at 10%.
 
 The combined agreement score (0 to 1) is then mapped to an agreement level: strong disagreement, weak disagreement, weak agreement, strong agreement. The thresholds are chosen to roughly align to quartiles of actual agreement scores calculated from live forecasts.
 

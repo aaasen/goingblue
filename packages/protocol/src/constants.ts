@@ -112,7 +112,7 @@ export const AGREEMENT_CENTERS = [
 // level its physical meaning, exactly like an AQI ladder — provisional quartiles of the
 // 2026-09-01 live multi-model snapshot, to be re-derived as snapshots accumulate.
 export const AGREEMENT_LEVELS = 4;
-export const AGREEMENT_CUTS = [0.32, 0.61, 0.82] as const;
+export const AGREEMENT_CUTS = [0.45, 0.63, 0.88] as const;
 export function quantAgreement(score: number): number {
   let lv = 0;
   while (lv < AGREEMENT_CUTS.length && score >= AGREEMENT_CUTS[lv]) lv++;

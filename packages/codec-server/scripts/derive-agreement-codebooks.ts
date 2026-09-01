@@ -28,7 +28,7 @@ const SERVED_SOURCE = "best_match";
 const CENTER_SOURCES = ["gfs_seamless", "gem_seamless", "ecmwf_ifs"]; // AGREEMENT_CENTERS order
 const VARS = [
   "temperature_2m", "wind_speed_10m", "wind_direction_10m",
-  "rain", "showers", "snowfall", "cloud_cover",
+  "rain", "showers", "snowfall",
 ];
 
 // Training period ladder, an Auto-like staircase over the snapshot's 16-day horizon: the

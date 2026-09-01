@@ -5,10 +5,9 @@ import {
   buildLayoutMessage, type AgreementHourly, type HourlyData, type ForecastParams, type Row,
 } from "../src/forecast.ts";
 
-// The score reads eight fields; everything else on Row is irrelevant to it.
+// The score reads seven fields; everything else on Row is irrelevant to it.
 const row = (over: Partial<Row> = {}): Row => ({
   temp_c: -5, wind_speed_10m: 20, wind_direction_10m: 270, snow_cm: 0, rain_mm: 0,
-  cloud_cover: 10,
   ...over,
 } as Row);
 
@@ -19,7 +18,6 @@ describe("agreementScore", () => {
 
   it("returns null when either side is missing an input", () => {
     expect(agreementScore(row({ temp_c: null }), row(), 12)).toBeNull();
-    expect(agreementScore(row(), row({ cloud_cover: null }), 12)).toBeNull();
     expect(agreementScore(row(), row({ wind_speed_10m: null }), 12)).toBeNull();
   });
 
@@ -56,12 +54,9 @@ describe("agreementScore", () => {
     expect(s).toBeCloseTo(1, 2);
   });
 
-  it("scores cloud as a clear/cloudy vote, not a linear delta", () => {
-    // 25 vs 75: both cloudy, agree. 5 vs 75: split, and the cloudy side is heavy.
-    expect(agreementScore(row({ cloud_cover: 25 }), row({ cloud_cover: 75 }), 12)!)
-      .toBeCloseTo(1, 5);
-    expect(agreementScore(row({ cloud_cover: 5 }), row({ cloud_cover: 75 }), 12)!)
-      .toBeLessThan(0.6);
+  it("ignores cloud cover entirely (removed from the metric 2026-09-01)", () => {
+    expect(agreementScore(row({ cloud_cover: 0 } as Partial<Row>),
+      row({ cloud_cover: 100 } as Partial<Row>), 12)!).toBeCloseTo(1, 5);
   });
 });
 

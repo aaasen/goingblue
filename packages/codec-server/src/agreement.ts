@@ -12,18 +12,19 @@
  *   precip  wet/dry vote on total water equivalent (rain + snow at 0.7 cm/mm) with a
  *           period-scaled trace floor; both wet → sqrt(min/max) of the totals; split vote →
  *           0.55 falling to 0 as the wet side's mean rate reaches 2 mm/h
- *   cloud   clear/cloudy vote (clear < 20% of the period's aggregated cover): agreeing votes
- *           score 1 whatever the amounts, a split falls to 0 as the cloudy side reaches 80%
- * combined by a weighted soft-min (power mean, p = -2) at precip .50 / wind .30 / temp .15 /
- * cloud .05 — near the worst component, not the average — then cut into the four wire levels
- * by AGREEMENT_CUTS (protocol constants.ts).
+ * combined by a weighted soft-min (power mean, p = -2) at precip .60 / wind .30 / temp .10
+ * — near the worst component, not the average — then cut into the four wire levels by
+ * AGREEMENT_CUTS (protocol constants.ts). Cloud cover was a fourth component (clear/cloudy
+ * vote at 5% weight) and was removed 2026-09-01: its hourly contradictions are dominated by
+ * parameterization noise and it bound disagreement at every lead without any lead structure —
+ * a constant tax, not confidence signal.
  */
 import { BEAUFORT_KPH_LOWER, BEAUFORT_MAX, quantAgreement } from "@weather/protocol";
 import type { Row } from "./forecast.js";
 
 export const AGREEMENT_FETCH_VARS = [
   "temperature_2m", "wind_speed_10m", "wind_direction_10m",
-  "rain", "showers", "snowfall", "cloud_cover",
+  "rain", "showers", "snowfall",
 ];
 
 const D_TEMP_C = 5.0;
@@ -35,12 +36,9 @@ const WET_FLOOR_BASE_MM = 0.2;
 const WET_FLOOR_PER_HOUR_MM = 0.05;
 const SPLIT_BASE = 0.55;
 const SPLIT_FULL_MM_PER_H = 2.0;
-const CLEAR_MAX_PCT = 20;
-const CLOUD_SPLIT_SLOPE_PCT = 60;
-const W_TEMP = 0.15;
+const W_TEMP = 0.10;
 const W_WIND = 0.30;
-const W_PRECIP = 0.50;
-const W_CLOUD = 0.05;
+const W_PRECIP = 0.60;
 const SOFTMIN_P = -2;
 const S_EPS = 0.02;
 
@@ -63,7 +61,6 @@ export function forceContinuous(kph: number): number {
 export function agreementScore(a: Row, b: Row, periodHours: number): number | null {
   if (a.temp_c == null || b.temp_c == null) return null;
   if (a.wind_speed_10m == null || b.wind_speed_10m == null) return null;
-  if (a.cloud_cover == null || b.cloud_cover == null) return null;
 
   const sTemp = clamp01(1 - Math.abs(a.temp_c - b.temp_c) / D_TEMP_C);
 
@@ -93,15 +90,9 @@ export function agreementScore(a: Row, b: Row, periodHours: number): number | nu
     sPrecip = SPLIT_BASE * clamp01(1 - rate / SPLIT_FULL_MM_PER_H);
   }
 
-  const clearA = a.cloud_cover < CLEAR_MAX_PCT;
-  const clearB = b.cloud_cover < CLEAR_MAX_PCT;
-  const sCloud = clearA === clearB
-    ? 1
-    : clamp01(1 - (Math.max(a.cloud_cover, b.cloud_cover) - CLEAR_MAX_PCT) / CLOUD_SPLIT_SLOPE_PCT);
-
   const term = (w: number, s: number) => w * Math.max(s, S_EPS) ** SOFTMIN_P;
   return (term(W_TEMP, sTemp) + term(W_WIND, sWind)
-    + term(W_PRECIP, sPrecip) + term(W_CLOUD, sCloud)) ** (1 / SOFTMIN_P);
+    + term(W_PRECIP, sPrecip)) ** (1 / SOFTMIN_P);
 }
 
 // One pair's per-period wire levels: 0..3, or null where a side has no data (encoded as the

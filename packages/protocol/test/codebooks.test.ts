@@ -13,7 +13,7 @@ import { WIRE_CODEBOOKS, WIRE_VERSION } from "../src/index.js";
 //     below. Never overwrite an existing entry: that would re-freeze the old version's tables
 //     to new values, which is exactly the silent drift this test exists to catch.
 const FROZEN_DIGESTS: Record<number, string> = {
-  4: "ad2e5336484baaa2", // pre-ship; re-recorded freely until this version has real deployed clients
+  4: "a917489a045dc48f", // pre-ship; re-recorded freely until this version has real deployed clients
 };
 
 const digest = createHash("sha256").update(JSON.stringify(WIRE_CODEBOOKS)).digest("hex").slice(0, 16);
