@@ -84,7 +84,7 @@ const PERIOD: Period = {
   wind_gust_kph: 34,       // force 5
   // One entry per WIND_LEVELS_HPA level (300 hPa first), forces 9 down to 2.
   wind_aloft: [9, 8, 6, 5, 4, 3, 2].map((force, li) => ({ kph: beaufortMidKph(force), dir: [5, 5, 4, 3, 2, 2, 1][li] })),
-  cloud_band: [60, 55, 40, 35, 30, 20, 15, 10],
+  cloud_band: [70, 65, 60, 55, 40, 35, 30, 20, 15, 10],
   // Air quality. Each headline sits at or above every one of its own scale's sub-index bands,
   // which is what the wire assumes when it codes the headline as a residual against their max.
   aqi: 118,
@@ -247,18 +247,18 @@ describe("round-trip encoding", () => {
   it("round-trips the cloud band only on fine-resolution periods", () => {
     const hourly = roundTrip(msg({ periods: [Array(49).fill(PERIOD)] }, { hourly: true }));
     // quantized to 3 bits per level (0–7 steps), decoded back to nearest %; at 500 m the
-    // forecast point is under every level, so all eight are carried.
+    // forecast point is under every level, so all ten are carried.
     expect(hourly.periods[0][0].cloud_band).toEqual(
       PERIOD.cloud_band!.map((v) => Math.round(Math.round(v * 7 / 100) * 100 / 7)));
   });
 
   it("truncates the band's levels to one below the forecast point", () => {
-    // 4267 m quantizes to 4300 m — ground ≈ 593 hPa, so 300/400/500 hPa sit above the point
-    // and 600 is the one carried below it. Everything under 600 never rides the wire.
+    // 4267 m quantizes to 4300 m — ground ≈ 593 hPa, so 200/250/300/400/500 hPa sit above the
+    // point and 600 is the one carried below it. Everything under 600 never rides the wire.
     const p = roundTrip(msg({ elevation: 4267, periods: [Array(49).fill(PERIOD)] }, { hourly: true }))
       .periods[0][0];
     expect(p.cloud_band).toEqual(
-      PERIOD.cloud_band!.slice(0, 4).map((v) => Math.round(Math.round(v * 7 / 100) * 100 / 7)));
+      PERIOD.cloud_band!.slice(0, 6).map((v) => Math.round(Math.round(v * 7 / 100) * 100 / 7)));
   });
 
   it("spends fewer body bits at altitude (dropped band levels are not encoded)", () => {
@@ -269,8 +269,9 @@ describe("round-trip encoding", () => {
     const bits = (elevation: number) => encodeBreakdown(msg(
       { vars: varSet(VAR.clouds), elevation, periods: [Array(49).fill(slim)] },
       { hourly: true })).bodyBits;
-    // 4267 m drops half the levels (8 → 4): anchors and their whole delta chains go with them.
-    expect(bits(4267)).toBeLessThan(bits(0) * 0.8);
+    // 4267 m drops the four lowest levels (10 → 6): anchors and their whole delta chains go
+    // with them.
+    expect(bits(4267)).toBeLessThan(bits(0) * 0.85);
   });
 
   it("round-trips every air-quality column on its own scale", () => {
@@ -565,9 +566,9 @@ describe("round-trip encoding", () => {
 
   it("encodes a near-constant cloud band smaller than a wide-swinging one (Huffman-coded deltas)", () => {
     const vars = varSet(VAR.clouds);
-    const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, cloud_band: [40, 40, 40, 40, 40, 40, 40, 40] }));
+    const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, cloud_band: Array.from({ length: 10 }, () => 40) }));
     const swings = Array.from({ length: 64 }, (_, i) => ({
-      ...PERIOD, cloud_band: Array.from({ length: 8 }, () => (i % 2 === 0 ? 0 : 100)),
+      ...PERIOD, cloud_band: Array.from({ length: 10 }, () => (i % 2 === 0 ? 0 : 100)),
     }));
     const flatLen = messageToString(msg({ vars, periods: [flat] }, { hourly: true })).length;
     const swingsLen = messageToString(msg({ vars, periods: [swings] }, { hourly: true })).length;

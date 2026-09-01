@@ -52,7 +52,7 @@ export interface Period {
   cloud_low?: number;     // <3km
 
   // Cloud cover by pressure level: one percentage per LEADING entry of
-  // CLOUD_BAND_LEVELS_HPA in constants.ts, highest level (300 hPa) first. Levels a center
+  // CLOUD_BAND_LEVELS_HPA in constants.ts, highest level (200 hPa) first. Levels a center
   // doesn't serve are interpolated server-side before encoding, never left out — but the wire
   // truncates the stack at one level below the forecast point (cloudBandLevelCount in wire.ts),
   // so a decoded array's LENGTH is the band's floor. Present only on periods at ≤3h resolution

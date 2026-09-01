@@ -20,13 +20,13 @@ export const BAND_TOP_HPA = CLOUD_BAND_LEVELS_HPA[0];
 // ("500 hPa"). The same label for every reader of a pressure level, whether on the cloud band's
 // rail, a wind row, or the builder's level list.
 //
-// On the cloud band the top rung is written "30k+" (`open`): 300 hPa is the highest level the
-// message carries, so the band stops flat there — and an unqualified "30k" would make that flat
-// top a claim about the sky, that cloud ends at 30k, when it is only a statement about the wire.
-// The "+" turns the top of the scale into what it actually is: everything from 30k up, gathered
-// onto one edge (fillCloudBand folds the model's high cloud into that slot). A wind level is a
+// On the cloud band the top rung is written "39k+" (`open`): 200 hPa is the highest level the
+// message carries, so the band stops flat there — and an unqualified "39k" would make that flat
+// top a claim about the sky, that cloud ends at 39k, when it is only a statement about the wire.
+// The "+" turns the top of the scale into what it actually is: everything from 39k up, gathered
+// onto one edge. A wind level is a
 // point reading — 300 hPa wind is the wind AT 30k, bundling nothing above it — so wind rungs
-// are plain. In pressure the open top reads "≤300 hPa": up is DOWN in hPa, so a "+" would point
+// are plain. In pressure the open top reads "≤200 hPa": up is DOWN in hPa, so a "+" would point
 // the wrong way.
 export function ladderLabel(hpa: number, unit: LevelUnit, open = false): string {
   const isTop = open && hpa === BAND_TOP_HPA;
@@ -69,11 +69,11 @@ export interface BandScale {
   ): void;
 }
 
-// The band spans exactly the levels the message carries: 300 hPa on the row's top edge, the
+// The band spans exactly the levels the message carries: 200 hPa on the row's top edge, the
 // last carried level on its bottom, one slice per level-to-level gap and nothing padded outside
 // them. The edges are both wire truncations, and the axis stops where the data stops at each:
-// 300 hPa is the ceiling of what the MESSAGE carries, not of the sky — the tropopause is nearer
-// 36k, and cirrus lives up there — so the rail reads the top level as "30k+"; the bottom level
+// 200 hPa is the ceiling of what the MESSAGE carries, not of the sky — cirrus can still top
+// out above it — so the rail reads the top level as "39k+"; the bottom level
 // is one below the forecast point's ground (or 1000 hPa, which IS the ground, from low country).
 export function bandScale(nLevels: number): BandScale {
   const levels = CLOUD_BAND_LEVELS_HPA.slice(0, Math.max(2, Math.min(nLevels, CLOUD_BAND_LEVELS_HPA.length)));

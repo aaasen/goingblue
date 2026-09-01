@@ -108,7 +108,7 @@ const SURFACE_VARS = [
   "cloud_cover_low",
 ];
 // Pressure-level wind at every WIND_LEVELS_HPA level, whichever the request selected — one
-// upstream call serves any selection, and the derive scripts read all eight.
+// upstream call serves any selection, and the derive scripts read all seven.
 const WIND_ALOFT_SPEED_VARS = WIND_LEVELS_HPA.map((l) => `wind_speed_${l}hPa`);
 const WIND_ALOFT_DIR_VARS = WIND_LEVELS_HPA.map((l) => `wind_direction_${l}hPa`);
 // The cloud band's levels ride the pressure-level request (for Europe that's the 0.25° IFS,
@@ -120,7 +120,7 @@ const WIND_ALOFT_DIR_VARS = WIND_LEVELS_HPA.map((l) => `wind_direction_${l}hPa`)
 // humidity to within 0.001 percentage points over 50,400 corpus hours × 8 levels. So we fetch
 // the humidity instead of the diagnostic — no information lost, and fillCloudBand can repair the
 // diagnostic's blind spot before aggregation. `geopotential_height_XhPa` is the one genuinely new
-// request cost (+8 variables): it places each level in a low/mid/high band per hour rather than
+// request cost (+10 variables): it places each level in a low/mid/high band per hour rather than
 // by a hardcoded standard atmosphere, which matters because 700 hPa straddles the 3 km line.
 const CLOUD_BAND_VARS = CLOUD_BAND_LEVELS_HPA.map((l) => `cloud_cover_${l}hPa`);
 const CLOUD_BAND_RH_VARS = CLOUD_BAND_LEVELS_HPA.map((l) => `relative_humidity_${l}hPa`);
@@ -212,7 +212,7 @@ export interface Row {
   cloud_cover_high: number | null;
   cloud_cover_mid: number | null;
   cloud_cover_low: number | null;
-  // Coverage per CLOUD_BAND_LEVELS_HPA entry (300 hPa first), aggregated from the post-fill
+  // Coverage per CLOUD_BAND_LEVELS_HPA entry (200 hPa first), aggregated from the post-fill
   // hourly stack (fillCloudBand). Null where the source served nothing for that level in the
   // window; toFullPeriod interpolates the holes.
   cloud_band: (number | null)[];
@@ -470,7 +470,7 @@ export function adjustPrecipPhase(h: HourlyData, siteElevM: number | null): Hour
 
 // ── Cloud band: rebuild from humidity, and fill what the humidity can't see ───────────────────
 //
-// The band's eight `cloud_cover_XhPa` levels are not model cloud. They are Open-Meteo's own
+// The band's ten `cloud_cover_XhPa` levels are not model cloud. They are Open-Meteo's own
 // Sundqvist diagnostic over gridbox-mean relative humidity, and it has a hard floor: below the
 // level's critical humidity it returns exactly 0. Stack the encoder's own 3-bit deadband on top
 // and near the surface you need 90.5% RH before a single pixel lights. Measured over the corpus
@@ -519,9 +519,9 @@ const CLOUD_BAND_SCORE_WINDOW_PP = 5;
 const CLOUD_BAND_TRIO = ["cloud_cover_low", "cloud_cover_mid", "cloud_cover_high"] as const;
 
 /**
- * Recompute the eight cloud-band levels from pressure-level humidity, then fill any low/mid band
+ * Recompute the ten cloud-band levels from pressure-level humidity, then fill any low/mid band
  * the humidity diagnostic reports as empty while the model's own layer cloud says otherwise, and
- * fold the model's high-cloud integral into the top slot.
+ * place the model's high-cloud integral onto the ≥8 km levels by humidity.
  *
  * Runs per hour, BEFORE the maxOf period aggregation and therefore before repairCloudBand:
  * per-hour is the only granularity at which humidity and geopotential exist without inventing
@@ -569,21 +569,26 @@ export function fillCloudBand(h: HourlyData): HourlyData {
       const C = Math.min(100, Math.max(0, raw));
 
       if (b === 2) {
-        // The fold. The top slot stops being a point diagnostic at 300 hPa and becomes the
-        // model's own layer integral for everything at or above 8 km — unconditional, not a
-        // repair, because up here the diagnostic is worse than a constant (R² −0.497 against the
-        // model's high cloud, where predicting the mean scores 0.000). On the rare hour where a
-        // second level also clears 8 km, both carry the integral: a slab, which is what the
-        // renderer should be drawing for this band anyway.
-        for (const li of members) cover[li] = C;
-        continue;
+        // High band: magnitude comes from the model's layer integral unconditionally, because
+        // up here the diagnostic is worse than a constant (R² −0.497 against the model's high
+        // cloud, where predicting the mean scores 0.000). The integral is PLACED across the
+        // ≥8 km levels (200/250/300 hPa in practice) by the same humidity scoring low/mid use
+        // below, so the band says WHERE the cirrus sits. Members the placement leaves unlit read
+        // clear. With no humidity anywhere in the band there is nothing to place with: every
+        // member carries the integral, a slab.
+        if (!members.some((li) => rh[li]?.[i] != null)) {
+          for (const li of members) cover[li] = C;
+          continue;
+        }
+        for (const li of members) cover[li] = 0;
+      } else {
+        // Low/mid: synthesize only where the diagnostic sees nothing AND the trio's own
+        // magnitude can survive the encoder. The second half is a survival condition, not a
+        // semantic one — the synthesized values go through quantCover like any other, so a fill
+        // that cannot clear the deadband ships an empty band regardless and only adds noise
+        // below it.
+        if (members.some((li) => quantCover(cover[li] as number) > 0)) continue;
       }
-
-      // Low/mid: synthesize only where the diagnostic sees nothing AND the trio's own magnitude
-      // can survive the encoder. The second half is a survival condition, not a semantic one —
-      // the synthesized values go through quantCover like any other, so a fill that cannot clear
-      // the deadband ships an empty band regardless and only adds noise below it.
-      if (members.some((li) => quantCover(cover[li] as number) > 0)) continue;
       if (quantCover(C) === 0) continue;
 
       // Placement by humidity ABOVE the level's critical threshold, not raw humidity. rhCrit
@@ -938,9 +943,9 @@ export function rowsFromWindows(
 // between the nearest served levels, clamped at the ends. A window with no level data at all
 // encodes as clear — the same ?? 0 coalescing every non-AQ variable gets.
 //
-// One accepted semantic mush, post-fold: interpolating a null 400 puts it between the 300 slot,
-// which now carries the model's layer integral for everything above 8 km (fillCloudBand), and
-// 500, which is still a point diagnostic. Deliberate — the alternative is a hole.
+// One accepted semantic mush, post-fill: interpolating a null 400 puts it between the 300 slot,
+// which carries its placed share of the model's high-cloud integral (fillCloudBand), and 500,
+// which is still a point diagnostic. Deliberate — the alternative is a hole.
 export function repairCloudBand(vals: (number | null)[]): number[] {
   // Always the full stack, whatever the caller had — a short or empty array pads with nulls.
   const out: (number | null)[] = CLOUD_BAND_LEVELS_HPA.map((_, i) => vals[i] ?? null);

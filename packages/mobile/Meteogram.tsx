@@ -2692,8 +2692,8 @@ const RowLegend = memo(function RowLegend({ rows, units, bandLevels, paint }: {
       for (const hpa of scale.levels) {
         if (hpa === 1000) continue;
         const gy = top + scale.hpaToFrac(hpa) * row.height;
-        // Rungs are centered on their own altitude, except at the ends: 300 hPa IS the row's top
-        // edge, so centering would hang half the "30k+" over the section header above it, and a
+        // Rungs are centered on their own altitude, except at the ends: 200 hPa IS the row's top
+        // edge, so centering would hang half the "39k+" over the section header above it, and a
         // truncated floor is the bottom edge likewise. The clamp drops each flush inside the
         // band instead — still reading against the edge it names. The inner rungs clear both
         // edges by a full slice, so for them the clamp only guards the arithmetic.
@@ -3564,7 +3564,7 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
     const bandLevels = periods.find((q) => q.cloud_band)?.cloud_band?.length ?? 0;
     CLOUD_BAND_LEVELS_HPA.slice(0, bandLevels).forEach((hpa, li) => {
       const v = p.cloud_band?.[li];
-      // "and above" on the top level, matching the rail's "30k+" — the highest level the
+      // "and above" on the top level, matching the rail's "39k+" — the highest level the
       // message carries is the only one whose reading is not bracketed by a level above it.
       const at = fmtLevelFull(hpa, units) + (hpa === BAND_TOP_HPA ? ' and above' : '');
       clouds.push([`Clouds ${at}`, v != null ? `${v}%` : '—']);

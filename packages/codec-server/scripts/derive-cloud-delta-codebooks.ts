@@ -19,13 +19,18 @@
  * WHAT IS COUNTED. The wire carries coverage at each CLOUD_BAND_LEVELS_HPA level, and what
  * lands in those slots is not any raw upstream field: fillCloudBand (forecast.ts) recomputes
  * each level from `relative_humidity_XhPa` via Sundqvist, synthesizes low/mid cover from the
- * model's own layer cloud wherever the diagnostic reads empty, and folds the model's high-cloud
- * integral into the top slot. toFullPeriod applies exactly that correction before aggregation,
- * so these tables train on the stack production sends.
+ * model's own layer cloud wherever the diagnostic reads empty, and places the model's high-cloud
+ * integral onto the ≥8 km levels by humidity. toFullPeriod applies exactly that correction
+ * before aggregation, so these tables train on the stack production sends.
+ *
+ * ONLY THE [300..1000] LEVELS ARE TRAINED: the corpus carries nothing above 300 hPa, so the
+ * 250/200 cirrus levels ship no rows of their own — cloudBandBook clamps them onto the 300 hPa
+ * rows (CLOUD_BAND_TRAINED_LEVEL_OFFSET in entropy.ts). Training them here would count
+ * repairCloudBand's clamp-extension of the 300 value, not data.
  *
  * Each model's first period stays a raw 3-bit anchor on the wire (not counted here); the tables
- * price transitions only. The level index IS the CLOUD_BAND_LEVELS_HPA index and the prev index
- * IS the previous quantized step, so wire.ts indexes the books with no mapping in between.
+ * price transitions only. The level index is the CLOUD_BAND_LEVELS_HPA index minus
+ * CLOUD_BAND_TRAINED_LEVEL_OFFSET and the prev index IS the previous quantized step.
  *
  * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
@@ -34,7 +39,7 @@
  */
 import { toFullPeriod } from "../src/forecast.ts";
 import {
-  CLOUD_BAND_LEVELS_HPA, VAR, type Variable, quantCover,
+  CLOUD_BAND_LEVELS_HPA, CLOUD_BAND_TRAINED_LEVEL_OFFSET, VAR, type Variable, quantCover,
   RESOLUTION_HOURS, TABLE_RES_IDXS, CLOUD_BAND_MAX_HOURS,
 } from "@weather/protocol";
 import {
@@ -42,7 +47,7 @@ import {
   type CellCounter, type DerivedTables,
 } from "./derive-lib.ts";
 
-const LEVELS = CLOUD_BAND_LEVELS_HPA;
+const LEVELS = CLOUD_BAND_LEVELS_HPA.slice(CLOUD_BAND_TRAINED_LEVEL_OFFSET);
 const NLEVEL = LEVELS.length;      // 8, highest first (300 hPa … 1000 hPa)
 const STEP_BITS = 3;               // matches the cloud band column width in wire.ts (steps 0..7)
 const NSYM = 1 << STEP_BITS;       // 8 value symbols
@@ -83,9 +88,10 @@ export function counter(): CellCounter {
         // empty are bridged here exactly as they are on the wire.
         const periods = slice.rows.map((r) => toFullPeriod(r, CLOUD_VARS, "US"));
         for (let li = 0; li < NLEVEL; li++) {
-          let prev = quantCover(periods[0].cloud_band?.[li]);
+          const ladderIdx = li + CLOUD_BAND_TRAINED_LEVEL_OFFSET;
+          let prev = quantCover(periods[0].cloud_band?.[ladderIdx]);
           for (let p = 1; p < periods.length; p++) {
-            const cur = quantCover(periods[p].cloud_band?.[li]);
+            const cur = quantCover(periods[p].cloud_band?.[ladderIdx]);
             add((li * NPREV + prev) * NSYM + cur);
             prev = cur;
           }

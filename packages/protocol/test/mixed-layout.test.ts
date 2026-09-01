@@ -57,7 +57,7 @@ function periodAt(i: number): Period {
     wind_aloft: Array.from({ length: 7 }, (_, li) =>
       ({ kph: beaufortMidKph(((i + li) % 5) + 2), dir: (i + 2 * li) % 8 })),
     // Step-aligned so the 3-bit quantization round-trips exactly, one moving value per level.
-    cloud_band: Array.from({ length: 8 }, (_, li) => Math.round(((i + li) % 8) * 100 / 7)),
+    cloud_band: Array.from({ length: 10 }, (_, li) => Math.round(((i + li) % 8) * 100 / 7)),
     // Air quality, as ladder band representatives so they round-trip exactly. Each headline stays
     // at or above every sub-index on its own scale, the relationship its residual coding assumes.
     aqi: aqiMid(9 + (i % 6), AQI_US_LOWER),

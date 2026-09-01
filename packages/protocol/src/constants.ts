@@ -93,18 +93,23 @@ export const MODEL_NAMES: string[] = [
 ];
 
 // The cloud band's pressure levels, highest first — the order Period.cloud_band and the wire.ts
-// cloud-band column both use. These are the eight levels every center's pressure product can
+// cloud-band column both use. These are the ten levels every center's pressure product can
 // serve or bracket (ECMWF lacks 600/400; the server interpolates them in). 750/800 hPa are
 // deliberately absent for now: best_match zero-fills 750 where the serving model doesn't carry
-// it, which reads as clear sky, and neither is in the training corpus.
-export const CLOUD_BAND_LEVELS_HPA = [300, 400, 500, 600, 700, 850, 925, 1000] as const;
-// Pressure-level wind uses the same ladder minus its 1000 hPa floor, one selectable column per
+// it, which reads as clear sky, and neither is in the training corpus. 250/200 hPa have real
+// cloud, humidity and height at all four center selections (verified 2026-08-31); their
+// codebooks alias the 300 hPa rows (CLOUD_BAND_TRAINED_LEVEL_OFFSET in entropy.ts) because the
+// training corpus stops at 300.
+export const CLOUD_BAND_LEVELS_HPA = [200, 250, 300, 400, 500, 600, 700, 850, 925, 1000] as const;
+// Pressure-level wind uses the [300..925] run of the same ladder, one selectable column per
 // level (WIND_LEVEL_VARS), highest first — Period.wind_aloft is indexed by it. 1000 hPa is
 // ~110 m: the always-on 10 m wind already describes that air, and above ~110 m the level is
-// under the terrain, so it never earned a column (dropped 2026-08-22). Every center's pressure
+// under the terrain, so it never earned a column (dropped 2026-08-22). 250/200 hPa are
+// cloud-band-only: the band is all-or-nothing so it carries the whole ladder, but each wind
+// level is its own column and the cirrus levels never earned one. Every center's pressure
 // product serves wind at all seven (verified 2026-08-22 against best_match, gfs_seamless,
 // gem_seamless and ecmwf_ifs025), so no level is gated per center.
-export const WIND_LEVELS_HPA = CLOUD_BAND_LEVELS_HPA.slice(0, 7) as readonly number[];
+export const WIND_LEVELS_HPA = CLOUD_BAND_LEVELS_HPA.slice(2, 9) as readonly number[];
 
 // International Standard Atmosphere, troposphere leg — the fixed scale that places the band's
 // pressure levels at altitudes. Good to a few tens of meters over the band's span. WIRE FORMAT:

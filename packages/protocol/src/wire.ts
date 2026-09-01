@@ -132,8 +132,9 @@ const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0)
 // RH-diagnostic fill pins levels at exactly 0 for long runs; held-out −27% vs unconditioned
 // per-level deltas — the vertical-neighbor chain added only −0.19 b/period on top and was left
 // out; see analyze-cloud-neighbor-heldout.ts). Tables are trained on the post-fillCloudBand
-// stack at the band's serving resolutions only — see
-// codec-server/scripts/derive-cloud-delta-codebooks.ts.
+// stack at the band's serving resolutions only, for the [300..1000] levels the corpus carries;
+// the 250/200 cirrus levels ride the 300 hPa books (CLOUD_BAND_TRAINED_LEVEL_OFFSET in
+// entropy.ts) — see codec-server/scripts/derive-cloud-delta-codebooks.ts.
 const CLOUD_ANCHOR_BITS = 3;
 const CLOUD_STEPS = (1 << CLOUD_ANCHOR_BITS) - 1;    // 7: the top step of the quantized scale
 export const quantCover = (pct: number | undefined): number =>
@@ -170,13 +171,13 @@ export function cloudBandPeriodCount(periodHours: number[]): number {
 // Elevation: levels below the forecast point are air the model puts under the terrain — the
 // fill synthesizes readings there, and a reader standing on the point can't see them anyway —
 // so a pressure-level column carries every level above the ground plus ONE below (the slice the
-// point stands in, which is where an undercast shows). The count is a leading run of the
-// shared ladder (CLOUD_BAND_LEVELS_HPA = WIND_LEVELS_HPA): the summit of Denali (~6200 m,
-// ground ≈ 459 hPa) keeps [300, 400, 500] — a 30k/24k/18k ladder — while anything under
-// ~110 m keeps all eight. Feed this the HEADER's elevation (quantElevM on the way in, the
-// decoded value on the way out). The floor of 2 keeps the cloud band a band (one slice) even
-// for a bogus elevation above every level; no terrain on Earth reaches 300 hPa, so real inputs
-// never hit it. The wind columns deliberately do NOT apply it: the reader picks wind levels one
+// point stands in, which is where an undercast shows). The count is a leading run of
+// CLOUD_BAND_LEVELS_HPA: the summit of Denali (~6200 m, ground ≈ 459 hPa) keeps
+// [200, 250, 300, 400, 500] — a 39k/34k/30k/24k/18k ladder — while anything under ~110 m keeps
+// all ten. Feed this the HEADER's elevation (quantElevM on the way in, the decoded value on the
+// way out). The floor of 2 keeps the cloud band a band (one slice) even for a bogus elevation
+// above every level; no terrain on Earth reaches 250 hPa, so real inputs never hit it. The wind
+// columns deliberately do NOT apply it: the reader picks wind levels one
 // by one and gets exactly those (a level under the terrain is the reader's call to leave out),
 // whereas the cloud band is all-or-nothing and so has to trim itself.
 export function pressureLevelCount(headerElevationM: number): number {

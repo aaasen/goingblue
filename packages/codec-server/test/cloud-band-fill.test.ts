@@ -11,7 +11,8 @@ import {
 // assignment. 700 hPa sits at ~3010 m — just inside "mid" — which is exactly the coin-flip the
 // per-hour height lookup exists to resolve; the flip case below moves it deliberately.
 const STD_HEIGHT_M: Record<number, number> = {
-  300: 9160, 400: 7185, 500: 5575, 600: 4205, 700: 3010, 850: 1460, 925: 765, 1000: 110,
+  200: 11785, 250: 10360, 300: 9160, 400: 7185, 500: 5575, 600: 4205, 700: 3010, 850: 1460,
+  925: 765, 1000: 110,
 };
 
 interface Case {
@@ -95,7 +96,8 @@ describe("fillCloudBand", () => {
     // 1000 (−8.0 pt), which is the surface bias the deficit exists to remove. Every in-band
     // cover is exactly 0.0, so the covers themselves carry no ranking information at all.
     const c: Case = { rh: { 850: 76, 925: 70, 1000: 81 }, low: 40 };
-    expect(stack(band({ ...c, low: null }))).toEqual([null, null, null, null, null, 0, 0, 0]);
+    expect(stack(band({ ...c, low: null })))
+      .toEqual([null, null, null, null, null, null, null, 0, 0, 0]);
     const b = band(c);
     expect(b[850]).toBeCloseTo(40, 10); // one level lit → it carries the whole band value
     expect(b[925]).toBe(0);
@@ -135,10 +137,11 @@ describe("fillCloudBand", () => {
     });
   });
 
-  describe("the high-band fold", () => {
-    it("carries the model's high cloud straight into the 300 hPa slot", () => {
+  describe("the high-band placement", () => {
+    it("carries the model's high cloud into the only level with humidity", () => {
       // 40% humidity at 300 hPa is far under its 70% threshold, so the diagnostic reads clear
-      // while the model reports 55% high cloud. The slot becomes the layer integral.
+      // while the model reports 55% high cloud. With 300 the only placeable level, it carries
+      // the whole layer integral.
       expect(band({ rh: { 300: 40 }, high: 55 })[300]).toBe(55);
     });
 
@@ -148,11 +151,30 @@ describe("fillCloudBand", () => {
       expect(band({ rh: { 300: 95 }, high: 20 })[300]).toBe(20);
     });
 
+    it("places the integral on the best-deficit cirrus level, clearing the rest", () => {
+      // All three cirrus levels served: 250 hPa clears its ~70% threshold (+2 pt) while 200 and
+      // 300 sit 30 pt under it, far outside the 5 pt window — so 250 alone carries the layer
+      // integral and the other two read clear, cirrus placed at its own altitude.
+      const b = band({ rh: { 200: 40, 250: 72, 300: 40 }, high: 55 });
+      expect(b[250]).toBe(55);
+      expect(b[200]).toBe(0);
+      expect(b[300]).toBe(0);
+    });
+
+    it("falls back to a slab when the band has cover but no humidity to place with", () => {
+      // Served diagnostic covers, no humidity at any cirrus level: nothing ranks them, so every
+      // member carries the integral.
+      const b = band({ rh: { 850: 76 }, cover: { 200: 5, 250: 5, 300: 5 }, high: 60 });
+      expect(b[200]).toBe(60);
+      expect(b[250]).toBe(60);
+      expect(b[300]).toBe(60);
+    });
+
     it("reports clear when the model says clear", () => {
       expect(band({ rh: { 300: 95 }, high: 0 })[300]).toBe(0);
     });
 
-    it("leaves the slot alone when the model has no high cloud to fold", () => {
+    it("leaves the band alone when the model has no high cloud to place", () => {
       const b = band({ rh: { 300: 95 }, high: null });
       expect(b[300]).toBeCloseTo(sundqvistCover(95, rhCritical(300)), 10);
     });
@@ -164,7 +186,7 @@ describe("fillCloudBand", () => {
       // fill could only add noise below the deadband.
       expect(quantCover(7.0)).toBe(0);
       const b = band({ rh: { 850: 76, 925: 70, 1000: 81 }, low: 7.0 });
-      expect(stack(b)).toEqual([null, null, null, null, null, 0, 0, 0]);
+      expect(stack(b)).toEqual([null, null, null, null, null, null, null, 0, 0, 0]);
     });
 
     it("fills a band value that just clears the deadband", () => {
@@ -209,22 +231,25 @@ describe("fillCloudBand", () => {
       const b = band(ECMWF);
       expect(b[400]).toBeNull();
       expect(b[600]).toBeNull();
-      expect(b[300]).toBe(55);            // the fold
+      expect(b[300]).toBe(55);            // the high placement, 300 the only placeable level
       expect(b[700]).toBeCloseTo(50, 10); // mid band, on the level the deficit picked
       expect(b[500]).toBe(0);
       expect(b[850]).toBeCloseTo(40, 10); // low band, unaffected by the holes above it
     });
 
-    it("bridges the holes after the fill, between the folded top slot and the levels below", () => {
+    it("bridges the holes after the fill, between the placed top slots and the levels below", () => {
       // repairCloudBand runs downstream of the fill (via toFullPeriod), so it interpolates filled
-      // values, not raw ones. 400 lands between the redefined 300 slot — a layer integral — and
-      // the point diagnostic at 500: the accepted semantic mush.
+      // values, not raw ones. 400 lands between the 300 slot — carrying its placed share of the
+      // layer integral — and the point diagnostic at 500: the accepted semantic mush. The unserved
+      // 200/250 clamp-extend from 300.
       const repaired = repairCloudBand(stack(band(ECMWF)));
-      expect(repaired[0]).toBe(55);   // 300, folded
-      expect(repaired[1]).toBe(28);   // 400, bridged halfway 300→500: 55 → 0
-      expect(repaired[2]).toBe(0);    // 500
-      expect(repaired[3]).toBe(25);   // 600, bridged halfway 500→700: 0 → 50
-      expect(repaired[4]).toBe(50);   // 700
+      expect(repaired[0]).toBe(55);   // 200, clamp-extended from 300
+      expect(repaired[1]).toBe(55);   // 250, bridged 300→300
+      expect(repaired[2]).toBe(55);   // 300, the placed integral
+      expect(repaired[3]).toBe(28);   // 400, bridged halfway 300→500: 55 → 0
+      expect(repaired[4]).toBe(0);    // 500
+      expect(repaired[5]).toBe(25);   // 600, bridged halfway 500→700: 0 → 50
+      expect(repaired[6]).toBe(50);   // 700
       expect(repaired.some((v) => v == null)).toBe(false);
     });
   });
@@ -253,7 +278,7 @@ describe("fillCloudBand", () => {
 
     it("skips a band whose model value is missing", () => {
       expect(stack(band({ rh: { 850: 76, 925: 70, 1000: 81 }, low: null })))
-        .toEqual([null, null, null, null, null, 0, 0, 0]);
+        .toEqual([null, null, null, null, null, null, null, 0, 0, 0]);
     });
   });
 });

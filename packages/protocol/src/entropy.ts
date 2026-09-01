@@ -416,6 +416,8 @@ export interface Books {
   // distribution (held-out −27% vs unconditioned per-level deltas). Each model's first period
   // is a raw 3-bit anchor, not a symbol under these tables. Trained on the post-fillCloudBand
   // stack at the band's serving resolutions only (3h/1h — see cloudBandPeriodCount in wire.ts).
+  // Tables exist for the trained [300..1000] levels only; the 250/200 cirrus levels alias the
+  // 300 hPa rows (CLOUD_BAND_TRAINED_LEVEL_OFFSET), since the corpus has no data above 300.
   // See codec-server/scripts/derive-cloud-delta-codebooks.ts.
   cloudBandBook(level: number, prev: number): CodeBook;
   // Order-1 codebooks over the wet columns' quantized VALUES (not deltas — zero is an absorbing
@@ -461,6 +463,11 @@ export interface Books {
   aqDominantBook(prev: number | null): CodeBook;
   aqDominantEuBook(prev: number | null): CodeBook;
 }
+
+// The cloud-band tables cover CLOUD_BAND_LEVELS_HPA from this index down: [300..1000], the
+// levels the corpus carries. Ladder indices above it (250/200) clamp to the 300 hPa rows, and
+// the derive script trains exactly the covered slice.
+export const CLOUD_BAND_TRAINED_LEVEL_OFFSET = 2;
 
 function buildBooks(t: typeof BASE_TABLES): Books {
   const weathercode = makeConditionalCodec(t.WEATHERCODE_BOOTSTRAP_WEIGHTS, t.WEATHERCODE_WEIGHTS);
@@ -520,7 +527,7 @@ function buildBooks(t: typeof BASE_TABLES): Books {
         : freezeDeltaTempTables[res][tempDeltaBucket(tempDelta)];
     },
     cloudBandBook(level, prev) {
-      return cloudBandTables[level][prev];
+      return cloudBandTables[Math.max(0, level - CLOUD_BAND_TRAINED_LEVEL_OFFSET)][prev];
     },
     precipBook: makeValueCodec(t.PRECIP_BOOTSTRAP_WEIGHTS, t.PRECIP_WEIGHTS_BY_RES, (p) => p),
     snowBook: makeValueCodec(t.SNOW_BOOTSTRAP_WEIGHTS, t.SNOW_WEIGHTS_BY_RES, accumBucket),
@@ -686,9 +693,9 @@ const bundleOf = (t: typeof BASE_TABLES) => ({
   // upperDeltaBucket, falling back to windSpeedDelta[res][0] when gust is absent.
   gustDelta: { byRes: t.GUST_DELTA_WEIGHTS_BY_RES.map(qf) },
   sfcDeltaGust: { byRes: t.SFC_DELTA_GUST_WEIGHTS_BY_RES.map((rows) => rows.map(qf)) },
-  // One table per (CLOUD_BAND_LEVELS_HPA level, previous step), in that order — both indices
-  // are the book indices, so a reordering of either axis is itself a wire change and trips the
-  // digest.
+  // One table per (trained cloud-band level [300..1000], previous step), in that order — both
+  // indices are the book indices (ladder indices above the trained slice clamp to row 0), so a
+  // reordering of either axis is itself a wire change and trips the digest.
   cloudBand: t.CLOUD_BAND_WEIGHTS_BY_LEVEL_PREV.map((rows) => rows.map(qf)),
   tempDelta: {
     bootstrap: qf(t.TEMP_DELTA_BOOTSTRAP_WEIGHTS),
