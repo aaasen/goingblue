@@ -125,6 +125,9 @@ const MODEL_INFO = [
 ];
 const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 
+// Compare-pill names by MODEL_BIT index — the short center names, matching the selector above.
+const COMPARE_MODEL_LABELS = ['Auto', 'US', 'CA', 'EU'];
+
 // Stands in for the model stack until there's a location to attribute. Every selector option but
 // EU resolves differently from place to place, so without coordinates there's nothing to name.
 const MODEL_HINT_NO_LOCATION = 'Set a location to see which models will be used.';
@@ -729,8 +732,12 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const scrollRef = useRef<ScrollView>(null);
   const metaY = useRef<number | null>(null);
   const pendingScroll = useRef(false);
+  // Set by a compare-pill tap: the reader is already looking at the meteogram, so the decode
+  // that follows should swap the forecast in place rather than scroll the page back to its top.
+  const suppressNextViewScroll = useRef(false);
   // The forecast map's frame in the scroll content, measured on layout, and where the forecast
-  // display ends (the attribution line's top — the meteogram's immediate follower). Together
+  // display ends (a zero-height marker after the compare row — the meteogram block's immediate
+  // follower; the attribution lives further down, below Past forecasts). Together
   // they drive the map's parking translation: once the map's bottom edge has scrolled up to the
   // status bar's bottom, the map stops and its tail stays parked in the status-bar band — the
   // clock reads over map tiles while the meteogram's strip docks flush beneath it (see
@@ -742,7 +749,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const [mapFrame, setMapFrame] = useState<{ y: number; h: number } | null>(null);
   const [forecastEnd, setForecastEnd] = useState<number | null>(null);
   // The open tap detail panel's height (0 when closed). It sits between the meteogram's last
-  // rows and the attribution, so it stretches forecastEnd without moving Meteogram's own clamp
+  // rows and the end-of-forecast marker, so it stretches forecastEnd without moving Meteogram's own clamp
   // end — left in, the map would stay parked over the panel for that extra stretch of scroll
   // after the strip and plate had ridden off, leaving a map slice under the status bar.
   const [detailH, setDetailH] = useState(0);
@@ -750,7 +757,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     if (mapFrame == null || forecastEnd == null) return null;
     const parkY = mapFrame.y + mapFrame.h - topInset;
     // How far the park carries: the forecast's height below the map, less the docked stack that
-    // rides off beneath it. forecastEnd (the attribution's top) minus the detail panel and the
+    // rides off beneath it. forecastEnd (the end-of-forecast marker) minus the detail panel and the
     // stack height is the same scroll offset Meteogram's own clamp ends at, so the exits align.
     const travel = forecastEnd - detailH - (mapFrame.y + mapFrame.h) - PINNED_STACK_H;
     if (travel <= 0) return null;
@@ -1056,7 +1063,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         setCollecting(null);
         // A decode of new text is the moment the forecast should come on screen, whichever way
         // the text arrived — a fetch reply, a completed paste, a cached entry loaded back.
-        pendingScroll.current = true;
+        // Except a compare-pill swap: the reader is already there.
+        pendingScroll.current = !suppressNextViewScroll.current;
+        suppressNextViewScroll.current = false;
         if (suppressNextCache.current) {
           suppressNextCache.current = false;
         } else {
@@ -1191,6 +1200,12 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     onForecastDataChange(encoded);
   }, [onForecastDataChange]);
 
+  // A compare-pill tap: loadPast, minus the scroll-to-forecast (see suppressNextViewScroll).
+  const loadCompare = useCallback((encoded: string) => {
+    suppressNextViewScroll.current = true;
+    loadPast(encoded);
+  }, [loadPast]);
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   // What the one action button does, per device. The label and icon come from the device table
@@ -1234,6 +1249,41 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const loadedSlot = cache.find((slot) =>
     normalizedForecastData(slot.encoded!) === normalizedForecastData(forecastData),
   );
+
+  // ── Compare selector ─────────────────────────────────────────────────────
+  // Cached forecasts comparable to the one on screen — same request hour, same spot (within
+  // ~1 km), the same rule the meteogram's scroll hold uses — so flipping between takes on the
+  // same weather window is one tap under the meteogram. One segment per distinct look: the
+  // center's short name plus the optional-variable icons ("US +☁️💨"), so two requests to the
+  // same center with different variables compare as easily as two centers. Behind one label,
+  // the most recent response wins — except the loaded slot, which always keeps its segment so
+  // exactly one is selected.
+  const kmApart = (a: Slot['context'], b: Slot['context']) => {
+    const dLat = (a.lat - b.lat) * 111.32;
+    const dLon = (a.lon - b.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180);
+    return Math.sqrt(dLat * dLat + dLon * dLon);
+  };
+  const compareRef = loadedSlot?.context;
+  const compareOptions = (() => {
+    if (!compareRef) return [] as { label: string; slot: Slot }[];
+    const byLabel = new Map<string, { label: string; slot: Slot }>();
+    for (const s of cache) {
+      if (!s.encoded) continue;
+      if (Math.abs(s.context.start - compareRef.start) > 3600_000) continue;
+      if (kmApart(s.context, compareRef) > 1) continue;
+      const icons = variableIconsFor(s.context.vars).map((i) => i.symbol).join('');
+      const base = COMPARE_MODEL_LABELS[s.context.model] ?? '?';
+      const label = icons ? `${base} +${icons}` : base;
+      const held = byLabel.get(label);
+      const heldIsLoaded = held?.slot.code === loadedSlot!.code;
+      if (!held || (!heldIsLoaded && (s.code === loadedSlot!.code
+        || (s.savedAt ?? 0) > (held.slot.savedAt ?? 0)))) {
+        byLabel.set(label, { label, slot: s });
+      }
+    }
+    return [...byLabel.values()].sort((a, b) =>
+      a.slot.context.model - b.slot.context.model || a.label.localeCompare(b.label));
+  })();
 
   const pastSection = (
     <View style={styles.pastSection}>
@@ -1616,24 +1666,47 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               prop still exists for the repaint-after-hide machinery it drives inside. */}
           <Meteogram msg={decoded} units={units} timeFormat={timeFormat} active scrollY={scrollY} onDetailHeight={setDetailH} />
 
-          {/* Open-Meteo's data is CC BY 4.0, which asks for credit where the data is shown —
-              the Settings footer alone doesn't satisfy that. Same wording as there. */}
-          <Text
-            style={styles.attribution}
+          {/* Compare selector: one segment per center holding a comparable cached forecast
+              (see compareOptions), the same system control the request builder's selectors
+              use. Only rendered when there's something to flip to; the meteogram's scroll
+              hold keeps the viewport on the same stretch of time across a swap. */}
+          {compareOptions.length > 1 && (
+            <View style={styles.compareRow}>
+              <SegmentedControl
+                values={compareOptions.map((o) => o.label)}
+                selectedIndex={compareOptions.findIndex((o) => o.slot.code === loadedSlot?.code)}
+                onChange={(e) => {
+                  const opt = compareOptions[e.nativeEvent.selectedSegmentIndex];
+                  if (opt && opt.slot.code !== loadedSlot?.code) loadCompare(opt.slot.encoded!);
+                }}
+              />
+            </View>
+          )}
+
+          {/* Zero-height marker for where the forecast display ends — the map's parking clamp
+              reads this y (forecastEnd). The attribution used to both credit and mark; it now
+              lives below Past forecasts, so only the marker stays. */}
+          <View
             onLayout={(e) => {
               const { y } = e.nativeEvent.layout;
               setForecastEnd((prev) => (prev === y ? prev : y));
             }}
-          >
-            Weather data provided by{' '}
-            <Text style={styles.attributionLink} onPress={() => Linking.openURL('https://open-meteo.com/')}>
-              Open-Meteo
-            </Text>.
-          </Text>
+          />
         </>
       )}
 
       {pastSection}
+
+      {/* Open-Meteo's data is CC BY 4.0, which asks for credit where the data is shown —
+          the Settings footer alone doesn't satisfy that. Same wording as there. */}
+      {decoded && (
+        <Text style={styles.attribution}>
+          Weather data provided by{' '}
+          <Text style={styles.attributionLink} onPress={() => Linking.openURL('https://open-meteo.com/')}>
+            Open-Meteo
+          </Text>.
+        </Text>
+      )}
 
       <HelpScreen visible={help} onClose={() => setHelp(false)} />
 
@@ -1988,6 +2061,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingTop: 10, gap: 10,
   },
+  compareRow: { marginTop: 10, marginHorizontal: 16 },
   segmentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   segment: {
     width: 24, height: 24,

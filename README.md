@@ -383,7 +383,8 @@ The Going Blue codec relies on the client and server having identical codebooks.
 #### In development: Codec v4 (App version 1.3.0)
 
  - Added Android support. 
- - Added model agreement. 
+ - Added a model agreement score for judging forecast confidence.
+ - Added a model comparison switch. 
 
 ## License
 
