@@ -2875,6 +2875,17 @@ function monotonicRange(knots: [input: number, output: number][]): { inputRange:
   return { inputRange, outputRange };
 }
 
+// Two messages tell the same forecast story when they start within an hour and sit on the same
+// spot (within ~1 km, equirectangular — exact enough at that radius). That's the
+// compare-forecasts case: a past forecast loaded against the current one, where the reader is
+// flipping between the two and the viewport should hold still instead of resetting.
+function comparableForecasts(a: ForecastMessage, b: ForecastMessage): boolean {
+  if (Math.abs(startDatetime(a).getTime() - startDatetime(b).getTime()) > 3600_000) return false;
+  const dLatKm = (a.lat - b.lat) * 111.32;
+  const dLonKm = (a.lon - b.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180);
+  return dLatKm * dLatKm + dLonKm * dLonKm <= 1;
+}
+
 function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, elevation, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint, scrollY, pinTop, msg }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
@@ -2895,10 +2906,39 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
 }) {
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<Tile>>(null);
+  const scrollOffsetRef = useRef(0); // mirrored from onScroll — see the Animated.event listener
   // A freshly loaded forecast starts at the beginning. The list persists across loads — blocks
   // re-render in place — so without this it would keep the previous forecast's scroll position,
   // which for a new message points at an unrelated stretch of time (or past the end entirely).
+  //
+  // The exception is loading a comparable forecast (same hour, same spot — see
+  // comparableForecasts): that's the compare case, and the viewport holds still IN TIME — the
+  // instant under the previous forecast's left edge is mapped through the new forecast's own
+  // layout — so the hold survives the two messages disagreeing on variables, period counts,
+  // or resolutions. Columns are equal-width per period, so offset ↔ time goes through each
+  // message's period starts and spans, piecewise-linearly within a period.
+  const prevRef = useRef<{ msg: ForecastMessage; dates: Date[]; steps: number[] } | null>(null);
   useEffect(() => {
+    const prev = prevRef.current;
+    prevRef.current = { msg, dates, steps };
+    if (prev && prev.msg !== msg && comparableForecasts(prev.msg, msg)) {
+      // 1. The time under the previous forecast's left edge.
+      const f = Math.max(0, scrollOffsetRef.current / CELL_W);
+      const i = Math.min(Math.floor(f), prev.dates.length - 1);
+      const leftMs = prev.dates[i].getTime() + (f - i) * prev.steps[i] * 3600_000;
+      // 2. That time's offset in the new forecast's layout (clamped to its window).
+      let offset = 0;
+      if (leftMs > dates[0].getTime()) {
+        let j = dates.length - 1;
+        for (let k = 0; k < dates.length; k++) {
+          if (leftMs < dates[k].getTime() + steps[k] * 3600_000) { j = k; break; }
+        }
+        const frac = Math.min(1, Math.max(0, (leftMs - dates[j].getTime()) / (steps[j] * 3600_000)));
+        offset = Math.min((j + frac) * CELL_W, Math.max(0, (periods.length - 1) * CELL_W));
+      }
+      flatListRef.current?.scrollToOffset({ offset, animated: false });
+      return;
+    }
     flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
   }, [msg]);
   const { width: winW, height: winH } = useWindowDimensions();
@@ -3154,7 +3194,15 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
         })}
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-          { useNativeDriver: true },
+          // The listener mirrors the native-driven value into a plain ref: the comparable-load
+          // scroll hold below needs to READ the current offset, which a native Animated.Value
+          // doesn't expose synchronously.
+          {
+            useNativeDriver: true,
+            listener: (e: { nativeEvent: { contentOffset: { x: number } } }) => {
+              scrollOffsetRef.current = e.nativeEvent.contentOffset.x;
+            },
+          },
         )}
         renderItem={renderTile}
       />
