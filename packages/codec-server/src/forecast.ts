@@ -1,8 +1,8 @@
 import {
   MODEL_BIT,
   ALWAYS_VARS,
-  CONFIGURABLE_VAR_GROUPS,
-  VAR_GROUP_CODES,
+  VAR_CODES,
+  VAR_CODE_CHARS,
   VAR,
   VARIABLES,
   type Variable,
@@ -129,7 +129,7 @@ export const CLOUD_BAND_FETCH_VARS = [...CLOUD_BAND_RH_VARS, ...CLOUD_BAND_HEIGH
 
 // Matches a `v:` value written as bare group codes rather than variable names. Built from the
 // group table so it stays in step with it; the codes are all regex-safe single characters.
-const COMPACT_VAR_CODES = new RegExp(`^[${VAR_GROUP_CODES}]+$`);
+const COMPACT_VAR_CODES = new RegExp(`^[${VAR_CODE_CHARS}]+$`);
 
 // Long-form `v:` values: the canonical variable names.
 const VAR_NAMES = new Set<string>(VARIABLES);
@@ -1156,11 +1156,11 @@ export function parseRequest(body: string): ForecastParams {
         // produced by older clients.
         const requestedVars = COMPACT_VAR_CODES.test(val) ? [...val] : val.split(",");
         for (const v of requestedVars) {
-          const group = CONFIGURABLE_VAR_GROUPS[
-            v as keyof typeof CONFIGURABLE_VAR_GROUPS
+          const variable = VAR_CODES[
+            v as keyof typeof VAR_CODES
           ];
-          if (group) {
-            for (const variable of group) vars.add(variable);
+          if (variable) {
+            vars.add(variable);
           } else if (VAR_NAMES.has(v)) {
             vars.add(v as Variable);
           } else {

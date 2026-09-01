@@ -11,7 +11,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
   VAR, type Variable, WIRE_VERSION,
-  ALWAYS_VARS, CONFIGURABLE_VAR_GROUPS, MODEL_BIT,
+  ALWAYS_VARS, VAR_CODES, MODEL_BIT,
   WIND_LEVELS_HPA, WIND_LEVEL_VARS, varGroupCodesFor, windLevelsToken,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE, MODE_NAMES, DEFAULT_MODE,
   predictCenter, estimatedLastFullRunMs, FILL_SLOTS, multiMessageOffered, startDatetime,
@@ -178,7 +178,7 @@ interface VarGroup {
 // unambiguous, and the scale it's read on is settled in Settings.
 const VAR_GROUPS: VarGroup[] = [
   {
-    value: 'clouds', code: 'c', label: 'Detailed Clouds', vars: CONFIGURABLE_VAR_GROUPS.c,
+    value: 'clouds', code: 'c', label: 'Detailed Clouds', vars: [VAR_CODES.c],
     desc: 'Cloud cover at 8 different levels of the atmosphere.',
   },
   // One row per pressure level, highest first. The label is the level's rung on the cloud
@@ -192,70 +192,70 @@ const VAR_GROUPS: VarGroup[] = [
     desc: `Wind speed and direction at the ${hpa} hPa pressure level.`,
   })),
   {
-    value: 'freeze', code: 'f', label: 'Freezing Level', vars: CONFIGURABLE_VAR_GROUPS.f,
+    value: 'freeze', code: 'f', label: 'Freezing Level', vars: [VAR_CODES.f],
     desc: 'Altitude at which atmospheric temperature drops to 0°C.',
   },
   {
-    value: 'precip', code: 'p', label: 'Precip Chance', vars: CONFIGURABLE_VAR_GROUPS.p,
+    value: 'precip', code: 'p', label: 'Precip Chance', vars: [VAR_CODES.p],
     desc: 'Chance of measurable precipitation during the period.',
   },
   {
-    value: 'aqi', code: 'a', label: 'AQI (Dominant pollutant)', vars: CONFIGURABLE_VAR_GROUPS.a,
+    value: 'aqi', code: 'a', label: 'AQI (Dominant pollutant)', vars: [VAR_CODES.a],
     subgroup: AIR_SUBGROUP, scale: 'us',
     desc: 'Index of the worst pollutant out of PM2.5, PM10, ozone, NO₂, and SO₂.',
   },
   {
-    value: 'smoke', code: 's', label: 'PM2.5 (Smoke)', vars: CONFIGURABLE_VAR_GROUPS.s,
+    value: 'smoke', code: 's', label: 'PM2.5 (Smoke)', vars: [VAR_CODES.s],
     subgroup: AIR_SUBGROUP, scale: 'us',
     desc: 'Fine-particulate pollution from wildfire smoke and haze.',
   },
   {
-    value: 'pm10', code: 'm', label: 'PM10 (Dust)', vars: CONFIGURABLE_VAR_GROUPS.m,
+    value: 'pm10', code: 'm', label: 'PM10 (Dust)', vars: [VAR_CODES.m],
     subgroup: AIR_SUBGROUP, scale: 'us',
     desc: 'Coarse particulates like blowing dust, pollen, and road grit.',
   },
   {
-    value: 'ozone', code: 'o', label: 'Ozone (Smog)', vars: CONFIGURABLE_VAR_GROUPS.o,
+    value: 'ozone', code: 'o', label: 'Ozone (Smog)', vars: [VAR_CODES.o],
     subgroup: AIR_SUBGROUP, scale: 'us',
     desc: 'Summer smog, which peaks in the afternoon.',
   },
   {
-    value: 'no2', code: 'd', label: 'NO₂ (Traffic)', vars: CONFIGURABLE_VAR_GROUPS.d,
+    value: 'no2', code: 'd', label: 'NO₂ (Traffic)', vars: [VAR_CODES.d],
     subgroup: AIR_SUBGROUP, scale: 'us',
     desc: 'Combustion exhaust, worst near busy roads at rush hour.',
   },
   {
-    value: 'so2', code: 'u', label: 'SO₂ (Industrial/Volcanic)', vars: CONFIGURABLE_VAR_GROUPS.u,
+    value: 'so2', code: 'u', label: 'SO₂ (Industrial/Volcanic)', vars: [VAR_CODES.u],
     subgroup: AIR_SUBGROUP, scale: 'us',
     desc: 'Smelters, coal plants, ship fuel, and volcanic vents.',
   },
   {
-    value: 'aqi-eu', code: 'e', label: 'AQI (Dominant pollutant)', vars: CONFIGURABLE_VAR_GROUPS.e,
+    value: 'aqi-eu', code: 'e', label: 'AQI (Dominant pollutant)', vars: [VAR_CODES.e],
     subgroup: AIR_SUBGROUP, scale: 'eu',
     desc: 'Index of the worst pollutant out of PM2.5, PM10, ozone, NO₂, and SO₂.',
   },
   {
-    value: 'smoke-eu', code: '2', label: 'PM2.5 (Smoke)', vars: CONFIGURABLE_VAR_GROUPS['2'],
+    value: 'smoke-eu', code: '2', label: 'PM2.5 (Smoke)', vars: [VAR_CODES['2']],
     subgroup: AIR_SUBGROUP, scale: 'eu',
     desc: 'Fine-particulate pollution from wildfire smoke and haze.',
   },
   {
-    value: 'pm10-eu', code: '1', label: 'PM10 (Dust)', vars: CONFIGURABLE_VAR_GROUPS['1'],
+    value: 'pm10-eu', code: '1', label: 'PM10 (Dust)', vars: [VAR_CODES['1']],
     subgroup: AIR_SUBGROUP, scale: 'eu',
     desc: 'Coarse particulates like blowing dust, pollen, and road grit.',
   },
   {
-    value: 'ozone-eu', code: '3', label: 'Ozone (Smog)', vars: CONFIGURABLE_VAR_GROUPS['3'],
+    value: 'ozone-eu', code: '3', label: 'Ozone (Smog)', vars: [VAR_CODES['3']],
     subgroup: AIR_SUBGROUP, scale: 'eu',
     desc: 'Summer smog, which peaks in the afternoon. This scale\'s most common worst pollutant.',
   },
   {
-    value: 'no2-eu', code: 'n', label: 'NO₂ (Traffic)', vars: CONFIGURABLE_VAR_GROUPS.n,
+    value: 'no2-eu', code: 'n', label: 'NO₂ (Traffic)', vars: [VAR_CODES.n],
     subgroup: AIR_SUBGROUP, scale: 'eu',
     desc: 'Combustion exhaust, worst near busy roads at rush hour.',
   },
   {
-    value: 'so2-eu', code: 'q', label: 'SO₂ (Industrial/Volcanic)', vars: CONFIGURABLE_VAR_GROUPS.q,
+    value: 'so2-eu', code: 'q', label: 'SO₂ (Industrial/Volcanic)', vars: [VAR_CODES.q],
     subgroup: AIR_SUBGROUP, scale: 'eu',
     desc: 'Smelters, coal plants, ship fuel, and volcanic vents.',
   },

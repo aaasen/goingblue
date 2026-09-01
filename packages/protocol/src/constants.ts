@@ -186,39 +186,39 @@ export function windLevelVar(ch: string): Variable | null {
 // user-configurable additions, which keeps the satellite message body as short as possible.
 export const ALWAYS_VARS: readonly Variable[] = [VAR.temp, VAR.snow, VAR.rain, VAR.wind, VAR.gust];
 
-// Single-character request codes for the user-configurable variable groups. A group is however
-// many protocol variables one toggle turns on together; every group is a single variable
-// today. Every air-quality index is its own toggle: the pollutants behave differently enough
-// (smoke vs photochemical smog vs traffic NO2) that a reader wants them separately, and each
-// costs its own share of the message budget. Pressure-level wind is not a group: its levels
-// travel in the `w:` token (windLevelsToken), one ladder index per selected level.
-export const CONFIGURABLE_VAR_GROUPS = {
-  p: [VAR.precip],
-  c: [VAR.clouds],
-  f: [VAR.freeze],
-  a: [VAR.aqi],           // US Air Quality Index
-  s: [VAR.aq_pm25],       // smoke
-  o: [VAR.aq_o3],         // ozone
-  m: [VAR.aq_pm10],       // US PM10 sub-index
-  d: [VAR.aq_no2],        // US nitrogen dioxide sub-index
-  u: [VAR.aq_so2],        // US sulphur dioxide sub-index
-  e: [VAR.aqi_eu],        // European AQI
-  "2": [VAR.aqi_eu_pm25], // European PM2.5 sub-index
-  "1": [VAR.aqi_eu_pm10], // European PM10 sub-index
-  n: [VAR.aqi_eu_no2],    // European nitrogen dioxide sub-index
-  "3": [VAR.aqi_eu_o3],   // European ozone sub-index
-  q: [VAR.aqi_eu_so2],    // European sulphur dioxide sub-index
+// Single-character request codes for the user-configurable variables; each code toggles exactly
+// one protocol variable. Every air-quality index is its own toggle: the pollutants behave
+// differently enough (smoke vs photochemical smog vs traffic NO2) that a reader wants them
+// separately, and each costs its own share of the message budget. Pressure-level wind has no
+// code here: its levels travel in the `w:` token (windLevelsToken), one ladder index per
+// selected level.
+export const VAR_CODES = {
+  p: VAR.precip,
+  c: VAR.clouds,
+  f: VAR.freeze,
+  a: VAR.aqi,           // US Air Quality Index
+  s: VAR.aq_pm25,       // smoke
+  o: VAR.aq_o3,         // ozone
+  m: VAR.aq_pm10,       // US PM10 sub-index
+  d: VAR.aq_no2,        // US nitrogen dioxide sub-index
+  u: VAR.aq_so2,        // US sulphur dioxide sub-index
+  e: VAR.aqi_eu,        // European AQI
+  "2": VAR.aqi_eu_pm25, // European PM2.5 sub-index
+  "1": VAR.aqi_eu_pm10, // European PM10 sub-index
+  n: VAR.aqi_eu_no2,    // European nitrogen dioxide sub-index
+  "3": VAR.aqi_eu_o3,   // European ozone sub-index
+  q: VAR.aqi_eu_so2,    // European sulphur dioxide sub-index
 } as const;
 
 // The request codes above, as a character class for the compact `v:` token (`v:aso`). Derived
-// rather than written out so a new group can't be added without the parser accepting it.
-export const VAR_GROUP_CODES = Object.keys(CONFIGURABLE_VAR_GROUPS).join("");
+// rather than written out so a new code can't be added without the parser accepting it.
+export const VAR_CODE_CHARS = Object.keys(VAR_CODES).join("");
 
-// A selection's `v:` token value: the code of every group whose variables are all selected.
-// Emitted in group-table order; the server unions the codes, so order carries no meaning.
+// A selection's `v:` token value: the code of every selected variable. Emitted in table order;
+// the server unions the codes, so order carries no meaning.
 export function varGroupCodesFor(vars: ReadonlySet<Variable>): string {
-  return Object.entries(CONFIGURABLE_VAR_GROUPS)
-    .filter(([, groupVars]) => groupVars.every((v) => vars.has(v)))
+  return Object.entries(VAR_CODES)
+    .filter(([, variable]) => vars.has(variable))
     .map(([code]) => code)
     .join("");
 }
