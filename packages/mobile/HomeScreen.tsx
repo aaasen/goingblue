@@ -1254,35 +1254,46 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // Cached forecasts comparable to the one on screen — same request hour, same spot (within
   // ~1 km), the same rule the meteogram's scroll hold uses — so flipping between takes on the
   // same weather window is one tap under the meteogram. One segment per distinct look: the
-  // center's short name plus the optional-variable icons ("US +☁️💨"), so two requests to the
+  // center's short name plus its optional-variable count ("US +2"), so two requests to the
   // same center with different variables compare as easily as two centers. Behind one label,
   // the most recent response wins — except the loaded slot, which always keeps its segment so
-  // exactly one is selected.
+  // exactly one is selected. Ordering is fixed (center, then count) and never depends on which
+  // segment is selected.
   const kmApart = (a: Slot['context'], b: Slot['context']) => {
     const dLat = (a.lat - b.lat) * 111.32;
     const dLon = (a.lon - b.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180);
     return Math.sqrt(dLat * dLat + dLon * dLon);
   };
+  const optionalVarCount = (vars: ReadonlySet<Variable>) => {
+    let n = 0;
+    for (const v of vars) if (!ALWAYS_VARS.includes(v)) n++;
+    return n;
+  };
   const compareRef = loadedSlot?.context;
   const compareOptions = (() => {
     if (!compareRef) return [] as { label: string; slot: Slot }[];
-    const byLabel = new Map<string, { label: string; slot: Slot }>();
+    // Segments sit in the order their forecasts were first requested — the order the reader
+    // built the comparison in — which stays put however the selection moves (`order` is the
+    // label's earliest request, so a newer response re-winning a label doesn't reseat it).
+    const byLabel = new Map<string, { label: string; order: number; slot: Slot }>();
     for (const s of cache) {
       if (!s.encoded) continue;
       if (Math.abs(s.context.start - compareRef.start) > 3600_000) continue;
       if (kmApart(s.context, compareRef) > 1) continue;
-      const icons = variableIconsFor(s.context.vars).map((i) => i.symbol).join('');
+      const count = optionalVarCount(s.context.vars);
       const base = COMPARE_MODEL_LABELS[s.context.model] ?? '?';
-      const label = icons ? `${base} +${icons}` : base;
+      const label = count ? `${base} +${count}` : base;
       const held = byLabel.get(label);
       const heldIsLoaded = held?.slot.code === loadedSlot!.code;
+      const order = Math.min(held?.order ?? Infinity, s.requestedAt);
       if (!held || (!heldIsLoaded && (s.code === loadedSlot!.code
         || (s.savedAt ?? 0) > (held.slot.savedAt ?? 0)))) {
-        byLabel.set(label, { label, slot: s });
+        byLabel.set(label, { label, order, slot: s });
+      } else {
+        held.order = order;
       }
     }
-    return [...byLabel.values()].sort((a, b) =>
-      a.slot.context.model - b.slot.context.model || a.label.localeCompare(b.label));
+    return [...byLabel.values()].sort((a, b) => a.order - b.order);
   })();
 
   const pastSection = (
