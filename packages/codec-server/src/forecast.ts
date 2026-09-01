@@ -55,10 +55,11 @@ interface CenterSources {
   freeze: boolean;
 }
 const CENTERS: Record<string, CenterSources> = {
-  BEST: { surface: "best_match",   pressure: "best_match",   freeze: true },
-  US:   { surface: "gfs_seamless", pressure: "gfs_seamless", freeze: true },
-  CA:   { surface: "gem_seamless", pressure: "gem_seamless", freeze: false },
-  EU:   { surface: "ecmwf_ifs",    pressure: "ecmwf_ifs025", freeze: false },
+  BEST: { surface: "best_match",    pressure: "best_match",    freeze: true },
+  US:   { surface: "gfs_seamless",  pressure: "gfs_seamless",  freeze: true },
+  CA:   { surface: "gem_seamless",  pressure: "gem_seamless",  freeze: false },
+  EU:   { surface: "ecmwf_ifs",     pressure: "ecmwf_ifs025",  freeze: false },
+  DE:   { surface: "icon_seamless", pressure: "icon_seamless", freeze: true },
 };
 
 interface NamedLocation { lat: number; lon: number; tz: string; elev_m: number }
@@ -91,6 +92,7 @@ const MODEL_NAME_TO_BIT: Record<string, number> = {
   us: MODEL_BIT["US"],
   ca: MODEL_BIT["CA"],
   eu: MODEL_BIT["EU"],
+  de: MODEL_BIT["DE"],
 };
 
 const SURFACE_VARS = [
@@ -1337,8 +1339,8 @@ function resolveLocation(params: ForecastParams): { lat: number; lon: number; el
 
 // A response carries exactly one model (the decoder assumes nModels=1), so take the first
 // requested model bit only.
-function firstModelKey(modelsMask: number): "BEST" | "US" | "CA" | "EU" {
-  const modelKeys = (["BEST", "US", "CA", "EU"] as const).filter(
+function firstModelKey(modelsMask: number): "BEST" | "US" | "CA" | "EU" | "DE" {
+  const modelKeys = (["BEST", "US", "CA", "EU", "DE"] as const).filter(
     (_, bit) => modelsMask & (1 << bit),
   );
   return modelKeys[0] ?? "BEST";

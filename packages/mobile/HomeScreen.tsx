@@ -99,6 +99,7 @@ const MODEL_UNAVAIL_VARS: Record<string, Variable[]> = {
   us: [],
   ca: [VAR.freeze],
   eu: [VAR.freeze],
+  de: [],
 };
 
 type LocationMode = 'current' | 'custom';
@@ -122,11 +123,12 @@ const MODEL_INFO = [
   { name: '🇺🇸 US', desc: 'Blend of HRRR (3km, 48hr, continental US) and GFS (13km, 16 day, global).' },
   { name: '🇨🇦 CA', desc: 'Blend of HRDPS (2.5km, 48hr, Canada) and GEM (15km, 10 day, global).' },
   { name: '🇪🇺 EU', desc: 'IFS HRES (9km, 15 day, global).' },
+  { name: '🇩🇪 DE', desc: 'Blend of ICON-D2 (2km, 48hr, central Europe), ICON-EU (7km, 5 day, Europe), and ICON (13km, 7 day, global).' },
 ];
 const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 
 // Compare-pill names by MODEL_BIT index — the short center names, matching the selector above.
-const COMPARE_MODEL_LABELS = ['Auto', 'US', 'CA', 'EU'];
+const COMPARE_MODEL_LABELS = ['Auto', 'US', 'CA', 'EU', 'DE'];
 
 // Kilometres between two coordinates — equirectangular, exact enough at the ~1 km radii the
 // comparable-forecast rules use (the compare selector and the map's remount key).

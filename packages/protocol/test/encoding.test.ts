@@ -521,8 +521,8 @@ describe("round-trip encoding", () => {
     expect(decoded.periodHours).toEqual(Array(58).fill(1));
   });
 
-  it("round-trips each of the four model indices (single model per response)", () => {
-    for (let idx = 0; idx < 4; idx++) {
+  it("round-trips each of the five model indices (single model per response)", () => {
+    for (let idx = 0; idx < 5; idx++) {
       const decoded = roundTrip(msg({ models_mask: 1 << idx, periods: [Array(5).fill(PERIOD)] }));
       expect(decoded.models_mask).toBe(1 << idx);
       expect(decoded.periods).toHaveLength(1);

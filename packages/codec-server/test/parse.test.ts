@@ -15,6 +15,7 @@ const BEST = 1 << MODEL_BIT["BEST"];
 const US   = 1 << MODEL_BIT["US"];
 const CA   = 1 << MODEL_BIT["CA"];
 const EU   = 1 << MODEL_BIT["EU"];
+const DE   = 1 << MODEL_BIT["DE"];
 
 describe("parseRequest", () => {
   it("defaults: Auto priority, UTC grid, Best Match, always-on vars, location 0", () => {
@@ -76,6 +77,7 @@ describe("parseRequest", () => {
     expect(parseRequest("m:us").modelsMask).toBe(US);
     expect(parseRequest("m:ca").modelsMask).toBe(CA);
     expect(parseRequest("m:eu").modelsMask).toBe(EU);
+    expect(parseRequest("m:de").modelsMask).toBe(DE);
   });
 
   it("m: legacy model-name tokens are rejected (mask keeps the default)", () => {
@@ -139,7 +141,7 @@ describe("parseRequest", () => {
   it("air quality is available on every center — it doesn't come from the weather model", () => {
     // CAMS serves it whatever the `m:` choice is, so unlike the freezing level it is never
     // dropped for GEM or ECMWF.
-    for (const center of ["best", "us", "ca", "eu"]) {
+    for (const center of ["best", "us", "ca", "eu", "de"]) {
       expect(parseRequest(`m:${center} v:a`).vars.has(VAR.aqi)).toBe(true);
     }
   });
@@ -366,6 +368,7 @@ describe("describeRequest", () => {
   it("names the requested models", () => {
     expect(describe_("").models).toEqual(["best"]);
     expect(describe_("m:us,eu").models).toEqual(["us", "eu"]);
+    expect(describe_("m:de").models).toEqual(["de"]);
   });
 
   it("names the variables, always-on ones included", () => {

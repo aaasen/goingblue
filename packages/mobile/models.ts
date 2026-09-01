@@ -1,15 +1,16 @@
 import { MODEL_BIT } from '@weather/protocol';
 
-// `value` uppercases to a MODEL_BIT key (BEST/US/CA/EU); it's also the `m:` request token.
+// `value` uppercases to a MODEL_BIT key (BEST/US/CA/EU/DE); it's also the `m:` request token.
 // Labels pair a flag emoji with a short abbreviation so the model selector fits without
 // clipping: 🌐 Auto = best match (auto-pick across centers, no single country), then the
-// US / Canadian / European centers. On Android, where flag emojis fall back to letters,
-// the abbreviation keeps the label readable.
+// US / Canadian / European / German centers. On Android, where flag emojis fall back to
+// letters, the abbreviation keeps the label readable.
 export const MODELS = [
   { value: 'best', label: '🌐 Auto' },
   { value: 'us', label: '🇺🇸 US' },
   { value: 'ca', label: '🇨🇦 CA' },
   { value: 'eu', label: '🇪🇺 EU' },
+  { value: 'de', label: '🇩🇪 DE' },
 ];
 
 export function modelLabelsFromMask(mask: number): string[] {

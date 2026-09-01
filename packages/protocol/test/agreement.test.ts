@@ -37,38 +37,40 @@ const ctxOf = (m: ForecastMessage): RequestContext => ({
 const roundTrip = (m: ForecastMessage) => messageFromString(messageToString(m), () => ctxOf(m));
 
 describe("model agreement column", () => {
-  it("round-trips all three pair levels under best_match", () => {
-    const levels = [[0, 1, 2], [3, 2, 1], [2, 2, 0]];
+  it("round-trips all four pair levels under best_match", () => {
+    const levels = [[0, 1, 2, 3], [3, 2, 1, 0], [2, 2, 0, 1]];
     const decoded = roundTrip(msg(3, 0b0001, levels));
     decoded.periods[0].forEach((p, i) => expect(p.agreement).toEqual(levels[i]));
   });
 
   it("never carries the served center's own pair", () => {
     // Served US (bit 1): the US slot decodes null whatever the encoder was handed.
-    const decoded = roundTrip(msg(3, 0b0010, [[3, 1, 2], [3, 2, 1], [3, 0, 0]]));
+    const decoded = roundTrip(msg(3, 0b0010, [[3, 1, 2, 0], [3, 2, 1, 0], [3, 0, 0, 0]]));
     decoded.periods[0].forEach((p) => expect(p.agreement![0]).toBeNull());
-    expect(decoded.periods[0][0].agreement).toEqual([null, 1, 2]);
+    expect(decoded.periods[0][0].agreement).toEqual([null, 1, 2, 0]);
   });
 
   it("codes a null level inside the horizon as no-data and restores it", () => {
-    const decoded = roundTrip(msg(3, 0b0001, [[2, null, 3], [2, null, 3], [2, null, 3]]));
-    decoded.periods[0].forEach((p) => expect(p.agreement).toEqual([2, null, 3]));
+    const decoded = roundTrip(msg(3, 0b0001, [[2, null, 3, 1], [2, null, 3, 1], [2, null, 3, 1]]));
+    decoded.periods[0].forEach((p) => expect(p.agreement).toEqual([2, null, 3, 1]));
   });
 
   it("clamps each pair at its center's horizon with zero wire bits", () => {
-    // 26 × 12h = 312h: CA (240h) covers the first 20 periods, US/EU the whole window.
+    // 26 × 12h = 312h: DE (180h) covers the first 15 periods, CA (240h) the first 20, US/EU
+    // the whole window.
     const n = 26;
-    const levels = Array.from({ length: n }, () => [1, 2, 3]);
+    const levels = Array.from({ length: n }, () => [1, 2, 3, 0]);
     const decoded = roundTrip(msg(n, 0b0001, levels));
     decoded.periods[0].forEach((p, i) => {
-      expect(p.agreement).toEqual(i < 20 ? [1, 2, 3] : [1, null, 3]);
+      expect(p.agreement).toEqual([1, i < 20 ? 2 : null, 3, i < 15 ? 0 : null]);
     });
-    // The clamp is derived, not sent: the CA series simply stops.
+    // The clamp is derived, not sent: each series simply stops.
     expect(agreementPeriodCount(Array(n).fill(12), AGREEMENT_CENTERS[1].horizonHours)).toBe(20);
+    expect(agreementPeriodCount(Array(n).fill(12), AGREEMENT_CENTERS[3].horizonHours)).toBe(15);
   });
 
   it("omits the column entirely when the variable is not requested", () => {
-    const m = msg(3, 0b0001, [[0, 0, 0], [0, 0, 0], [0, 0, 0]]);
+    const m = msg(3, 0b0001, [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]);
     const without = { ...m, vars: new Set(ALWAYS_VARS) as ReadonlySet<Variable> };
     const decoded = messageFromString(messageToString(without), () => ctxOf(without));
     decoded.periods[0].forEach((p) => expect(p.agreement).toBeUndefined());
@@ -79,8 +81,9 @@ describe("model agreement column", () => {
   });
 
   it("derives pairs and buckets identically to the constants", () => {
-    expect(agreementPairIdxs(0b0001)).toEqual([0, 1, 2]); // best_match: all three
-    expect(agreementPairIdxs(0b1000)).toEqual([0, 1]);    // EU served: US + CA
+    expect(agreementPairIdxs(0b0001)).toEqual([0, 1, 2, 3]); // best_match: all four
+    expect(agreementPairIdxs(0b1000)).toEqual([0, 1, 3]);    // EU served: US + CA + DE
+    expect(agreementPairIdxs(0b10000)).toEqual([0, 1, 2]);   // DE served: US + CA + EU
     expect(agreementLeadBucket(0)).toBe(0);
     expect(agreementLeadBucket(47)).toBe(0);
     expect(agreementLeadBucket(48)).toBe(1);

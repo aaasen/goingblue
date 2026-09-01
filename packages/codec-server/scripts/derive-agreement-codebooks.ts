@@ -25,7 +25,7 @@ import { runStandalone, type CellCounter, type DerivedTables } from "./derive-li
 
 // The served side of every training pair: production's default center.
 const SERVED_SOURCE = "best_match";
-const CENTER_SOURCES = ["gfs_seamless", "gem_seamless", "ecmwf_ifs"]; // AGREEMENT_CENTERS order
+const CENTER_SOURCES = ["gfs_seamless", "gem_seamless", "ecmwf_ifs", "icon_seamless"]; // AGREEMENT_CENTERS order
 const VARS = [
   "temperature_2m", "wind_speed_10m", "wind_direction_10m",
   "rain", "showers", "snowfall",

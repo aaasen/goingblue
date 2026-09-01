@@ -84,12 +84,13 @@ export const TABLE_RES_IDXS = [1, 2, 3, 4] as const;
 // maps to an Open-Meteo _seamless family (or, for Europe, HRES surface + IFS 0.25° pressure
 // levels) so the label stays valid when an upstream model is swapped out. Best Match is the
 // default (bit 0): Open-Meteo picks the highest-resolution model available for the location.
-export const MODEL_BIT: Record<string, number> = { BEST: 0, US: 1, CA: 2, EU: 3 };
+export const MODEL_BIT: Record<string, number> = { BEST: 0, US: 1, CA: 2, EU: 3, DE: 4 };
 export const MODEL_NAMES: string[] = [
   "Auto",
   "American (NOAA)",
   "Canadian (GEM)",
   "European (ECMWF)",
+  "German (DWD)",
 ];
 
 // ── Model agreement (VAR.agreement) ─────────────────────────────────────────────
@@ -98,13 +99,14 @@ export const MODEL_NAMES: string[] = [
 // clamp (like AQ_HORIZON_HOURS in wire.ts) — periods whose start offset reaches a center's
 // horizon carry no symbols for that pair, derived identically on both sides from the layout.
 // The pair whose center IS the served model is never carried (agreementPairs in wire.ts); the
-// default best_match serve carries all three. Horizons are hours from the FIRST PERIOD's start,
+// default best_match serve carries all four. Horizons are hours from the FIRST PERIOD's start,
 // deliberately inside each center's real reach; a ragged upstream edge inside the clamp falls
 // back to the no-data symbol (AGREEMENT_NO_DATA in entropy.ts).
 export const AGREEMENT_CENTERS = [
   { bit: 1, label: "US", horizonHours: 16 * 24 }, // MODEL_BIT.US — GFS seamless
   { bit: 2, label: "CA", horizonHours: 10 * 24 }, // MODEL_BIT.CA — GEM seamless
   { bit: 3, label: "EU", horizonHours: 15 * 24 }, // MODEL_BIT.EU — ECMWF IFS
+  { bit: 4, label: "DE", horizonHours: 180 }, // MODEL_BIT.DE — DWD ICON seamless
 ] as const;
 
 // The wire's four agreement levels (0 = strong disagreement .. 3 = strong agreement), cut from

@@ -21,6 +21,15 @@ describe("fillSlotsFor", () => {
     expect(fillSlotsFor(MODEL_BIT.CA, utcHourAtLocal(23, 0), 0)).toBe(10);
   });
 
+  it("counts the day slots whose end lies within DWD's guaranteed reach", () => {
+    // 164h from local hour 0 ends 20h into day 6, so 6 whole slots; a request at local hour 4
+    // or later reaches the end of slot 6, the 7th.
+    expect(fillSlotsFor(MODEL_BIT.DE, utcHourAtLocal(0, 0), 0)).toBe(6);
+    expect(fillSlotsFor(MODEL_BIT.DE, utcHourAtLocal(3, 0), 0)).toBe(6);
+    expect(fillSlotsFor(MODEL_BIT.DE, utcHourAtLocal(4, 0), 0)).toBe(7);
+    expect(fillSlotsFor(MODEL_BIT.DE, utcHourAtLocal(23, 0), 0)).toBe(7);
+  });
+
   it("computes the local hour through the UTC offset, including negative offsets", () => {
     for (const offset of [-9, -1, 0, 5, 14]) {
       expect(fillSlotsFor(MODEL_BIT.CA, utcHourAtLocal(18, offset), offset)).toBe(9);
@@ -93,6 +102,12 @@ describe("which centers fall short of the window", () => {
     const gem = [MODELS.gem_hrdps_continental, MODELS.gem_regional, MODELS.gem_global];
     expect(FILL_REACH_HOURS[MODEL_BIT.CA]).toBeLessThanOrEqual(guaranteedReach(gem));
     expect(guaranteedReach(gem)).toBeLessThan(WINDOW_HOURS);
+  });
+
+  it("DWD's frozen reach is still guaranteed by its models", () => {
+    const icon = [MODELS.icon_d2, MODELS.icon_eu, MODELS.icon_global];
+    expect(FILL_REACH_HOURS[MODEL_BIT.DE]).toBeLessThanOrEqual(guaranteedReach(icon));
+    expect(guaranteedReach(icon)).toBeLessThan(WINDOW_HOURS);
   });
 
   it("NOAA and ECMWF still clear it", () => {

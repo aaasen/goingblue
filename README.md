@@ -16,7 +16,7 @@ Going Blue is a weather app designed specifically for satellite messengers. It w
 - Uses a custom compression codec optimized for weather data that packs hundreds of data points into a single message. Choose between hourly detail and extended range up to 13 days.
 - Temperature, snow, rain, wind, and cloud cover included by default. Optional variables include pressure-level winds for high-altitude mountaineering, AQI for planning around wildfire smoke, detailed cloud cover with 8 levels, and freezing level.
 - Weather forecasts from over 30 models including HRRR (3km), HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for your location.
-- Compare forecasts from American, Canadian, and European forecast centers.
+- Compare forecasts from American, Canadian, European, and German forecast centers.
 - All forecasts are saved on your device for comparing multiple models and past forecasts.
 
 ## Architecture

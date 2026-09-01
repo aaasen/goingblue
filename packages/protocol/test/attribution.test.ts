@@ -69,6 +69,15 @@ describe("center stacks", () => {
   it("EU is IFS HRES everywhere", () => {
     expect(predictCenter("eu", -49.272, -73.042).models.map((m) => m.id)).toEqual(["ecmwf_ifs"]);
   });
+
+  it("DE is the ICON ladder in the Alps, ICON global alone at Denali", () => {
+    expect(predictCenter("de", 45.923, 6.87).models.map((m) => m.id)).toEqual([
+      "icon_d2",
+      "icon_eu",
+      "icon_global",
+    ]);
+    expect(predictCenter("de", 63.069, -151.003).models.map((m) => m.id)).toEqual(["icon_global"]);
+  });
 });
 
 describe("attributeHour", () => {

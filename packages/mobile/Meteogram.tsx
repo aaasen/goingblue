@@ -298,6 +298,7 @@ const MODEL_COLORS: Record<string, string> = {
   'American (NOAA)': '#2a8f5a',
   'Canadian (GEM)': '#c0102a',
   'European (ECMWF)': '#7040b0',
+  'German (DWD)': '#b07a10',
 };
 
 // The selector option each display name stands for, which is what the model row is attributed
@@ -307,6 +308,7 @@ const MODEL_CENTERS: Record<string, Center> = {
   'American (NOAA)': 'us',
   'Canadian (GEM)': 'ca',
   'European (ECMWF)': 'eu',
+  'German (DWD)': 'de',
 };
 
 // ── Weather code classification ──────────────────────────────────────────--

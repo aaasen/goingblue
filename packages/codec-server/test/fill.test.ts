@@ -452,4 +452,36 @@ describe("fitFillToBudget", () => {
       }
     });
   });
+
+  // Same fix for the shortest center: ICON's data stops ~7 days out (180h runs, 12h apart,
+  // ~4h delay), and DWD keeps the freezing level, so the full variable set rides the capped
+  // ladder.
+  describe("a German request", () => {
+    const lastHourWithData = REQ_UTC_HOUR + (180 - 12 - 4);
+    const iconLike: HourlyData = {
+      ...HOURLY,
+      temperature_2m: HOURLY.temperature_2m.map(
+        (v, i) => (DATA_START + i <= lastHourWithData ? v : null)),
+    };
+    const deEncode = (mode: number) => {
+      const p = params({ mode, modelsMask: 1 << MODEL_BIT.DE });
+      return (seq: number) =>
+        encodeFillSeq(iconLike, TIMES, p, seq, p.lat!, p.lon!, 500, "DE", codec);
+    };
+    const deCtx = (mode: number): RequestContext => ({ ...ctxFor(mode), model: MODEL_BIT.DE });
+    const slots = fillSlotsFor(MODEL_BIT.DE, REQ_UTC_HOUR, UTC_OFFSET);
+
+    it("reaches every mode's capped top on an internet-scale budget", () => {
+      expect(slots).toBe(7); // 13:00 local: 164h ends 15h short of slot 7's end
+      for (const mode of MODES) {
+        const top = maxFillSeq(mode, slots);
+        const encoded = fitFillToBudget(deEncode(mode), (e) => e.length, top, 100000)!;
+        const decoded = decodeMessage(encoded, () => deCtx(mode));
+        expect(decoded.seq, `mode ${mode}`).toBe(top);
+        expect(decoded.periodHours).toEqual(
+          layoutFor(mode, REQ_UTC_HOUR, UTC_OFFSET, top, slots).periodHours);
+        expect(decoded.periodHours!.filter((ph) => ph === 1).length).toBeGreaterThan(24);
+      }
+    });
+  });
 });

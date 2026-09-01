@@ -1,7 +1,8 @@
 /**
  * Predicts which weather model Open-Meteo serves for a given coordinate and forecast hour, for
- * each of the app's model-selector options: `best` (best_match) and the US/CA/EU center stacks
- * (gfs_seamless / gem_seamless / ecmwf_ifs — see codec-server MODEL_CONFIG). Open-Meteo does
+ * each of the app's model-selector options: `best` (best_match) and the US/CA/EU/DE center
+ * stacks (gfs_seamless / gem_seamless / ecmwf_ifs / icon_seamless — see codec-server
+ * MODEL_CONFIG). Open-Meteo does
  * not expose this; it is inferred by replicating the server's routing, which is two mechanisms
  * (verified against open-meteo/open-meteo @ 5fcb532,
  * Sources/App/Controllers/ForecastapiController.swift):
@@ -483,12 +484,13 @@ function predictBranch(lat: number, lon: number): BranchPrediction {
 }
 
 /** The app's model-selector options (MODEL_BIT keys, lowercase). */
-export type Center = "best" | "us" | "ca" | "eu";
+export type Center = "best" | "us" | "ca" | "eu" | "de";
 
 /**
  * Predict the serving-model stack for any selector option. `best` runs the best_match cascade;
  * the centers mirror codec-server's MODEL_CONFIG: US = gfs_seamless (HRRR then GFS), CA =
- * gem_seamless (HRDPS > RDPS > GDPS), EU = ecmwf_ifs. Note EU pressure-level variables
+ * gem_seamless (HRDPS > RDPS > GDPS), EU = ecmwf_ifs, DE = icon_seamless
+ * (ICON-D2 > ICON-EU > ICON). Note EU pressure-level variables
  * (500/600/700 hPa winds) come from ecmwf_ifs025, not HRES — the one per-variable split among
  * the center stacks.
  */
@@ -511,6 +513,11 @@ export function predictCenter(center: Center, lat: number, lon: number): BranchP
       };
     case "eu":
       return { branch: "eu-ecmwf-ifs", models: [M.ecmwf_ifs] };
+    case "de":
+      return {
+        branch: "de-icon-seamless",
+        models: [M.icon_d2, M.icon_eu, M.icon_global].filter((m) => m.grid.contains(lat, lon)),
+      };
   }
 }
 

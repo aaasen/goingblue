@@ -230,7 +230,7 @@ describe("toFullPeriod — air quality", () => {
 
   it("is served on every center — CAMS doesn't depend on the weather model", () => {
     // The freezing level gets cleared for GEM and ECMWF; air quality never does.
-    for (const center of ["BEST", "US", "CA", "EU"]) {
+    for (const center of ["BEST", "US", "CA", "EU", "DE"]) {
       const p = toFullPeriod(row(0), withAlways(VAR.aqi), center);
       expect(p.aqi, center).toBe(118);
     }

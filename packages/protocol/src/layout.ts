@@ -54,9 +54,10 @@ export const MODE_NAMES = ["Detail", "Auto", "Range"] as const;
 // Guaranteed forecast reach in hours from the request, for centers whose deepest model stops
 // short of the window, by MODEL_BIT. Worst case is horizon minus run interval minus publish
 // delay: Canada's GDPS runs 240h twice a day and lands ~7h after init, so a request is
-// guaranteed 240 - 12 - 7 = 221h against a window of 288-312h. NOAA (GFS 384h) and ECMWF
-// (IFS 360h) clear the window, as does every best_match branch (its shallowest bottoms out in
-// a ≥360h global model) — a model without an entry serves the full window.
+// guaranteed 240 - 12 - 7 = 221h against a window of 288-312h. DWD's ICON runs 180h twice a
+// day, ~4h after init, so 180 - 12 - 4 = 164h. NOAA (GFS 384h) and ECMWF (IFS 360h) clear the
+// window, as does every best_match branch (its shallowest bottoms out in a ≥360h global
+// model) — a model without an entry serves the full window.
 //
 // THIS TABLE IS WIRE FORMAT: fillSlotsFor reads it on both sides to derive the layout, so a
 // changed entry changes what already-encoded messages mean. Entries must err low — a reach
@@ -64,6 +65,7 @@ export const MODE_NAMES = ["Detail", "Auto", "Range"] as const;
 // fill-reach.test.ts fails if an upstream horizon moves below a frozen entry.
 export const FILL_REACH_HOURS: Partial<Record<number, number>> = {
   [MODEL_BIT.CA]: 221,
+  [MODEL_BIT.DE]: 164,
 };
 
 /**

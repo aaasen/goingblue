@@ -29,7 +29,7 @@ const TIE_BREAK_VARS = ["relative_humidity_2m", "wind_speed_10m", "cloud_cover"]
 const VARS = ["temperature_2m", ...TIE_BREAK_VARS] as const;
 
 // best_match: one location per cascade branch (favorites/eval where available, else stratified
-// samples). Center stacks (US/CA): the composite seamless model is fetched as ground truth and
+// samples). Center stacks (US/CA/DE): the composite seamless model is fetched as ground truth and
 // its components as candidates; EU is a single model, so there is nothing to attribute.
 const POINTS: Array<{ id: string; center: Center; composite: string; expectBranch: string }> = [
   { id: "s-cfb-0017", center: "best", composite: "best_match", expectBranch: "netherlands-knmi" },
@@ -50,6 +50,8 @@ const POINTS: Array<{ id: string; center: Center; composite: string; expectBranc
   { id: "denali", center: "us", composite: "gfs_seamless", expectBranch: "us-gfs-seamless" },
   { id: "rogers-pass", center: "ca", composite: "gem_seamless", expectBranch: "ca-gem-seamless" },
   { id: "denali", center: "ca", composite: "gem_seamless", expectBranch: "ca-gem-seamless" },
+  { id: "chamonix", center: "de", composite: "icon_seamless", expectBranch: "de-icon-seamless" },
+  { id: "denali", center: "de", composite: "icon_seamless", expectBranch: "de-icon-seamless" },
 ];
 
 interface Hourly {
