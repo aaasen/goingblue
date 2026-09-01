@@ -461,15 +461,22 @@ const AQ_BANDS: Record<'us' | 'eu', AqBand[]> = {
 const aqBand = (value: number, scale: 'us' | 'eu'): AqBand =>
   AQ_BANDS[scale].find((b) => value < b.max) ?? AQ_BANDS[scale][AQ_BANDS[scale].length - 1];
 
-// Model agreement's four wire levels: red (disagreement) to green (agreement), the weak middle
-// levels translucent so strength reads as saturation. The colors carry the drawing; the words
-// are the detail panel's readout of the same levels.
+// Model agreement's four wire levels, drawn as circular badges with a white symbol — the
+// familiar status-icon style: green check for strong agreement (weak agreement the same badge
+// in a lighter green), amber circle with an exclamation for weak disagreement, red circle with
+// an ✗ for strong disagreement. Shape still disambiguates the ends (check vs bang vs ✗), so
+// color alone never carries the level. No-data cells stay the divider grey with no badge.
+// The words are the detail panel's readout of the same levels.
 const AGREEMENT_LEVEL_NAMES = [
   'Strong disagreement', 'Weak disagreement', 'Weak agreement', 'Strong agreement',
 ] as const;
-const AGREEMENT_LEVEL_COLORS = [
-  'rgba(214,69,65,0.92)', 'rgba(214,69,65,0.42)', 'rgba(46,160,83,0.42)', 'rgba(46,160,83,0.92)',
-] as const;
+// Badge fill by level, with the glyph each level wears (white throughout).
+const AGREEMENT_BADGES: readonly { color: string; glyph: 'x' | 'bang' | 'check' }[] = [
+  { color: '#d3392f', glyph: 'x' },      // strong disagreement
+  { color: '#eda100', glyph: 'bang' },   // weak disagreement
+  { color: '#97cf9a', glyph: 'check' },  // weak agreement: same badge, lighter
+  { color: '#3d9c40', glyph: 'check' },  // strong agreement
+];
 
 // Which CAMS domain served, predicted from the location the way the model row predicts the
 // weather centers — the response carries no domain id, and it isn't worth wire bits. Open-Meteo's
@@ -1128,8 +1135,8 @@ function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number, el
   // Presence is per pair — the served center's own pair is all-null on the wire (the reader is
   // already looking at that opinion) and a center whose data was unavailable decodes all-null
   // too, so a row earns its place by holding at least one reading, like the precip amounts do.
-  // Rows are color fields (red = disagree, green = agree, weak shades translucent); the words
-  // live in the detail panel.
+  // Rows carry one circular badge per period (green check / lighter check / amber bang /
+  // red ✗); the words live in the detail panel.
   const agreementRows = AGREEMENT_CENTERS
     .map((c, ci) => ({ ci, label: c.label }))
     .filter(({ ci }) => has((p) => p.agreement?.[ci]));
@@ -1278,6 +1285,37 @@ function thinDirArrow(key: string, cx: number, cy: number, di: number, scale: nu
   return (
     <Group key={key} transform={[{ rotate: arrowRotation(di) }]} origin={vec(cx, cy)}>
       <Path path={path} style="stroke" strokeWidth={1} strokeCap="round" strokeJoin="round" color={color} />
+    </Group>
+  );
+}
+
+// Model agreement badges (see AGREEMENT_BADGES): a filled circle wearing a white symbol, drawn
+// as paths like the direction arrows — the canvas has no icon font, and paths stay crisp at
+// row size.
+function agreementBadge(key: string, cx: number, cy: number, level: number): ReactNode {
+  const { color, glyph } = AGREEMENT_BADGES[level];
+  const r = 8;
+  const sym = Skia.Path.Make();
+  if (glyph === 'check') {
+    sym.moveTo(cx - 3.9, cy + 0.2);
+    sym.lineTo(cx - 1.2, cy + 2.9);
+    sym.lineTo(cx + 4.1, cy - 2.9);
+  } else if (glyph === 'x') {
+    const a = 3.1;
+    sym.moveTo(cx - a, cy - a);
+    sym.lineTo(cx + a, cy + a);
+    sym.moveTo(cx + a, cy - a);
+    sym.lineTo(cx - a, cy + a);
+  } else {
+    sym.moveTo(cx, cy - 4);
+    sym.lineTo(cx, cy + 0.8);
+  }
+  return (
+    <Group key={key}>
+      <Circle cx={cx} cy={cy} r={r} color={color} />
+      <Path path={sym} style="stroke" strokeWidth={2.2} strokeCap="round" strokeJoin="round"
+        color="#ffffff" />
+      {glyph === 'bang' && <Circle cx={cx} cy={cy + 3.9} r={1.2} color="#ffffff" />}
     </Group>
   );
 }
@@ -2559,14 +2597,24 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
       }
 
       case 'agreement': {
-        // A color field per period: the level's red/green shade, or the day divider's grey where
-        // the pair has no reading (past the center's horizon, or no data) — absence, never
+        // One badge per period (see AGREEMENT_BADGES), and the day divider's grey where the
+        // pair has no reading (past the center's horizon, or no data) — absence, never
         // disagreement, the same convention as the air-quality tail.
         const ci = row.level!;
+        // A hairline between consecutive pair rows: badges float on bare paper, so without a
+        // rule the three centers' rows read as one field of icons rather than three series.
+        if (rows[ri - 1]?.kind === 'agreement') {
+          els.push(<Line key={`agrrule${ri}`} p1={vec(colLeft(c0), top)}
+            p2={vec(colLeft(c1 - 1) + CELL_W, top)} color={C.divider} strokeWidth={1} />);
+        }
         for (let i = c0; i < c1; i++) {
           const lv = periods[i].agreement?.[ci];
-          els.push(<Rect key={`agr${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W}
-            height={row.height} color={lv == null ? C.divider : AGREEMENT_LEVEL_COLORS[lv]} />);
+          if (lv == null) {
+            els.push(<Rect key={`agr${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W}
+              height={row.height} color={C.divider} />);
+            continue;
+          }
+          els.push(agreementBadge(`agr${ri}-${i}`, colCenter(i), mid, lv));
         }
         break;
       }
