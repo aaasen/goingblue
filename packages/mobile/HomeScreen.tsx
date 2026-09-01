@@ -128,6 +128,14 @@ const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 // Compare-pill names by MODEL_BIT index — the short center names, matching the selector above.
 const COMPARE_MODEL_LABELS = ['Auto', 'US', 'CA', 'EU'];
 
+// Kilometres between two coordinates — equirectangular, exact enough at the ~1 km radii the
+// comparable-forecast rules use (the compare selector and the map's remount key).
+function kmApart(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  const dLat = (a.lat - b.lat) * 111.32;
+  const dLon = (a.lon - b.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180);
+  return Math.sqrt(dLat * dLat + dLon * dLon);
+}
+
 // Stands in for the model stack until there's a location to attribute. Every selector option but
 // EU resolves differently from place to place, so without coordinates there's nothing to name.
 const MODEL_HINT_NO_LOCATION = 'Set a location to see which models will be used.';
@@ -735,6 +743,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // Set by a compare-pill tap: the reader is already looking at the meteogram, so the decode
   // that follows should swap the forecast in place rather than scroll the page back to its top.
   const suppressNextViewScroll = useRef(false);
+  // The map's remount key, held steady while the loaded forecast stays within ~1 km of the
+  // key's coordinate: flipping between comparable forecasts must not tear the map view down
+  // and rebuild it (LocationMap tracks small coordinate nudges itself, with an animated ease).
+  // A genuinely new location still gets a fresh key, remounting and recentering as before.
+  const mapKeyRef = useRef<{ key: string; lat: number; lon: number } | null>(null);
   // The forecast map's frame in the scroll content, measured on layout, and where the forecast
   // display ends (a zero-height marker after the compare row — the meteogram block's immediate
   // follower; the attribution lives further down, below Past forecasts). Together
@@ -1259,11 +1272,6 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // the most recent response wins — except the loaded slot, which always keeps its segment so
   // exactly one is selected. Ordering is fixed (center, then count) and never depends on which
   // segment is selected.
-  const kmApart = (a: Slot['context'], b: Slot['context']) => {
-    const dLat = (a.lat - b.lat) * 111.32;
-    const dLon = (a.lon - b.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180);
-    return Math.sqrt(dLat * dLat + dLon * dLon);
-  };
   const optionalVarCount = (vars: ReadonlySet<Variable>) => {
     let n = 0;
     for (const v of vars) if (!ALWAYS_VARS.includes(v)) n++;
@@ -1667,7 +1675,13 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             }}
           >
             <LocationMap
-              key={`${decoded.lat},${decoded.lon}`}
+              key={(() => {
+                const held = mapKeyRef.current;
+                if (held && kmApart(held, decoded) <= 1) return held.key;
+                const key = `${decoded.lat},${decoded.lon}`;
+                mapKeyRef.current = { key, lat: decoded.lat, lon: decoded.lon };
+                return key;
+              })()}
               coord={{ lat: decoded.lat, lon: decoded.lon }}
               height={200}
             />
