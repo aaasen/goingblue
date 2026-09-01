@@ -14,7 +14,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CODECS, supportedVersions } from "@weather/protocol";
+import { wireCodec, WIRE_VERSION } from "@weather/protocol";
 import { fetchForecast, parseRequest, splitReplyFor } from "../src/forecast.ts";
 
 const OUT_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "golden", "goldens.json");
@@ -78,8 +78,8 @@ function keyOf(url: string): string {
   return url.replace(/^https?:\/\/[^/]+/, "");
 }
 
-const version = Math.max(...supportedVersions());
-const codec = CODECS[version];
+const version = WIRE_VERSION;
+const codec = wireCodec;
 const startEpochHour = Math.floor(Date.now() / 3600000);
 
 const cases: GoldenCase[] = [];

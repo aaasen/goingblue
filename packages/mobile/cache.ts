@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  CODECS, chunkLines, collectingChunks, decodeMessage, effectiveMode, maxFillSeq, mergeParts,
-  peekHeader, peekVersion, readParts, reassembleReply, supportedVersions,
+  chunkLines, collectingChunks, decodeMessage, effectiveMode, maxFillSeq, mergeParts,
+  peekHeader, readParts, reassembleReply, WIRE_HEADER_CHARS,
   type ForecastMessage, type ReplyOracles, type RequestContext, type Variable,
 } from '@weather/protocol';
 
@@ -104,11 +104,11 @@ function cleaned(encoded: string): string {
   return encoded.trim().replace(/^fw:\s*/i, '');
 }
 
-// The repeated header's width, read off a part's version tag. An unrecognized version falls back
-// to the lowest codec this build carries; decoding then raises the version error properly, rather
-// than reassembly failing first with something less useful.
-function headerCharsOf(part: string): number {
-  return (CODECS[peekVersion(part)] ?? CODECS[supportedVersions()[0]]).headerChars;
+// The repeated header's width, a constant: this build speaks a single protocol version. A part
+// with an unrecognized version tag still reassembles at this width, and decoding then raises the
+// version error properly, rather than reassembly failing first with something less useful.
+function headerCharsOf(_part: string): number {
+  return WIRE_HEADER_CHARS;
 }
 
 // What the merge rules need to know about a reply that only this layer can answer: reading one

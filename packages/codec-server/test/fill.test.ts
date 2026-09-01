@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CODECS, WIRE_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
+  wireCodec, WIRE_VERSION, layoutFor, maxFillSeq, fillProfile, effectiveMode, FILL_SLOTS,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   decodeMessage, DEFAULT_VARS, VAR, type Variable, MODEL_BIT, IPHONE_MAX_CHARS,
   WIRE_HEADER_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, maxCharsFor, reassembleReply,
@@ -79,7 +79,7 @@ function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
   };
 }
 
-const codec = CODECS[WIRE_VERSION];
+const codec = wireCodec;
 
 function encodeSeq(p: ForecastParams, h = HOURLY, times = TIMES) {
   return (seq: number) =>

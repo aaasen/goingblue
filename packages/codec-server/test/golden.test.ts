@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CODECS } from "@weather/protocol";
+import { wireCodec, WIRE_VERSION } from "@weather/protocol";
 import { fetchForecast, parseRequest, splitReplyFor } from "../src/forecast.js";
 
 // Bit-exactness guard for the CURRENT protocol version: replays the recorded Open-Meteo
@@ -39,13 +39,13 @@ describe.skipIf(!goldens)("golden corpus (bit-exact encode)", () => {
       });
 
       const params = parseRequest(c.request);
+      expect(goldens!.protocolVersion).toBe(WIRE_VERSION);
       expect(params.decoderVersion).toBe(goldens!.protocolVersion);
       // Compare the WIRE text — post-split, newline-joined, the same construction the codec
       // server's /encode returns and verify-container diffs — so the split boundaries and part
       // labels are bit-frozen along with the encoding.
-      const codec = CODECS[goldens!.protocolVersion];
-      const { encoded, periods } = await fetchForecast(params, codec);
-      expect(splitReplyFor(params, encoded, codec.headerChars).join("\n")).toBe(c.encoded);
+      const { encoded, periods } = await fetchForecast(params, wireCodec);
+      expect(splitReplyFor(params, encoded, wireCodec.headerChars).join("\n")).toBe(c.encoded);
       // The tracking side of the result: every reply carries at least one period, and every
       // bucket key is an hours-per-period count.
       const total = Object.values(periods).reduce((a, b) => a + b, 0);

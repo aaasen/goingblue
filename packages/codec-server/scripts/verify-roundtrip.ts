@@ -16,7 +16,7 @@ import { encodeFillSeq, type ForecastParams, type HourlyData } from "../src/fore
 import { eachForecast } from "./derive-lib.ts";
 import {
   messageToString, messageFromString, layoutFor, maxFillSeq, DEFAULT_VARS,
-  ALWAYS_VARS, VAR, type Variable, CODECS, WIRE_VERSION,
+  ALWAYS_VARS, VAR, type Variable, wireCodec, WIRE_VERSION,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   type RequestContext,
 } from "@weather/protocol";
@@ -31,7 +31,7 @@ const ALL_VARS: ReadonlySet<Variable> = new Set([
 const UTC_OFFSET = 0;
 // Request at midnight (whole day 0) and mid-afternoon (partial day 0) to cover both layouts.
 const REQUEST_HOURS_OF_DAY = [0, 13];
-const codec = CODECS[WIRE_VERSION];
+const codec = wireCodec;
 
 // Every mode × seq × mask × request hour is ~800 messages per forecast, so the full corpus
 // (~100k train cells) is an hours-long run. The default stride samples an even spread that

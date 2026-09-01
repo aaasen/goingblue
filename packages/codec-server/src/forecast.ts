@@ -22,7 +22,6 @@ import {
   type VersionedCodec,
   type Alphabet,
   type DeviceCode,
-  CODECS,
   DEVICE_TRANSPORT,
   MAX_MESSAGES,
   isDeviceCode,
@@ -30,7 +29,7 @@ import {
   UNCAPPED_MAX_CHARS,
   partBodyChars,
   splitReply,
-  supportedVersions,
+  WIRE_HEADER_CHARS,
   CLOUD_BAND_LEVELS_HPA,
   WIND_LEVELS_HPA, WIND_LEVEL_VARS, windLevelVar,
   CLOUD_COVER_MIN_PCT,
@@ -1214,15 +1213,12 @@ export function parseRequest(body: string): ForecastParams {
   // The reply budget, resolved last because it depends on three tokens at once. It is DERIVED,
   // never stated: `d:` and `n:` name the route and how many messages it may spend, and the length
   // follows from the one table both ends read. A multi-message wide reply repeats the header in
-  // every part, so its budget needs the header's width — read off the codec the request named. An
-  // unknown version falls back to the lowest one this image serves; the request is rejected for
-  // the version before the budget is ever spent.
+  // every part, so its budget needs the header's width, a constant: this image serves a single
+  // protocol version, and a request naming any other is rejected before the budget is ever spent.
   const alphabet = device ? DEVICE_TRANSPORT[device].alphabet : undefined;
-  const codec = decoderVersion === null ? undefined : CODECS[decoderVersion];
-  const headerChars = (codec ?? CODECS[supportedVersions()[0]]).headerChars;
   // A request that names no device is budgeted as SMS: one 160-character segment, the narrowest
   // route's limit and so the safe reading of an unidentified sender.
-  const maxChars = maxCharsFor(device ?? "s", messages, headerChars);
+  const maxChars = maxCharsFor(device ?? "s", messages, WIRE_HEADER_CHARS);
 
   return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, vars, maxChars, alphabet, device: device ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
 }

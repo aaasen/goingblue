@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { CODECS, supportedVersions } from "@weather/protocol";
+import { wireCodec, WIRE_VERSION } from "@weather/protocol";
 import { describeRequest, fetchForecast, parseRequest, splitReplyFor } from "./forecast.js";
 import { log } from "./log.js";
 
@@ -36,10 +36,8 @@ app.post("/encode", async (c) => {
   if (params.decoderVersion === null) {
     return c.text("missing protocol version token", 400);
   }
-  const codec = CODECS[params.decoderVersion];
-  if (!codec) {
-    const supported = supportedVersions().map((v) => `v${v}`).join(", ");
-    return c.text(`unsupported protocol version v${params.decoderVersion} (supported: ${supported})`, 400);
+  if (params.decoderVersion !== WIRE_VERSION) {
+    return c.text(`unsupported protocol version v${params.decoderVersion} (supported: v${WIRE_VERSION})`, 400);
   }
 
   // Requests are only ever written by the app, so validation is strict: a missing or invalid
@@ -49,12 +47,12 @@ app.post("/encode", async (c) => {
   }
 
   try {
-    const { encoded, periods, fetchMs, encodeMs } = await fetchForecast(params, codec);
+    const { encoded, periods, fetchMs, encodeMs } = await fetchForecast(params, wireCodec);
     // The shape rides on a header rather than in the body so the body stays exactly the
     // encoded message lines: they are what a phone in the field decodes, and they are
     // bit-frozen. What the request asked for (describeRequest) travels next to what the reply
     // actually carries and cost (periods by resolution, upstream and encode wall time).
-    return c.text(splitReplyFor(params, encoded, codec.headerChars).join("\n"), 200, {
+    return c.text(splitReplyFor(params, encoded, wireCodec.headerChars).join("\n"), 200, {
       "X-Request-Shape": JSON.stringify({ ...describeRequest(params), periods, fetchMs, encodeMs }),
     });
   } catch (e) {
@@ -65,5 +63,5 @@ app.post("/encode", async (c) => {
 
 const port = parseInt(process.env["PORT"] ?? "8081");
 serve({ fetch: app.fetch, port }, () => {
-  log.info("codec.listening", { port, versions: supportedVersions() });
+  log.info("codec.listening", { port, version: WIRE_VERSION });
 });

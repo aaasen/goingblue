@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { ALPHABET, SEPTET_SWAP, foldSeptetSwap } from "../src/constants.js";
-import { CODECS, decodeMessage, peekHeader, encodeMessage } from "../src/registry.js";
+import { decodeMessage, peekHeader, encodeMessage } from "../src/registry.js";
 import { peekVersion, encodeVersion } from "../src/version.js";
 import { DEVICE_TRANSPORT } from "../src/devices.js";
-import { WIRE_VERSION, type ForecastMessage, type RequestContext, type DeviceCode, type Variable } from "../src/index.js";
+import { WIRE_HEADER_CHARS, type ForecastMessage, type RequestContext, type DeviceCode, type Variable } from "../src/index.js";
 import wireFixture from "./fixtures/wire.fixture.json";
 
 // The inReach display swap: Garmin Messenger shows a base-85 reply's $ @ _ as ¤ ¡ § — the GSM-7
@@ -71,7 +71,7 @@ describe("decoding a swapped reply", () => {
   it("leaves an SMS body alone: there ¤ ¡ § are base-124's own characters", () => {
     const clean = encodeMessage(d, "base124");
     const resolve = () => ctx("s");
-    const header = clean.slice(0, CODECS[WIRE_VERSION].headerChars);
+    const header = clean.slice(0, WIRE_HEADER_CHARS);
     const body = clean.slice(header.length);
     // Only the base-85 prefix may be folded. Swap the header (as Garmin would) but keep the body
     // exactly as the SMS route wrote it; the message must survive unchanged.

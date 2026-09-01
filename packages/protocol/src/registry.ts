@@ -7,11 +7,9 @@ import type { Alphabet } from "./codec.js";
 import { foldSeptetSwap } from "./constants.js";
 import { DEVICE_TRANSPORT } from "./devices.js";
 
-// The single source of truth mapping a protocol version number to its codec.
-//
-// Main carries exactly one version: wire.ts is the current message grammar, and WIRE_VERSION
-// names it. `decodeMessage` reads the version tag and routes to the codec registered for it,
-// and any version not present here is rejected with a clear error rather than mis-decoded.
+// Main carries exactly one protocol version: wire.ts is the current message grammar, and
+// WIRE_VERSION names it. `decodeMessage` reads the version tag and rejects any other version
+// with a clear error rather than mis-decoding.
 //
 // Old versions are NOT kept: when the next version ships, the outgoing grammar survives only
 // in its frozen `codec-vN` container (built from the codec-vN git tag), which keeps serving
@@ -19,17 +17,15 @@ import { DEVICE_TRANSPORT } from "./devices.js";
 // on. The app treats a saved message it can no longer decode as expired (past forecasts are
 // a short-lived buffer, not long-term storage). See VERSIONING.md for the freeze/sunset
 // runbooks.
-export const CODECS: Record<number, VersionedCodec> = {
-  [WIRE_VERSION]: wireCodec,
-};
-
-export function supportedVersions(): number[] {
-  return Object.keys(CODECS).map(Number).sort((a, b) => a - b);
+function codecForVersion(version: number): VersionedCodec {
+  if (version !== WIRE_VERSION) {
+    throw new Error(`Unsupported protocol version: v${version}. Supported: v${WIRE_VERSION}`);
+  }
+  return wireCodec;
 }
 
-// Decodes a message of any registered version by reading its self-describing version tag
-// and dispatching to exactly one codec. `resolve` recovers the request-echo fields the slim
-// response omits, keyed by the message code (see RequestContext).
+// Decodes a message by its self-describing version tag. `resolve` recovers the request-echo
+// fields the slim response omits, keyed by the message code (see RequestContext).
 export function decodeMessage(s: string, resolve: ContextResolver): ForecastMessage {
   const codec = codecFor(s);
   return codec.decode(unswapReply(s, codec, resolve), resolve);
@@ -62,22 +58,11 @@ export function peekHeader(s: string): MessageHeader {
 }
 
 function codecFor(s: string): VersionedCodec {
-  const version = peekVersion(s);
-  const codec = CODECS[version];
-  if (!codec) {
-    const supported = supportedVersions().map((v) => `v${v}`).join(", ");
-    throw new Error(`Unsupported protocol version: v${version}. Supported: ${supported}`);
-  }
-  return codec;
+  return codecForVersion(peekVersion(s));
 }
 
 // Encodes a message using the codec for its `version` field, writing the body in `alphabet`
-// (default base-85 — see the Alphabet type in codec.ts).
+// (default base-85, see the Alphabet type in codec.ts).
 export function encodeMessage(msg: ForecastMessage, alphabet?: Alphabet): string {
-  const codec = CODECS[msg.version];
-  if (!codec) {
-    const supported = supportedVersions().map((v) => `v${v}`).join(", ");
-    throw new Error(`Unsupported protocol version: v${msg.version}. Supported: ${supported}`);
-  }
-  return codec.encode(msg, alphabet);
+  return codecForVersion(msg.version).encode(msg, alphabet);
 }
