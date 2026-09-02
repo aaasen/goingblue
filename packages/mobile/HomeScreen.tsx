@@ -227,8 +227,8 @@ interface VarGroup {
 // User-selectable variable groups. Each toggle enables/disables all of its underlying
 // protocol variables together (e.g. "Clouds" covers the pressure-level band, not total cover).
 // Order is display order only — the server unions the `v:` codes into the vars set, so the emitted
-// order carries no meaning. Precip chance sits last of the weather groups: it costs the most for
-// the least detail.
+// order carries no meaning. The single-row weather groups lead, and the two collapsible
+// subgroups sit at the end, where opening one can't push the rest of the list out of reach.
 // The air-quality entries are single variables rather than bundles: smoke and ozone are different
 // hazards on different schedules (a smoke plume arrives and stays for days; ozone peaks every
 // afternoon), and someone watching for fire smoke shouldn't have to pay for the rest. Their labels
@@ -239,31 +239,23 @@ const VAR_GROUPS: VarGroup[] = [
     value: 'clouds', code: 'c', label: 'Detailed Clouds', vars: [VAR_CODES.c],
     desc: 'Cloud cover at 8 different levels of the atmosphere.',
   },
-  // One row per pressure level, highest first. The label is the level's rung on the cloud
-  // band's altitude ladder (ladderLabel — the same rough band the meteogram's rail names), the
-  // pressure after it for the reader who thinks in hectopascals; the rung is written in the
-  // reader's unit at render time (windLevelLabel). Every ticked level is carried — a reader on a
-  // summit who ticks 925 hPa gets model air under the terrain, which is theirs to leave out.
-  ...WIND_LEVELS_HPA.map((hpa, li): VarGroup => ({
-    value: `w${hpa}`, windLevel: li, label: `${hpa} hPa`, vars: [WIND_LEVEL_VARS[li]],
-    subgroup: WIND_SUBGROUP,
-    desc: `Wind speed and direction at the ${hpa} hPa pressure level.`,
-  })),
+  {
+    value: 'humidity', code: 'h', label: 'Humidity', vars: [VAR_CODES.h],
+    desc: 'Dewpoint, relative humidity, and feels-like temperature.',
+  },
+  {
+    value: 'precip', code: 'p', label: 'Precipitation Probability', vars: [VAR_CODES.p],
+    desc: 'Probability of more than 0.1mm of precipitation in the hour. Computed from an '
+      + 'ensemble model.',
+  },
   {
     value: 'freeze', code: 'f', label: 'Freezing Level', vars: [VAR_CODES.f],
     desc: 'Altitude at which atmospheric temperature drops to 0°C.',
   },
   {
-    value: 'humidity', code: 'h', label: 'Humidity', vars: [VAR_CODES.h],
-    desc: 'Dewpoint and relative humidity.',
-  },
-  {
     value: 'agreement', code: 'g', label: 'Model Agreement', vars: [VAR_CODES.g],
-    desc: 'How well the other forecast centers agree with this forecast, period by period.',
-  },
-  {
-    value: 'precip', code: 'p', label: 'Precip Chance', vars: [VAR_CODES.p],
-    desc: 'Chance of measurable precipitation during the period.',
+    desc: 'How well the other forecast centers agree with the precip, wind, and temperature '
+      + 'of this forecast.',
   },
   {
     value: 'aqi', code: 'a', label: 'AQI (Dominant pollutant)', vars: [VAR_CODES.a],
@@ -325,6 +317,16 @@ const VAR_GROUPS: VarGroup[] = [
     subgroup: AIR_SUBGROUP, scale: 'eu',
     desc: 'Smelters, coal plants, ship fuel, and volcanic vents.',
   },
+  // One row per pressure level, highest first. The label is the level's rung on the cloud
+  // band's altitude ladder (ladderLabel — the same rough band the meteogram's rail names), the
+  // pressure after it for the reader who thinks in hectopascals; the rung is written in the
+  // reader's unit at render time (windLevelLabel). Every ticked level is carried — a reader on a
+  // summit who ticks 925 hPa gets model air under the terrain, which is theirs to leave out.
+  ...WIND_LEVELS_HPA.map((hpa, li): VarGroup => ({
+    value: `w${hpa}`, windLevel: li, label: `${hpa} hPa`, vars: [WIND_LEVEL_VARS[li]],
+    subgroup: WIND_SUBGROUP,
+    desc: `Wind speed and direction at the ${hpa} hPa pressure level.`,
+  })),
 ];
 
 // "18k ft (500 hPa)": the level's rung on the altitude ladder, then the pressure the wire names —
@@ -1529,11 +1531,12 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                 const open = openSubgroups.has(row.id);
                 const selected = row.members.filter((m) => activeValues.has(m.value)).length;
                 return (
-                  <TouchableOpacity
+                  <Pressable
                     key={row.key}
-                    style={[styles.varRow, border]}
+                    style={({ pressed }) => [
+                      styles.varRow, border, pressed && !disabled && styles.varRowPressed,
+                    ]}
                     onPress={() => !disabled && toggleSubgroup(row.id)}
-                    activeOpacity={disabled ? 1 : 0.6}
                     accessibilityRole="button"
                     accessibilityState={{ expanded: open, disabled }}
                     accessibilityLabel={`${row.label}, ${selected} of ${row.members.length} selected`}
@@ -1549,24 +1552,26 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                         color="#8e8e93"
                       />
                     </View>
-                  </TouchableOpacity>
+                  </Pressable>
                 );
               }
               // A group is unavailable when the model can't supply any of its variables.
               const disabled = row.group.vars.every((v) => unavail.includes(v));
               const checked = groups.has(row.group.value) && !disabled;
               return (
-                <TouchableOpacity
+                <Pressable
                   key={row.key}
-                  style={[styles.varRow, row.indent && styles.varRowIndent, border]}
+                  style={({ pressed }) => [
+                    styles.varRow, row.indent && styles.varRowIndent, border,
+                    pressed && !disabled && styles.varRowPressed,
+                  ]}
                   onPress={() => !disabled && toggleGroup(row.group.value)}
-                  activeOpacity={disabled ? 1 : 0.6}
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked, disabled }}
                 >
                   <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{groupLabel(row.group, units)}</Text>
                   <Text style={[styles.varCheck, !checked && styles.varCheckHidden]}>✓</Text>
-                </TouchableOpacity>
+                </Pressable>
               );
             })}
           </View>
@@ -1792,7 +1797,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         <Text style={styles.modalBody}>
           Going Blue packs as much information as it can into each message. Choose{' '}
           <Text style={styles.modalBold}>Detail</Text> for short-range hourly forecasts. Choose{' '}
-          <Text style={styles.modalBold}>Range</Text> for extended forecasts up to 14 days. Choose{' '}
+          <Text style={styles.modalBold}>Range</Text> for extended forecasts up to 13 days. Choose{' '}
           <Text style={styles.modalBold}>Auto</Text> for a blend of the two.
         </Text>
       </InfoModal>
@@ -1833,7 +1838,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
       <InfoModal visible={varsInfo} title="Extra Variables" onClose={() => setVarsInfo(false)}>
         <Text style={styles.modalBody}>
-          By default, forecasts include temperature, rain, snow, wind, and basic cloud cover. The
+          By default, forecasts include temperature, rain, snow, wind, and weathercode. The
           following variables are optional:
         </Text>
         {/* Same tree the list draws from, so the modal describes exactly the rows on screen —
@@ -2059,6 +2064,10 @@ const styles = StyleSheet.create({
   // Members of an open subgroup, set in from their heading and off the white of the top-level rows.
   varRowIndent: { paddingLeft: 32, backgroundColor: '#fafafc' },
   varRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
+  // Press feedback for the variable rows, declarative for the same reason as btnPressed: a row
+  // re-renders from inside its own press handler (a toggle, a subgroup opening or closing), and a
+  // touchable's animated fade can be stranded by that, leaving the row greyed until the next touch.
+  varRowPressed: { opacity: 0.6 },
   varLabel: { fontSize: 15, color: '#1c1c1e' },
   varLabelDim: { color: '#aeaeb2' },
   varCheck: { fontSize: 17, fontWeight: '600', color: '#2a6bb5' },
