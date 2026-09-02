@@ -93,6 +93,8 @@ const ROW_H = {
   // taller than the stack did — which is the point, since two areas on one baseline could only be
   // told apart by which color was on top.
   PRECIP: 38,
+  // The humidity curve gets half again the chance row: its wash is the reading as much as the line.
+  HUMIDITY: 57,
   DATA: 42,
   // The freezing level is a graph rather than a bare number, so it needs room for the isotherm to
   // move in under its band of column labels.
@@ -243,8 +245,6 @@ const C = {
   freezeWarm: 'rgba(214, 82, 62, 0.14)',
   // The isotherm itself, dark enough to hold its shape against both washes.
   freezeLine: '#7e8896',
-  // Relative humidity as a tint, saturating toward a steel blue at 100%.
-  humidityFill: (pct: number) => `rgba(92, 134, 180, ${(0.05 + 0.6 * pct / 100).toFixed(2)})`,
   // The two precip inks, for the numbers each precip row prints (the rail's marks stay grey — see
   // LEGEND_MARK_COLORS). Snow is the lighter of the pair, matching the two areas: it kept its color
   // from the stacked area the two rows replaced, where snow lay over rain as the paler band.
@@ -372,6 +372,22 @@ const TEMP_STOPS: ColorStop[] = [
   [30, [212, 96, 42]],
   [38, [192, 48, 42]],
 ];
+
+// Relative humidity → color, after Windy's humidity palette: dry air in browns, the middle in
+// olive and green, saturated air in blues. Read at each column's humidity for the curve and the
+// wash under it.
+const HUMIDITY_STOPS: ColorStop[] = [
+  [0, [160, 96, 54]],
+  [30, [186, 122, 62]],
+  [50, [176, 168, 74]],
+  [65, [118, 168, 112]],
+  [80, [70, 158, 150]],
+  [90, [62, 122, 178]],
+  [100, [46, 78, 148]],
+];
+function humidityColor(pct: number, alpha = 1): string {
+  return rgb(rampRgb(HUMIDITY_STOPS, pct), alpha);
+}
 
 function lerp(a: number, b: number, t: number): number {
   return Math.round(a + (b - a) * t);
@@ -1136,12 +1152,12 @@ function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number, el
     rows.push({ kind: 'freeze', height: ROW_H.FREEZE, label: '', legend: frU });
   }
 
-  // Humidity: the relative humidity derived from the dewpoint and the temperature, as a fill row
-  // like the cloud-cover trio. The dewpoint itself lives up in the temperature row, as the
-  // area's bottom edge and a line of numbers under the temperature's.
+  // Humidity: the relative humidity derived from the dewpoint and the temperature, a curve on
+  // the precip-chance row's fixed 0-100% scale. The dewpoint itself lives up in the temperature
+  // row, as the area's bottom edge and a line of numbers under the temperature's.
   if (has((p) => p.dewpoint_c)) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Humidity', legend: '' });
-    rows.push({ kind: 'humidity', height: ROW_H.DATA, label: '', legend: '%' });
+    rows.push({ kind: 'humidity', height: ROW_H.HUMIDITY, label: '', legend: '%' });
   }
 
   // The Windy-style vertical cloud band — the message carries it in place of the low/mid/high
@@ -1909,7 +1925,6 @@ function slicePoints<T extends { x: number }>(pts: T[], xLo: number, xHi: number
 // the tint.
 const TINTABLE_STOP = new Set<RowKind>([
   'wind-sfc', 'wind-gust', 'wind-dir', 'freeze', 'cloud-band', 'cloud-high', 'cloud-mid', 'cloud-low',
-  'humidity',
   ...AQ_KINDS, // air-quality cells carry their category as a fill, same as the wind ribbon
   ...AQ_DOMINANT_KINDS, // and the dominant row is painted with its headline's fill
   'wind-aloft', 'model',
@@ -2398,11 +2413,21 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         for (let i = c0; i < c1; i++) {
           const { temp_c: t, dewpoint_c: d } = periods[i];
           if (t == null) continue;
-          els.push(centerText(`th${i}`, fmtTemp(t, units), colCenter(i), top + TEMP_VALUE_Y, fonts.data, '#1c1c1e'));
+          const tempText = fmtTemp(t, units);
+          els.push(centerText(`th${i}`, tempText, colCenter(i), top + TEMP_VALUE_Y, fonts.data, '#1c1c1e'));
           // The dewpoint under it, in the light dew face and the hour labels' grey: the band's
-          // bottom edge is the reading, and the number is its caption.
-          if (d != null)
-            els.push(centerText(`dh${i}`, fmtTemp(Math.min(d, t), units), colCenter(i), top + DEW_VALUE_Y, fonts.dew, C.hour));
+          // bottom edge is the reading, and the number is its caption. Its DIGITS are centered on
+          // the temperature's digits, not the whole string on the whole string — the degree sign
+          // is a different share of each face's width, and centering both wholes left the two
+          // numbers a hair apart.
+          if (d != null) {
+            const dewText = fmtTemp(Math.min(d, t), units);
+            const digitsCx = colCenter(i) - fonts.data.getTextWidth(tempText) / 2
+              + fonts.data.getTextWidth(tempText.replace('°', '')) / 2;
+            const dewX = digitsCx - fonts.dew.getTextWidth(dewText.replace('°', '')) / 2;
+            els.push(<Text key={`dh${i}`} x={dewX} y={baseline(top + DEW_VALUE_Y, fonts.dew.getSize())}
+              text={dewText} font={fonts.dew} color={C.hour} />);
+          }
         }
         break;
       }
@@ -2514,15 +2539,47 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
       }
 
       case 'humidity': {
-        // Relative humidity as a fill, the cloud-cover rows' encoding in the dewpoint's blue: the
-        // number is one tap away, and a row of percentages said less than a row of tint.
-        for (let i = c0; i < c1; i++) {
-          const { temp_c: t, dewpoint_c: d } = periods[i];
-          if (t == null || d == null) { els.push(centerText(`hu${ri}-${i}`, '—', colCenter(i), mid, fonts.data, C.nil)); continue; }
-          const pct = relativeHumidityPct(t, d);
-          els.push(<Rect key={`hubg${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W} height={row.height}
-            color={C.humidityFill(pct)} />);
-        }
+        // Relative humidity as a curve on the same fixed 0-100% scale as precip chance, for the
+        // same reason: a percentage's full scale is the whole of it. Under it, a wash colored by
+        // each column's humidity on the Windy-style ramp (HUMIDITY_STOPS) — brown when dry, blue
+        // when saturated — blended between column centers the way the wind ribbon is, and the
+        // line itself carries the same colors. The number is one tap away.
+        const bottom = top + row.height;
+        const plotTop = top + PRECIP_PLOT_PAD;
+        const rh = (i: number) => relativeHumidityPct(periods[i].temp_c!, periods[i].dewpoint_c!);
+        const rhY = (v: number) => bottom - (Math.min(100, Math.max(0, v)) / 100) * (bottom - plotTop);
+        valueRuns(n, (i) => periods[i].temp_c != null && periods[i].dewpoint_c != null).forEach((run) => {
+          const x0 = colLeft(run[0]);
+          const x1 = colLeft(run[run.length - 1]) + CELL_W;
+          if (x1 < xLo || x0 > xHi) return;
+          const points = [
+            { x: x0, y: rhY(rh(run[0])) },
+            ...run.map((i) => ({ x: colCenter(i), y: rhY(rh(i)) })),
+            { x: x1, y: rhY(rh(run[run.length - 1])) },
+          ];
+          const curve = Skia.Path.Make();
+          smoothTo(curve, points);
+          const wash = Skia.Path.Make();
+          smoothTo(wash, points);
+          wash.lineTo(x1, bottom);
+          wash.lineTo(x0, bottom);
+          wash.close();
+          const span = x1 - x0;
+          const positions = [0, ...run.map((i) => (colCenter(i) - x0) / span), 1];
+          const ramp = (alpha: number) => [
+            humidityColor(rh(run[0]), alpha),
+            ...run.map((i) => humidityColor(rh(i), alpha)),
+            humidityColor(rh(run[run.length - 1]), alpha),
+          ];
+          els.push(
+            <Path key={`huw${ri}-${run[0]}`} path={wash}>
+              <LinearGradient start={vec(x0, 0)} end={vec(x1, 0)} colors={ramp(0.28)} positions={positions} />
+            </Path>,
+            <Path key={`hu${ri}-${run[0]}`} path={curve} style="stroke" strokeWidth={1.5}>
+              <LinearGradient start={vec(x0, 0)} end={vec(x1, 0)} colors={ramp(1)} positions={positions} />
+            </Path>,
+          );
+        });
         break;
       }
 
