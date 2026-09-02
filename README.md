@@ -360,9 +360,15 @@ eas build --platform ios --profile preview
 
 ### Tests
 
+Going Blue has a large set of unit tests that can be run like this:
+
 ```bash
 pnpm test
 ```
+
+### Skills
+
+ - [`benchmark`](.agents/skills/benchmark/SKILL.md): Regenerate the public encoding benchmark at [going.blue/benchmark](https://going.blue/benchmark)
 
 ### Codec Versioning
 

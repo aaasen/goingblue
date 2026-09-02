@@ -1,46 +1,21 @@
 .gcloudignore
 .git
 .gitignore
-
 node_modules/
 packages/*/dist/
 *.tsbuildinfo
-
-# Benchmark data: cached Open-Meteo responses and HTML reports, never needed in the build
 data/
-
-# Photo originals at the repo root — the pages serve the resized copies in
-# packages/server/public, so the multi-megabyte source files never need uploading.
 /*.jpg
 /*.jpeg
 /*.png
-
-# Basemap tooling and outputs. No cloud build reads these: the codec image copies only
-# protocol + codec-server, and the gateway image builds only protocol + server. The nested
-# maps/preview/.gitignore does not apply here (a hand-authored .gcloudignore disables all
-# gitignore handling), so without this line the preview screenshots and node_modules ride along.
 maps/
-
-# Bundled basemap archives, fetched from R2 by packages/mobile/scripts/fetch-basemap.mjs.
-# Only the Expo native/dev builds require() them; no cloud build does.
 packages/mobile/assets/basemap/
-
-# API keys
 .env
-
-# Deployment target — read by deploy.sh on the way in, never needed inside the build.
 deploy.env
-
-# Private notes (runbooks, A2P 10DLC registration, TODO). A hand-authored .gcloudignore replaces
-# the .gitignore fallback entirely, so these must be listed here too or they ride along.
 docs/private/
-
-# Native build output under the mobile package. The gateway Dockerfile builds the Expo *web*
-# export, which needs the mobile source but never the regenerable iOS/Android native dirs
-# (~1 GB of iOS Pods/build). gcloud ignores nested .gitignore files, so mirror those rules here.
 packages/mobile/ios/
 packages/mobile/android/
 packages/mobile/.expo/
-
 .claude/
+.agents/
 *.har

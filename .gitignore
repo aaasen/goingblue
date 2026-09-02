@@ -1,38 +1,14 @@
-# Node
 node_modules/
-
-# Build output
 packages/*/dist/
 *.tsbuildinfo
-
-# Benchmark data: cached Open-Meteo responses (data/raw) and HTML reports (data/benchmarks)
 data/
-
-# Camera files dropped at the repo root stay out of it. The cropped master under
-# packages/server/assets is the exception and is tracked — it is the provenance for the served
-# derivatives under packages/server/public, and the crop is hand-made. Both it and the
-# derivatives are stripped of EXIF first; the master's is GPS-tagged.
 /*.jpg
 /*.jpeg
-
-# macOS
 .DS_Store
-
-# Private notes: deployment runbooks, the A2P 10DLC registration, and the working TODO.
-# Nested under docs/ rather than ignoring docs/ outright, so docs/ stays free for public docs.
 docs/private/
-
-.claude
-
-# API keys (node --env-file)
+.claude/*
+!.claude/skills
 .env
-
-# Deployment target (GCP project/region/instance names); documented in deploy.sh
 deploy.env
-
-# Python
 __pycache__/
-
-# Bundled basemap archives: fetched from R2 by packages/mobile/scripts/fetch-basemap.mjs
-# (run by the start/ios/android scripts and the EAS post-install hook), not tracked.
 packages/mobile/assets/basemap/
