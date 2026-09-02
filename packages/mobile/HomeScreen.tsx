@@ -1566,11 +1566,20 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                     pressed && !disabled && styles.varRowPressed,
                   ]}
                   onPress={() => !disabled && toggleGroup(row.group.value)}
-                  accessibilityRole="checkbox"
+                  accessibilityRole="switch"
                   accessibilityState={{ checked, disabled }}
                 >
                   <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{groupLabel(row.group, units)}</Text>
-                  <Text style={[styles.varCheck, !checked && styles.varCheckHidden]}>✓</Text>
+                  {/* The row stays pressable as well: the switch swallows its own touches, so the
+                      two never fire together, and the whole row remains the larger target. */}
+                  <Switch
+                    style={styles.switchAlign}
+                    value={checked}
+                    disabled={disabled}
+                    onValueChange={() => toggleGroup(row.group.value)}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                  />
                 </Pressable>
               );
             })}
@@ -1606,6 +1615,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                 <Text style={styles.switchHint}>Use multiple messages for more range and detail</Text>
               </View>
               <Switch
+                style={styles.switchAlign}
                 value={twoMessages}
                 onValueChange={onTwoMessagesChange}
                 accessibilityLabel="Multi-message forecast"
@@ -2060,7 +2070,13 @@ const styles = StyleSheet.create({
   sectionInfo: { fontSize: 14, color: '#2a6bb5', marginLeft: 6 },
 
   varList: { backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
-  varRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10 },
+  // Sized to a grouped iOS settings row: 50pt tall with 17pt labels, which the switch fits
+  // inside, so a toggle row and a subgroup heading come out the same height. The padding is
+  // only what a label needs when it wraps past one line.
+  varRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 6, minHeight: 50,
+  },
   // Members of an open subgroup, set in from their heading and off the white of the top-level rows.
   varRowIndent: { paddingLeft: 32, backgroundColor: '#fafafc' },
   varRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
@@ -2068,10 +2084,11 @@ const styles = StyleSheet.create({
   // re-renders from inside its own press handler (a toggle, a subgroup opening or closing), and a
   // touchable's animated fade can be stranded by that, leaving the row greyed until the next touch.
   varRowPressed: { opacity: 0.6 },
-  varLabel: { fontSize: 15, color: '#1c1c1e' },
+  // Switch composes alignSelf: 'flex-start' into its own iOS style, which on a row means the
+  // top rather than the start, and beats the row's alignItems. Every switch needs this back.
+  switchAlign: { alignSelf: 'center' },
+  varLabel: { fontSize: 17, color: '#1c1c1e' },
   varLabelDim: { color: '#aeaeb2' },
-  varCheck: { fontSize: 17, fontWeight: '600', color: '#2a6bb5' },
-  varCheckHidden: { opacity: 0 },
   // The subgroup heading's right-hand side: how many of its rows are on, then the disclosure.
   varRowTrailing: { flexDirection: 'row', alignItems: 'center' },
   varCount: { fontSize: 13, color: '#8e8e93', marginRight: 6 },
