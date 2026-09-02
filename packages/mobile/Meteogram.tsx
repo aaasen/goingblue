@@ -3010,7 +3010,7 @@ const RowLegend = memo(function RowLegend({ rows, units, bandLevels, elevation, 
     }
     if (row.legend2) {
       els.push(
-        <RNText key={`u2${ri}`} numberOfLines={1}
+        <RNText key={`u2-${ri}`} numberOfLines={1}
           style={[styles.legendUnit, { top: top + FEELS_VALUE_Y - textH / 2, color: C.hour }]}>
           {row.legend2}
         </RNText>,
