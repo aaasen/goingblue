@@ -163,6 +163,7 @@ These are the units and techniques used for each variable:
 | Model agreement                 | Value   | 4 levels, strong disagreement to strong agreement  | Previous agreement, lead time                                 |
 | Dewpoint                        | Delta   | 1°C                                                | Temperature delta, dewpoint depression, forecast resolution   |
 | Relative humidity               | Derived | %                                                  | Derived from temperature and dewpoint                         |
+| Feels like temperature          | Derived | 1°C                                                | Derived from temperature, wind, and relative humidity         |
 
 ### Forecast Packing
 
@@ -304,6 +305,15 @@ The components are combined using a weighted soft min with precip at 60%, wind a
 
 The combined agreement score (0 to 1) is then mapped to an agreement level: strong disagreement, weak disagreement, weak agreement, strong agreement. The thresholds are chosen to roughly align to quartiles of actual agreement scores calculated from live forecasts.
 
+#### Dewpoint, Relative Humidity, and Apparent Temperature
+
+The nice thing about these variables is that they can be derived from one another. Only dewpoint is actually sent in the message. Relative humidity can be derived from temperature and dewpoint using the [Magnus formula](https://en.wikipedia.org/wiki/Dew_point#Calculating_the_dew_point). Apparent temperature can be derived from temperature, relative humidity, and wind speed. Wet bulb temperature and cloud base could also be derived from existing variables. By sending some indicator of humidity, we get a lot for free!
+
+Apparent or "feels like" temperature is calculated from temperature, sustained wind, and relative humidity. It does not take solar radiation into account. There are three ways apparent temperature is calculated depending on conditions:
+1. **Wind chill**: The [Environment Canada wind chill index](https://en.wikipedia.org/wiki/Wind_chill#North_American_and_United_Kingdom_wind_chill_index) is used when the temperature is <= 10 °C and the wind is > 4.8 km/h.
+2. **Heat index**: The [Rothfusz regression](https://en.wikipedia.org/wiki/Heat_index#Formula) is used when the temperature is >= 27 °C and the humidity is >= 40%.
+3. **Air temperature**: Used when the other rules don't apply. Apparent temperature is the same as the actual temperature.
+
 ## Development
 
 Requirements:
@@ -386,7 +396,8 @@ The Going Blue codec relies on the client and server having identical codebooks.
 
  - Added Android support. 
  - Added a model agreement score for judging forecast confidence.
- - Added a model comparison switch. 
+ - Added dewpoint, relative humidity, and apparent temperature.
+ - Added a model comparison switch.
 
 ## License
 

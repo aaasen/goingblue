@@ -15,6 +15,27 @@ export function relativeHumidityPct(tempC: number, dewpointC: number): number {
   return Math.min(100, Math.round((100 * es(dewpointC)) / es(tempC)));
 }
 
+// Apparent ("feels like") temperature in °C from the readings a message already carries: wind
+// chill (Environment Canada / NWS, 2001) below 10 °C with wind over 4.8 km/h, the NWS heat index
+// (Rothfusz 1990) at or above 27 °C when humidity is known and 40% or more, the air temperature
+// otherwise. `windKph` is the sustained 10 m wind, never the gust; `rhPct` is optional — without
+// dewpoint in the message the heat index is skipped. Not Open-Meteo's apparent_temperature,
+// which also folds in solar radiation.
+export function apparentTempC(tempC: number, windKph: number, rhPct?: number): number {
+  if (tempC <= 10 && windKph > 4.8) {
+    const v = Math.pow(windKph, 0.16);
+    return 13.12 + 0.6215 * tempC - 11.37 * v + 0.3965 * tempC * v;
+  }
+  if (tempC >= 27 && rhPct != null && rhPct >= 40) {
+    const t = tempC * 9 / 5 + 32, r = rhPct;
+    const hi = -42.379 + 2.04901523 * t + 10.14333127 * r - 0.22475541 * t * r
+      - 6.83783e-3 * t * t - 5.481717e-2 * r * r + 1.22874e-3 * t * t * r
+      + 8.5282e-4 * t * r * r - 1.99e-6 * t * t * r * r;
+    return (hi - 32) * 5 / 9;
+  }
+  return tempC;
+}
+
 export interface WindAloft {
   kph: number;
   dir: number;

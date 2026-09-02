@@ -8,7 +8,7 @@ import {
 import {
   CARDINALS, RAIN_K, modelsFromMask, startDatetime, predictCenter, attributeHour,
   AQ_DOMINANT_US, AQ_DOMINANT_EU, WIND_LEVELS_HPA, quantWind, AGREEMENT_CENTERS,
-  relativeHumidityPct,
+  relativeHumidityPct, apparentTempC,
   type Center, type ForecastMessage, type ModelSpec, type Period,
 } from '@weather/protocol';
 import type { AltitudeUnit, TimeFormat, UnitPrefs } from './settings';
@@ -66,8 +66,8 @@ const CANVAS_TILE_W = CELL_W * 16;
 // curve needs the space under the digits. The rail reads this too, so "°F" lines up with the
 // numbers it names instead of floating a dozen pixels below them.
 const TEMP_VALUE_Y = 14;
-// The dewpoint's line of numbers, under the temperature's, when the message carries it.
-const DEW_VALUE_Y = TEMP_VALUE_Y + 18;
+// The feels-like line of numbers under the temperature's (see feelsLikeC).
+const FEELS_VALUE_Y = TEMP_VALUE_Y + 18;
 // The temperature area's plot band: it starts inside the date header, behind the day glyphs,
 // and stops this far above the temperature row's bottom edge.
 const TEMP_PLOT_TOP = 39;
@@ -86,8 +86,8 @@ const ROW_H = {
   SECTION: 22,
   CLOUD: 58,
   TEMP: 52,
-  // The line the dewpoint numbers take under the temperature's (see tempRowHeight).
-  TEMP_DEW_TEXT: 18,
+  // The line the feels-like numbers take under the temperature's (see tempRowHeight).
+  TEMP_FEELS_TEXT: 18,
   // Snow and rain each get their own row, so one is shorter than the single stacked area they
   // replace: each carries one number rather than two lines of them, and the pair still ends up
   // taller than the stack did — which is the point, since two areas on one baseline could only be
@@ -985,7 +985,7 @@ type RowKind =
 
 interface Row {
   kind: RowKind;
-  // A second caption under the legend, on the temperature row's dewpoint line.
+  // A second caption under the legend, on the temperature row's feels-like line.
   legend2?: string;
   height: number;
   // Section bands only — the one row kind that still carries prose, drawn across the full width.
@@ -1070,11 +1070,20 @@ const pollutantName = (scale: 'us' | 'eu', idx: number | undefined): string | un
   return POLLUTANT_LABEL[ids[idx]] ?? ids[idx];
 };
 
-// The temperature row grows when the message carries dewpoint: one line for the dewpoint numbers,
-// then whatever the axis needs to keep the temperature curve at the amplitude it has on its own.
-// The area's bottom edge becomes the dewpoint curve, so the axis reaches down to the driest
-// dewpoint — a 30 °C depression squeezed into the temperature-only pixels would flatten the
-// curve exactly where the band under it is widest. Capped at one extra row of height.
+// The feels-like temperature of a period, or null where it can't be derived. Drawn only when
+// the message carries dewpoint: wind chill alone would be derivable from every message, but a
+// "feels like" whose meaning changed with the humidity toggle would mislead more than it told.
+function feelsLikeC(p: Period): number | null {
+  if (p.temp_c == null || p.wind_sfc_kph == null || p.dewpoint_c == null) return null;
+  return apparentTempC(p.temp_c, p.wind_sfc_kph, relativeHumidityPct(p.temp_c, p.dewpoint_c));
+}
+
+// The temperature row grows by a line of numbers when feels-like can be drawn under the
+// temperatures, and further when the message carries dewpoint: the area's bottom edge becomes
+// the dewpoint curve, so the axis reaches down to the driest dewpoint, and the row takes
+// whatever keeps the temperature curve at the amplitude it has on its own — a 30 °C depression
+// squeezed into the temperature-only pixels would flatten the curve exactly where the band under
+// it is widest. Capped at one extra row of height.
 function tempRowHeight(periods: Period[]): number {
   const temps: number[] = [], dews: number[] = [];
   periods.forEach((p) => {
@@ -1082,12 +1091,13 @@ function tempRowHeight(periods: Period[]): number {
     temps.push(p.temp_c);
     if (p.dewpoint_c != null) dews.push(Math.min(p.dewpoint_c, p.temp_c));
   });
-  if (!dews.length) return ROW_H.TEMP;
+  const textH = periods.some((p) => feelsLikeC(p) != null) ? ROW_H.TEMP_FEELS_TEXT : 0;
+  if (!dews.length) return ROW_H.TEMP + textH;
   const tempRange = Math.max(...temps) - Math.min(...temps) + 2;
   const fullRange = Math.max(...temps) - Math.min(...dews, ...temps) + 2;
   const plotH = ROW_H.DATE - TEMP_PLOT_TOP + ROW_H.TEMP - TEMP_PLOT_BOTTOM_PAD;
-  const extra = (fullRange - tempRange) * (plotH / tempRange) - ROW_H.TEMP_DEW_TEXT;
-  return ROW_H.TEMP + ROW_H.TEMP_DEW_TEXT + Math.round(Math.min(ROW_H.TEMP, Math.max(0, extra)));
+  const extra = (fullRange - tempRange) * (plotH / tempRange) - textH;
+  return ROW_H.TEMP + textH + Math.round(Math.min(ROW_H.TEMP, Math.max(0, extra)));
 }
 
 function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number, elevation: number): Row[] {
@@ -1115,7 +1125,7 @@ function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number, el
   if (hasSurface) {
     if (has((p) => p.temp_c))
       rows.push({ kind: 'temp', height: tempRowHeight(periods), label: '', legend: tU,
-        legend2: has((p) => p.dewpoint_c) ? 'dew' : undefined });
+        legend2: periods.some((p) => feelsLikeC(p) != null) ? 'feel' : undefined });
     // Snow over rain, the order the freezing level's washes and the old stacked area both used:
     // frozen above liquid.
     if (hasAmount((p) => p.snow_cm)) rows.push({ kind: 'snow', height: ROW_H.PRECIP, label: '', legend: snowU });
@@ -1154,7 +1164,7 @@ function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number, el
 
   // Humidity: the relative humidity derived from the dewpoint and the temperature, a curve on
   // the precip-chance row's fixed 0-100% scale. The dewpoint itself lives up in the temperature
-  // row, as the area's bottom edge and a line of numbers under the temperature's.
+  // row as the area's bottom edge; its number is in the readout only.
   if (has((p) => p.dewpoint_c)) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Humidity', legend: '' });
     rows.push({ kind: 'humidity', height: ROW_H.HUMIDITY, label: '', legend: '%' });
@@ -1300,9 +1310,9 @@ interface Fonts {
   // Wind speeds sit on the ribbon's colored ground; a small light face keeps the numbers from
   // shouting over it in a short row.
   wind: SkFont;
-  // The dewpoint line under the temperatures: a light face in the hour labels' grey, a caption
+  // The feels-like line under the temperatures: a light face in the hour labels' grey, a caption
   // to the temperature's figure rather than a second one.
-  dew: SkFont;
+  feels: SkFont;
   // Model names are drawn as RN text over the canvas, so this face is only ever measured — it
   // must match styles.stickyModelText for the sticky arithmetic to hold.
   model: SkFont;
@@ -2411,22 +2421,27 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
 
       case 'temp': {
         for (let i = c0; i < c1; i++) {
-          const { temp_c: t, dewpoint_c: d } = periods[i];
+          const t = periods[i].temp_c;
           if (t == null) continue;
           const tempText = fmtTemp(t, units);
           els.push(centerText(`th${i}`, tempText, colCenter(i), top + TEMP_VALUE_Y, fonts.data, '#1c1c1e'));
-          // The dewpoint under it, in the light dew face and the hour labels' grey: the band's
-          // bottom edge is the reading, and the number is its caption. Its DIGITS are centered on
-          // the temperature's digits, not the whole string on the whole string — the degree sign
-          // is a different share of each face's width, and centering both wholes left the two
-          // numbers a hair apart.
-          if (d != null) {
-            const dewText = fmtTemp(Math.min(d, t), units);
-            const digitsCx = colCenter(i) - fonts.data.getTextWidth(tempText) / 2
-              + fonts.data.getTextWidth(tempText.replace('°', '')) / 2;
-            const dewX = digitsCx - fonts.dew.getTextWidth(dewText.replace('°', '')) / 2;
-            els.push(<Text key={`dh${i}`} x={dewX} y={baseline(top + DEW_VALUE_Y, fonts.dew.getSize())}
-              text={dewText} font={fonts.dew} color={C.hour} />);
+          // Feels-like under it, in the light face and the hour labels' grey: a caption to the
+          // temperature's figure. Its DIGITS are centered on the temperature's digits, not the
+          // whole string on the whole string — the degree sign is a different share of each
+          // face's width, and a minus sign on one line and not the other would shove the digits
+          // apart, so both hang outside the centered span.
+          const feels = feelsLikeC(periods[i]);
+          if (feels != null) {
+            const feelsText = fmtTemp(feels, units);
+            // Offset from a string's left edge to the center of its digits.
+            const digitsMid = (font: SkFont, text: string) => {
+              const sign = text.startsWith('-') ? '-' : '';
+              return font.getTextWidth(sign) + font.getTextWidth(text.slice(sign.length).replace('°', '')) / 2;
+            };
+            const digitsCx = colCenter(i) - fonts.data.getTextWidth(tempText) / 2 + digitsMid(fonts.data, tempText);
+            const feelsX = digitsCx - digitsMid(fonts.feels, feelsText);
+            els.push(<Text key={`fh${i}`} x={feelsX} y={baseline(top + FEELS_VALUE_Y, fonts.feels.getSize())}
+              text={feelsText} font={fonts.feels} color={C.hour} />);
           }
         }
         break;
@@ -2996,7 +3011,7 @@ const RowLegend = memo(function RowLegend({ rows, units, bandLevels, elevation, 
     if (row.legend2) {
       els.push(
         <RNText key={`u2${ri}`} numberOfLines={1}
-          style={[styles.legendUnit, { top: top + DEW_VALUE_Y - textH / 2, color: C.hour }]}>
+          style={[styles.legendUnit, { top: top + FEELS_VALUE_Y - textH / 2, color: C.hour }]}>
           {row.legend2}
         </RNText>,
       );
@@ -3609,7 +3624,7 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY, onD
       hourSuffix: font({ fontSize: 9.5, fontWeight: '400' }),
       strip: font({ fontSize: 11, fontWeight: '300' }),
       wind: font({ fontSize: 11.5, fontWeight: '400' }),
-      dew: font({ fontSize: 11, fontWeight: '300' }),
+      feels: font({ fontSize: 11, fontWeight: '300' }),
       model: font({ fontSize: 11, fontWeight: '600' }),
     };
   }, []);
@@ -3834,6 +3849,10 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
 
   if (has((q) => q.temp_c))
     thermal.push(['Temperature', p.temp_c != null ? `${fmtTemp(p.temp_c, units)}${units.temp === 'f' ? 'F' : 'C'}` : '—']);
+  if (has((q) => feelsLikeC(q))) {
+    const f = feelsLikeC(p);
+    thermal.push(['Feels like', f != null ? `${fmtTemp(f, units)}${units.temp === 'f' ? 'F' : 'C'}` : '—']);
+  }
   // The freezing level rides with temperature rather than with the winds it used to sit among:
   // it is the other thing this column says about heat, and keeping it here leaves the surface
   // wind and the levels above it unbroken.
