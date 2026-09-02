@@ -1287,12 +1287,12 @@ function modelSegments(
   return segments;
 }
 
-// The name and grid spacing of the model behind a band, stepping down to the bare name and then
-// to nothing as the band narrows. A model can serve a single period — AROME HD's 15-minute domain
-// reaches about six hours, which is one column of a 12h fill — and there a clipped name would say
-// less than a colored band the reader can compare against a labelled one.
+// The name of the model behind a band, stepping down to the short name and then to nothing as the
+// band narrows. A model can serve a single period — AROME HD's 15-minute domain reaches about six
+// hours, which is one column of a 12h fill — and there a clipped name would say less than a
+// colored band the reader can compare against a labelled one.
 function fitModelLabel(spec: ModelSpec | null, available: number, font: SkFont): string {
-  const forms = spec ? [`${spec.shortLabel} ${spec.resKm}km`, spec.shortLabel] : ['—'];
+  const forms = spec ? [spec.label, spec.shortLabel] : ['—'];
   return forms.find((f) => font.getTextWidth(f) <= available) ?? '';
 }
 

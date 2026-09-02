@@ -122,7 +122,7 @@ const MODEL_INFO = [
   { name: '🌐 Auto', desc: 'Chooses the highest resolution model for your location from over 30 regional weather models.' },
   { name: '🇺🇸 US', desc: 'Blend of HRRR (3km, 48hr, continental US) and GFS (13km, 16 day, global).' },
   { name: '🇨🇦 CA', desc: 'Blend of HRDPS (2.5km, 48hr, Canada) and GEM (15km, 10 day, global).' },
-  { name: '🇪🇺 EU', desc: 'IFS HRES (9km, 15 day, global).' },
+  { name: '🇪🇺 EU', desc: 'ECMWF IFS HRES (9km, 15 day, global).' },
   { name: '🇩🇪 DE', desc: 'Blend of ICON-D2 (2km, 48hr, central Europe), ICON-EU (7km, 5 day, Europe), and ICON (13km, 7 day, global).' },
 ];
 const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
@@ -448,8 +448,7 @@ function modelStackLabel(
     const end = estimatedLastFullRunMs(spec, nowMs) + spec.horizonHours * 3600000;
     if (end <= covered) continue;
     covered = end;
-    const label = `${spec.shortLabel} ${spec.resKm}km`;
-    if (!labels.includes(label)) labels.push(label);
+    if (!labels.includes(spec.label)) labels.push(spec.label);
   }
   return labels.length ? labels.join(' › ') : null;
 }

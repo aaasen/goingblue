@@ -209,14 +209,15 @@ const GRIDS = {
 export interface ModelSpec {
   /** Open-Meteo `models=` parameter name, usable to fetch this model individually. */
   id: string;
-  label: string;
   /**
-   * Display name for UI segments/subtext. The AROME 15-min domains share their parent's short
-   * label deliberately: they are the same model on a faster assimilation cycle, so adjacent
-   * segments merge when rendered by shortLabel.
+   * Full display name, matching what Open-Meteo's docs call the model, with its resolution.
+   * The AROME 15-min domains carry their parent's names deliberately: they are the same model on
+   * a faster assimilation cycle, so adjacent segments read as one band.
    */
+  label: string;
+  /** `label` without the agency prefix or the region, for spaces too narrow for the full name. */
   shortLabel: string;
-  /** Approximate native resolution in km, for display. */
+  /** Approximate native resolution in km; drives the band's color ramp. */
   resKm: number;
   grid: Grid;
   /** Forecast length (hours from run initialisation) of the longest runs. */
@@ -229,9 +230,9 @@ export interface ModelSpec {
 
 const spec = (
   id: string,
+  label: string,
   shortLabel: string,
   resKm: number,
-  label: string,
   grid: Grid,
   horizonHours: number,
   runIntervalHours: number,
@@ -242,20 +243,21 @@ const spec = (
 // live behaviour (2026-08-14 validation run): ECMWF now serves ~15 days on both feeds; UKMO
 // global, ARPEGE, AROME, and JMA MSM reach their full horizon only on the 00z/12z runs. Past
 // hours are always covered by every domain — the .om files are a continuous rolling archive.
+// Names and resolutions follow the per-provider Open-Meteo docs pages (checked 2026-09-02).
 export const MODELS = {
-  ecmwf_ifs: spec("ecmwf_ifs", "IFS", 9, "ECMWF IFS HRES 9km", GLOBAL_GRID, 360, 12, 8),
-  ecmwf_ifs025: spec("ecmwf_ifs025", "IFS 0.25°", 25, "ECMWF IFS 0.25°", GLOBAL_GRID, 360, 12, 8),
-  icon_global: spec("icon_global", "ICON", 13, "DWD ICON 13km", GLOBAL_GRID, 180, 12, 4),
-  icon_eu: spec("icon_eu", "ICON-EU", 7, "DWD ICON-EU 7km", GRIDS.icon_eu, 120, 6, 4),
-  icon_d2: spec("icon_d2", "ICON-D2", 2, "DWD ICON-D2 2km", GRIDS.icon_d2, 48, 3, 3),
-  gfs_global: spec("gfs_global", "GFS", 13, "NOAA GFS 13km", GLOBAL_GRID, 384, 6, 5),
-  gfs_hrrr: spec("gfs_hrrr", "HRRR", 3, "NOAA HRRR 3km", GRIDS.hrrr, 48, 6, 2),
-  jma_msm: spec("jma_msm", "MSM", 5, "JMA MSM 5km", GRIDS.jma_msm, 78, 12, 3),
+  ecmwf_ifs: spec("ecmwf_ifs", "ECMWF IFS HRES 9km", "ECMWF IFS 9km", 9, GLOBAL_GRID, 360, 12, 8),
+  ecmwf_ifs025: spec("ecmwf_ifs025", "ECMWF IFS 0.25°", "ECMWF IFS 0.25°", 25, GLOBAL_GRID, 360, 12, 8),
+  icon_global: spec("icon_global", "ICON Global 11km", "ICON Global 11km", 11, GLOBAL_GRID, 180, 12, 4),
+  icon_eu: spec("icon_eu", "ICON Europe 7km", "ICON Europe 7km", 7, GRIDS.icon_eu, 120, 6, 4),
+  icon_d2: spec("icon_d2", "ICON D2 2km", "ICON D2 2km", 2, GRIDS.icon_d2, 48, 3, 3),
+  gfs_global: spec("gfs_global", "GFS 13km", "GFS 13km", 13, GLOBAL_GRID, 384, 6, 5),
+  gfs_hrrr: spec("gfs_hrrr", "HRRR Conus 3km", "HRRR 3km", 3, GRIDS.hrrr, 48, 6, 2),
+  jma_msm: spec("jma_msm", "JMA MSM 5km", "MSM 5km", 5, GRIDS.jma_msm, 78, 12, 3),
   meteofrance_arome_france_hd_15min: spec(
     "meteofrance_arome_france_hd_15min",
-    "AROME-HD",
-    1.3,
-    "Météo-France AROME HD (15-min run)",
+    "AROME France HD 1.5km",
+    "AROME HD 1.5km",
+    1.5,
     GRIDS.arome_france_hd,
     6,
     1,
@@ -263,9 +265,9 @@ export const MODELS = {
   ),
   meteofrance_arome_france_15min: spec(
     "meteofrance_arome_france_15min",
-    "AROME",
+    "AROME France 2.5km",
+    "AROME 2.5km",
     2.5,
-    "Météo-France AROME (15-min run)",
     GRIDS.arome_france,
     6,
     1,
@@ -273,9 +275,9 @@ export const MODELS = {
   ),
   meteofrance_arome_france_hd: spec(
     "meteofrance_arome_france_hd",
-    "AROME-HD",
-    1.3,
-    "Météo-France AROME HD 1.3km",
+    "AROME France HD 1.5km",
+    "AROME HD 1.5km",
+    1.5,
     GRIDS.arome_france_hd,
     51,
     12,
@@ -283,9 +285,9 @@ export const MODELS = {
   ),
   meteofrance_arome_france: spec(
     "meteofrance_arome_france",
-    "AROME",
+    "AROME France 2.5km",
+    "AROME 2.5km",
     2.5,
-    "Météo-France AROME 2.5km",
     GRIDS.arome_france,
     51,
     12,
@@ -293,9 +295,9 @@ export const MODELS = {
   ),
   meteofrance_arpege_europe: spec(
     "meteofrance_arpege_europe",
-    "ARPEGE",
+    "ARPEGE Europe 11km",
+    "ARPEGE 11km",
     11,
-    "Météo-France ARPEGE Europe 11km",
     GRIDS.arpege_europe,
     114,
     12,
@@ -303,20 +305,29 @@ export const MODELS = {
   ),
   knmi_harmonie_arome_netherlands: spec(
     "knmi_harmonie_arome_netherlands",
-    "KNMI",
+    "KNMI Harmonie AROME Netherlands 2km",
+    "KNMI 2km",
     2,
-    "KNMI Harmonie AROME NL 2km",
     GRIDS.knmi_netherlands,
     60,
     1,
     3,
   ),
-  metno_nordic: spec("metno_nordic", "MetNo", 1, "MET Norway Nordic 1km", GRIDS.metno_nordic, 60, 1, 2),
+  metno_nordic: spec(
+    "metno_nordic",
+    "MET Norway Nordic 1km",
+    "MET Nordic 1km",
+    1,
+    GRIDS.metno_nordic,
+    60,
+    1,
+    2,
+  ),
   dmi_harmonie_arome_europe: spec(
     "dmi_harmonie_arome_europe",
-    "DMI",
-    2,
     "DMI Harmonie AROME Europe 2km",
+    "DMI 2km",
+    2,
     GRIDS.dmi_europe,
     60,
     3,
@@ -324,9 +335,9 @@ export const MODELS = {
   ),
   ukmo_uk_deterministic_2km: spec(
     "ukmo_uk_deterministic_2km",
-    "UKV",
+    "UKMO UKV 2km",
+    "UKV 2km",
     2,
-    "UK Met Office UKV 2km",
     GRIDS.ukmo_ukv,
     54,
     1,
@@ -334,9 +345,9 @@ export const MODELS = {
   ),
   ukmo_global_deterministic_10km: spec(
     "ukmo_global_deterministic_10km",
-    "UKMO",
+    "UKMO Global 10km",
+    "UKMO 10km",
     10,
-    "UK Met Office Global 10km",
     GLOBAL_GRID,
     168,
     12,
@@ -346,16 +357,25 @@ export const MODELS = {
   // init); RDPS and HRDPS every 6h to 78h/48h (~3h delay).
   gem_hrdps_continental: spec(
     "gem_hrdps_continental",
-    "HRDPS",
+    "GEM HRDPS 2.5km",
+    "HRDPS 2.5km",
     2.5,
-    "Canada HRDPS 2.5km",
     GRIDS.gem_hrdps,
     48,
     6,
     3,
   ),
-  gem_regional: spec("gem_regional", "RDPS", 10, "Canada RDPS 10km", GRIDS.gem_rdps, 78, 6, 3),
-  gem_global: spec("gem_global", "GDPS", 15, "Canada GDPS 15km", GLOBAL_GRID, 240, 12, 7),
+  gem_regional: spec(
+    "gem_regional",
+    "GEM RDPS 10km",
+    "RDPS 10km",
+    10,
+    GRIDS.gem_rdps,
+    78,
+    6,
+    3,
+  ),
+  gem_global: spec("gem_global", "GEM GDPS 15km", "GDPS 15km", 15, GLOBAL_GRID, 240, 12, 7),
 } as const;
 
 export interface BranchPrediction {
