@@ -209,6 +209,10 @@ const VAR_GROUPS: VarGroup[] = [
     desc: 'Altitude at which atmospheric temperature drops to 0°C.',
   },
   {
+    value: 'humidity', code: 'h', label: 'Humidity', vars: [VAR_CODES.h],
+    desc: 'Dewpoint and relative humidity.',
+  },
+  {
     value: 'agreement', code: 'g', label: 'Model Agreement', vars: [VAR_CODES.g],
     desc: 'How well the other forecast centers agree with this forecast, period by period.',
   },
@@ -556,6 +560,7 @@ const OPTIONAL_VARIABLE_ICONS: { vars: readonly Variable[]; symbol: string; labe
   { vars: [VAR.clouds], symbol: '☁️', label: 'Detailed clouds' },
   { vars: WIND_LEVEL_VARS, symbol: '💨', label: 'Pressure-level winds' },
   { vars: [VAR.freeze], symbol: '🌡️', label: 'Freezing level' },
+  { vars: [VAR.dewpoint], symbol: '💧', label: 'Humidity' },
   { vars: [VAR.agreement], symbol: '🤝', label: 'Model agreement' },
   // One icon for the whole air-quality block: which index a request picked is the meteogram's
   // business, and five near-identical chips on a cache row would say less than one.

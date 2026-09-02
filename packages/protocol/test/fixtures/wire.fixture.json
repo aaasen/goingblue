@@ -7,7 +7,7 @@
     "mode": 0,
     "utcOffsetHours": -9
   },
-  "encoded": "%!!'NT:%kayqhC2V%Y8DcKB&OGW(2%2U,+Jq-t=7XscC6d5Pd%X/@gqZY*;V&Xv*iE7B87#-ZOIfAAnc#e!VMta;$&tPoo?+L?$llq*C0$G+r1)N\"Wtn)Mi_pyoIw_,STA%\"CkmN5O2hWfwBJG%LJ>fM(>O&mtK-*NTB2&cm3?tJQ&vlJ.VCnJTc_f!fJe7=%e+sl4V4Ze%51k%%h=HZP-,",
+  "encoded": "%!!'NPdI/Y4z&1OM+E/v<RIReRR19A.D@M$+IQ-UGA;RC3v1ovrS?:\"vO)iA9=D3SVGi@\"PBX$P5EfT&l1bV&M-52@*3A@sEuaz&b(f9Flrisj;hHL.0>v2lYuAa3:U#X-aAHOYtbBOj1G@8=%&rb=;N&MQ:Rv3Q.IK8-Db_K/.x*\"K/=;N%oCMR5@8MzFm&kg5UZzVu!JBbfEk=Zp*9zHv-&1Nlp-\"",
   "decoded": {
     "version": 4,
     "code": 0,
@@ -28,6 +28,7 @@
       "aqi_eu_pm25",
       "aqi_eu_so2",
       "clouds",
+      "dewpoint",
       "freeze",
       "gust",
       "precip",
@@ -54,6 +55,7 @@
         {
           "weathercode": 3,
           "temp_c": -8,
+          "dewpoint_c": -14,
           "freeze_m": 3048,
           "cloud_band": [
             71,
@@ -123,6 +125,7 @@
         {
           "weathercode": 61,
           "temp_c": -4,
+          "dewpoint_c": -6,
           "freeze_m": 2438.4,
           "cloud_band": [
             86,
@@ -192,6 +195,7 @@
         {
           "weathercode": 63,
           "temp_c": -3,
+          "dewpoint_c": -4,
           "freeze_m": 2133.6,
           "cloud_band": [
             100,
@@ -261,6 +265,7 @@
         {
           "weathercode": 71,
           "temp_c": -6,
+          "dewpoint_c": -9,
           "freeze_m": 2438.4,
           "cloud_band": [
             71,
@@ -330,6 +335,7 @@
         {
           "weathercode": 2,
           "temp_c": -12,
+          "dewpoint_c": -20,
           "freeze_m": 3352.8,
           "aqi_pm25": 8,
           "aqi_o3": 23,
@@ -391,6 +397,7 @@
         {
           "weathercode": 71,
           "temp_c": -10,
+          "dewpoint_c": -13,
           "freeze_m": 2743.2000000000003,
           "aqi_pm25": 85,
           "aqi_o3": 33,
@@ -452,6 +459,7 @@
         {
           "weathercode": 3,
           "temp_c": -7,
+          "dewpoint_c": -12,
           "freeze_m": 2743.2000000000003,
           "aqi_pm25": 13,
           "aqi_o3": 55,
@@ -513,6 +521,7 @@
         {
           "weathercode": 61,
           "temp_c": -5,
+          "dewpoint_c": -7,
           "freeze_m": 2438.4,
           "aqi_pm25": 225,
           "aqi_o3": 48,

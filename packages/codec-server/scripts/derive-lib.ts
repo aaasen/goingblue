@@ -25,7 +25,7 @@ export const DERIVE_SOURCE = "best_match";
 // listed here sees an absent column and silently counts nothing — add the variable here (or
 // pass `vars: null` to eachForecast for an unfiltered load) when introducing one.
 export const DERIVE_VARS: readonly string[] = [
-  "temperature_2m", "freezing_level_height", "weather_code",
+  "temperature_2m", "dew_point_2m", "freezing_level_height", "weather_code",
   "rain", "showers", "snowfall", "precipitation_probability",
   "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m",
   // Pressure-level wind at every WIND_LEVELS_HPA level — the reader picks any subset.

@@ -8,6 +8,7 @@ import {
   GUST_DELTA_WEIGHTS_BY_RES, SFC_DELTA_GUST_WEIGHTS_BY_RES,
   CLOUD_BAND_WEIGHTS_BY_LEVEL_PREV,
   TEMP_DELTA_BOOTSTRAP_WEIGHTS, TEMP_DELTA_WEIGHTS_BY_RES,
+  DEWPOINT_DELTA_WEIGHTS_BY_RES,
   PRECIP_BOOTSTRAP_WEIGHTS, PRECIP_WEIGHTS_BY_RES,
   SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES,
   RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_RES,
@@ -224,6 +225,29 @@ function tempDeltaSym(delta: number): number {
   return Math.abs(delta) <= TEMP_DELTA_CORE_RADIUS ? delta + TEMP_DELTA_CORE_RADIUS : TEMP_DELTA_ESCAPE_SYM;
 }
 
+// ── Dewpoint ────────────────────────────────────────────────────────────────────
+// The dewpoint column codes the DEWPOINT delta under the temp alphabet (same core/escape
+// geometry), keyed by two contexts the decoder already holds: the same period's decoded temp
+// delta, clamped to the core (15 values — the temp symbol itself, escapes folded to the ends),
+// and the PREVIOUS period's reconstructed depression (temp − dewpoint) in five bands. The
+// depression is what makes the temp delta informative: at zero the dewpoint is pinned to the
+// falling temperature (dewpoint ≤ temp), at 11+ it is decoupled from the diurnal swing. Held-out
+// (analyze-dewpoint-entropy.ts): res-only 4.024/3.373/2.709/1.748 → 3.550/2.915/2.351/1.582
+// b/period (12h/6h/3h/1h). The depression itself was rejected as the coded quantity — it
+// inherits the diurnal cycle and costs 0.3-1.1 b/period more under every context tried.
+export const DEWPOINT_TEMP_CTX = 2 * TEMP_DELTA_CORE_RADIUS + 1; // 15
+export function dewpointTempCtx(tempDelta: number): number {
+  return Math.min(Math.max(tempDelta, -TEMP_DELTA_CORE_RADIUS), TEMP_DELTA_CORE_RADIUS) + TEMP_DELTA_CORE_RADIUS;
+}
+// Previous depression (°C, post-quantization), 5 bands: ≤0 | 1-2 | 3-5 | 6-10 | 11+.
+export const DEWPOINT_DEPRESSION_BUCKETS = 5;
+const DEWPOINT_DEPRESSION_EDGES = [1, 3, 6, 11];
+export function dewpointDepressionBucket(depression: number): number {
+  let b = 0;
+  for (const e of DEWPOINT_DEPRESSION_EDGES) { if (depression < e) break; b++; }
+  return b;
+}
+
 // ── Air quality index ladders ───────────────────────────────────────────────────
 // Both AQ scales quantize to a 25-band ladder plus symbol 0 = NO DATA, so 26 symbols fit the same
 // 5-bit anchor the wind columns use. The bands are non-uniform, spending resolution where the
@@ -437,6 +461,11 @@ export interface Books {
   // sign; the previous delta adds the airmass's actual trajectory. See
   // codec-server/scripts/derive-temp-delta-codebooks.ts.
   tempDeltaBook(res: number, tod: number, prevDelta: number | null): CodeBook;
+  // The codebook for one dewpoint delta. `tempDelta` is the same period's decoded temp delta
+  // (post-clamp reconstruction), `prevDepression` the previous period's reconstructed
+  // temp − dewpoint. Temp is required: the column is never carried without it. See
+  // codec-server/scripts/derive-dewpoint-delta-codebooks.ts.
+  dewpointDeltaBook(res: number, tempDelta: number, prevDepression: number): CodeBook;
   // Air quality. Every AQ book is CLASS-INDEPENDENT — see AQ_BOOKS below — so these five resolve
   // to the same tables whichever class the header selected. `prevDelta` is the previous decoded
   // delta in the same column, null for the column's first (no bootstrap table: an AQ column's
@@ -509,6 +538,7 @@ function buildBooks(t: typeof BASE_TABLES): Books {
 
   const tempDeltaBootstrap = buildTable(t.TEMP_DELTA_BOOTSTRAP_WEIGHTS);
   const tempDeltaTablesByRes = t.TEMP_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
+  const dewpointTablesByRes = t.DEWPOINT_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(buildTable));
 
   return {
     encodeWeathercode: weathercode.encode,
@@ -546,6 +576,10 @@ function buildBooks(t: typeof BASE_TABLES): Books {
     tempDeltaBook(res, tod, prevDelta) {
       if (prevDelta === null) return tempDeltaBootstrap;
       return tempDeltaTablesByRes[res][tempDeltaBucket(prevDelta) * TEMP_DELTA_TOD_BUCKETS + tod];
+    },
+    dewpointDeltaBook(res, tempDelta, prevDepression) {
+      return dewpointTablesByRes[res][
+        dewpointTempCtx(tempDelta) * DEWPOINT_DEPRESSION_BUCKETS + dewpointDepressionBucket(prevDepression)];
     },
     ...AQ_BOOKS,
     ...AGREEMENT_BOOKS,
@@ -620,6 +654,7 @@ const BASE_TABLES = {
   SNOW_BOOTSTRAP_WEIGHTS, SNOW_WEIGHTS_BY_RES,
   RAIN_BOOTSTRAP_WEIGHTS, RAIN_WEIGHTS_BY_RES,
   TEMP_DELTA_BOOTSTRAP_WEIGHTS, TEMP_DELTA_WEIGHTS_BY_RES,
+  DEWPOINT_DELTA_WEIGHTS_BY_RES,
   WEATHERCODE_BOOTSTRAP_WEIGHTS, WEATHERCODE_WEIGHTS,
   WIND_DIR_BOOTSTRAP_WEIGHTS, WIND_DIR_WEIGHTS_BY_RES, WIND_DIR_UPPER_WEIGHTS_BY_RES,
   WIND_SPEED_DELTA_WEIGHTS_BY_RES_LEVEL, WIND_SPEED_UPPER_DELTA_WEIGHTS_BY_RES,
@@ -678,6 +713,7 @@ export const precipBook = BOOKS.precipBook;
 export const snowBook = BOOKS.snowBook;
 export const rainBook = BOOKS.rainBook;
 export const tempDeltaBook = BOOKS.tempDeltaBook;
+export const dewpointDeltaBook = BOOKS.dewpointDeltaBook;
 
 // ── Wire-format freeze ──────────────────────────────────────────────────────────
 // Every table above is wire format: re-deriving any of them changes what already-encoded
@@ -729,6 +765,12 @@ const bundleOf = (t: typeof BASE_TABLES) => ({
     escapeBits: TEMP_DELTA_ESCAPE_BITS,
     prevBucketEdges: TEMP_DELTA_PREV_EDGES,
     todBuckets: TEMP_DELTA_TOD_BUCKETS,
+  },
+  // Rows are tempCtx-major (dewpointTempCtx × DEWPOINT_DEPRESSION_BUCKETS + depression band);
+  // the alphabet is tempDelta's (core radius + escape bits above).
+  dewpoint: {
+    byRes: t.DEWPOINT_DELTA_WEIGHTS_BY_RES.map((rows) => rows.map(qf)),
+    depressionEdges: DEWPOINT_DEPRESSION_EDGES,
   },
 });
 // Air quality is pinned once, outside bundleOf: the classes don't carry AQ tables (see AQ_BOOKS),

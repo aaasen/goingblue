@@ -7,6 +7,14 @@ export const WMO2IDX: Record<number, number> = Object.fromEntries(
   WMO_CODES.map((c, i) => [c, i]),
 );
 
+// Relative humidity (%) from a temperature/dewpoint pair, Magnus form (Alduchov & Eskridge
+// 1996 coefficients). Humidity never travels on the wire: dewpoint does, and this is how a reader
+// gets the percentage back. Clamped to 100 — a dewpoint above temp is model rounding.
+export function relativeHumidityPct(tempC: number, dewpointC: number): number {
+  const es = (t: number) => Math.exp((17.625 * t) / (243.04 + t));
+  return Math.min(100, Math.round((100 * es(dewpointC)) / es(tempC)));
+}
+
 export interface WindAloft {
   kph: number;
   dir: number;
@@ -25,6 +33,11 @@ export interface Period {
   // as min/max over a local day's periods; which sample the encoder picks is server policy,
   // not wire format.
   temp_c?: number;
+
+  // Dewpoint in Celsius, sampled at the same hour as temp_c, so temp_c - dewpoint_c is the
+  // depression at one instant and relative humidity follows from the pair. Never above temp_c
+  // by more than model rounding. Carried only alongside temp.
+  dewpoint_c?: number;
 
   // Snow accumulation in centimeters.
   snow_cm?: number;

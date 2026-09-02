@@ -97,6 +97,7 @@ const MODEL_NAME_TO_BIT: Record<string, number> = {
 
 const SURFACE_VARS = [
   "temperature_2m",
+  "dew_point_2m",
   "wind_speed_10m",
   "wind_direction_10m",
   "wind_gusts_10m",
@@ -181,6 +182,7 @@ export function dominantDirDeg(
 export interface HourlyData {
   time: string[];
   temperature_2m: (number | null)[];
+  dew_point_2m: (number | null)[];
   wind_speed_10m: (number | null)[];
   wind_direction_10m: (number | null)[];
   wind_gusts_10m: (number | null)[];
@@ -200,6 +202,9 @@ export interface HourlyData {
 export interface Row {
   time: string;
   temp_c: number | null;
+  // Dewpoint at the hour temp_c was sampled from (representativeTempIndices), so the pair is one
+  // instant's reading. Null when the source carried no dewpoint at that hour.
+  dewpoint_c: number | null;
   wind_speed_10m: number | null;
   wind_direction_10m: number | null;
   wind_gusts_10m: number | null;
@@ -843,13 +848,26 @@ export function representativeTemps(
   windows: number[][],
   utcOffsetHours: number,
 ): (number | null)[] {
+  return representativeTempIndices(temps, times, windows, utcOffsetHours)
+    .map((i) => (i === null ? null : temps![i]));
+}
+
+// The hourly index each window's representative temperature is read from (null for a window
+// with no temperature at all). Other instantaneous variables sampled at this index (dewpoint)
+// describe the same moment as the temperature beside them.
+export function representativeTempIndices(
+  temps: (number | null)[] | undefined,
+  times: string[],
+  windows: number[][],
+  utcOffsetHours: number,
+): (number | null)[] {
   // Default: the window's midpoint sample (nearest non-null hour to the middle).
   const midSample = (idx: number[]): number | null => {
     const mid = idx.length >> 1;
     for (let d = 0; d < idx.length; d++) {
       for (const j of d === 0 ? [mid] : [mid - d, mid + d]) {
         const t = j >= 0 && j < idx.length ? temps?.[idx[j]] : null;
-        if (t != null) return t;
+        if (t != null) return idx[j];
       }
     }
     return null;
@@ -868,15 +886,18 @@ export function representativeTemps(
   });
 
   for (const wins of byDay.values()) {
-    // Per-window raw extremes over non-null hours.
+    // Per-window raw extremes over non-null hours, with the hour each was read at (the first
+    // hour on a tie, so the choice is deterministic).
     const lo = new Map<number, number>();
     const hi = new Map<number, number>();
+    const loAt = new Map<number, number>();
+    const hiAt = new Map<number, number>();
     for (const p of wins) {
       for (const i of windows[p]) {
         const t = temps?.[i];
         if (t == null) continue;
-        if (!lo.has(p) || t < lo.get(p)!) lo.set(p, t);
-        if (!hi.has(p) || t > hi.get(p)!) hi.set(p, t);
+        if (!lo.has(p) || t < lo.get(p)!) { lo.set(p, t); loAt.set(p, i); }
+        if (!hi.has(p) || t > hi.get(p)!) { hi.set(p, t); hiAt.set(p, i); }
       }
     }
     const withData = wins.filter((p) => lo.has(p));
@@ -893,8 +914,8 @@ export function representativeTemps(
       // Separable: report each extreme from a distinct window.
       const pm = pMin.find((p) => !pMax.includes(p)) ?? pMin[0];
       const px = pMax.find((p) => p !== pm)!;
-      out[pm] = lo.get(pm)!;
-      out[px] = hi.get(px)!;
+      out[pm] = loAt.get(pm)!;
+      out[px] = hiAt.get(px)!;
     } else {
       // Collision: both extremes confined to one window.
       const pc = pMin[0];
@@ -902,7 +923,7 @@ export function representativeTemps(
       if (others.length === 0) {
         // Single-window (partial) day: keep the max — partial day-0 windows start at the
         // request period and usually contain the remaining day's high.
-        out[pc] = hi.get(pc)!;
+        out[pc] = hiAt.get(pc)!;
         continue;
       }
       let poMin = others[0], poMax = others[0];
@@ -913,11 +934,11 @@ export function representativeTemps(
       const errKeepMax = Math.round(lo.get(poMin)!) - dayMin;
       const errKeepMin = dayMax - Math.round(hi.get(poMax)!);
       if (errKeepMax <= errKeepMin) {
-        out[pc] = hi.get(pc)!;
-        out[poMin] = lo.get(poMin)!;
+        out[pc] = hiAt.get(pc)!;
+        out[poMin] = loAt.get(poMin)!;
       } else {
-        out[pc] = lo.get(pc)!;
-        out[poMax] = hi.get(poMax)!;
+        out[pc] = loAt.get(pc)!;
+        out[poMax] = hiAt.get(poMax)!;
       }
     }
   }
@@ -931,8 +952,10 @@ export function representativeTemps(
 export function rowsFromWindows(
   h: HourlyData, times: string[], windows: number[][], utcOffsetHours = 0,
 ): Row[] {
-  const repTemps = representativeTemps(h.temperature_2m, times, windows, utcOffsetHours);
+  const repIdx = representativeTempIndices(h.temperature_2m, times, windows, utcOffsetHours);
+  const dews = h.dew_point_2m;
   const rows = windows.map((idx, w) => {
+    const ti = repIdx[w];
     // Null-safe: a series may be entirely absent when aggregating injected data (e.g. an offline
     // corpus that omits precipitation_probability); production always supplies these arrays.
     const pick = (arr: (number | null)[] | undefined): (number | null)[] =>
@@ -956,7 +979,8 @@ export function rowsFromWindows(
 
     return {
       time: times[idx[0]],
-      temp_c: repTemps[w],
+      temp_c: ti === null ? null : (h.temperature_2m?.[ti] ?? null),
+      dewpoint_c: ti === null ? null : (dews?.[ti] ?? null),
       wind_speed_10m: maxOf(sfcSpd),
       wind_direction_10m: dominantDirDeg(sfcSpd, sfcDir),
       wind_gusts_10m: maxOf(pick(h.wind_gusts_10m)),
@@ -1021,6 +1045,9 @@ export function toFullPeriod(r: Row, vars: ReadonlySet<Variable>, modelKey: stri
   const p: Period = { weathercode: r.weathercode ?? 0 };
   if (vars.has(VAR.precip)) p.precip     = r.precip ?? 0;
   if (vars.has(VAR.temp))   p.temp_c     = r.temp_c ?? 0;
+  // A missing dewpoint reads as saturated air rather than 0 °C: the depression is the quantity
+  // the wire anchors on, and 0 is its least surprising value.
+  if (vars.has(VAR.dewpoint) && vars.has(VAR.temp)) p.dewpoint_c = r.dewpoint_c ?? p.temp_c!;
   if (vars.has(VAR.snow))   p.snow_cm    = r.snow_cm ?? 0;
   if (vars.has(VAR.rain))   p.rain_mm    = r.rain_mm ?? 0;
   if (vars.has(VAR.freeze)) p.freeze_m   = r.freezing_level_m ?? 0;

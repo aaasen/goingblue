@@ -68,21 +68,21 @@ const BENCHMARKS_DIR = join(REPO_ROOT, "data", "benchmarks"); // timestamped HTM
 // air-quality half of every table to say the same thing twice. The US scale stands in for both.
 type GroupId =
   | "clouds" | "highwind" | "freeze" | "precip"
-  | "aqi" | "pm25" | "ozone" | "pm10" | "no2" | "so2";
+  | "aqi" | "pm25" | "ozone" | "pm10" | "no2" | "so2" | "humidity";
 const GROUP_IDS: GroupId[] = [
   "clouds", "highwind", "freeze", "precip",
-  "aqi", "pm25", "ozone", "pm10", "no2", "so2",
+  "aqi", "pm25", "ozone", "pm10", "no2", "so2", "humidity",
 ];
 const GROUP_LABEL: Record<GroupId, string> = {
   clouds: "Clouds", highwind: "Pressure-Level Winds (600/500/400 hPa)", freeze: "Freezing Level",
   precip: "Precip Chance",
   aqi: "Air Quality (US)", pm25: "PM2.5 (US)", ozone: "Ozone (US)",
-  pm10: "PM10 (US)", no2: "NO2 (US)", so2: "SO2 (US)",
+  pm10: "PM10 (US)", no2: "NO2 (US)", so2: "SO2 (US)", humidity: "Humidity (dewpoint)",
 };
 // Short forms for the frontier chart, where each curve is labelled on the plot itself.
 const GROUP_SHORT: Record<GroupId, string> = {
   clouds: "Cloud", highwind: "Wind", freeze: "FL", precip: "Precip",
-  aqi: "AQI", pm25: "PM2.5", ozone: "O3", pm10: "PM10", no2: "NO2", so2: "SO2",
+  aqi: "AQI", pm25: "PM2.5", ozone: "O3", pm10: "PM10", no2: "NO2", so2: "SO2", humidity: "Dew",
 };
 // Which groups the frontier chart breaks out on hover. The air-quality variables all cost about
 // the same and all cost little (the 4-day clamp means they only pay for the front of the window),
@@ -90,7 +90,7 @@ const GROUP_SHORT: Record<GroupId, string> = {
 // overlapping — seven lines saying one thing, at the price of making the four curves that
 // differ hard to follow. US AQI stands in for the group; the rest keep their rows in the mode
 // comparison table, which is where their individual numbers are legible anyway.
-const FRONTIER_GROUPS = new Set<GroupId>(["clouds", "highwind", "freeze", "precip", "aqi"]);
+const FRONTIER_GROUPS = new Set<GroupId>(["clouds", "highwind", "freeze", "precip", "aqi", "humidity"]);
 
 // Open-Meteo hourly series behind the current wire format. The Historical Forecast API provides
 // precipitation_probability (unlike single-runs, where it forced the ensemble variant).
@@ -353,6 +353,7 @@ const GROUP_VARS: Record<GroupId, Variable[]> = {
   pm10: [VAR.aq_pm10],
   no2: [VAR.aq_no2],
   so2: [VAR.aq_so2],
+  humidity: [VAR.dewpoint],
 };
 
 // The variable selections the report draws: the base set and each group on its own — ONE extra

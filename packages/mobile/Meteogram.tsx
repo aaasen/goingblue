@@ -8,6 +8,7 @@ import {
 import {
   CARDINALS, RAIN_K, modelsFromMask, startDatetime, predictCenter, attributeHour,
   AQ_DOMINANT_US, AQ_DOMINANT_EU, WIND_LEVELS_HPA, quantWind, AGREEMENT_CENTERS,
+  relativeHumidityPct,
   type Center, type ForecastMessage, type ModelSpec, type Period,
 } from '@weather/protocol';
 import type { AltitudeUnit, TimeFormat, UnitPrefs } from './settings';
@@ -944,7 +945,8 @@ function windLevelsPresent(periods: Period[]): number[] {
 // ── Row model ──────────────────────────────────────────────────────────────
 
 type RowKind =
-  | 'clouds' | 'temp' | 'precip-chance' | 'snow' | 'rain' | 'freeze' | 'wind-sfc' | 'wind-gust' | 'wind-dir'
+  | 'clouds' | 'temp' | 'precip-chance' | 'snow' | 'rain' | 'freeze' | 'dewpoint' | 'humidity'
+  | 'wind-sfc' | 'wind-gust' | 'wind-dir'
   | 'cloud-high' | 'cloud-mid' | 'cloud-low'
   | 'aqi' | 'aqi-pm25' | 'aqi-o3' | 'aqi-pm10' | 'aqi-no2' | 'aqi-so2'
   | 'aqi-dominant' | 'aqi-eu-dominant'
@@ -1095,6 +1097,15 @@ function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number, el
   if (has((p) => p.freeze_m)) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Freezing level', legend: '' });
     rows.push({ kind: 'freeze', height: ROW_H.FREEZE, label: '', legend: frU });
+  }
+
+  // Humidity: the dewpoint the message carries and the relative humidity derived from it and
+  // the temperature, two number rows. Both need temp, which the dewpoint column never travels
+  // without.
+  if (has((p) => p.dewpoint_c)) {
+    rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Humidity', legend: '' });
+    rows.push({ kind: 'dewpoint', height: ROW_H.DATA, label: '', legend: `dew ${tU}` });
+    rows.push({ kind: 'humidity', height: ROW_H.DATA, label: '', legend: '%' });
   }
 
   // The Windy-style vertical cloud band — the message carries it in place of the low/mid/high
@@ -2429,6 +2440,17 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         break;
       }
 
+      case 'dewpoint': case 'humidity': {
+        for (let i = c0; i < c1; i++) {
+          const { temp_c: t, dewpoint_c: d } = periods[i];
+          const txt = t == null || d == null ? ''
+            : row.kind === 'dewpoint' ? fmtTemp(d, units) : `${relativeHumidityPct(t, d)}`;
+          els.push(centerText(`hu${ri}-${i}`, txt || '—', colCenter(i), mid, fonts.data,
+            txt ? '#1c1c1e' : C.nil));
+        }
+        break;
+      }
+
       case 'cloud-band':
         // Contours, gridlines and the ground line are global geometry, built once in
         // buildSceneStatics and shared by every tile — each canvas clips them to its own bounds.
@@ -3675,6 +3697,11 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
   // it is the other thing this column says about heat, and keeping it here leaves the surface
   // wind and the levels above it unbroken.
   if (has((q) => q.freeze_m)) thermal.push(['Freezing level', fmtFreezeFull(p.freeze_m, units)]);
+  if (has((q) => q.dewpoint_c)) {
+    const t = p.temp_c, d = p.dewpoint_c;
+    thermal.push(['Dew point', d != null ? `${fmtTemp(d, units)}${units.temp === 'f' ? 'F' : 'C'}` : '—']);
+    thermal.push(['Humidity', t != null && d != null ? `${relativeHumidityPct(t, d)}%` : '—']);
+  }
 
   // Probability lives here and only here: the drawing carries the two amounts, and this panel is
   // where a column's numbers are read one at a time.

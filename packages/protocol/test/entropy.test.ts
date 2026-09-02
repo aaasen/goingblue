@@ -19,6 +19,7 @@ import {
   encodeTempDelta,
   decodeTempDelta,
   tempDeltaBook,
+  dewpointDeltaBook, DEWPOINT_TEMP_CTX, DEWPOINT_DEPRESSION_BUCKETS, dewpointTempCtx, dewpointDepressionBucket,
   TEMP_DELTA_TOD_BUCKETS,
   TEMP_DELTA_CORE_RADIUS,
   TEMP_DELTA_MIN,
@@ -255,6 +256,42 @@ describe("freezing level delta entropy coding", () => {
   it("a warming period makes a rising freezing level cheaper than the no-temp fallback (cross-variable context)", () => {
     const rising = Array(64).fill(1);
     expect(bitsFor(rising, freezeDeltaBook(2, 3))).toBeLessThan(bitsFor(rising, freezeDeltaBook(2, null)));
+  });
+});
+
+describe("dewpoint delta entropy coding", () => {
+  it("keys 15 temp-delta contexts × 5 depression bands, with the temp delta clamped to the core", () => {
+    expect(dewpointTempCtx(-32)).toBe(0);
+    expect(dewpointTempCtx(-7)).toBe(0);
+    expect(dewpointTempCtx(0)).toBe(7);
+    expect(dewpointTempCtx(31)).toBe(DEWPOINT_TEMP_CTX - 1);
+    expect([-3, 0, 1, 2, 3, 5, 6, 10, 11, 40].map(dewpointDepressionBucket)).toEqual([0, 0, 1, 1, 2, 2, 3, 3, 4, 4]);
+    expect(DEWPOINT_DEPRESSION_BUCKETS).toBe(5);
+  });
+
+  it("round-trips every core delta and the escape range under every (res, tempΔ, depression) book", () => {
+    for (let res = 0; res <= 3; res++) {
+      for (const tempDelta of [-32, -7, -1, 0, 1, 7, 31]) {
+        for (const dep of [0, 1, 3, 6, 11]) {
+          const book = dewpointDeltaBook(res, tempDelta, dep);
+          for (const d of [-32, -8, -7, -1, 0, 1, 7, 8, 31]) {
+            const { cost, source } = encoded((sink) => encodeTempDelta(sink, book, d));
+            expect(cost).toBeGreaterThan(0);
+            expect(decodeTempDelta(source, book)).toBe(d);
+            source.assertDone();
+          }
+        }
+      }
+    }
+  });
+
+  const bitsFor = (deltas: number[], book: CodeBook) =>
+    costOf((sink) => { for (const d of deltas) encodeTempDelta(sink, book, d); });
+
+  it("a saturated period follows a cooling temp down more cheaply than a dry one does", () => {
+    // Depression 0 and temp falling 3 °C: the dewpoint must fall too (dewpoint ≤ temp).
+    const falling = Array(64).fill(-3);
+    expect(bitsFor(falling, dewpointDeltaBook(2, -3, 0))).toBeLessThan(bitsFor(falling, dewpointDeltaBook(2, -3, 11)));
   });
 });
 

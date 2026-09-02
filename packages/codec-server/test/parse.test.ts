@@ -163,8 +163,9 @@ describe("parseRequest", () => {
   });
 
   it("rejects the retired v2 cloud names", () => {
-    // "ccm" is excluded: it spells the compact codes c+c+m, which the compact form wins.
-    for (const name of ["cch", "ccl"]) {
+    // "cch" and "ccm" are excluded: they spell the compact codes c+c+h / c+c+m, which the
+    // compact form wins.
+    for (const name of ["ccl"]) {
       const p = parseRequest(`v:${name}`);
       expect(p.vars).toEqual(withAlways());
       expect(p.errors).toContain(`unknown variable "${name}"`);

@@ -77,6 +77,7 @@ const PERIOD: Period = {
   weathercode: 73,
   precip: 75,
   temp_c: 0,
+  dewpoint_c: -6,          // 6 °C depression — anchors as the difference from temp
   snow_cm: 4 * 2.54,       // ~10cm — sqrt-companded, compared via qSnow()
   rain_mm: 6.5,            // sqrt-companded, compared via qRain()
   freeze_m: 6 * 304.8,     // 6000 ft in m — round-trips exactly
@@ -567,6 +568,39 @@ describe("round-trip encoding", () => {
     // The corpus tops out near 21,000 ft (the Andes in summer); nothing there may saturate.
     const decoded = roundTrip(msg({ periods: [[{ ...PERIOD, freeze_m: 21 * 304.8 }]] }));
     expect(decoded.periods[0][0].freeze_m).toBeCloseTo(21 * 304.8, 5);
+  });
+
+  it("round-trips the dewpoint beside temp, and drops it without temp", () => {
+    const withTemp = roundTrip(msg({ vars: varSet(VAR.temp, VAR.dewpoint) })).periods[0][0];
+    expect(withTemp.temp_c).toBe(0);
+    expect(withTemp.dewpoint_c).toBe(-6);
+    const noTemp = roundTrip(msg({ vars: varSet(VAR.dewpoint, VAR.freeze) })).periods[0][0];
+    expect(noTemp.dewpoint_c).toBeUndefined();
+    expect(noTemp.temp_c).toBeUndefined();
+  });
+
+  it("clamps a dewpoint above temp to saturation and a depression past 63 °C to 63", () => {
+    const wet = roundTrip(msg({ periods: [[{ ...PERIOD, temp_c: 10, dewpoint_c: 11 }]] })).periods[0][0];
+    expect(wet.dewpoint_c).toBe(10);
+    const dry = roundTrip(msg({ periods: [[{ ...PERIOD, temp_c: 40, dewpoint_c: -40 }]] })).periods[0][0];
+    expect(dry.dewpoint_c).toBe(40 - 63);
+  });
+
+  it("heals a clamped dewpoint jump on the next period, like temp", () => {
+    const periods = Array.from({ length: 64 }, (_, i) =>
+      ({ ...PERIOD, temp_c: 20, dewpoint_c: i === 0 ? 10 : -30 })); // -40 jump at p=1, clamped to -32
+    const decoded = roundTrip(msg({ periods: [periods] }, { hourly: true })).periods[0];
+    expect(decoded[1].dewpoint_c).toBe(-22);
+    expect(decoded[2].dewpoint_c).toBe(-30);
+  });
+
+  it("encodes a near-constant dewpoint column smaller than a wide-swinging one", () => {
+    const vars = varSet(VAR.temp, VAR.dewpoint);
+    const flat = Array.from({ length: 64 }, () => ({ ...PERIOD, temp_c: 10, dewpoint_c: 4 }));
+    const swings = Array.from({ length: 64 }, (_, i) => ({ ...PERIOD, temp_c: 10, dewpoint_c: i % 2 === 0 ? 9 : -5 }));
+    const flatLen = messageToString(msg({ vars, periods: [flat] }, { hourly: true })).length;
+    const swingsLen = messageToString(msg({ vars, periods: [swings] }, { hourly: true })).length;
+    expect(flatLen).toBeLessThan(swingsLen);
   });
 
   it("encodes a near-constant freeze-level column smaller than a wide-swinging one (Huffman-coded deltas)", () => {

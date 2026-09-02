@@ -170,6 +170,9 @@ export function metersToPressure(m: number): number {
 export const VAR = {
   precip: "precip",
   temp: "temp",   // representative temperature sample (see Period.temp_c in model.ts)
+  // Dewpoint at the temp sample's hour (see Period.dewpoint_c). Rides on temp: the column is
+  // carried only when temp is, and relative humidity is the reader's to derive from the pair.
+  dewpoint: "dewpoint",
   snow: "snow",
   freeze: "freeze",
   rain: "rain",   // liquid precipitation (rain + showers), mm
@@ -245,6 +248,7 @@ export const VAR_CODES = {
   p: VAR.precip,
   c: VAR.clouds,
   f: VAR.freeze,
+  h: VAR.dewpoint,      // Humidity: dewpoint on the wire, relative humidity derived on the reader
   g: VAR.agreement,     // model aGreement (pairwise, vs the other centers)
   a: VAR.aqi,           // US Air Quality Index
   s: VAR.aq_pm25,       // smoke

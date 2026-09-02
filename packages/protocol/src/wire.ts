@@ -106,11 +106,19 @@ function clampInt(v: number, width: number): number {
 // temp: entropy-coded period-over-period deltas (see TEMP_DELTA_* in entropy.ts), not a plain
 // scalar column — each model's first period is an anchor at full width, quantized the same way.
 const TEMP_ANCHOR_BITS = 8;
-const quantTemp = (p: Period, field: "temp_c"): number =>
+const quantTemp = (p: Period, field: "temp_c" | "dewpoint_c"): number =>
   clampInt(Math.round((p[field] ?? 0) + TEMP_OFFSET), TEMP_ANCHOR_BITS);
 const TEMP_DELTA_COLUMNS: [variable: Variable, field: "temp_c"][] = [
   [VAR.temp, "temp_c"],
 ];
+
+// dewpoint: the temp column's delta machinery over the dewpoint, keyed by (resolution, the same
+// period's decoded temp delta, the previous period's reconstructed depression) — see
+// dewpointDeltaBook in entropy.ts. Its anchor is the first period's DEPRESSION against the temp
+// anchor, 6 bits (0..63 °C; the corpus tops out at 78 and a dewpoint above temp is model
+// rounding, so both ends clamp), which is cheaper than a second absolute temperature. The column
+// rides on temp: without temp in the selection neither side carries it.
+const DEWPOINT_ANCHOR_BITS = 6;
 
 // freeze: entropy-coded period-over-period deltas under tables keyed by (the arriving period's
 // resolution, the SAME period's temp delta) — the 0°C isotherm moves with the airmass
@@ -558,13 +566,18 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
   // codebooks below, and keeping the CLAMPED value (what the decoder reconstructs) rather than
   // the raw input difference is what keeps the two sides' freeze contexts identical.
   let tempDeltas: number[][] | null = null;
+  // The reconstructed quantized temps ([model][period]) key the dewpoint column's depression
+  // context and anchor its first period.
+  let tempQuants: number[][] | null = null;
   for (const [variable, field] of TEMP_DELTA_COLUMNS) {
     if (!msg.vars.has(variable)) continue;
     before = em.cost;
     const deltas: number[][] = msg.periods.map(() => []);
+    const quants: number[][] = msg.periods.map(() => []);
     for (let m = 0; m < nModels; m++) {
       let reconstructed = quantTemp(msg.periods[m][0], field);
       em.raw(reconstructed, TEMP_ANCHOR_BITS);
+      quants[m][0] = reconstructed;
       let prevDelta: number | null = null;
       for (let p = 1; p < nPeriods; p++) {
         const delta = Math.min(Math.max(
@@ -573,10 +586,33 @@ function buildBody(msg: ForecastMessage, books: Books, sink?: ColumnSink): Retur
         reconstructed += delta;
         prevDelta = delta;
         deltas[m][p] = delta;
+        quants[m][p] = reconstructed;
       }
     }
-    if (variable === VAR.temp) tempDeltas = deltas;
+    if (variable === VAR.temp) { tempDeltas = deltas; tempQuants = quants; }
     mark(variable, before);
+  }
+
+  // dewpoint: per model, a raw depression anchor against the temp anchor, then the temp delta
+  // machinery keyed by (res, same-period temp delta, previous reconstructed depression). Diffed
+  // against the reconstruction like temp, so a clamped jump heals on the next period, and the
+  // depression context is taken from the two reconstructions (what the decoder holds).
+  if (msg.vars.has(VAR.dewpoint) && tempDeltas && tempQuants) {
+    before = em.cost;
+    for (let m = 0; m < nModels; m++) {
+      const anchorDepression = clampInt(
+        tempQuants[m][0] - quantTemp(msg.periods[m][0], "dewpoint_c"), DEWPOINT_ANCHOR_BITS);
+      em.raw(anchorDepression, DEWPOINT_ANCHOR_BITS);
+      let reconstructed = tempQuants[m][0] - anchorDepression;
+      for (let p = 1; p < nPeriods; p++) {
+        const delta = Math.min(Math.max(
+          quantTemp(msg.periods[m][p], "dewpoint_c") - reconstructed, TEMP_DELTA_MIN), TEMP_DELTA_MAX);
+        const book = books.dewpointDeltaBook(res[p], tempDeltas[m][p], tempQuants[m][p - 1] - reconstructed);
+        encodeTempDelta(em, book, delta);
+        reconstructed += delta;
+      }
+    }
+    mark(VAR.dewpoint, before);
   }
 
   // freeze: per model, an anchor (first period, full width) followed by entropy-coded
@@ -993,12 +1029,15 @@ function decodeBody(
   // The decoded temp deltas ([model][period], p ≥ 1) are kept — they key the freeze column's
   // codebooks below, mirroring buildBody.
   let tempDeltas: number[][] | null = null;
+  let tempQuants: number[][] | null = null;
   for (const [variable, field] of TEMP_DELTA_COLUMNS) {
     if (!vars.has(variable)) continue;
     const deltas: number[][] = periods.map(() => []);
+    const quants: number[][] = periods.map(() => []);
     for (let m = 0; m < nModels; m++) {
       let quant = rd.int(TEMP_ANCHOR_BITS);
       periods[m][0][field] = quant - TEMP_OFFSET;
+      quants[m][0] = quant;
       let prevDelta: number | null = null;
       for (let p = 1; p < nPeriods; p++) {
         const delta = rd.tempDelta(books.tempDeltaBook(res[p], tod[p], prevDelta));
@@ -1006,9 +1045,23 @@ function decodeBody(
         periods[m][p][field] = quant - TEMP_OFFSET;
         prevDelta = delta;
         deltas[m][p] = delta;
+        quants[m][p] = quant;
       }
     }
-    if (variable === VAR.temp) tempDeltas = deltas;
+    if (variable === VAR.temp) { tempDeltas = deltas; tempQuants = quants; }
+  }
+
+  // Dewpoint mirrors buildBody exactly: depression anchor against the temp anchor, then deltas
+  // keyed by (res, same-period temp delta, previous reconstructed depression).
+  if (vars.has(VAR.dewpoint) && tempDeltas && tempQuants) {
+    for (let m = 0; m < nModels; m++) {
+      let quant = tempQuants[m][0] - rd.int(DEWPOINT_ANCHOR_BITS);
+      periods[m][0].dewpoint_c = quant - TEMP_OFFSET;
+      for (let p = 1; p < nPeriods; p++) {
+        quant += rd.tempDelta(books.dewpointDeltaBook(res[p], tempDeltas[m][p], tempQuants[m][p - 1] - quant));
+        periods[m][p].dewpoint_c = quant - TEMP_OFFSET;
+      }
+    }
   }
 
   // Freeze mirrors buildBody exactly: each delta's table keyed by (the arriving period's
