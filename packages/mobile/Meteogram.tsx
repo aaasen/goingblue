@@ -66,6 +66,16 @@ const CANVAS_TILE_W = CELL_W * 16;
 // curve needs the space under the digits. The rail reads this too, so "°F" lines up with the
 // numbers it names instead of floating a dozen pixels below them.
 const TEMP_VALUE_Y = 14;
+// The dewpoint's line of numbers, under the temperature's, when the message carries it.
+const DEW_VALUE_Y = TEMP_VALUE_Y + 18;
+// The temperature area's plot band: it starts inside the date header, behind the day glyphs,
+// and stops this far above the temperature row's bottom edge.
+const TEMP_PLOT_TOP = 39;
+const TEMP_PLOT_BOTTOM_PAD = 18;
+// The thinnest the temperature band gets when the dewpoint meets the temperature.
+const TEMP_BAND_MIN_PX = 4;
+// The area's opacity: a wash the hour labels, weather glyphs and figures stay legible over.
+const TEMP_AREA_ALPHA = 0.3;
 
 // Where the hour labels sit in the header block, from the top of the drawing. The rail puts its
 // clock on this line, so the symbol reads as naming that row of times.
@@ -76,6 +86,8 @@ const ROW_H = {
   SECTION: 22,
   CLOUD: 58,
   TEMP: 52,
+  // The line the dewpoint numbers take under the temperature's (see tempRowHeight).
+  TEMP_DEW_TEXT: 18,
   // Snow and rain each get their own row, so one is shorter than the single stacked area they
   // replace: each carries one number rather than two lines of them, and the pair still ends up
   // taller than the stack did — which is the point, since two areas on one baseline could only be
@@ -231,6 +243,8 @@ const C = {
   freezeWarm: 'rgba(214, 82, 62, 0.14)',
   // The isotherm itself, dark enough to hold its shape against both washes.
   freezeLine: '#7e8896',
+  // Relative humidity as a tint, saturating toward a steel blue at 100%.
+  humidityFill: (pct: number) => `rgba(92, 134, 180, ${(0.05 + 0.6 * pct / 100).toFixed(2)})`,
   // The two precip inks, for the numbers each precip row prints (the rail's marks stay grey — see
   // LEGEND_MARK_COLORS). Snow is the lighter of the pair, matching the two areas: it kept its color
   // from the stacked area the two rows replaced, where snow lay over rain as the paler band.
@@ -945,7 +959,7 @@ function windLevelsPresent(periods: Period[]): number[] {
 // ── Row model ──────────────────────────────────────────────────────────────
 
 type RowKind =
-  | 'clouds' | 'temp' | 'precip-chance' | 'snow' | 'rain' | 'freeze' | 'dewpoint' | 'humidity'
+  | 'clouds' | 'temp' | 'precip-chance' | 'snow' | 'rain' | 'freeze' | 'humidity'
   | 'wind-sfc' | 'wind-gust' | 'wind-dir'
   | 'cloud-high' | 'cloud-mid' | 'cloud-low'
   | 'aqi' | 'aqi-pm25' | 'aqi-o3' | 'aqi-pm10' | 'aqi-no2' | 'aqi-so2'
@@ -955,6 +969,8 @@ type RowKind =
 
 interface Row {
   kind: RowKind;
+  // A second caption under the legend, on the temperature row's dewpoint line.
+  legend2?: string;
   height: number;
   // Section bands only — the one row kind that still carries prose, drawn across the full width.
   label: string;
@@ -1038,6 +1054,26 @@ const pollutantName = (scale: 'us' | 'eu', idx: number | undefined): string | un
   return POLLUTANT_LABEL[ids[idx]] ?? ids[idx];
 };
 
+// The temperature row grows when the message carries dewpoint: one line for the dewpoint numbers,
+// then whatever the axis needs to keep the temperature curve at the amplitude it has on its own.
+// The area's bottom edge becomes the dewpoint curve, so the axis reaches down to the driest
+// dewpoint — a 30 °C depression squeezed into the temperature-only pixels would flatten the
+// curve exactly where the band under it is widest. Capped at one extra row of height.
+function tempRowHeight(periods: Period[]): number {
+  const temps: number[] = [], dews: number[] = [];
+  periods.forEach((p) => {
+    if (p.temp_c == null) return;
+    temps.push(p.temp_c);
+    if (p.dewpoint_c != null) dews.push(Math.min(p.dewpoint_c, p.temp_c));
+  });
+  if (!dews.length) return ROW_H.TEMP;
+  const tempRange = Math.max(...temps) - Math.min(...temps) + 2;
+  const fullRange = Math.max(...temps) - Math.min(...dews, ...temps) + 2;
+  const plotH = ROW_H.DATE - TEMP_PLOT_TOP + ROW_H.TEMP - TEMP_PLOT_BOTTOM_PAD;
+  const extra = (fullRange - tempRange) * (plotH / tempRange) - ROW_H.TEMP_DEW_TEXT;
+  return ROW_H.TEMP + ROW_H.TEMP_DEW_TEXT + Math.round(Math.min(ROW_H.TEMP, Math.max(0, extra)));
+}
+
 function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number, elevation: number): Row[] {
   const rows: Row[] = [];
   const has = (fn: (p: Period) => unknown) => periods.some((p) => fn(p) != null);
@@ -1062,7 +1098,8 @@ function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number, el
     has((p) => p.wind_sfc_kph) || has((p) => p.wind_gust_kph);
   if (hasSurface) {
     if (has((p) => p.temp_c))
-      rows.push({ kind: 'temp', height: ROW_H.TEMP, label: '', legend: tU });
+      rows.push({ kind: 'temp', height: tempRowHeight(periods), label: '', legend: tU,
+        legend2: has((p) => p.dewpoint_c) ? 'dew' : undefined });
     // Snow over rain, the order the freezing level's washes and the old stacked area both used:
     // frozen above liquid.
     if (hasAmount((p) => p.snow_cm)) rows.push({ kind: 'snow', height: ROW_H.PRECIP, label: '', legend: snowU });
@@ -1099,12 +1136,11 @@ function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number, el
     rows.push({ kind: 'freeze', height: ROW_H.FREEZE, label: '', legend: frU });
   }
 
-  // Humidity: the dewpoint the message carries and the relative humidity derived from it and
-  // the temperature, two number rows. Both need temp, which the dewpoint column never travels
-  // without.
+  // Humidity: the relative humidity derived from the dewpoint and the temperature, as a fill row
+  // like the cloud-cover trio. The dewpoint itself lives up in the temperature row, as the
+  // area's bottom edge and a line of numbers under the temperature's.
   if (has((p) => p.dewpoint_c)) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Humidity', legend: '' });
-    rows.push({ kind: 'dewpoint', height: ROW_H.DATA, label: '', legend: `dew ${tU}` });
     rows.push({ kind: 'humidity', height: ROW_H.DATA, label: '', legend: '%' });
   }
 
@@ -1248,6 +1284,9 @@ interface Fonts {
   // Wind speeds sit on the ribbon's colored ground; a small light face keeps the numbers from
   // shouting over it in a short row.
   wind: SkFont;
+  // The dewpoint line under the temperatures: a light face in the hour labels' grey, a caption
+  // to the temperature's figure rather than a second one.
+  dew: SkFont;
   // Model names are drawn as RN text over the canvas, so this face is only ever measured — it
   // must match styles.stickyModelText for the sticky arithmetic to hold.
   model: SkFont;
@@ -1870,6 +1909,7 @@ function slicePoints<T extends { x: number }>(pts: T[], xLo: number, xHi: number
 // the tint.
 const TINTABLE_STOP = new Set<RowKind>([
   'wind-sfc', 'wind-gust', 'wind-dir', 'freeze', 'cloud-band', 'cloud-high', 'cloud-mid', 'cloud-low',
+  'humidity',
   ...AQ_KINDS, // air-quality cells carry their category as a fill, same as the wind ribbon
   ...AQ_DOMINANT_KINDS, // and the dominant row is painted with its headline's fill
   'wind-aloft', 'model',
@@ -1885,7 +1925,7 @@ const MARKER_ROWS = new Set<RowKind>(['clouds', 'temp', 'precip-chance', 'snow',
 // geometry that is genuinely global, the cloud-band contours, a handful of path elements every
 // tile shares as-is (each tile's canvas clips them to its own bounds).
 interface SceneStatics {
-  tMin: number; tMax: number; tempRowBottom: number;
+  tMin: number; tMax: number; tempRowBottom: number; dews: (number | null)[];
   maxSnow: number; maxRain: number;
   snowNorm: number[]; rainNorm: number[]; precipScale: number;
   freezeValues: (number | undefined)[]; freezeBase: number; freezeSpan: number;
@@ -1907,10 +1947,14 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
   const colLeft = (i: number) => i * CELL_W;
   const colCenter = (i: number) => i * CELL_W + CELL_W / 2;
 
-  // Temperature domain across all periods.
+  // Temperature domain across all periods. The dewpoint shares the axis when carried: it is the
+  // area's bottom edge, so the axis reaches the driest dewpoint (never drawn above its temp —
+  // a dewpoint over the temperature is model rounding, and the band would fold).
   const temps: number[] = [];
   periods.forEach((p) => { if (p.temp_c != null) temps.push(p.temp_c); });
-  const tMin = temps.length ? Math.min(...temps) - 1 : 0;
+  const dews = periods.map((p) => (p.temp_c == null || p.dewpoint_c == null ? null : Math.min(p.dewpoint_c, p.temp_c)));
+  const dewsPresent = dews.filter((d): d is number => d != null);
+  const tMin = temps.length ? Math.min(...temps, ...dewsPresent) - 1 : 0;
   const tMax = temps.length ? Math.max(...temps) + 1 : 1;
   let tempRowBottom = ROW_H.DATE;
   for (const row of rows) {
@@ -2124,7 +2168,7 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
   });
 
   return {
-    tMin, tMax, tempRowBottom, maxSnow, maxRain, snowNorm, rainNorm, precipScale,
+    tMin, tMax, tempRowBottom, dews, maxSnow, maxRain, snowNorm, rainNorm, precipScale,
     freezeValues, freezeBase, freezeSpan, markerTop, markerBottom, cloudBandEls, dominantSegs,
   };
 }
@@ -2243,34 +2287,59 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
   // from absolute temperatures and fade to white beneath the plotted range.
   const plottedTemps = periods.map((p) => p.temp_c);
   if (plottedTemps.some((temperature) => temperature != null)) {
-    const { tMin, tMax, tempRowBottom } = statics;
-    const plotTop = 39;
-    const plotBottom = tempRowBottom - 18;
+    const { tMin, tMax, tempRowBottom, dews } = statics;
+    const plotTop = TEMP_PLOT_TOP;
+    const plotBottom = tempRowBottom - TEMP_PLOT_BOTTOM_PAD;
     const scaleTempY = (temperature: number) =>
       plotTop + ((tMax - temperature) / (tMax - tMin)) * (plotBottom - plotTop);
-    const first = plottedTemps.find((temperature): temperature is number => temperature != null)!;
-    const last = [...plottedTemps].reverse().find((temperature): temperature is number => temperature != null)!;
-    const points = slicePoints([
-      { x: colLeft(0), y: scaleTempY(first) },
-      ...plottedTemps.flatMap((temperature, i) => temperature == null ? [] : [{ x: colCenter(i), y: scaleTempY(temperature) }]),
-      { x: colLeft(n), y: scaleTempY(last) },
-    ], xLo, xHi);
+    // `floor` is the least y a point may take (the dewpoint curve's floor under the temperature
+    // curve — see TEMP_BAND_MIN_PX).
+    const curve = (values: (number | null | undefined)[], floor?: (i: number) => number) => {
+      const yAt = (v: number, i: number) => Math.max(scaleTempY(v), floor?.(i) ?? -Infinity);
+      const firstI = values.findIndex((v) => v != null);
+      const lastI = values.length - 1 - [...values].reverse().findIndex((v) => v != null);
+      return slicePoints([
+        { x: colLeft(0), y: yAt(values[firstI]!, firstI) },
+        ...values.flatMap((v, i) => v == null ? [] : [{ x: colCenter(i), y: yAt(v, i) }]),
+        { x: colLeft(n), y: yAt(values[lastI]!, lastI) },
+      ], xLo, xHi);
+    };
+    const points = curve(plottedTemps);
     const area = Skia.Path.Make();
     smoothTo(area, points);
-    area.lineTo(points[points.length - 1].x, tempRowBottom);
-    area.lineTo(points[0].x, tempRowBottom);
-    area.close();
-    const rangeEnd = Math.max(0, Math.min(1, (plotBottom - plotTop) / (tempRowBottom - plotTop)));
-    els.push(
-      <Path key="temperature-area" path={area}>
-        <LinearGradient
-          start={vec(0, plotTop)}
-          end={vec(0, tempRowBottom)}
-          colors={[tempColor(tMax, 0.55), tempColor((tMax + tMin) / 2, 0.55), tempColor(tMin, 0.55), 'rgba(255,255,255,0)']}
-          positions={[0, rangeEnd / 2, rangeEnd, 1]}
-        />
-      </Path>,
-    );
+    if (dews.some((d) => d != null)) {
+      // With dewpoint, the area's bottom edge is the dewpoint curve, so the band's depth is the
+      // depression: the two curves part in dry air and close up at saturation — to a thin line,
+      // never to nothing, so the temperature curve still draws through a fog-bound day. The fill
+      // keeps its gradient by axis position and no longer fades — the edge is data.
+      smoothTo(area, curve(dews, (i) => scaleTempY(plottedTemps[i]!) + TEMP_BAND_MIN_PX), true);
+      area.close();
+      els.push(
+        <Path key="temperature-area" path={area}>
+          <LinearGradient
+            start={vec(0, plotTop)}
+            end={vec(0, plotBottom)}
+            colors={[tempColor(tMax, TEMP_AREA_ALPHA), tempColor((tMax + tMin) / 2, TEMP_AREA_ALPHA), tempColor(tMin, TEMP_AREA_ALPHA)]}
+            positions={[0, 0.5, 1]}
+          />
+        </Path>,
+      );
+    } else {
+      area.lineTo(points[points.length - 1].x, tempRowBottom);
+      area.lineTo(points[0].x, tempRowBottom);
+      area.close();
+      const rangeEnd = Math.max(0, Math.min(1, (plotBottom - plotTop) / (tempRowBottom - plotTop)));
+      els.push(
+        <Path key="temperature-area" path={area}>
+          <LinearGradient
+            start={vec(0, plotTop)}
+            end={vec(0, tempRowBottom)}
+            colors={[tempColor(tMax, TEMP_AREA_ALPHA), tempColor((tMax + tMin) / 2, TEMP_AREA_ALPHA), tempColor(tMin, TEMP_AREA_ALPHA), 'rgba(255,255,255,0)']}
+            positions={[0, rangeEnd / 2, rangeEnd, 1]}
+          />
+        </Path>,
+      );
+    }
   }
 
   // 3. Date header. Hours occupy their own row. Each day label sticks to the visible left
@@ -2327,9 +2396,13 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
 
       case 'temp': {
         for (let i = c0; i < c1; i++) {
-          if (periods[i].temp_c != null) {
-            els.push(centerText(`th${i}`, fmtTemp(periods[i].temp_c, units), colCenter(i), top + TEMP_VALUE_Y, fonts.data, '#1c1c1e'));
-          }
+          const { temp_c: t, dewpoint_c: d } = periods[i];
+          if (t == null) continue;
+          els.push(centerText(`th${i}`, fmtTemp(t, units), colCenter(i), top + TEMP_VALUE_Y, fonts.data, '#1c1c1e'));
+          // The dewpoint under it, in the light dew face and the hour labels' grey: the band's
+          // bottom edge is the reading, and the number is its caption.
+          if (d != null)
+            els.push(centerText(`dh${i}`, fmtTemp(Math.min(d, t), units), colCenter(i), top + DEW_VALUE_Y, fonts.dew, C.hour));
         }
         break;
       }
@@ -2440,13 +2513,15 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         break;
       }
 
-      case 'dewpoint': case 'humidity': {
+      case 'humidity': {
+        // Relative humidity as a fill, the cloud-cover rows' encoding in the dewpoint's blue: the
+        // number is one tap away, and a row of percentages said less than a row of tint.
         for (let i = c0; i < c1; i++) {
           const { temp_c: t, dewpoint_c: d } = periods[i];
-          const txt = t == null || d == null ? ''
-            : row.kind === 'dewpoint' ? fmtTemp(d, units) : `${relativeHumidityPct(t, d)}`;
-          els.push(centerText(`hu${ri}-${i}`, txt || '—', colCenter(i), mid, fonts.data,
-            txt ? '#1c1c1e' : C.nil));
+          if (t == null || d == null) { els.push(centerText(`hu${ri}-${i}`, '—', colCenter(i), mid, fonts.data, C.nil)); continue; }
+          const pct = relativeHumidityPct(t, d);
+          els.push(<Rect key={`hubg${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W} height={row.height}
+            color={C.humidityFill(pct)} />);
         }
         break;
       }
@@ -2858,6 +2933,14 @@ const RowLegend = memo(function RowLegend({ rows, units, bandLevels, elevation, 
         <RNText key={`u${ri}`} numberOfLines={1}
           style={[onLadder ? styles.legendLevel : styles.legendUnit, { top: stackTop + iconH }]}>
           {row.legend}
+        </RNText>,
+      );
+    }
+    if (row.legend2) {
+      els.push(
+        <RNText key={`u2${ri}`} numberOfLines={1}
+          style={[styles.legendUnit, { top: top + DEW_VALUE_Y - textH / 2, color: C.hour }]}>
+          {row.legend2}
         </RNText>,
       );
     }
@@ -3469,6 +3552,7 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY, onD
       hourSuffix: font({ fontSize: 9.5, fontWeight: '400' }),
       strip: font({ fontSize: 11, fontWeight: '300' }),
       wind: font({ fontSize: 11.5, fontWeight: '400' }),
+      dew: font({ fontSize: 11, fontWeight: '300' }),
       model: font({ fontSize: 11, fontWeight: '600' }),
     };
   }, []);
