@@ -15,7 +15,8 @@ import {
   WIND_LEVELS_HPA, WIND_LEVEL_VARS, varGroupCodesFor, windLevelsToken,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE, MODE_NAMES, DEFAULT_MODE,
   predictCenter, estimatedLastFullRunMs, fillSlotsFor, multiMessageOffered, startDatetime,
-  type RequestContext, type Center, type ForecastMessage,
+  MODELS as MODEL_SPECS,
+  type RequestContext, type Center, type ForecastMessage, type ModelSpec,
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import { type AqiScale, type TimeFormat, type UnitPrefs } from './settings';
@@ -116,15 +117,59 @@ const PRIORITIES = [
   { value: MODE_RANGE, token: 'r', label: 'Range' },
 ];
 
-// Model-selector help copy. Each line pairs the option's flag label with the forecast center(s)
-// behind it and, where it's a blend, the short-range/global pair with resolution and horizon.
-const MODEL_INFO = [
-  { name: '🌐 Auto', desc: 'Chooses the highest resolution model for your location from over 30 regional weather models.' },
-  { name: '🇺🇸 US', desc: 'Blend of HRRR (3km, 48hr, continental US) and GFS (13km, 16 day, global).' },
-  { name: '🇨🇦 CA', desc: 'Blend of HRDPS (2.5km, 48hr, Canada) and GEM (15km, 10 day, global).' },
-  { name: '🇪🇺 EU', desc: 'ECMWF IFS HRES (9km, 15 day, global).' },
-  { name: '🇩🇪 DE', desc: 'Blend of ICON-D2 (2km, 48hr, central Europe), ICON-EU (7km, 5 day, Europe), and ICON (13km, 7 day, global).' },
+// Model-selector help copy: the option's flag label, the center behind it, and the models it
+// serves, highest resolution first, which is the order they serve in, so the list reads as the
+// blend outward that Auto's line describes. Names and horizons come off the specs, keeping this
+// text saying what the meteogram's band labels say; only the region is written here.
+interface ModelInfoEntry { spec: ModelSpec; region: string }
+const M = MODEL_SPECS;
+const MODEL_INFO: Array<{ name: string; desc: string; models: ModelInfoEntry[] }> = [
+  {
+    name: '🌐 Auto',
+    desc: 'Chooses the highest resolution model for your location from over 30 regional weather '
+      + 'models. Seamlessly blends to lower-resolution global models at longer time horizons.',
+    models: [],
+  },
+  {
+    name: '🇺🇸 US',
+    desc: 'NOAA',
+    models: [
+      { spec: M.gfs_hrrr, region: 'continental US' },
+      { spec: M.gfs_global, region: 'global' },
+    ],
+  },
+  {
+    name: '🇨🇦 CA',
+    desc: 'Environment Canada',
+    models: [
+      { spec: M.gem_hrdps_continental, region: 'Canada and the northern US' },
+      { spec: M.gem_regional, region: 'North America' },
+      { spec: M.gem_global, region: 'global' },
+    ],
+  },
+  {
+    name: '🇪🇺 EU',
+    desc: 'ECMWF',
+    models: [{ spec: M.ecmwf_ifs, region: 'global' }],
+  },
+  {
+    name: '🇩🇪 DE',
+    desc: 'DWD',
+    models: [
+      { spec: M.icon_d2, region: 'central Europe' },
+      { spec: M.icon_eu, region: 'Europe' },
+      { spec: M.icon_global, region: 'global' },
+    ],
+  },
 ];
+
+// A spec's horizon in the units the reader thinks in: hours while a run is short enough to plan
+// an outing around, days once it isn't. Halves survive the switch (ICON Global's 7.5 days).
+function horizonText(hours: number): string {
+  if (hours < 96) return `${hours} hours`;
+  const days = hours / 24;
+  return `${Number.isInteger(days) ? days : days.toFixed(1)} days`;
+}
 const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 
 // Compare-pill names by MODEL_BIT index — the short center names, matching the selector above.
@@ -1754,9 +1799,16 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
       <InfoModal visible={modelInfo} title="Model" onClose={() => setModelInfo(false)}>
         {MODEL_INFO.map((m) => (
-          <Text key={m.name} style={styles.modalItem}>
-            <Text style={styles.modalBold}>{m.name}</Text>: {m.desc}
-          </Text>
+          <View key={m.name} style={styles.modalItem}>
+            <Text style={styles.modalBody}>
+              <Text style={styles.modalBold}>{m.name}</Text>: {m.desc}
+            </Text>
+            {m.models.map(({ spec, region }) => (
+              <Text key={spec.id} style={styles.modalBullet}>
+                {'\u2022'} {spec.label}: {horizonText(spec.horizonHours)}, {region}
+              </Text>
+            ))}
+          </View>
         ))}
         <Text style={styles.modalBody}>
           For model details, see{' '}
@@ -1970,6 +2022,8 @@ const styles = StyleSheet.create({
   // Sheet body copy, shared by all four ⓘ sheets.
   modalBody: { fontSize: 15, color: '#3a3a3c', lineHeight: 22 },
   modalItem: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginBottom: 10 },
+  // A model under its center, set in one step and tucked close enough to read as part of it.
+  modalBullet: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginTop: 4, paddingLeft: 12 },
   modalItemIndent: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginTop: 10, paddingLeft: 12 },
   // Entries under a subgroup heading, set in one step further than the top-level ones.
   modalItemNested: { paddingLeft: 24 },
