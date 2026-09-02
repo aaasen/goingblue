@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import { cors } from "hono/cors";
-import { forecast, health, sms, createAccountRoute, verifyAccountRoute, deleteAccountRoute } from "./routes.js";
+import { forecast, health, sms, createAccountRoute, deleteAccountRoute } from "./routes.js";
 import { landing } from "./pages/landing.js";
 import { support } from "./pages/support.js";
 import { privacy } from "./pages/privacy.js";
@@ -34,8 +34,6 @@ app.post("/forecast", forecast);
 app.post("/sms", sms);
 app.use("/account", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/account", createAccountRoute);
-app.use("/account/verify", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
-app.post("/account/verify", verifyAccountRoute);
 app.use("/account/delete", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/account/delete", deleteAccountRoute);
 

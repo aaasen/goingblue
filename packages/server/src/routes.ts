@@ -169,23 +169,6 @@ export async function createAccountRoute(c: Context) {
   }
 }
 
-// POST /account/verify { token } — used by the import flow to confirm an existing token is
-// real. A malformed token (bad check symbol) is reported as { valid: false } without a DB
-// lookup; a DB error is surfaced as 503 so the client retries rather than concluding the
-// token is invalid.
-export async function verifyAccountRoute(c: Context) {
-  const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
-  const raw = typeof body?.token === "string" ? body.token : "";
-  if (!isValidToken(raw)) return c.json({ valid: false });
-  try {
-    const exists = await accountExists(normalizeToken(raw));
-    return c.json({ valid: exists });
-  } catch (e) {
-    log.error("account.verify_failed", { err: e });
-    return c.text("Verification unavailable", 503);
-  }
-}
-
 // POST /account/delete { token } — erase the caller's account. An app that creates accounts has
 // to offer deletion from inside it (App Store Review Guideline 5.1.1(v)), and since the token is
 // the only identifier we hold, deleting the row leaves us nothing about the user.

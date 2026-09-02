@@ -67,16 +67,3 @@ export async function createAccount(): Promise<string> {
   await saveToken(normalized);
   return normalized;
 }
-
-// Confirm an existing token is real before importing it. The caller should check
-// isValidToken first (a local check-symbol test); this verifies the token exists server-side.
-export async function verifyAccount(token: string): Promise<boolean> {
-  const resp = await fetch(`${API_BASE}/account/verify`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: normalizeToken(token) }),
-  });
-  if (!resp.ok) throw new Error(`Verification failed (${resp.status})`);
-  const { valid } = await resp.json();
-  return valid === true;
-}

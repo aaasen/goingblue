@@ -1,14 +1,13 @@
 // User account tokens. A token is an 80-bit random value rendered in Crockford base32 — 16
 // characters, displayed in four groups of four, e.g. "FT3E-YZEG-JK8X-1A9C". The server mints
-// them (see generateToken); the mobile app normalizes and sanity-checks user-entered tokens
-// during account import (see isValidToken / normalizeToken).
+// them (see generateToken); clients and the gateway normalize and shape-check tokens before
+// use (see isValidToken / normalizeToken).
 //
 // Why this shape:
 //   - 80 bits is unguessable, and the keyspace is far too sparse for a mistyped token to ever
-//     land on a real account, so import correctness is enforced by the server's verify step
-//     rather than a local check digit.
+//     land on a real account, so no local check digit is needed.
 //   - Crockford base32 is case-insensitive, omits the ambiguous letters I/L/O/U, and tolerates
-//     hyphen grouping — all friendly to a human retyping a token onto a new device.
+//     hyphen grouping, so it stays readable when shown to a person.
 //   - On the wire it costs little: carried as `u:<token>` it uses 18 of a message's 160 chars.
 
 const TOKEN_BYTES = 10; // 80 bits of entropy
