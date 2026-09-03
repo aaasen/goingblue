@@ -2,7 +2,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type
 import { Animated, Platform, View, Text as RNText, StyleSheet, FlatList, PanResponder, Pressable, useWindowDimensions } from 'react-native';
 import {
   Canvas, DashPathEffect, Group, Paint, Rect, RoundedRect, Circle, Line, Path, Text,
-  LinearGradient, Skia, vec, matchFont, type SkFont,
+  LinearGradient, Skia, vec, matchFont, type SkFont, type SkPathBuilder,
   FillType,
 } from '@shopify/react-native-skia';
 import {
@@ -1333,7 +1333,7 @@ const arrowRotation = (di: number) => ((di * 45 + 90) % 360) * (Math.PI / 180);
 function dirArrow(key: string, cx: number, cy: number, di: number, scale: number, color: string): ReactNode {
   const L = 14 * scale, SHAFT = 4.5 * scale, HEAD_L = 6.5 * scale, HEAD_W = 10.5 * scale;
   const h = L / 2, s = SHAFT / 2, w = HEAD_W / 2;
-  const path = Skia.Path.Make();
+  const path = Skia.PathBuilder.Make();
   path.moveTo(cx - h, cy - s);
   path.lineTo(cx + h - HEAD_L, cy - s);
   path.lineTo(cx + h - HEAD_L, cy - w);
@@ -1344,7 +1344,7 @@ function dirArrow(key: string, cx: number, cy: number, di: number, scale: number
   path.close();
   return (
     <Group key={key} transform={[{ rotate: arrowRotation(di) }]} origin={vec(cx, cy)}>
-      <Path path={path} color={color} />
+      <Path path={path.build()} color={color} />
     </Group>
   );
 }
@@ -1354,7 +1354,7 @@ function dirArrow(key: string, cx: number, cy: number, di: number, scale: number
 function thinDirArrow(key: string, cx: number, cy: number, di: number, scale: number, color: string): ReactNode {
   const L = 12 * scale, HEAD = 4 * scale;
   const h = L / 2;
-  const path = Skia.Path.Make();
+  const path = Skia.PathBuilder.Make();
   path.moveTo(cx - h, cy);
   path.lineTo(cx + h, cy);
   path.moveTo(cx + h - HEAD, cy - HEAD);
@@ -1362,7 +1362,7 @@ function thinDirArrow(key: string, cx: number, cy: number, di: number, scale: nu
   path.lineTo(cx + h - HEAD, cy + HEAD);
   return (
     <Group key={key} transform={[{ rotate: arrowRotation(di) }]} origin={vec(cx, cy)}>
-      <Path path={path} style="stroke" strokeWidth={1} strokeCap="round" strokeJoin="round" color={color} />
+      <Path path={path.build()} style="stroke" strokeWidth={1} strokeCap="round" strokeJoin="round" color={color} />
     </Group>
   );
 }
@@ -1373,7 +1373,7 @@ function thinDirArrow(key: string, cx: number, cy: number, di: number, scale: nu
 function agreementBadge(key: string, cx: number, cy: number, level: number): ReactNode {
   const { color, glyph } = AGREEMENT_BADGES[level];
   const r = 8;
-  const sym = Skia.Path.Make();
+  const sym = Skia.PathBuilder.Make();
   if (glyph === 'check') {
     sym.moveTo(cx - 3.9, cy + 0.2);
     sym.lineTo(cx - 1.2, cy + 2.9);
@@ -1391,7 +1391,7 @@ function agreementBadge(key: string, cx: number, cy: number, level: number): Rea
   return (
     <Group key={key}>
       <Circle cx={cx} cy={cy} r={r} color={color} />
-      <Path path={sym} style="stroke" strokeWidth={2.2} strokeCap="round" strokeJoin="round"
+      <Path path={sym.build()} style="stroke" strokeWidth={2.2} strokeCap="round" strokeJoin="round"
         color="#ffffff" />
       {glyph === 'bang' && <Circle cx={cx} cy={cy + 3.9} r={1.2} color="#ffffff" />}
     </Group>
@@ -1420,7 +1420,7 @@ function centerHour(
 }
 
 // Smooth polyline (quadratic through segment midpoints) appended to an existing path.
-function smoothTo(path: ReturnType<typeof Skia.Path.Make>, pts: { x: number; y: number }[], reverse = false) {
+function smoothTo(path: SkPathBuilder, pts: { x: number; y: number }[], reverse = false) {
   const p = reverse ? [...pts].reverse() : pts;
   if (p.length === 0) return;
   if (reverse) path.lineTo(p[0].x, p[0].y);
@@ -1570,13 +1570,13 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
       ...plottedTemps.flatMap((t, i) => t == null ? [] : [{ x: slot(i).center, y: yOf(t) }]),
       { x: W, y: yOf(last) },
     ];
-    const area = Skia.Path.Make();
+    const area = Skia.PathBuilder.Make();
     smoothTo(area, points);
     area.lineTo(W, silBottom);
     area.lineTo(timeX(0), silBottom);
     area.close();
     els.push(
-      <Path key="strip-temp" path={area}>
+      <Path key="strip-temp" path={area.build()}>
         {/* The fill also eases off toward the top of the zone, where the white glyph and high are.
             The warm end of the scale is its lightest, and at full strength white text on it fell to
             ~2.7:1 — under the fade it holds ~5:1 while the curve's own shape still reads. */}
@@ -1903,7 +1903,7 @@ function isoLoops(
 // Closed midpoint-quad smoothing — the loop analog of smoothTo: the curve starts at an edge
 // midpoint, treats every vertex as a quad control point, and closes on itself. Quads stay in
 // their control points' hull, so a loop hugging the band's edge never overshoots it.
-function smoothClosed(path: ReturnType<typeof Skia.Path.Make>, pts: { x: number; y: number }[]) {
+function smoothClosed(path: SkPathBuilder, pts: { x: number; y: number }[]) {
   const nPts = pts.length;
   if (nPts < 3) return;
   const start = { x: (pts[nPts - 1].x + pts[0].x) / 2, y: (pts[nPts - 1].y + pts[0].y) / 2 };
@@ -2100,14 +2100,14 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
     for (const [threshold, alpha] of CLOUD_BAND_STEPS) {
       const loops = isoLoops(val, W, H, threshold);
       if (!loops.length) continue;
-      const path = Skia.Path.Make();
+      const path = Skia.PathBuilder.Make();
       path.setFillType(FillType.EvenOdd); // an inner loop is a hole in its surrounding band
       for (const loop of loops) {
         const mapped = loop.map((p) => ({ x: px(p.x), y: py(p.y) }));
         if (loopArea(mapped) < minLoopArea) continue;
         smoothClosed(path, mapped);
       }
-      cloudBandEls.push(<Path key={`cb${ri}-${threshold}`} path={path}
+      cloudBandEls.push(<Path key={`cb${ri}-${threshold}`} path={path.build()}
         color={rgb(CLOUD_BAND_INK, alpha)} />);
     }
 
@@ -2288,7 +2288,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
       ...values.map((value, i) => ({ x: colCenter(i), y: valueY(value) })),
       { x: colLeft(n), y: valueY(values[values.length - 1]) },
     ], xLo, xHi);
-    const area = Skia.Path.Make();
+    const area = Skia.PathBuilder.Make();
     smoothTo(area, points);
     area.lineTo(points[points.length - 1].x, span.bottom);
     area.lineTo(points[0].x, span.bottom);
@@ -2297,12 +2297,12 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
     // closed area would draw the outline along the row's bottom edge too, a second rule beside
     // the seam. The edge is what carries the shape once the ground under it moves — snow's wash
     // against the night tint is a 1.01:1 difference, which is to say none at all.
-    const edge = Skia.Path.Make();
+    const edge = Skia.PathBuilder.Make();
     smoothTo(edge, points);
     els.push(
       <Group key={`${kind}-area`}>
-        <Path path={area} color={color} />
-        <Path path={edge} style="stroke" strokeWidth={PRECIP_EDGE_W} color={edgeColor} />
+        <Path path={area.build()} color={color} />
+        <Path path={edge.build()} style="stroke" strokeWidth={PRECIP_EDGE_W} color={edgeColor} />
       </Group>,
     );
   });
@@ -2330,7 +2330,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
       ], xLo, xHi);
     };
     const points = curve(plottedTemps);
-    const area = Skia.Path.Make();
+    const area = Skia.PathBuilder.Make();
     smoothTo(area, points);
     if (dews.some((d) => d != null)) {
       // With dewpoint, the area's bottom edge is the dewpoint curve, so the band's depth is the
@@ -2340,7 +2340,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
       smoothTo(area, curve(dews, (i) => scaleTempY(plottedTemps[i]!) + TEMP_BAND_MIN_PX), true);
       area.close();
       els.push(
-        <Path key="temperature-area" path={area}>
+        <Path key="temperature-area" path={area.build()}>
           <LinearGradient
             start={vec(0, plotTop)}
             end={vec(0, plotBottom)}
@@ -2355,7 +2355,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
       area.close();
       const rangeEnd = Math.max(0, Math.min(1, (plotBottom - plotTop) / (tempRowBottom - plotTop)));
       els.push(
-        <Path key="temperature-area" path={area}>
+        <Path key="temperature-area" path={area.build()}>
           <LinearGradient
             start={vec(0, plotTop)}
             end={vec(0, tempRowBottom)}
@@ -2469,10 +2469,10 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
             ...run.map((i) => ({ x: colCenter(i), y: chanceY(periods[i].precip!) })),
             { x: x1, y: chanceY(periods[run[run.length - 1]].precip!) },
           ];
-          const curve = Skia.Path.Make();
+          const curve = Skia.PathBuilder.Make();
           smoothTo(curve, points);
           els.push(
-            <Path key={`pc${ri}-${run[0]}`} path={curve}
+            <Path key={`pc${ri}-${run[0]}`} path={curve.build()}
               style="stroke" strokeWidth={1.25} color={C.chanceLine}>
               <DashPathEffect intervals={[4, 3]} />
             </Path>,
@@ -2525,23 +2525,23 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           ], xLo, xHi);
           const xFirst = points[0].x;
           const xLast = points[points.length - 1].x;
-          const cold = Skia.Path.Make();
+          const cold = Skia.PathBuilder.Make();
           smoothTo(cold, points);
           cold.lineTo(xLast, top);
           cold.lineTo(xFirst, top);
           cold.close();
-          const warm = Skia.Path.Make();
+          const warm = Skia.PathBuilder.Make();
           smoothTo(warm, points);
           warm.lineTo(xLast, bottom);
           warm.lineTo(xFirst, bottom);
           warm.close();
-          const isotherm = Skia.Path.Make();
+          const isotherm = Skia.PathBuilder.Make();
           smoothTo(isotherm, points);
           els.push(
             <Group key={`fzg${ri}-${run[0]}`}>
-              <Path path={cold} color={C.freezeCold} />
-              <Path path={warm} color={C.freezeWarm} />
-              <Path path={isotherm} style="stroke" strokeWidth={1.25} color={C.freezeLine} />
+              <Path path={cold.build()} color={C.freezeCold} />
+              <Path path={warm.build()} color={C.freezeWarm} />
+              <Path path={isotherm.build()} style="stroke" strokeWidth={1.25} color={C.freezeLine} />
             </Group>,
           );
         });
@@ -2572,9 +2572,9 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
             ...run.map((i) => ({ x: colCenter(i), y: rhY(rh(i)) })),
             { x: x1, y: rhY(rh(run[run.length - 1])) },
           ];
-          const curve = Skia.Path.Make();
+          const curve = Skia.PathBuilder.Make();
           smoothTo(curve, points);
-          const wash = Skia.Path.Make();
+          const wash = Skia.PathBuilder.Make();
           smoothTo(wash, points);
           wash.lineTo(x1, bottom);
           wash.lineTo(x0, bottom);
@@ -2587,10 +2587,10 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
             humidityColor(rh(run[run.length - 1]), alpha),
           ];
           els.push(
-            <Path key={`huw${ri}-${run[0]}`} path={wash}>
+            <Path key={`huw${ri}-${run[0]}`} path={wash.build()}>
               <LinearGradient start={vec(x0, 0)} end={vec(x1, 0)} colors={ramp(0.28)} positions={positions} />
             </Path>,
-            <Path key={`hu${ri}-${run[0]}`} path={curve} style="stroke" strokeWidth={1.5}>
+            <Path key={`hu${ri}-${run[0]}`} path={curve.build()} style="stroke" strokeWidth={1.5}>
               <LinearGradient start={vec(x0, 0)} end={vec(x1, 0)} colors={ramp(1)} positions={positions} />
             </Path>,
           );
