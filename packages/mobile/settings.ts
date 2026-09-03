@@ -129,6 +129,7 @@ const TIME_FORMAT_KEY = 'time_format';
 const AQI_SCALE_KEY = 'aqi_scale';
 const DEVICE_KEY = 'builder_device';
 const TWO_MESSAGES_KEY = 'builder_two_messages';
+const PINNED_COORDS_KEY = 'pinned_coords';
 const DEFAULT_TWO_MESSAGES = true;
 const DEFAULT_SYSTEM: Units = 'imperial';
 const DEFAULT_TIME_FORMAT: TimeFormat = '12h';
@@ -230,12 +231,32 @@ export async function saveTwoMessages(on: boolean): Promise<void> {
   try { await AsyncStorage.setItem(TWO_MESSAGES_KEY, String(on)); } catch { /* ignore */ }
 }
 
+// The coordinates field while the location is pinned. Persisted so a point typed or picked for a
+// trip survives a restart; following is not, since it re-resolves from the phone. Null (or empty)
+// means the next launch starts following.
+export async function loadPinnedCoords(): Promise<string | null> {
+  try {
+    const value = await AsyncStorage.getItem(PINNED_COORDS_KEY);
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function savePinnedCoords(text: string | null): Promise<void> {
+  try {
+    if (text) await AsyncStorage.setItem(PINNED_COORDS_KEY, text);
+    else await AsyncStorage.removeItem(PINNED_COORDS_KEY);
+  } catch { /* ignore */ }
+}
+
 // Forget every stored preference, the pre-per-quantity master switch included. Part of account
 // deletion: the next launch starts from the defaults as a fresh install would.
 export async function clearSettings(): Promise<void> {
   try {
     await AsyncStorage.multiRemove([
       LEGACY_UNITS_KEY, UNIT_PREFS_KEY, TIME_FORMAT_KEY, AQI_SCALE_KEY, DEVICE_KEY, TWO_MESSAGES_KEY,
+      PINNED_COORDS_KEY,
     ]);
   } catch { /* ignore */ }
 }

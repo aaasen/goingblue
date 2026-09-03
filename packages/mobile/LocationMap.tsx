@@ -27,6 +27,14 @@ interface Props {
   // Null means no fix; the caller has already told the user why.
   onLocate?: () => Promise<LatLon | null>;
   locating?: boolean;
+  // When provided, a clear button takes the pin off the map. Greyed while there is nothing to
+  // clear, which the caller decides: a field holding unparseable text has no pin but still needs
+  // clearing.
+  onClear?: () => void;
+  canClear?: boolean;
+  // Whether the pin is riding the phone's position. Only changes the button's glyph: filled while
+  // following, outlined when not, the convention map apps use for their tracking button.
+  following?: boolean;
 }
 
 // Wide view of the contiguous US, used as the picker's starting point before any coordinate is set.
@@ -40,7 +48,7 @@ const MAP_IMAGES = { 'peak-triangle': require('./assets/peak-triangle.png') };
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
 // picks a coordinate. Either way the corner button opens the same map fullscreen, where it pans and
 // zooms freely. Callers also expose lat/lon text inputs for setting a location without the map.
-export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, onClear, canClear = coord != null, following = false }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
@@ -129,11 +137,26 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         onPress={locate}
         disabled={locating}
         accessibilityRole="button"
-        accessibilityLabel="Find my location"
+        accessibilityLabel="Use my current location"
       >
         {locating
           ? <ActivityIndicator color={palette.link} />
-          : <MaterialCommunityIcons name="crosshairs-gps" size={24} color={palette.link} />}
+          : <MaterialCommunityIcons name={following ? 'crosshairs-gps' : 'crosshairs'} size={24} color={palette.link} />}
+      </TouchableOpacity>
+    );
+  }
+
+  function renderClearButton(style: object) {
+    if (!onClear) return null;
+    return (
+      <TouchableOpacity
+        style={[style, !canClear && styles.cornerButtonDisabled]}
+        onPress={onClear}
+        disabled={!canClear}
+        accessibilityRole="button"
+        accessibilityLabel="Clear location"
+      >
+        <MaterialCommunityIcons name="map-marker-off" size={24} color={palette.link} />
       </TouchableOpacity>
     );
   }
@@ -155,6 +178,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
             <MaterialCommunityIcons name="fullscreen" size={26} color={palette.link} />
           </TouchableOpacity>
           {renderLocateButton(styles.locateButton)}
+          {renderClearButton(styles.clearButton)}
         </>
       )}
       {fullscreen && (
@@ -175,6 +199,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
               <Text style={styles.doneButtonText}>Done</Text>
             </TouchableOpacity>
             {renderLocateButton(styles.fullscreenLocateButton)}
+            {renderClearButton(styles.fullscreenClearButton)}
           </View>
         </Modal>
       )}
@@ -228,15 +253,24 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
     width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
   },
-  // Stacked under the fullscreen button inline, and under Done in the modal.
+  // Stacked under the fullscreen button inline, and under Done in the modal: locate, then clear.
   locateButton: {
     position: 'absolute', top: 60, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
+    width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+  },
+  clearButton: {
+    position: 'absolute', top: 108, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
     width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
   },
   fullscreenLocateButton: {
     position: 'absolute', top: 108, right: 16, backgroundColor: 'rgba(255,255,255,0.96)',
     width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
   },
+  fullscreenClearButton: {
+    position: 'absolute', top: 156, right: 16, backgroundColor: 'rgba(255,255,255,0.96)',
+    width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+  },
+  cornerButtonDisabled: { opacity: 0.4 },
   doneButton: {
     position: 'absolute', top: 56, right: 16, backgroundColor: 'rgba(255,255,255,0.96)',
     borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10,

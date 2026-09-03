@@ -19,7 +19,7 @@ import {
   type RequestContext, type Center, type ForecastMessage, type ModelSpec,
 } from '@weather/protocol';
 import { API_BASE } from './account';
-import { type AqiScale, type TimeFormat, type UnitPrefs } from './settings';
+import { type AqiScale, type TimeFormat, type UnitPrefs, loadPinnedCoords, savePinnedCoords } from './settings';
 import { ladderLabel } from './cloudBand';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import {
@@ -83,8 +83,9 @@ const LOCATION_BLOCKED =
   'Location access is off for Going Blue. Turn it on in Settings or pick a forecast location ' +
   'on the map.';
 const LOCATION_FAILED = `Couldn’t get your current location. ${LOCATION_FALLBACK}`;
-// Shown under the greyed action button when custom mode has no usable coordinates — the field is
-// empty or unreadable. Whichever it is, the fix is the same, so one message covers both.
+// Shown under the greyed action button when the location is pinned and the field has no usable
+// coordinates, because it is empty or unreadable. Whichever it is, the fix is the same, so one
+// message covers both.
 const NO_LOCATION_MESSAGE = 'Choose a location to request a forecast';
 
 // A fix taken when the app was opened can be hours old by the time a request goes out, and a
@@ -104,9 +105,14 @@ const MODEL_UNAVAIL_VARS: Record<string, Variable[]> = {
   de: [],
 };
 
-type LocationMode = 'current' | 'custom';
-const LOCATION_MODES: LocationMode[] = ['current', 'custom'];
-const LOCATION_LABELS = ['Current Location', 'Custom'];
+// The map is always on screen, so it shares the builder with everything below it; fullscreen is
+// there for precision.
+const BUILDER_MAP_HEIGHT = 220;
+
+// How the coordinates field writes a point, and what a map pick puts in it.
+function formatLatLon(c: { lat: number; lon: number }): string {
+  return `${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`;
+}
 
 // Priority modes. The server fills the reply by walking the mode's refinement path — Detail
 // spends the budget on hourly detail first, Range on covering the whole horizon first, Auto
@@ -744,12 +750,15 @@ interface Props {
 
 export default function HomeScreen({ token, device, onDeviceChange, twoMessages, onTwoMessagesChange, aqiScale, units, timeFormat, forecastData, onForecastDataChange, onOpenSettings }: Props) {
   // ── Builder state ────────────────────────────────────────────────────────
-  const [locationMode, setLocationMode] = useState<LocationMode>('current');
+  // Whether the pin rides the phone's position. Following resolves the location from the last fix
+  // and re-fixes at send; pinned takes whatever is in the coordinates field. A fresh install starts
+  // following, so the first send asks for location on its own.
+  const [following, setFollowing] = useState(true);
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   // When the fix in gpsCoords was taken (ms epoch, 0 = never). The OS's own timestamp, not ours:
   // getCurrentPositionAsync may hand back a cached fix, and its age is the fix's, not the call's.
   const gpsFixedAt = useRef(0);
-  const [customCoords, setCustomCoords] = useState('');
+  const [coordsText, setCoordsText] = useState('');
   const [mode, setMode] = useState(MODE_AUTO);
   const [model, setModel] = useState('best');
   const [groups, setGroups] = useState<Set<string>>(new Set(DEFAULT_GROUPS));
@@ -900,11 +909,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const multiMessageShown = multiMessageOffered(deviceCode(device), vars);
   const messages = multiMessageShown && twoMessages ? 2 : DEFAULT_MESSAGES;
 
-  const parsedCustomCoords = parseLatLon(customCoords);
-  const customCoordsInvalid = customCoords.trim().length > 0 && parsedCustomCoords == null;
-  const resolvedCoords = locationMode === 'current'
-    ? gpsCoords
-    : parsedCustomCoords;
+  const parsedCoords = parseLatLon(coordsText);
+  const coordsInvalid = !following && coordsText.trim().length > 0 && parsedCoords == null;
+  const resolvedCoords = following ? gpsCoords : parsedCoords;
+  // What the field shows: the fix while following, otherwise whatever was typed or picked.
+  const coordsField = following ? (gpsCoords ? formatLatLon(gpsCoords) : '') : coordsText;
   const coordsValid = resolvedCoords != null
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
   // What the selected option resolves to here, so the choice isn't abstract: "Auto" means a 2km
@@ -915,8 +924,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const modelStack = coordsValid
     ? modelStackLabel(model, resolvedCoords, alignedStartEpochHour())
     : null;
-  // In current-location mode the button stays tappable so it can request GPS on demand.
-  const sendDisabled = locating || (locationMode === 'custom' && !coordsValid);
+  // While following, the button stays tappable so it can request GPS on demand.
+  const sendDisabled = locating || (!following && !coordsValid);
   const fetchDisabled = sendDisabled || fetching || offline;
 
   // Read the phone's position, assuming permission is already in hand. Null when no fix came back
@@ -984,20 +993,51 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     })();
   }, []);
 
-  // Resolve the location (asking for GPS on demand in current-location mode), allocate the message
+  // Pin the location at whatever the field holds. Typing, picking on the map and clearing all come
+  // through here, so each of them takes the pin off the phone's position.
+  function pinCoordsText(text: string) {
+    setCoordsText(text);
+    setFollowing(false);
+  }
+
+  // The locate button: a fresh fix, and the pin back on the phone's position if one came. A failed
+  // fix leaves things as they were; requestCurrentLocation has already said why.
+  async function follow(): Promise<{ lat: number; lon: number } | null> {
+    const coords = await requestCurrentLocation();
+    if (coords) setFollowing(true);
+    return coords;
+  }
+
+  // A pinned point outlives the session; following does not. Nothing is saved until the restore
+  // has landed, or the mount's default of following would erase the point before it was read.
+  const pinRestored = useRef(false);
+  useEffect(() => {
+    loadPinnedCoords().then((text) => {
+      if (text != null) {
+        setCoordsText(text);
+        setFollowing(false);
+      }
+      pinRestored.current = true;
+    });
+  }, []);
+  useEffect(() => {
+    if (pinRestored.current) savePinnedCoords(following ? null : coordsText);
+  }, [following, coordsText]);
+
+  // Resolve the location (asking for GPS on demand while following), allocate the message
   // code the reply will echo, and build the request it belongs to. Null when there's no usable
   // location. Every send path goes through here so each outgoing request gets its own code.
   //
   // Callers just stop on null and say nothing: the only branch that can produce one is a failed
   // requestCurrentLocation, which has already raised its own alert and notice. The other route to
-  // null — custom mode with unparseable coordinates — greys out the action button, so it never
+  // null — a pinned point with unparseable coordinates — greys out the action button, so it never
   // gets this far.
   async function prepareMessage(): Promise<string | null> {
     let coords = resolvedCoords;
     // A stale fix takes the same on-demand path as a missing one: a send is the moment the
     // location has to be right, and refreshing through requestCurrentLocation means a failed
     // re-fix aborts with the same alert instead of quietly sending where the phone used to be.
-    if (locationMode === 'current'
+    if (following
       && (!coordsValid || Date.now() - gpsFixedAt.current > GPS_FIX_MAX_AGE_MS)) {
       coords = await requestCurrentLocation();
     }
@@ -1452,59 +1492,58 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           scroll content, which they can only do as its direct children. */}
       <View style={styles.builderPad}>
         <StepHeader title="Build a forecast request" />
-        <Section label="Location">
-          <SegmentedControl
-            {...SEGMENT_PROPS}
-            values={LOCATION_LABELS}
-            selectedIndex={LOCATION_MODES.indexOf(locationMode)}
-            onChange={(e) => setLocationMode(LOCATION_MODES[e.nativeEvent.selectedSegmentIndex])}
-          />
-          {locationMode === 'custom' && (
-            <>
-              <View style={[styles.customCoords, customCoordsInvalid && styles.customCoordsInvalid]}>
-                <View style={[styles.coordRow, styles.coordRowLast]}>
-                  <Text style={[styles.coordLabel, styles.coordLabelWide]}>Coordinates</Text>
-                  <TextInput
-                    style={[styles.coordInput, customCoordsInvalid && styles.coordInputInvalid]}
-                    value={customCoords}
-                    onChangeText={setCustomCoords}
-                    placeholder="latitude, longitude"
-                    keyboardType="numbers-and-punctuation"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    returnKeyType="done"
-                  />
-                  {/* Pasted coordinates are long and the keyboard's delete key clears them one
-                      character at a time; one tap on the ✕ empties the field. Only drawn when
-                      there is something to clear, so an empty field shows no control. */}
-                  {customCoords.length > 0 && (
-                    <TouchableOpacity
-                      style={styles.coordClear}
-                      onPress={() => setCustomCoords('')}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Clear coordinates"
-                    >
-                      <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-              <Text style={styles.mapHint}>Tap the map to set a location</Text>
-              {/* Edge to edge: the negative inset cancels the builder's horizontal padding,
-                  so the map spans the screen rather than sitting inside the section's column. */}
-              <View style={styles.mapFullBleed}>
-                <LocationMap
-                  coord={coordsValid ? resolvedCoords : null}
-                  onPick={(c) => setCustomCoords(`${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`)}
-                  userCoord={gpsCoords}
-                  onLocate={requestCurrentLocation}
-                  locating={locating}
-                />
-              </View>
-            </>
-          )}
-        </Section>
+        {/* No heading: the map is its own label. Edge to edge, since the negative inset cancels
+            the builder's horizontal padding, so the map spans the screen rather than sitting
+            inside the column. The coordinates sit under it as the map's readout and a way to
+            type or paste a point. */}
+        <View style={styles.section}>
+          <View style={styles.mapFullBleed}>
+            <LocationMap
+              coord={coordsValid ? resolvedCoords : null}
+              onPick={(c) => pinCoordsText(formatLatLon(c))}
+              height={BUILDER_MAP_HEIGHT}
+              userCoord={gpsCoords}
+              following={following}
+              onLocate={follow}
+              locating={locating}
+              onClear={() => pinCoordsText('')}
+              canClear={coordsField.length > 0}
+            />
+          </View>
+          <View style={[styles.coordsCard, coordsInvalid && styles.coordsCardInvalid]}>
+            <View style={[styles.coordRow, styles.coordRowLast]}>
+              <Text style={[styles.coordLabel, styles.coordLabelWide]}>Coordinates</Text>
+              {/* Editing pins. The first keystroke arrives with the field's whole text, fix
+                  included, so nudging the current location's digits works as expected. */}
+              <TextInput
+                style={[styles.coordInput, coordsInvalid && styles.coordInputInvalid]}
+                value={coordsField}
+                onChangeText={pinCoordsText}
+                placeholder="latitude, longitude"
+                keyboardType="numbers-and-punctuation"
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="done"
+              />
+              {/* Pasted coordinates are long and the keyboard's delete key clears them one
+                  character at a time; one tap on the ✕ empties the field. Same action as the
+                  map's clear button, placed where someone typing will look for it. Always laid
+                  out and merely hidden when there is nothing to clear: the icon is taller than
+                  the text line, so adding and removing it would change the row's height. */}
+              <TouchableOpacity
+                style={[styles.coordClear, coordsField.length === 0 && styles.coordClearHidden]}
+                onPress={() => pinCoordsText('')}
+                disabled={coordsField.length === 0}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear coordinates"
+                accessibilityElementsHidden={coordsField.length === 0}
+              >
+                <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
 
         <Section label="Priority" info={() => setPriorityInfo(true)}>
           <SegmentedControl
@@ -1653,11 +1692,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             Keyed on `offline` alone, not on fetchDisabled — a button greyed for want of a location is
             a different problem with a different fix. */}
         {device === 'internet' && offline && <Text style={styles.actionNote}>{OFFLINE_MESSAGE}</Text>}
-        {/* The location half of that: custom mode with nothing usable in the field greys every
+        {/* The location half of that: a pinned point with nothing usable in the field greys every
             device's button, and the input sits a few sections up by the time the button is on
             screen. Both notes can show at once — offline and no location are separate problems,
             each with its own fix. */}
-        {locationMode === 'custom' && !coordsValid && (
+        {!following && !coordsValid && (
           <Text style={styles.actionNote}>{NO_LOCATION_MESSAGE}</Text>
         )}
 
@@ -2109,17 +2148,19 @@ const styles = StyleSheet.create({
   varRowTrailing: { flexDirection: 'row', alignItems: 'center' },
   varCount: { fontSize: 13, color: palette.textTertiary, marginRight: 6 },
 
-  customCoords: { marginTop: 10, backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden' },
-  customCoordsInvalid: { borderWidth: 1, borderColor: palette.destructive },
+  // The border is always there, transparent until the field is invalid, so flagging a bad entry
+  // recolors the card without resizing it.
+  coordsCard: { marginTop: 10, backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'transparent' },
+  coordsCardInvalid: { borderColor: palette.destructive },
   coordRow: { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule },
   coordRowLast: { borderBottomWidth: 0 },
   coordLabel: { width: 30, fontSize: 15, fontWeight: '600', color: palette.textSecondary },
   coordLabelWide: { width: 104 },
   coordInput: { flex: 1, fontSize: 15, color: palette.text },
   coordInputInvalid: { color: palette.destructive },
-  // The row aligns on the text baseline, which an icon doesn't have; centre it on the row instead.
+  // The row aligns on the text baseline, which an icon doesn't have; center it on the row instead.
   coordClear: { alignSelf: 'center', marginLeft: 8 },
-  mapHint: { fontSize: 12, color: palette.pageTextTertiary, marginTop: 10 },
+  coordClearHidden: { opacity: 0 },
   mapFullBleed: { marginTop: 10, marginHorizontal: -CONTENT_PAD },
   modelHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 8 },
 
