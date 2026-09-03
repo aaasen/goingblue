@@ -32,6 +32,7 @@ import HelpScreen from './HelpScreen';
 import { MODELS, modelLabelsFromMask } from './models';
 import { DEVICES, deviceCode, type Device } from './devices';
 import { parseLatLon } from './coords';
+import { SHOW_COORDINATES } from './features';
 import { palette, SEGMENT_PROPS, SWITCH_PROPS } from './palette';
 
 // The whole flow on one screen, in the order the steps happen: build a request at the top, send
@@ -1510,6 +1511,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               canClear={coordsField.length > 0}
             />
           </View>
+          {SHOW_COORDINATES && (
           <View style={[styles.coordsCard, coordsInvalid && styles.coordsCardInvalid]}>
             <View style={[styles.coordRow, styles.coordRowLast]}>
               <Text style={[styles.coordLabel, styles.coordLabelWide]}>Coordinates</Text>
@@ -1543,6 +1545,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               </TouchableOpacity>
             </View>
           </View>
+          )}
         </View>
 
         <Section label="Priority" info={() => setPriorityInfo(true)}>
