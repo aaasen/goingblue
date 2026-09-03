@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Camera, Images, Map, Marker, type CameraRef, type PressEvent } from '@maplibre/maplibre-react-native';
+import { ActivityIndicator, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Camera, GeoJSONSource, Images, Layer, Map, Marker, type CameraRef, type PressEvent } from '@maplibre/maplibre-react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import type { NativeSyntheticEvent } from 'react-native';
 import { MAX_ZOOM, MIN_ZOOM } from './basemapStyle';
@@ -21,6 +21,12 @@ interface Props {
   // Inline height. Omitted, the map is square at whatever width it is given.
   height?: number;
   active?: boolean;
+  // The phone's last known position, drawn as a blue dot. The pin stays the point of interest.
+  userCoord?: LatLon | null;
+  // When provided, a locate button asks for a fresh fix and the map moves to whatever comes back.
+  // Null means no fix; the caller has already told the user why.
+  onLocate?: () => Promise<LatLon | null>;
+  locating?: boolean;
 }
 
 // Wide view of the contiguous US, used as the picker's starting point before any coordinate is set.
@@ -34,7 +40,7 @@ const MAP_IMAGES = { 'peak-triangle': require('./assets/peak-triangle.png') };
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
 // picks a coordinate. Either way the corner button opens the same map fullscreen, where it pans and
 // zooms freely. Callers also expose lat/lon text inputs for setting a location without the map.
-export default function LocationMap({ coord, onPick, height, active = true }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
@@ -57,6 +63,14 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
     cameraRef.current?.easeTo(stop);
     fullscreenCameraRef.current?.easeTo(stop);
   }, [coord?.lat, coord?.lon]);
+
+  async function locate() {
+    const c = await onLocate?.();
+    if (!c) return;
+    const stop = { center: [c.lon, c.lat] as [number, number], zoom: PICKED_ZOOM, duration: 250 };
+    cameraRef.current?.easeTo(stop);
+    fullscreenCameraRef.current?.easeTo(stop);
+  }
 
   const onPress = interactive
     ? (e: NativeSyntheticEvent<PressEvent>) => {
@@ -86,6 +100,14 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
       >
         <Images images={MAP_IMAGES} />
         <Camera ref={ref} initialViewState={initialViewState} minZoom={MIN_ZOOM} maxZoom={MAX_ZOOM} />
+        {/* A style layer rather than a Marker: markers are native views over the GL surface, so a
+            layer always sits under the pin, and a forecast on top of the phone's position keeps the
+            pin in front. */}
+        {userCoord && (
+          <GeoJSONSource id="user-location" data={{ type: 'Point', coordinates: [userCoord.lon, userCoord.lat] }}>
+            <Layer id="user-location-dot" type="circle" style={USER_DOT_STYLE} />
+          </GeoJSONSource>
+        )}
         {coord && (
           <Marker lngLat={[coord.lon, coord.lat]} anchor="bottom">
             <View style={styles.pin}>
@@ -96,6 +118,23 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
           </Marker>
         )}
       </Map>
+    );
+  }
+
+  function renderLocateButton(style: object) {
+    if (!onLocate) return null;
+    return (
+      <TouchableOpacity
+        style={style}
+        onPress={locate}
+        disabled={locating}
+        accessibilityRole="button"
+        accessibilityLabel="Find my location"
+      >
+        {locating
+          ? <ActivityIndicator color={palette.link} />
+          : <MaterialCommunityIcons name="crosshairs-gps" size={24} color={palette.link} />}
+      </TouchableOpacity>
     );
   }
 
@@ -115,6 +154,7 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
                 platforms draw as a plain box or a missing-glyph slug. */}
             <MaterialCommunityIcons name="fullscreen" size={26} color={palette.link} />
           </TouchableOpacity>
+          {renderLocateButton(styles.locateButton)}
         </>
       )}
       {fullscreen && (
@@ -134,6 +174,7 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
             >
               <Text style={styles.doneButtonText}>Done</Text>
             </TouchableOpacity>
+            {renderLocateButton(styles.fullscreenLocateButton)}
           </View>
         </Modal>
       )}
@@ -142,6 +183,15 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
 }
 
 const PIN = '#d0433b';
+// The phone's position, in the blue-dot idiom every map app uses, so it reads as "you are here"
+// rather than as a second point of interest.
+const USER_DOT_STYLE = {
+  circleRadius: 7,
+  circleColor: '#007aff',
+  circleStrokeWidth: 3,
+  circleStrokeColor: '#ffffff',
+  circlePitchAlignment: 'map',
+} as const;
 // Width of the marker's square before it is turned; the point it lands on is a corner, so the
 // shape reaches half its diagonal below the box centre — BALLOON * (√2 - 1) / 2 past the bottom.
 const BALLOON = 26;
@@ -177,6 +227,15 @@ const styles = StyleSheet.create({
   fullscreenButton: {
     position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
     width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+  },
+  // Stacked under the fullscreen button inline, and under Done in the modal.
+  locateButton: {
+    position: 'absolute', top: 60, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
+    width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+  },
+  fullscreenLocateButton: {
+    position: 'absolute', top: 108, right: 16, backgroundColor: 'rgba(255,255,255,0.96)',
+    width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
   },
   doneButton: {
     position: 'absolute', top: 56, right: 16, backgroundColor: 'rgba(255,255,255,0.96)',

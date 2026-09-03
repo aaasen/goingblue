@@ -1495,6 +1495,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                 <LocationMap
                   coord={coordsValid ? resolvedCoords : null}
                   onPick={(c) => setCustomCoords(`${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`)}
+                  userCoord={gpsCoords}
+                  onLocate={requestCurrentLocation}
+                  locating={locating}
                 />
               </View>
             </>
@@ -1759,6 +1762,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               })()}
               coord={{ lat: decoded.lat, lon: decoded.lon }}
               height={200}
+              userCoord={gpsCoords}
+              onLocate={requestCurrentLocation}
+              locating={locating}
             />
           </Animated.View>
 
