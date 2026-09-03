@@ -29,7 +29,7 @@ import {
 import LocationMap from './LocationMap';
 import Meteogram, { PINNED_STACK_H } from './Meteogram';
 import HelpScreen from './HelpScreen';
-import { MODELS, modelIconsFromMask, modelLabelsFromMask } from './models';
+import { MODELS, modelLabelsFromMask } from './models';
 import { DEVICES, deviceCode, type Device } from './devices';
 import { parseLatLon } from './coords';
 import { palette, SEGMENT_PROPS, SWITCH_PROPS } from './palette';
@@ -118,7 +118,7 @@ const PRIORITIES = [
   { value: MODE_RANGE, token: 'r', label: 'Range' },
 ];
 
-// Model-selector help copy: the option's flag label, the center behind it, and the models it
+// Model-selector help copy: the option's label, the center behind it, and the models it
 // serves, highest resolution first, which is the order they serve in, so the list reads as the
 // blend outward that Auto's line describes. Names and horizons come off the specs, keeping this
 // text saying what the meteogram's band labels say; only the region is written here.
@@ -126,22 +126,22 @@ interface ModelInfoEntry { spec: ModelSpec; region: string }
 const M = MODEL_SPECS;
 const MODEL_INFO: Array<{ name: string; desc: string; models: ModelInfoEntry[] }> = [
   {
-    name: '🌐 Auto',
+    name: 'Auto',
     desc: 'Chooses the highest resolution model for your location from over 30 regional weather '
       + 'models. Seamlessly blends to lower-resolution global models at longer time horizons.',
     models: [],
   },
   {
-    name: '🇺🇸 US',
-    desc: 'NOAA',
+    name: 'NOAA',
+    desc: 'US National Oceanic and Atmospheric Administration',
     models: [
       { spec: M.gfs_hrrr, region: 'continental US' },
       { spec: M.gfs_global, region: 'global' },
     ],
   },
   {
-    name: '🇨🇦 CA',
-    desc: 'Environment Canada',
+    name: 'GEM',
+    desc: 'Environment and Climate Change Canada',
     models: [
       { spec: M.gem_hrdps_continental, region: 'Canada and the northern US' },
       { spec: M.gem_regional, region: 'North America' },
@@ -149,13 +149,13 @@ const MODEL_INFO: Array<{ name: string; desc: string; models: ModelInfoEntry[] }
     ],
   },
   {
-    name: '🇪🇺 EU',
-    desc: 'ECMWF',
+    name: 'ECMWF',
+    desc: 'European Centre for Medium-Range Weather Forecasts',
     models: [{ spec: M.ecmwf_ifs, region: 'global' }],
   },
   {
-    name: '🇩🇪 DE',
-    desc: 'DWD',
+    name: 'ICON',
+    desc: 'Deutscher Wetterdienst (Germany)',
     models: [
       { spec: M.icon_d2, region: 'central Europe' },
       { spec: M.icon_eu, region: 'Europe' },
@@ -173,8 +173,8 @@ function horizonText(hours: number): string {
 }
 const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 
-// Compare-pill names by MODEL_BIT index — the short center names, matching the selector above.
-const COMPARE_MODEL_LABELS = ['Auto', 'US', 'CA', 'EU', 'DE'];
+// Compare-pill names by MODEL_BIT index, matching the selector.
+const COMPARE_MODEL_LABELS = MODELS.map((m) => m.label);
 
 // Kilometres between two coordinates — equirectangular, exact enough at the ~1 km radii the
 // comparable-forecast rules use (the compare selector and the map's remount key).
@@ -586,18 +586,20 @@ function normalizedForecastData(encoded: string): string {
 /**
  * Cached-forecast label (request time · models · priority · location). `detailed`
  * is for the loaded forecast's own meta row, which has the width for the request
- * date and the forecast point's elevation; the past-forecast list stays compact.
+ * date and the forecast point's elevation; the past-forecast list stays compact and
+ * names the priority only when it isn't the Auto default.
  */
 function cacheMetaLabel(slot: Slot, token: string, units: UnitPrefs, detailed = false): string {
   try {
     const msg = decodeAny(slot.encoded!, token);
-    const models = modelIconsFromMask(msg.models_mask).join(' ');
+    const models = modelLabelsFromMask(msg.models_mask).join(' + ');
     const requested = detailed
       ? requestDateTimeLabel(slot.requestedAt)
       : requestTimeLabel(slot.requestedAt);
     const elev = detailed ? elevationLabel(msg, units) : '';
     const elevStr = elev ? ` · ${elev}` : '';
-    return `${requested} · ${models} · ${priorityLabel(msg)} · ${latLonLabel(msg)}${elevStr}`;
+    const priority = detailed || msg.mode !== MODE_AUTO ? ` · ${priorityLabel(msg)}` : '';
+    return `${requested} · ${models}${priority} · ${latLonLabel(msg)}${elevStr}`;
   } catch {
     return 'Unknown';
   }
@@ -1513,7 +1515,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           />
         </Section>
 
-        <Section label="Model" info={() => setModelInfo(true)}>
+        <Section label="Weather Model" info={() => setModelInfo(true)}>
           <SegmentedControl
             {...SEGMENT_PROPS}
             values={MODELS.map((m) => m.label)}
@@ -1826,7 +1828,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         </Text>
       </InfoModal>
 
-      <InfoModal visible={modelInfo} title="Model" onClose={() => setModelInfo(false)}>
+      <InfoModal visible={modelInfo} title="Weather Model" onClose={() => setModelInfo(false)}>
         {MODEL_INFO.map((m) => (
           <View key={m.name} style={styles.modalItem}>
             <Text style={styles.modalBody}>
