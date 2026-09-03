@@ -229,3 +229,13 @@ export async function loadTwoMessages(): Promise<boolean> {
 export async function saveTwoMessages(on: boolean): Promise<void> {
   try { await AsyncStorage.setItem(TWO_MESSAGES_KEY, String(on)); } catch { /* ignore */ }
 }
+
+// Forget every stored preference, the pre-per-quantity master switch included. Part of account
+// deletion: the next launch starts from the defaults as a fresh install would.
+export async function clearSettings(): Promise<void> {
+  try {
+    await AsyncStorage.multiRemove([
+      LEGACY_UNITS_KEY, UNIT_PREFS_KEY, TIME_FORMAT_KEY, AQI_SCALE_KEY, DEVICE_KEY, TWO_MESSAGES_KEY,
+    ]);
+  } catch { /* ignore */ }
+}

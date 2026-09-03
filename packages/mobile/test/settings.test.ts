@@ -6,6 +6,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   default: {
     getItem: async (k: string) => store.get(k) ?? null,
     setItem: async (k: string, v: string) => { store.set(k, v); },
+    multiRemove: async (ks: string[]) => { for (const k of ks) store.delete(k); },
   },
 }));
 
@@ -13,7 +14,9 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 // parse under vitest.
 vi.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
 
-import { applyUnitSystem, defaultUnitPrefs, loadUnits, saveUnits } from '../settings';
+import {
+  applyUnitSystem, clearSettings, defaultUnitPrefs, loadTimeFormat, loadUnits, saveTimeFormat, saveUnits,
+} from '../settings';
 
 describe('unit preferences', () => {
   beforeEach(() => store.clear());
@@ -56,5 +59,15 @@ describe('unit preferences', () => {
     expect(await loadUnits()).toEqual({ ...defaultUnitPrefs('metric'), temp: 'f' });
     store.set('display_unit_prefs', '{not json');
     expect(await loadUnits()).toEqual(defaultUnitPrefs('imperial'));
+  });
+
+  it('clearSettings forgets every stored preference', async () => {
+    await saveUnits(defaultUnitPrefs('metric'));
+    await saveTimeFormat('24h');
+    store.set('display_units', 'metric');
+    await clearSettings();
+    expect(store.size).toBe(0);
+    expect(await loadUnits()).toEqual(defaultUnitPrefs('imperial'));
+    expect(await loadTimeFormat()).toBe('12h');
   });
 });

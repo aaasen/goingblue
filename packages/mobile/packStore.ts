@@ -175,3 +175,13 @@ export async function removePack(id: string): Promise<void> {
   await saveDownloadedPacks(installed);
   emit({ installed });
 }
+
+// Every pack at once, for account deletion: downloads in flight are called off (each cleans up
+// its own .part files as it unwinds), then the whole directory goes, so nothing survives that
+// the persisted id set wouldn't know about.
+export async function removeAllPacks(): Promise<void> {
+  for (const id of inFlight.keys()) cancelDownload(id);
+  await deleteAsync(DIR, { idempotent: true }).catch(() => {});
+  await saveDownloadedPacks(new Set());
+  emit({ installed: new Set() });
+}

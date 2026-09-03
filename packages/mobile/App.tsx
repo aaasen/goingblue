@@ -7,13 +7,14 @@ import SettingsScreen from './SettingsScreen';
 import SetupScreen from './SetupScreen';
 import { loadToken, clearToken, deleteAccount } from './account';
 import { clearStore } from './cache';
+import { removeAllPacks } from './packStore';
 import {
   loadAqiScale, loadDevice, loadTimeFormat, loadTwoMessages, loadUnits,
-  saveAqiScale, saveDevice, saveTimeFormat, saveTwoMessages, saveUnits,
+  saveAqiScale, saveDevice, saveTimeFormat, saveTwoMessages, saveUnits, clearSettings,
   defaultUnitPrefs, type AqiScale, type TimeFormat, type UnitPrefs,
 } from './settings';
 import { DEFAULT_DEVICE, type Device } from './devices';
-import { configureTileCache } from './tileCache';
+import { clearTileCache, configureTileCache } from './tileCache';
 import { MODAL_TOP_INSET } from './insets';
 import { palette } from './palette';
 
@@ -100,12 +101,23 @@ export default function App() {
   // The server call goes first and its failure propagates to the caller, which reports it.
   // Clearing the token after a failed delete would strand a live account with nothing left that
   // could ever delete it — the token is the only handle on it.
+  // Once the server has forgotten the account, the phone forgets everything with it: saved
+  // forecasts, preferences, offline maps and the map tile cache, so what remains is a fresh
+  // install. The in-memory preferences reset too, since Setup renders from them next.
   async function handleDeleteAccount() {
     if (typeof token !== 'string') return;
     await deleteAccount(token);
     await clearStore(token);
+    await clearSettings();
+    await removeAllPacks();
+    await clearTileCache().catch(() => {});
     await clearToken();
     setForecastData('');
+    setUnitsState(defaultUnitPrefs('imperial'));
+    setTimeFormatState('12h');
+    setAqiScaleState('us');
+    setDeviceState(DEFAULT_DEVICE);
+    setTwoMessagesState(true);
     // The delete lives inside the Settings sheet; close it so Setup isn't hiding under it.
     setSettingsOpen(false);
     setToken(null);
