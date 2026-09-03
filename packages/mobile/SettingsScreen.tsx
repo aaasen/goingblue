@@ -48,7 +48,7 @@ export default function SettingsScreen({
     storeRemovePack(id);
   }
 
-  const DELETE_MESSAGE = 'Deletion is permanent.';
+  const DELETE_MESSAGE = 'This erases your data from the server and removes your saved forecasts, settings, and offline maps from this phone. Deletion is permanent.';
 
   // Deletion needs the network, so it can fail. Say so and leave the account intact rather than
   // clearing the app locally — the token is the only handle on the account, and a device that
@@ -59,8 +59,8 @@ export default function SettingsScreen({
       await onDeleteAccount();
     } catch {
       Alert.alert(
-        'Couldn’t delete account',
-        'Your account is unchanged. Check your connection and try again.',
+        'Couldn’t delete your data',
+        'Nothing was deleted. Check your connection and try again.',
       );
     } finally {
       setDeleting(false);
@@ -68,7 +68,7 @@ export default function SettingsScreen({
   }
 
   function confirmDelete() {
-    Alert.alert('Delete account?', DELETE_MESSAGE, [
+    Alert.alert('Delete your data?', DELETE_MESSAGE, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: runDelete },
     ]);
@@ -127,10 +127,10 @@ export default function SettingsScreen({
             onRemove={removePack}
           />
 
-          {/* Account */}
-          <Text style={[styles.heading, { marginTop: 28 }]}>Account</Text>
+          {/* Data */}
+          <Text style={[styles.heading, { marginTop: 28 }]}>Data</Text>
           <Text style={styles.sectionNote}>
-            Deleting an account clears it from the server and resets the app to its original state.
+            You can delete all of your data from Going Blue at any time.
           </Text>
           <TouchableOpacity
             style={[styles.resetBtn, deleting && styles.resetBtnDisabled]}
@@ -140,7 +140,7 @@ export default function SettingsScreen({
           >
             {deleting
               ? <ActivityIndicator color={palette.destructive} />
-              : <Text style={styles.resetBtnText}>Delete account</Text>}
+              : <Text style={styles.resetBtnText}>Delete my data</Text>}
           </TouchableOpacity>
 
           <Text style={styles.legalLinks}>

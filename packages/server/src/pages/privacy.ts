@@ -2,6 +2,24 @@ import type { Context } from "hono";
 import { BRAND, CONTACT_EMAIL, PRIVACY_UPDATED } from "../constants.js";
 import { PAGE } from "./shell.js";
 
+// The deletion instructions, shared with the support page so the two never drift: the privacy
+// policy is the version the Play listing's delete-data link points at, and support answers the
+// same question in the same words.
+export const DELETION_HTML = `<p>Steps:</p>
+<ol>
+  <li>Open the ${BRAND} app.</li>
+  <li>Tap the gear icon in the upper-right corner.</li>
+  <li>Scroll down to "Delete my data" and confirm.</li>
+</ol>
+<p>This immediately erases your token from the server and erases all data stored on your phone.
+Request records are kept on the server with the token removed so that they can't be linked back
+to you.</p>
+<p>Data cannot be deleted outside the app, since the app's stored token is the only way a token
+is linked to you. If you delete the app before deleting your account, the anonymous token will
+remain on the server but there will be no way to link to you. Delete your account before deleting
+the app if you want the token erased from the server.</p>
+`;
+
 const PRIVACY_BODY = `
 <p>${BRAND} is operated by Lane Aasen (<a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>).</p>
 
@@ -24,19 +42,7 @@ may be used for training the encoder on real-world usage.</p>
 on your phone.</p>
 
 <h2 id="deletion">Data Deletion</h2>
-<p>Steps:</p>
-<ol>
-  <li>Open the ${BRAND} app.</li>
-  <li>Tap the gear icon in the upper-right corner.</li>
-  <li>Scroll down to "Delete account" and confirm.</li>
-</ol>
-<p>This immediately erases your token from the server and erases all data stored on your phone.
-Request records are kept on the server with the token removed so that they can't be linked back
-to you.</p>
-<p>Data cannot be deleted outside the app, since the app's stored token is the only way a token
-is linked to you. If you delete the app before deleting your account, the anonymous token will
-remain on the server but there will be no way to link to you. Delete your account before deleting
-the app if you want the token erased from the server.</p>
+${DELETION_HTML}
 
 <h2>App Permissions</h2>
 <p>${BRAND} asks for location permission when requesting a forecast. It never uses your location

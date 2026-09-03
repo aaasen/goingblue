@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { BRAND, CONTACT_EMAIL } from "../constants.js";
 import { PAGE } from "./shell.js";
+import { DELETION_HTML } from "./privacy.js";
 
 // The App Store listing points its Support URL here rather than at the landing page: a reviewer
 // checking that support exists should land on a page that is unambiguously support, and the
@@ -43,11 +44,8 @@ satellite messaging. The <strong>Setup</strong> section in the app walks through
   new forecast.</li>
 </ul>
 
-<h2>How do I delete my account?</h2>
-<p>Open <strong>Settings</strong> in the app and tap <strong>Delete account</strong>. That erases
-the account from our servers immediately and permanently, and clears the forecasts saved on your
-device. The account is an anonymous token with no name, email address, or phone number attached to
-it. See our <a href="/privacy">Privacy Policy</a> for what we hold and for how long.</p>
+<h2>How do I delete my data?</h2>
+${DELETION_HTML}
 
 <h2>Where does the weather data come from?</h2>
 <p>Forecasts are retrieved from <a href="https://open-meteo.com/">Open-Meteo</a>, which serves
