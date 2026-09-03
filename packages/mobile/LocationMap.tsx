@@ -113,7 +113,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
             pin in front. */}
         {userCoord && (
           <GeoJSONSource id="user-location" data={{ type: 'Point', coordinates: [userCoord.lon, userCoord.lat] }}>
-            <Layer id="user-location-dot" type="circle" style={USER_DOT_STYLE} />
+            <Layer id="user-location-dot" type="circle" paint={USER_DOT_PAINT} />
           </GeoJSONSource>
         )}
         {coord && (
@@ -210,12 +210,12 @@ export default function LocationMap({ coord, onPick, height, active = true, user
 const PIN = '#d0433b';
 // The phone's position, in the blue-dot idiom every map app uses, so it reads as "you are here"
 // rather than as a second point of interest.
-const USER_DOT_STYLE = {
-  circleRadius: 7,
-  circleColor: '#007aff',
-  circleStrokeWidth: 3,
-  circleStrokeColor: '#ffffff',
-  circlePitchAlignment: 'map',
+const USER_DOT_PAINT = {
+  'circle-radius': 7,
+  'circle-color': '#007aff',
+  'circle-stroke-width': 3,
+  'circle-stroke-color': '#ffffff',
+  'circle-pitch-alignment': 'map',
 } as const;
 // Width of the marker's square before it is turned; the point it lands on is a corner, so the
 // shape reaches half its diagonal below the box centre — BALLOON * (√2 - 1) / 2 past the bottom.
