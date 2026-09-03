@@ -2815,25 +2815,26 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
     });
   });
 
-  // A rule on every seam INSIDE the precip block — snow/rain, rain/chance, snow/chance. These are
-  // the drawing's only stacked rows that each plot from their own baseline, so without a rule an
-  // area rising into the row above reads as that row's own bottom edge, and the chance curve
-  // running low reads as a border under the rain. No rule at the block's outer edges: the rows
-  // above and below it are unfilled and end it on their own. Drawn here, after the rows, so it
-  // lies over the fills rather than under them.
+  // A rule on every seam inside the precip block — snow/rain, rain/chance, snow/chance — and one
+  // along its bottom edge. These are the drawing's only stacked rows that each plot from their
+  // own baseline, so without a rule an area rising into the row above reads as that row's own
+  // bottom edge, and the chance curve running low reads as a border under the rain. The bottom
+  // rule closes the block the same way, so the last row ends where the others do rather than
+  // running into whatever is drawn beneath. No rule on the top edge: the row above is unfilled
+  // and ends it on its own. Drawn here, after the rows, so it lies over the fills rather than
+  // under them.
   let seamY = ROW_H.DATE;
   let prevWasPrecip = false;
+  const precipRule = (y: number) => els.push(
+    <Line key={`precip-seam${y}`} p1={vec(0, y)} p2={vec(width, y)} color={C.divider} strokeWidth={1} />,
+  );
   rows.forEach((row) => {
     const isPrecip = PRECIP_BLOCK.has(row.kind);
-    if (isPrecip && prevWasPrecip) {
-      els.push(
-        <Line key={`precip-seam${seamY}`} p1={vec(0, seamY)} p2={vec(width, seamY)}
-          color={C.divider} strokeWidth={1} />,
-      );
-    }
+    if (prevWasPrecip) precipRule(seamY);
     prevWasPrecip = isPrecip;
     seamY += row.height;
   });
+  if (prevWasPrecip) precipRule(seamY);
   return { els, markerIndex };
 }
 
