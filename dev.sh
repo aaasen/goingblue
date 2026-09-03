@@ -3,7 +3,9 @@ set -euo pipefail
 
 # Local dev: the whole README "Development" flow in one tmux session.
 #
-#   ./dev.sh          # start Postgres (docker), build, create the session, attach
+#   ./dev.sh install  # pnpm install, then fetch the bundled basemap (assets not in git that
+#                     # Metro needs at bundle time); run once on a fresh clone
+#   ./dev.sh start    # start Postgres (docker), build, create the session, attach
 #   ./dev.sh tunnel   # same, but for public wifi with client isolation, where the phone
 #                     # cannot reach the Mac's LAN address: Metro goes through Expo's ngrok
 #                     # tunnel and the gateway through a second ngrok tunnel on your own
@@ -40,6 +42,12 @@ TUNNEL_URL_FILE="${TMPDIR:-/tmp}/weather-gateway-tunnel.url"
 
 DB_VOLUME="goingblue-data"
 
+if [ "${1:-}" = "install" ]; then
+  pnpm install
+  pnpm --filter @weather/mobile fetch-basemap
+  exit 0
+fi
+
 if [ "${1:-}" = "stop" ] || [ "${1:-}" = "reset" ]; then
   tmux kill-session -t "$SESSION" 2>/dev/null || true
   docker stop goingblue 2>/dev/null || true
@@ -50,10 +58,17 @@ if [ "${1:-}" = "stop" ] || [ "${1:-}" = "reset" ]; then
 fi
 
 TUNNEL=""
-if [ "${1:-}" = "tunnel" ]; then
-  TUNNEL=1
-  EXPO_ARGS="$EXPO_ARGS --tunnel"
-fi
+case "${1:-}" in
+  start) ;;
+  tunnel)
+    TUNNEL=1
+    EXPO_ARGS="$EXPO_ARGS --tunnel"
+    ;;
+  *)
+    echo "usage: ./dev.sh install|start|tunnel|stop|reset"
+    exit 2
+    ;;
+esac
 
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   if [ -z "$(docker ps -q -f name='^goingblue$')" ]; then

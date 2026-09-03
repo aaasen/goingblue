@@ -316,15 +316,22 @@ Apparent or "feels like" temperature is calculated from temperature, sustained w
 
 ## Development
 
-Requirements:
-1. Docker
-2. tmux
+Development dependencies:
+1. Node 26: `brew install node@26`
+1. pnpm: `npm install -g pnpm@9.15.4`
+1. Docker (Postgres container): `brew install --cask docker`
+1. tmux (dev script): `brew install tmux`
+1. EAS CLI (mobile apps): Create an Expo account, install the CLI with `npm install -g eas-cli`, then run `eas login`.
+1. Xcode (iOS simulator) with CocoaPods: `brew install cocoapods`
+1. JDK 17 + Android SDK and an emulator image
+1. ngrok (dev script tunnel mode): Create an ngrok account, install the CLI with `brew install ngrok`, then run `ngrok config add-authtoken`.
 
-Everything needed to run locally is bundled into a tmux session for easy setup. First, run `pnpm install` to install dependencies. Then, use the following development commands:
- - `./dev.sh`: Start the development environment.
+Everything needed to run locally is bundled into a tmux session for easy setup:
+ - `./dev.sh install`: Install dependencies and fetch the global basemap that is bundled in the app.
+ - `./dev.sh start`: Start the development environment.
  - `./dev.sh stop`: Stop the development environment.
  - `./dev.sh reset`: Stop the development environment and clear the development database. Note that this will invalidate all existing tokens, so reset the account on your dev device afterwards.
- - `./dev.sh tunnel`: Start the development environment with an ngrok tunnel for the gateway and Expo server. This is useful for testing app changes on a physical device while on a public network. Before using the tunnel, create an [ngrok](https://ngrok.com/) account, install the CLI with `brew install ngrok` and set the token with `ngrok config add-authtoken`.
+ - `./dev.sh tunnel`: Start the development environment with an ngrok tunnel for the gateway and Expo server. This is useful for testing app changes on a physical device while on a public network.
 
 The services run on the following ports by default:
  - Postgres: 5432
@@ -332,7 +339,7 @@ The services run on the following ports by default:
  - Codec server: 8082
  - Expo (mobile app server): 8081
 
-Then, run the mobile app in development mode from `packages/mobile`:
+Run the mobile app in development mode from `packages/mobile`:
  - iOS: `eas build --platform ios --profile development`
  - Android: `eas build --platform android --profile development`
 
