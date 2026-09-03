@@ -3087,40 +3087,6 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<Tile>>(null);
   const scrollOffsetRef = useRef(0); // mirrored from onScroll — see the Animated.event listener
-  // A freshly loaded forecast starts at the beginning. The list persists across loads — blocks
-  // re-render in place — so without this it would keep the previous forecast's scroll position,
-  // which for a new message points at an unrelated stretch of time (or past the end entirely).
-  //
-  // The exception is loading a comparable forecast (same hour, same spot — see
-  // comparableForecasts): that's the compare case, and the viewport holds still IN TIME — the
-  // instant under the previous forecast's left edge is mapped through the new forecast's own
-  // layout — so the hold survives the two messages disagreeing on variables, period counts,
-  // or resolutions. Columns are equal-width per period, so offset ↔ time goes through each
-  // message's period starts and spans, piecewise-linearly within a period.
-  const prevRef = useRef<{ msg: ForecastMessage; dates: Date[]; steps: number[] } | null>(null);
-  useEffect(() => {
-    const prev = prevRef.current;
-    prevRef.current = { msg, dates, steps };
-    if (prev && prev.msg !== msg && comparableForecasts(prev.msg, msg)) {
-      // 1. The time under the previous forecast's left edge.
-      const f = Math.max(0, scrollOffsetRef.current / CELL_W);
-      const i = Math.min(Math.floor(f), prev.dates.length - 1);
-      const leftMs = prev.dates[i].getTime() + (f - i) * prev.steps[i] * 3600_000;
-      // 2. That time's offset in the new forecast's layout (clamped to its window).
-      let offset = 0;
-      if (leftMs > dates[0].getTime()) {
-        let j = dates.length - 1;
-        for (let k = 0; k < dates.length; k++) {
-          if (leftMs < dates[k].getTime() + steps[k] * 3600_000) { j = k; break; }
-        }
-        const frac = Math.min(1, Math.max(0, (leftMs - dates[j].getTime()) / (steps[j] * 3600_000)));
-        offset = Math.min((j + frac) * CELL_W, Math.max(0, (periods.length - 1) * CELL_W));
-      }
-      flatListRef.current?.scrollToOffset({ offset, animated: false });
-      return;
-    }
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-  }, [msg]);
   const { width: winW, height: winH } = useWindowDimensions();
   // Where the strip docks and how much width the page spans are both orientation questions —
   // portrait clears the status bar above (the parked map covers the band behind the clock),
@@ -3131,6 +3097,56 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   // How much of the forecast is on screen at once: the rail is beside the scroll view, not over
   // it, so it comes off the viewport rather than merely covering part of it.
   const viewportW = screenW - LEGEND_W;
+  // A freshly loaded forecast starts at the beginning. The list persists across loads — blocks
+  // re-render in place — so without this it would keep the previous forecast's scroll position,
+  // which for a new message points at an unrelated stretch of time (or past the end entirely).
+  //
+  // The exception is loading a comparable forecast (same hour, same spot — see
+  // comparableForecasts): that's the compare case, and the viewport holds still IN TIME — the
+  // instant under the previous forecast's left edge is mapped through the new forecast's own
+  // layout — so the hold survives the two messages disagreeing on variables, period counts,
+  // or resolutions. Columns are equal-width per period, so offset ↔ time goes through each
+  // message's period starts and spans, piecewise-linearly within a period.
+  //
+  // The list is scrolled AND `scrollX` is set directly. Everything that rides `scrollX` (the
+  // strip's viewport window, the sticky day and model labels) rebuilds its interpolation for
+  // the new layout on this render, and a rebuilt native interpolation is only evaluated when
+  // the value it reads next changes. The list reports a scroll only when its offset actually
+  // moves, and the hold often lands on the offset the list is already at (the same hour in two
+  // layouts with the same near-term resolution), so without the direct set those views would
+  // keep showing the previous layout's positions.
+  //
+  // The set waits a frame. Until React's cleanup for this render runs, the previous layout's
+  // native nodes are still wired to the same views, so a same-tick set reaches both sets of
+  // nodes and whichever writes last wins. A frame later only the new nodes are connected.
+  const prevRef = useRef<{ msg: ForecastMessage; dates: Date[]; steps: number[] } | null>(null);
+  useEffect(() => {
+    const prev = prevRef.current;
+    prevRef.current = { msg, dates, steps };
+    let offset = 0;
+    if (prev && prev.msg !== msg && comparableForecasts(prev.msg, msg)) {
+      // 1. The time under the previous forecast's left edge.
+      const f = Math.max(0, scrollOffsetRef.current / CELL_W);
+      const i = Math.min(Math.floor(f), prev.dates.length - 1);
+      const leftMs = prev.dates[i].getTime() + (f - i) * prev.steps[i] * 3600_000;
+      // 2. That time's offset in the new forecast's layout.
+      if (leftMs > dates[0].getTime()) {
+        let j = dates.length - 1;
+        for (let k = 0; k < dates.length; k++) {
+          if (leftMs < dates[k].getTime() + steps[k] * 3600_000) { j = k; break; }
+        }
+        const frac = Math.min(1, Math.max(0, (leftMs - dates[j].getTime()) / (steps[j] * 3600_000)));
+        offset = (j + frac) * CELL_W;
+      }
+    }
+    // Clamped to what the list can scroll to, so the value set here is the offset the list lands
+    // on rather than one it silently clamps.
+    offset = Math.max(0, Math.min(offset, periods.length * CELL_W - viewportW));
+    flatListRef.current?.scrollToOffset({ offset, animated: false });
+    scrollOffsetRef.current = offset;
+    const frame = requestAnimationFrame(() => scrollX.setValue(offset));
+    return () => cancelAnimationFrame(frame);
+  }, [msg]);
   const n = periods.length;
   const width = n * CELL_W;
   const totalH = ROW_H.DATE + rows.reduce((s, r) => s + r.height, 0);
