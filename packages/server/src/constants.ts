@@ -4,6 +4,7 @@
 // the shell is only one more reader.
 export const BRAND = "Going Blue";
 export const LAST_UPDATED = "August 17, 2026";
+export const PRIVACY_UPDATED = "September 3, 2026";
 export const CONTACT_EMAIL = "help@going.blue";
 export const FORECAST_NUMBER = "+14254345858";
 export const REPO_URL = "https://github.com/aaasen/goingblue";
