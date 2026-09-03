@@ -138,9 +138,11 @@ export async function sms(c: Context) {
     }
   }
 
+  // Neither the sender's number nor the message text is logged; both sit in Twilio's own logs
+  // under the MessageSid, which is what gets logged so a message can still be looked up there
+  // while Twilio retains it.
   const body = params["Body"] ?? "";
-  const sender = params["From"] ?? "";
-  log.info("sms.inbound", { from: sender, len: body.length, text: body });
+  log.info("sms.inbound", { sid: params["MessageSid"], len: body.length });
 
   // HELP, STOP and START never reach this webhook: Twilio's Advanced Opt-Out intercepts the
   // keywords and sends its own replies, configured in the Twilio console.

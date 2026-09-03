@@ -21,14 +21,14 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("log", () => {
   it("writes one line of JSON per call", () => {
-    const lines = capture(() => log.info("sms.inbound", { from: "+15555550123", len: 42 }));
+    const lines = capture(() => log.info("sms.inbound", { sid: "SM0123456789abcdef0123456789abcdef", len: 42 }));
     expect(lines).toHaveLength(1);
     expect(lines[0]).not.toContain("\n");
     expect(JSON.parse(lines[0]!)).toEqual({
       severity: "INFO",
       message: "sms.inbound",
       event: "sms.inbound",
-      from: "+15555550123",
+      sid: "SM0123456789abcdef0123456789abcdef",
       len: 42,
     });
   });
