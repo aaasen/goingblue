@@ -4,6 +4,7 @@
 // Roles come in two families. `page*` colors sit directly on the page background; card/sheet
 // colors sit on the white surfaces (lists, cards, the ⓘ sheets).
 
+import { Platform } from 'react-native';
 import type { StatusBarStyle } from 'expo-status-bar';
 
 export interface Palette {
@@ -81,8 +82,8 @@ export interface Palette {
   collectCheck: string;
 }
 
-// The iOS system grays and the original blue. Leaves the segmented controls and switches to the
-// system, which is why those roles are optional.
+// The iOS system grays and the original blue. Leaves the segmented controls and the off state of
+// the switches to the system, which is why those roles are optional.
 const system: Palette = {
   statusBar: 'dark',
   page: '#f2f2f7',
@@ -117,7 +118,7 @@ const system: Palette = {
   textFaint: '#c7c7cc',
   link: '#2a6bb5',
   linkTint: '#eef3fa',
-  primary: '#2a6bb5',
+  primary: '#3a8ee3',
   onPrimary: '#ffffff',
   primaryDisabled: '#aeaeb2',
   toggleTrack: '#e5e5ea',
@@ -132,6 +133,7 @@ const system: Palette = {
   collectTint: '#e8f6ec',
   collectBorder: '#34a853',
   collectCheck: '#2e8b48',
+  switchOn: '#3a8ee3',
 };
 
 export const palette: Palette = system;
@@ -143,7 +145,10 @@ export const SEGMENT_PROPS = palette.segmentText && palette.segmentSelectedText
   ? { fontStyle: { color: palette.segmentText }, activeFontStyle: { color: palette.segmentSelectedText } }
   : {};
 
-// Props that give a Switch the palette's colors.
-export const SWITCH_PROPS = palette.switchOn && palette.switchOff
-  ? { trackColor: { true: palette.switchOn, false: palette.switchOff }, ios_backgroundColor: palette.switchOff }
-  : {};
+// Props that give a Switch the palette's colors. Android's thumb otherwise takes the AppCompat
+// accent, which the app theme never sets, so it comes out teal.
+export const SWITCH_PROPS = {
+  trackColor: { true: palette.switchOn, false: palette.switchOff },
+  ...(palette.switchOff && { ios_backgroundColor: palette.switchOff }),
+  ...(Platform.OS === 'android' && { thumbColor: '#ffffff' }),
+};
