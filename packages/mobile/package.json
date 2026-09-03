@@ -31,6 +31,8 @@
   },
   "devDependencies": {
     "@babel/core": "7.29.7",
+    "@expo/ngrok": "^4.1.0",
+    "@ngrok/ngrok": "^1.7.0",
     "@types/react": "~19.2.2",
     "typescript": "~7.0.2",
     "vitest": "^1.6.1"

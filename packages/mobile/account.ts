@@ -12,9 +12,13 @@ function devNativeApiBase(): string {
 }
 
 // Base URL for the API. Account provisioning runs over normal internet during app setup (never
-// over satellite), so it can talk to the server directly. In dev, derive the dev machine's host
-// from Metro (see devNativeApiBase); in production, target the deployed server.
-export const API_BASE = __DEV__ ? devNativeApiBase() : 'https://going.blue';
+// over satellite), so it can talk to the server directly. In dev, EXPO_PUBLIC_API_BASE wins when
+// set (dev.sh tunnel mode, where Metro's host is an ngrok hostname with no gateway behind it);
+// otherwise derive the dev machine's host from Metro (see devNativeApiBase). In production,
+// target the deployed server.
+export const API_BASE = __DEV__
+  ? (process.env.EXPO_PUBLIC_API_BASE ?? devNativeApiBase())
+  : 'https://going.blue';
 
 const TOKEN_KEY = 'user_token';
 

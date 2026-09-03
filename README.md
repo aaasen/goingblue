@@ -320,13 +320,11 @@ Requirements:
 1. Docker
 2. tmux
 
-Everything needed to run locally is bundled into one tmux session:
-
-```
-pnpm install
-./dev.sh
-./dev.sh kill
-```
+Everything needed to run locally is bundled into a tmux session for easy setup. First, run `pnpm install` to install dependencies. Then, use the following development commands:
+ - `./dev.sh`: Start the development environment.
+ - `./dev.sh stop`: Stop the development environment.
+ - `./dev.sh reset`: Stop the development environment and clear the development database. Note that this will invalidate all existing tokens, so reset the account on your dev device afterwards.
+ - `./dev.sh tunnel`: Start the development environment with an ngrok tunnel for the gateway and Expo server. This is useful for testing app changes on a physical device while on a public network. Before using the tunnel, create an [ngrok](https://ngrok.com/) account, install the CLI with `brew install ngrok` and set the token with `ngrok config add-authtoken`.
 
 The services run on the following ports by default:
  - Postgres: 5432
@@ -334,29 +332,19 @@ The services run on the following ports by default:
  - Codec server: 8082
  - Expo (mobile app server): 8081
 
-### iOS App
+Then, run the mobile app in development mode from `packages/mobile`:
+ - iOS: `eas build --platform ios --profile development`
+ - Android: `eas build --platform android --profile development`
 
-To run the iOS app:
-
-```
-cd packages/mobile
-eas build -p ios --profile development
-```
-
-Then install the app on your iOS device using the QR code in the step above.
+This will produce a QR code which you can scan to install the development app on your device.
 
 The app can also be run in the simulator:
+ - iOS: `npx expo run:ios`
+ - Android: `npx expo run:android`
 
-```
-cd packages/mobile
-npx expo run:ios
-```
-
-For a non-development build:
-
-```
-eas build --platform ios --profile preview
-```
+For a preview build that uses the deployed server:
+ - iOS: `eas build --platform ios --profile preview`
+ - Android: `eas build --platform android --profile preview`
 
 ### Tests
 
