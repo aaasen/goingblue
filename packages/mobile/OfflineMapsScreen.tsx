@@ -10,6 +10,7 @@ import { regionsAt } from './outlines';
 import { MODAL_TOP_INSET } from './insets';
 import { cancelDownload, usePackState } from './packStore';
 import { clearTileCache, tileCacheSize, TILE_CACHE_EMPTY_BYTES } from './tileCache';
+import { palette } from './palette';
 
 interface Props {
   visible: boolean;
@@ -180,7 +181,7 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   {clearing
-                    ? <ActivityIndicator color="#cc2222" />
+                    ? <ActivityIndicator color={palette.destructive} />
                     : <Text style={[styles.clear, (cacheEmpty || cacheBytes == null) && styles.clearDisabled]}>Clear</Text>}
                 </TouchableOpacity>
               }
@@ -190,13 +191,13 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
           <Text style={[styles.heading, styles.headingGap]}>Download maps</Text>
           <View style={styles.card}>
             {here.kind === 'locating' && (
-              <Row title="Finding your location…" subtitle="" trailing={<ActivityIndicator color="#8e8e93" />} />
+              <Row title="Finding your location…" subtitle="" trailing={<ActivityIndicator color={palette.textTertiary} />} />
             )}
             {here.kind === 'off' && (
               <Row
                 title="Use my location"
                 subtitle="Shows the maps for the state and country you're in"
-                trailing={<MaterialCommunityIcons name="crosshairs-gps" size={24} color="#2a6bb5" />}
+                trailing={<MaterialCommunityIcons name="crosshairs-gps" size={24} color={palette.link} />}
                 onPress={askAndLocate}
               />
             )}
@@ -204,7 +205,7 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
               <Row
                 title="Couldn’t get your location"
                 subtitle="Tap to try again"
-                trailing={<MaterialCommunityIcons name="refresh" size={24} color="#2a6bb5" />}
+                trailing={<MaterialCommunityIcons name="refresh" size={24} color={palette.link} />}
                 onPress={askAndLocate}
               />
             )}
@@ -218,13 +219,13 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
 
           <View style={styles.searchGap} onLayout={(e) => { searchY.current = e.nativeEvent.layout.y; }} />
           <View style={styles.search}>
-            <MaterialCommunityIcons name="magnify" size={20} color="#8e8e93" />
+            <MaterialCommunityIcons name="magnify" size={20} color={palette.textTertiary} />
             <TextInput
               style={styles.searchInput}
               value={query}
               onChangeText={setQuery}
               placeholder="Country, state, or province"
-              placeholderTextColor="#8e8e93"
+              placeholderTextColor={palette.textTertiary}
               autoCapitalize="words"
               autoCorrect={false}
               onFocus={scrollToSearch}
@@ -363,12 +364,12 @@ export function DownloadControl({ pack, downloaded, onDownload, onRemove, intera
         activeOpacity={0.6}
       >
         <Text style={progressStyles.pct}>{Math.round(running * 100)}%</Text>
-        <MaterialCommunityIcons name="stop-circle-outline" size={26} color="#2a6bb5" />
+        <MaterialCommunityIcons name="stop-circle-outline" size={26} color={palette.link} />
       </TouchableOpacity>
     );
   }
   const on = downloaded.has(pack.id);
-  const icon = <MaterialCommunityIcons name={on ? 'check-circle' : 'download-circle-outline'} size={26} color="#2a6bb5" />;
+  const icon = <MaterialCommunityIcons name={on ? 'check-circle' : 'download-circle-outline'} size={26} color={palette.link} />;
   if (!interactive) return icon;
   return (
     <TouchableOpacity
@@ -385,7 +386,7 @@ export function DownloadControl({ pack, downloaded, onDownload, onRemove, intera
 
 const progressStyles = StyleSheet.create({
   wrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  pct: { fontSize: 13, color: '#8e8e93', fontVariant: ['tabular-nums'] },
+  pct: { fontSize: 13, color: palette.textTertiary, fontVariant: ['tabular-nums'] },
 });
 
 // The removal confirmation both lists use.
@@ -398,39 +399,39 @@ export function confirmRemovePack(pack: Pack, onRemove: (id: string) => void) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f2f2f7', paddingTop: MODAL_TOP_INSET },
+  root: { flex: 1, backgroundColor: palette.page, paddingTop: MODAL_TOP_INSET },
   // The same frame as HelpScreen's.
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
   },
-  title: { flex: 1, fontSize: 20, fontWeight: '700', color: '#1c1c1e' },
-  done: { fontSize: 16, fontWeight: '600', color: '#2a6bb5', paddingLeft: 12 },
+  title: { flex: 1, fontSize: 20, fontWeight: '700', color: palette.pageTitle },
+  done: { fontSize: 16, fontWeight: '600', color: palette.pageLink, paddingLeft: 12 },
 
   scroll: { flex: 1 },
   content: { paddingHorizontal: 16, paddingBottom: 40 },
 
-  intro: { fontSize: 14, color: '#3a3a3c', lineHeight: 20, marginBottom: 20 },
-  heading: { fontSize: 13, fontWeight: '700', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
+  intro: { fontSize: 14, color: palette.pageText, lineHeight: 20, marginBottom: 20 },
+  heading: { fontSize: 13, fontWeight: '700', color: palette.pageLabelLight, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
   headingGap: { marginTop: 24 },
-  note: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: 10 },
-  card: { backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14 },
+  note: { fontSize: 13, color: palette.pageNote, lineHeight: 19, marginTop: 10 },
+  card: { backgroundColor: palette.card, borderRadius: 12, paddingHorizontal: 14 },
 
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, gap: 10 },
-  rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#d1d1d6' },
+  rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.cardRule },
   rowText: { flex: 1 },
-  rowTitle: { fontSize: 15, color: '#1c1c1e' },
-  rowSubtitle: { fontSize: 13, color: '#8e8e93', marginTop: 2 },
+  rowTitle: { fontSize: 15, color: palette.text },
+  rowSubtitle: { fontSize: 13, color: palette.textTertiary, marginTop: 2 },
 
   searchGap: { height: 12 },
   search: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fff', borderRadius: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: palette.card, borderRadius: 12,
     paddingHorizontal: 12, height: 44, marginBottom: 12,
   },
-  searchInput: { flex: 1, fontSize: 15, color: '#1c1c1e' },
+  searchInput: { flex: 1, fontSize: 15, color: palette.text },
 
-  attribution: { fontSize: 12, color: '#8e8e93', lineHeight: 17, marginTop: 28 },
+  attribution: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 28 },
 
-  clear: { color: '#cc2222', fontSize: 15, fontWeight: '600' },
-  clearDisabled: { color: '#c7c7cc' },
+  clear: { color: palette.destructive, fontSize: 15, fontWeight: '600' },
+  clearDisabled: { color: palette.textFaint },
 });

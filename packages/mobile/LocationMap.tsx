@@ -5,6 +5,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import type { NativeSyntheticEvent } from 'react-native';
 import { MAX_ZOOM, MIN_ZOOM } from './basemapStyle';
 import { useBasemapStyle } from './useBasemapStyle';
+import { palette } from './palette';
 
 export interface LatLon {
   lat: number;
@@ -112,7 +113,7 @@ export default function LocationMap({ coord, onPick, height, active = true }: Pr
           >
             {/* Material's fullscreen glyph rather than a ⛶ text character, which several
                 platforms draw as a plain box or a missing-glyph slug. */}
-            <MaterialCommunityIcons name="fullscreen" size={26} color="#2a6bb5" />
+            <MaterialCommunityIcons name="fullscreen" size={26} color={palette.link} />
           </TouchableOpacity>
         </>
       )}
@@ -181,5 +182,5 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 56, right: 16, backgroundColor: 'rgba(255,255,255,0.96)',
     borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10,
   },
-  doneButtonText: { color: '#2a6bb5', fontSize: 16, fontWeight: '600' },
+  doneButtonText: { color: palette.link, fontSize: 16, fontWeight: '600' },
 });

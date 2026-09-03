@@ -6,6 +6,7 @@ import { createAccount } from './account';
 import GettingStarted from './GettingStarted';
 import PreferenceRows from './PreferenceRows';
 import type { AqiScale, TimeFormat, UnitPrefs } from './settings';
+import { palette } from './palette';
 
 const TERMS_URL = 'https://going.blue/terms';
 const PRIVACY_URL = 'https://going.blue/privacy';
@@ -67,7 +68,7 @@ export default function SetupScreen({
         onPress={handleStart}
         disabled={busy}
       >
-        {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Start</Text>}
+        {busy ? <ActivityIndicator color={palette.onPrimary} /> : <Text style={styles.btnPrimaryText}>Start</Text>}
       </TouchableOpacity>
 
       <Text style={styles.legalLinks}>
@@ -80,20 +81,20 @@ export default function SetupScreen({
 }
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: '#f2f2f7' },
+  scroll: { flex: 1, backgroundColor: palette.page },
   content: { padding: 24, paddingTop: 48, paddingBottom: 72 },
   // Rounded like the home-screen icon it is. 96pt from a 1024px source, so it stays crisp at 3x.
   icon: { width: 96, height: 96, borderRadius: 22, alignSelf: 'center', marginBottom: 14 },
-  brand: { fontSize: 30, fontWeight: '700', color: '#2a6bb5', marginBottom: 8, textAlign: 'center' },
-  tagline: { fontSize: 15, color: '#3a3a3c', lineHeight: 21, marginBottom: 24, textAlign: 'center' },
-  label: { fontSize: 12, fontWeight: '600', color: '#6e6e73', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 24, marginBottom: 8 },
-  legalLinks: { fontSize: 13, color: '#6e6e73', marginTop: 20, textAlign: 'center' },
-  link: { color: '#2a6bb5', fontWeight: '500' },
+  brand: { fontSize: 30, fontWeight: '700', color: palette.brand, marginBottom: 8, textAlign: 'center' },
+  tagline: { fontSize: 15, color: palette.pageText, lineHeight: 21, marginBottom: 24, textAlign: 'center' },
+  label: { fontSize: 12, fontWeight: '600', color: palette.pageLabel, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 24, marginBottom: 8 },
+  legalLinks: { fontSize: 13, color: palette.pageNote, marginTop: 20, textAlign: 'center' },
+  link: { color: palette.pageLink, fontWeight: '500' },
 
   btn: { height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  btnPrimary: { backgroundColor: '#2a6bb5' },
-  btnDisabled: { backgroundColor: '#aeaeb2' },
-  btnPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  btnPrimary: { backgroundColor: palette.primary },
+  btnDisabled: { backgroundColor: palette.primaryDisabled },
+  btnPrimaryText: { color: palette.onPrimary, fontSize: 16, fontWeight: '600' },
 
-  preferencesCard: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 20 },
+  preferencesCard: { backgroundColor: palette.card, borderRadius: 12, padding: 14, marginBottom: 20 },
 });

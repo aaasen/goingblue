@@ -4,6 +4,7 @@ import {
   ALTITUDE_UNITS, AQI_SCALES, LEVEL_UNITS, RAIN_UNITS, SNOW_UNITS, TEMP_UNITS, WIND_UNITS,
   applyUnitSystem, type AqiScale, type TimeFormat, type UnitOption, type UnitPrefs, type Units,
 } from './settings';
+import { palette } from './palette';
 
 // The display preferences, as one block: Units, Time format, and Air quality. Both the setup
 // screen and the Settings tab render this component rather than their own rows, so the two
@@ -114,13 +115,13 @@ function Toggle<T extends string>({
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   rowSpacing: { marginTop: 14 },
-  label: { fontSize: 13, fontWeight: '600', color: '#3a3a3c' },
+  label: { fontSize: 13, fontWeight: '600', color: palette.textBody },
   // The per-quantity rows sit under the master switch as its detail: lighter and stepped in.
-  labelIndented: { fontWeight: '500', color: '#6e6e73', paddingLeft: 12 },
-  toggle: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: '#e5e5ea', borderRadius: 8, padding: 2 },
+  labelIndented: { fontWeight: '500', color: palette.textSecondary, paddingLeft: 12 },
+  toggle: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: palette.toggleTrack, borderRadius: 8, padding: 2 },
   // 14 rather than 16 so the five-way wind toggle clears its label on a 360dp phone.
   toggleBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6 },
-  toggleBtnActive: { backgroundColor: '#fff' },
-  toggleText: { fontSize: 13, color: '#6e6e73', fontWeight: '500' },
-  toggleTextActive: { color: '#1c1c1e' },
+  toggleBtnActive: { backgroundColor: palette.toggleSelected },
+  toggleText: { fontSize: 13, color: palette.toggleText, fontWeight: '500' },
+  toggleTextActive: { color: palette.toggleSelectedText },
 });

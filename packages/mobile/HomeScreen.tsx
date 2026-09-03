@@ -32,6 +32,7 @@ import HelpScreen from './HelpScreen';
 import { MODELS, modelIconsFromMask, modelLabelsFromMask } from './models';
 import { DEVICES, deviceCode, type Device } from './devices';
 import { parseLatLon } from './coords';
+import { palette, SEGMENT_PROPS, SWITCH_PROPS } from './palette';
 
 // The whole flow on one screen, in the order the steps happen: build a request at the top, send
 // it with the device's button, paste the reply in under that, and read the decoded forecast
@@ -1439,7 +1440,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           accessibilityRole="button"
           accessibilityLabel="Settings"
         >
-          <MaterialCommunityIcons name="cog-outline" size={24} color="#6e6e73" />
+          <MaterialCommunityIcons name="cog-outline" size={24} color={palette.pageIcon} />
         </TouchableOpacity>
       </View>
       <View style={styles.titleRule} />
@@ -1451,6 +1452,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         <StepHeader title="Build a forecast request" />
         <Section label="Location">
           <SegmentedControl
+            {...SEGMENT_PROPS}
             values={LOCATION_LABELS}
             selectedIndex={LOCATION_MODES.indexOf(locationMode)}
             onChange={(e) => setLocationMode(LOCATION_MODES[e.nativeEvent.selectedSegmentIndex])}
@@ -1481,7 +1483,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                       accessibilityRole="button"
                       accessibilityLabel="Clear coordinates"
                     >
-                      <MaterialCommunityIcons name="close-circle" size={18} color="#8e8e93" />
+                      <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -1501,6 +1503,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
         <Section label="Priority" info={() => setPriorityInfo(true)}>
           <SegmentedControl
+            {...SEGMENT_PROPS}
             values={PRIORITIES.map((m) => m.label)}
             selectedIndex={PRIORITIES.findIndex((m) => m.value === mode)}
             onChange={(e) => setMode(PRIORITIES[e.nativeEvent.selectedSegmentIndex].value)}
@@ -1509,6 +1512,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
         <Section label="Model" info={() => setModelInfo(true)}>
           <SegmentedControl
+            {...SEGMENT_PROPS}
             values={MODELS.map((m) => m.label)}
             selectedIndex={MODELS.findIndex((m) => m.value === model)}
             onChange={(e) => setModel(MODELS[e.nativeEvent.selectedSegmentIndex].value)}
@@ -1549,7 +1553,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                       <MaterialCommunityIcons
                         name={open ? 'chevron-up' : 'chevron-down'}
                         size={20}
-                        color="#8e8e93"
+                        color={palette.textTertiary}
                       />
                     </View>
                   </Pressable>
@@ -1573,6 +1577,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                   {/* The row stays pressable as well: the switch swallows its own touches, so the
                       two never fire together, and the whole row remains the larger target. */}
                   <Switch
+                    {...SWITCH_PROPS}
                     style={styles.switchAlign}
                     value={checked}
                     disabled={disabled}
@@ -1594,6 +1599,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             the button it drives rather than up with the forecast's own options. */}
         <Section label="Device" info={() => setDeviceInfo(true)}>
           <SegmentedControl
+            {...SEGMENT_PROPS}
             values={DEVICES.map((d) => d.label)}
             selectedIndex={DEVICES.findIndex((d) => d.value === device)}
             onChange={(e) => {
@@ -1615,6 +1621,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                 <Text style={styles.switchHint}>Use multiple messages for more range and detail</Text>
               </View>
               <Switch
+                {...SWITCH_PROPS}
                 style={styles.switchAlign}
                 value={twoMessages}
                 onValueChange={onTwoMessagesChange}
@@ -1685,7 +1692,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                 <MaterialCommunityIcons
                   name={outcome.failed ? 'close' : 'check'}
                   size={19}
-                  color={outcome.failed ? '#c03030' : '#2a8f5a'}
+                  color={outcome.failed ? palette.danger : palette.success}
                   style={styles.pasteBtnIcon}
                 />
               )}
@@ -1705,7 +1712,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               accessibilityRole="button"
               accessibilityLabel="Clear forecast"
             >
-              <MaterialCommunityIcons name="close" size={22} color="#636366" />
+              <MaterialCommunityIcons name="close" size={22} color={palette.pageChipText} />
             </TouchableOpacity>
           </View>
           {/* Both sit under the button, where what they ask for is another press of it. Only one can
@@ -1766,6 +1773,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           {compareOptions.length > 1 && (
             <View style={styles.compareRow}>
               <SegmentedControl
+                {...SEGMENT_PROPS}
                 values={compareOptions.map((o) => o.label)}
                 selectedIndex={compareOptions.findIndex((o) => o.slot.code === loadedSlot?.code)}
                 onChange={(e) => {
@@ -1940,7 +1948,7 @@ function ActionButton({ icon, label, onPress, onCancel, disabled, busy, variant 
 }) {
   const fill = { primary: styles.btnPrimary, success: styles.btnSuccess }[variant];
   const greyed = disabled && !busy;
-  const tint = greyed || variant === 'primary' ? '#fff' : '#2a8f5a';
+  const tint = greyed || variant === 'primary' ? palette.onPrimary : palette.success;
   return (
     <Pressable
       style={({ pressed }) => [styles.btn, fill, greyed && styles.btnDisabled, pressed && styles.btnPressed]}
@@ -2002,7 +2010,7 @@ function InfoModal({ visible, title, onClose, children }: {
 const CONTENT_PAD = 16;
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: '#f2f2f7' },
+  scroll: { flex: 1, backgroundColor: palette.page },
   // The orientation-dependent pads (top inset, cutout sides) are applied inline off pageInsets;
   // the bottom pad covers the home-indicator inset the scroll view extends under.
   content: { paddingBottom: 72 },
@@ -2014,62 +2022,62 @@ const styles = StyleSheet.create({
   titleBrand: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   // Closes the title bar the way the section dividers close their sections: a full-width
   // hairline directly under it.
-  titleRule: { height: StyleSheet.hairlineWidth, backgroundColor: '#d1d1d6' },
+  titleRule: { height: StyleSheet.hairlineWidth, backgroundColor: palette.pageRule },
   // Rounded like the home-screen icon it is, at the setup screen's proportions, sized to the
   // wordmark's cap height plus a little.
   titleIcon: { width: 26, height: 26, borderRadius: 6 },
   // The splash wordmark's blue (see SetupScreen's brand), small.
-  titleText: { fontSize: 20, fontWeight: '700', color: '#2a6bb5' },
+  titleText: { fontSize: 20, fontWeight: '700', color: palette.brand },
   builderPad: { padding: CONTENT_PAD },
 
   // Sheet frame, matching HelpScreen's. The safe area carries the status bar inset now that this
   // runs the full height, so the header only needs the same 12pt the app header uses.
-  sheet: { flex: 1, backgroundColor: '#fff', paddingTop: MODAL_TOP_INSET },
+  sheet: { flex: 1, backgroundColor: palette.sheet, paddingTop: MODAL_TOP_INSET },
   sheetHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
   },
-  sheetTitle: { flex: 1, fontSize: 20, fontWeight: '700', color: '#1c1c1e' },
-  sheetDone: { fontSize: 16, fontWeight: '600', color: '#2a6bb5', paddingLeft: 12 },
+  sheetTitle: { flex: 1, fontSize: 20, fontWeight: '700', color: palette.text },
+  sheetDone: { fontSize: 16, fontWeight: '600', color: palette.link, paddingLeft: 12 },
   sheetScroll: { flex: 1 },
   sheetContent: { paddingHorizontal: 16, paddingBottom: 40 },
 
   // Sheet body copy, shared by all four ⓘ sheets.
-  modalBody: { fontSize: 15, color: '#3a3a3c', lineHeight: 22 },
-  modalItem: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginBottom: 10 },
+  modalBody: { fontSize: 15, color: palette.textBody, lineHeight: 22 },
+  modalItem: { fontSize: 15, color: palette.textBody, lineHeight: 22, marginBottom: 10 },
   // A model under its center, set in one step and tucked close enough to read as part of it.
-  modalBullet: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginTop: 4, paddingLeft: 12 },
-  modalItemIndent: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginTop: 10, paddingLeft: 12 },
+  modalBullet: { fontSize: 15, color: palette.textBody, lineHeight: 22, marginTop: 4, paddingLeft: 12 },
+  modalItemIndent: { fontSize: 15, color: palette.textBody, lineHeight: 22, marginTop: 10, paddingLeft: 12 },
   // Entries under a subgroup heading, set in one step further than the top-level ones.
   modalItemNested: { paddingLeft: 24 },
-  modalSubhead: { fontSize: 15, fontWeight: '700', color: '#1c1c1e', marginTop: 14, paddingLeft: 12 },
+  modalSubhead: { fontSize: 15, fontWeight: '700', color: palette.text, marginTop: 14, paddingLeft: 12 },
   // A subgroup's own paragraph, sitting between its heading and its entries at the heading's indent.
-  modalSubdesc: { fontSize: 15, color: '#3a3a3c', lineHeight: 22, marginTop: 4, paddingLeft: 12 },
-  modalBold: { fontWeight: '700', color: '#1c1c1e' },
+  modalSubdesc: { fontSize: 15, color: palette.textBody, lineHeight: 22, marginTop: 4, paddingLeft: 12 },
+  modalBold: { fontWeight: '700', color: palette.text },
   modalNote: { marginTop: 14 },
-  modalLink: { color: '#2a6bb5', textDecorationLine: 'underline' },
+  modalLink: { color: palette.link, textDecorationLine: 'underline' },
 
   // A milestone heading with a dotted leader to the row's edge. `stepHeaderGap` separates it
   // from the divider that closes the section above; the first one needs none.
   stepHeader: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 14 },
   stepHeaderGap: { marginTop: 20 },
-  stepTitle: { fontSize: 18, fontWeight: '600', color: '#6e6e73' },
+  stepTitle: { fontSize: 18, fontWeight: '600', color: palette.pageHeading },
   // The leader: a 2px window over a uniformly dotted border, taking the row's spare width and
   // riding 4px above the text's bottom edge — baseline height for an 18pt face.
   stepRule: { flex: 1, height: 2, overflow: 'hidden', marginBottom: 4, marginLeft: 6 },
-  stepRuleDots: { height: 4, borderWidth: 2, borderColor: '#d1d1d6', borderStyle: 'dotted' },
+  stepRuleDots: { height: 4, borderWidth: 2, borderColor: palette.pageRule, borderStyle: 'dotted' },
   // The rule that closes a section's bottom, bleeding past the page padding to the screen edge.
   sectionEnd: {
-    height: StyleSheet.hairlineWidth, backgroundColor: '#d1d1d6',
+    height: StyleSheet.hairlineWidth, backgroundColor: palette.pageRule,
     marginTop: 24, marginHorizontal: -CONTENT_PAD,
   },
 
   section: { marginBottom: 20 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  sectionLabel: { fontSize: 12, fontWeight: '600', color: '#6e6e73', textTransform: 'uppercase', letterSpacing: 0.5 },
-  sectionInfo: { fontSize: 14, color: '#2a6bb5', marginLeft: 6 },
+  sectionLabel: { fontSize: 12, fontWeight: '600', color: palette.pageLabel, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionInfo: { fontSize: 14, color: palette.pageLink, marginLeft: 6 },
 
-  varList: { backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
+  varList: { backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden' },
   // Sized to a grouped iOS settings row: 50pt tall with 17pt labels, which the switch fits
   // inside, so a toggle row and a subgroup heading come out the same height. The padding is
   // only what a label needs when it wraps past one line.
@@ -2078,8 +2086,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 6, minHeight: 50,
   },
   // Members of an open subgroup, set in from their heading and off the white of the top-level rows.
-  varRowIndent: { paddingLeft: 32, backgroundColor: '#fafafc' },
-  varRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
+  varRowIndent: { paddingLeft: 32, backgroundColor: palette.cardInset },
+  varRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule },
   // Press feedback for the variable rows, declarative for the same reason as btnPressed: a row
   // re-renders from inside its own press handler (a toggle, a subgroup opening or closing), and a
   // touchable's animated fade can be stranded by that, leaving the row greyed until the next touch.
@@ -2087,32 +2095,32 @@ const styles = StyleSheet.create({
   // Switch composes alignSelf: 'flex-start' into its own iOS style, which on a row means the
   // top rather than the start, and beats the row's alignItems. Every switch needs this back.
   switchAlign: { alignSelf: 'center' },
-  varLabel: { fontSize: 17, color: '#1c1c1e' },
-  varLabelDim: { color: '#aeaeb2' },
+  varLabel: { fontSize: 17, color: palette.text },
+  varLabelDim: { color: palette.textDisabled },
   // The subgroup heading's right-hand side: how many of its rows are on, then the disclosure.
   varRowTrailing: { flexDirection: 'row', alignItems: 'center' },
-  varCount: { fontSize: 13, color: '#8e8e93', marginRight: 6 },
+  varCount: { fontSize: 13, color: palette.textTertiary, marginRight: 6 },
 
-  customCoords: { marginTop: 10, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
-  customCoordsInvalid: { borderWidth: 1, borderColor: '#cc2222' },
-  coordRow: { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d1d6' },
+  customCoords: { marginTop: 10, backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden' },
+  customCoordsInvalid: { borderWidth: 1, borderColor: palette.destructive },
+  coordRow: { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule },
   coordRowLast: { borderBottomWidth: 0 },
-  coordLabel: { width: 30, fontSize: 15, fontWeight: '600', color: '#6e6e73' },
+  coordLabel: { width: 30, fontSize: 15, fontWeight: '600', color: palette.textSecondary },
   coordLabelWide: { width: 104 },
-  coordInput: { flex: 1, fontSize: 15, color: '#1c1c1e' },
-  coordInputInvalid: { color: '#cc2222' },
+  coordInput: { flex: 1, fontSize: 15, color: palette.text },
+  coordInputInvalid: { color: palette.destructive },
   // The row aligns on the text baseline, which an icon doesn't have; centre it on the row instead.
   coordClear: { alignSelf: 'center', marginLeft: 8 },
-  mapHint: { fontSize: 12, color: '#8e8e93', marginTop: 10 },
+  mapHint: { fontSize: 12, color: palette.pageTextTertiary, marginTop: 10 },
   mapFullBleed: { marginTop: 10, marginHorizontal: -CONTENT_PAD },
-  modelHint: { fontSize: 12, color: '#8e8e93', lineHeight: 17, marginTop: 8 },
+  modelHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 8 },
 
   // Full-width action, its icon and label on a single centered row.
   buttons: { marginTop: 4 },
   btn: { flexDirection: 'row', height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  btnPrimary: { backgroundColor: '#2a6bb5' },
-  btnSuccess: { backgroundColor: '#e8f5ec', borderWidth: 1, borderColor: '#2a8f5a' },
-  btnDisabled: { backgroundColor: '#aeaeb2', borderColor: '#aeaeb2' },
+  btnPrimary: { backgroundColor: palette.primary },
+  btnSuccess: { backgroundColor: palette.successTint, borderWidth: 1, borderColor: palette.success },
+  btnDisabled: { backgroundColor: palette.primaryDisabled, borderColor: palette.primaryDisabled },
   // Press feedback for the action and paste buttons. A declarative dim rather than
   // TouchableOpacity: both buttons re-render themselves from inside their own press handler
   // (busy, copied, a paste outcome), and a re-render landing mid-fade could strand the touchable's
@@ -2122,18 +2130,18 @@ const styles = StyleSheet.create({
   btnIcon: { marginRight: 8 },
   btnText: { fontSize: 16, fontWeight: '600' },
 
-  actionNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, textAlign: 'center', marginTop: 10 },
+  actionNote: { fontSize: 13, color: palette.pageNote, lineHeight: 19, textAlign: 'center', marginTop: 10 },
   // A settings row: label left, switch right, the switch's own height setting the row's.
   switchRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     gap: 12, marginTop: 16,
   },
   switchText: { flexShrink: 1 },
-  switchLabel: { fontSize: 15, color: '#1c1c1e' },
-  switchHint: { fontSize: 12, color: '#8e8e93', lineHeight: 17, marginTop: 2 },
+  switchLabel: { fontSize: 15, color: palette.pageTitle },
+  switchHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 2 },
 
   helpLink: { alignSelf: 'center', marginTop: 8, paddingVertical: 6, paddingHorizontal: 12 },
-  helpLinkText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },
+  helpLinkText: { color: palette.pageLink, fontSize: 14, fontWeight: '600' },
 
   pasteRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   // Same fills as the Copy inReach Message button (ActionButton above), so a confirmed press
@@ -2146,7 +2154,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#2a6bb5',
+    backgroundColor: palette.primary,
   },
   // Quiet beside the paste button: it is always available but rarely the thing to press.
   clearBtn: {
@@ -2155,20 +2163,20 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f2f2f7',
+    backgroundColor: palette.pageChip,
     borderWidth: 1,
-    borderColor: '#d1d1d6',
+    borderColor: palette.pageChipBorder,
   },
-  pasteBtnDone: { backgroundColor: '#e8f5ec', borderWidth: 1, borderColor: '#2a8f5a' },
+  pasteBtnDone: { backgroundColor: palette.successTint, borderWidth: 1, borderColor: palette.success },
   // The error box's own colours, so the button and the reason under it read as one thing.
-  pasteBtnFailed: { backgroundColor: '#fde8e8', borderWidth: 1, borderColor: '#c03030' },
+  pasteBtnFailed: { backgroundColor: palette.dangerTint, borderWidth: 1, borderColor: palette.danger },
   pasteBtnIcon: { marginRight: 8 },
-  pasteBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  pasteBtnTextDone: { color: '#2a8f5a' },
-  pasteBtnTextFailed: { color: '#c03030' },
+  pasteBtnText: { color: palette.onPrimary, fontSize: 16, fontWeight: '600' },
+  pasteBtnTextDone: { color: palette.success },
+  pasteBtnTextFailed: { color: palette.danger },
 
-  errorBox: { marginTop: 10, padding: 12, backgroundColor: '#fde8e8', borderRadius: 10 },
-  errorText: { color: '#c03030', fontSize: 14, lineHeight: 20 },
+  errorBox: { marginTop: 10, padding: 12, backgroundColor: palette.dangerTint, borderRadius: 10 },
+  errorText: { color: palette.danger, fontSize: 14, lineHeight: 20 },
 
   collectArea: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -2181,10 +2189,10 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderRadius: 6,
   },
-  segmentReceived: { backgroundColor: '#e8f6ec', borderColor: '#34a853' },
-  segmentMissing: { backgroundColor: '#f2f2f7', borderColor: '#d1d1d6', borderStyle: 'dashed' },
-  segmentCheck: { fontSize: 13, lineHeight: 16, color: '#2e8b48', fontWeight: '700' },
-  collectCaption: { flexShrink: 1, fontSize: 12, color: '#636366', textAlign: 'right' },
+  segmentReceived: { backgroundColor: palette.collectTint, borderColor: palette.collectBorder },
+  segmentMissing: { backgroundColor: palette.pageChip, borderColor: palette.pageChipBorder, borderStyle: 'dashed' },
+  segmentCheck: { fontSize: 13, lineHeight: 16, color: palette.collectCheck, fontWeight: '700' },
+  collectCaption: { flexShrink: 1, fontSize: 12, color: palette.pageTextSecondary, textAlign: 'right' },
 
   // The parked map must draw over what scrolls up beneath it once it stops.
   mapFloat: { zIndex: 1 },
@@ -2196,28 +2204,28 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     gap: 10,
   },
-  metaText: { flexShrink: 1, fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
+  metaText: { flexShrink: 1, fontSize: 13, color: palette.pageText, lineHeight: 18 },
   variableRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  variableLabel: { fontSize: 12, color: '#636366' },
+  variableLabel: { fontSize: 12, color: palette.pageTextSecondary },
 
-  attribution: { fontSize: 12, color: '#8e8e93', marginTop: 8, marginHorizontal: 16 },
-  attributionLink: { color: '#2a6bb5', textDecorationLine: 'underline' },
+  attribution: { fontSize: 12, color: palette.pageTextTertiary, marginTop: 8, marginHorizontal: 16 },
+  attributionLink: { color: palette.pageLink, textDecorationLine: 'underline' },
 
   pastSection: { marginTop: 8, marginHorizontal: 16 },
-  pastEmpty: { fontSize: 13, color: '#aeaeb2', fontFamily: 'Courier', paddingVertical: 12 },
+  pastEmpty: { fontSize: 13, color: palette.textDisabled, fontFamily: 'Courier', paddingVertical: 12 },
   pastGroup: { marginBottom: 8 },
-  pastDayText: { fontSize: 13, fontWeight: '600', color: '#636366', paddingTop: 4, paddingBottom: 6 },
+  pastDayText: { fontSize: 13, fontWeight: '600', color: palette.pageTextSecondary, paddingTop: 4, paddingBottom: 6 },
   pastItem: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingVertical: 10, paddingHorizontal: 8, gap: 12,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e5ea',
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.pageRuleLight,
   },
-  pastItemLoaded: { backgroundColor: '#e8f1fb', borderRadius: 8, borderTopColor: '#c7dff5' },
+  pastItemLoaded: { backgroundColor: palette.selectedRow, borderRadius: 8, borderTopColor: palette.selectedRowBorder },
   pastDetails: { flex: 1, gap: 3 },
-  pastMeta: { flexShrink: 1, fontSize: 13, color: '#3a3a3c', lineHeight: 18 },
+  pastMeta: { flexShrink: 1, fontSize: 13, color: palette.pageText, lineHeight: 18 },
   pastIcon: { fontSize: 15, lineHeight: 19 },
   pastBtns: { flexDirection: 'row', gap: 8 },
-  pastLoadBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: '#2a6bb5' },
-  pastLoadBtnDisabled: { backgroundColor: '#aeaeb2' },
-  pastLoadText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  pastLoadBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: palette.primary },
+  pastLoadBtnDisabled: { backgroundColor: palette.primaryDisabled },
+  pastLoadText: { color: palette.onPrimary, fontSize: 13, fontWeight: '600' },
 });

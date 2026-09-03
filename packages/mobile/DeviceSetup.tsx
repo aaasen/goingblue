@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { palette } from './palette';
 
 const FORECAST_NUMBER = '(425) 434-5858';
 // Opening the hosted vCard hands the user off to the system's own "add contact" flow, so the app
@@ -70,7 +71,7 @@ function Device({ name, open, onToggle, children }: {
         accessibilityState={{ expanded: open }}
       >
         <Text style={styles.deviceName}>{name}</Text>
-        <MaterialCommunityIcons name={open ? 'chevron-up' : 'chevron-down'} size={22} color="#8e8e93" />
+        <MaterialCommunityIcons name={open ? 'chevron-up' : 'chevron-down'} size={22} color={palette.textTertiary} />
       </TouchableOpacity>
       {open && <View style={styles.deviceBody}>{children}</View>}
     </View>
@@ -322,36 +323,36 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 }
 
 const styles = StyleSheet.create({
-  para: { fontSize: 14, color: '#3a3a3c', lineHeight: 21 },
-  bold: { fontWeight: '700', color: '#1c1c1e' },
+  para: { fontSize: 14, color: palette.textBody, lineHeight: 21 },
+  bold: { fontWeight: '700', color: palette.text },
 
-  device: { backgroundColor: '#fff', borderRadius: 12, marginBottom: 10, overflow: 'hidden' },
+  device: { backgroundColor: palette.card, borderRadius: 12, marginBottom: 10, overflow: 'hidden' },
   deviceHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 14, paddingVertical: 14,
   },
-  deviceName: { fontSize: 16, fontWeight: '600', color: '#1c1c1e' },
+  deviceName: { fontSize: 16, fontWeight: '600', color: palette.text },
   deviceBody: { paddingHorizontal: 14, paddingTop: 2 },
-  deviceDesc: { fontSize: 14, color: '#6e6e73', lineHeight: 20, marginBottom: 16 },
+  deviceDesc: { fontSize: 14, color: palette.textSecondary, lineHeight: 20, marginBottom: 16 },
 
   step: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   stepBody: { flex: 1 },
-  stepNum: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#2a6bb5', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  stepNumText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  stepTitle: { fontSize: 15, fontWeight: '600', color: '#1c1c1e', marginBottom: 6 },
+  stepNum: { width: 24, height: 24, borderRadius: 12, backgroundColor: palette.primary, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  stepNumText: { color: palette.onPrimary, fontSize: 13, fontWeight: '700' },
+  stepTitle: { fontSize: 15, fontWeight: '600', color: palette.text, marginBottom: 6 },
 
-  linkBtn: { backgroundColor: '#2a6bb5', borderRadius: 10, paddingVertical: 11, alignItems: 'center', marginTop: 12 },
-  linkBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  linkBtn: { backgroundColor: palette.primary, borderRadius: 10, paddingVertical: 11, alignItems: 'center', marginTop: 12 },
+  linkBtnText: { color: palette.onPrimary, fontSize: 15, fontWeight: '600' },
 
   // Tinted rather than white — it sits inside the white section card, so white would vanish.
   numberRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#f2f2f7', borderRadius: 10, paddingLeft: 14, paddingRight: 8,
+    backgroundColor: palette.cardWell, borderRadius: 10, paddingLeft: 14, paddingRight: 8,
     paddingVertical: 8, marginTop: 8,
   },
-  number: { fontSize: 16, fontWeight: '600', color: '#1c1c1e', fontFamily: 'Courier' },
-  copyBtn: { backgroundColor: '#eef3fa', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 7 },
-  copyBtnText: { color: '#2a6bb5', fontSize: 14, fontWeight: '600' },
-  copyBtnSuccess: { backgroundColor: '#e8f5ec' },
-  copyBtnSuccessText: { color: '#2a8f5a' },
+  number: { fontSize: 16, fontWeight: '600', color: palette.text, fontFamily: 'Courier' },
+  copyBtn: { backgroundColor: palette.linkTint, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 7 },
+  copyBtnText: { color: palette.link, fontSize: 14, fontWeight: '600' },
+  copyBtnSuccess: { backgroundColor: palette.successTint },
+  copyBtnSuccessText: { color: palette.success },
 });

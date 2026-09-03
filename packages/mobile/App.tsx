@@ -15,6 +15,7 @@ import {
 import { DEFAULT_DEVICE, type Device } from './devices';
 import { configureTileCache } from './tileCache';
 import { MODAL_TOP_INSET } from './insets';
+import { palette } from './palette';
 
 // Hold the launch image until the first screen can be drawn as it will finally look. It otherwise
 // hides the moment React mounts — which is before the stored token and preferences have come back
@@ -117,7 +118,7 @@ export default function App() {
   if (token === null) {
     return (
       <View style={styles.root} onLayout={onLayoutRoot}>
-        <StatusBar style="dark" />
+        <StatusBar style={palette.statusBar} />
         <SafeAreaView style={styles.topInset} />
         <SetupScreen
           onReady={setToken}
@@ -134,7 +135,7 @@ export default function App() {
 
   return (
     <View style={styles.root} onLayout={onLayoutRoot}>
-      <StatusBar style="dark" />
+      <StatusBar style={palette.statusBar} />
       {/* One screen: the title row (and the door to Settings) lives inside the screen's own
           scroll, and the scroll runs under the status bar — HomeScreen pads its resting content
           by the status-bar inset, so the page seats below the clock and slides beneath it. It
@@ -168,8 +169,8 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f2f2f7' },
+  root: { flex: 1, backgroundColor: palette.page },
   // Empty safe area: lays out to exactly the top inset, nothing more. On Android the safe area
   // measures zero, so the padding carries it instead.
-  topInset: { backgroundColor: '#f2f2f7', paddingTop: MODAL_TOP_INSET },
+  topInset: { backgroundColor: palette.page, paddingTop: MODAL_TOP_INSET },
 });

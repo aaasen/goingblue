@@ -10,6 +10,7 @@ import OfflineMapsScreen, { downloadedPacks } from './OfflineMapsScreen';
 import { downloadPack as storeDownloadPack, removePack as storeRemovePack, usePackState } from './packStore';
 import { findPack } from './catalog';
 import type { AqiScale, TimeFormat, UnitPrefs } from './settings';
+import { palette } from './palette';
 
 const TERMS_URL = 'https://going.blue/terms';
 const PRIVACY_URL = 'https://going.blue/privacy';
@@ -115,7 +116,7 @@ export default function SettingsScreen({
                 <Text style={styles.listTitle}>Manage downloads</Text>
                 <Text style={styles.listSubtitle}>{held.packs.length ? held.summary : 'None downloaded'}</Text>
               </View>
-              <MaterialCommunityIcons name="chevron-right" size={24} color="#c7c7cc" />
+              <MaterialCommunityIcons name="chevron-right" size={24} color={palette.textFaint} />
             </TouchableOpacity>
           </View>
           <OfflineMapsScreen
@@ -138,7 +139,7 @@ export default function SettingsScreen({
             activeOpacity={0.7}
           >
             {deleting
-              ? <ActivityIndicator color="#cc2222" />
+              ? <ActivityIndicator color={palette.destructive} />
               : <Text style={styles.resetBtnText}>Delete account</Text>}
           </TouchableOpacity>
 
@@ -154,34 +155,34 @@ export default function SettingsScreen({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f2f2f7', paddingTop: MODAL_TOP_INSET },
+  root: { flex: 1, backgroundColor: palette.page, paddingTop: MODAL_TOP_INSET },
   // Same frame as HelpScreen: the safe area carries the status bar inset, so the header only
   // needs the same 12pt the app header uses.
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
   },
-  title: { flex: 1, fontSize: 20, fontWeight: '700', color: '#1c1c1e' },
-  done: { fontSize: 16, fontWeight: '600', color: '#2a6bb5', paddingLeft: 12 },
+  title: { flex: 1, fontSize: 20, fontWeight: '700', color: palette.pageTitle },
+  done: { fontSize: 16, fontWeight: '600', color: palette.pageLink, paddingLeft: 12 },
 
   scroll: { flex: 1 },
   content: { padding: 16, paddingBottom: 40 },
 
-  heading: { fontSize: 13, fontWeight: '700', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
-  link: { color: '#2a6bb5', textDecorationLine: 'underline' },
+  heading: { fontSize: 13, fontWeight: '700', color: palette.pageLabelLight, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
+  link: { color: palette.pageLink, textDecorationLine: 'underline' },
 
-  card: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12 },
+  card: { backgroundColor: palette.card, borderRadius: 12, padding: 14, marginBottom: 12 },
   // Tappable rows, so the card pads only its sides and each row carries its own height.
   listCard: { paddingVertical: 0 },
   listRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, gap: 10 },
   listText: { flex: 1 },
-  listTitle: { fontSize: 15, color: '#1c1c1e' },
-  listSubtitle: { fontSize: 13, color: '#8e8e93', marginTop: 2 },
+  listTitle: { fontSize: 15, color: palette.text },
+  listSubtitle: { fontSize: 13, color: palette.textTertiary, marginTop: 2 },
   // Full-width destructive action, sitting on its own under the account note. Height is fixed so
   // swapping the label for a spinner mid-delete doesn't make the row jump.
-  resetBtn: { backgroundColor: '#fff', borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  resetBtn: { backgroundColor: palette.card, borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
   resetBtnDisabled: { opacity: 0.6 },
-  resetBtnText: { color: '#cc2222', fontSize: 15, fontWeight: '600' },
-  sectionNote: { fontSize: 13, color: '#6e6e73', lineHeight: 19, marginTop: -4, marginBottom: 10 },
-  legalLinks: { fontSize: 13, color: '#8e8e93', marginTop: 20, lineHeight: 19 },
+  resetBtnText: { color: palette.destructive, fontSize: 15, fontWeight: '600' },
+  sectionNote: { fontSize: 13, color: palette.pageNote, lineHeight: 19, marginTop: -4, marginBottom: 10 },
+  legalLinks: { fontSize: 13, color: palette.pageTextTertiary, marginTop: 20, lineHeight: 19 },
 });

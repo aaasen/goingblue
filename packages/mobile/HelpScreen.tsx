@@ -3,6 +3,7 @@ import {
 } from 'react-native';
 import GettingStarted from './GettingStarted';
 import { MODAL_TOP_INSET } from './insets';
+import { palette } from './palette';
 
 interface Props {
   visible: boolean;
@@ -32,7 +33,7 @@ export default function HelpScreen({ visible, onClose }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f2f2f7', paddingTop: MODAL_TOP_INSET },
+  root: { flex: 1, backgroundColor: palette.page, paddingTop: MODAL_TOP_INSET },
   // The safe area carries the status bar inset now that this runs the full height, so the header
   // only needs the same 12pt the app header uses. It kept 24 as a page sheet, to clear the
   // rounded corners UIKit drew over the title.
@@ -40,8 +41,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
   },
-  title: { flex: 1, fontSize: 20, fontWeight: '700', color: '#1c1c1e' },
-  done: { fontSize: 16, fontWeight: '600', color: '#2a6bb5', paddingLeft: 12 },
+  title: { flex: 1, fontSize: 20, fontWeight: '700', color: palette.pageTitle },
+  done: { fontSize: 16, fontWeight: '600', color: palette.pageLink, paddingLeft: 12 },
 
   scroll: { flex: 1 },
   content: { paddingHorizontal: 16, paddingBottom: 40 },

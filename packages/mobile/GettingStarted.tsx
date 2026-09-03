@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 import DeviceSetup from './DeviceSetup';
+import { palette } from './palette';
 
 // The getting-started explanation: what the three-step loop is, then the per-device instructions
 // for carrying it out. Shared by the first-run Setup screen and the help sheet, so
@@ -53,13 +54,13 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 }
 
 const styles = StyleSheet.create({
-  heading: { fontSize: 13, fontWeight: '700', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
+  heading: { fontSize: 13, fontWeight: '700', color: palette.pageLabelLight, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
   headingTop: { marginTop: 12 },
-  para: { fontSize: 14, color: '#3a3a3c', lineHeight: 21, marginBottom: 12 },
-  bold: { fontWeight: '700', color: '#1c1c1e' },
+  para: { fontSize: 14, color: palette.pageText, lineHeight: 21, marginBottom: 12 },
+  bold: { fontWeight: '700', color: palette.pageTitle },
   step: { flexDirection: 'row', gap: 12, marginBottom: 4 },
   stepBody: { flex: 1 },
-  stepNum: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#2a6bb5', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  stepNumText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  stepTitle: { fontSize: 15, fontWeight: '600', color: '#1c1c1e', marginBottom: 4 },
+  stepNum: { width: 24, height: 24, borderRadius: 12, backgroundColor: palette.primary, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  stepNumText: { color: palette.onPrimary, fontSize: 13, fontWeight: '700' },
+  stepTitle: { fontSize: 15, fontWeight: '600', color: palette.pageTitle, marginBottom: 4 },
 });
