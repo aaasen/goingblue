@@ -119,10 +119,12 @@ function formatLatLon(c: { lat: number; lon: number }): string {
 // spends the budget on hourly detail first, Range on covering the whole horizon first, Auto
 // balances the two. A mode is a priority, not a promise: the weather's entropy decides how far
 // the fill gets, so the copy carries no hour/day numbers.
+// `hint` is the line under the selector: what the chosen priority trades away, since the labels
+// alone don't say which way each one leans.
 const PRIORITIES = [
-  { value: MODE_DETAIL, token: 'd', label: 'Detail' },
-  { value: MODE_AUTO, token: 'a', label: 'Auto' },
-  { value: MODE_RANGE, token: 'r', label: 'Range' },
+  { value: MODE_DETAIL, token: 'd', label: 'Detail', hint: 'Hourly resolution with shorter range' },
+  { value: MODE_AUTO, token: 'a', label: 'Auto', hint: 'Balance of resolution and range' },
+  { value: MODE_RANGE, token: 'r', label: 'Range', hint: 'Long-range forecasts with lower resolution' },
 ];
 
 // Model-selector help copy: the option's label, the center behind it, and the models it
@@ -1548,15 +1550,6 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           )}
         </View>
 
-        <Section label="Priority" info={() => setPriorityInfo(true)}>
-          <SegmentedControl
-            {...SEGMENT_PROPS}
-            values={PRIORITIES.map((m) => m.label)}
-            selectedIndex={PRIORITIES.findIndex((m) => m.value === mode)}
-            onChange={(e) => setMode(PRIORITIES[e.nativeEvent.selectedSegmentIndex].value)}
-          />
-        </Section>
-
         <Section label="Weather Model" info={() => setModelInfo(true)}>
           <SegmentedControl
             {...SEGMENT_PROPS}
@@ -1636,6 +1629,16 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               );
             })}
           </View>
+        </Section>
+
+        <Section label="Fill Priority" info={() => setPriorityInfo(true)}>
+          <SegmentedControl
+            {...SEGMENT_PROPS}
+            values={PRIORITIES.map((m) => m.label)}
+            selectedIndex={PRIORITIES.findIndex((m) => m.value === mode)}
+            onChange={(e) => setMode(PRIORITIES[e.nativeEvent.selectedSegmentIndex].value)}
+          />
+          <Text style={styles.modelHint}>{PRIORITIES.find((m) => m.value === mode)!.hint}</Text>
         </Section>
 
         <View style={styles.sectionEnd} />
@@ -1861,12 +1864,21 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
       <HelpScreen visible={help} onClose={() => setHelp(false)} />
 
-      <InfoModal visible={priorityInfo} title="Priority" onClose={() => setPriorityInfo(false)}>
+      <InfoModal visible={priorityInfo} title="Fill Priority" onClose={() => setPriorityInfo(false)}>
+        <View style={styles.modalItem}>
+          <Text style={styles.modalBody}>
+            Going Blue packs as much information as it can into each message. You can control what
+            it prioritizes depending on what information is most important to you.
+          </Text>
+        </View>
         <Text style={styles.modalBody}>
-          Going Blue packs as much information as it can into each message. Choose{' '}
-          <Text style={styles.modalBold}>Detail</Text> for short-range hourly forecasts. Choose{' '}
-          <Text style={styles.modalBold}>Range</Text> for extended forecasts up to 13 days. Choose{' '}
-          <Text style={styles.modalBold}>Auto</Text> for a blend of the two.
+          <Text style={styles.modalBold}>Detail</Text>: Hourly resolution with shorter range.
+        </Text>
+        <Text style={styles.modalBody}>
+          <Text style={styles.modalBold}>Auto</Text>: Balance of resolution and range.
+        </Text>
+        <Text style={styles.modalBody}>
+          <Text style={styles.modalBold}>Range</Text>: Long-range forecasts with lower resolution.
         </Text>
       </InfoModal>
 
