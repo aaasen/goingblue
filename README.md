@@ -364,6 +364,7 @@ pnpm test
 ### Skills
 
  - [`benchmark`](.agents/skills/benchmark/SKILL.md): Regenerate the public encoding benchmark at [going.blue/benchmark](https://going.blue/benchmark)
+ - [`logs`](.agents/skills/logs/SKILL.md): Read service logs and investigate issues. 
 
 ### Codec Versioning
 
