@@ -55,7 +55,9 @@ gcloud logging read 'jsonPayload.event="forecast.dispatch"' \
   --project "$PROJECT" --limit 20 --freshness 7d --format json
 ```
 
-Every log line of a single request, in order, using the trace from any one of its entries:
+Every entry of a single request, in order, using the trace from any one of them. Only request
+logs carry a `trace`; app logs have no trace field, so this finds the HTTP entries and nothing
+from `packages/server/src/log.ts`:
 
 ```bash
 source deploy.env
@@ -72,6 +74,63 @@ Live tail (`gcloud beta` is installed):
 source deploy.env; SERVICE="${SERVICE:-$PROJECT}"
 gcloud beta run services logs tail "$SERVICE" --project "$PROJECT" --region "$REGION"
 ```
+
+## Following one request across services
+
+A forecast request touches both services: the gateway takes the SMS or HTTP call, then calls
+`$SERVICE-codec-v<N>` over HTTP. Nothing joins the two sides for you. App logs carry no trace at
+all, each service gets its own trace for its own inbound request, and `labels.instanceId`
+identifies a container rather than a request.
+
+Correlate on **time**. The whole exchange takes a couple of seconds, so read a window around any
+one event across every service at once by dropping the `service_name` clause:
+
+```bash
+source deploy.env
+gcloud logging read \
+  '(logName:"stdout" OR logName:"stderr")
+   AND timestamp>="2026-09-04T02:15:40Z" AND timestamp<="2026-09-04T02:16:30Z"' \
+  --project "$PROJECT" --limit 100 --order asc --format json
+```
+
+`--format json` keeps `resource.labels.service_name` in view, which is the only field that says
+which side emitted a line. For the shape of the exchange rather than its contents, ask for the
+columns instead:
+
+```
+--format 'value(timestamp,resource.labels.service_name,jsonPayload.event)'
+```
+
+A served forecast request reads:
+
+ 1. gateway `sms.inbound` — the raw request text (`v3 <coords> ... k:2 t:496754`).
+ 2. codec `encode.request` — the parsed request: `userToken`, `startEpochHour`, `mode`,
+    `varsMask`, `device`, `maxChars`.
+ 3. codec `openmeteo.request` — the upstream call, including `past_days` and `forecast_days`.
+ 4. gateway `forecast.dispatch` — `kind`, `ok` when it was served.
+
+A failed one inserts codec `encode.failed` (with `err` and `stack_trace`) before the gateway's
+`codec.error_response` (`status`, `body`) and a `forecast.dispatch` of another `kind`. The
+gateway's `codec.unreachable` means the call never landed, so no codec-side lines exist to find.
+
+To pick the window, start from an event you already have. Errors land on both sides, so search
+across all services and take the timestamp of the first hit:
+
+```bash
+source deploy.env
+gcloud logging read 'jsonPayload.event="encode.failed" OR jsonPayload.event="codec.error_response"' \
+  --project "$PROJECT" --limit 20 --freshness 30d \
+  --format 'value(timestamp,resource.labels.service_name,jsonPayload.err,jsonPayload.status)'
+```
+
+Two fields tie entries together once you have the window:
+
+ - `jsonPayload.version` on the gateway's `codec.error_response` and `forecast.dispatch`, and the
+   `v<N>` prefix of the request text, name which codec service handled it.
+ - `jsonPayload.userToken` on the codec's `encode.request` is the same value as `u:` in the
+   gateway's request text. It follows one account across days without touching a phone number.
+   The `k:` code increments per message the app builds, so it separates a newly built request
+   from a redelivery of an old one.
 
 ## When reading
 
