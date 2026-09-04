@@ -395,10 +395,12 @@ The Going Blue codec relies on the client and server having identical codebooks.
 
 #### In development: Codec v4 (App version 1.3.0)
 
- - Added Android support. 
- - Added a model agreement score for judging forecast confidence.
- - Added dewpoint, relative humidity, and apparent temperature.
- - Added a model comparison switch.
+ - Added Android support. Adding the app to the Play Store requires a 2 week internal testing period. 
+ - Added the ICON model from DWD.
+ - Added a model agreement score that shows how well the forecast agrees with forecasts from NOAA, ECCC, ECMWF, and DWD. 
+ - Added a model comparison mode. To use it, pull forecasts for the same location from multiple models. A comparison switch will appear below the meteogram.  
+ - Improved meteogram rendering performance so that switching between forecasts feels instant.
+ - Added humidity variables: dewpoint, relative humidity, and feels-like temperature.
 
 ## License
 
