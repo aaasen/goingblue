@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { log, withRequestId } from "../src/log.js";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { log, traceIdFrom, withRequestId, withTrace } from "../src/log.js";
 
 // Capture what the logger actually wrote. Every assertion here is about the shape of the wire
 // format — one parseable line per call — because that is the contract log consumers depend on.
@@ -142,5 +142,74 @@ describe("withRequestId", () => {
       request_id: RID,
       log_error: "unserializable fields",
     });
+  });
+});
+
+describe("withTrace", () => {
+  const TRACE = "0123456789abcdef0123456789abcdef";
+  const NAME = `projects/goingblue/traces/${TRACE}`;
+
+  beforeEach(() => {
+    process.env["GOOGLE_CLOUD_PROJECT"] = "goingblue";
+  });
+  afterEach(() => {
+    delete process.env["GOOGLE_CLOUD_PROJECT"];
+  });
+
+  it("tags lines with the resource name Cloud Logging nests on", () => {
+    const lines = capture(() => withTrace(TRACE, () => log.info("sms.inbound", { len: 42 })));
+    expect(JSON.parse(lines[0]!)["logging.googleapis.com/trace"]).toBe(NAME);
+  });
+
+  it("leaves lines untagged when the request had no trace", () => {
+    const lines = capture(() => withTrace(null, () => log.info("encode.request")));
+    expect(JSON.parse(lines[0]!)).not.toHaveProperty("logging.googleapis.com/trace");
+  });
+
+  // Half a resource name resolves to nothing, so it is worth less than no field at all.
+  it("leaves lines untagged when no project names the trace", () => {
+    delete process.env["GOOGLE_CLOUD_PROJECT"];
+    const lines = capture(() => withTrace(TRACE, () => log.info("encode.request")));
+    expect(JSON.parse(lines[0]!)).not.toHaveProperty("logging.googleapis.com/trace");
+  });
+
+  it("carries both correlation keys at once", () => {
+    const lines = capture(() =>
+      withTrace(TRACE, () => withRequestId("rid", () => log.info("forecast.dispatch"))));
+    const entry = JSON.parse(lines[0]!);
+    expect(entry.request_id).toBe("rid");
+    expect(entry["logging.googleapis.com/trace"]).toBe(NAME);
+  });
+
+  it("keeps the trace on the fallback line when the fields cannot be serialized", () => {
+    const circular: Record<string, unknown> = {};
+    circular["self"] = circular;
+    const lines = capture(() => withTrace(TRACE, () => log.info("encode.request", circular)));
+    const entry = JSON.parse(lines[0]!);
+    expect(entry["logging.googleapis.com/trace"]).toBe(NAME);
+    expect(entry.log_error).toBe("unserializable fields");
+  });
+});
+
+describe("traceIdFrom", () => {
+  it("takes the id out of Cloud Run's header", () => {
+    expect(traceIdFrom("0123456789abcdef0123456789abcdef/1234567890;o=1"))
+      .toBe("0123456789abcdef0123456789abcdef");
+  });
+
+  it("accepts the bare id the gateway forwards to the codec", () => {
+    expect(traceIdFrom("0123456789abcdef0123456789abcdef"))
+      .toBe("0123456789abcdef0123456789abcdef");
+  });
+
+  // The header reaches a public endpoint from the caller: anything malformed is no trace, so
+  // nothing unchecked reaches the log field or the outbound call.
+  it("rejects anything that is not 32 hex digits", () => {
+    expect(traceIdFrom(undefined)).toBeNull();
+    expect(traceIdFrom("")).toBeNull();
+    expect(traceIdFrom("/1234567890;o=1")).toBeNull();
+    expect(traceIdFrom("0123456789abcdef0123456789abcde")).toBeNull();
+    expect(traceIdFrom("0123456789abcdef0123456789abcdeff")).toBeNull();
+    expect(traceIdFrom("projects/goingblue/traces/x")).toBeNull();
   });
 });

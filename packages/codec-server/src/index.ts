@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import { wireCodec, WIRE_VERSION } from "@weather/protocol";
 import { describeRequest, fetchForecast, parseRequest, splitReplyFor } from "./forecast.js";
-import { log, withRequestId } from "./log.js";
+import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 
 // The codec server: one container per shipped protocol version, frozen at that version's git
 // tag and kept running for as long as clients in the field may still speak it. It is
@@ -23,14 +23,19 @@ import { log, withRequestId } from "./log.js";
 //          component — the body names the problems). The gateway replies with its
 //          download-the-app text; the body is for logs and direct callers.
 //     503  upstream data unavailable — the gateway replies with its retry text
-//   The request may carry an X-Request-Id header, which is logged and never interpreted.
+//   The request may carry X-Request-Id and X-Cloud-Trace-Context headers, both logged and
+//   never interpreted.
 const app = new Hono();
 
 app.get("/health", (c) => c.text("OK", 200));
 
 // The gateway's id for the message being served, tagging every line this request logs so its
 // path through both services reads as one sequence. A caller that sends no header logs no id.
-app.post("/encode", (c) => withRequestId(c.req.header("X-Request-Id") ?? null, () => encode(c)));
+// The trace comes from the same call and does the same job for the Logs Explorer, which nests
+// these lines under the gateway's request rather than the codec's own.
+app.post("/encode", (c) =>
+  withTrace(traceIdFrom(c.req.header("X-Cloud-Trace-Context")), () =>
+    withRequestId(c.req.header("X-Request-Id") ?? null, () => encode(c))));
 
 async function encode(c: Context) {
   const body = (await c.req.text()).trim();

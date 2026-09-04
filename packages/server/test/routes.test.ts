@@ -113,3 +113,42 @@ describe("request id", () => {
     expect(sentIds()).toEqual(recordedIds());
   });
 });
+
+// The trace Cloud Run puts on the inbound request, forwarded so the codec's lines land under the
+// same request log. Only the id travels: the span and sampling flag are the caller's, and the
+// header reaches a public endpoint.
+describe("trace propagation", () => {
+  const TRACE = "0123456789abcdef0123456789abcdef";
+  const sentTraces = () =>
+    vi.mocked(fetch).mock.calls.map(
+      (call) => ((call[1] as RequestInit).headers as Record<string, string>)["X-Cloud-Trace-Context"],
+    );
+  const headers = { "X-Cloud-Trace-Context": `${TRACE}/1234567890;o=1` };
+
+  it("forwards the id from POST /forecast", async () => {
+    await app.request("/forecast", { method: "POST", body: BODY, headers });
+    expect(sentTraces()).toEqual([TRACE]);
+  });
+
+  it("forwards the id from POST /sms", async () => {
+    await app.request("/sms", {
+      method: "POST",
+      body: new URLSearchParams({ Body: BODY, From: "+15550100" }),
+      headers,
+    });
+    expect(sentTraces()).toEqual([TRACE]);
+  });
+
+  it("sends no trace header when the request arrived without one", async () => {
+    await post(BODY);
+    expect(sentTraces()).toEqual([undefined]);
+  });
+
+  it("sends none when the header is malformed", async () => {
+    await app.request("/forecast", {
+      method: "POST", body: BODY, headers: { "X-Cloud-Trace-Context": "not-a-trace" },
+    });
+    expect(sentTraces()).toEqual([undefined]);
+  });
+});
+

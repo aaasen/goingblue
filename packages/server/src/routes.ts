@@ -5,7 +5,7 @@ import { ping } from "./db.js";
 import { createAccount, accountExists, deleteAccount, recordRequest } from "./accounts.js";
 import { isValidToken, normalizeToken } from "@weather/protocol";
 import { twiml, validateTwilioSignature } from "./twilio.js";
-import { log, withRequestId } from "./log.js";
+import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 
 // Human-readable replies for requests that get no forecast, one per error class. These go back
 // over SMS, so each must fit a single GSM-7 segment and tell the person what to do next.
@@ -72,7 +72,7 @@ async function logRequest(record: Parameters<typeof recordRequest>[0]): Promise<
 // still a person using the service, and the failures are the only signal that a version has
 // clients it can no longer answer. The per-version counts are also the sunset metric — a frozen
 // codec container is retired only once its version has gone quiet (VERSIONING.md).
-async function buildForecast(body: string, requestId: string): Promise<RequestResult> {
+async function buildForecast(body: string, requestId: string, traceId: string | null): Promise<RequestResult> {
   const version = extractVersion(body);
   const token = extractUserToken(body);
   // The account check runs before dispatch, so a rejected request never costs a codec call or
@@ -83,7 +83,7 @@ async function buildForecast(body: string, requestId: string): Promise<RequestRe
     await logRequest({ requestId, token, chars: null, version, outcome: "unknown_token", codecMs: null, shape: null });
     return { kind: "unknown_token" };
   }
-  const result = await dispatchForecast(body, requestId);
+  const result = await dispatchForecast(body, requestId, traceId);
   log.info("forecast.dispatch", {
     version,
     kind: result.kind,
@@ -105,8 +105,10 @@ async function buildForecast(body: string, requestId: string): Promise<RequestRe
 
 export async function forecast(c: Context) {
   const requestId = randomUUID();
+  const traceId = traceIdFrom(c.req.header("X-Cloud-Trace-Context"));
   const body = (await c.req.text()).trim();
-  const result = await withRequestId(requestId, () => buildForecast(body, requestId));
+  const result = await withTrace(traceId, () =>
+    withRequestId(requestId, () => buildForecast(body, requestId, traceId)));
   switch (result.kind) {
     case "ok": return c.text(result.encoded, 200);
     case "missing_version": return c.text(REPLY_MALFORMED, 400);
@@ -128,10 +130,11 @@ export async function sms(c: Context) {
   // The id is minted here and the whole handler runs inside its scope, so every line the message
   // produces carries it, from the signature check to the recorded row.
   const requestId = randomUUID();
-  return withRequestId(requestId, () => handleSms(c, requestId));
+  const traceId = traceIdFrom(c.req.header("X-Cloud-Trace-Context"));
+  return withTrace(traceId, () => withRequestId(requestId, () => handleSms(c, requestId, traceId)));
 }
 
-async function handleSms(c: Context, requestId: string) {
+async function handleSms(c: Context, requestId: string, traceId: string | null) {
   const form = await c.req.parseBody();
   // Flatten to string params for both signature validation and our own use.
   const params: Record<string, string> = {};
@@ -158,7 +161,7 @@ async function handleSms(c: Context, requestId: string) {
   // HELP, STOP and START never reach this webhook: Twilio's Advanced Opt-Out intercepts the
   // keywords and sends its own replies, configured in the Twilio console.
 
-  const result = await buildForecast(body.trim(), requestId);
+  const result = await buildForecast(body.trim(), requestId, traceId);
   return c.text(twiml(replyFor(result)), 200, { "Content-Type": "text/xml" });
 }
 

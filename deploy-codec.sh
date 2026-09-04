@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PROJECT="${PROJECT:?set PROJECT in deploy.env}"
 REGION="${REGION:?set REGION in deploy.env}"
-SERVICE="${SERVICE:-$PROJECT}"
+SERVICE="${SERVICE:?set SERVICE in deploy.env}"
 
 # One-time setup: gcloud artifacts repositories create codec --repository-format=docker \
 #   --project "$PROJECT" --location "$REGION"
@@ -29,8 +29,11 @@ gcloud builds submit --project "$PROJECT" --config cloudbuild-codec.yaml \
 # Scale-to-zero (the default min-instances) keeps a quiet frozen version effectively free.
 # The service is unauthenticated for now: it holds no secrets and serves only public weather
 # data; tightening to IAM-authenticated invocation from the gateway is a later hardening step.
+# GOOGLE_CLOUD_PROJECT names the project the trace field's resource name resolves under; without
+# it the codec's lines still carry their request id, they just don't nest under the request log.
 gcloud run deploy "$CODEC_SERVICE" --project "$PROJECT" --region "$REGION" \
-  --image "$IMAGE" --platform managed --allow-unauthenticated
+  --image "$IMAGE" --platform managed --allow-unauthenticated \
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT"
 
 echo
 echo "Service URL (set CODEC_URL_V${V} to this in deploy.sh, then redeploy the gateway):"

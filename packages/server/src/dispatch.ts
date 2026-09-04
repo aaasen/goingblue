@@ -153,10 +153,14 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
   };
 }
 
-// `requestId` is passed rather than read from the logger's ambient store because it travels on
-// the wire: the codec tags its own lines with it, so one request reads as one sequence across
-// both services.
-export async function dispatchForecast(body: string, requestId: string): Promise<DispatchResult> {
+// `requestId` and `traceId` are passed rather than read from the logger's ambient store because
+// they travel on the wire: the codec tags its own lines with both, so one request reads as one
+// sequence across both services and nests under one request log in the Logs Explorer.
+export async function dispatchForecast(
+  body: string,
+  requestId: string,
+  traceId: string | null,
+): Promise<DispatchResult> {
   const version = extractVersion(body);
   if (version === null) return { kind: "missing_version" };
 
@@ -170,7 +174,9 @@ export async function dispatchForecast(body: string, requestId: string): Promise
     const resp = await fetch(`${url}/encode`, {
       method: "POST",
       body,
-      headers: { "X-Request-Id": requestId },
+      headers: traceId === null
+        ? { "X-Request-Id": requestId }
+        : { "X-Request-Id": requestId, "X-Cloud-Trace-Context": traceId },
     });
     if (resp.ok) {
       const encoded = await resp.text();

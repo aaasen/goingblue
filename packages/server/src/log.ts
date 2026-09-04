@@ -29,6 +29,29 @@ export function withRequestId<T>(id: string | null, fn: () => T): T {
   return id === null ? fn() : requestId.run(id, fn);
 }
 
+// The trace of the request being served, as the resource name Cloud Logging resolves. A line
+// carrying one is nested under its own request log in the Logs Explorer, so a request's path
+// unfolds in place instead of being a filter to type. The gateway forwards its trace id to the
+// codec, which puts both services' lines under the same request.
+const traceName = new AsyncLocalStorage<string>();
+
+// Run `fn` with every line it logs tagged with `id`'s trace. A null id, or no project to name
+// the trace under, runs `fn` untagged: the field correlates nothing unless it is a resource
+// name Cloud Logging can resolve.
+export function withTrace<T>(id: string | null, fn: () => T): T {
+  const project = process.env["GOOGLE_CLOUD_PROJECT"];
+  if (id === null || project === undefined) return fn();
+  return traceName.run(`projects/${project}/traces/${id}`, fn);
+}
+
+// The trace id out of Cloud Run's `X-Cloud-Trace-Context: TRACE_ID/SPAN_ID;o=1`. The header
+// arrives from the caller on a public endpoint, so anything but 32 hex digits is treated as no
+// trace at all rather than logged or forwarded.
+export function traceIdFrom(header: string | null | undefined): string | null {
+  const id = (header ?? "").split("/")[0]!;
+  return /^[0-9a-f]{32}$/i.test(id) ? id : null;
+}
+
 // Errors are unwrapped in place: the value becomes the message so it reads in the log summary,
 // and the stack is hoisted to top-level `stack_trace` — the key Cloud Error Reporting looks for.
 // JSON.stringify escapes the stack's newlines, so the entry stays a single line either way.
@@ -36,6 +59,8 @@ function emit(severity: Severity, event: string, fields?: Fields): void {
   const entry: Fields = { severity, message: event, event };
   const id = requestId.getStore();
   if (id !== undefined) entry["request_id"] = id;
+  const trace = traceName.getStore();
+  if (trace !== undefined) entry["logging.googleapis.com/trace"] = trace;
   let stack: string | undefined;
   for (const [key, value] of Object.entries(fields ?? {})) {
     if (value === undefined) continue;
@@ -54,7 +79,10 @@ function emit(severity: Severity, event: string, fields?: Fields): void {
   } catch {
     // A logger must never throw: a circular or otherwise unserializable field costs its
     // values, not the event.
-    line = JSON.stringify({ severity, message: event, event, request_id: id, log_error: "unserializable fields" });
+    line = JSON.stringify({
+      severity, message: event, event, request_id: id,
+      "logging.googleapis.com/trace": trace, log_error: "unserializable fields",
+    });
   }
   if (severity === "ERROR") console.error(line);
   else console.log(line);
