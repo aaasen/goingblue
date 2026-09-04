@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  LayoutAnimation, Linking, Platform, StyleSheet, Text, TouchableOpacity, UIManager, View,
+  LayoutAnimation, Linking, Platform, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -11,9 +11,6 @@ const FORECAST_NUMBER = '(425) 434-5858';
 // needs no Contacts permission. Earthmate keeps its own contact list, so only its steps go
 // without — every other route (SMS, iPhone, ZOLEO, Garmin Messenger) reads the phone's contacts.
 const CONTACT_VCF_URL = 'https://going.blue/contact.vcf';
-
-// Android needs this opted into before LayoutAnimation does anything; on iOS it's already on.
-if (Platform.OS === 'android') UIManager.setLayoutAnimationEnabledExperimental?.(true);
 
 // Per-device setup, shared by the first-run Setup screen and the help sheet — one
 // list of instructions, so the two can't drift apart.
