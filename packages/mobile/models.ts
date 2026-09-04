@@ -12,8 +12,8 @@ export const MODELS = [
   { value: 'de', label: 'ICON' },
 ];
 
-export function modelLabelsFromMask(mask: number): string[] {
-  return MODELS
-    .filter((model) => mask & (1 << MODEL_BIT[model.value.toUpperCase()]))
-    .map((model) => model.label);
+// A reply carries exactly one model, so the mask has exactly one bit set.
+export function modelLabelFromMask(mask: number): string {
+  const model = MODELS.find((m) => mask & (1 << MODEL_BIT[m.value.toUpperCase()]));
+  return model ? model.label : '';
 }

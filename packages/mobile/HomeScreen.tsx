@@ -30,7 +30,7 @@ import {
 import LocationMap from './LocationMap';
 import Meteogram, { PINNED_STACK_H } from './Meteogram';
 import HelpScreen from './HelpScreen';
-import { MODELS, modelLabelsFromMask } from './models';
+import { MODELS, modelLabelFromMask } from './models';
 import { DEVICES, deviceCode, type Device } from './devices';
 import { parseLatLon } from './coords';
 import { SHOW_COORDINATES } from './features';
@@ -528,26 +528,6 @@ function latLonLabel(msg: ForecastMessage): string {
   return `${latStr} ${lonStr}`;
 }
 
-function hoursLabel(h: number): string {
-  return `${h}h`;
-}
-
-/**
- * The resolution(s) a message carries: uniform ("12h", "3h") or, for a mixed
- * layout, the finest–coarsest range ("1h–12h").
- */
-function resolutionLabel(msg: ForecastMessage): string {
-  const finest = Math.min(...msg.periodHours);
-  const coarsest = Math.max(...msg.periodHours);
-  if (finest === coarsest) return hoursLabel(finest);
-  return `${hoursLabel(finest)}–${hoursLabel(coarsest)}`;
-}
-
-/** Span label: days covered plus the resolution(s), e.g. "7d 12h" or "10d 6h–12h". */
-function spanLabel(msg: ForecastMessage): string {
-  return `${msg.days}d ${resolutionLabel(msg)}`;
-}
-
 // The priority mode the forecast was requested with (msg.mode: Detail/Auto/Range),
 // labelled the same way as the builder's priority selector.
 function priorityLabel(msg: ForecastMessage): string {
@@ -563,13 +543,6 @@ function elevationLabel(msg: ForecastMessage, units: UnitPrefs): string {
   return units.altitude === 'ft'
     ? `${Math.round(msg.elevation * 3.28084).toLocaleString()}ft`
     : `${Math.round(msg.elevation).toLocaleString()}m`;
-}
-
-function metaLabel(msg: ForecastMessage, units: UnitPrefs): string {
-  const models = modelLabelsFromMask(msg.models_mask);
-  const elev = elevationLabel(msg, units);
-  const elevStr = elev ? ` · ${elev}` : '';
-  return `${latLonLabel(msg)}${elevStr} · ${spanLabel(msg)} · ${models.join(' + ')}`;
 }
 
 function requestTimeLabel(requestedAt: number): string {
@@ -595,22 +568,23 @@ function normalizedForecastData(encoded: string): string {
   }
 }
 
-/**
- * Cached-forecast label (request time · models · priority · location). `detailed`
- * is for the loaded forecast's own meta row, which has the width for the request
- * date and the forecast point's elevation; the past-forecast list stays compact and
- * names the priority only when it isn't the Auto default.
- */
-function cacheMetaLabel(slot: Slot, msg: ForecastMessage | null, units: UnitPrefs, detailed = false): string {
+/** The loaded forecast's own meta row: when it was requested and where it is for. */
+function loadedMetaLabel(slot: Slot, msg: ForecastMessage | null, units: UnitPrefs): string {
   if (!msg) return 'Unknown';
-  const models = modelLabelsFromMask(msg.models_mask).join(' + ');
-  const requested = detailed
-    ? requestDateTimeLabel(slot.requestedAt)
-    : requestTimeLabel(slot.requestedAt);
-  const elev = detailed ? elevationLabel(msg, units) : '';
+  const elev = elevationLabel(msg, units);
   const elevStr = elev ? ` · ${elev}` : '';
-  const priority = detailed || msg.mode !== MODE_AUTO ? ` · ${priorityLabel(msg)}` : '';
-  return `${requested} · ${models}${priority} · ${latLonLabel(msg)}${elevStr}`;
+  return `${requestDateTimeLabel(slot.requestedAt)} · ${latLonLabel(msg)}${elevStr}`;
+}
+
+/**
+ * One line per entry in the past-forecast list: request time · model · priority ·
+ * location, naming the priority only when it isn't the Auto default.
+ */
+function pastMetaLabel(slot: Slot, msg: ForecastMessage | null): string {
+  if (!msg) return 'Unknown';
+  const priority = msg.mode !== MODE_AUTO ? ` · ${priorityLabel(msg)}` : '';
+  const model = modelLabelFromMask(msg.models_mask);
+  return `${requestTimeLabel(slot.requestedAt)} · ${model}${priority} · ${latLonLabel(msg)}`;
 }
 
 const OPTIONAL_VARIABLE_ICONS: { vars: readonly Variable[]; symbol: string; label: string }[] = [
@@ -1531,8 +1505,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             style={styles.metaRow}
             onLayout={(e) => { metaY.current = e.nativeEvent.layout.y; scrollToForecast(); }}
           >
+            {/* Blank for the frames between the decode and the cache write that gives the
+                message its slot; the row holds a line's height so nothing under it moves. */}
             <Text style={styles.metaText} numberOfLines={3}>
-              {loadedSlot ? cacheMetaLabel(loadedSlot, slotMessage(loadedSlot), units, true) : metaLabel(decoded, units)}
+              {loadedSlot ? loadedMetaLabel(loadedSlot, slotMessage(loadedSlot), units) : ''}
             </Text>
           </View>
 
@@ -1710,7 +1686,7 @@ const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, uni
   return (
     <View style={[styles.pastItem, isLoaded && styles.pastItemLoaded]}>
       <View style={styles.pastDetails}>
-        <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, msg, units)}</Text>
+        <Text style={styles.pastMeta} numberOfLines={2}>{pastMetaLabel(slot, msg)}</Text>
         {variableIcons.length > 0 && (
           <View style={styles.variableRow}>
             <Text style={styles.variableLabel}>Variables:</Text>
@@ -2402,7 +2378,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     gap: 10,
   },
-  metaText: { flexShrink: 1, fontSize: 13, color: palette.pageText, lineHeight: 18 },
+  metaText: { flexShrink: 1, fontSize: 13, color: palette.pageText, lineHeight: 18, minHeight: 18, textAlign: 'center' },
   variableRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   variableLabel: { fontSize: 12, color: palette.pageTextSecondary },
 
