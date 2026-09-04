@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, SafeAreaView, ScrollView, StyleSheet,
+  ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, ScrollView, StyleSheet,
   Text, TextInput, TouchableOpacity, View, useWindowDimensions, type GestureResponderEvent,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { findPack, formatBytes, formatTallyBytes, searchPacks, tally, type Pack } from './catalog';
 import { regionsAt } from './outlines';
-import { MODAL_TOP_INSET } from './insets';
 import { cancelDownload, usePackState } from './packStore';
 import { clearTileCache, tileCacheSize, TILE_CACHE_EMPTY_BYTES } from './tileCache';
 import { palette } from './palette';
@@ -399,7 +399,7 @@ export function confirmRemovePack(pack: Pack, onRemove: (id: string) => void) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: palette.page, paddingTop: MODAL_TOP_INSET },
+  root: { flex: 1, backgroundColor: palette.page },
   // The same frame as HelpScreen's.
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

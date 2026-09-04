@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, StyleSheet, SafeAreaView } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import HomeScreen from './HomeScreen';
@@ -15,7 +16,6 @@ import {
 } from './settings';
 import { DEFAULT_DEVICE, type Device } from './devices';
 import { clearTileCache, configureTileCache } from './tileCache';
-import { MODAL_TOP_INSET } from './insets';
 import { palette } from './palette';
 
 // Hold the launch image until the first screen can be drawn as it will finally look. It otherwise
@@ -129,11 +129,49 @@ export default function App() {
 
   if (token === null) {
     return (
+      <SafeAreaProvider>
+        <View style={styles.root} onLayout={onLayoutRoot}>
+          <StatusBar style={palette.statusBar} />
+          <SafeAreaView edges={['top']} style={styles.topInset} />
+          <SetupScreen
+            onReady={setToken}
+            units={units}
+            onUnitsChange={setUnits}
+            timeFormat={timeFormat}
+            onTimeFormatChange={setTimeFormat}
+            aqiScale={aqiScale}
+            onAqiScaleChange={setAqiScale}
+          />
+        </View>
+      </SafeAreaProvider>
+    );
+  }
+
+  return (
+    <SafeAreaProvider>
       <View style={styles.root} onLayout={onLayoutRoot}>
         <StatusBar style={palette.statusBar} />
-        <SafeAreaView style={styles.topInset} />
-        <SetupScreen
-          onReady={setToken}
+        {/* One screen: the title row (and the door to Settings) lives inside the screen's own
+            scroll, and the scroll runs under the status bar — HomeScreen pads its resting content
+            by the status-bar inset, so the page seats below the clock and slides beneath it. It
+            pads the bottom of its content too, so the last row clears the home indicator. */}
+        <HomeScreen
+          token={token}
+          device={device}
+          onDeviceChange={setDevice}
+          twoMessages={twoMessages}
+          onTwoMessagesChange={setTwoMessages}
+          aqiScale={aqiScale}
+          units={units}
+          timeFormat={timeFormat}
+          forecastData={forecastData}
+          onForecastDataChange={setForecastData}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+        <SettingsScreen
+          visible={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          onDeleteAccount={handleDeleteAccount}
           units={units}
           onUnitsChange={setUnits}
           timeFormat={timeFormat}
@@ -142,47 +180,12 @@ export default function App() {
           onAqiScaleChange={setAqiScale}
         />
       </View>
-    );
-  }
-
-  return (
-    <View style={styles.root} onLayout={onLayoutRoot}>
-      <StatusBar style={palette.statusBar} />
-      {/* One screen: the title row (and the door to Settings) lives inside the screen's own
-          scroll, and the scroll runs under the status bar — HomeScreen pads its resting content
-          by the status-bar inset, so the page seats below the clock and slides beneath it. It
-          pads the bottom of its content too, so the last row clears the home indicator. */}
-      <HomeScreen
-        token={token}
-        device={device}
-        onDeviceChange={setDevice}
-        twoMessages={twoMessages}
-        onTwoMessagesChange={setTwoMessages}
-        aqiScale={aqiScale}
-        units={units}
-        timeFormat={timeFormat}
-        forecastData={forecastData}
-        onForecastDataChange={setForecastData}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
-      <SettingsScreen
-        visible={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        onDeleteAccount={handleDeleteAccount}
-        units={units}
-        onUnitsChange={setUnits}
-        timeFormat={timeFormat}
-        onTimeFormatChange={setTimeFormat}
-        aqiScale={aqiScale}
-        onAqiScaleChange={setAqiScale}
-      />
-    </View>
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
-  // Empty safe area: lays out to exactly the top inset, nothing more. On Android the safe area
-  // measures zero, so the padding carries it instead.
-  topInset: { backgroundColor: palette.page, paddingTop: MODAL_TOP_INSET },
+  // Empty safe area: lays out to exactly the top inset, nothing more.
+  topInset: { backgroundColor: palette.page },
 });

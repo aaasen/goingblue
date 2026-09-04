@@ -1,8 +1,8 @@
 import {
-  Modal, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import GettingStarted from './GettingStarted';
-import { MODAL_TOP_INSET } from './insets';
 import { palette } from './palette';
 
 interface Props {
@@ -33,7 +33,7 @@ export default function HelpScreen({ visible, onClose }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: palette.page, paddingTop: MODAL_TOP_INSET },
+  root: { flex: 1, backgroundColor: palette.page },
   // The safe area carries the status bar inset now that this runs the full height, so the header
   // only needs the same 12pt the app header uses. It kept 24 as a page sheet, to clear the
   // rounded corners UIKit drew over the title.

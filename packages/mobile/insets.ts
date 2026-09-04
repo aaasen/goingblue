@@ -12,11 +12,6 @@ import Constants from 'expo-constants';
 // the portrait rule. expo-constants rather than a safe-area dependency: these two numbers are
 // the only insets the layout needs, and statusBarHeight is measured at launch in portrait,
 // which is the measure both cases want.
-// react-native's SafeAreaView only insets on iOS. The full-screen modals lean on it for the
-// status bar, so on Android they pad by this instead (zero on iOS, where the safe area already
-// carries it).
-export const MODAL_TOP_INSET = Platform.OS === 'android' ? Constants.statusBarHeight : 0;
-
 export function pageInsets(width: number, height: number): { top: number; side: number } {
   const phoneLandscape = Platform.OS === 'ios' && !Platform.isPad && width > height;
   return phoneLandscape

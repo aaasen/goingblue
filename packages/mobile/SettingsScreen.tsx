@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator, Alert, Linking, Modal, SafeAreaView, ScrollView, StyleSheet, Text,
+  ActivityIndicator, Alert, Linking, Modal, ScrollView, StyleSheet, Text,
   TouchableOpacity, View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import PreferenceRows from './PreferenceRows';
-import { MODAL_TOP_INSET } from './insets';
 import OfflineMapsScreen, { downloadedPacks } from './OfflineMapsScreen';
 import { downloadPack as storeDownloadPack, removePack as storeRemovePack, usePackState } from './packStore';
 import { findPack } from './catalog';
@@ -155,7 +155,7 @@ export default function SettingsScreen({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: palette.page, paddingTop: MODAL_TOP_INSET },
+  root: { flex: 1, backgroundColor: palette.page },
   // Same frame as HelpScreen: the safe area carries the status bar inset, so the header only
   // needs the same 12pt the app header uses.
   header: {
