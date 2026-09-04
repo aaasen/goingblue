@@ -1441,6 +1441,17 @@ function drawCenterHour(
   if (parts.suffix) drawText(canvas, parts.suffix, x + numW, y, suffixFont, color);
 }
 
+// The header's row of hour labels for columns c0..c1, in scene coordinates. The scene's tiles
+// and the pinned header's copies (PinnedHourTile) both draw through here, so the copy is the
+// same drawing rather than a native approximation of it.
+function drawHourRow(
+  canvas: SkCanvas, zoned: Date[], steps: number[], timeFormat: TimeFormat, fonts: Fonts, c0: number, c1: number,
+): void {
+  for (let i = c0; i < c1; i++) {
+    drawCenterHour(canvas, hourParts(zoned[i], steps[i], timeFormat), i * CELL_W + CELL_W / 2, HOUR_LABEL_Y, fonts.hour, fonts.hourSuffix, C.hour);
+  }
+}
+
 // Smooth polyline (quadratic through segment midpoints) appended to an existing path.
 function smoothTo(path: SkPathBuilder, pts: { x: number; y: number }[], reverse = false) {
   const p = reverse ? [...pts].reverse() : pts;
@@ -2381,9 +2392,7 @@ function drawScene({ below, above, periods, rows, dates, zoned, steps, units, ti
 
   // 3. Date header. Hours occupy their own row. Each day label sticks to the visible left
   // edge while its columns are being scrolled, then yields to the following day.
-  for (let i = c0; i < c1; i++) {
-    drawCenterHour(below, hourParts(zoned[i], steps[i], timeFormat), colCenter(i), HOUR_LABEL_Y, fonts.hour, fonts.hourSuffix, C.hour);
-  }
+  drawHourRow(below, zoned, steps, timeFormat, fonts, c0, c1);
   below.drawLine(0, 31, width, 31, strokePaint(C.grid, 1));
 
   const { freezeValues, freezeBase, freezeSpan } = statics;
@@ -2887,6 +2896,63 @@ const CanvasTile = memo(function CanvasTile({ tile, pictures, marker, totalH, pa
   );
 });
 
+// One tile of the pinned header's hour row: the scene's hour labels for the tile's columns,
+// recorded in the tile's own frame and shown through a picture view the tile's size. Tiled on
+// the canvas's grid for the same reason the canvas is (CANVAS_TILE_W): a content-wide drawable
+// would pass Metal's texture width.
+const PinnedHourTile = memo(function PinnedHourTile({ tile, zoned, steps, timeFormat, fonts, paint }: {
+  tile: Tile; zoned: Date[]; steps: number[]; timeFormat: TimeFormat; fonts: Fonts; paint: number;
+}) {
+  const picture = useMemo(() => {
+    const recorder = Skia.PictureRecorder();
+    const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, tile.width, ROW_H.DATE));
+    canvas.translate(-tile.offset, 0);
+    drawHourRow(canvas, zoned, steps, timeFormat, fonts, tile.offset / CELL_W, (tile.offset + tile.width) / CELL_W);
+    return recorder.finishRecordingAsPicture();
+  }, [tile, zoned, steps, timeFormat, fonts]);
+  return (
+    <SkiaPictureView key={paint} style={[styles.pinnedHourTile, { left: tile.offset, width: tile.width }]} picture={picture} />
+  );
+});
+
+// The tiles the pinned header keeps mounted for a scroll offset: the ones under the viewport and
+// one to either side, so a tile is on screen before it scrolls into view. Every mounted tile
+// holds a Metal drawable, so the rest stay unmounted, as the canvas's do.
+function pinnedHourWindow(x: number, viewportW: number, count: number): { first: number; last: number } {
+  return {
+    first: Math.max(0, Math.floor(x / CANVAS_TILE_W) - 1),
+    last: Math.min(count - 1, Math.floor((x + viewportW) / CANVAS_TILE_W) + 1),
+  };
+}
+
+// The pinned header's hour row. The strip it sits in rides the block's horizontal scroll on the
+// native driver, so which tiles are near the viewport is the one thing about it JavaScript has
+// to track: the block's scroll listener feeds this component, and it re-renders only when the
+// window of tiles changes, a few times per screen of scrolling.
+const PinnedHourRow = memo(function PinnedHourRow({ tiles, viewportW, scrollOffset, subscribeScroll, zoned, steps, timeFormat, fonts, paint }: {
+  tiles: Tile[]; viewportW: number;
+  // The block's current scroll offset, and a subscription to its changes (see ModelCanvas).
+  scrollOffset: RefObject<number>; subscribeScroll: (listener: (x: number) => void) => () => void;
+  zoned: Date[]; steps: number[]; timeFormat: TimeFormat; fonts: Fonts; paint: number;
+}) {
+  const [range, setRange] = useState(() => pinnedHourWindow(scrollOffset.current, viewportW, tiles.length));
+  useEffect(() => subscribeScroll((x) => {
+    const next = pinnedHourWindow(x, viewportW, tiles.length);
+    setRange((prev) => (prev.first === next.first && prev.last === next.last ? prev : next));
+  }), [subscribeScroll, viewportW, tiles.length]);
+  // A shorter forecast can leave the range past its last tile until the list reports where it
+  // landed; the clamp keeps the render inside the tiles that exist.
+  const last = Math.min(range.last, tiles.length - 1);
+  const els: ReactNode[] = [];
+  for (let i = range.first; i <= last; i++) {
+    els.push(
+      <PinnedHourTile key={tiles[i].offset} tile={tiles[i]} zoned={zoned} steps={steps} timeFormat={timeFormat}
+        fonts={fonts} paint={paint} />,
+    );
+  }
+  return <>{els}</>;
+});
+
 // ── Fixed left rail ────────────────────────────────────────────────────────
 
 // Rows whose rail entry is (or includes) a symbol rather than a word. Monochrome, in the rail's
@@ -3123,7 +3189,19 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
 }) {
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<Tile>>(null);
-  const scrollOffsetRef = useRef(0); // mirrored from onScroll — see the Animated.event listener
+  const scrollOffsetRef = useRef(0); // mirrored from onScroll — see onScrollOffset
+  // Whoever needs to know the offset as it moves (the pinned header's hour row, which mounts
+  // tiles by it). Fed from the scroll listener and from the load-time scroll below, which the
+  // list does not always report.
+  const scrollListeners = useRef(new Set<(x: number) => void>()).current;
+  const subscribeScroll = useCallback((listener: (x: number) => void) => {
+    scrollListeners.add(listener);
+    return () => { scrollListeners.delete(listener); };
+  }, [scrollListeners]);
+  const onScrollOffset = useCallback((x: number) => {
+    scrollOffsetRef.current = x;
+    scrollListeners.forEach((listener) => listener(x));
+  }, [scrollListeners]);
   const { width: winW, height: winH } = useWindowDimensions();
   // Where the strip docks and how much width the page spans are both orientation questions —
   // portrait clears the status bar above (the parked map covers the band behind the clock),
@@ -3180,7 +3258,7 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     // on rather than one it silently clamps.
     offset = Math.max(0, Math.min(offset, periods.length * CELL_W - viewportW));
     flatListRef.current?.scrollToOffset({ offset, animated: false });
-    scrollOffsetRef.current = offset;
+    onScrollOffset(offset);
     const frame = requestAnimationFrame(() => scrollX.setValue(offset));
     return () => cancelAnimationFrame(frame);
   }, [msg]);
@@ -3256,19 +3334,6 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
       </Animated.Text>
     );
   }), [dayGroups, width, fonts, scrollX]);
-  // Native copies of the canvas's hour labels, for the pinned header: the number at the canvas's
-  // size with the meridiem a couple of sizes down, sharing its baseline via nested Text the way
-  // centerHour shares it, the pair centered in the column.
-  const hourEls = useMemo(() => zoned.map((d, i) => {
-    const parts = hourParts(d, steps[i], timeFormat);
-    if (!parts.num) return null;
-    return (
-      <RNText key={`h${i}`} style={[styles.pinnedHourText, { left: i * CELL_W }]}>
-        {parts.num}
-        {parts.suffix ? <RNText style={styles.pinnedHourSuffix}>{parts.suffix}</RNText> : null}
-      </RNText>
-    );
-  }), [zoned, steps, timeFormat]);
   // Held apart from the scene because the labels are drawn outside it, and memoized for the same
   // reason as the tiles: a fresh array on every render would repaint every mounted canvas.
   const modelBands = useMemo(
@@ -3552,12 +3617,12 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { x: scrollX } } }],
           // The listener mirrors the native-driven value into a plain ref: the comparable-load
-          // scroll hold below needs to READ the current offset, which a native Animated.Value
-          // doesn't expose synchronously.
+          // scroll hold above needs to READ the current offset, which a native Animated.Value
+          // doesn't expose synchronously, and the pinned hour row mounts its tiles by it.
           {
             useNativeDriver: true,
             listener: (e: { nativeEvent: { contentOffset: { x: number } } }) => {
-              scrollOffsetRef.current = e.nativeEvent.contentOffset.x;
+              onScrollOffset(e.nativeEvent.contentOffset.x);
             },
           },
         )}
@@ -3626,7 +3691,8 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
           style={[styles.pinnedHeader, { opacity: pin.opacity, transform: [{ translateY: pin.translateY }] }]}>
           <View style={styles.pinnedHeaderScene}>
             <Animated.View style={[styles.pinnedHourStrip, { width, transform: [{ translateX: scrollShift }] }]}>
-              {hourEls}
+              <PinnedHourRow tiles={tiles} viewportW={viewportW} scrollOffset={scrollOffsetRef} subscribeScroll={subscribeScroll}
+                zoned={zoned} steps={steps} timeFormat={timeFormat} fonts={fonts} paint={paint} />
             </Animated.View>
             <View pointerEvents="none" style={styles.stickyDayRow}>{dayLabelEls}</View>
             <View style={styles.pinnedDayRule} />
@@ -4214,17 +4280,12 @@ const styles = StyleSheet.create({
   // shadows, so labels vanish at the rail edge rather than sliding over it.
   pinnedHeaderScene: { position: 'absolute', top: 0, bottom: 0, left: LEGEND_W, right: 0, overflow: 'hidden' },
   pinnedHeaderRail: { position: 'absolute', top: 0, bottom: 0, left: 0, width: LEGEND_W, backgroundColor: '#fff' },
-  // Content-wide, translated by the block's own horizontal scroll — the native mirror of the
-  // hour row the canvas draws.
+  // Content-wide, translated by the block's own horizontal scroll: the canvas's hour row again,
+  // in tiles on the canvas's grid (PinnedHourRow).
   pinnedHourStrip: { position: 'absolute', top: 0, bottom: 0, left: 0 },
+  pinnedHourTile: { position: 'absolute', top: 0, height: ROW_H.DATE },
   // Mirrors the canvas's date-row rule: a 1px line centered on y=31 in the grid's ink.
   pinnedDayRule: { position: 'absolute', left: 0, right: 0, top: 30.5, height: 1, backgroundColor: C.grid },
-  // lineHeight 16 with its top at HOUR_LABEL_Y − 8 centers the text on the canvas's hour line.
-  pinnedHourText: {
-    position: 'absolute', width: CELL_W, textAlign: 'center',
-    top: HOUR_LABEL_Y - 8, fontSize: 12, lineHeight: 16, color: C.hour,
-  },
-  pinnedHourSuffix: { fontSize: 9.5 },
   modelHeaderBar: { paddingHorizontal: 14, paddingVertical: 7 },
   modelHeaderText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   sep: { height: 10, backgroundColor: '#f2f2f7' },
