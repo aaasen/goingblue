@@ -3737,15 +3737,15 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY, onD
   // drawing. Stringifying a full-fill message costs under a millisecond.
   const sceneKey = useMemo(() => JSON.stringify(msg), [msg]);
   const [now, setNow] = useState(Date.now());
-  const [selection, setSelection] = useState<{ block: number; period: number } | null>(null);
+  // The selection remembers the message it was made on: a new message may have different period
+  // counts and models, so a selection from another is ignored rather than reset, which keeps the
+  // switch to one commit instead of a reset effect and a second one behind it.
+  const [selection, setSelection] = useState<{ msg: ForecastMessage; block: number; period: number } | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60000);
     return () => clearInterval(timer);
   }, []);
-
-  // A new message may have different period counts and models; drop the selection.
-  useEffect(() => setSelection(null), [msg]);
 
   // A Skia canvas draws into a drawable its layer only vends while the view is on screen, and hiding
   // this tab (`display: none`) zeroes the layout underneath it — the drawables go with it, and
@@ -3759,8 +3759,9 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY, onD
     wasActive.current = active;
   }, [active]);
 
-  // Stable across renders so the memoized canvas tiles never see a new press handler.
-  const selectColumn = useCallback((block: number, period: number) => setSelection({ block, period }), []);
+  // Stable across renders of one message, so the memoized canvas tiles never see a new press
+  // handler except on the message change that re-records them anyway.
+  const selectColumn = useCallback((block: number, period: number) => setSelection({ msg, block, period }), [msg]);
 
   const fonts = useMemo<Fonts>(() => {
     // matchFont's default family is "System", which Android's Skia font manager doesn't know —
@@ -3813,7 +3814,7 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY, onD
     };
   }), [msg, models, units]);
 
-  const sel = selection != null && selection.period < (blocks[selection.block]?.periods.length ?? 0)
+  const sel = selection != null && selection.msg === msg && selection.period < (blocks[selection.block]?.periods.length ?? 0)
     ? selection
     : null;
 

@@ -805,6 +805,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const slotMessage = useCallback((slot: Slot) => slotMessages.get(slot) ?? null, [slotMessages]);
   // When true, the next decode came from loading a cached entry — don't re-attach it.
   const suppressNextCache = useRef(false);
+  // A cached entry put on screen by loadPast ahead of the decode effect, with the text it was
+  // decoded from: the effect finds it settled and leaves its state alone.
+  const predecoded = useRef<{ data: string; msg: ForecastMessage } | null>(null);
 
   // The forecast is below the whole builder, so a reply that decodes while the reader is looking
   // at the request form would land out of sight. A successful decode of new text raises
@@ -1175,20 +1178,25 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       fetchDecoding.current = false;
       return;
     }
+    const pre = predecoded.current?.data === forecastData ? predecoded.current.msg : null;
+    predecoded.current = null;
     (async () => {
       try {
         // The store maps the message code → request context; load it before the (sync) decode.
         await loadStore(token);
         if (cancelled) return;
-        const msg = decodeAny(forecastData, token);
-        setDecoded(msg);
-        setError(null);
-        setCollecting(null);
-        // A decode of new text is the moment the forecast should come on screen, whichever way
-        // the text arrived — a fetch reply, a completed paste, a cached entry loaded back.
-        // Except a compare-pill swap: the reader is already there.
-        pendingScroll.current = !suppressNextViewScroll.current;
-        suppressNextViewScroll.current = false;
+        const msg = pre ?? decodeAny(forecastData, token);
+        // A cached entry loaded by loadPast is already on screen, its scroll already settled.
+        if (!pre) {
+          setDecoded(msg);
+          setError(null);
+          setCollecting(null);
+          // A decode of new text is the moment the forecast should come on screen, whichever way
+          // the text arrived — a fetch reply, a completed paste, a cached entry loaded back.
+          // Except a compare-pill swap: the reader is already there.
+          pendingScroll.current = !suppressNextViewScroll.current;
+          suppressNextViewScroll.current = false;
+        }
         if (suppressNextCache.current) {
           suppressNextCache.current = false;
         } else {
@@ -1320,8 +1328,22 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
   const loadPast = useCallback((encoded: string) => {
     suppressNextCache.current = true;
+    // A cached entry is decoded already (slotMessages), so it goes on screen in the render that
+    // takes its text rather than a decode effect and a second commit later. The pill index, the
+    // meta line and the meteogram then change in one commit and one layout pass. The decode
+    // effect still runs for the entry and finds it settled (predecoded).
+    const slot = cache.find((s) => s.encoded === encoded);
+    const msg = slot ? slotMessages.get(slot) : null;
+    if (msg) {
+      predecoded.current = { data: encoded, msg };
+      pendingScroll.current = !suppressNextViewScroll.current;
+      suppressNextViewScroll.current = false;
+      setDecoded(msg);
+      setError(null);
+      setCollecting(null);
+    }
     onForecastDataChange(encoded);
-  }, [onForecastDataChange]);
+  }, [cache, slotMessages, onForecastDataChange]);
 
   // A compare-pill tap: loadPast, minus the scroll-to-forecast (see suppressNextViewScroll).
   const loadCompare = useCallback((encoded: string) => {
