@@ -1,7 +1,7 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Animated, AppState, Platform, View, Text as RNText, StyleSheet, FlatList, PanResponder, Pressable, useWindowDimensions } from 'react-native';
 import {
-  Canvas, DashPathEffect, Group, Line, Picture, Skia, vec, matchFont,
+  SkiaPictureView, Skia, vec, matchFont,
   ClipOp, StrokeCap, StrokeJoin, FillType,
   type SkCanvas, type SkFont, type SkPath, type SkPathBuilder, type SkPicture,
 } from '@shopify/react-native-skia';
@@ -23,7 +23,6 @@ import {
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { precipMark, weatherGlyph, wmoName, type MoonPhase, type PrecipMarkKind } from './weatherGlyph';
 import { pageInsets } from './insets';
-
 // ── Layout constants ───────────────────────────────────────────────────────
 // Rows are named by a narrow unit rail fixed to the left of the drawing (RowLegend). It sits
 // BESIDE the scrolling canvas rather than over it — the scene's own content starts at column 0 —
@@ -1726,6 +1725,17 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, now, 
     const frac = (now - dates[cur].getTime()) / (steps[cur] * 3600000);
     nowX = timeX(cum[cur] + frac * steps[cur]);
   }
+  // The bands, the marker and the header composed into the one picture the view shows. Handed
+  // to the native view inside React's commit (SkiaPictureView), so the strip lands on screen in
+  // the same frame as the text around it rather than a scheduler task later.
+  const composed = useMemo(() => {
+    const recorder = Skia.PictureRecorder();
+    const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, W, STRIP_H));
+    canvas.drawPicture(pictures.bands);
+    if (nowX != null) canvas.drawLine(nowX, STRIP_HEAD_H, nowX, STRIP_H, strokePaint('rgba(255,69,58,0.85)', 1));
+    canvas.drawPicture(pictures.header);
+    return recorder.finishRecordingAsPicture();
+  }, [pictures, nowX, W]);
 
   const contentW = n * CELL_W;
   const maxOffset = Math.max(0, contentW - VW);
@@ -1800,13 +1810,7 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, now, 
   return (
     <View style={styles.overviewStrip} {...pan.panHandlers}>
       <View style={{ width: W, height: STRIP_H, overflow: 'hidden' }}>
-        <Canvas key={paint} style={{ width: W, height: STRIP_H }} pointerEvents="none">
-          <Picture picture={pictures.bands} />
-          {nowX != null && (
-            <Line p1={vec(nowX, STRIP_HEAD_H)} p2={vec(nowX, STRIP_H)} color="rgba(255,69,58,0.85)" strokeWidth={1} />
-          )}
-          <Picture picture={pictures.header} />
-        </Canvas>
+        <SkiaPictureView key={paint} style={{ width: W, height: STRIP_H }} pointerEvents="none" picture={composed} />
         <Animated.View pointerEvents="none"
           style={[styles.overviewWindowFill, { width: W, transform: [{ translateX: win.fillX }, { scaleX: win.fillScale }] }]} />
         <Animated.View pointerEvents="none"
@@ -2854,21 +2858,31 @@ function sceneEntryFor(
 // moving, panel state, the minute tick moving the marker in another tile) repaints no tiles:
 // a Skia Canvas repaints on any React commit that reaches it.
 const CanvasTile = memo(function CanvasTile({ tile, pictures, marker, totalH, paint, onPress }: {
-  tile: Tile; pictures: TilePictures; marker: ReactNode; totalH: number; paint: number;
+  tile: Tile; pictures: TilePictures;
+  // The current-time marker, when it crosses this tile: its x in scene coordinates and how far
+  // down the drawing it runs. Null for every other tile, so the minute tick leaves them alone.
+  marker: { x: number; bottom: number } | null;
+  totalH: number; paint: number;
   onPress: (locationX: number, tileOffset: number) => void;
 }) {
+  // The two recordings with the marker between them, shifted into the tile's own frame. One
+  // picture, handed straight to the native view inside React's commit (SkiaPictureView): the
+  // tile paints in the same frame as the labels around it.
+  const composed = useMemo(() => {
+    const recorder = Skia.PictureRecorder();
+    const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, tile.width, totalH));
+    canvas.translate(-tile.offset, 0);
+    canvas.drawPicture(pictures.below);
+    if (marker) canvas.drawLine(marker.x, 0, marker.x, marker.bottom, dashedStroke('rgba(255,59,48,0.5)', 1, [5, 4]));
+    canvas.drawPicture(pictures.above);
+    return recorder.finishRecordingAsPicture();
+  }, [tile, pictures, marker, totalH]);
   return (
     // Tap → column index. tile.offset is static per tile, so the tap position never needs
     // the native-driven scrollX; a drag hands the responder to the FlatList and cancels
     // the press.
     <Pressable onPress={(e) => onPress(e.nativeEvent.locationX, tile.offset)}>
-      <Canvas key={paint} style={{ width: tile.width, height: totalH }}>
-        <Group transform={[{ translateX: -tile.offset }]}>
-          <Picture picture={pictures.below} />
-          {marker}
-          <Picture picture={pictures.above} />
-        </Group>
-      </Canvas>
+      <SkiaPictureView key={paint} style={{ width: tile.width, height: totalH }} picture={composed} />
     </Pressable>
   );
 });
@@ -2918,11 +2932,7 @@ function PrecipMarkCanvas({ kind, top, paint }: { kind: PrecipMarkKind; top: num
     drawPrecipMark(canvas, kind, LEGEND_MARK_CX, LEGEND_ICON_H / 2, LEGEND_MARK_H, LEGEND_MARK_COLORS, false);
     return recorder.finishRecordingAsPicture();
   }, [kind]);
-  return (
-    <Canvas key={paint} style={[styles.legendMarks, { top }]}>
-      <Picture picture={picture} />
-    </Canvas>
-  );
+  return <SkiaPictureView key={paint} style={[styles.legendMarks, { top }]} picture={picture} />;
 }
 
 /**
@@ -3321,16 +3331,7 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     const i = dates.findIndex((date, k) => now >= date.getTime() && now < date.getTime() + steps[k] * 3600000);
     if (i < 0 || statics.markerTop == null || statics.markerBottom == null) return null;
     const fraction = (now - dates[i].getTime()) / (steps[i] * 3600000);
-    const x = i * CELL_W + fraction * CELL_W;
-    return {
-      x,
-      el: (
-        <Line key="current-time" p1={vec(x, 0)} p2={vec(x, statics.markerBottom)}
-          color="rgba(255,59,48,0.5)" strokeWidth={1}>
-          <DashPathEffect intervals={[5, 4]} />
-        </Line>
-      ),
-    };
+    return { x: i * CELL_W + fraction * CELL_W, bottom: statics.markerBottom };
   }, [now, dates, steps, statics]);
   // Walked rather than measured from the bottom: the model row closes the weather rows, and the
   // air-quality block sits below it when the request asked for any of it.
@@ -3342,11 +3343,11 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     let y = ROW_H.DATE;
     for (const row of rows) {
       if (row.kind === 'aqi-dominant' || row.kind === 'aqi-eu-dominant')
-        out.push({ kind: row.kind, top: y, segs: dominantSegments(periods, row.kind) });
+        out.push({ kind: row.kind, top: y, segs: statics.dominantSegs[row.kind] ?? [] });
       y += row.height;
     }
     return out;
-  }, [rows, periods]);
+  }, [rows, statics]);
 
   const modelRowTop = useMemo(() => {
     let y = ROW_H.DATE;
@@ -3379,8 +3380,115 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   // minute ticks, so its memo holds.
   const renderTile = useCallback(({ item: tile, index }: { item: Tile; index: number }) => (
     <CanvasTile tile={tile} pictures={scene.get(index)} totalH={totalH} paint={paint} onPress={onPressTile}
-      marker={marker != null && marker.x >= tile.offset - 1 && marker.x <= tile.offset + tile.width + 1 ? marker.el : null} />
+      marker={marker != null && marker.x >= tile.offset - 1 && marker.x <= tile.offset + tile.width + 1 ? marker : null} />
   ), [scene, marker, totalH, paint, onPressTile]);
+
+  // Both label sets are memoized because each label is a native interpolation of `scrollX`:
+  // rebuilt on every render, a selection or the minute tick would create and attach a fresh set
+  // of native nodes for nothing. They rebuild only when their bands move.
+  const modelLabelEls = useMemo(() => (
+    modelBands.map((band, i) => {
+      const start = colLeft(band.start);
+      const end = colLeft(band.end);
+      const label = fitModelLabel(band.spec, end - start - 16, fonts.model);
+      if (!label) return null;
+      const textWidth = fonts.model.getTextWidth(label);
+      // Where the label stops being pinned and starts leaving with its band: two pads short of
+      // the band's right edge, which is where the pinned line and the parked one meet — the
+      // label then holds one pad inside the seam for the rest of the scroll.
+      const stickyEnd = end - textWidth - 16;
+      const range = monotonicRange([
+        [0, start + 8],
+        [start, 8],
+        [stickyEnd, 8],
+        [width, end - textWidth - 8 - width],
+      ]);
+      const translateX = stickyEnd > start && range.inputRange.length >= 2
+        ? scrollX.interpolate({ ...range, extrapolate: 'extend' })
+        : Animated.subtract(start + 8, scrollX);
+      return (
+        <Animated.Text
+          key={`mdl${i}`}
+          style={[styles.stickyModelText, {
+            color: bandInk(modelBandRgb(band.spec)),
+            transform: [{ translateX }],
+          }]}
+        >
+          {label}
+        </Animated.Text>
+      );
+    })
+  ), [modelBands, width, fonts, scrollX]);
+  const dominantLabelEls = useMemo(() => (
+    dominantRows.map(({ kind, top, segs }) => (
+      <View key={`dom-${kind}`} pointerEvents="none"
+        style={[styles.stickyModelRow, { top, height: ROW_H.WIND }]}>
+        {segs.map((seg, i) => {
+          const start = colLeft(seg.start);
+          const end = colLeft(seg.end);
+          // Measured as the label's BOX, not its glyphs: the plate is padded to cut the rule
+          // where the text sits, and translateX moves that box's left edge, so centring on the
+          // glyphs alone would let the plate hang over the run's cap.
+          //
+          // The PAD is what gives way on a narrow run, not the label. A single period is 34px
+          // and "PM2.5" is ~31 of them, so a fixed 4px each side overflowed and the name was
+          // dropped entirely — a bracket with nothing in it. The pad shrinks to whatever is
+          // left instead, down to nothing, and only a run too narrow for the glyphs themselves
+          // goes unlabelled.
+          const glyphW = fonts.model.getTextWidth(seg.label);
+          const runW = end - start;
+          const avail = runW - 2;
+          if (glyphW > avail) return null;
+          const pad = Math.max(0, Math.min(4, (avail - glyphW) / 2));
+          const textWidth = glyphW + pad * 2;
+          // Centered in the VISIBLE part of the run, not pinned to the edge: the label tracks
+          // the middle of however much of its band is on screen, and comes to rest in the
+          // middle of the band once the whole thing fits. Clamped to the run so a sliver at the
+          // edge of the screen can't push the name out over the run next door.
+          //
+          // NOTE `viewportW`, not `width` — in this scope `width` is the CONTENT width
+          // (n · CELL_W), which is several screens across. The sticky day and model labels use
+          // it only as a far extrapolation anchor, where any value past the pin gives the slope
+          // they want; here it is the viewport that defines "visible", and using the content
+          // width instead puts the label off the right of the screen.
+          const labelX = (sx: number) => {
+            const l = Math.max(start - sx, 0);
+            const r = Math.min(end - sx, viewportW);
+            const c = (l + r) / 2 - textWidth / 2;
+            return Math.min(Math.max(c, start - sx), end - sx - textWidth);
+          };
+          // The function is piecewise linear; these are its knees, so sampling exactly here
+          // reproduces it rather than approximating it. Outer anchors extend the end slopes.
+          const knees = [
+            start - viewportW + textWidth,
+            Math.min(start, end - viewportW),
+            Math.max(start, end - viewportW),
+            end - textWidth,
+          ];
+          const inputRange: number[] = [];
+          for (const v of [knees[0] - viewportW, ...knees, knees[3] + viewportW])
+            if (!inputRange.length || v > inputRange[inputRange.length - 1] + 0.01)
+              inputRange.push(v);
+          const translateX = inputRange.length >= 2
+            ? scrollX.interpolate({
+                inputRange, outputRange: inputRange.map(labelX), extrapolate: 'extend',
+              })
+            : Animated.subtract(start + (runW - textWidth) / 2, scrollX);
+          return (
+            <Animated.Text
+              key={`dom${i}`}
+              style={[styles.stickyModelText, styles.stickyDominantText, {
+                paddingHorizontal: pad,
+                transform: [{ translateX }],
+              }]}
+            >
+              {seg.label}
+            </Animated.Text>
+          );
+        })}
+      </View>
+    ))
+  ), [dominantRows, viewportW, fonts, scrollX]);
 
   // The selection overlay tracks the scroll on the native driver, but only the scroll: which column
   // it sits on is a discrete jump, so it rides a static `left` that commits with everything else
@@ -3494,110 +3602,13 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
           and a label centered in it would be off screen for most of that span. Each one sticks to
           the visible left edge while its own band is in view, then hands over at the seam. */}
       <View pointerEvents="none" style={[styles.stickyModelRow, { top: modelRowTop, height: ROW_H.MODEL }]}>
-        {modelBands.map((band, i) => {
-          const start = colLeft(band.start);
-          const end = colLeft(band.end);
-          const label = fitModelLabel(band.spec, end - start - 16, fonts.model);
-          if (!label) return null;
-          const textWidth = fonts.model.getTextWidth(label);
-          // Where the label stops being pinned and starts leaving with its band: two pads short of
-          // the band's right edge, which is where the pinned line and the parked one meet — the
-          // label then holds one pad inside the seam for the rest of the scroll.
-          const stickyEnd = end - textWidth - 16;
-          const range = monotonicRange([
-            [0, start + 8],
-            [start, 8],
-            [stickyEnd, 8],
-            [width, end - textWidth - 8 - width],
-          ]);
-          const translateX = stickyEnd > start && range.inputRange.length >= 2
-            ? scrollX.interpolate({ ...range, extrapolate: 'extend' })
-            : Animated.subtract(start + 8, scrollX);
-          return (
-            <Animated.Text
-              key={`mdl${i}`}
-              style={[styles.stickyModelText, {
-                color: bandInk(modelBandRgb(band.spec)),
-                transform: [{ translateX }],
-              }]}
-            >
-              {label}
-            </Animated.Text>
-          );
-        })}
+        {modelLabelEls}
       </View>
       {/* The dominant pollutant rides its run the way a model name rides its band: pinned to the
           visible edge while the run is in view, handing over at the tick. Written once per run —
           a stretch of PM2.5 is one fact, and repeating it per column buried the thing that does
           change, which is where it stops being PM2.5. */}
-      {dominantRows.map(({ kind, top, segs }) => (
-        <View key={`dom-${kind}`} pointerEvents="none"
-          style={[styles.stickyModelRow, { top, height: ROW_H.WIND }]}>
-          {segs.map((seg, i) => {
-            const start = colLeft(seg.start);
-            const end = colLeft(seg.end);
-            // Measured as the label's BOX, not its glyphs: the plate is padded to cut the rule
-            // where the text sits, and translateX moves that box's left edge, so centring on the
-            // glyphs alone would let the plate hang over the run's cap.
-            //
-            // The PAD is what gives way on a narrow run, not the label. A single period is 34px
-            // and "PM2.5" is ~31 of them, so a fixed 4px each side overflowed and the name was
-            // dropped entirely — a bracket with nothing in it. The pad shrinks to whatever is
-            // left instead, down to nothing, and only a run too narrow for the glyphs themselves
-            // goes unlabelled.
-            const glyphW = fonts.model.getTextWidth(seg.label);
-            const runW = end - start;
-            const avail = runW - 2;
-            if (glyphW > avail) return null;
-            const pad = Math.max(0, Math.min(4, (avail - glyphW) / 2));
-            const textWidth = glyphW + pad * 2;
-            // Centered in the VISIBLE part of the run, not pinned to the edge: the label tracks
-            // the middle of however much of its band is on screen, and comes to rest in the
-            // middle of the band once the whole thing fits. Clamped to the run so a sliver at the
-            // edge of the screen can't push the name out over the run next door.
-            //
-            // NOTE `viewportW`, not `width` — in this scope `width` is the CONTENT width
-            // (n · CELL_W), which is several screens across. The sticky day and model labels use
-            // it only as a far extrapolation anchor, where any value past the pin gives the slope
-            // they want; here it is the viewport that defines "visible", and using the content
-            // width instead puts the label off the right of the screen.
-            const labelX = (sx: number) => {
-              const l = Math.max(start - sx, 0);
-              const r = Math.min(end - sx, viewportW);
-              const c = (l + r) / 2 - textWidth / 2;
-              return Math.min(Math.max(c, start - sx), end - sx - textWidth);
-            };
-            // The function is piecewise linear; these are its knees, so sampling exactly here
-            // reproduces it rather than approximating it. Outer anchors extend the end slopes.
-            const knees = [
-              start - viewportW + textWidth,
-              Math.min(start, end - viewportW),
-              Math.max(start, end - viewportW),
-              end - textWidth,
-            ];
-            const inputRange: number[] = [];
-            for (const v of [knees[0] - viewportW, ...knees, knees[3] + viewportW])
-              if (!inputRange.length || v > inputRange[inputRange.length - 1] + 0.01)
-                inputRange.push(v);
-            const translateX = inputRange.length >= 2
-              ? scrollX.interpolate({
-                  inputRange, outputRange: inputRange.map(labelX), extrapolate: 'extend',
-                })
-              : Animated.subtract(start + (runW - textWidth) / 2, scrollX);
-            return (
-              <Animated.Text
-                key={`dom${i}`}
-                style={[styles.stickyModelText, styles.stickyDominantText, {
-                  paddingHorizontal: pad,
-                  transform: [{ translateX }],
-                }]}
-              >
-                {seg.label}
-              </Animated.Text>
-            );
-          })}
-        </View>
-      ))}
+      {dominantLabelEls}
       </View>
       <RowLegend rows={rows} units={units} paint={paint} elevation={elevation}
         bandLevels={periods.find((p) => p.cloud_band)?.cloud_band?.length ?? 0} />
@@ -3865,11 +3876,7 @@ function DetailGlyphCanvas({ code, night, phase, paint }: { code: number; night:
     drawCloudGlyph(canvas, 24, -5, 58, code, night, phase);
     return recorder.finishRecordingAsPicture();
   }, [code, night, phase]);
-  return (
-    <Canvas key={paint} style={{ width: 48, height: 48 }}>
-      <Picture picture={picture} />
-    </Canvas>
-  );
+  return <SkiaPictureView key={paint} style={{ width: 48, height: 48 }} picture={picture} />;
 }
 
 function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColor, units, timeFormat, lat, lon, elevation, utcOffsetHours, paint, onClose }: {

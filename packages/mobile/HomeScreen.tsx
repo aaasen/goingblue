@@ -599,20 +599,16 @@ function normalizedForecastData(encoded: string): string {
  * date and the forecast point's elevation; the past-forecast list stays compact and
  * names the priority only when it isn't the Auto default.
  */
-function cacheMetaLabel(slot: Slot, token: string, units: UnitPrefs, detailed = false): string {
-  try {
-    const msg = decodeAny(slot.encoded!, token);
-    const models = modelLabelsFromMask(msg.models_mask).join(' + ');
-    const requested = detailed
-      ? requestDateTimeLabel(slot.requestedAt)
-      : requestTimeLabel(slot.requestedAt);
-    const elev = detailed ? elevationLabel(msg, units) : '';
-    const elevStr = elev ? ` · ${elev}` : '';
-    const priority = detailed || msg.mode !== MODE_AUTO ? ` · ${priorityLabel(msg)}` : '';
-    return `${requested} · ${models}${priority} · ${latLonLabel(msg)}${elevStr}`;
-  } catch {
-    return 'Unknown';
-  }
+function cacheMetaLabel(slot: Slot, msg: ForecastMessage | null, units: UnitPrefs, detailed = false): string {
+  if (!msg) return 'Unknown';
+  const models = modelLabelsFromMask(msg.models_mask).join(' + ');
+  const requested = detailed
+    ? requestDateTimeLabel(slot.requestedAt)
+    : requestTimeLabel(slot.requestedAt);
+  const elev = detailed ? elevationLabel(msg, units) : '';
+  const elevStr = elev ? ` · ${elev}` : '';
+  const priority = detailed || msg.mode !== MODE_AUTO ? ` · ${priorityLabel(msg)}` : '';
+  return `${requested} · ${models}${priority} · ${latLonLabel(msg)}${elevStr}`;
 }
 
 const OPTIONAL_VARIABLE_ICONS: { vars: readonly Variable[]; symbol: string; label: string }[] = [
@@ -634,9 +630,8 @@ function variableIconsFor(selected: ReadonlySet<Variable>) {
   );
 }
 
-function cacheVariableIcons(slot: Slot, token: string) {
-  try { return variableIconsFor(decodeAny(slot.encoded!, token).vars); }
-  catch { return []; }
+function cacheVariableIcons(msg: ForecastMessage | null) {
+  return msg ? variableIconsFor(msg.vars) : [];
 }
 
 interface PastForecastGroup {
@@ -645,11 +640,12 @@ interface PastForecastGroup {
 }
 
 /** Group forecasts by their local start day while preserving newest-first order. */
-function groupPastForecasts(slots: Slot[], token: string): PastForecastGroup[] {
+function groupPastForecasts(slots: Slot[], msgOf: (slot: Slot) => ForecastMessage | null): PastForecastGroup[] {
   const groups: PastForecastGroup[] = [];
   for (const slot of slots) {
-    let start = new Date(slot.savedAt ?? slot.requestedAt);
-    try { start = startDatetime(decodeAny(slot.encoded!, token)); } catch { /* use saved/request time */ }
+    const msg = msgOf(slot);
+    // A slot that no longer decodes groups by its saved/request time instead.
+    const start = msg ? startDatetime(msg) : new Date(slot.savedAt ?? slot.requestedAt);
     const day = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
     const group = groups.find((candidate) => candidate.day === day);
     if (group) group.slots.push(slot);
@@ -795,6 +791,18 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const outcomeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [cache, setCache] = useState<Slot[]>([]);
+  // Every cached forecast decoded once per cache change. The past-forecast list needs each
+  // slot's message three times per render (its day, its label, its variable icons), and a
+  // decode of a full-fill message runs a few milliseconds; decoding in render made every
+  // HomeScreen render pay for the whole list.
+  const slotMessages = useMemo(() => {
+    const decoded = new Map<Slot, ForecastMessage | null>();
+    for (const slot of cache) {
+      try { decoded.set(slot, decodeAny(slot.encoded!, token)); } catch { decoded.set(slot, null); }
+    }
+    return decoded;
+  }, [cache, token]);
+  const slotMessage = useCallback((slot: Slot) => slotMessages.get(slot) ?? null, [slotMessages]);
   // When true, the next decode came from loading a cached entry — don't re-attach it.
   const suppressNextCache = useRef(false);
 
@@ -1360,7 +1368,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     }
   }
 
-  const pastGroups = groupPastForecasts(cache, token);
+  const pastGroups = groupPastForecasts(cache, slotMessage);
   const loadedSlot = cache.find((slot) =>
     normalizedForecastData(slot.encoded!) === normalizedForecastData(forecastData),
   );
@@ -1419,14 +1427,14 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             {group.slots.map((slot) => {
               const isLoaded = normalizedForecastData(forecastData)
                 === normalizedForecastData(slot.encoded!);
-              const variableIcons = cacheVariableIcons(slot, token);
+              const variableIcons = cacheVariableIcons(slotMessage(slot));
               return (
                 <View
                   key={slot.code}
                   style={[styles.pastItem, isLoaded && styles.pastItemLoaded]}
                 >
                   <View style={styles.pastDetails}>
-                    <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, token, units)}</Text>
+                    <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, slotMessage(slot), units)}</Text>
                     {variableIcons.length > 0 && (
                       <View style={styles.variableRow}>
                         <Text style={styles.variableLabel}>Variables:</Text>
@@ -1786,7 +1794,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             onLayout={(e) => { metaY.current = e.nativeEvent.layout.y; scrollToForecast(); }}
           >
             <Text style={styles.metaText} numberOfLines={3}>
-              {loadedSlot ? cacheMetaLabel(loadedSlot, token, units, true) : metaLabel(decoded, units)}
+              {loadedSlot ? cacheMetaLabel(loadedSlot, slotMessage(loadedSlot), units, true) : metaLabel(decoded, units)}
             </Text>
           </View>
 
