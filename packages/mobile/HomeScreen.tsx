@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, Pressable,
   ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions,
@@ -106,6 +106,8 @@ const MODEL_UNAVAIL_VARS: Record<string, Variable[]> = {
   eu: [VAR.freeze],
   de: [],
 };
+// One shared empty list, so a model with nothing unavailable reads as the same value every render.
+const NO_UNAVAIL_VARS: readonly Variable[] = [];
 
 // The map is always on screen, so it shares the builder with everything below it; fullscreen is
 // there for precision.
@@ -900,20 +902,27 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     cancelFetch();
   }
 
-  const unavail = MODEL_UNAVAIL_VARS[model] ?? [];
+  const unavail = MODEL_UNAVAIL_VARS[model] ?? NO_UNAVAIL_VARS;
   // Expand the always-on variables plus any enabled groups for the stored request context. Only
   // configurable variables go in the message because the server adds the always-on set. Read off
   // the scale-filtered list, so switching the Settings preference drops the other index's
   // variables from the request without having to clear what's ticked: come back to that scale and
   // the selection is as it was left.
-  const activeGroups = visibleVarGroups(aqiScale)
-    .filter((g) => groups.has(g.value))
-    .map((g) => ({ ...g, vars: g.vars.filter((v) => !unavail.includes(v)) }))
-    .filter((g) => g.vars.length > 0);
-  // What a closed subgroup counts. A group the model can't supply adds nothing to the request, so
-  // it isn't reported as if it did — activeGroups has already dropped those.
-  const activeValues = new Set(activeGroups.map((g) => g.value));
-  const vars = new Set<Variable>([...ALWAYS_VARS, ...activeGroups.flatMap((g) => g.vars)]);
+  //
+  // Memoized, like everything the builder is handed: the builder re-renders only when one of its
+  // inputs changes identity (see RequestBuilder).
+  const { activeValues, vars } = useMemo(() => {
+    const activeGroups = visibleVarGroups(aqiScale)
+      .filter((g) => groups.has(g.value))
+      .map((g) => ({ ...g, vars: g.vars.filter((v) => !unavail.includes(v)) }))
+      .filter((g) => g.vars.length > 0);
+    // What a closed subgroup counts. A group the model can't supply adds nothing to the request,
+    // so it isn't reported as if it did — activeGroups has already dropped those.
+    return {
+      activeValues: new Set(activeGroups.map((g) => g.value)),
+      vars: new Set<Variable>([...ALWAYS_VARS, ...activeGroups.flatMap((g) => g.vars)]),
+    };
+  }, [aqiScale, groups, unavail]);
   const modeName = PRIORITIES.find((m) => m.value === mode)!.label;
 
   // Whether the multi-message switch is on offer at all, and so how many messages the reply may
@@ -924,13 +933,14 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const multiMessageShown = multiMessageOffered(deviceCode(device), vars);
   const messages = multiMessageShown && twoMessages ? 2 : DEFAULT_MESSAGES;
 
-  const parsedCoords = parseLatLon(coordsText);
+  const parsedCoords = useMemo(() => parseLatLon(coordsText), [coordsText]);
   const coordsInvalid = !following && coordsText.trim().length > 0 && parsedCoords == null;
   const resolvedCoords = following ? gpsCoords : parsedCoords;
   // What the field shows: the fix while following, otherwise whatever was typed or picked.
   const coordsField = following ? (gpsCoords ? formatLatLon(gpsCoords) : '') : coordsText;
   const coordsValid = resolvedCoords != null
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
+  const mapCoord = coordsValid ? resolvedCoords : null;
   // What the selected option resolves to here, so the choice isn't abstract: "Auto" means a 2km
   // model in the Alps and a 9km one over the Alaska Range, and the US and Canadian stacks drop to
   // their global member outside their short-range domains. Which models serve depends on run age,
@@ -1372,23 +1382,48 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // which is its own confirmation.
   const copied = (device === 'inreach' || device === 'zoleo') && messageCopied;
 
-  // The list to draw, under the scale the reader has chosen. Cheap enough to rebuild each render,
-  // like the model chain above it.
-  const varTree = buildVarTree(aqiScale);
-  // The variable rows to draw: each subgroup's heading always, its members only while it's open.
-  const varRows: VarRow[] = [];
-  for (const node of varTree) {
-    if (node.kind === 'group') {
-      varRows.push({ key: node.group.value, kind: 'toggle', group: node.group, indent: false });
-      continue;
-    }
-    varRows.push({ key: node.id, kind: 'subgroup', id: node.id, label: node.label, members: node.members });
-    if (openSubgroups.has(node.id)) {
-      for (const group of node.members) {
-        varRows.push({ key: group.value, kind: 'toggle', group, indent: true });
+  // The list to draw, under the scale the reader has chosen, and the rows it becomes: each
+  // subgroup's heading always, its members only while it's open.
+  const varTree = useMemo(() => buildVarTree(aqiScale), [aqiScale]);
+  const varRows = useMemo(() => {
+    const rows: VarRow[] = [];
+    for (const node of varTree) {
+      if (node.kind === 'group') {
+        rows.push({ key: node.group.value, kind: 'toggle', group: node.group, indent: false });
+        continue;
+      }
+      rows.push({ key: node.id, kind: 'subgroup', id: node.id, label: node.label, members: node.members });
+      if (openSubgroups.has(node.id)) {
+        for (const group of node.members) {
+          rows.push({ key: group.value, kind: 'toggle', group, indent: true });
+        }
       }
     }
-  }
+    return rows;
+  }, [varTree, openSubgroups]);
+
+  // The builder's handlers, with one identity each (useStableHandler): the functions above are
+  // rewritten every render because they read this screen's state through their closures.
+  const onPick = useStableHandler((c: { lat: number; lon: number }) => pinCoordsText(formatLatLon(c)));
+  const onCoordsText = useStableHandler(pinCoordsText);
+  const onLocate = useStableHandler(follow);
+  const onToggleGroup = useStableHandler(toggleGroup);
+  const onToggleSubgroup = useStableHandler(toggleSubgroup);
+  const onDevice = useStableHandler((next: Device) => {
+    setMessageCopied(false);
+    // The device is what the reply's length and alphabet are cut to, so a fetch started under
+    // the old one can only come back wrong. Switching is also how someone gets out of a stalled
+    // internet request — leaving it running would spin the button on a route that no longer
+    // fetches anything.
+    cancelFetch();
+    onDeviceChange(next);
+  });
+  const onAction = useStableHandler(() => action.onPress());
+  const onCancelAction = useStableHandler(cancelAction);
+  // pasteFromClipboard is keyed on the forecast text, so it changes on every load; the parent's
+  // multi-message callback is whatever App passed this render.
+  const onPaste = useStableHandler(pasteFromClipboard);
+  const onTwoMessages = useStableHandler(onTwoMessagesChange);
 
   const pastGroups = useMemo(() => groupPastForecasts(cache, slotMessage), [cache, slotMessage]);
   const loadedSlot = cache.find((slot) =>
@@ -1474,289 +1509,20 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       {/* The builder carries the scroll content's side padding itself: the forecast pieces below
           it run full-bleed, and the meteogram's pinned headers measure their offset against the
           scroll content, which they can only do as its direct children. */}
-      <View style={styles.builderPad}>
-        <StepHeader title="Build a forecast request" />
-        {/* No heading: the map is its own label. Edge to edge, since the negative inset cancels
-            the builder's horizontal padding, so the map spans the screen rather than sitting
-            inside the column. The coordinates sit under it as the map's readout and a way to
-            type or paste a point. */}
-        <View style={styles.section}>
-          <View style={styles.mapFullBleed}>
-            <LocationMap
-              coord={coordsValid ? resolvedCoords : null}
-              onPick={(c) => pinCoordsText(formatLatLon(c))}
-              height={BUILDER_MAP_HEIGHT}
-              userCoord={gpsCoords}
-              following={following}
-              onLocate={follow}
-              locating={locating}
-              onClear={() => pinCoordsText('')}
-              canClear={coordsField.length > 0}
-            />
-          </View>
-          {SHOW_COORDINATES && (
-          <View style={[styles.coordsCard, coordsInvalid && styles.coordsCardInvalid]}>
-            <View style={[styles.coordRow, styles.coordRowLast]}>
-              <Text style={[styles.coordLabel, styles.coordLabelWide]}>Coordinates</Text>
-              {/* Editing pins. The first keystroke arrives with the field's whole text, fix
-                  included, so nudging the current location's digits works as expected. */}
-              <TextInput
-                style={[styles.coordInput, coordsInvalid && styles.coordInputInvalid]}
-                value={coordsField}
-                onChangeText={pinCoordsText}
-                placeholder="latitude, longitude"
-                keyboardType="numbers-and-punctuation"
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="done"
-              />
-              {/* Pasted coordinates are long and the keyboard's delete key clears them one
-                  character at a time; one tap on the ✕ empties the field. Same action as the
-                  map's clear button, placed where someone typing will look for it. Always laid
-                  out and merely hidden when there is nothing to clear: the icon is taller than
-                  the text line, so adding and removing it would change the row's height. */}
-              <TouchableOpacity
-                style={[styles.coordClear, coordsField.length === 0 && styles.coordClearHidden]}
-                onPress={() => pinCoordsText('')}
-                disabled={coordsField.length === 0}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityRole="button"
-                accessibilityLabel="Clear coordinates"
-                accessibilityElementsHidden={coordsField.length === 0}
-              >
-                <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
-              </TouchableOpacity>
-            </View>
-          </View>
-          )}
-        </View>
-
-        <Section label="Weather Model" info={() => setModelInfo(true)}>
-          <SegmentedControl
-            {...SEGMENT_PROPS}
-            values={MODELS.map((m) => m.label)}
-            selectedIndex={MODELS.findIndex((m) => m.value === model)}
-            onChange={(e) => setModel(MODELS[e.nativeEvent.selectedSegmentIndex].value)}
-          />
-          {/* Left to wrap rather than clipped to a line: the deepest chains run five models (the
-              ICON-D2 branch over central Europe), and truncating would hide exactly the long-range
-              model the last days of the forecast come from. */}
-          <Text style={styles.modelHint}>{modelStack ?? MODEL_HINT_NO_LOCATION}</Text>
-        </Section>
-
-        <Section label="Extra Variables" info={() => setVarsInfo(true)}>
-          <View style={styles.varList}>
-            {varRows.map((row, idx) => {
-              const border = idx < varRows.length - 1 && styles.varRowBorder;
-              if (row.kind === 'subgroup') {
-                // Nothing under the heading is selectable when the model supplies none of it, which
-                // no current model does to air quality — CAMS is a separate forecast from the
-                // weather center. Handled anyway so the rule lives with the rows, not with the data.
-                const disabled = row.members.every((m) => m.vars.every((v) => unavail.includes(v)));
-                const open = openSubgroups.has(row.id);
-                const selected = row.members.filter((m) => activeValues.has(m.value)).length;
-                return (
-                  <Pressable
-                    key={row.key}
-                    style={({ pressed }) => [
-                      styles.varRow, border, pressed && !disabled && styles.varRowPressed,
-                    ]}
-                    onPress={() => !disabled && toggleSubgroup(row.id)}
-                    accessibilityRole="button"
-                    accessibilityState={{ expanded: open, disabled }}
-                    accessibilityLabel={`${row.label}, ${selected} of ${row.members.length} selected`}
-                  >
-                    <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{row.label}</Text>
-                    <View style={styles.varRowTrailing}>
-                      {/* Only when something is on: a "0" against every other row's blank check
-                          column would read as a value rather than as an empty count. */}
-                      {selected > 0 && <Text style={styles.varCount}>{selected}</Text>}
-                      <MaterialCommunityIcons
-                        name={open ? 'chevron-up' : 'chevron-down'}
-                        size={20}
-                        color={palette.textTertiary}
-                      />
-                    </View>
-                  </Pressable>
-                );
-              }
-              // A group is unavailable when the model can't supply any of its variables.
-              const disabled = row.group.vars.every((v) => unavail.includes(v));
-              const checked = groups.has(row.group.value) && !disabled;
-              return (
-                <Pressable
-                  key={row.key}
-                  style={({ pressed }) => [
-                    styles.varRow, row.indent && styles.varRowIndent, border,
-                    pressed && !disabled && styles.varRowPressed,
-                  ]}
-                  onPress={() => !disabled && toggleGroup(row.group.value)}
-                  accessibilityRole="switch"
-                  accessibilityState={{ checked, disabled }}
-                >
-                  <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{groupLabel(row.group, units)}</Text>
-                  {/* The row stays pressable as well: the switch swallows its own touches, so the
-                      two never fire together, and the whole row remains the larger target. */}
-                  <Switch
-                    {...SWITCH_PROPS}
-                    style={styles.switchAlign}
-                    value={checked}
-                    disabled={disabled}
-                    onValueChange={() => toggleGroup(row.group.value)}
-                    accessibilityElementsHidden
-                    importantForAccessibility="no-hide-descendants"
-                  />
-                </Pressable>
-              );
-            })}
-          </View>
-        </Section>
-
-        <Section label="Fill Priority" info={() => setPriorityInfo(true)}>
-          <SegmentedControl
-            {...SEGMENT_PROPS}
-            values={PRIORITIES.map((m) => m.label)}
-            selectedIndex={PRIORITIES.findIndex((m) => m.value === mode)}
-            onChange={(e) => setMode(PRIORITIES[e.nativeEvent.selectedSegmentIndex].value)}
-          />
-          <Text style={styles.modelHint}>{PRIORITIES.find((m) => m.value === mode)!.hint}</Text>
-        </Section>
-
-        <View style={styles.sectionEnd} />
-
-        <StepHeader title="Send the request" gap />
-
-        {/* The way out. Which device you carry decides how the request travels, so it sits with
-            the button it drives rather than up with the forecast's own options. */}
-        <Section label="Device" info={() => setDeviceInfo(true)}>
-          <SegmentedControl
-            {...SEGMENT_PROPS}
-            values={DEVICES.map((d) => d.label)}
-            selectedIndex={DEVICES.findIndex((d) => d.value === device)}
-            onChange={(e) => {
-              setMessageCopied(false);
-              // The device is what the reply's length and alphabet are cut to, so a fetch started
-              // under the old one can only come back wrong. Switching is also how someone gets out
-              // of a stalled internet request — leaving it running would spin the button on a route
-              // that no longer fetches anything.
-              cancelFetch();
-              onDeviceChange(DEVICES[e.nativeEvent.selectedSegmentIndex].value);
-            }}
-          />
-          {/* A switch rather than an On/Off segment: this is one setting being turned on, not a
-              choice between two things, and it is read far more often than it is changed. */}
-          {multiMessageShown && (
-            <View style={styles.switchRow}>
-              <View style={styles.switchText}>
-                <Text style={styles.switchLabel}>Multi-message forecast</Text>
-                <Text style={styles.switchHint}>Use multiple messages for more range and detail</Text>
-              </View>
-              <Switch
-                {...SWITCH_PROPS}
-                style={styles.switchAlign}
-                value={twoMessages}
-                onValueChange={onTwoMessagesChange}
-                accessibilityLabel="Multi-message forecast"
-                accessibilityHint="Use multiple messages for more range and detail"
-              />
-            </View>
-          )}
-        </Section>
-
-        <View style={styles.buttons}>
-          <ActionButton
-            icon={copied ? 'check' : deviceSpec.icon}
-            label={copied ? 'Copied' : deviceSpec.action}
-            onPress={action.onPress}
-            onCancel={cancelAction}
-            disabled={action.disabled}
-            busy={action.busy}
-            variant={copied ? 'success' : 'primary'}
-          />
-        </View>
-
-        {/* Says why Get Forecast is greyed out, so it's shown only when that's the button on screen.
-            Keyed on `offline` alone, not on fetchDisabled — a button greyed for want of a location is
-            a different problem with a different fix. */}
-        {device === 'internet' && offline && <Text style={styles.actionNote}>{OFFLINE_MESSAGE}</Text>}
-        {/* The location half of that: a pinned point with nothing usable in the field greys every
-            device's button, and the input sits a few sections up by the time the button is on
-            screen. Both notes can show at once — offline and no location are separate problems,
-            each with its own fix. */}
-        {!following && !coordsValid && (
-          <Text style={styles.actionNote}>{NO_LOCATION_MESSAGE}</Text>
-        )}
-
-        <TouchableOpacity
-          style={styles.helpLink}
-          onPress={() => setHelp(true)}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-        >
-          <Text style={styles.helpLinkText}>How do I get a forecast?</Text>
-        </TouchableOpacity>
-
-        <View style={styles.sectionEnd} />
-
-        <StepHeader title="View the forecast" gap />
-
-        {/* The way back in: pull the encoded reply straight off the clipboard. It opens the view
-            step because that is the flow — the reply this loads is to the request the send step
-            just put on its way. The button also carries the last press's outcome for a moment — a
-            green check for what it loaded, a red ✕ when the paste wouldn't decode — then goes back
-            to offering the paste. Clear sits beside it rather than appearing with a state, because
-            the state it is most needed in — a collection that will never decode — is the one where
-            a reader has least reason to expect it. */}
-        <View>
-          <View style={styles.pasteRow}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.pasteBtn,
-                outcome && (outcome.failed ? styles.pasteBtnFailed : styles.pasteBtnDone),
-                pressed && styles.btnPressed,
-              ]}
-              onPress={pasteFromClipboard}
-              accessibilityRole="button"
-              accessibilityLabel={outcome?.label ?? 'Paste Forecast'}
-            >
-              {outcome && (
-                <MaterialCommunityIcons
-                  name={outcome.failed ? 'close' : 'check'}
-                  size={19}
-                  color={outcome.failed ? palette.danger : palette.success}
-                  style={styles.pasteBtnIcon}
-                />
-              )}
-              <Text
-                style={[
-                  styles.pasteBtnText,
-                  outcome && (outcome.failed ? styles.pasteBtnTextFailed : styles.pasteBtnTextDone),
-                ]}
-                numberOfLines={1}
-              >
-                {outcome?.label ?? 'Paste Forecast'}
-              </Text>
-            </Pressable>
-            <TouchableOpacity
-              style={styles.clearBtn}
-              onPress={clearForecast}
-              accessibilityRole="button"
-              accessibilityLabel="Clear forecast"
-            >
-              <MaterialCommunityIcons name="close" size={22} color={palette.pageChipText} />
-            </TouchableOpacity>
-          </View>
-          {/* Both sit under the button, where what they ask for is another press of it. Only one can
-              be showing: a paste is either short of its remaining messages or wrong, never both. */}
-          {collecting && <CollectingBox {...collecting} />}
-          {error && (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
-        </View>
-
-      </View>
+      <RequestBuilder
+        mapCoord={mapCoord} onPick={onPick} gpsCoords={gpsCoords} following={following} onLocate={onLocate}
+        locating={locating} coordsField={coordsField} coordsInvalid={coordsInvalid} onCoordsText={onCoordsText}
+        model={model} modelStack={modelStack} onModel={setModel} setModelInfo={setModelInfo}
+        varRows={varRows} unavail={unavail} openSubgroups={openSubgroups} activeValues={activeValues} groups={groups}
+        units={units} onToggleGroup={onToggleGroup} onToggleSubgroup={onToggleSubgroup} setVarsInfo={setVarsInfo}
+        mode={mode} onMode={setMode} setPriorityInfo={setPriorityInfo}
+        device={device} onDevice={onDevice} setDeviceInfo={setDeviceInfo}
+        multiMessageShown={multiMessageShown} twoMessages={twoMessages} onTwoMessagesChange={onTwoMessages}
+        deviceSpec={deviceSpec} copied={copied} onAction={onAction} onCancelAction={onCancelAction}
+        actionDisabled={action.disabled} actionBusy={action.busy} offline={offline} coordsValid={coordsValid}
+        setHelp={setHelp} outcome={outcome} onPaste={onPaste} onClearForecast={clearForecast}
+        collecting={collecting} error={error}
+      />
 
       {decoded && (
         <>
@@ -1999,6 +1765,321 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
           </View>
         ))
       )}
+    </View>
+  );
+});
+
+// A handler with one identity for the component's lifetime that calls the latest render's
+// closure. HomeScreen's handlers read most of its state, so they are rewritten every render;
+// handed to a memoized child as they are, they would re-render it every time.
+function useStableHandler<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const ref = useRef(fn);
+  useInsertionEffect(() => { ref.current = fn; });
+  return useCallback((...args: A) => ref.current(...args), []);
+}
+
+// The request builder: the map, the model, variable, priority and device sections, the action
+// button and the paste step. Memoized, and every prop is a primitive, a piece of state, a
+// memoized derivation or a stable handler, so a render of HomeScreen that concerns the forecast
+// below it (a load, a switch, a layout measurement) does not walk the builder.
+const RequestBuilder = memo(function RequestBuilder({
+  mapCoord, onPick, gpsCoords, following, onLocate, locating, coordsField, coordsInvalid, onCoordsText,
+  model, modelStack, onModel, setModelInfo,
+  varRows, unavail, openSubgroups, activeValues, groups, units, onToggleGroup, onToggleSubgroup, setVarsInfo,
+  mode, onMode, setPriorityInfo,
+  device, onDevice, setDeviceInfo, multiMessageShown, twoMessages, onTwoMessagesChange,
+  deviceSpec, copied, onAction, onCancelAction, actionDisabled, actionBusy, offline, coordsValid, setHelp,
+  outcome, onPaste, onClearForecast, collecting, error,
+}: {
+  mapCoord: { lat: number; lon: number } | null; onPick: (c: { lat: number; lon: number }) => void;
+  gpsCoords: { lat: number; lon: number } | null; following: boolean; onLocate: () => Promise<{ lat: number; lon: number } | null>; locating: boolean;
+  coordsField: string; coordsInvalid: boolean; onCoordsText: (text: string) => void;
+  model: string; modelStack: string | null; onModel: (model: string) => void; setModelInfo: (open: boolean) => void;
+  varRows: VarRow[]; unavail: readonly Variable[]; openSubgroups: ReadonlySet<string>; activeValues: ReadonlySet<string>;
+  groups: ReadonlySet<string>; units: UnitPrefs; onToggleGroup: (value: string) => void; onToggleSubgroup: (id: string) => void;
+  setVarsInfo: (open: boolean) => void;
+  mode: number; onMode: (mode: number) => void; setPriorityInfo: (open: boolean) => void;
+  device: Device; onDevice: (device: Device) => void; setDeviceInfo: (open: boolean) => void;
+  multiMessageShown: boolean; twoMessages: boolean; onTwoMessagesChange: (on: boolean) => void;
+  deviceSpec: (typeof DEVICES)[number]; copied: boolean; onAction: () => void; onCancelAction: () => void;
+  actionDisabled: boolean; actionBusy: boolean; offline: boolean; coordsValid: boolean; setHelp: (open: boolean) => void;
+  outcome: Outcome | null; onPaste: () => void; onClearForecast: () => void; collecting: Collecting | null; error: string | null;
+}) {
+  return (
+    <View style={styles.builderPad}>
+      <StepHeader title="Build a forecast request" />
+      {/* No heading: the map is its own label. Edge to edge, since the negative inset cancels
+          the builder's horizontal padding, so the map spans the screen rather than sitting
+          inside the column. The coordinates sit under it as the map's readout and a way to
+          type or paste a point. */}
+      <View style={styles.section}>
+        <View style={styles.mapFullBleed}>
+          <LocationMap
+            coord={mapCoord}
+            onPick={onPick}
+            height={BUILDER_MAP_HEIGHT}
+            userCoord={gpsCoords}
+            following={following}
+            onLocate={onLocate}
+            locating={locating}
+            onClear={() => onCoordsText('')}
+            canClear={coordsField.length > 0}
+          />
+        </View>
+        {SHOW_COORDINATES && (
+        <View style={[styles.coordsCard, coordsInvalid && styles.coordsCardInvalid]}>
+          <View style={[styles.coordRow, styles.coordRowLast]}>
+            <Text style={[styles.coordLabel, styles.coordLabelWide]}>Coordinates</Text>
+            {/* Editing pins. The first keystroke arrives with the field's whole text, fix
+                included, so nudging the current location's digits works as expected. */}
+            <TextInput
+              style={[styles.coordInput, coordsInvalid && styles.coordInputInvalid]}
+              value={coordsField}
+              onChangeText={onCoordsText}
+              placeholder="latitude, longitude"
+              keyboardType="numbers-and-punctuation"
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="done"
+            />
+            {/* Pasted coordinates are long and the keyboard's delete key clears them one
+                character at a time; one tap on the ✕ empties the field. Same action as the
+                map's clear button, placed where someone typing will look for it. Always laid
+                out and merely hidden when there is nothing to clear: the icon is taller than
+                the text line, so adding and removing it would change the row's height. */}
+            <TouchableOpacity
+              style={[styles.coordClear, coordsField.length === 0 && styles.coordClearHidden]}
+              onPress={() => onCoordsText('')}
+              disabled={coordsField.length === 0}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Clear coordinates"
+              accessibilityElementsHidden={coordsField.length === 0}
+            >
+              <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+        )}
+      </View>
+
+      <Section label="Weather Model" info={() => setModelInfo(true)}>
+        <SegmentedControl
+          {...SEGMENT_PROPS}
+          values={MODELS.map((m) => m.label)}
+          selectedIndex={MODELS.findIndex((m) => m.value === model)}
+          onChange={(e) => onModel(MODELS[e.nativeEvent.selectedSegmentIndex].value)}
+        />
+        {/* Left to wrap rather than clipped to a line: the deepest chains run five models (the
+            ICON-D2 branch over central Europe), and truncating would hide exactly the long-range
+            model the last days of the forecast come from. */}
+        <Text style={styles.modelHint}>{modelStack ?? MODEL_HINT_NO_LOCATION}</Text>
+      </Section>
+
+      <Section label="Extra Variables" info={() => setVarsInfo(true)}>
+        <View style={styles.varList}>
+          {varRows.map((row, idx) => {
+            const border = idx < varRows.length - 1 && styles.varRowBorder;
+            if (row.kind === 'subgroup') {
+              // Nothing under the heading is selectable when the model supplies none of it, which
+              // no current model does to air quality — CAMS is a separate forecast from the
+              // weather center. Handled anyway so the rule lives with the rows, not with the data.
+              const disabled = row.members.every((m) => m.vars.every((v) => unavail.includes(v)));
+              const open = openSubgroups.has(row.id);
+              const selected = row.members.filter((m) => activeValues.has(m.value)).length;
+              return (
+                <Pressable
+                  key={row.key}
+                  style={({ pressed }) => [
+                    styles.varRow, border, pressed && !disabled && styles.varRowPressed,
+                  ]}
+                  onPress={() => !disabled && onToggleSubgroup(row.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: open, disabled }}
+                  accessibilityLabel={`${row.label}, ${selected} of ${row.members.length} selected`}
+                >
+                  <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{row.label}</Text>
+                  <View style={styles.varRowTrailing}>
+                    {/* Only when something is on: a "0" against every other row's blank check
+                        column would read as a value rather than as an empty count. */}
+                    {selected > 0 && <Text style={styles.varCount}>{selected}</Text>}
+                    <MaterialCommunityIcons
+                      name={open ? 'chevron-up' : 'chevron-down'}
+                      size={20}
+                      color={palette.textTertiary}
+                    />
+                  </View>
+                </Pressable>
+              );
+            }
+            // A group is unavailable when the model can't supply any of its variables.
+            const disabled = row.group.vars.every((v) => unavail.includes(v));
+            const checked = groups.has(row.group.value) && !disabled;
+            return (
+              <Pressable
+                key={row.key}
+                style={({ pressed }) => [
+                  styles.varRow, row.indent && styles.varRowIndent, border,
+                  pressed && !disabled && styles.varRowPressed,
+                ]}
+                onPress={() => !disabled && onToggleGroup(row.group.value)}
+                accessibilityRole="switch"
+                accessibilityState={{ checked, disabled }}
+              >
+                <Text style={[styles.varLabel, disabled && styles.varLabelDim]}>{groupLabel(row.group, units)}</Text>
+                {/* The row stays pressable as well: the switch swallows its own touches, so the
+                    two never fire together, and the whole row remains the larger target. */}
+                <Switch
+                  {...SWITCH_PROPS}
+                  style={styles.switchAlign}
+                  value={checked}
+                  disabled={disabled}
+                  onValueChange={() => onToggleGroup(row.group.value)}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                />
+              </Pressable>
+            );
+          })}
+        </View>
+      </Section>
+
+      <Section label="Fill Priority" info={() => setPriorityInfo(true)}>
+        <SegmentedControl
+          {...SEGMENT_PROPS}
+          values={PRIORITIES.map((m) => m.label)}
+          selectedIndex={PRIORITIES.findIndex((m) => m.value === mode)}
+          onChange={(e) => onMode(PRIORITIES[e.nativeEvent.selectedSegmentIndex].value)}
+        />
+        <Text style={styles.modelHint}>{PRIORITIES.find((m) => m.value === mode)!.hint}</Text>
+      </Section>
+
+      <View style={styles.sectionEnd} />
+
+      <StepHeader title="Send the request" gap />
+
+      {/* The way out. Which device you carry decides how the request travels, so it sits with
+          the button it drives rather than up with the forecast's own options. */}
+      <Section label="Device" info={() => setDeviceInfo(true)}>
+        <SegmentedControl
+          {...SEGMENT_PROPS}
+          values={DEVICES.map((d) => d.label)}
+          selectedIndex={DEVICES.findIndex((d) => d.value === device)}
+          onChange={(e) => onDevice(DEVICES[e.nativeEvent.selectedSegmentIndex].value)}
+        />
+        {/* A switch rather than an On/Off segment: this is one setting being turned on, not a
+            choice between two things, and it is read far more often than it is changed. */}
+        {multiMessageShown && (
+          <View style={styles.switchRow}>
+            <View style={styles.switchText}>
+              <Text style={styles.switchLabel}>Multi-message forecast</Text>
+              <Text style={styles.switchHint}>Use multiple messages for more range and detail</Text>
+            </View>
+            <Switch
+              {...SWITCH_PROPS}
+              style={styles.switchAlign}
+              value={twoMessages}
+              onValueChange={onTwoMessagesChange}
+              accessibilityLabel="Multi-message forecast"
+              accessibilityHint="Use multiple messages for more range and detail"
+            />
+          </View>
+        )}
+      </Section>
+
+      <View style={styles.buttons}>
+        <ActionButton
+          icon={copied ? 'check' : deviceSpec.icon}
+          label={copied ? 'Copied' : deviceSpec.action}
+          onPress={onAction}
+          onCancel={onCancelAction}
+          disabled={actionDisabled}
+          busy={actionBusy}
+          variant={copied ? 'success' : 'primary'}
+        />
+      </View>
+
+      {/* Says why Get Forecast is greyed out, so it's shown only when that's the button on screen.
+          Keyed on `offline` alone, not on fetchDisabled — a button greyed for want of a location is
+          a different problem with a different fix. */}
+      {device === 'internet' && offline && <Text style={styles.actionNote}>{OFFLINE_MESSAGE}</Text>}
+      {/* The location half of that: a pinned point with nothing usable in the field greys every
+          device's button, and the input sits a few sections up by the time the button is on
+          screen. Both notes can show at once — offline and no location are separate problems,
+          each with its own fix. */}
+      {!following && !coordsValid && (
+        <Text style={styles.actionNote}>{NO_LOCATION_MESSAGE}</Text>
+      )}
+
+      <TouchableOpacity
+        style={styles.helpLink}
+        onPress={() => setHelp(true)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+      >
+        <Text style={styles.helpLinkText}>How do I get a forecast?</Text>
+      </TouchableOpacity>
+
+      <View style={styles.sectionEnd} />
+
+      <StepHeader title="View the forecast" gap />
+
+      {/* The way back in: pull the encoded reply straight off the clipboard. It opens the view
+          step because that is the flow — the reply this loads is to the request the send step
+          just put on its way. The button also carries the last press's outcome for a moment — a
+          green check for what it loaded, a red ✕ when the paste wouldn't decode — then goes back
+          to offering the paste. Clear sits beside it rather than appearing with a state, because
+          the state it is most needed in — a collection that will never decode — is the one where
+          a reader has least reason to expect it. */}
+      <View>
+        <View style={styles.pasteRow}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.pasteBtn,
+              outcome && (outcome.failed ? styles.pasteBtnFailed : styles.pasteBtnDone),
+              pressed && styles.btnPressed,
+            ]}
+            onPress={onPaste}
+            accessibilityRole="button"
+            accessibilityLabel={outcome?.label ?? 'Paste Forecast'}
+          >
+            {outcome && (
+              <MaterialCommunityIcons
+                name={outcome.failed ? 'close' : 'check'}
+                size={19}
+                color={outcome.failed ? palette.danger : palette.success}
+                style={styles.pasteBtnIcon}
+              />
+            )}
+            <Text
+              style={[
+                styles.pasteBtnText,
+                outcome && (outcome.failed ? styles.pasteBtnTextFailed : styles.pasteBtnTextDone),
+              ]}
+              numberOfLines={1}
+            >
+              {outcome?.label ?? 'Paste Forecast'}
+            </Text>
+          </Pressable>
+          <TouchableOpacity
+            style={styles.clearBtn}
+            onPress={onClearForecast}
+            accessibilityRole="button"
+            accessibilityLabel="Clear forecast"
+          >
+            <MaterialCommunityIcons name="close" size={22} color={palette.pageChipText} />
+          </TouchableOpacity>
+        </View>
+        {/* Both sit under the button, where what they ask for is another press of it. Only one can
+            be showing: a paste is either short of its remaining messages or wrong, never both. */}
+        {collecting && <CollectingBox {...collecting} />}
+        {error && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+      </View>
+
     </View>
   );
 });
