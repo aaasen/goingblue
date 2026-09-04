@@ -79,7 +79,9 @@ export default function SettingsScreen({
       {/* A Modal is its own window, so the provider at the app root is not above it in the native
           tree, and the safe-area view reads zero insets without a provider of its own here. */}
       <SafeAreaProvider>
-        <SafeAreaView style={styles.root}>
+        {/* No bottom edge: the frame runs to the screen edge so the scroll view fills it,
+            and the content padding below clears the home indicator. */}
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.root}>
           <View style={styles.header}>
             <Text style={styles.title}>Settings</Text>
             <TouchableOpacity
@@ -165,12 +167,13 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.pageRule,
   },
   title: { flex: 1, fontSize: 20, fontWeight: '700', color: palette.pageTitle },
   done: { fontSize: 16, fontWeight: '600', color: palette.pageLink, paddingLeft: 12 },
 
   scroll: { flex: 1 },
-  content: { padding: 16, paddingBottom: 40 },
+  content: { padding: 16, paddingBottom: 72 },
 
   heading: { fontSize: 13, fontWeight: '700', color: palette.pageLabelLight, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
   link: { color: palette.pageLink, textDecorationLine: 'underline' },
