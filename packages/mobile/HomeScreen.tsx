@@ -587,27 +587,28 @@ function pastMetaLabel(slot: Slot, msg: ForecastMessage | null): string {
   return `${requestTimeLabel(slot.requestedAt)} · ${model}${priority} · ${latLonLabel(msg)}`;
 }
 
-const OPTIONAL_VARIABLE_ICONS: { vars: readonly Variable[]; symbol: string; label: string }[] = [
-  { vars: [VAR.clouds], symbol: '☁️', label: 'Detailed clouds' },
-  { vars: WIND_LEVEL_VARS, symbol: '💨', label: 'Pressure-level winds' },
-  { vars: [VAR.freeze], symbol: '🌡️', label: 'Freezing level' },
-  { vars: [VAR.dewpoint], symbol: '💧', label: 'Humidity' },
-  { vars: [VAR.agreement], symbol: '🤝', label: 'Model agreement' },
-  // One icon for the whole air-quality block: which index a request picked is the meteogram's
+const OPTIONAL_VARIABLE_TAGS: { vars: readonly Variable[]; tag: string; label: string }[] = [
+  { vars: [VAR.clouds], tag: 'C', label: 'Detailed clouds' },
+  { vars: WIND_LEVEL_VARS, tag: 'W', label: 'Pressure-level winds' },
+  { vars: [VAR.freeze], tag: 'FL', label: 'Freezing level' },
+  { vars: [VAR.dewpoint], tag: 'H', label: 'Humidity' },
+  { vars: [VAR.precip], tag: 'P', label: 'Precipitation probability' },
+  { vars: [VAR.agreement], tag: 'A', label: 'Model agreement' },
+  // One tag for the whole air-quality block: which index a request picked is the meteogram's
   // business, and five near-identical chips on a cache row would say less than one.
   { vars: [VAR.aqi, VAR.aq_pm25, VAR.aq_o3, VAR.aq_pm10, VAR.aq_no2, VAR.aq_so2,
            VAR.aqi_eu, VAR.aqi_eu_pm25, VAR.aqi_eu_o3, VAR.aqi_eu_pm10, VAR.aqi_eu_no2, VAR.aqi_eu_so2],
-    symbol: '🌫️', label: 'Air quality' },
+    tag: 'AQI', label: 'Air quality' },
 ];
 
-function variableIconsFor(selected: ReadonlySet<Variable>) {
-  return OPTIONAL_VARIABLE_ICONS.filter(({ vars }) =>
+function variableTagsFor(selected: ReadonlySet<Variable>) {
+  return OPTIONAL_VARIABLE_TAGS.filter(({ vars }) =>
     vars.some((variable) => selected.has(variable)),
   );
 }
 
-function cacheVariableIcons(msg: ForecastMessage | null) {
-  return msg ? variableIconsFor(msg.vars) : [];
+function cacheVariableTags(msg: ForecastMessage | null) {
+  return msg ? variableTagsFor(msg.vars) : [];
 }
 
 interface PastForecastGroup {
@@ -1680,21 +1681,21 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, units, onLoad }: {
   slot: Slot; msg: ForecastMessage | null; isLoaded: boolean; units: UnitPrefs; onLoad: (encoded: string) => void;
 }) {
-  const variableIcons = cacheVariableIcons(msg);
+  const variableTags = cacheVariableTags(msg);
   return (
     <View style={[styles.pastItem, isLoaded && styles.pastItemLoaded]}>
       <View style={styles.pastDetails}>
         <Text style={styles.pastMeta} numberOfLines={2}>{pastMetaLabel(slot, msg)}</Text>
-        {variableIcons.length > 0 && (
+        {variableTags.length > 0 && (
           <View style={styles.variableRow}>
             <Text style={styles.variableLabel}>Variables:</Text>
-            {variableIcons.map((icon) => (
+            {variableTags.map((entry) => (
               <Text
-                key={icon.label}
-                style={styles.pastIcon}
-                accessibilityLabel={icon.label}
+                key={entry.label}
+                style={styles.pastTag}
+                accessibilityLabel={entry.label}
               >
-                {icon.symbol}
+                {entry.tag}
               </Text>
             ))}
           </View>
@@ -2398,7 +2399,20 @@ const styles = StyleSheet.create({
   pastItemLoaded: { backgroundColor: palette.selectedRow, borderRadius: 8, borderTopColor: palette.selectedRowBorder },
   pastDetails: { flex: 1, gap: 3 },
   pastMeta: { flexShrink: 1, fontSize: 13, color: palette.pageText, lineHeight: 18 },
-  pastIcon: { fontSize: 15, lineHeight: 19 },
+  pastTag: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '600',
+    fontFamily: 'Courier',
+    color: palette.pageLink,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: palette.pageLink,
+    backgroundColor: palette.linkTint,
+    overflow: 'hidden',
+  },
   pastBtns: { flexDirection: 'row', gap: 8 },
   pastLoadBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: palette.primary },
   pastLoadBtnDisabled: { backgroundColor: palette.primaryDisabled },
