@@ -667,7 +667,12 @@ interface Collecting {
 // unlabelled one doesn't: it gets a box per message pasted and a single open box after them,
 // which is the whole of what can honestly be shown about a reply whose length only decoding it
 // reveals. The reader keeps pasting until the forecast appears.
-function CollectingBox({ total, have }: Collecting) {
+//
+// Clear drops the collection. It lives here, with the boxes, because this is the one state
+// with no other way out: an unlabelled collection that has taken a stray message can never
+// decode, and pasting the first message again is ignored as a duplicate. Everything else the
+// paste button holds is replaced by the next paste.
+function CollectingBox({ total, have, onClear }: Collecting & { onClear: () => void }) {
   const boxes = total > 0
     ? Array.from({ length: total }, (_, i) => have.includes(i + 1))
     : [...have.map(() => true), false];
@@ -677,16 +682,27 @@ function CollectingBox({ total, have }: Collecting) {
   };
   return (
     <View style={styles.collectArea}>
-      <View style={styles.segmentRow}>
-        {boxes.map((received, i) => (
-          <View
-            key={i}
-            style={[styles.segment, received ? styles.segmentReceived : styles.segmentMissing]}
-            accessibilityLabel={boxLabel(i + 1, received)}
-          >
-            {received && <Text style={styles.segmentCheck}>✓</Text>}
-          </View>
-        ))}
+      <View style={styles.collectRow}>
+        <View style={styles.segmentRow}>
+          {boxes.map((received, i) => (
+            <View
+              key={i}
+              style={[styles.segment, received ? styles.segmentReceived : styles.segmentMissing]}
+              accessibilityLabel={boxLabel(i + 1, received)}
+            >
+              {received && <Text style={styles.segmentCheck}>✓</Text>}
+            </View>
+          ))}
+        </View>
+        <TouchableOpacity
+          style={styles.collectClearBtn}
+          onPress={onClear}
+          accessibilityRole="button"
+          accessibilityLabel="Clear"
+          accessibilityHint="Drops the messages pasted so far"
+        >
+          <Text style={styles.collectClearText}>Clear</Text>
+        </TouchableOpacity>
       </View>
       <Text style={styles.collectCaption}>
         {total > 0 ? 'Paste remaining forecast segments' : 'Paste remaining message parts'}
@@ -1998,9 +2014,9 @@ const RequestBuilder = memo(function RequestBuilder({
           step because that is the flow — the reply this loads is to the request the send step
           just put on its way. The button also carries the last press's outcome for a moment — a
           green check for what it loaded, a red ✕ when the paste wouldn't decode — then goes back
-          to offering the paste. Clear sits beside it rather than appearing with a state, because
-          the state it is most needed in — a collection that will never decode — is the one where
-          a reader has least reason to expect it. */}
+          to offering the paste. There is no clear button: a new paste replaces whatever is held,
+          and the one state that needs dropping by hand, a collection, carries its own Clear
+          (see CollectingBox). */}
       <View>
         <View style={styles.pasteRow}>
           <Pressable
@@ -2013,14 +2029,12 @@ const RequestBuilder = memo(function RequestBuilder({
             accessibilityRole="button"
             accessibilityLabel={outcome?.label ?? 'Paste Forecast'}
           >
-            {outcome && (
-              <MaterialCommunityIcons
-                name={outcome.failed ? 'close' : 'check'}
-                size={19}
-                color={outcome.failed ? palette.danger : palette.success}
-                style={styles.pasteBtnIcon}
-              />
-            )}
+            <MaterialCommunityIcons
+              name={outcome ? (outcome.failed ? 'close' : 'check') : 'content-paste'}
+              size={19}
+              color={outcome ? (outcome.failed ? palette.danger : palette.success) : palette.onPrimary}
+              style={styles.pasteBtnIcon}
+            />
             <Text
               style={[
                 styles.pasteBtnText,
@@ -2031,18 +2045,10 @@ const RequestBuilder = memo(function RequestBuilder({
               {outcome?.label ?? 'Paste Forecast'}
             </Text>
           </Pressable>
-          <TouchableOpacity
-            style={styles.clearBtn}
-            onPress={onClearForecast}
-            accessibilityRole="button"
-            accessibilityLabel="Clear forecast"
-          >
-            <MaterialCommunityIcons name="close" size={22} color={palette.pageChipText} />
-          </TouchableOpacity>
         </View>
         {/* Both sit under the button, where what they ask for is another press of it. Only one can
             be showing: a paste is either short of its remaining messages or wrong, never both. */}
-        {collecting && <CollectingBox {...collecting} />}
+        {collecting && <CollectingBox {...collecting} onClear={onClearForecast} />}
         {error && (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{error}</Text>
@@ -2317,8 +2323,7 @@ const styles = StyleSheet.create({
 
   pasteRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   // Same fills as the Copy inReach Message button (ActionButton above), so a confirmed press
-  // looks the same in both places. It takes the row's spare width, leaving Clear square —
-  // which is what keeps the outcome labels short enough not to truncate at one line.
+  // looks the same in both places.
   pasteBtn: {
     flex: 1,
     flexDirection: 'row',
@@ -2327,17 +2332,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: palette.primary,
-  },
-  // Quiet beside the paste button: it is always available but rarely the thing to press.
-  clearBtn: {
-    width: 50,
-    height: 50,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: palette.pageChip,
-    borderWidth: 1,
-    borderColor: palette.pageChipBorder,
   },
   pasteBtnDone: { backgroundColor: palette.successTint, borderWidth: 1, borderColor: palette.success },
   // The error box's own colours, so the button and the reason under it read as one thing.
@@ -2350,10 +2344,9 @@ const styles = StyleSheet.create({
   errorBox: { marginTop: 10, padding: 12, backgroundColor: palette.dangerTint, borderRadius: 10 },
   errorText: { color: palette.danger, fontSize: 14, lineHeight: 20 },
 
-  collectArea: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingTop: 10, gap: 10,
-  },
+  // The boxes and Clear on one row, the caption on its own line under the boxes.
+  collectArea: { paddingTop: 10, gap: 8 },
+  collectRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   compareRow: { marginTop: 10, marginHorizontal: 16 },
   segmentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   segment: {
@@ -2364,7 +2357,11 @@ const styles = StyleSheet.create({
   segmentReceived: { backgroundColor: palette.collectTint, borderColor: palette.collectBorder },
   segmentMissing: { backgroundColor: palette.pageChip, borderColor: palette.pageChipBorder, borderStyle: 'dashed' },
   segmentCheck: { fontSize: 13, lineHeight: 16, color: palette.collectCheck, fontWeight: '700' },
-  collectCaption: { flexShrink: 1, fontSize: 12, color: palette.pageTextSecondary, textAlign: 'right' },
+  collectCaption: { fontSize: 12, color: palette.pageTextSecondary },
+  // The past list's Load button in gray: the same shape at the row's right edge, quieter because
+  // it undoes rather than does.
+  collectClearBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: palette.pageButton },
+  collectClearText: { color: palette.pageButtonText, fontSize: 13, fontWeight: '600' },
 
   // The parked map must draw over what scrolls up beneath it once it stops.
   mapFloat: { zIndex: 1 },
