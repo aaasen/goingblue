@@ -1782,7 +1782,6 @@ const RequestBuilder = memo(function RequestBuilder({
 }) {
   return (
     <View style={styles.builderPad}>
-      <StepHeader title="Build a forecast request" />
       {/* No heading: the map is its own label. Edge to edge, since the negative inset cancels
           the builder's horizontal padding, so the map spans the screen rather than sitting
           inside the column. The coordinates sit under it as the map's readout and a way to
@@ -1929,12 +1928,8 @@ const RequestBuilder = memo(function RequestBuilder({
         <Text style={styles.modelHint}>{PRIORITIES.find((m) => m.value === mode)!.hint}</Text>
       </Section>
 
-      <View style={styles.sectionEnd} />
-
-      <StepHeader title="Send the request" gap />
-
-      {/* The way out. Which device you carry decides how the request travels, so it sits with
-          the button it drives rather than up with the forecast's own options. */}
+      {/* The way out. Which device you carry decides how the request travels, so it sits last,
+          with the button it drives. */}
       <Section label="Device" info={() => setDeviceInfo(true)}>
         <SegmentedControl
           {...SEGMENT_PROPS}
@@ -2059,8 +2054,8 @@ const RequestBuilder = memo(function RequestBuilder({
   );
 });
 
-// The flow's milestone headings — the same steps the getting-started sheet teaches, drawn on
-// the page itself so it reads as the loop it is, with the archive at the end. A dotted leader
+// The flow's milestone headings after the builder: viewing the forecast, then the archive,
+// drawn on the page itself so it reads as the loop it is. A dotted leader
 // runs from the end of the text to the row's edge at baseline height — the underline picks up
 // where the words stop — paired with the solid rule that closes each section's bottom. The
 // leader is an all-side dotted border clipped to its top edge: iOS draws borderStyle only when
@@ -2201,7 +2196,8 @@ const styles = StyleSheet.create({
   titleIcon: { width: 26, height: 26, borderRadius: 6 },
   // The splash wordmark's blue (see SetupScreen's brand), small.
   titleText: { fontSize: 20, fontWeight: '700', color: palette.brand },
-  builderPad: { padding: CONTENT_PAD },
+  // No top padding: the map opens the builder flush against the title rule.
+  builderPad: { padding: CONTENT_PAD, paddingTop: 0 },
 
   // Sheet frame, matching HelpScreen's. The safe area carries the status bar inset now that this
   // runs the full height, so the header only needs the same 12pt the app header uses.
@@ -2232,7 +2228,7 @@ const styles = StyleSheet.create({
   modalLink: { color: palette.link, textDecorationLine: 'underline' },
 
   // A milestone heading with a dotted leader to the row's edge. `stepHeaderGap` separates it
-  // from the divider that closes the section above; the first one needs none.
+  // from the divider that closes the section above.
   stepHeader: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 14 },
   stepHeaderGap: { marginTop: 20 },
   stepTitle: { fontSize: 18, fontWeight: '600', color: palette.pageHeading },
@@ -2288,7 +2284,7 @@ const styles = StyleSheet.create({
   // The row aligns on the text baseline, which an icon doesn't have; center it on the row instead.
   coordClear: { alignSelf: 'center', marginLeft: 8 },
   coordClearHidden: { opacity: 0 },
-  mapFullBleed: { marginTop: 10, marginHorizontal: -CONTENT_PAD },
+  mapFullBleed: { marginHorizontal: -CONTENT_PAD },
   modelHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 8 },
 
   // Full-width action, its icon and label on a single centered row.
