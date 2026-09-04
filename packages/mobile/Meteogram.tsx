@@ -1,10 +1,14 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Animated, Platform, View, Text as RNText, StyleSheet, FlatList, PanResponder, Pressable, useWindowDimensions } from 'react-native';
 import {
-  Canvas, DashPathEffect, Group, Paint, Rect, RoundedRect, Circle, Line, Path, Text,
-  LinearGradient, Skia, vec, matchFont, type SkFont, type SkPathBuilder,
-  FillType,
+  Canvas, DashPathEffect, Group, Line, Picture, Skia, vec, matchFont,
+  ClipOp, StrokeCap, StrokeJoin, FillType,
+  type SkCanvas, type SkFont, type SkPath, type SkPathBuilder, type SkPicture,
 } from '@shopify/react-native-skia';
+import {
+  compileGlyph, dashedStroke, drawText, fillPaint, fillRect, gradientPaint, linearGradient,
+  strokePaint, svgPath, textWidth, type CompiledGlyph,
+} from './skiaPaint';
 import {
   CARDINALS, RAIN_K, modelsFromMask, startDatetime, predictCenter, attributeHour,
   AQ_DOMINANT_US, AQ_DOMINANT_EU, WIND_LEVELS_HPA, quantWind, AGREEMENT_CENTERS,
@@ -17,7 +21,7 @@ import {
   GRID_STEP_HPA, type BandScale,
 } from './cloudBand';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { precipMark, weatherGlyph, wmoName, type MoonPhase, type Prim, type PrecipMarkKind } from './weatherGlyph';
+import { precipMark, weatherGlyph, wmoName, type MoonPhase, type PrecipMarkKind } from './weatherGlyph';
 import { pageInsets } from './insets';
 
 // ── Layout constants ───────────────────────────────────────────────────────
@@ -614,23 +618,21 @@ type Slot = { left: number; center: number; right: number };
 // A run of wind columns painted as one horizontal gradient rather than a rect per column: the
 // color is exact at each column's center, blends between centers, and holds flat out to the
 // run's outer edges. No vertical seams, and the shade under a number still means that number.
-function windRibbon(
-  key: string, run: number[], slotOf: (i: number) => Slot, colorAt: (i: number) => string,
+function drawWindRibbon(
+  canvas: SkCanvas, run: number[], slotOf: (i: number) => Slot, colorAt: (i: number) => string,
   top: number, height: number,
-): ReactNode {
+): void {
   const x0 = slotOf(run[0]).left;
   const x1 = slotOf(run[run.length - 1]).right;
   const span = x1 - x0;
   const first = colorAt(run[0]);
   const lastColor = colorAt(run[run.length - 1]);
-  return (
-    <Rect key={key} x={x0} y={top} width={span} height={height}>
-      <LinearGradient
-        start={vec(x0, top)} end={vec(x1, top)}
-        colors={[first, ...run.map(colorAt), lastColor]}
-        positions={[0, ...run.map((i) => (slotOf(i).center - x0) / span), 1]} />
-    </Rect>
+  const shader = linearGradient(
+    vec(x0, top), vec(x1, top),
+    [first, ...run.map(colorAt), lastColor],
+    [0, ...run.map((i) => (slotOf(i).center - x0) / span), 1],
   );
+  canvas.drawRect(Skia.XYWHRect(x0, top, span, height), gradientPaint(shader));
 }
 
 // ── Unit-aware formatting (no suffix; unit lives in the row label) ──────────--
@@ -1318,105 +1320,126 @@ interface Fonts {
   model: SkFont;
 }
 
-function centerText(key: string, text: string, cx: number, cy: number, font: SkFont, color: string): ReactNode {
-  if (!text) return null;
-  const w = font.getTextWidth(text);
-  return <Text key={key} x={cx - w / 2} y={baseline(cy, font.getSize())} text={text} font={font} color={color} />;
+// The font sizes the scene lays text out with, read once per face rather than per string.
+const fontSizes = new WeakMap<SkFont, number>();
+function fontSize(font: SkFont): number {
+  let size = fontSizes.get(font);
+  if (size == null) {
+    size = font.getSize();
+    fontSizes.set(font, size);
+  }
+  return size;
+}
+
+function drawCenterText(canvas: SkCanvas, text: string, cx: number, cy: number, font: SkFont, color: string): void {
+  if (!text) return;
+  const w = textWidth(font, text);
+  drawText(canvas, text, cx - w / 2, baseline(cy, fontSize(font)), font, color);
 }
 
 // Direction arrows, drawn as paths: Android's sans-serif has none of the arrow glyphs, and Skia
 // draws with a single typeface, no per-glyph fallback. Both point east and rotate to where the wind
 // blows toward: dir index 0 (N wind) points south = +90° in screen coords.
-const arrowRotation = (di: number) => ((di * 45 + 90) % 360) * (Math.PI / 180);
+const arrowDegrees = (di: number) => (di * 45 + 90) % 360;
+
+// Arrow geometry at the origin, built once per scale and stamped in place by a rotate about the
+// column's center.
+const dirArrowPaths = new Map<number, SkPath>();
+function dirArrowPath(scale: number): SkPath {
+  let path = dirArrowPaths.get(scale);
+  if (!path) {
+    const L = 14 * scale, SHAFT = 4.5 * scale, HEAD_L = 6.5 * scale, HEAD_W = 10.5 * scale;
+    const h = L / 2, s = SHAFT / 2, w = HEAD_W / 2;
+    const builder = Skia.PathBuilder.Make();
+    builder.moveTo(-h, -s);
+    builder.lineTo(h - HEAD_L, -s);
+    builder.lineTo(h - HEAD_L, -w);
+    builder.lineTo(h, 0);
+    builder.lineTo(h - HEAD_L, w);
+    builder.lineTo(h - HEAD_L, s);
+    builder.lineTo(-h, s);
+    builder.close();
+    path = builder.build();
+    dirArrowPaths.set(scale, path);
+  }
+  return path;
+}
+
+// A bare line-and-chevron variant for the pressure-level rows, drawn at scale 1.
+const thinDirArrowPath = (() => {
+  const L = 12, HEAD = 4;
+  const h = L / 2;
+  const builder = Skia.PathBuilder.Make();
+  builder.moveTo(-h, 0);
+  builder.lineTo(h, 0);
+  builder.moveTo(h - HEAD, -HEAD);
+  builder.lineTo(h, 0);
+  builder.lineTo(h - HEAD, HEAD);
+  return builder.build();
+})();
 
 // Chunky solid arrow (shaft + triangular head) for the surface direction row.
-function dirArrow(key: string, cx: number, cy: number, di: number, scale: number, color: string): ReactNode {
-  const L = 14 * scale, SHAFT = 4.5 * scale, HEAD_L = 6.5 * scale, HEAD_W = 10.5 * scale;
-  const h = L / 2, s = SHAFT / 2, w = HEAD_W / 2;
-  const path = Skia.PathBuilder.Make();
-  path.moveTo(cx - h, cy - s);
-  path.lineTo(cx + h - HEAD_L, cy - s);
-  path.lineTo(cx + h - HEAD_L, cy - w);
-  path.lineTo(cx + h, cy);
-  path.lineTo(cx + h - HEAD_L, cy + w);
-  path.lineTo(cx + h - HEAD_L, cy + s);
-  path.lineTo(cx - h, cy + s);
-  path.close();
-  return (
-    <Group key={key} transform={[{ rotate: arrowRotation(di) }]} origin={vec(cx, cy)}>
-      <Path path={path.build()} color={color} />
-    </Group>
-  );
+function drawDirArrow(canvas: SkCanvas, cx: number, cy: number, di: number, scale: number, color: string): void {
+  canvas.save();
+  canvas.translate(cx, cy);
+  canvas.rotate(arrowDegrees(di), 0, 0);
+  canvas.drawPath(dirArrowPath(scale), fillPaint(color));
+  canvas.restore();
 }
 
-// Hairline arrow (1px stroked shaft + open head) matching the ↗-style text glyph the aloft rows
-// drew before arrows became paths.
-function thinDirArrow(key: string, cx: number, cy: number, di: number, scale: number, color: string): ReactNode {
-  const L = 12 * scale, HEAD = 4 * scale;
-  const h = L / 2;
-  const path = Skia.PathBuilder.Make();
-  path.moveTo(cx - h, cy);
-  path.lineTo(cx + h, cy);
-  path.moveTo(cx + h - HEAD, cy - HEAD);
-  path.lineTo(cx + h, cy);
-  path.lineTo(cx + h - HEAD, cy + HEAD);
-  return (
-    <Group key={key} transform={[{ rotate: arrowRotation(di) }]} origin={vec(cx, cy)}>
-      <Path path={path.build()} style="stroke" strokeWidth={1} strokeCap="round" strokeJoin="round" color={color} />
-    </Group>
-  );
+// Hairline arrow (1px stroked shaft + open head) for the pressure-level rows.
+function drawThinDirArrow(canvas: SkCanvas, cx: number, cy: number, di: number, color: string): void {
+  canvas.save();
+  canvas.translate(cx, cy);
+  canvas.rotate(arrowDegrees(di), 0, 0);
+  canvas.drawPath(thinDirArrowPath, strokePaint(color, 1, StrokeCap.Round, StrokeJoin.Round));
+  canvas.restore();
 }
+
+// The three agreement marks, in badge-local coordinates.
+const agreementSymbols: Record<string, SkPath> = (() => {
+  const check = Skia.PathBuilder.Make();
+  check.moveTo(-3.9, 0.2);
+  check.lineTo(-1.2, 2.9);
+  check.lineTo(4.1, -2.9);
+  const x = Skia.PathBuilder.Make();
+  const a = 3.1;
+  x.moveTo(-a, -a);
+  x.lineTo(a, a);
+  x.moveTo(a, -a);
+  x.lineTo(-a, a);
+  const bang = Skia.PathBuilder.Make();
+  bang.moveTo(0, -4);
+  bang.lineTo(0, 0.8);
+  return { check: check.build(), x: x.build(), bang: bang.build() };
+})();
 
 // Model agreement badges (see AGREEMENT_BADGES): a filled circle wearing a white symbol, drawn
 // as paths like the direction arrows — the canvas has no icon font, and paths stay crisp at
 // row size.
-function agreementBadge(key: string, cx: number, cy: number, level: number): ReactNode {
+function drawAgreementBadge(canvas: SkCanvas, cx: number, cy: number, level: number): void {
   const { color, glyph } = AGREEMENT_BADGES[level];
-  const r = 8;
-  const sym = Skia.PathBuilder.Make();
-  if (glyph === 'check') {
-    sym.moveTo(cx - 3.9, cy + 0.2);
-    sym.lineTo(cx - 1.2, cy + 2.9);
-    sym.lineTo(cx + 4.1, cy - 2.9);
-  } else if (glyph === 'x') {
-    const a = 3.1;
-    sym.moveTo(cx - a, cy - a);
-    sym.lineTo(cx + a, cy + a);
-    sym.moveTo(cx + a, cy - a);
-    sym.lineTo(cx - a, cy + a);
-  } else {
-    sym.moveTo(cx, cy - 4);
-    sym.lineTo(cx, cy + 0.8);
-  }
-  return (
-    <Group key={key}>
-      <Circle cx={cx} cy={cy} r={r} color={color} />
-      <Path path={sym.build()} style="stroke" strokeWidth={2.2} strokeCap="round" strokeJoin="round"
-        color="#ffffff" />
-      {glyph === 'bang' && <Circle cx={cx} cy={cy + 3.9} r={1.2} color="#ffffff" />}
-    </Group>
-  );
+  canvas.drawCircle(cx, cy, 8, fillPaint(color));
+  canvas.save();
+  canvas.translate(cx, cy);
+  canvas.drawPath(agreementSymbols[glyph], strokePaint('#ffffff', 2.2, StrokeCap.Round, StrokeJoin.Round));
+  if (glyph === 'bang') canvas.drawCircle(0, 3.9, 1.2, fillPaint('#ffffff'));
+  canvas.restore();
 }
 
 // Hour label: the number carries the reading and the meridiem only disambiguates it, so AM/PM rides
 // a couple of sizes down. Both sit on the number's baseline, and the pair centers as one run.
-function centerHour(
-  key: string, parts: { num: string; suffix: string }, cx: number, cy: number,
+function drawCenterHour(
+  canvas: SkCanvas, parts: { num: string; suffix: string }, cx: number, cy: number,
   font: SkFont, suffixFont: SkFont, color: string,
-): ReactNode {
-  if (!parts.num) return null;
-  const numW = font.getTextWidth(parts.num);
-  const w = numW + (parts.suffix ? suffixFont.getTextWidth(parts.suffix) : 0);
+): void {
+  if (!parts.num) return;
+  const numW = textWidth(font, parts.num);
+  const w = numW + (parts.suffix ? textWidth(suffixFont, parts.suffix) : 0);
   const x = cx - w / 2;
-  const y = baseline(cy, font.getSize());
-  return (
-    <Group key={key}>
-      <Text x={x} y={y} text={parts.num} font={font} color={color} />
-      {parts.suffix
-        ? <Text x={x + numW} y={y} text={parts.suffix} font={suffixFont} color={color} />
-        : null}
-    </Group>
-  );
+  const y = baseline(cy, fontSize(font));
+  drawText(canvas, parts.num, x, y, font, color);
+  if (parts.suffix) drawText(canvas, parts.suffix, x + numW, y, suffixFont, color);
 }
 
 // Smooth polyline (quadratic through segment midpoints) appended to an existing path.
@@ -1437,97 +1460,64 @@ function glyphColor(color: string, onDark: boolean): string {
   return onDark && (color === '#ffffff' || color === C.night) ? SC.bg : color;
 }
 
-function glyphPrimitive(key: string, prim: Prim, onDark: boolean): ReactNode {
-  switch (prim.kind) {
-    case 'circle':
-      return <Circle key={key} cx={prim.cx} cy={prim.cy} r={prim.r} color={glyphColor(prim.fill, onDark)} />;
-    case 'line':
-      return (
-        <Line key={key} p1={vec(prim.x1, prim.y1)} p2={vec(prim.x2, prim.y2)}
-          color={prim.role === 'symbol-separator' ? '#000000' : glyphColor(prim.stroke, onDark)}
-          blendMode={prim.role === 'symbol-separator' ? 'clear' : undefined}
-          strokeWidth={prim.width} strokeCap={prim.cap ?? 'butt'} />
-      );
-    case 'rrect':
-      return (
-        <RoundedRect key={key} x={prim.x} y={prim.y} width={prim.w} height={prim.h} r={prim.r}
-          color={glyphColor(prim.fill, onDark)} />
-      );
-    case 'path': {
-      const clearsLayer = prim.role?.endsWith('separator') ?? false;
-      const parts: ReactNode[] = [];
-      if (prim.fill && prim.fill !== 'none') {
-        parts.push(
-          <Path key={`${key}-fill`} path={prim.d}
-            color={clearsLayer ? '#000000' : glyphColor(prim.fill, onDark)}
-            blendMode={clearsLayer ? 'clear' : undefined} />,
-        );
-      }
-      if (prim.stroke && prim.stroke !== 'none') {
-        parts.push(
-          <Path key={`${key}-stroke`} path={prim.d} style="stroke"
-            color={clearsLayer ? '#000000' : glyphColor(prim.stroke, onDark)}
-            blendMode={clearsLayer ? 'clear' : undefined} strokeWidth={prim.width ?? 1}
-            strokeCap={prim.cap ?? 'butt'} strokeJoin="round" />,
-        );
-      }
-      return <Group key={key}>{parts}</Group>;
-    }
+// The icon set's geometry resolved to Skia paths and paints once per appearance (code, ground,
+// moon phase, row height) at the origin, then stamped per column with a translate. A forecast
+// draws a dozen distinct glyphs a hundred times over; compiling each once is what makes the
+// clouds row cheap to record.
+const compiledGlyphs = new Map<string, CompiledGlyph>();
+function glyphFor(code: number, night: boolean, moonPhase: MoonPhase, h: number, onDark: boolean): CompiledGlyph {
+  const phase = night ? moonPhase : 'full';
+  const key = `${code}|${night}|${phase}|${h}|${onDark}`;
+  let glyph = compiledGlyphs.get(key);
+  if (!glyph) {
+    glyph = compileGlyph(
+      weatherGlyph(code, night, 0, 0, h, phase),
+      (color) => glyphColor(color, onDark),
+      Skia.XYWHRect(-GLYPH_NATURAL_W / 2, -4, GLYPH_NATURAL_W, h + 8),
+    );
+    compiledGlyphs.set(key, glyph);
   }
+  return glyph;
 }
 
-// Adapter from the shared renderer-independent icon geometry to the Skia scene graph.
-function cloudGlyph(
-  key: string,
-  cx: number,
-  top: number,
-  h: number,
-  code: number,
-  night = false,
-  moonPhase: MoonPhase = 'full',
-  onDark = false,
-): ReactNode {
-  const prims = weatherGlyph(code, night, cx, top, h, moonPhase);
-  const hasTransparentOutline = prims.some((prim) => 'role' in prim && prim.role?.endsWith('separator'));
-  return (
-    <Group key={key} layer={hasTransparentOutline ? <Paint /> : undefined}
-      clip={hasTransparentOutline ? { x: cx - GLYPH_NATURAL_W / 2, y: top - 4, width: GLYPH_NATURAL_W, height: h + 8 } : undefined}>
-      {prims.map((prim, i) => glyphPrimitive(`${key}-${i}`, prim, onDark))}
-    </Group>
+// Precip marks are few (the strip's stamps, the rail's two symbols), so they compile per call.
+function drawPrecipMark(canvas: SkCanvas, kind: PrecipMarkKind, cx: number, cy: number, h: number,
+  colors: { rain: string; snow: string; ground: string }, onDark: boolean): void {
+  const glyph = compileGlyph(
+    precipMark(kind, 0, 0, h, colors),
+    (color) => glyphColor(color, onDark),
+    Skia.XYWHRect(-h, -h, 2 * h, 2 * h),
   );
+  canvas.save();
+  canvas.translate(cx, cy);
+  glyph.draw(canvas);
+  canvas.restore();
+}
+
+// A weather glyph for one column: the compiled geometry translated so its center sits at
+// (cx, top + h / 2). Any scale is the caller's, applied around that center.
+function drawCloudGlyph(
+  canvas: SkCanvas, cx: number, top: number, h: number, code: number,
+  night = false, moonPhase: MoonPhase = 'full', onDark = false,
+): void {
+  canvas.save();
+  canvas.translate(cx, top);
+  glyphFor(code, night, moonPhase, h, onDark).draw(canvas);
+  canvas.restore();
 }
 
 // ── Overview strip (per-model minimap + scrubber) ────────────────────────--
 
 type Tile = { offset: number; width: number };
 
-// A coarse, screen-width overview whose x-axis is linear in time, so full days come out equal
-// width regardless of how many periods they hold. Each day column shows its weekday and date over
-// a summary weather glyph and its high, both riding a mini temperature silhouette, then a band of
-// drop and flake marks stamped across the wet stretches, a Beaufort wind ribbon, and a band of one
-// block per forecast period showing where the fill's resolution changes. A viewport window tracks the
-// meteogram's scroll on the native driver, and touching the strip scrubs the meteogram to that
-// position.
-// Memoized for the same reason as CanvasTile: every prop is identity-stable while a selection
-// changes, and an unchecked re-render rebuilds the strip's elements and repaints its canvas.
-const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps, units, now, width, viewportW, flatListRef, scrollX, fonts, paint }: {
-  // `dates` are absolute instants; `zoned` is the same series on the forecast point's wall clock,
-  // for the day columns and their labels.
-  periods: Period[]; dates: Date[]; zoned: Date[]; steps: number[]; units: UnitPrefs; now: number;
-  // Two different widths, and mixing them up puts the viewport window in the wrong place: `width`
-  // is how many pixels the strip DRAWS across (it spans the screen, rail included), `viewportW` is
-  // how much of the meteogram below is visible at once (the screen less the fixed rail). The
-  // window's position and the scrub target are answers about the viewport; everything the strip
-  // paints is in its own pixels.
-  width: number; viewportW: number;
-  flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value; fonts: Fonts;
-  // Epoch that remounts the canvas after this tab was hidden — see Meteogram.
-  paint: number;
-}) {
+// The strip's two recordings: the graph bands (temperature silhouette, precip marks, wind
+// ribbon, resolution blocks) and, over them, the per-day header. Split so the current-time marker
+// can be drawn between them.
+function recordStrip({ periods, zoned, steps, units, W, fonts, dayGroups }: {
+  periods: Period[]; zoned: Date[]; steps: number[]; units: UnitPrefs; W: number; fonts: Fonts;
+  dayGroups: DayGroup[];
+}): { bands: SkPicture; header: SkPicture } {
   const n = periods.length;
-  const W = width;
-  const VW = viewportW;
-  const dayGroups = buildDayGroups(zoned);
 
   // Time-linear columns: each period's width is proportional to the hours it spans. Full days come
   // out equal width whatever their resolution — a coarse far-term day is no wider than an hourly
@@ -1550,7 +1540,8 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
   };
 
   const graphTop = STRIP_HEAD_H;
-  const els: ReactNode[] = [];
+  const recorder = Skia.PictureRecorder();
+  const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, W, STRIP_H));
 
   // Temperature silhouette. It runs the full depth of the temperature zone, under the day's summary
   // glyph and high.
@@ -1575,16 +1566,14 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
     area.lineTo(W, silBottom);
     area.lineTo(timeX(0), silBottom);
     area.close();
-    els.push(
-      <Path key="strip-temp" path={area.build()}>
-        {/* The fill also eases off toward the top of the zone, where the white glyph and high are.
-            The warm end of the scale is its lightest, and at full strength white text on it fell to
-            ~2.7:1 — under the fade it holds ~5:1 while the curve's own shape still reads. */}
-        <LinearGradient start={vec(0, silTop)} end={vec(0, silBottom)}
-          colors={[tempColor(tMax, 0.5), tempColor((tMax + tMin) / 2, 0.68), tempColor(tMin, 0.85)]}
-          positions={[0, 0.5, 1]} />
-      </Path>,
-    );
+    // The fill also eases off toward the top of the zone, where the white glyph and high are.
+    // The warm end of the scale is its lightest, and at full strength white text on it fell to
+    // ~2.7:1 — under the fade it holds ~5:1 while the curve's own shape still reads.
+    canvas.drawPath(area.build(), gradientPaint(linearGradient(
+      vec(0, silTop), vec(0, silBottom),
+      [tempColor(tMax, 0.5), tempColor((tMax + tMin) / 2, 0.68), tempColor(tMin, 0.85)],
+      [0, 0.5, 1],
+    )));
   }
 
   // Precipitation marks. An area graph is illegible in a 13px band — a heavy day and a trace one
@@ -1617,8 +1606,7 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
     // strip scale is a few pixels of mush.
     const kind = rain && snow ? 'mix' : rain ? 'rain' : 'snow';
     const cx = timeX((from + to) / 2 - originHours);
-    els.push(...precipMark(kind, cx, markCy, STRIP_MARK_H, STRIP_MARK_COLORS)
-      .map((prim, pi) => glyphPrimitive(`sprecip${k}-${pi}`, prim, true)));
+    drawPrecipMark(canvas, kind, cx, markCy, STRIP_MARK_H, STRIP_MARK_COLORS, true);
   }
 
   // Wind ribbon, on the same blended scale as the main canvas, over a white panel. Gusts rather than
@@ -1631,18 +1619,15 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
   const stripWind = (i: number) => hasGust ? periods[i].wind_gust_kph : periods[i].wind_sfc_kph;
   const windPanel = Skia.RRectXY(
     Skia.XYWHRect(0, windTop, W, STRIP_WIND_H), STRIP_WIND_R, STRIP_WIND_R);
-  els.push(
-    <RoundedRect key="swind-bg" x={0} y={windTop} width={W} height={STRIP_WIND_H}
-      r={STRIP_WIND_R} color={SC.windBg} />,
-  );
+  canvas.drawRRect(windPanel, fillPaint(SC.windBg));
   // Clipped to the panel so a run reaching either end follows the eased corner instead of squaring
   // it off.
-  const windEls: ReactNode[] = [];
+  canvas.save();
+  canvas.clipRRect(windPanel, ClipOp.Intersect, true);
   valueRuns(n, (i) => stripWind(i) != null).forEach((run) => {
-    windEls.push(windRibbon(`swind${run[0]}`, run, slot,
-      (i) => windColor(stripWind(i)!), windTop, STRIP_WIND_H));
+    drawWindRibbon(canvas, run, slot, (i) => windColor(stripWind(i)!), windTop, STRIP_WIND_H);
   });
-  els.push(<Group key="swind" clip={windPanel}>{windEls}</Group>);
+  canvas.restore();
 
   // Resolution band along the very bottom: one block per period. On the time-linear axis a block's
   // width *is* its span, so the fill's shape reads directly — a dense run of slivers is the hourly
@@ -1650,24 +1635,14 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
   // the resolution steps down. One color throughout: the rung's own value is already legible from
   // the width, and tinting per resolution would compete with the graphs above.
   const resTop = STRIP_H - STRIP_RES_H;
+  const rung = fillPaint(SC.rung);
   for (let i = 0; i < n; i++) {
     const s = slot(i);
-    els.push(
-      <RoundedRect key={`sres${i}`} x={s.left} y={resTop + 1}
-        width={Math.max(1, s.right - s.left - STRIP_RES_GAP)} height={STRIP_RES_H - 2} r={1}
-        color={SC.rung} />,
-    );
+    canvas.drawRRect(Skia.RRectXY(
+      Skia.XYWHRect(s.left, resTop + 1, Math.max(1, s.right - s.left - STRIP_RES_GAP), STRIP_RES_H - 2), 1, 1,
+    ), rung);
   }
-
-  // Current-time marker across the graph bands, drawn before the per-day summaries so it passes
-  // behind the glyph and high rather than slicing through them.
-  const cur = dates.findIndex((date, i) => now >= date.getTime() && now < date.getTime() + steps[i] * 3600000);
-  if (cur >= 0) {
-    const s = slot(cur);
-    const frac = (now - dates[cur].getTime()) / (steps[cur] * 3600000);
-    const mx = s.left + frac * (s.right - s.left);
-    els.push(<Line key="strip-now" p1={vec(mx, graphTop)} p2={vec(mx, STRIP_H)} color="rgba(255,69,58,0.85)" strokeWidth={1} />);
-  }
+  const bands = recorder.finishRecordingAsPicture();
 
   // Per-day header: day of month in the calendar band, summary glyph and daily high
   // over the temperature silhouette. The day columns are read from the header text alone — no
@@ -1680,6 +1655,8 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
   // the day the user is most likely to be reading. The two axes agree on the order of the days and
   // roughly on where each one sits; they do not agree edge to edge, and a partial day's header sits
   // wider than its own graph data.
+  const headRecorder = Skia.PictureRecorder();
+  const head = headRecorder.beginRecording(Skia.XYWHRect(0, 0, W, STRIP_H));
   const headDayW = W / dayGroups.length;
   const glyphScale = STRIP_GLYPH_H / ROW_H.CLOUD;
   dayGroups.forEach((g, d) => {
@@ -1692,16 +1669,66 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
       if (t != null) hi = hi == null ? t : Math.max(hi, t);
     }
     // The glyph is drawn at its natural meteogram size, then scaled into the small header slot.
-    els.push(
-      <Group key={`gly${d}`} transform={[{ translateX: cx }, { translateY: STRIP_GLYPH_Y }, { scale: glyphScale }]}>
-        {cloudGlyph(`glyi${d}`, 0, 0, ROW_H.CLOUD, code, false, 'full', true)}
-      </Group>,
-    );
-    els.push(centerText(`sdm${d}`, String(g.date.getUTCDate()), cx, STRIP_DATE_Y + STRIP_DATE_H / 2, fonts.strip, SC.label));
+    head.save();
+    head.translate(cx, STRIP_GLYPH_Y);
+    head.scale(glyphScale, glyphScale);
+    drawCloudGlyph(head, 0, 0, ROW_H.CLOUD, code, false, 'full', true);
+    head.restore();
+    drawCenterText(head, String(g.date.getUTCDate()), cx, STRIP_DATE_Y + STRIP_DATE_H / 2, fonts.strip, SC.label);
     if (hi != null) {
-      els.push(centerText(`shi${d}`, fmtTemp(hi, units), cx, STRIP_TVAL_Y + STRIP_TVAL_H / 2, fonts.strip, SC.label));
+      drawCenterText(head, fmtTemp(hi, units), cx, STRIP_TVAL_Y + STRIP_TVAL_H / 2, fonts.strip, SC.label);
     }
   });
+  return { bands, header: headRecorder.finishRecordingAsPicture() };
+}
+
+// A coarse, screen-width overview whose x-axis is linear in time, so full days come out equal
+// width regardless of how many periods they hold. Each day column shows its weekday and date over
+// a summary weather glyph and its high, both riding a mini temperature silhouette, then a band of
+// drop and flake marks stamped across the wet stretches, a Beaufort wind ribbon, and a band of one
+// block per forecast period showing where the fill's resolution changes. A viewport window tracks the
+// meteogram's scroll on the native driver, and touching the strip scrubs the meteogram to that
+// position.
+// Memoized for the same reason as CanvasTile: every prop is identity-stable while a selection
+// changes, and an unchecked re-render repaints its canvas.
+const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps, units, now, width, viewportW, flatListRef, scrollX, fonts, paint }: {
+  // `dates` are absolute instants; `zoned` is the same series on the forecast point's wall clock,
+  // for the day columns and their labels.
+  periods: Period[]; dates: Date[]; zoned: Date[]; steps: number[]; units: UnitPrefs; now: number;
+  // Two different widths, and mixing them up puts the viewport window in the wrong place: `width`
+  // is how many pixels the strip DRAWS across (it spans the screen, rail included), `viewportW` is
+  // how much of the meteogram below is visible at once (the screen less the fixed rail). The
+  // window's position and the scrub target are answers about the viewport; everything the strip
+  // paints is in its own pixels.
+  width: number; viewportW: number;
+  flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value; fonts: Fonts;
+  // Epoch that remounts the canvas after this tab was hidden — see Meteogram.
+  paint: number;
+}) {
+  const n = periods.length;
+  const W = width;
+  const VW = viewportW;
+  const dayGroups = useMemo(() => buildDayGroups(zoned), [zoned]);
+
+  // The strip's drawing, recorded once per forecast and layout. The current-time marker is the
+  // one element that moves with the clock, so it stays out of the recording: it is drawn between
+  // the two pictures, behind the per-day summaries and over the graph bands.
+  const pictures = useMemo(
+    () => recordStrip({ periods, zoned, steps, units, W, fonts, dayGroups }),
+    [periods, zoned, steps, units, W, fonts, dayGroups],
+  );
+
+  const cum = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) cum[i + 1] = cum[i] + steps[i];
+  const pxPerHour = W / cum[n];
+  const timeX = (h: number) => h * pxPerHour;
+
+  const cur = dates.findIndex((date, i) => now >= date.getTime() && now < date.getTime() + steps[i] * 3600000);
+  let nowX: number | null = null;
+  if (cur >= 0) {
+    const frac = (now - dates[cur].getTime()) / (steps[cur] * 3600000);
+    nowX = timeX(cum[cur] + frac * steps[cur]);
+  }
 
   const contentW = n * CELL_W;
   const maxOffset = Math.max(0, contentW - VW);
@@ -1776,7 +1803,13 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps
   return (
     <View style={styles.overviewStrip} {...pan.panHandlers}>
       <View style={{ width: W, height: STRIP_H, overflow: 'hidden' }}>
-        <Canvas key={paint} style={{ width: W, height: STRIP_H }} pointerEvents="none">{els}</Canvas>
+        <Canvas key={paint} style={{ width: W, height: STRIP_H }} pointerEvents="none">
+          <Picture picture={pictures.bands} />
+          {nowX != null && (
+            <Line p1={vec(nowX, STRIP_HEAD_H)} p2={vec(nowX, STRIP_H)} color="rgba(255,69,58,0.85)" strokeWidth={1} />
+          )}
+          <Picture picture={pictures.header} />
+        </Canvas>
         <Animated.View pointerEvents="none"
           style={[styles.overviewWindowFill, { width: W, transform: [{ translateX: win.fillX }, { scaleX: win.fillScale }] }]} />
         <Animated.View pointerEvents="none"
@@ -1947,8 +1980,8 @@ const MARKER_ROWS = new Set<RowKind>(['clouds', 'temp', 'precip-chance', 'snow',
 // Scene quantities computed over the WHOLE forecast, whatever slice of it a tile draws: the
 // domains and scales that keep columns comparable across the window — a tile that fit its own
 // temperature range would disagree with its neighbor at the seam — plus the one piece of
-// geometry that is genuinely global, the cloud-band contours, a handful of path elements every
-// tile shares as-is (each tile's canvas clips them to its own bounds).
+// geometry that is genuinely global, the cloud-band contours, a drawing every tile records
+// as-is (each tile's picture clips it to its own bounds).
 interface SceneStatics {
   tMin: number; tMax: number; tempRowBottom: number; dews: (number | null)[];
   maxSnow: number; maxRain: number;
@@ -1958,7 +1991,8 @@ interface SceneStatics {
   // clock, so ModelCanvas splices it into the one tile it crosses (see markerIndex), and the
   // minute tick re-renders that tile alone.
   markerTop: number | undefined; markerBottom: number | undefined;
-  cloudBandEls: ReactNode[];
+  // Draws the cloud band's contours, gridlines and ground line, in scene coordinates.
+  drawCloudBand: (canvas: SkCanvas) => void;
   dominantSegs: Partial<Record<AqDominantKind, DominantSegment[]>>;
 }
 
@@ -2045,8 +2079,8 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
   // the row's height in buildRows follows the same count.
   //
   // Marching squares runs over the whole field, and its loops cross tiles freely — so the band
-  // is built HERE, once, into elements every tile includes and clips for itself.
-  const cloudBandEls: ReactNode[] = [];
+  // is built HERE, once, into a drawing every tile records and clips for itself.
+  const cloudBandOps: ((canvas: SkCanvas) => void)[] = [];
   let bandY = ROW_H.DATE;
   rows.forEach((row, ri) => {
     const top = bandY;
@@ -2107,8 +2141,9 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
         if (loopArea(mapped) < minLoopArea) continue;
         smoothClosed(path, mapped);
       }
-      cloudBandEls.push(<Path key={`cb${ri}-${threshold}`} path={path.build()}
-        color={rgb(CLOUD_BAND_INK, alpha)} />);
+      const contour = path.build();
+      const ink = fillPaint(rgb(CLOUD_BAND_INK, alpha));
+      cloudBandOps.push((canvas) => canvas.drawPath(contour, ink));
     }
 
     // Where the band stops short of the window (coarser periods follow), the rest of the row is
@@ -2122,17 +2157,13 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
     // crisply at the boundary, so the SCALE reads as ending while the CLOUD reads as passing out
     // of view.
     if (nCb < n) {
-      cloudBandEls.push(
-        <Rect key={`cbnone${ri}`} x={bandRight} y={top} width={width - bandRight}
-          height={row.height} color={C.divider} />,
-      );
-      cloudBandEls.push(
-        <Rect key={`cbfade${ri}`} x={bandRight - CELL_W / 2} y={top}
-          width={CELL_W / 2} height={row.height}>
-          <LinearGradient start={vec(bandRight - CELL_W / 2, 0)} end={vec(bandRight, 0)}
-            colors={['rgba(255,255,255,0)', '#ffffff']} />
-        </Rect>,
-      );
+      const fade = gradientPaint(linearGradient(
+        vec(bandRight - CELL_W / 2, 0), vec(bandRight, 0), ['rgba(255,255,255,0)', '#ffffff'], [0, 1]));
+      const fadeRect = Skia.XYWHRect(bandRight - CELL_W / 2, top, CELL_W / 2, row.height);
+      cloudBandOps.push((canvas) => {
+        fillRect(canvas, bandRight, top, width - bandRight, row.height, C.divider);
+        canvas.drawRect(fadeRect, fade);
+      });
     }
 
     // One gridline per wire level — the axis lists exactly what the message carries, and runs
@@ -2145,12 +2176,8 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
       // ground, the floor level against the row under it. The edges ARE those two rungs; the
       // rail's labels land on them, and the rungs between them are what needs a line of its own.
       if (hpa === scale.topHpa || hpa === scale.bottomHpa) continue;
-      cloudBandEls.push(
-        <Line key={`cbg${ri}-${hpa}`} p1={vec(0, yOfHpa(hpa))} p2={vec(bandRight, yOfHpa(hpa))}
-          color={C.grid} strokeWidth={1}>
-          <DashPathEffect intervals={[3, 4]} />
-        </Line>,
-      );
+      const y = yOfHpa(hpa);
+      cloudBandOps.push((canvas) => canvas.drawLine(0, y, bandRight, y, dashedStroke(C.grid, 1, [3, 4])));
     }
 
     // The ground: the forecast point's elevation, placed on the same pressure ladder as the cloud
@@ -2167,12 +2194,8 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
     const groundHpa = metersToPressure(elevation);
     if (elevation > 0 && groundHpa < scale.bottomHpa) {
       const groundY = yOfHpa(groundHpa);
-      cloudBandEls.push(
-        <Line key={`cbgnd${ri}`} p1={vec(0, groundY)} p2={vec(bandRight, groundY)}
-          color={C.groundLine} strokeWidth={1.25}>
-          <DashPathEffect intervals={[5, 4]} />
-        </Line>,
-      );
+      cloudBandOps.push((canvas) =>
+        canvas.drawLine(0, groundY, bandRight, groundY, dashedStroke(C.groundLine, 1.25, [5, 4])));
       // The altitude the line stands for, at its left end. The rail beside the canvas labels the
       // wire's levels and nothing else, so this reading has to travel with the line — which means
       // it scrolls away with the first day, like every other label drawn into the scene. That is
@@ -2181,40 +2204,43 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
       //
       // Above the line by preference, so the dashes underline it; below when the line runs too
       // near the top of the band for the text to fit over it (an elevation up near 300 hPa).
-      const size = fonts.small.getSize();
+      const size = fontSize(fonts.small);
       const cy = groundY - size - GROUND_LABEL_GAP >= top
         ? groundY - size / 2 - GROUND_LABEL_GAP
         : groundY + size / 2 + GROUND_LABEL_GAP;
-      cloudBandEls.push(
-        <Text key={`cbgndl${ri}`} x={GROUND_LABEL_X} y={baseline(cy, size)}
-          text={fmtElevation(elevation, units)} font={fonts.small} color={C.groundText} />,
-      );
+      const label = fmtElevation(elevation, units);
+      cloudBandOps.push((canvas) =>
+        drawText(canvas, label, GROUND_LABEL_X, baseline(cy, size), fonts.small, C.groundText));
     }
   });
 
   return {
     tMin, tMax, tempRowBottom, dews, maxSnow, maxRain, snowNorm, rainNorm, precipScale,
-    freezeValues, freezeBase, freezeSpan, markerTop, markerBottom, cloudBandEls, dominantSegs,
+    freezeValues, freezeBase, freezeSpan, markerTop, markerBottom, dominantSegs,
+    drawCloudBand: (canvas) => { for (const op of cloudBandOps) op(canvas); },
   };
 }
 
-// Skia scene for one TILE of a model's drawing: columns [from, to), in the drawing's own
-// absolute coordinates — the tile translates, it doesn't re-project. Building per tile is what
-// keeps a tile mount affordable: the full scene at maximum fill is tens of thousands of
-// elements, and a tile that mounts all of them to show its own sixteen columns pays for the
-// whole forecast on every mount — which is what made the first paint slow and left blank tiles
-// trailing a fast scroll.
+// The drawing for one TILE of a model's scene: columns [from, to), in the drawing's own absolute
+// coordinates — the tile translates, it doesn't re-project. Recording per tile is what keeps a
+// tile mount affordable: the full scene at maximum fill is tens of thousands of draw calls, and a
+// tile that records all of them to show its own sixteen columns pays for the whole forecast on
+// every mount.
 //
-// A slice carries its columns plus a margin: one column of per-column elements either side
+// A slice carries its columns plus a margin: one column of per-column drawing either side
 // (nothing a column draws reaches past its neighbor), one further POINT on every smooth curve
 // (slicePoints), and one gradient stop past each ribbon edge — each exactly what pins the
-// visible pixels to what the full-scene build drew there. Range geometry that is cheap and
-// awkward to split — full-width rules, section grounds, the shared cloud-band contours — is
-// included whole and clipped by the canvas.
+// visible pixels to what a full-scene recording would draw there. Range geometry that is cheap
+// and awkward to split — full-width rules, section grounds, the shared cloud-band contours — is
+// drawn whole and clipped by the picture's bounds.
 //
-// Pure, and called through useMemo: overlay-only state like the selected column must not
-// rebuild the elements, since any rebuild repaints every mounted tile.
-function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics, from, to }: {
+// Two canvases, because the current-time marker sits between them in the stacking order: `below`
+// takes the night shading, the area fills and the header, `above` the row content and the rules
+// drawn over it. The marker is the one element that moves with the clock, so it stays out of the
+// recordings and is drawn by the tile between the two pictures — the digits read over the line,
+// as they always have.
+function drawScene({ below, above, periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics, from, to }: {
+  below: SkCanvas; above: SkCanvas;
   // `dates` are absolute instants — what the sun answers to. `zoned` is the same series on the
   // forecast point's wall clock, which is what the hour and day labels read.
   periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: UnitPrefs; timeFormat: TimeFormat;
@@ -2224,12 +2250,11 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
   modelBands: ModelSegment[];
   statics: SceneStatics;
   from: number; to: number;
-}): { els: ReactNode[]; markerIndex: number } {
+}): void {
   const n = periods.length;
   const width = n * CELL_W;
   const colLeft = (i: number) => i * CELL_W;
   const colCenter = (i: number) => i * CELL_W + CELL_W / 2;
-  const els: ReactNode[] = [];
   // The slice's column range with its one-column margin, and the x-range strokes are kept for —
   // a hairline on the tile's very edge bleeds half a pixel in from the neighboring column.
   const c0 = Math.max(0, from - 1);
@@ -2253,8 +2278,8 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
   for (let i = c0; i < c1; i++) {
     const start = dates[i].getTime();
     const end = start + steps[i] * 3600000;
-    nightSegments(start, end, lat, lon).forEach(([fromFrac, toFrac], segment) => {
-      els.push(<Rect key={`night${i}-${segment}`} x={colLeft(i) + fromFrac * CELL_W} y={31} width={(toFrac - fromFrac) * CELL_W} height={nightBottom - 31} color={C.night} />);
+    nightSegments(start, end, lat, lon).forEach(([fromFrac, toFrac]) => {
+      fillRect(below, colLeft(i) + fromFrac * CELL_W, 31, (toFrac - fromFrac) * CELL_W, nightBottom - 31, C.night);
     });
   }
 
@@ -2299,12 +2324,8 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
     // against the night tint is a 1.01:1 difference, which is to say none at all.
     const edge = Skia.PathBuilder.Make();
     smoothTo(edge, points);
-    els.push(
-      <Group key={`${kind}-area`}>
-        <Path path={area.build()} color={color} />
-        <Path path={edge.build()} style="stroke" strokeWidth={PRECIP_EDGE_W} color={edgeColor} />
-      </Group>,
-    );
+    below.drawPath(area.build(), fillPaint(color));
+    below.drawPath(edge.build(), strokePaint(edgeColor, PRECIP_EDGE_W));
   });
 
   // Temperature is a background area behind the time, weather-code, and temperature rows. Its
@@ -2339,48 +2360,33 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
       // keeps its gradient by axis position and no longer fades — the edge is data.
       smoothTo(area, curve(dews, (i) => scaleTempY(plottedTemps[i]!) + TEMP_BAND_MIN_PX), true);
       area.close();
-      els.push(
-        <Path key="temperature-area" path={area.build()}>
-          <LinearGradient
-            start={vec(0, plotTop)}
-            end={vec(0, plotBottom)}
-            colors={[tempColor(tMax, TEMP_AREA_ALPHA), tempColor((tMax + tMin) / 2, TEMP_AREA_ALPHA), tempColor(tMin, TEMP_AREA_ALPHA)]}
-            positions={[0, 0.5, 1]}
-          />
-        </Path>,
-      );
+      below.drawPath(area.build(), gradientPaint(linearGradient(
+        vec(0, plotTop), vec(0, plotBottom),
+        [tempColor(tMax, TEMP_AREA_ALPHA), tempColor((tMax + tMin) / 2, TEMP_AREA_ALPHA), tempColor(tMin, TEMP_AREA_ALPHA)],
+        [0, 0.5, 1],
+      )));
     } else {
       area.lineTo(points[points.length - 1].x, tempRowBottom);
       area.lineTo(points[0].x, tempRowBottom);
       area.close();
       const rangeEnd = Math.max(0, Math.min(1, (plotBottom - plotTop) / (tempRowBottom - plotTop)));
-      els.push(
-        <Path key="temperature-area" path={area.build()}>
-          <LinearGradient
-            start={vec(0, plotTop)}
-            end={vec(0, tempRowBottom)}
-            colors={[tempColor(tMax, TEMP_AREA_ALPHA), tempColor((tMax + tMin) / 2, TEMP_AREA_ALPHA), tempColor(tMin, TEMP_AREA_ALPHA), 'rgba(255,255,255,0)']}
-            positions={[0, rangeEnd / 2, rangeEnd, 1]}
-          />
-        </Path>,
-      );
+      below.drawPath(area.build(), gradientPaint(linearGradient(
+        vec(0, plotTop), vec(0, tempRowBottom),
+        [tempColor(tMax, TEMP_AREA_ALPHA), tempColor((tMax + tMin) / 2, TEMP_AREA_ALPHA), tempColor(tMin, TEMP_AREA_ALPHA), 'rgba(255,255,255,0)'],
+        [0, rangeEnd / 2, rangeEnd, 1],
+      )));
     }
   }
 
   // 3. Date header. Hours occupy their own row. Each day label sticks to the visible left
   // edge while its columns are being scrolled, then yields to the following day.
   for (let i = c0; i < c1; i++) {
-    els.push(centerHour(`hour${i}`, hourParts(zoned[i], steps[i], timeFormat), colCenter(i), HOUR_LABEL_Y, fonts.hour, fonts.hourSuffix, C.hour));
+    drawCenterHour(below, hourParts(zoned[i], steps[i], timeFormat), colCenter(i), HOUR_LABEL_Y, fonts.hour, fonts.hourSuffix, C.hour);
   }
-  els.push(<Line key="date-row-rule" p1={vec(0, 31)} p2={vec(width, 31)} color={C.grid} strokeWidth={1} />);
-
-  // Where ModelCanvas splices the current-time marker into the one tile it crosses: over the
-  // areas and header, under the row content — the digits read over the line, as they always
-  // have. The marker is kept out of the slice so the minute tick re-renders one tile, not every
-  // mounted one.
-  const markerIndex = els.length;
+  below.drawLine(0, 31, width, 31, strokePaint(C.grid, 1));
 
   const { freezeValues, freezeBase, freezeSpan } = statics;
+  const hairline = strokePaint(C.divider, 1);
 
   // 4. Rows.
   let y = ROW_H.DATE;
@@ -2388,13 +2394,12 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
     const top = y;
     const mid = top + row.height / 2;
     y += row.height;
-
     // Section bands paint their ground here and are LABELLED outside the scene: the header names
     // the block every row under it belongs to, and a band that scrolled its own name away would
     // leave a bare gray stripe exactly when the reader most needs to know what they are looking
     // at. See SectionLabels.
     if (row.kind === 'section') {
-      els.push(<Rect key={`sec-bg${ri}`} x={0} y={top} width={width} height={row.height} color={C.section} />);
+      fillRect(above, 0, top, width, row.height, C.section);
       return;
     }
 
@@ -2403,19 +2408,13 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         for (let i = c0; i < c1; i++) {
           const midpoint = dates[i].getTime() + steps[i] * 1800000;
           const night = isNight(midpoint, lat, lon);
-          els.push(
-            <Group key={`clg${i}`} transform={[{ scale: GLYPH_SCALE }]} origin={vec(colCenter(i), mid)}>
-              {cloudGlyph(
-                `cl${i}`,
-                colCenter(i),
-                top,
-                row.height,
-                periods[i].weathercode,
-                night,
-                moonPhaseAt(midpoint),
-              )}
-            </Group>,
-          );
+          // The glyph's natural geometry, shrunk into its column about the cell's center.
+          above.save();
+          above.translate(colCenter(i), mid);
+          above.scale(GLYPH_SCALE, GLYPH_SCALE);
+          above.translate(0, -row.height / 2);
+          glyphFor(periods[i].weathercode, night, moonPhaseAt(midpoint), row.height, false).draw(above);
+          above.restore();
         }
         break;
 
@@ -2424,7 +2423,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           const t = periods[i].temp_c;
           if (t == null) continue;
           const tempText = fmtTemp(t, units);
-          els.push(centerText(`th${i}`, tempText, colCenter(i), top + TEMP_VALUE_Y, fonts.data, '#1c1c1e'));
+          drawCenterText(above, tempText, colCenter(i), top + TEMP_VALUE_Y, fonts.data, '#1c1c1e');
           // Feels-like under it, in the light face and the hour labels' grey: a caption to the
           // temperature's figure. Its DIGITS are centered on the temperature's digits, not the
           // whole string on the whole string — the degree sign is a different share of each
@@ -2436,12 +2435,11 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
             // Offset from a string's left edge to the center of its digits.
             const digitsMid = (font: SkFont, text: string) => {
               const sign = text.startsWith('-') ? '-' : '';
-              return font.getTextWidth(sign) + font.getTextWidth(text.slice(sign.length).replace('°', '')) / 2;
+              return textWidth(font, sign) + textWidth(font, text.slice(sign.length).replace('°', '')) / 2;
             };
-            const digitsCx = colCenter(i) - fonts.data.getTextWidth(tempText) / 2 + digitsMid(fonts.data, tempText);
+            const digitsCx = colCenter(i) - textWidth(fonts.data, tempText) / 2 + digitsMid(fonts.data, tempText);
             const feelsX = digitsCx - digitsMid(fonts.feels, feelsText);
-            els.push(<Text key={`fh${i}`} x={feelsX} y={baseline(top + FEELS_VALUE_Y, fonts.feels.getSize())}
-              text={feelsText} font={fonts.feels} color={C.hour} />);
+            drawText(above, feelsText, feelsX, baseline(top + FEELS_VALUE_Y, fontSize(fonts.feels)), fonts.feels, C.hour);
           }
         }
         break;
@@ -2463,7 +2461,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           if (x1 < xLo || x0 > xHi) return;
           // The whole run, not a slice of it: the dashes' phase runs from the path's start, so a
           // trimmed curve would break pattern at every tile seam. One stroked path per run is
-          // cheap; it is the per-column element walls this builder exists to avoid.
+          // cheap; it is the per-column work this builder exists to avoid.
           const points = [
             { x: x0, y: chanceY(periods[run[0]].precip!) },
             ...run.map((i) => ({ x: colCenter(i), y: chanceY(periods[i].precip!) })),
@@ -2471,12 +2469,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           ];
           const curve = Skia.PathBuilder.Make();
           smoothTo(curve, points);
-          els.push(
-            <Path key={`pc${ri}-${run[0]}`} path={curve.build()}
-              style="stroke" strokeWidth={1.25} color={C.chanceLine}>
-              <DashPathEffect intervals={[4, 3]} />
-            </Path>,
-          );
+          above.drawPath(curve.build(), dashedStroke(C.chanceLine, 1.25, [4, 3]));
         });
         break;
       }
@@ -2493,10 +2486,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           if (!(value > 0 && max > 0)) continue;
           const text = snow ? fmtSnow(value, units) : fmtRain(value, units);
           if (!text) continue;
-          els.push(centerText(
-            `${snow ? 'sv' : 'rv'}${i}`, text, colCenter(i), top + PRECIP_VALUE_Y,
-            fonts.small, snow ? C.snowInk : C.rainInk,
-          ));
+          drawCenterText(above, text, colCenter(i), top + PRECIP_VALUE_Y, fonts.small, snow ? C.snowInk : C.rainInk);
         }
         break;
 
@@ -2537,18 +2527,13 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           warm.close();
           const isotherm = Skia.PathBuilder.Make();
           smoothTo(isotherm, points);
-          els.push(
-            <Group key={`fzg${ri}-${run[0]}`}>
-              <Path path={cold.build()} color={C.freezeCold} />
-              <Path path={warm.build()} color={C.freezeWarm} />
-              <Path path={isotherm.build()} style="stroke" strokeWidth={1.25} color={C.freezeLine} />
-            </Group>,
-          );
+          above.drawPath(cold.build(), fillPaint(C.freezeCold));
+          above.drawPath(warm.build(), fillPaint(C.freezeWarm));
+          above.drawPath(isotherm.build(), strokePaint(C.freezeLine, 1.25));
         });
         for (let i = c0; i < c1; i++) {
           const txt = fmtFreeze(periods[i].freeze_m, units);
-          els.push(centerText(`fz${i}`, txt || '—', colCenter(i), mid, fonts.data,
-            txt ? '#1c1c1e' : C.nil));
+          drawCenterText(above, txt || '—', colCenter(i), mid, fonts.data, txt ? '#1c1c1e' : C.nil);
         }
         break;
       }
@@ -2586,22 +2571,16 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
             ...run.map((i) => humidityColor(rh(i), alpha)),
             humidityColor(rh(run[run.length - 1]), alpha),
           ];
-          els.push(
-            <Path key={`huw${ri}-${run[0]}`} path={wash.build()}>
-              <LinearGradient start={vec(x0, 0)} end={vec(x1, 0)} colors={ramp(0.28)} positions={positions} />
-            </Path>,
-            <Path key={`hu${ri}-${run[0]}`} path={curve.build()} style="stroke" strokeWidth={1.5}>
-              <LinearGradient start={vec(x0, 0)} end={vec(x1, 0)} colors={ramp(1)} positions={positions} />
-            </Path>,
-          );
+          above.drawPath(wash.build(), gradientPaint(linearGradient(vec(x0, 0), vec(x1, 0), ramp(0.28), positions)));
+          above.drawPath(curve.build(), gradientPaint(linearGradient(vec(x0, 0), vec(x1, 0), ramp(1), positions), 1.5));
         });
         break;
       }
 
       case 'cloud-band':
         // Contours, gridlines and the ground line are global geometry, built once in
-        // buildSceneStatics and shared by every tile — each canvas clips them to its own bounds.
-        els.push(...statics.cloudBandEls);
+        // buildSceneStatics and shared by every tile — each picture clips them to its own bounds.
+        statics.drawCloudBand(above);
         break;
 
       case 'wind-sfc': case 'wind-gust': case 'wind-aloft': {
@@ -2615,24 +2594,22 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         // A run trimmed to the slice, not the whole run: the ribbon blends linearly between
         // column centers, so a sub-run holding every center adjacent to the tile paints the
         // tile's pixels exactly — the flat hold it gains at its cut ends lies in the margin,
-        // where the canvas clips.
+        // where the picture is clipped.
         valueRuns(n, (i) => speedAt(i) != null).forEach((run) => {
           const sub = run.filter((i) => i >= c0 && i < c1);
           if (!sub.length) return;
-          els.push(windRibbon(
-            `wbg${ri}-${sub[0]}`, sub,
+          drawWindRibbon(above, sub,
             (i) => ({ left: colLeft(i), center: colCenter(i), right: colLeft(i) + CELL_W }),
-            (i) => windColor(speedAt(i)!), top, row.height,
-          ));
+            (i) => windColor(speedAt(i)!), top, row.height);
         });
         for (let i = c0; i < c1; i++) {
           const kph = speedAt(i);
           const cx = colCenter(i);
-          if (kph == null) { els.push(centerText(`w${ri}-${i}`, '—', cx, mid, fonts.wind, C.nil)); continue; }
+          if (kph == null) { drawCenterText(above, '—', cx, mid, fonts.wind, C.nil); continue; }
           const di = inlineArrow ? dirAt(i) : undefined;
           // Rows carrying an inline arrow split the (now shorter) row evenly above and below center.
-          els.push(centerText(`ws${ri}-${i}`, fmtWind(kph, units), cx, di != null ? mid - 6 : mid, fonts.wind, WIND_INK));
-          if (di != null) els.push(thinDirArrow(`wa${ri}-${i}`, cx, mid + 6, di, 1, WIND_INK));
+          drawCenterText(above, fmtWind(kph, units), cx, di != null ? mid - 6 : mid, fonts.wind, WIND_INK);
+          if (di != null) drawThinDirArrow(above, cx, mid + 6, di, WIND_INK);
         }
         break;
       }
@@ -2653,11 +2630,9 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           // Trimmed to the slice like the wind ribbon above, and exact for the same reason.
           const sub = run.filter((i) => i >= c0 && i < c1);
           if (!sub.length) return;
-          els.push(windRibbon(
-            `aqbg${ri}-${sub[0]}`, sub,
+          drawWindRibbon(above, sub,
             (i) => ({ left: colLeft(i), center: colCenter(i), right: colLeft(i) + CELL_W }),
-            (i) => aqBand(valueAt(i)!, scale).color, top, row.height,
-          ));
+            (i) => aqBand(valueAt(i)!, scale).color, top, row.height);
         });
         for (let i = c0; i < c1; i++) {
           const v = valueAt(i);
@@ -2667,8 +2642,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           // "not content" tone, as the cloud band's tail is, rather than left white beside the
           // category colors, where they would read as the cleanest category of all.
           if (v == null) {
-            els.push(<Rect key={`aq${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W}
-              height={row.height} color={C.divider} />);
+            fillRect(above, colLeft(i), top, CELL_W, row.height, C.divider);
             continue;
           }
           // The gradient is exact at the column's center, which is where the digits sit, so the
@@ -2676,14 +2650,12 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           // white for the whole row was tried and doesn't survive the light fills — on EPA's
           // yellow it is 1.07:1, and on the orange and the EU cyan barely better.
           const band = aqBand(v, scale);
-          els.push(centerText(`aq${ri}-${i}`, String(Math.round(v)), cx, mid, fonts.wind,
-            band.ink ?? bandInk(hexRgb(band.color))));
+          drawCenterText(above, String(Math.round(v)), cx, mid, fonts.wind, band.ink ?? bandInk(hexRgb(band.color)));
         }
         break;
       }
 
       case 'aqi-dominant': case 'aqi-eu-dominant': {
-        // Painted exactly like the headline row above it, from the HEADLINE's value — same
         // Left white on purpose. The row carries no measurement of its own — the AQI band above
         // it already says how bad the air is — so shading it in those same colours would read as
         // a second reading rather than as a caption on the first.
@@ -2698,10 +2670,9 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         // row above them, so the blank runs to the bottom of the block as one shape.
         for (let i = c0; i < c1; i++) {
           if (named.has(i)) continue;
-          els.push(<Rect key={`dm${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W}
-            height={row.height} color={C.divider} />);
+          fillRect(above, colLeft(i), top, CELL_W, row.height, C.divider);
         }
-        segs.forEach((sg, si) => {
+        segs.forEach((sg) => {
           if (colLeft(sg.end) < xLo || colLeft(sg.start) > xHi) return;
           const x0 = colLeft(sg.start), x1 = colLeft(sg.end);
           // |____| : a dotted rule on the text's own centre line, closed by a cap at each end of
@@ -2712,16 +2683,8 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
           // The label rides over the rule on a white plate, which is what keeps the dashes from
           // striking through it: the label moves with the scroll and the canvas can't follow it,
           // so the gap has to travel with the text rather than be cut into the line.
-          const y = mid;
-          els.push(
-            <Line key={`dmrule${ri}-${si}`} p1={vec(x0 + 1, y)} p2={vec(x1 - 1, y)}
-              color={C.date} strokeWidth={1} opacity={0.45}>
-              <DashPathEffect intervals={[1.5, 2.5]} />
-            </Line>,
-          );
-          for (const [xi, x] of [[0, x0 + 1], [1, x1 - 1]] as const)
-            els.push(<Line key={`dmcap${ri}-${si}-${xi}`}
-              p1={vec(x, y - 6)} p2={vec(x, y)} color={C.date} strokeWidth={1} opacity={0.45} />);
+          above.drawLine(x0 + 1, mid, x1 - 1, mid, dashedStroke(C.date, 1, [1.5, 2.5], DOMINANT_RULE_ALPHA));
+          for (const x of [x0 + 1, x1 - 1]) above.drawLine(x, mid - 6, x, mid, dominantCapPaint);
         });
         break;
       }
@@ -2730,7 +2693,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         for (let i = c0; i < c1; i++) {
           const di = periods[i].wind_sfc_dir;
           if (di == null) continue;
-          els.push(dirArrow(`wd${ri}-${i}`, colCenter(i), mid, di, 1, C.dirArrow));
+          drawDirArrow(above, colCenter(i), mid, di, 1, C.dirArrow);
         }
         break;
       }
@@ -2743,14 +2706,8 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         modelBands.forEach((band, bi) => {
           if (colLeft(band.end) < xLo || colLeft(band.start) > xHi) return;
           const x0 = colLeft(band.start);
-          els.push(
-            <Rect key={`mdl${ri}-${bi}`} x={x0} y={top} width={colLeft(band.end) - x0}
-              height={row.height} color={rgb(modelBandRgb(band.spec))} />,
-          );
-          if (bi > 0) {
-            els.push(<Line key={`mdlsep${ri}-${bi}`} p1={vec(x0, top)} p2={vec(x0, top + row.height)}
-              color="#ffffff" strokeWidth={1} />);
-          }
+          fillRect(above, x0, top, colLeft(band.end) - x0, row.height, rgb(modelBandRgb(band.spec)));
+          if (bi > 0) above.drawLine(x0, top, x0, top + row.height, strokePaint('#ffffff', 1));
         });
         break;
       }
@@ -2760,9 +2717,8 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         for (let i = c0; i < c1; i++) {
           const pct = periods[i][key] as number | undefined;
           const cx = colCenter(i);
-          if (pct == null) { els.push(centerText(`cc${ri}-${i}`, '—', cx, mid, fonts.data, C.nil)); continue; }
-          els.push(<Rect key={`ccbg${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W} height={row.height}
-            color={`rgba(130,130,130,${(pct / 100).toFixed(2)})`} />);
+          if (pct == null) { drawCenterText(above, '—', cx, mid, fonts.data, C.nil); continue; }
+          fillRect(above, colLeft(i), top, CELL_W, row.height, `rgba(130,130,130,${(pct / 100).toFixed(2)})`);
         }
         break;
       }
@@ -2775,17 +2731,15 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
         // A hairline between consecutive pair rows: badges float on bare paper, so without a
         // rule the three centers' rows read as one field of icons rather than three series.
         if (rows[ri - 1]?.kind === 'agreement') {
-          els.push(<Line key={`agrrule${ri}`} p1={vec(colLeft(c0), top)}
-            p2={vec(colLeft(c1 - 1) + CELL_W, top)} color={C.divider} strokeWidth={1} />);
+          above.drawLine(colLeft(c0), top, colLeft(c1 - 1) + CELL_W, top, hairline);
         }
         for (let i = c0; i < c1; i++) {
           const lv = periods[i].agreement?.[ci];
           if (lv == null) {
-            els.push(<Rect key={`agr${ri}-${i}`} x={colLeft(i)} y={top} width={CELL_W}
-              height={row.height} color={C.divider} />);
+            fillRect(above, colLeft(i), top, CELL_W, row.height, C.divider);
             continue;
           }
-          els.push(agreementBadge(`agr${ri}-${i}`, colCenter(i), mid, lv));
+          drawAgreementBadge(above, colCenter(i), mid, lv);
         }
         break;
       }
@@ -2807,12 +2761,10 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
     spanY += row.height;
   });
   if (spanY > spanTop) dividerSpans.push([spanTop, spanY]);
-  dayGroups.slice(1).forEach((group, i) => {
+  dayGroups.slice(1).forEach((group) => {
     const x = colLeft(group.start);
     if (x < xLo || x > xHi) return;
-    dividerSpans.forEach(([yFrom, yTo], s) => {
-      els.push(<Line key={`day-divider${i}-${s}`} p1={vec(x, yFrom)} p2={vec(x, yTo)} color={C.divider} strokeWidth={1} />);
-    });
+    dividerSpans.forEach(([yFrom, yTo]) => above.drawLine(x, yFrom, x, yTo, hairline));
   });
 
   // A rule on every seam inside the precip block — snow/rain, rain/chance, snow/chance — and one
@@ -2825,9 +2777,7 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
   // under them.
   let seamY = ROW_H.DATE;
   let prevWasPrecip = false;
-  const precipRule = (y: number) => els.push(
-    <Line key={`precip-seam${y}`} p1={vec(0, y)} p2={vec(width, y)} color={C.divider} strokeWidth={1} />,
-  );
+  const precipRule = (ruleY: number) => above.drawLine(0, ruleY, width, ruleY, hairline);
   rows.forEach((row) => {
     const isPrecip = PRECIP_BLOCK.has(row.kind);
     if (prevWasPrecip) precipRule(seamY);
@@ -2835,15 +2785,38 @@ function buildScene({ periods, rows, dates, zoned, steps, units, timeFormat, lat
     seamY += row.height;
   });
   if (prevWasPrecip) precipRule(seamY);
-  return { els, markerIndex };
 }
 
-// A single canvas tile, holding its own slice of the scene (buildScene) in the drawing's
+// The dominant-pollutant bracket's ink: the date grey at under half strength, so the rule reads
+// as a caption's underline rather than as another row boundary.
+const DOMINANT_RULE_ALPHA = 0.45;
+const dominantCapPaint = (() => {
+  const paint = strokePaint(C.date, 1).copy();
+  paint.setAlphaf(DOMINANT_RULE_ALPHA);
+  return paint;
+})();
+
+// The two recordings of one tile, split at the current-time marker (see drawScene). Recorded
+// in scene coordinates and clipped to the tile's columns plus the hairline margin, so the
+// picture holds exactly what the tile's canvas can show.
+interface TilePictures { below: SkPicture; above: SkPicture }
+
+function recordTile(tile: Tile, totalH: number, draw: (below: SkCanvas, above: SkCanvas, from: number, to: number) => void): TilePictures {
+  const bounds = Skia.XYWHRect(tile.offset - 1, 0, tile.width + 2, totalH);
+  const belowRecorder = Skia.PictureRecorder();
+  const aboveRecorder = Skia.PictureRecorder();
+  const below = belowRecorder.beginRecording(bounds);
+  const above = aboveRecorder.beginRecording(bounds);
+  draw(below, above, tile.offset / CELL_W, (tile.offset + tile.width) / CELL_W);
+  return { below: belowRecorder.finishRecordingAsPicture(), above: aboveRecorder.finishRecordingAsPicture() };
+}
+
+// A single canvas tile, holding its own recordings of the scene (recordTile) in the drawing's
 // absolute coordinates, shifted into place. Memoized so a ModelCanvas re-render (selection
 // moving, panel state, the minute tick moving the marker in another tile) repaints no tiles:
 // a Skia Canvas repaints on any React commit that reaches it.
-const CanvasTile = memo(function CanvasTile({ tile, els, totalH, paint, onPress }: {
-  tile: Tile; els: ReactNode[]; totalH: number; paint: number;
+const CanvasTile = memo(function CanvasTile({ tile, pictures, marker, totalH, paint, onPress }: {
+  tile: Tile; pictures: TilePictures; marker: ReactNode; totalH: number; paint: number;
   onPress: (locationX: number, tileOffset: number) => void;
 }) {
   return (
@@ -2852,7 +2825,11 @@ const CanvasTile = memo(function CanvasTile({ tile, els, totalH, paint, onPress 
     // the press.
     <Pressable onPress={(e) => onPress(e.nativeEvent.locationX, tile.offset)}>
       <Canvas key={paint} style={{ width: tile.width, height: totalH }}>
-        <Group transform={[{ translateX: -tile.offset }]}>{els}</Group>
+        <Group transform={[{ translateX: -tile.offset }]}>
+          <Picture picture={pictures.below} />
+          {marker}
+          <Picture picture={pictures.above} />
+        </Group>
       </Canvas>
     </Pressable>
   );
@@ -2894,6 +2871,21 @@ function legendCy(row: Row): number {
   return row.height / 2;
 }
 
+
+// The rail's precip mark, recorded once per row and shown through a one-node canvas.
+function PrecipMarkCanvas({ kind, top, paint }: { kind: PrecipMarkKind; top: number; paint: number }) {
+  const picture = useMemo(() => {
+    const recorder = Skia.PictureRecorder();
+    const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, LEGEND_W, LEGEND_ICON_H));
+    drawPrecipMark(canvas, kind, LEGEND_MARK_CX, LEGEND_ICON_H / 2, LEGEND_MARK_H, LEGEND_MARK_COLORS, false);
+    return recorder.finishRecordingAsPicture();
+  }, [kind]);
+  return (
+    <Canvas key={paint} style={[styles.legendMarks, { top }]}>
+      <Picture picture={picture} />
+    </Canvas>
+  );
+}
 
 /**
  * The unit rail: what each row is, written once and never scrolled away.
@@ -2986,12 +2978,7 @@ const RowLegend = memo(function RowLegend({ rows, units, bandLevels, elevation, 
     const stackTop = top + legendCy(row) - (iconH + textH) / 2;
 
     if (mark) {
-      els.push(
-        <Canvas key={`m${ri}-${paint}`} style={[styles.legendMarks, { top: stackTop }]}>
-          {precipMark(mark, LEGEND_MARK_CX, LEGEND_ICON_H / 2, LEGEND_MARK_H, LEGEND_MARK_COLORS)
-            .map((prim, i) => glyphPrimitive(`lm${ri}-${i}`, prim, false))}
-        </Canvas>,
-      );
+      els.push(<PrecipMarkCanvas key={`m${ri}`} kind={mark} top={stackTop} paint={paint} />);
     } else if (icons) {
       els.push(
         <View key={`i${ri}`} style={[styles.legendIcons, { top: stackTop, height: LEGEND_ICON_H }]}>
@@ -3241,21 +3228,47 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   const statics = useMemo(
     () => buildSceneStatics({ periods, rows, steps, elevation, units, fonts }),
     [periods, rows, steps, elevation, units, fonts]);
-  // One scene slice per tile, built eagerly — the build is cheap element allocation, and building
-  // them all up front costs about what the single full-scene build did. What it buys is the mount:
-  // a tile commits only its own columns instead of the whole forecast, which is what made the
-  // first paint slow and left blank tiles trailing a fast scroll.
-  const slices = useMemo(
-    () => tiles.map((tile) => buildScene({
-      periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics,
-      from: tile.offset / CELL_W, to: (tile.offset + tile.width) / CELL_W,
-    })),
-    [tiles, periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics],
-  );
+  // One recording per tile, made when the tile first mounts rather than all up front: a fresh
+  // forecast paints its first screen after recording the three tiles on it, not the whole
+  // window. The rest are recorded in idle time (the effect below), nearest the viewport first,
+  // so a scroll finds its tiles ready. The cache is remade whenever anything the drawing reads
+  // changes, which drops every old recording at once.
+  const scene = useMemo(() => {
+    const cache = new Map<number, TilePictures>();
+    const draw = (below: SkCanvas, above: SkCanvas, from: number, to: number) => drawScene({
+      below, above, periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics, from, to,
+    });
+    return {
+      has: (index: number) => cache.has(index),
+      get: (index: number): TilePictures => {
+        let pictures = cache.get(index);
+        if (!pictures) {
+          pictures = recordTile(tiles[index], totalH, draw);
+          cache.set(index, pictures);
+        }
+        return pictures;
+      },
+    };
+  }, [tiles, totalH, periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics]);
+  useEffect(() => {
+    const center = Math.floor((scrollOffsetRef.current + viewportW / 2) / CANVAS_TILE_W);
+    const order = tiles.map((_, i) => i).sort((a, b) => Math.abs(a - center) - Math.abs(b - center));
+    let k = 0;
+    let handle: number | null = null;
+    const step = () => {
+      handle = null;
+      while (k < order.length && scene.has(order[k])) k++;
+      if (k >= order.length) return;
+      scene.get(order[k++]);
+      handle = requestIdleCallback(step);
+    };
+    handle = requestIdleCallback(step);
+    return () => { if (handle != null) cancelIdleCallback(handle); };
+  }, [scene, tiles, viewportW]);
   // Current time, positioned proportionally within its period. It runs through the date/time
   // header and visual weather rows down to precip (statics.markerBottom). Built apart from the
-  // slices because it is the one element that moves with the clock: the minute tick makes a new
-  // marker, and only the tile it crosses re-renders.
+  // recordings because it is the one element that moves with the clock: the minute tick makes a
+  // new marker, and only the tile it crosses re-renders.
   const marker = useMemo(() => {
     const i = dates.findIndex((date, k) => now >= date.getTime() && now < date.getTime() + steps[k] * 3600000);
     if (i < 0 || statics.markerTop == null || statics.markerBottom == null) return null;
@@ -3271,17 +3284,6 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
       ),
     };
   }, [now, dates, steps, statics]);
-  // The marker spliced into the tile(s) it crosses, at the z-position the slice reserved for it
-  // (over the area fills, under the row content). Unaffected tiles keep their slice's array
-  // identity, so CanvasTile's memo holds for them.
-  const tileEls = useMemo(() => slices.map((slice, k) => {
-    if (marker == null) return slice.els;
-    const tile = tiles[k];
-    if (marker.x < tile.offset - 1 || marker.x > tile.offset + tile.width + 1) return slice.els;
-    const els = slice.els.slice();
-    els.splice(slice.markerIndex, 0, marker.el);
-    return els;
-  }), [slices, marker, tiles]);
   // Walked rather than measured from the bottom: the model row closes the weather rows, and the
   // air-quality block sits below it when the request asked for any of it.
   // Every dominant-pollutant row in this block: where it sits and the runs it labels. Walked
@@ -3325,9 +3327,12 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     const x = tileOffset + locationX;
     onSelectColumn(blockIndex, Math.min(periods.length - 1, Math.floor(x / CELL_W)));
   }, [onSelectColumn, blockIndex, periods.length]);
+  // The marker goes only to the tile it crosses; every other tile sees the same null across
+  // minute ticks, so its memo holds.
   const renderTile = useCallback(({ item: tile, index }: { item: Tile; index: number }) => (
-    <CanvasTile tile={tile} els={tileEls[index]} totalH={totalH} paint={paint} onPress={onPressTile} />
-  ), [tileEls, totalH, paint, onPressTile]);
+    <CanvasTile tile={tile} pictures={scene.get(index)} totalH={totalH} paint={paint} onPress={onPressTile}
+      marker={marker != null && marker.x >= tile.offset - 1 && marker.x <= tile.offset + tile.width + 1 ? marker.el : null} />
+  ), [scene, marker, totalH, paint, onPressTile]);
 
   // The selection overlay tracks the scroll on the native driver, but only the scroll: which column
   // it sits on is a discrete jump, so it rides a static `left` that commits with everything else
@@ -3796,6 +3801,25 @@ function glyphVariantAt(periods: Period[], dates: Date[], steps: number[], i: nu
   return { key: `${periods[i].weathercode}|${night}|${phase}`, code: periods[i].weathercode, night, phase };
 }
 
+// The panel's summary glyph, recorded once per appearance. Same convention as the clouds row:
+// the glyph centers on top + 58/2, scaled about the canvas center.
+function DetailGlyphCanvas({ code, night, phase, paint }: { code: number; night: boolean; phase: MoonPhase; paint: number }) {
+  const picture = useMemo(() => {
+    const recorder = Skia.PictureRecorder();
+    const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, 48, 48));
+    canvas.translate(24, 24);
+    canvas.scale(0.75, 0.75);
+    canvas.translate(-24, -24);
+    drawCloudGlyph(canvas, 24, -5, 58, code, night, phase);
+    return recorder.finishRecordingAsPicture();
+  }, [code, night, phase]);
+  return (
+    <Canvas key={paint} style={{ width: 48, height: 48 }}>
+      <Picture picture={picture} />
+    </Canvas>
+  );
+}
+
 function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColor, units, timeFormat, lat, lon, elevation, utcOffsetHours, paint, onClose }: {
   // `dates` are absolute — the glyph's day/night ground comes off the sun. `zoned` names the hours
   // on the forecast point's clock, matching the column the tap came from.
@@ -3976,13 +4000,7 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
         <View style={[styles.detailGlyphWrap, night && { backgroundColor: C.night }]}>
           {glyphVariants.map((variant) => (
             <View key={variant.key} style={[styles.detailGlyphLayer, variant.key !== activeGlyph.key && styles.detailGlyphHidden]}>
-              <Canvas key={paint} style={{ width: 48, height: 48 }}>
-                {/* Same convention as the clouds row: cloudGlyph centers on top + 58/2, scaled
-                    about the canvas center. */}
-                <Group transform={[{ scale: 0.75 }]} origin={vec(24, 24)}>
-                  {cloudGlyph(`dg-${variant.key}`, 24, -5, 58, variant.code, variant.night, variant.phase)}
-                </Group>
-              </Canvas>
+              <DetailGlyphCanvas code={variant.code} night={variant.night} phase={variant.phase} paint={paint} />
             </View>
           ))}
         </View>
