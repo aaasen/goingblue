@@ -3,7 +3,7 @@ import {
   ActivityIndicator, Alert, Linking, Modal, ScrollView, StyleSheet, Text,
   TouchableOpacity, View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import PreferenceRows from './PreferenceRows';
 import OfflineMapsScreen, { downloadedPacks } from './OfflineMapsScreen';
@@ -76,80 +76,84 @@ export default function SettingsScreen({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      <SafeAreaView style={styles.root}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Settings</Text>
-          <TouchableOpacity
-            onPress={onClose}
-            accessibilityRole="button"
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Text style={styles.done}>Done</Text>
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-          {/* Preferences */}
-          <Text style={styles.heading}>Preferences</Text>
-          <View style={styles.card}>
-            <PreferenceRows
-              units={units}
-              onUnitsChange={onUnitsChange}
-              detailed
-              timeFormat={timeFormat}
-              onTimeFormatChange={onTimeFormatChange}
-              aqiScale={aqiScale}
-              onAqiScaleChange={onAqiScaleChange}
-            />
-          </View>
-
-          {/* Offline maps: the door to the pack list. */}
-          <Text style={[styles.heading, { marginTop: 28 }]}>Offline maps</Text>
-          <View style={[styles.card, styles.listCard]}>
+      {/* A Modal is its own window, so the provider at the app root is not above it in the native
+          tree, and the safe-area view reads zero insets without a provider of its own here. */}
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.root}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Settings</Text>
             <TouchableOpacity
-              style={styles.listRow}
-              onPress={() => setOfflineMaps(true)}
-              activeOpacity={0.6}
+              onPress={onClose}
               accessibilityRole="button"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <View style={styles.listText}>
-                <Text style={styles.listTitle}>Manage downloads</Text>
-                <Text style={styles.listSubtitle}>{held.packs.length ? held.summary : 'None downloaded'}</Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={24} color={palette.textFaint} />
+              <Text style={styles.done}>Done</Text>
             </TouchableOpacity>
           </View>
-          <OfflineMapsScreen
-            visible={offlineMaps}
-            onClose={() => setOfflineMaps(false)}
-            downloaded={downloaded}
-            onDownload={downloadPack}
-            onRemove={removePack}
-          />
 
-          {/* Data */}
-          <Text style={[styles.heading, { marginTop: 28 }]}>Data</Text>
-          <Text style={styles.sectionNote}>
-            You can delete all of your data from Going Blue at any time.
-          </Text>
-          <TouchableOpacity
-            style={[styles.resetBtn, deleting && styles.resetBtnDisabled]}
-            onPress={confirmDelete}
-            disabled={deleting}
-            activeOpacity={0.7}
-          >
-            {deleting
-              ? <ActivityIndicator color={palette.destructive} />
-              : <Text style={styles.resetBtnText}>Delete my data</Text>}
-          </TouchableOpacity>
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+            {/* Preferences */}
+            <Text style={styles.heading}>Preferences</Text>
+            <View style={styles.card}>
+              <PreferenceRows
+                units={units}
+                onUnitsChange={onUnitsChange}
+                detailed
+                timeFormat={timeFormat}
+                onTimeFormatChange={onTimeFormatChange}
+                aqiScale={aqiScale}
+                onAqiScaleChange={onAqiScaleChange}
+              />
+            </View>
 
-          <Text style={styles.legalLinks}>
-            <Text style={styles.link} onPress={() => Linking.openURL(TERMS_URL)}>Terms &amp; Conditions</Text>
-            {'   ·   '}
-            <Text style={styles.link} onPress={() => Linking.openURL(PRIVACY_URL)}>Privacy Policy</Text>
-          </Text>
-        </ScrollView>
-      </SafeAreaView>
+            {/* Offline maps: the door to the pack list. */}
+            <Text style={[styles.heading, { marginTop: 28 }]}>Offline maps</Text>
+            <View style={[styles.card, styles.listCard]}>
+              <TouchableOpacity
+                style={styles.listRow}
+                onPress={() => setOfflineMaps(true)}
+                activeOpacity={0.6}
+                accessibilityRole="button"
+              >
+                <View style={styles.listText}>
+                  <Text style={styles.listTitle}>Manage downloads</Text>
+                  <Text style={styles.listSubtitle}>{held.packs.length ? held.summary : 'None downloaded'}</Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={24} color={palette.textFaint} />
+              </TouchableOpacity>
+            </View>
+            <OfflineMapsScreen
+              visible={offlineMaps}
+              onClose={() => setOfflineMaps(false)}
+              downloaded={downloaded}
+              onDownload={downloadPack}
+              onRemove={removePack}
+            />
+
+            {/* Data */}
+            <Text style={[styles.heading, { marginTop: 28 }]}>Data</Text>
+            <Text style={styles.sectionNote}>
+              You can delete all of your data from Going Blue at any time.
+            </Text>
+            <TouchableOpacity
+              style={[styles.resetBtn, deleting && styles.resetBtnDisabled]}
+              onPress={confirmDelete}
+              disabled={deleting}
+              activeOpacity={0.7}
+            >
+              {deleting
+                ? <ActivityIndicator color={palette.destructive} />
+                : <Text style={styles.resetBtnText}>Delete my data</Text>}
+            </TouchableOpacity>
+
+            <Text style={styles.legalLinks}>
+              <Text style={styles.link} onPress={() => Linking.openURL(TERMS_URL)}>Terms &amp; Conditions</Text>
+              {'   ·   '}
+              <Text style={styles.link} onPress={() => Linking.openURL(PRIVACY_URL)}>Privacy Policy</Text>
+            </Text>
+          </ScrollView>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }

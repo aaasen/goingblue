@@ -3,7 +3,7 @@ import {
   ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, Pressable,
   ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import * as Network from 'expo-network';
@@ -2048,21 +2048,25 @@ function InfoModal({ visible, title, onClose, children }: {
 }) {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      <SafeAreaView style={styles.sheet}>
-        <View style={styles.sheetHeader}>
-          <Text style={styles.sheetTitle}>{title}</Text>
-          <TouchableOpacity
-            onPress={onClose}
-            accessibilityRole="button"
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Text style={styles.sheetDone}>Done</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
-          {children}
-        </ScrollView>
-      </SafeAreaView>
+      {/* A Modal is its own window, so the provider at the app root is not above it in the native
+          tree, and the safe-area view reads zero insets without a provider of its own here. */}
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.sheet}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{title}</Text>
+            <TouchableOpacity
+              onPress={onClose}
+              accessibilityRole="button"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={styles.sheetDone}>Done</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
+            {children}
+          </ScrollView>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }

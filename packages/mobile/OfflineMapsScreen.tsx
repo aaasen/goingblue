@@ -3,7 +3,7 @@ import {
   ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, ScrollView, StyleSheet,
   Text, TextInput, TouchableOpacity, View, useWindowDimensions, type GestureResponderEvent,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { findPack, formatBytes, formatTallyBytes, searchPacks, tally, type Pack } from './catalog';
@@ -140,116 +140,120 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      <SafeAreaView style={styles.root}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Offline maps</Text>
-          <TouchableOpacity onPress={onClose} accessibilityRole="button" hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Text style={styles.done}>Done</Text>
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView
-          ref={scrollRef}
-          style={styles.scroll}
-          contentContainerStyle={[styles.content, bottomPad != null && { paddingBottom: bottomPad }]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-        >
-          <Text style={styles.intro}>
-            Going Blue comes with a low-resolution map of the world for displaying forecast location.
-            Download maps for higher resolution while offline.
-          </Text>
-
-          <Text style={styles.heading}>{heldBytes ? `Offline maps · ${formatBytes(heldBytes)}` : 'Offline maps'}</Text>
-          <View style={styles.card}>
-            {held.packs.map((pack, i) => (
-              <Row key={pack.id} title={pack.name} subtitle={packDetails(pack)} divider={i > 0} trailing={control(pack)} />
-            ))}
-            <Row
-              divider={held.packs.length > 0}
-              title="Tile cache"
-              subtitle={cacheBytes === undefined ? 'Measuring…'
-                : cacheBytes === null ? 'Size unavailable'
-                : cacheEmpty ? 'Empty'
-                : formatBytes(cacheBytes)}
-              trailing={
-                <TouchableOpacity
-                  onPress={confirmClearCache}
-                  disabled={clearing || cacheEmpty || cacheBytes == null}
-                  activeOpacity={0.6}
-                  accessibilityRole="button"
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  {clearing
-                    ? <ActivityIndicator color={palette.destructive} />
-                    : <Text style={[styles.clear, (cacheEmpty || cacheBytes == null) && styles.clearDisabled]}>Clear</Text>}
-                </TouchableOpacity>
-              }
-            />
+      {/* A Modal is its own window, so the provider at the app root is not above it in the native
+          tree, and the safe-area view reads zero insets without a provider of its own here. */}
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.root}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Offline maps</Text>
+            <TouchableOpacity onPress={onClose} accessibilityRole="button" hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.done}>Done</Text>
+            </TouchableOpacity>
           </View>
 
-          <Text style={[styles.heading, styles.headingGap]}>Download maps</Text>
-          <View style={styles.card}>
-            {here.kind === 'locating' && (
-              <Row title="Finding your location…" subtitle="" trailing={<ActivityIndicator color={palette.textTertiary} />} />
-            )}
-            {here.kind === 'off' && (
-              <Row
-                title="Use my location"
-                subtitle="Shows the maps for the state and country you're in"
-                trailing={<MaterialCommunityIcons name="crosshairs-gps" size={24} color={palette.link} />}
-                onPress={askAndLocate}
-              />
-            )}
-            {here.kind === 'failed' && (
-              <Row
-                title="Couldn’t get your location"
-                subtitle="Tap to try again"
-                trailing={<MaterialCommunityIcons name="refresh" size={24} color={palette.link} />}
-                onPress={askAndLocate}
-              />
-            )}
-            {here.kind === 'found' && here.packs.length === 0 && (
-              <Row title="No map pack here" subtitle="You're outside every region the packs cover" />
-            )}
-            {here.kind === 'found' && here.packs.map((pack, i) => (
-              <Row key={pack.id} title={pack.name} subtitle={packDetails(pack)} divider={i > 0} trailing={control(pack, false)} onPress={rowAction(pack)} />
-            ))}
-          </View>
+          <ScrollView
+            ref={scrollRef}
+            style={styles.scroll}
+            contentContainerStyle={[styles.content, bottomPad != null && { paddingBottom: bottomPad }]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+          >
+            <Text style={styles.intro}>
+              Going Blue comes with a low-resolution map of the world for displaying forecast location.
+              Download maps for higher resolution while offline.
+            </Text>
 
-          <View style={styles.searchGap} onLayout={(e) => { searchY.current = e.nativeEvent.layout.y; }} />
-          <View style={styles.search}>
-            <MaterialCommunityIcons name="magnify" size={20} color={palette.textTertiary} />
-            <TextInput
-              style={styles.searchInput}
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Country, state, or province"
-              placeholderTextColor={palette.textTertiary}
-              autoCapitalize="words"
-              autoCorrect={false}
-              onFocus={scrollToSearch}
-              onBlur={() => setSearching(false)}
-              clearButtonMode="while-editing"
-              returnKeyType="search"
-              accessibilityLabel="Search regions"
-            />
-          </View>
-          {query.trim().length > 0 && (
+            <Text style={styles.heading}>{heldBytes ? `Offline maps · ${formatBytes(heldBytes)}` : 'Offline maps'}</Text>
             <View style={styles.card}>
-              {results.length === 0 && <Row title="No regions match" subtitle="" />}
-              {results.map((pack, i) => (
+              {held.packs.map((pack, i) => (
+                <Row key={pack.id} title={pack.name} subtitle={packDetails(pack)} divider={i > 0} trailing={control(pack)} />
+              ))}
+              <Row
+                divider={held.packs.length > 0}
+                title="Tile cache"
+                subtitle={cacheBytes === undefined ? 'Measuring…'
+                  : cacheBytes === null ? 'Size unavailable'
+                  : cacheEmpty ? 'Empty'
+                  : formatBytes(cacheBytes)}
+                trailing={
+                  <TouchableOpacity
+                    onPress={confirmClearCache}
+                    disabled={clearing || cacheEmpty || cacheBytes == null}
+                    activeOpacity={0.6}
+                    accessibilityRole="button"
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    {clearing
+                      ? <ActivityIndicator color={palette.destructive} />
+                      : <Text style={[styles.clear, (cacheEmpty || cacheBytes == null) && styles.clearDisabled]}>Clear</Text>}
+                  </TouchableOpacity>
+                }
+              />
+            </View>
+
+            <Text style={[styles.heading, styles.headingGap]}>Download maps</Text>
+            <View style={styles.card}>
+              {here.kind === 'locating' && (
+                <Row title="Finding your location…" subtitle="" trailing={<ActivityIndicator color={palette.textTertiary} />} />
+              )}
+              {here.kind === 'off' && (
+                <Row
+                  title="Use my location"
+                  subtitle="Shows the maps for the state and country you're in"
+                  trailing={<MaterialCommunityIcons name="crosshairs-gps" size={24} color={palette.link} />}
+                  onPress={askAndLocate}
+                />
+              )}
+              {here.kind === 'failed' && (
+                <Row
+                  title="Couldn’t get your location"
+                  subtitle="Tap to try again"
+                  trailing={<MaterialCommunityIcons name="refresh" size={24} color={palette.link} />}
+                  onPress={askAndLocate}
+                />
+              )}
+              {here.kind === 'found' && here.packs.length === 0 && (
+                <Row title="No map pack here" subtitle="You're outside every region the packs cover" />
+              )}
+              {here.kind === 'found' && here.packs.map((pack, i) => (
                 <Row key={pack.id} title={pack.name} subtitle={packDetails(pack)} divider={i > 0} trailing={control(pack, false)} onPress={rowAction(pack)} />
               ))}
             </View>
-          )}
-          <Text style={styles.attribution}>
-            Map data © OpenStreetMap contributors, via Protomaps; place data from the Overture Maps
-            Foundation; terrain from Mapterhorn (Copernicus DEM); land cover from the Copernicus
-            Global Land Service; region boundaries from Natural Earth.
-          </Text>
-        </ScrollView>
-      </SafeAreaView>
+
+            <View style={styles.searchGap} onLayout={(e) => { searchY.current = e.nativeEvent.layout.y; }} />
+            <View style={styles.search}>
+              <MaterialCommunityIcons name="magnify" size={20} color={palette.textTertiary} />
+              <TextInput
+                style={styles.searchInput}
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Country, state, or province"
+                placeholderTextColor={palette.textTertiary}
+                autoCapitalize="words"
+                autoCorrect={false}
+                onFocus={scrollToSearch}
+                onBlur={() => setSearching(false)}
+                clearButtonMode="while-editing"
+                returnKeyType="search"
+                accessibilityLabel="Search regions"
+              />
+            </View>
+            {query.trim().length > 0 && (
+              <View style={styles.card}>
+                {results.length === 0 && <Row title="No regions match" subtitle="" />}
+                {results.map((pack, i) => (
+                  <Row key={pack.id} title={pack.name} subtitle={packDetails(pack)} divider={i > 0} trailing={control(pack, false)} onPress={rowAction(pack)} />
+                ))}
+              </View>
+            )}
+            <Text style={styles.attribution}>
+              Map data © OpenStreetMap contributors, via Protomaps; place data from the Overture Maps
+              Foundation; terrain from Mapterhorn (Copernicus DEM); land cover from the Copernicus
+              Global Land Service; region boundaries from Natural Earth.
+            </Text>
+          </ScrollView>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
