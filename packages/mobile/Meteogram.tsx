@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { Animated, Platform, View, Text as RNText, StyleSheet, FlatList, PanResponder, Pressable, useWindowDimensions } from 'react-native';
+import { Animated, AppState, Platform, View, Text as RNText, StyleSheet, FlatList, PanResponder, Pressable, useWindowDimensions } from 'react-native';
 import {
   Canvas, DashPathEffect, Group, Line, Picture, Skia, vec, matchFont,
   ClipOp, StrokeCap, StrokeJoin, FillType,
@@ -1513,10 +1513,12 @@ type Tile = { offset: number; width: number };
 // The strip's two recordings: the graph bands (temperature silhouette, precip marks, wind
 // ribbon, resolution blocks) and, over them, the per-day header. Split so the current-time marker
 // can be drawn between them.
+interface StripPictures { bands: SkPicture; header: SkPicture }
+
 function recordStrip({ periods, zoned, steps, units, W, fonts, dayGroups }: {
   periods: Period[]; zoned: Date[]; steps: number[]; units: UnitPrefs; W: number; fonts: Fonts;
   dayGroups: DayGroup[];
-}): { bands: SkPicture; header: SkPicture } {
+}): StripPictures {
   const n = periods.length;
 
   // Time-linear columns: each period's width is proportional to the hours it spans. Full days come
@@ -1691,32 +1693,27 @@ function recordStrip({ periods, zoned, steps, units, W, fonts, dayGroups }: {
 // position.
 // Memoized for the same reason as CanvasTile: every prop is identity-stable while a selection
 // changes, and an unchecked re-render repaints its canvas.
-const OverviewStrip = memo(function OverviewStrip({ periods, dates, zoned, steps, units, now, width, viewportW, flatListRef, scrollX, fonts, paint }: {
-  // `dates` are absolute instants; `zoned` is the same series on the forecast point's wall clock,
-  // for the day columns and their labels.
-  periods: Period[]; dates: Date[]; zoned: Date[]; steps: number[]; units: UnitPrefs; now: number;
+const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, now, width, viewportW, flatListRef, scrollX, pictures, paint }: {
+  // `dates` are absolute instants, for placing the current-time marker.
+  periods: Period[]; dates: Date[]; steps: number[]; now: number;
   // Two different widths, and mixing them up puts the viewport window in the wrong place: `width`
   // is how many pixels the strip DRAWS across (it spans the screen, rail included), `viewportW` is
   // how much of the meteogram below is visible at once (the screen less the fixed rail). The
   // window's position and the scrub target are answers about the viewport; everything the strip
   // paints is in its own pixels.
   width: number; viewportW: number;
-  flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value; fonts: Fonts;
+  flatListRef: RefObject<FlatList<Tile> | null>; scrollX: Animated.Value;
+  // The strip's drawing (recordStrip), recorded by ModelCanvas alongside the tiles. The
+  // current-time marker is the one element that moves with the clock, so it stays out of the
+  // recording: it is drawn between the two pictures, behind the per-day summaries and over the
+  // graph bands.
+  pictures: StripPictures;
   // Epoch that remounts the canvas after this tab was hidden — see Meteogram.
   paint: number;
 }) {
   const n = periods.length;
   const W = width;
   const VW = viewportW;
-  const dayGroups = useMemo(() => buildDayGroups(zoned), [zoned]);
-
-  // The strip's drawing, recorded once per forecast and layout. The current-time marker is the
-  // one element that moves with the clock, so it stays out of the recording: it is drawn between
-  // the two pictures, behind the per-day summaries and over the graph bands.
-  const pictures = useMemo(
-    () => recordStrip({ periods, zoned, steps, units, W, fonts, dayGroups }),
-    [periods, zoned, steps, units, W, fonts, dayGroups],
-  );
 
   const cum = new Float64Array(n + 1);
   for (let i = 0; i < n; i++) cum[i + 1] = cum[i] + steps[i];
@@ -2811,6 +2808,47 @@ function recordTile(tile: Tile, totalH: number, draw: (below: SkCanvas, above: S
   return { below: belowRecorder.finishRecordingAsPicture(), above: aboveRecorder.finishRecordingAsPicture() };
 }
 
+// Everything recorded for one block of one forecast: the whole-window statics, the strip, and
+// the tiles recorded so far. Kept for the last few forecasts, keyed by message content and
+// block, because the compare pills are used as A → B → A: without the cache each return
+// recomputed the statics and re-recorded the strip and every visible tile. The layout inputs
+// that aren't part of the message are checked on lookup — a units change or a rotation records
+// afresh under the same key.
+//
+// Pictures are resolution-independent and small next to a tile's own drawable: a full-fill
+// forecast comes to about 2MB per entry, so three entries stay under 6MB. The cache empties on a
+// memory warning all the same.
+interface SceneEntry {
+  units: UnitPrefs; timeFormat: TimeFormat; screenW: number; fonts: Fonts;
+  statics: SceneStatics; strip: StripPictures; tiles: Map<number, TilePictures>;
+}
+const SCENE_CACHE_SIZE = 3;
+const sceneCache = new Map<string, SceneEntry>();
+AppState.addEventListener('memoryWarning', () => sceneCache.clear());
+
+function sceneEntryFor(
+  key: string, layout: Pick<SceneEntry, 'units' | 'timeFormat' | 'screenW' | 'fonts'>,
+  make: () => Pick<SceneEntry, 'statics' | 'strip'>,
+): SceneEntry {
+  const hit = sceneCache.get(key);
+  if (hit && hit.units === layout.units && hit.timeFormat === layout.timeFormat
+    && hit.screenW === layout.screenW && hit.fonts === layout.fonts) {
+    // Re-inserted so the map's order is recency, which is what eviction reads.
+    sceneCache.delete(key);
+    sceneCache.set(key, hit);
+    return hit;
+  }
+  const entry: SceneEntry = { ...layout, ...make(), tiles: new Map() };
+  sceneCache.delete(key);
+  sceneCache.set(key, entry);
+  while (sceneCache.size > SCENE_CACHE_SIZE) {
+    const oldest = sceneCache.keys().next().value;
+    if (oldest == null) break;
+    sceneCache.delete(oldest);
+  }
+  return entry;
+}
+
 // A single canvas tile, holding its own recordings of the scene (recordTile) in the drawing's
 // absolute coordinates, shifted into place. Memoized so a ModelCanvas re-render (selection
 // moving, panel state, the minute tick moving the marker in another tile) repaints no tiles:
@@ -3053,7 +3091,7 @@ function comparableForecasts(a: ForecastMessage, b: ForecastMessage): boolean {
   return dLatKm * dLatKm + dLonKm * dLonKm <= 1;
 }
 
-function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, elevation, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint, scrollY, pinTop, msg }: {
+function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, elevation, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint, scrollY, pinTop, msg, sceneKey }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
   periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: UnitPrefs; timeFormat: TimeFormat; now: number; lat: number; lon: number; elevation: number; fonts: Fonts;
@@ -3070,6 +3108,8 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   // The decoded message this block renders. Only its identity is read here: a new message is a
   // newly loaded forecast, which starts reading from its first period.
   msg: ForecastMessage;
+  // The message's content, as the recorded-scene cache keys it — see sceneEntryFor.
+  sceneKey: string;
 }) {
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList<Tile>>(null);
@@ -3225,16 +3265,24 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
     () => modelSegments(dates, steps, predictCenter(center, lat, lon).models, attributionMs),
     [dates, steps, center, lat, lon, attributionMs],
   );
-  const statics = useMemo(
-    () => buildSceneStatics({ periods, rows, steps, elevation, units, fonts }),
-    [periods, rows, steps, elevation, units, fonts]);
+  // This block's recordings, from the cache when the same forecast was drawn recently (see
+  // sceneEntryFor). Everything the drawing reads besides the layout inputs derives from the
+  // message, so a hit under the same key and layout is the same drawing.
+  const entry = useMemo(
+    () => sceneEntryFor(`${sceneKey}#${blockIndex}`, { units, timeFormat, screenW, fonts }, () => ({
+      statics: buildSceneStatics({ periods, rows, steps, elevation, units, fonts }),
+      strip: recordStrip({ periods, zoned, steps, units, W: screenW, fonts, dayGroups }),
+    })),
+    [sceneKey, blockIndex, units, timeFormat, screenW, fonts, periods, rows, steps, elevation, zoned, dayGroups],
+  );
+  const statics = entry.statics;
   // One recording per tile, made when the tile first mounts rather than all up front: a fresh
   // forecast paints its first screen after recording the three tiles on it, not the whole
   // window. The rest are recorded in idle time (the effect below), nearest the viewport first,
-  // so a scroll finds its tiles ready. The cache is remade whenever anything the drawing reads
-  // changes, which drops every old recording at once.
+  // so a scroll finds its tiles ready. The recordings live on the cache entry, so a forecast
+  // drawn again within the last few finds its tiles already made.
   const scene = useMemo(() => {
-    const cache = new Map<number, TilePictures>();
+    const cache = entry.tiles;
     const draw = (below: SkCanvas, above: SkCanvas, from: number, to: number) => drawScene({
       below, above, periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics, from, to,
     });
@@ -3249,7 +3297,7 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
         return pictures;
       },
     };
-  }, [tiles, totalH, periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics]);
+  }, [entry, tiles, totalH, periods, rows, dates, zoned, steps, units, timeFormat, lat, lon, fonts, dayGroups, modelBands, statics]);
   useEffect(() => {
     const center = Math.floor((scrollOffsetRef.current + viewportW / 2) / CANVAS_TILE_W);
     const order = tiles.map((_, i) => i).sort((a, b) => Math.abs(a - center) - Math.abs(b - center));
@@ -3355,8 +3403,8 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
           bottom of the status bar; the parked map above it (HomeScreen) owns the band the clock
           sits on. */}
       <Animated.View style={[styles.stripFloat, pin && { transform: [{ translateY: pin.translateY }] }]}>
-        <OverviewStrip periods={periods} dates={dates} zoned={zoned} steps={steps} units={units} now={now}
-          width={screenW} viewportW={viewportW} flatListRef={flatListRef} scrollX={scrollX} fonts={fonts} paint={paint} />
+        <OverviewStrip periods={periods} dates={dates} steps={steps} now={now}
+          width={screenW} viewportW={viewportW} flatListRef={flatListRef} scrollX={scrollX} pictures={entry.strip} paint={paint} />
       </Animated.View>
       <View style={{ height: totalH }} onLayout={(e) => setStripH(e.nativeEvent.layout.y)}>
       {/* Everything that scrolls, inset past the rail. The overlays inside here are positioned in
@@ -3607,6 +3655,10 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY, onD
   // Memoized because `blocks` depends on it: a fresh array here would rebuild every block —
   // and with them every Skia scene — on each render, e.g. whenever the selection moves.
   const models = useMemo(() => modelsFromMask(msg.models_mask), [msg.models_mask]);
+  // What the recorded-scene cache keys a forecast by: its content, not its identity — the
+  // compare pills decode a fresh object each time, and a re-fetch of identical data is the same
+  // drawing. Stringifying a full-fill message costs under a millisecond.
+  const sceneKey = useMemo(() => JSON.stringify(msg), [msg]);
   const [now, setNow] = useState(Date.now());
   const [selection, setSelection] = useState<{ block: number; period: number } | null>(null);
 
@@ -3706,7 +3758,7 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY, onD
             blockIndex={bi}
             selected={sel?.block === bi ? sel.period : null}
             onSelectColumn={selectColumn} paint={paint}
-            scrollY={scrollY} msg={msg}
+            scrollY={scrollY} msg={msg} sceneKey={sceneKey}
             pinTop={selfY != null && blockTops[bi] != null ? selfY + blockTops[bi] : null} />
           {bi < blocks.length - 1 && <View style={styles.sep} />}
         </View>
