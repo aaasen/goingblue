@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import { dispatchForecast, extractUserToken, extractVersion, type DispatchResult } from "./dispatch.js";
 import { ping } from "./db.js";
 import { createAccount, accountExists, deleteAccount, recordRequest } from "./accounts.js";
-import { isValidToken, normalizeToken } from "@weather/protocol";
+import { isAppUserAgent, isValidToken, normalizeToken } from "@weather/protocol";
 import { twiml, validateTwilioSignature } from "./twilio.js";
 import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 
@@ -176,11 +176,14 @@ export async function health(c: Context) {
 // is consumer-initiated (the user opts in by texting a forecast request to the number), so this
 // records no consent and takes no body. Returns { token }.
 export async function createAccountRoute(c: Context) {
+  // Log whether the user agent matches the app. This will reject requests once v4 is fully rolled out.
+  const client = isAppUserAgent(c.req.header("User-Agent")) ? "app" : "other";
   try {
     const token = await createAccount();
+    log.info("account.create", { client });
     return c.json({ token });
   } catch (e) {
-    log.error("account.create_failed", { err: e });
+    log.error("account.create_failed", { client, err: e });
     return c.text("Could not create account", 503);
   }
 }

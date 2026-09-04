@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
-import { generateToken } from "@weather/protocol";
-import { forecast, sms } from "../src/routes.js";
-import { accountExists, recordRequest } from "../src/accounts.js";
+import { appUserAgent, generateToken } from "@weather/protocol";
+import { createAccountRoute, forecast, sms } from "../src/routes.js";
+import { accountExists, createAccount, recordRequest } from "../src/accounts.js";
+import { log } from "../src/log.js";
 
 // The account gate: a request whose token names no account is rejected before dispatch. The
 // accounts module is mocked so no Postgres is needed; the codec call is a stubbed fetch, so a
@@ -152,3 +153,42 @@ describe("trace propagation", () => {
   });
 });
 
+
+// How POST /account reads its caller. It is observe-only: nothing is rejected yet, so the
+// assertion that matters is that an account is still minted whatever the user agent says, and
+// that the log line carries the state a rejection rule will later be written against.
+describe("account creation client", () => {
+  const accounts = new Hono();
+  accounts.post("/account", createAccountRoute);
+  const mint = (ua?: string) =>
+    accounts.request("/account", { method: "POST", headers: ua ? { "User-Agent": ua } : undefined });
+
+  beforeEach(() => {
+    vi.mocked(createAccount).mockClear();
+    vi.mocked(createAccount).mockResolvedValue(TOKEN);
+  });
+
+  it.each([
+    ["app", appUserAgent("1.2.0")],
+    // What the scanners that minted 20 rows actually sent.
+    ["other", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"],
+    // Android's default, which identifies nothing and is why the app names itself explicitly.
+    ["other", "okhttp/4.12.0"],
+    ["other", undefined],
+  ] as const)("mints an account and logs client=%s", async (state, ua) => {
+    const info = vi.spyOn(log, "info").mockImplementation(() => {});
+    const resp = await mint(ua);
+    expect(resp.status).toBe(200);
+    expect(await resp.json()).toEqual({ token: TOKEN });
+    expect(info).toHaveBeenCalledWith("account.create", { client: state });
+    info.mockRestore();
+  });
+
+  // The version moves with every release, so only the leading name may be matched on.
+  it("accepts the app under any version", async () => {
+    const info = vi.spyOn(log, "info").mockImplementation(() => {});
+    await mint(appUserAgent("99.0.0"));
+    expect(info).toHaveBeenCalledWith("account.create", { client: "app" });
+    info.mockRestore();
+  });
+});

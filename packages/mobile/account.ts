@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { isValidToken, normalizeToken } from '@weather/protocol';
+import { appUserAgent, isValidToken, normalizeToken } from '@weather/protocol';
 
 // In a dev build on a physical device, `localhost` resolves to the phone itself, not the dev
 // machine, so the API is unreachable. Constants.expoConfig.hostUri carries the Metro dev-server
@@ -61,7 +61,10 @@ export async function deleteAccount(token: string): Promise<void> {
 // identifies the user for usage limits; messaging opt-in is consumer-initiated (the user opts
 // in by texting a forecast request to the number), so creating an account records no consent.
 export async function createAccount(): Promise<string> {
-  const resp = await fetch(`${API_BASE}/account`, { method: 'POST' });
+  const resp = await fetch(`${API_BASE}/account`, {
+    method: 'POST',
+    headers: { 'User-Agent': appUserAgent(Constants.expoConfig?.version ?? '0') },
+  });
   if (!resp.ok) throw new Error(`Account creation failed (${resp.status})`);
   const { token } = await resp.json();
   if (typeof token !== 'string' || !isValidToken(token)) {

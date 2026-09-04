@@ -7,6 +7,7 @@ export * from "./version.js";
 export * from "./entropy.js";
 export * from "./rans.js";
 export * from "./token.js";
+export * from "./client.js";
 export * from "./model.js";
 export * from "./attribution.js";
 export * from "./layout.js";
