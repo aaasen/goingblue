@@ -28,7 +28,7 @@ import {
   prunePastForecasts, replyParts, type Slot,
 } from './cache';
 import LocationMap from './LocationMap';
-import Meteogram, { PINNED_STACK_H } from './Meteogram';
+import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
 import HelpScreen from './HelpScreen';
 import { MODELS, modelLabelFromMask } from './models';
 import { DEVICES, deviceCode, type Device } from './devices';
@@ -813,6 +813,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const { width: winW, height: winH } = useWindowDimensions();
   const { top: topInset, side: sideInset } = pageInsets(winW, winH);
   const scrollRef = useRef<ScrollView>(null);
+  // Lets the overview strip hold the page still while it is scrubbed (see OverviewStrip). Set on
+  // the native view directly: a prop would re-render this whole screen on every touch.
+  const pageScroll = useMemo<PageScroll>(() => ({
+    setScrollEnabled: (enabled) => scrollRef.current?.setNativeProps({ scrollEnabled: enabled }),
+  }), []);
   const metaY = useRef<number | null>(null);
   const pendingScroll = useRef(false);
   // Set by a compare-pill tap: the reader is already looking at the meteogram, so the decode
@@ -1555,7 +1560,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
           {/* Forecast meteogram. Nothing hides this screen any more, so it is always active — the
               prop still exists for the repaint-after-hide machinery it drives inside. */}
-          <Meteogram msg={decoded} units={units} timeFormat={timeFormat} active scrollY={scrollY} onDetailHeight={setDetailH} />
+          <Meteogram msg={decoded} units={units} timeFormat={timeFormat} active scrollY={scrollY} onDetailHeight={setDetailH} pageScroll={pageScroll} />
 
           {/* Compare selector: one segment per center holding a comparable cached forecast
               (see compareOptions), the same system control the request builder's selectors

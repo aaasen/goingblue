@@ -1517,6 +1517,10 @@ function drawCloudGlyph(
 
 // ── Overview strip (per-model minimap + scrubber) ────────────────────────--
 
+// The page's vertical scroll, as the strip needs it: a switch to hold it still while a scrub is
+// in progress. HomeScreen builds one over its ScrollView.
+export type PageScroll = { setScrollEnabled: (enabled: boolean) => void };
+
 type Tile = { offset: number; width: number };
 
 // The strip's two recordings: the graph bands (temperature silhouette, precip marks, wind
@@ -1702,7 +1706,7 @@ function recordStrip({ periods, zoned, steps, units, W, fonts, dayGroups }: {
 // position.
 // Memoized for the same reason as CanvasTile: every prop is identity-stable while a selection
 // changes, and an unchecked re-render repaints its canvas.
-const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, now, width, viewportW, flatListRef, scrollX, pictures, paint }: {
+const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, now, width, viewportW, flatListRef, scrollX, pictures, paint, pageScroll }: {
   // `dates` are absolute instants, for placing the current-time marker.
   periods: Period[]; dates: Date[]; steps: number[]; now: number;
   // Two different widths, and mixing them up puts the viewport window in the wrong place: `width`
@@ -1719,6 +1723,7 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, now, 
   pictures: StripPictures;
   // Epoch that remounts the canvas after this tab was hidden — see Meteogram.
   paint: number;
+  pageScroll?: PageScroll;
 }) {
   const n = periods.length;
   const W = width;
@@ -1762,14 +1767,30 @@ const OverviewStrip = memo(function OverviewStrip({ periods, dates, steps, now, 
     const offset = Math.max(0, Math.min(maxOffset, t * CELL_W - VW / 2));
     flatListRef.current?.scrollToOffset({ offset, animated: false });
   };
+  // A scrub owns the touch outright: only its horizontal position matters, and the page must not
+  // scroll under it. Holding the responder is enough on Android, but the page's UIScrollView keeps
+  // tracking a touch the strip has claimed, so the page's scrolling is switched off for the
+  // duration of the gesture through the handle HomeScreen passes down.
+  //
+  // The finger is placed by pageX against the strip's own page x, captured at touch-down.
+  // locationX is relative to the view under the finger, which on Android is whatever the finger
+  // has wandered over rather than the responder, so it changes origin as a scrub strays below
+  // the strip.
+  const stripPageX = useRef(0);
   const pan = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderTerminationRequest: () => false,
-    onPanResponderGrant: (e) => scrub(e.nativeEvent.locationX),
-    onPanResponderMove: (e) => scrub(e.nativeEvent.locationX),
+    onPanResponderGrant: (e) => {
+      pageScroll?.setScrollEnabled(false);
+      stripPageX.current = e.nativeEvent.pageX - e.nativeEvent.locationX;
+      scrub(e.nativeEvent.locationX);
+    },
+    onPanResponderMove: (e) => scrub(e.nativeEvent.pageX - stripPageX.current),
+    onPanResponderRelease: () => pageScroll?.setScrollEnabled(true),
+    onPanResponderTerminate: () => pageScroll?.setScrollEnabled(true),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [steps, maxOffset, W, VW]);
+  }), [steps, maxOffset, W, VW, pageScroll]);
 
   // The main canvas scrolls by equal-width period columns while the strip is linear in time, so
   // map BOTH viewport edges through the resolution boundaries — piecewise-linear, on the native
@@ -3166,7 +3187,7 @@ function comparableForecasts(a: ForecastMessage, b: ForecastMessage): boolean {
   return dLatKm * dLatKm + dLonKm * dLonKm <= 1;
 }
 
-function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, elevation, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint, scrollY, pinTop, msg, sceneKey }: {
+function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, now, lat, lon, elevation, fonts, center, attributionMs, blockIndex, selected, onSelectColumn, paint, scrollY, pinTop, msg, sceneKey, pageScroll }: {
   // `steps` is each period's span in hours — the fill mixes resolutions within one message.
   // Columns stay equal-width; the span drives labels and shading.
   periods: Period[]; rows: Row[]; dates: Date[]; zoned: Date[]; steps: number[]; units: UnitPrefs; timeFormat: TimeFormat; now: number; lat: number; lon: number; elevation: number; fonts: Fonts;
@@ -3180,6 +3201,7 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
   // that page's scroll content — together they place the pinned date header. `pinTop` is null
   // until the layout chain above this component has reported in.
   scrollY: Animated.Value; pinTop: number | null;
+  pageScroll?: PageScroll;
   // The decoded message this block renders. Only its identity is read here: a new message is a
   // newly loaded forecast, which starts reading from its first period.
   msg: ForecastMessage;
@@ -3576,7 +3598,7 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
           sits on. */}
       <Animated.View style={[styles.stripFloat, pin && { transform: [{ translateY: pin.translateY }] }]}>
         <OverviewStrip periods={periods} dates={dates} steps={steps} now={now}
-          width={screenW} viewportW={viewportW} flatListRef={flatListRef} scrollX={scrollX} pictures={entry.strip} paint={paint} />
+          width={screenW} viewportW={viewportW} flatListRef={flatListRef} scrollX={scrollX} pictures={entry.strip} paint={paint} pageScroll={pageScroll} />
       </Animated.View>
       <View style={{ height: totalH }} onLayout={(e) => setStripH(e.nativeEvent.layout.y)}>
       {/* Everything that scrolls, inset past the rail. The overlays inside here are positioned in
@@ -3715,10 +3737,12 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
 
 // Memoized so a HomeScreen render that doesn't concern the forecast (a layout measurement, the
 // compare row) stops here: every prop is a piece of state or a stable handler.
-const Meteogram = memo(function Meteogram({ msg, units, timeFormat, active, scrollY, onDetailHeight }: {
+const Meteogram = memo(function Meteogram({ msg, units, timeFormat, active, scrollY, onDetailHeight, pageScroll }: {
   msg: ForecastMessage; units: UnitPrefs; timeFormat: TimeFormat; active: boolean;
   // The page's vertical scroll offset (native-driven) — see the pinned header in ModelCanvas.
   scrollY: Animated.Value;
+  // The page's scroll as something the overview strip can hold still — see OverviewStrip.
+  pageScroll?: PageScroll;
   // Height of the open tap detail panel, 0 when closed. The panel sits below the blocks but
   // above the attribution HomeScreen measures the map park against, so HomeScreen subtracts
   // this to keep the park ending where the blocks end — otherwise the map stays parked in the
@@ -3830,7 +3854,7 @@ const Meteogram = memo(function Meteogram({ msg, units, timeFormat, active, scro
             blockIndex={bi}
             selected={sel?.block === bi ? sel.period : null}
             onSelectColumn={selectColumn} paint={paint}
-            scrollY={scrollY} msg={msg} sceneKey={sceneKey}
+            scrollY={scrollY} msg={msg} sceneKey={sceneKey} pageScroll={pageScroll}
             pinTop={selfY != null && blockTops[bi] != null ? selfY + blockTops[bi] : null} />
           {bi < blocks.length - 1 && <View style={styles.sep} />}
         </View>
