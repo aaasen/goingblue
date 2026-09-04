@@ -1533,8 +1533,6 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               coord={{ lat: decoded.lat, lon: decoded.lon }}
               height={200}
               userCoord={gpsCoords}
-              onLocate={requestCurrentLocation}
-              locating={locating}
             />
           </Animated.View>
 
