@@ -38,7 +38,7 @@ import { palette, SEGMENT_PROPS, SWITCH_PROPS } from './palette';
 
 // The whole flow on one screen, in the order the steps happen: build a request at the top, send
 // it with the device's button, paste the reply in under that, and read the decoded forecast
-// below, with past forecasts at the bottom. What used to be the Builder and Decoder tabs.
+// below, with saved forecasts at the bottom. What used to be the Builder and Decoder tabs.
 
 // ── Building the request ───────────────────────────────────────────────────
 
@@ -825,7 +825,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const mapKeyRef = useRef<{ key: string; lat: number; lon: number } | null>(null);
   // The forecast map's frame in the scroll content, measured on layout, and where the forecast
   // display ends (a zero-height marker after the compare row — the meteogram block's immediate
-  // follower; the attribution lives further down, below Past forecasts). Together
+  // follower; the attribution lives further down, below Saved forecasts). Together
   // they drive the map's parking translation: once the map's bottom edge has scrolled up to the
   // status bar's bottom, the map stops and its tail stays parked in the status-bar band — the
   // clock reads over map tiles while the meteogram's strip docks flush beneath it (see
@@ -1318,7 +1318,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   }, [forecastData, onForecastDataChange, flash, token]);
 
   // Drops whatever is held. Nothing decoded is lost — a forecast that decoded is in the cache and
-  // a tap away in Past forecasts — but a half-collected reply is, which is the point: it is the
+  // a tap away in Saved forecasts — but a half-collected reply is, which is the point: it is the
   // way out of a collection that can never decode, and without it a reader who pasted the wrong
   // message would be stuck in one, with no text field to edit.
   const clearForecast = useCallback(() => {
@@ -1577,7 +1577,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
           {/* Zero-height marker for where the forecast display ends — the map's parking clamp
               reads this y (forecastEnd). The attribution used to both credit and mark; it now
-              lives below Past forecasts, so only the marker stays. */}
+              lives below Saved forecasts, so only the marker stays. */}
           <View
             onLayout={(e) => {
               const { y } = e.nativeEvent.layout;
@@ -1585,6 +1585,15 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             }}
           />
         </>
+      )}
+
+      {/* Where the forecast will be. Not shown while a collection or an error is under the paste
+          button, which already say what to do next. */}
+      {!decoded && !collecting && !error && (
+        <View style={styles.emptyForecast}>
+          <Text style={styles.emptyTitle}>No forecast loaded</Text>
+          <Text style={styles.emptyHint}>Paste an encoded forecast reply to visualize it</Text>
+        </View>
       )}
 
       <PastForecasts groups={pastGroups} loadedKey={loadedKey} slotMessage={slotMessage} units={units} onLoad={loadPast} />
@@ -1739,23 +1748,21 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
   groups: PastForecastGroup[]; loadedKey: string; slotMessage: (slot: Slot) => ForecastMessage | null;
   units: UnitPrefs; onLoad: (encoded: string) => void;
 }) {
+  // Nothing saved, no section: the page ends at the paste step.
+  if (groups.length === 0) return null;
   return (
     <View style={styles.pastSection}>
       <View style={styles.sectionEnd} />
-      <StepHeader title="Past forecasts" gap />
-      {groups.length === 0 ? (
-        <Text style={styles.pastEmpty}>No past forecasts.</Text>
-      ) : (
-        groups.map((group) => (
-          <View key={group.day} style={styles.pastGroup}>
-            <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
-            {group.slots.map((slot) => (
-              <PastForecastRow key={slot.code} slot={slot} msg={slotMessage(slot)}
-                isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} units={units} onLoad={onLoad} />
-            ))}
-          </View>
-        ))
-      )}
+      <Text style={styles.savedTitle}>Saved forecasts</Text>
+      {groups.map((group) => (
+        <View key={group.day} style={styles.pastGroup}>
+          <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
+          {group.slots.map((slot) => (
+            <PastForecastRow key={slot.code} slot={slot} msg={slotMessage(slot)}
+              isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} units={units} onLoad={onLoad} />
+          ))}
+        </View>
+      ))}
     </View>
   );
 });
@@ -2008,16 +2015,14 @@ const RequestBuilder = memo(function RequestBuilder({
 
       <View style={styles.sectionEnd} />
 
-      <StepHeader title="View the forecast" gap />
-
-      {/* The way back in: pull the encoded reply straight off the clipboard. It opens the view
-          step because that is the flow — the reply this loads is to the request the send step
-          just put on its way. The button also carries the last press's outcome for a moment — a
+      {/* The way back in: pull the encoded reply straight off the clipboard. It follows the send
+          step without a heading of its own because that is the flow — the reply this loads is to
+          the request the send step just put on its way. The button also carries the last press's outcome for a moment — a
           green check for what it loaded, a red ✕ when the paste wouldn't decode — then goes back
           to offering the paste. There is no clear button: a new paste replaces whatever is held,
           and the one state that needs dropping by hand, a collection, carries its own Clear
           (see CollectingBox). */}
-      <View>
+      <View style={styles.pasteArea}>
         <View style={styles.pasteRow}>
           <Pressable
             style={({ pressed }) => [
@@ -2059,23 +2064,6 @@ const RequestBuilder = memo(function RequestBuilder({
     </View>
   );
 });
-
-// The flow's milestone headings after the builder: viewing the forecast, then the archive,
-// drawn on the page itself so it reads as the loop it is. A dotted leader
-// runs from the end of the text to the row's edge at baseline height — the underline picks up
-// where the words stop — paired with the solid rule that closes each section's bottom. The
-// leader is an all-side dotted border clipped to its top edge: iOS draws borderStyle only when
-// the border is uniform, so a bare borderBottom would come out solid.
-function StepHeader({ title, gap }: { title: string; gap?: boolean }) {
-  return (
-    <View style={[styles.stepHeader, gap && styles.stepHeaderGap]}>
-      <Text style={styles.stepTitle}>{title}</Text>
-      <View style={styles.stepRule}>
-        <View style={styles.stepRuleDots} />
-      </View>
-    </View>
-  );
-}
 
 function Section({ label, info, children }: { label: string; info?: () => void; children: React.ReactNode }) {
   return (
@@ -2233,15 +2221,8 @@ const styles = StyleSheet.create({
   modalNote: { marginTop: 14 },
   modalLink: { color: palette.link, textDecorationLine: 'underline' },
 
-  // A milestone heading with a dotted leader to the row's edge. `stepHeaderGap` separates it
-  // from the divider that closes the section above.
-  stepHeader: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 14 },
-  stepHeaderGap: { marginTop: 20 },
-  stepTitle: { fontSize: 18, fontWeight: '600', color: palette.pageHeading },
-  // The leader: a 2px window over a uniformly dotted border, taking the row's spare width and
-  // riding 4px above the text's bottom edge — baseline height for an 18pt face.
-  stepRule: { flex: 1, height: 2, overflow: 'hidden', marginBottom: 4, marginLeft: 6 },
-  stepRuleDots: { height: 4, borderWidth: 2, borderColor: palette.pageRule, borderStyle: 'dotted' },
+  // The archive's heading, set off from the divider that closes the builder above it.
+  savedTitle: { fontSize: 18, fontWeight: '600', color: palette.pageHeading, textAlign: 'center', marginTop: 20, marginBottom: 14 },
   // The rule that closes a section's bottom, bleeding past the page padding to the screen edge.
   sectionEnd: {
     height: StyleSheet.hairlineWidth, backgroundColor: palette.pageRule,
@@ -2321,6 +2302,8 @@ const styles = StyleSheet.create({
   helpLink: { alignSelf: 'center', marginTop: 8, paddingVertical: 6, paddingHorizontal: 12 },
   helpLinkText: { color: palette.pageLink, fontSize: 14, fontWeight: '600' },
 
+  // Set off from the divider above by the space a heading would have taken.
+  pasteArea: { marginTop: 24 },
   pasteRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   // Same fills as the Copy inReach Message button (ActionButton above), so a confirmed press
   // looks the same in both places.
@@ -2368,6 +2351,14 @@ const styles = StyleSheet.create({
 
   // Forecast meta and the past-forecast list, full-bleed siblings of the meteogram — they carry
   // their own margins.
+  // A dashed outline the size of a short meteogram, so the page holds its shape before and after.
+  emptyForecast: {
+    marginHorizontal: 16, marginBottom: 8, paddingVertical: 28, paddingHorizontal: 16,
+    alignItems: 'center', gap: 4,
+    borderWidth: 1, borderStyle: 'dashed', borderColor: palette.pageChipBorder, borderRadius: 12,
+  },
+  emptyTitle: { fontSize: 15, fontWeight: '600', color: palette.pageTextSecondary },
+  emptyHint: { fontSize: 13, color: palette.pageTextTertiary, textAlign: 'center' },
   metaRow: {
     margin: 16,
     marginBottom: 8,
@@ -2381,7 +2372,6 @@ const styles = StyleSheet.create({
   attributionLink: { color: palette.pageLink, textDecorationLine: 'underline' },
 
   pastSection: { marginTop: 8, marginHorizontal: 16 },
-  pastEmpty: { fontSize: 13, color: palette.textDisabled, fontFamily: 'Courier', paddingVertical: 12 },
   pastGroup: { marginBottom: 8 },
   pastDayText: { fontSize: 13, fontWeight: '600', color: palette.pageTextSecondary, paddingTop: 4, paddingBottom: 6 },
   pastItem: {
