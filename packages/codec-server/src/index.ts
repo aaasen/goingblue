@@ -1,8 +1,8 @@
 import { serve } from "@hono/node-server";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { wireCodec, WIRE_VERSION } from "@weather/protocol";
 import { describeRequest, fetchForecast, parseRequest, splitReplyFor } from "./forecast.js";
-import { log } from "./log.js";
+import { log, withRequestId } from "./log.js";
 
 // The codec server: one container per shipped protocol version, frozen at that version's git
 // tag and kept running for as long as clients in the field may still speak it. It is
@@ -23,11 +23,16 @@ import { log } from "./log.js";
 //          component — the body names the problems). The gateway replies with its
 //          download-the-app text; the body is for logs and direct callers.
 //     503  upstream data unavailable — the gateway replies with its retry text
+//   The request may carry an X-Request-Id header, which is logged and never interpreted.
 const app = new Hono();
 
 app.get("/health", (c) => c.text("OK", 200));
 
-app.post("/encode", async (c) => {
+// The gateway's id for the message being served, tagging every line this request logs so its
+// path through both services reads as one sequence. A caller that sends no header logs no id.
+app.post("/encode", (c) => withRequestId(c.req.header("X-Request-Id") ?? null, () => encode(c)));
+
+async function encode(c: Context) {
   const body = (await c.req.text()).trim();
   const params = parseRequest(body);
   log.info("encode.request", { ...params });
@@ -59,7 +64,7 @@ app.post("/encode", async (c) => {
     log.error("encode.failed", { version: params.decoderVersion, err: e });
     return c.text("forecast unavailable", 503);
   }
-});
+}
 
 const port = parseInt(process.env["PORT"] ?? "8081");
 serve({ fetch: app.fetch, port }, () => {

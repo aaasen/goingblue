@@ -1,10 +1,11 @@
+import { randomUUID } from "node:crypto";
 import type { Context } from "hono";
 import { dispatchForecast, extractUserToken, extractVersion, type DispatchResult } from "./dispatch.js";
 import { ping } from "./db.js";
 import { createAccount, accountExists, deleteAccount, recordRequest } from "./accounts.js";
 import { isValidToken, normalizeToken } from "@weather/protocol";
 import { twiml, validateTwilioSignature } from "./twilio.js";
-import { log } from "./log.js";
+import { log, withRequestId } from "./log.js";
 
 // Human-readable replies for requests that get no forecast, one per error class. These go back
 // over SMS, so each must fit a single GSM-7 segment and tell the person what to do next.
@@ -71,7 +72,7 @@ async function logRequest(record: Parameters<typeof recordRequest>[0]): Promise<
 // still a person using the service, and the failures are the only signal that a version has
 // clients it can no longer answer. The per-version counts are also the sunset metric — a frozen
 // codec container is retired only once its version has gone quiet (VERSIONING.md).
-async function buildForecast(body: string): Promise<RequestResult> {
+async function buildForecast(body: string, requestId: string): Promise<RequestResult> {
   const version = extractVersion(body);
   const token = extractUserToken(body);
   // The account check runs before dispatch, so a rejected request never costs a codec call or
@@ -79,16 +80,17 @@ async function buildForecast(body: string): Promise<RequestResult> {
   // one goes to the codec, whose reply names what is wrong with it.
   if (token !== null && !(await tokenKnown(token))) {
     log.info("forecast.dispatch", { version, kind: "unknown_token" });
-    await logRequest({ token, chars: null, version, outcome: "unknown_token", codecMs: null, shape: null });
+    await logRequest({ requestId, token, chars: null, version, outcome: "unknown_token", codecMs: null, shape: null });
     return { kind: "unknown_token" };
   }
-  const result = await dispatchForecast(body);
+  const result = await dispatchForecast(body, requestId);
   log.info("forecast.dispatch", {
     version,
     kind: result.kind,
     chars: result.kind === "ok" ? result.encoded.length : undefined,
   });
   await logRequest({
+    requestId,
     token,
     // A multi-message reply arrives one message per line; the newlines are gateway framing, not
     // reply characters, so they don't count.
@@ -102,7 +104,9 @@ async function buildForecast(body: string): Promise<RequestResult> {
 }
 
 export async function forecast(c: Context) {
-  const result = await buildForecast((await c.req.text()).trim());
+  const requestId = randomUUID();
+  const body = (await c.req.text()).trim();
+  const result = await withRequestId(requestId, () => buildForecast(body, requestId));
   switch (result.kind) {
     case "ok": return c.text(result.encoded, 200);
     case "missing_version": return c.text(REPLY_MALFORMED, 400);
@@ -121,6 +125,13 @@ export async function forecast(c: Context) {
 // TWILIO_AUTH_TOKEN is set, the request signature is verified so the public endpoint can't be
 // spoofed; an unsigned/invalid request is rejected with 403.
 export async function sms(c: Context) {
+  // The id is minted here and the whole handler runs inside its scope, so every line the message
+  // produces carries it, from the signature check to the recorded row.
+  const requestId = randomUUID();
+  return withRequestId(requestId, () => handleSms(c, requestId));
+}
+
+async function handleSms(c: Context, requestId: string) {
   const form = await c.req.parseBody();
   // Flatten to string params for both signature validation and our own use.
   const params: Record<string, string> = {};
@@ -147,7 +158,7 @@ export async function sms(c: Context) {
   // HELP, STOP and START never reach this webhook: Twilio's Advanced Opt-Out intercepts the
   // keywords and sends its own replies, configured in the Twilio console.
 
-  const result = await buildForecast(body.trim());
+  const result = await buildForecast(body.trim(), requestId);
   return c.text(twiml(replyFor(result)), 200, { "Content-Type": "text/xml" });
 }
 

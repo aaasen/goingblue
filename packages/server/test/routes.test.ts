@@ -82,3 +82,34 @@ describe("account gate", () => {
     expect(await resp.text()).toBe("ENCODED");
   });
 });
+
+// One inbound message gets one id: the gateway mints it, sends it to the codec, and stores it on
+// the row, so a row leads to the logs of both services and back again.
+describe("request id", () => {
+  const sentIds = () =>
+    vi.mocked(fetch).mock.calls.map(
+      (call) => ((call[1] as RequestInit).headers as Record<string, string>)["X-Request-Id"],
+    );
+  const recordedIds = () =>
+    vi.mocked(recordRequest).mock.calls.map((call) => call[0].requestId);
+
+  it("sends the recorded id to the codec", async () => {
+    await post(BODY);
+    expect(sentIds()).toEqual(recordedIds());
+    expect(recordedIds()[0]).toEqual(expect.any(String));
+  });
+
+  it("records one for a request that never reaches a codec", async () => {
+    vi.mocked(accountExists).mockResolvedValue(false);
+    await post(BODY);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(recordedIds()[0]).toEqual(expect.any(String));
+  });
+
+  it("mints a fresh one per message, on both routes", async () => {
+    await post(BODY);
+    await postSms(BODY);
+    expect(new Set(recordedIds()).size).toBe(2);
+    expect(sentIds()).toEqual(recordedIds());
+  });
+});

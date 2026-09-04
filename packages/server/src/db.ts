@@ -163,6 +163,13 @@ export async function migrate(): Promise<void> {
       add column if not exists fetch_ms int,
       add column if not exists encode_ms int
   `);
+  // The gateway's id for the message, the same value its logs and the codec's carry as
+  // `request_id`, so a row leads straight to the lines that produced it. Null on rows written
+  // before the id existed; every row since has one, because the gateway mints it before
+  // anything else runs.
+  await query(`
+    alter table requests add column if not exists request_id text
+  `);
   // The sending number is not stored in any form; this drops the hash an earlier design kept
   // (see the header comment above).
   await query(`

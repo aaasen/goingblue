@@ -153,7 +153,10 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
   };
 }
 
-export async function dispatchForecast(body: string): Promise<DispatchResult> {
+// `requestId` is passed rather than read from the logger's ambient store because it travels on
+// the wire: the codec tags its own lines with it, so one request reads as one sequence across
+// both services.
+export async function dispatchForecast(body: string, requestId: string): Promise<DispatchResult> {
   const version = extractVersion(body);
   if (version === null) return { kind: "missing_version" };
 
@@ -164,7 +167,11 @@ export async function dispatchForecast(body: string): Promise<DispatchResult> {
   // the gateway's own view of response time, next to the codec's reported components.
   const start = Date.now();
   try {
-    const resp = await fetch(`${url}/encode`, { method: "POST", body });
+    const resp = await fetch(`${url}/encode`, {
+      method: "POST",
+      body,
+      headers: { "X-Request-Id": requestId },
+    });
     if (resp.ok) {
       const encoded = await resp.text();
       return {

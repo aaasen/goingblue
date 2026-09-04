@@ -37,6 +37,9 @@ describe("extractUserToken", () => {
   });
 });
 
+// Any id will do here: dispatch never reads it, it only puts it on the wire.
+const RID = "8f6b1c2e-0000-4000-8000-000000000001";
+
 describe("dispatchForecast", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -46,12 +49,12 @@ describe("dispatchForecast", () => {
   it("reports a missing version without calling any codec", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    expect(await dispatchForecast("63.0630,-151.0810 p:a")).toEqual({ kind: "missing_version" });
+    expect(await dispatchForecast("63.0630,-151.0810 p:a", RID)).toEqual({ kind: "missing_version" });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("reports an unmapped version as unsupported (never existed or sunset)", async () => {
-    expect(await dispatchForecast("v9 p:a")).toEqual({ kind: "unsupported_version", version: 9 });
+    expect(await dispatchForecast("v9 p:a", RID)).toEqual({ kind: "unsupported_version", version: 9 });
   });
 
   it("forwards the raw body to the mapped codec and relays its reply", async () => {
@@ -60,10 +63,14 @@ describe("dispatchForecast", () => {
     const fetchSpy = vi.fn(async () => new Response("ENCODED", { status: 200 }));
     vi.stubGlobal("fetch", fetchSpy);
 
-    expect(await dispatchForecast(body)).toEqual({
+    expect(await dispatchForecast(body, RID)).toEqual({
       kind: "ok", encoded: "ENCODED", shape: null, codecMs: expect.any(Number),
     });
-    expect(fetchSpy).toHaveBeenCalledWith("http://codec-v1/encode", { method: "POST", body });
+    // The id rides along as a header so the codec's own log lines carry it too: the body is the
+    // frozen wire message and nothing may be added to it.
+    expect(fetchSpy).toHaveBeenCalledWith("http://codec-v1/encode", {
+      method: "POST", body, headers: { "X-Request-Id": RID },
+    });
   });
 
   it("picks up the shape header when the codec sends one", async () => {
@@ -73,7 +80,7 @@ describe("dispatchForecast", () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response("ENCODED", { status: 200, headers: { "X-Request-Shape": JSON.stringify(header) } })));
 
-    expect(await dispatchForecast("v1 p:d")).toEqual({
+    expect(await dispatchForecast("v1 p:d", RID)).toEqual({
       kind: "ok", encoded: "ENCODED", codecMs: expect.any(Number),
       shape: { lat: 63.06, lon: -151.08, loc: "current", mode: "detail",
                model: "best", vars: ["temp"], maxChars: 160, messages: 1, device: null,
@@ -84,7 +91,7 @@ describe("dispatchForecast", () => {
   it("maps a codec 400 to malformed, carrying the codec's reason", async () => {
     process.env["CODEC_URL_V1"] = "http://codec-v1";
     vi.stubGlobal("fetch", vi.fn(async () => new Response("invalid request: missing u:", { status: 400 })));
-    expect(await dispatchForecast("v1 p:a")).toEqual({
+    expect(await dispatchForecast("v1 p:a", RID)).toEqual({
       kind: "malformed", reason: "invalid request: missing u:", codecMs: expect.any(Number),
     });
   });
@@ -92,10 +99,10 @@ describe("dispatchForecast", () => {
   it("maps codec 5xx and unreachable codecs to unavailable", async () => {
     process.env["CODEC_URL_V1"] = "http://codec-v1";
     vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 503 })));
-    expect(await dispatchForecast("v1 p:a")).toEqual({ kind: "unavailable", codecMs: expect.any(Number) });
+    expect(await dispatchForecast("v1 p:a", RID)).toEqual({ kind: "unavailable", codecMs: expect.any(Number) });
 
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("ECONNREFUSED"); }));
-    expect(await dispatchForecast("v1 p:a")).toEqual({ kind: "unavailable", codecMs: expect.any(Number) });
+    expect(await dispatchForecast("v1 p:a", RID)).toEqual({ kind: "unavailable", codecMs: expect.any(Number) });
   });
 });
 
