@@ -25,7 +25,7 @@ ICON_RADIUS_PT = 22
 GAP_PT = 14
 BRAND_PT = 30
 BRAND_TEXT = "Going Blue"
-BRAND_COLOR = "#2a6bb5"
+BRAND_COLOR = "#3a8ee3"
 
 # iOS tops out at @3x, and the icon source is 1024px, so 3x stays crisp without wasting bytes.
 SCALE = 3

@@ -212,13 +212,13 @@ const PIN = '#d0433b';
 // rather than as a second point of interest.
 const USER_DOT_PAINT = {
   'circle-radius': 7,
-  'circle-color': '#007aff',
+  'circle-color': palette.brand,
   'circle-stroke-width': 3,
   'circle-stroke-color': '#ffffff',
   'circle-pitch-alignment': 'map',
 } as const;
 // Width of the marker's square before it is turned; the point it lands on is a corner, so the
-// shape reaches half its diagonal below the box centre — BALLOON * (√2 - 1) / 2 past the bottom.
+// shape reaches half its diagonal below the box center — BALLOON * (√2 - 1) / 2 past the bottom.
 const BALLOON = 26;
 const TIP_DROP = Math.round((BALLOON * (Math.SQRT2 - 1)) / 2);
 

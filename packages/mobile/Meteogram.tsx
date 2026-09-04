@@ -311,14 +311,6 @@ const SC = {
 // temperature silhouette and above the wind ribbon, so nothing else shows through there.
 const STRIP_MARK_COLORS = { rain: SC.precipRain, snow: SC.precipSnow, ground: SC.bg };
 
-const MODEL_COLORS: Record<string, string> = {
-  'Auto': '#2a6bb5',
-  'American (NOAA)': '#2a8f5a',
-  'Canadian (GEM)': '#c0102a',
-  'European (ECMWF)': '#7040b0',
-  'German (DWD)': '#b07a10',
-};
-
 // The selector option each display name stands for, which is what the model row is attributed
 // against (MODEL_NAMES, by MODEL_BIT order).
 const MODEL_CENTERS: Record<string, Center> = {
@@ -3796,8 +3788,6 @@ const Meteogram = memo(function Meteogram({ msg, units, timeFormat, active, scro
       t += step * 3600000;
     }
     return {
-      name: models[mi] ?? `Model ${mi + 1}`,
-      color: MODEL_COLORS[models[mi]] ?? '#666',
       center: MODEL_CENTERS[models[mi]] ?? 'best',
       // What the model row measures each model's horizon from. The message doesn't carry the
       // request time — the header holds the first period's start, which is that time floored to
@@ -3828,12 +3818,6 @@ const Meteogram = memo(function Meteogram({ msg, units, timeFormat, active, scro
           const { y } = e.nativeEvent.layout;
           setBlockTops((prev) => (prev[bi] === y ? prev : { ...prev, [bi]: y }));
         }}>
-          {/* Model header is a plain RN bar so it stays pinned at full width above the scrolling canvas. */}
-          {blocks.length > 1 && (
-            <View style={[styles.modelHeaderBar, { backgroundColor: b.color }]}>
-              <RNText style={styles.modelHeaderText}>{b.name}</RNText>
-            </View>
-          )}
           <ModelCanvas periods={b.periods} rows={b.rows} dates={b.dates} zoned={b.zoned} steps={b.steps} units={units} timeFormat={timeFormat} now={now} lat={msg.lat} lon={msg.lon} elevation={msg.elevation} fonts={fonts}
             center={b.center} attributionMs={b.attributionMs}
             blockIndex={bi}
@@ -3854,8 +3838,6 @@ const Meteogram = memo(function Meteogram({ msg, units, timeFormat, active, scro
           dates={blocks[sel.block].dates}
           zoned={blocks[sel.block].zoned}
           steps={blocks[sel.block].steps}
-          modelName={blocks.length > 1 ? blocks[sel.block].name : undefined}
-          modelColor={blocks[sel.block].color}
           units={units}
           timeFormat={timeFormat}
           lat={msg.lat}
@@ -3950,11 +3932,10 @@ function DetailGlyphCanvas({ code, night, phase, paint }: { code: number; night:
   return <SkiaPictureView key={paint} style={{ width: 48, height: 48 }} picture={picture} />;
 }
 
-const DetailPanel = memo(function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColor, units, timeFormat, lat, lon, elevation, utcOffsetHours, paint, onClose }: {
+const DetailPanel = memo(function DetailPanel({ periods, index, dates, zoned, steps, units, timeFormat, lat, lon, elevation, utcOffsetHours, paint, onClose }: {
   // `dates` are absolute — the glyph's day/night ground comes off the sun. `zoned` names the hours
   // on the forecast point's clock, matching the column the tap came from.
   periods: Period[]; index: number; dates: Date[]; zoned: Date[]; steps: number[];
-  modelName?: string; modelColor: string;
   units: UnitPrefs; timeFormat: TimeFormat; lat: number; lon: number; elevation: number;
   utcOffsetHours: number;
   // Epoch that remounts the glyph canvases after this tab was hidden — see Meteogram.
@@ -4121,11 +4102,6 @@ const DetailPanel = memo(function DetailPanel({ periods, index, dates, zoned, st
           <RNText style={styles.detailClose}>✕</RNText>
         </Pressable>
       </View>
-      {modelName != null && (
-        <View style={[styles.detailModelChip, { backgroundColor: modelColor }]}>
-          <RNText style={styles.detailModelText}>{modelName}</RNText>
-        </View>
-      )}
       <View style={styles.detailSummary}>
         <View style={[styles.detailGlyphWrap, night && { backgroundColor: C.night }]}>
           {glyphVariants.map((variant) => (
@@ -4241,8 +4217,6 @@ const styles = StyleSheet.create({
   detailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   detailTime: { fontSize: 15, fontWeight: '600', color: C.label, flexShrink: 1 },
   detailClose: { fontSize: 17, color: C.sectionText, paddingLeft: 14, paddingVertical: 2 },
-  detailModelChip: { alignSelf: 'flex-start', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginTop: 4 },
-  detailModelText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   detailSummary: { flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 4 },
   detailGlyphWrap: { width: 48, height: 48, borderRadius: 8, overflow: 'hidden' },
   detailGlyphLayer: { position: 'absolute', top: 0, left: 0 },
@@ -4291,7 +4265,5 @@ const styles = StyleSheet.create({
   pinnedHourTile: { position: 'absolute', top: 0, height: ROW_H.DATE },
   // Mirrors the canvas's date-row rule: a 1px line centered on y=31 in the grid's ink.
   pinnedDayRule: { position: 'absolute', left: 0, right: 0, top: 30.5, height: 1, backgroundColor: C.grid },
-  modelHeaderBar: { paddingHorizontal: 14, paddingVertical: 7 },
-  modelHeaderText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   sep: { height: 10, backgroundColor: '#f2f2f7' },
 });
