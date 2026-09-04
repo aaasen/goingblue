@@ -3714,7 +3714,9 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
 
 // ── Public component ─────────────────────────────────────────────────────--
 
-export default function Meteogram({ msg, units, timeFormat, active, scrollY, onDetailHeight }: {
+// Memoized so a HomeScreen render that doesn't concern the forecast (a layout measurement, the
+// compare row) stops here: every prop is a piece of state or a stable handler.
+const Meteogram = memo(function Meteogram({ msg, units, timeFormat, active, scrollY, onDetailHeight }: {
   msg: ForecastMessage; units: UnitPrefs; timeFormat: TimeFormat; active: boolean;
   // The page's vertical scroll offset (native-driven) — see the pinned header in ModelCanvas.
   scrollY: Animated.Value;
@@ -3762,6 +3764,7 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY, onD
   // Stable across renders of one message, so the memoized canvas tiles never see a new press
   // handler except on the message change that re-records them anyway.
   const selectColumn = useCallback((block: number, period: number) => setSelection({ msg, block, period }), [msg]);
+  const closeSelection = useCallback(() => setSelection(null), []);
 
   const fonts = useMemo<Fonts>(() => {
     // matchFont's default family is "System", which Android's Skia font manager doesn't know —
@@ -3860,13 +3863,14 @@ export default function Meteogram({ msg, units, timeFormat, active, scrollY, onD
           elevation={msg.elevation}
           utcOffsetHours={msg.utcOffsetHours}
           paint={paint}
-          onClose={() => setSelection(null)}
+          onClose={closeSelection}
         />
       )}
       </View>
     </View>
   );
-}
+});
+export default Meteogram;
 
 // ── Tap detail panel ───────────────────────────────────────────────────────
 
@@ -3946,7 +3950,7 @@ function DetailGlyphCanvas({ code, night, phase, paint }: { code: number; night:
   return <SkiaPictureView key={paint} style={{ width: 48, height: 48 }} picture={picture} />;
 }
 
-function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColor, units, timeFormat, lat, lon, elevation, utcOffsetHours, paint, onClose }: {
+const DetailPanel = memo(function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColor, units, timeFormat, lat, lon, elevation, utcOffsetHours, paint, onClose }: {
   // `dates` are absolute — the glyph's day/night ground comes off the sun. `zoned` names the hours
   // on the forecast point's clock, matching the column the tap came from.
   periods: Period[]; index: number; dates: Date[]; zoned: Date[]; steps: number[];
@@ -4141,7 +4145,7 @@ function DetailPanel({ periods, index, dates, zoned, steps, modelName, modelColo
       ))}
     </View>
   );
-}
+});
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
