@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, Pressable,
   ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions,
@@ -1390,7 +1390,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     }
   }
 
-  const pastGroups = groupPastForecasts(cache, slotMessage);
+  const pastGroups = useMemo(() => groupPastForecasts(cache, slotMessage), [cache, slotMessage]);
   const loadedSlot = cache.find((slot) =>
     normalizedForecastData(slot.encoded!) === normalizedForecastData(forecastData),
   );
@@ -1436,59 +1436,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     return [...byLabel.values()].sort((a, b) => a.order - b.order);
   })();
 
-  const pastSection = (
-    <View style={styles.pastSection}>
-      <View style={styles.sectionEnd} />
-      <StepHeader title="Past forecasts" gap />
-      {cache.length === 0 ? (
-        <Text style={styles.pastEmpty}>No past forecasts.</Text>
-      ) : (
-        pastGroups.map((group) => (
-          <View key={group.day} style={styles.pastGroup}>
-            <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
-            {group.slots.map((slot) => {
-              const isLoaded = normalizedForecastData(forecastData)
-                === normalizedForecastData(slot.encoded!);
-              const variableIcons = cacheVariableIcons(slotMessage(slot));
-              return (
-                <View
-                  key={slot.code}
-                  style={[styles.pastItem, isLoaded && styles.pastItemLoaded]}
-                >
-                  <View style={styles.pastDetails}>
-                    <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, slotMessage(slot), units)}</Text>
-                    {variableIcons.length > 0 && (
-                      <View style={styles.variableRow}>
-                        <Text style={styles.variableLabel}>Variables:</Text>
-                        {variableIcons.map((icon) => (
-                          <Text
-                            key={icon.label}
-                            style={styles.pastIcon}
-                            accessibilityLabel={icon.label}
-                          >
-                            {icon.symbol}
-                          </Text>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                  <View style={styles.pastBtns}>
-                    <TouchableOpacity
-                      style={[styles.pastLoadBtn, isLoaded && styles.pastLoadBtnDisabled]}
-                      onPress={() => loadPast(slot.encoded!)}
-                      disabled={isLoaded}
-                    >
-                      <Text style={styles.pastLoadText}>Load</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        ))
-      )}
-    </View>
-  );
+  // The past list takes only stable inputs (see PastForecasts), so a HomeScreen render that
+  // changes nothing about it, a layout measurement or the minute tick, leaves it alone.
+  const loadedKey = normalizedForecastData(forecastData);
 
   return (
     <Animated.ScrollView
@@ -1880,7 +1830,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         </>
       )}
 
-      {pastSection}
+      <PastForecasts groups={pastGroups} loadedKey={loadedKey} slotMessage={slotMessage} units={units} onLoad={loadPast} />
 
       {/* Open-Meteo's data is CC BY 4.0, which asks for credit where the data is shown —
           the Settings footer alone doesn't satisfy that. Same wording as there. */}
@@ -1984,6 +1934,74 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     </Animated.ScrollView>
   );
 }
+
+// One cached forecast in the past list. Memoized on its own so a switch, which changes only which
+// row is loaded, re-renders the two rows whose highlight flips and no others.
+const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, units, onLoad }: {
+  slot: Slot; msg: ForecastMessage | null; isLoaded: boolean; units: UnitPrefs; onLoad: (encoded: string) => void;
+}) {
+  const variableIcons = cacheVariableIcons(msg);
+  return (
+    <View style={[styles.pastItem, isLoaded && styles.pastItemLoaded]}>
+      <View style={styles.pastDetails}>
+        <Text style={styles.pastMeta} numberOfLines={2}>{cacheMetaLabel(slot, msg, units)}</Text>
+        {variableIcons.length > 0 && (
+          <View style={styles.variableRow}>
+            <Text style={styles.variableLabel}>Variables:</Text>
+            {variableIcons.map((icon) => (
+              <Text
+                key={icon.label}
+                style={styles.pastIcon}
+                accessibilityLabel={icon.label}
+              >
+                {icon.symbol}
+              </Text>
+            ))}
+          </View>
+        )}
+      </View>
+      <View style={styles.pastBtns}>
+        <TouchableOpacity
+          style={[styles.pastLoadBtn, isLoaded && styles.pastLoadBtnDisabled]}
+          onPress={() => onLoad(slot.encoded!)}
+          disabled={isLoaded}
+        >
+          <Text style={styles.pastLoadText}>Load</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+});
+
+// The past-forecast list. Every prop is stable across a HomeScreen render that doesn't concern
+// the list: the groups are memoized on the cache, `loadedKey` is the loaded forecast's text
+// normalized (a string, so it compares by value), and the lookup and load handler are memoized
+// callbacks. A layout measurement or the minute tick then re-renders HomeScreen without
+// walking this subtree, which on a long history is the taller half of the screen.
+const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessage, units, onLoad }: {
+  groups: PastForecastGroup[]; loadedKey: string; slotMessage: (slot: Slot) => ForecastMessage | null;
+  units: UnitPrefs; onLoad: (encoded: string) => void;
+}) {
+  return (
+    <View style={styles.pastSection}>
+      <View style={styles.sectionEnd} />
+      <StepHeader title="Past forecasts" gap />
+      {groups.length === 0 ? (
+        <Text style={styles.pastEmpty}>No past forecasts.</Text>
+      ) : (
+        groups.map((group) => (
+          <View key={group.day} style={styles.pastGroup}>
+            <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
+            {group.slots.map((slot) => (
+              <PastForecastRow key={slot.code} slot={slot} msg={slotMessage(slot)}
+                isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} units={units} onLoad={onLoad} />
+            ))}
+          </View>
+        ))
+      )}
+    </View>
+  );
+});
 
 // The flow's milestone headings — the same steps the getting-started sheet teaches, drawn on
 // the page itself so it reads as the loop it is, with the archive at the end. A dotted leader
