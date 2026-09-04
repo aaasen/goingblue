@@ -11,7 +11,7 @@ import {
 } from './skiaPaint';
 import {
   CARDINALS, RAIN_K, modelsFromMask, startDatetime, predictCenter, attributeHour,
-  AQ_DOMINANT_US, AQ_DOMINANT_EU, WIND_LEVELS_HPA, quantWind, AGREEMENT_CENTERS,
+  AQ_DOMINANT_US, AQ_DOMINANT_EU, WIND_LEVELS_HPA, quantWind, AGREEMENT_CENTERS, MODEL_BIT,
   relativeHumidityPct, apparentTempC,
   type Center, type ForecastMessage, type ModelSpec, type Period,
 } from '@weather/protocol';
@@ -22,6 +22,7 @@ import {
 } from './cloudBand';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { precipMark, weatherGlyph, wmoName, type MoonPhase, type PrecipMarkKind } from './weatherGlyph';
+import { MODELS } from './models';
 import { pageInsets } from './insets';
 // ── Layout constants ───────────────────────────────────────────────────────
 // Rows are named by a narrow unit rail fixed to the left of the drawing (RowLegend). It sits
@@ -488,6 +489,12 @@ const AQ_BANDS: Record<'us' | 'eu', AqBand[]> = {
 };
 const aqBand = (value: number, scale: 'us' | 'eu'): AqBand =>
   AQ_BANDS[scale].find((b) => value < b.max) ?? AQ_BANDS[scale][AQ_BANDS[scale].length - 1];
+
+// Agreement rows name each center the way the model selector does (MODELS), so a row reads as
+// the option the reader could switch to. Indexed by AGREEMENT_CENTERS position.
+const AGREEMENT_NAMES: string[] = AGREEMENT_CENTERS.map(
+  (c) => MODELS.find((m) => MODEL_BIT[m.value.toUpperCase()] === c.bit)?.label ?? c.label,
+);
 
 // Model agreement's four wire levels, drawn as circular badges with a white symbol — the
 // familiar status-icon style: green check for strong agreement (weak agreement the same badge
@@ -1206,7 +1213,7 @@ function buildRows(periods: Period[], u: UnitPrefs, lat: number, lon: number, el
   // Rows carry one circular badge per period (green check / lighter check / amber bang /
   // red ✗); the words live in the detail panel.
   const agreementRows = AGREEMENT_CENTERS
-    .map((c, ci) => ({ ci, label: c.label }))
+    .map((_c, ci) => ({ ci, label: AGREEMENT_NAMES[ci] }))
     .filter(({ ci }) => has((p) => p.agreement?.[ci]));
   if (agreementRows.length) {
     rows.push({ kind: 'section', height: ROW_H.SECTION, label: 'Model agreement', legend: '' });
@@ -4075,10 +4082,10 @@ const DetailPanel = memo(function DetailPanel({ periods, index, dates, zoned, st
 
   // Model agreement reads out in words — the drawing carries only the colors. A pair the
   // message carries but this period doesn't reach (past that center's horizon) says so.
-  AGREEMENT_CENTERS.forEach((c, ci) => {
+  AGREEMENT_CENTERS.forEach((_c, ci) => {
     if (!has((q) => q.agreement?.[ci])) return;
     const lv = p.agreement?.[ci];
-    agreement.push([`${c.label} agreement`, lv != null ? AGREEMENT_LEVEL_NAMES[lv] : 'Not forecast']);
+    agreement.push([`${AGREEMENT_NAMES[ci]} agreement`, lv != null ? AGREEMENT_LEVEL_NAMES[lv] : 'Not forecast']);
   });
 
   // The astronomy group answers for the whole day, not the selected period. It needs no header of
