@@ -19,6 +19,13 @@ const REPLY_MALFORMED =
 const REPLY_UNSUPPORTED = "Invalid app version. Update the app at going.blue and try again";
 // Transient service failure (codec unreachable, upstream data down): retrying is the fix.
 const REPLY_UNAVAILABLE = "Going Blue is not available right now. Please try again in a few minutes";
+// A request whose start time is off the servable axis gets no message at all over SMS. Stale
+// means the message sat in a queue for days: the sender's failure happened back then, and a
+// reply now would cost them an inbound message to say what they already know. Future means a
+// wrong clock, which has never been seen in practice. Both are recorded as their own outcomes.
+// The HTTP route names each for the app or a direct caller.
+const REPLY_STALE = "Request is stale. Build a new request and try again.";
+const REPLY_FUTURE = "Request is from the future. Build a new request and try again.";
 
 // What a request can come to: a dispatch result, or the gateway's own rejection of a token
 // that names no account. The codec validates that a token is present and well-formed; whether
@@ -42,6 +49,9 @@ function replyFor(result: RequestResult): string | string[] {
     case "unknown_token": return REPLY_MALFORMED;
     case "unsupported_version": return REPLY_UNSUPPORTED;
     case "unavailable": return REPLY_UNAVAILABLE;
+    // Empty: twiml() turns it into a bare <Response/>, and Twilio sends nothing.
+    case "stale": return "";
+    case "future": return "";
   }
 }
 
@@ -118,6 +128,8 @@ export async function forecast(c: Context) {
     case "unknown_token": return c.text(REPLY_MALFORMED, 400);
     case "unsupported_version": return c.text(REPLY_UNSUPPORTED, 400);
     case "unavailable": return c.text(REPLY_UNAVAILABLE, 503);
+    case "stale": return c.text(REPLY_STALE, 422);
+    case "future": return c.text(REPLY_FUTURE, 422);
   }
 }
 

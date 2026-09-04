@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import { wireCodec, WIRE_VERSION } from "@weather/protocol";
-import { describeRequest, fetchForecast, parseRequest, splitReplyFor } from "./forecast.js";
+import { describeRequest, fetchForecast, parseRequest, requestWindow, splitReplyFor } from "./forecast.js";
 import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 
 // The codec server: one container per shipped protocol version, frozen at that version's git
@@ -22,6 +22,10 @@ import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 //     400  the request is malformed (missing/unsupported version, or a missing/invalid
 //          component — the body names the problems). The gateway replies with its
 //          download-the-app text; the body is for logs and direct callers.
+//     422  the request is well-formed but its start time is off the servable axis. The body is
+//          exactly one word: `stale` (delivery delay carried it past the axis) or `future` (a
+//          wrong clock). Neither is retryable as sent; the gateway decides what, if anything,
+//          to reply.
 //     503  upstream data unavailable — the gateway replies with its retry text
 //   The request may carry X-Request-Id and X-Cloud-Trace-Context headers, both logged and
 //   never interpreted.
@@ -54,6 +58,14 @@ async function encode(c: Context) {
   // component is a malformed request, rejected before any forecast work (see parseRequest).
   if (params.errors.length > 0) {
     return c.text(`invalid request: ${params.errors.join("; ")}`, 400);
+  }
+
+  // Decided before the fetch: an off-axis start can't be served at any layout, so the upstream
+  // call would only be spent on a failure.
+  const window = requestWindow(params.startEpochHour);
+  if (window !== "ok") {
+    log.info(`encode.${window}`, { version: params.decoderVersion, startEpochHour: params.startEpochHour });
+    return c.text(window, 422);
   }
 
   try {

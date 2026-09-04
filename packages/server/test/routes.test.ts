@@ -40,6 +40,36 @@ afterEach(() => {
   delete process.env["CODEC_URL_V1"];
 });
 
+describe("off-axis start time", () => {
+  it("names the side over HTTP and records the outcome", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("stale", { status: 422 })));
+    let resp = await post(BODY);
+    expect(resp.status).toBe(422);
+    expect(await resp.text()).toBe("Request is stale. Build a new request and try again.");
+    expect(vi.mocked(recordRequest)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ token: TOKEN, outcome: "stale", shape: null }),
+    );
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("future", { status: 422 })));
+    resp = await post(BODY);
+    expect(resp.status).toBe(422);
+    expect(await resp.text()).toBe("Request is from the future. Build a new request and try again.");
+    expect(vi.mocked(recordRequest)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ token: TOKEN, outcome: "future", shape: null }),
+    );
+  });
+
+  it("sends nothing over SMS", async () => {
+    for (const side of ["stale", "future"]) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(side, { status: 422 })));
+      const resp = await postSms(BODY);
+      expect(resp.status).toBe(200);
+      expect(await resp.text()).toBe('<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>');
+      expect(vi.mocked(recordRequest)).toHaveBeenLastCalledWith(expect.objectContaining({ outcome: side }));
+    }
+  });
+});
+
 describe("account gate", () => {
   it("serves a request whose token names an account", async () => {
     const resp = await post(BODY);

@@ -112,6 +112,19 @@ describe("dispatchForecast", () => {
     });
   });
 
+  it("maps a codec 422 to the side of the axis its body names", async () => {
+    process.env["CODEC_URL_V1"] = "http://codec-v1";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("stale", { status: 422 })));
+    expect(await dispatchForecast("v1 p:a", RID, null)).toEqual({ kind: "stale", codecMs: expect.any(Number) });
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("future", { status: 422 })));
+    expect(await dispatchForecast("v1 p:a", RID, null)).toEqual({ kind: "future", codecMs: expect.any(Number) });
+
+    // A 422 whose body names neither side is not one of ours: retryable, like any other status.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("something else", { status: 422 })));
+    expect(await dispatchForecast("v1 p:a", RID, null)).toEqual({ kind: "unavailable", codecMs: expect.any(Number) });
+  });
+
   it("maps codec 5xx and unreachable codecs to unavailable", async () => {
     process.env["CODEC_URL_V1"] = "http://codec-v1";
     vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 503 })));

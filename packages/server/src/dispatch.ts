@@ -44,6 +44,10 @@ export type DispatchResult =
   // The codec rejected the request (400): not a well-formed request of its version. The reason
   // is the codec's response body, kept for logs and the HTTP route, never sent over SMS.
   | { kind: "malformed"; reason: string; codecMs: number }
+  // The codec's 422s: a well-formed request whose start time is off the servable axis, either
+  // stale (delivery delay) or from the future (a wrong clock). Not retryable as sent.
+  | { kind: "stale"; codecMs: number }
+  | { kind: "future"; codecMs: number }
   | { kind: "unavailable"; codecMs: number };
 
 // First `vN` word in the body, or null. A version is required — there is no default, so a
@@ -190,9 +194,11 @@ export async function dispatchForecast(
     const text = await resp.text();
     log.error("codec.error_response", { version, status: resp.status, body: text });
     const codecMs = Date.now() - start;
-    // A 400 is the codec's verdict on the request itself; anything else (503, unexpected
-    // statuses) is a service problem the sender should retry.
+    // A 400 is the codec's verdict on the request itself, and a 422 names which side of the
+    // servable axis its start time fell on (its body is exactly the word); anything else (503,
+    // unexpected statuses, an unrecognized 422 body) is a service problem the sender should retry.
     if (resp.status === 400) return { kind: "malformed", reason: text.slice(0, 500), codecMs };
+    if (resp.status === 422 && (text === "stale" || text === "future")) return { kind: text, codecMs };
     return { kind: "unavailable", codecMs };
   } catch (e) {
     log.error("codec.unreachable", { version, err: e });

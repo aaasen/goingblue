@@ -1536,6 +1536,20 @@ export interface ForecastResult {
 // finds the largest fill-sequence number whose encoding fits the budget (encoded size grows
 // along the sequence — see layout.ts). Always returns at least the seq=1 layout (one day at 12h),
 // even if it exceeds the budget.
+// Where a request's start hour falls against the time axis fetchForecast will fetch: past_days=1
+// in UTC starts the axis at 00:00 UTC of the previous day, and FILL_SLOTS + 2 forecast days end
+// it. A layout is only fully servable when its first period is on the axis, so a `t:` before the
+// axis is stale (delivery delay: the message sat in a queue) and one past it is from the future
+// (a wrong clock). Both are decided here, before any upstream call, and neither is a transient
+// condition a retry could fix: the same `t:` only gets staler.
+export type RequestWindow = "ok" | "stale" | "future";
+export function requestWindow(startEpochHour: number, nowMs = Date.now()): RequestWindow {
+  const todayUtc = Math.floor(nowMs / 3600000 / 24) * 24;
+  if (startEpochHour < todayUtc - 24) return "stale";
+  if (startEpochHour >= todayUtc + (FILL_SLOTS + 2) * 24) return "future";
+  return "ok";
+}
+
 export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<ForecastResult> {
   const { lat, lon, elev_m } = resolveLocation(params);
   const modelKey = firstModelKey(params.modelsMask);
