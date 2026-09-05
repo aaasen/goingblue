@@ -3,7 +3,7 @@
 // replay them under any later codec version without the weather changing.
 //
 //   pnpm record-shot denali             # from packages/mobile
-//   pnpm record-shot denali lowe-peak
+//   pnpm record-shot denali eldorado-peak
 //   pnpm record-shot --all
 //
 // Run it when the weather at the location suits the shot; each shot records on its own day and

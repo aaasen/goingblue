@@ -33,26 +33,28 @@ const WIND_400_600 = WIND_LEVEL_VARS.slice(1, 4);
 export const SHOTS: readonly Shot[] = [
   {
     name: 'denali', lat: 63.0692, lon: -151.0070, mode: MODE_AUTO, ...INTERNET,
-    requests: [{ model: 'best', vars: [VAR.freeze, ...WIND_400_600] }],
+    requests: [{ model: 'best', vars: [VAR.dewpoint, VAR.freeze, ...WIND_400_600] }],
   },
   {
-    // One request per center, all with the agreement column, so the compare pills group them.
-    name: 'cerro-torre', lat: -49.2929, lon: -73.0958, mode: MODE_AUTO, ...INTERNET,
-    requests: (['us', 'ca', 'eu', 'de'] as const).map((model) => ({ model, vars: [VAR.agreement] })),
+    // Monte Fitz Roy's summit. One request per center, all with the agreement column, so the
+    // compare pills group them.
+    name: 'fitz-roy', lat: -49.27125, lon: -73.04321, mode: MODE_AUTO, ...INTERNET,
+    requests: (['us', 'ca', 'eu', 'de'] as const).map((model) => ({ model, vars: [VAR.dewpoint, VAR.agreement] })),
   },
   {
-    name: 'jiehkkevarri', lat: 69.4658, lon: 19.9158, mode: MODE_AUTO, ...INTERNET,
-    requests: [{ model: 'best', vars: [VAR.clouds] }],
+    // The summit, as OpenStreetMap places it.
+    name: 'jiehkkevarri', lat: 69.46921, lon: 19.87873, mode: MODE_AUTO, ...INTERNET,
+    requests: [{ model: 'best', vars: [VAR.dewpoint, VAR.clouds] }],
   },
   {
-    // Lowe Peak, west of Salt Lake City. The US air-quality scale in full.
-    name: 'lowe-peak', lat: 40.5580, lon: -112.5770, mode: MODE_AUTO, ...INTERNET,
-    requests: [{ model: 'best', vars: [VAR.aqi, VAR.aq_pm25, VAR.aq_o3, VAR.aq_pm10, VAR.aq_no2, VAR.aq_so2] }],
+    // Eldorado Peak, North Cascades. The US air-quality scale in full.
+    name: 'eldorado-peak', lat: 48.53752, lon: -121.13440, mode: MODE_AUTO, ...INTERNET,
+    requests: [{ model: 'best', vars: [VAR.precip, VAR.aqi, VAR.aq_pm25, VAR.aq_o3, VAR.aq_pm10, VAR.aq_no2, VAR.aq_so2] }],
   },
   {
     // The overview shot. Last so the earlier shots keep their message codes.
     name: 'mont-blanc', lat: 45.8326, lon: 6.8652, mode: MODE_AUTO, ...INTERNET,
-    requests: [{ model: 'best', vars: [VAR.dewpoint, VAR.freeze] }],
+    requests: [{ model: 'best', vars: [VAR.dewpoint, VAR.freeze, VAR.clouds] }],
   },
 ];
 

@@ -22,7 +22,7 @@ This is the process for taking screenshots. Run everything from `packages/mobile
 Caption: "Expedition weather forecasts via inReach, ZOLEO, and iPhone satellite"
 Location: Mont Blanc
 Model: Auto
-Variables: Humidity, freezing level
+Variables: Humidity, freezing level, detailed clouds
 Window start: Tuesday the 8th, 9am
 Filename: overview
 
@@ -31,34 +31,34 @@ Filename: overview
 Caption: "High-altitude winds and freezing level forecasts for mountaineering"
 Location: Denali
 Model: Auto
-Variables: Freezing level, pressure-level winds at 400, 500, and 600 hPa
+Variables: Humidity, freezing level, pressure-level winds at 400, 500, and 600 hPa
 Window start: Friday the 11th, 3am
 Filename: altitude
 
 ## Cloud Cover
 
 Caption: "Avoid whiteouts and flat light with detailed cloud cover"
-Location: Jiehkkevarri
+Location: Jiehkkevarri summit (69.46921,19.87873)
 Model: Auto
-Variables: Detailed clouds
-Window start: Saturday the 5th, 3am
+Variables: Humidity, detailed clouds
+Window start: Saturday the 5th, 4am
 Filename: cloud
 
 ## AQI
 
 Caption: "Plan around wildfire smoke with AQI forecasts"
-Location: 40.558,-112.577 (Lowe peak by SLC)
+Location: Eldorado Peak, North Cascades (48.53752,-121.13440)
 Model: Auto
-Variables: US AQI variables
-Window start: Friday the 4th, 6pm
+Variables: Precipitation probability, US AQI variables
+Window start: Friday the 4th, 7pm
 Filename: aqi
 
 ## Model Agreement
 
 Caption: "Compare forecasts from NOAA, ECMWF, GEM, and ICON models"
-Location: Cerro Torre
-Model: ECMWF, NOAA, GEM, ICON
-Variables: Model agreement
+Location: Monte Fitz Roy summit (-49.27125,-73.04321)
+Model: ECMWF, NOAA, GEM, ICON. Select ECMWF in the compare pills before capturing.
+Variables: Humidity, model agreement
 Window start: Tuesday the 8th, 8am
 Filename: agreement
 
