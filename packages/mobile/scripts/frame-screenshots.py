@@ -16,9 +16,10 @@ build dependency: this runs by hand when the screenshots or their captions chang
 
 The iOS output is 1320x2868 — the same size as the input, because that is what App Store Connect
 wants for the 6.9" set. So the capture is scaled inside the canvas to make room for the caption;
-the frame is not added around a full-size shot. The Android output is 1080x2160: Google Play
-caps a screenshot at 2:1, so the canvas is shorter than the 1080x2424 capture and the device is
-scaled down a little further to fit. Both sets share one layout, scaled to the canvas width.
+the frame is not added around a full-size shot. The Android output is 1080x1920: Google Play
+accepts anything up to 2:1 but only 9:16 screenshots at 1080px or more make a listing eligible
+for featured placement, so the canvas is shorter than the 1080x2424 capture and the device is
+scaled down further to fit. Both sets share one layout, scaled to the canvas width.
 """
 
 import argparse
@@ -57,7 +58,7 @@ ANDROID_CAPTIONS = {
 # in iOS canvas pixels and scale with the canvas width.
 PLATFORMS = {
     "ios": {"canvas": (1320, 2868), "dir": "screenshots", "radius_ratio": 165 / 1320},
-    "android": {"canvas": (1080, 2160), "dir": "screenshots/android", "radius_ratio": 130 / 1080},
+    "android": {"canvas": (1080, 1920), "dir": "screenshots/android", "radius_ratio": 130 / 1080},
 }
 LAYOUT_W = 1320
 
