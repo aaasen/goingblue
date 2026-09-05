@@ -25,6 +25,7 @@ const data = (
     groupComponents = [] as StatsData["groupComponents"],
     mapPoints = [] as StatsData["mapPoints"],
     requests = [] as StatsData["requests"],
+    hidden = [] as number[],
     totals = {} as Partial<StatsData["totals"]>,
     filters = {} as Partial<StatsData["filters"]>,
   } = {},
@@ -40,6 +41,7 @@ const data = (
   groups,
   groupComponents,
   mapPoints,
+  hidden,
   totals: {
     requests: daily.reduce((n, c) => n + c.requests, 0),
     failed: 0,
@@ -265,15 +267,18 @@ describe("renderStats — recent requests", () => {
     expect(html).toContain("Recent requests");
     // Components fold to their families, deduplicated: cch+ccm are one clouds entry. Periods
     // show the total with the resolution split in the title; codec ms carries its own split.
+    // The account cell also holds the hide form, so the row is matched around it.
+    expect(html).toContain("<td>55</td><td>8/30 14:11</td><td>29<form");
     expect(html).toContain(
-      "<td>55</td><td>8/30 14:11</td><td>29</td><td>iPhone</td><td>3</td><td>summit</td>" +
+      "<td>iPhone</td><td>3</td><td>summit</td>" +
       "<td>auto</td><td>best</td><td>2</td><td>288</td>" +
       `<td title="1h×130, 3h×56">186</td><td title="fetch 1015, encode 18 ms">1037</td>` +
       "<td>freeze, clouds, AQI, wind</td>");
     // 'current' is not a name; the coordinates stand in, and all-default vars leave the cell
     // empty, as do the periods/timing columns the row predates.
+    expect(html).toContain("<td>54</td><td>8/29 09:02</td><td>12<form");
     expect(html).toContain(
-      "<td>54</td><td>8/29 09:02</td><td>12</td><td>SMS</td><td>2</td><td>47.62, -122.29</td>" +
+      "<td>SMS</td><td>2</td><td>47.62, -122.29</td>" +
       "<td>detail</td><td>eu</td><td></td><td></td><td></td><td></td><td></td>");
   });
 
@@ -291,5 +296,33 @@ describe("renderStats — recent requests", () => {
     const html = renderStats(data([cell("2026-08-07", 1)]));
     expect(html).toContain("No requests in the window");
     expect(html).toContain("No locations recorded");
+  });
+});
+
+describe("renderStats — hidden accounts", () => {
+  it("lists the hidden set with an unhide form for each id and an add form", () => {
+    const html = renderStats(data([cell("2026-08-07", 2)], { hidden: [7, 29] }));
+    expect(html).toContain("Hidden accounts");
+    expect(html.split('action="/stats/unhide"').length - 1).toBe(2);
+    expect(html).toContain('<input type=hidden name=account value="29">');
+    expect(html).toContain('action="/stats/hide"');
+  });
+
+  it("offers a hide form on every recent request row, carrying the window along", () => {
+    const html = renderStats(data([cell("2026-08-07", 2)], {
+      requests: [row({ account: 29 }), row({ id: 2, account: 30 })],
+      filters: { from: "2026-08-06", to: "2026-08-07", group: "device" },
+    }));
+    // Two row forms plus the add form in the hidden section.
+    expect(html.split('action="/stats/hide"').length - 1).toBe(3);
+    expect(html).toContain('<input type=hidden name=account value="30">');
+    expect(html).toContain('name=group value="device"');
+    expect(html).toContain('name=from value="2026-08-06"');
+  });
+
+  it("renders the hidden section with only the add form when nothing is hidden", () => {
+    const html = renderStats(data([cell("2026-08-07", 2)]));
+    expect(html).toContain("Hidden accounts");
+    expect(html).not.toContain('action="/stats/unhide"');
   });
 });

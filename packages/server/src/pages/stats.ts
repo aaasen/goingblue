@@ -33,6 +33,9 @@ export type GroupKey =
 // `outcome` groups every row, since its point is showing the failures; everything else counts
 // served forecasts only, so a failure's all-null shape columns never surface as a "?" series.
 const SERVED = `coalesce(r.outcome, 'ok') = 'ok'`;
+// Accounts hidden from the whole page (db.ts, stats_hidden_accounts): the operator's own
+// testing. Applied wherever `r` is a requests row, the map included.
+const NOT_HIDDEN = `r.account_id not in (select account_id from stats_hidden_accounts)`;
 const GROUP_EXPRS: Record<Exclude<GroupKey, "variable">, string> = {
   account: "r.account_id::text",
   device: "r.device",
@@ -179,6 +182,8 @@ export type StatsData = {
   // otherwise.
   groupComponents: { grp: string; component: string; count: number }[];
   mapPoints: MapPointRow[];
+  // The hidden set, ascending, so the page can list it for editing.
+  hidden: number[];
 };
 
 // Every counted quantity, as one SQL fragment shared by the daily and window queries so the two
@@ -215,6 +220,7 @@ function requestsFilter(f: StatsFilters): { where: string; params: unknown[] } {
   const where = `r.created_at >= ($2::date::timestamp at time zone $1)
      and r.created_at < (($3::date + 1)::timestamp at time zone $1)
      and r.account_id is not null
+     and ${NOT_HIDDEN}
      and coalesce(r.outcome, 'ok') not in ('probe', 'help')`;
   return { where, params };
 }
@@ -284,8 +290,9 @@ const varComponentsSql = (where: string) => `
 `;
 
 // Every place in the window with stored coordinates, one point per ~1 km cell. Windowed by time
-// alone — a located request belongs on the map even when the identity exclusions would keep it
-// out of the counts. Named and unnamed requests for the same cell fold together; min(loc) picks
+// and the hidden set alone — a located request belongs on the map even when the other identity
+// exclusions would keep it out of the counts, but a hidden account's test locations are noise
+// here too. Named and unnamed requests for the same cell fold together; min(loc) picks
 // a stable representative name where any request carried one ('current' is the app's marker for
 // "my location", not a name).
 const MAP_POINTS_SQL = `
@@ -296,6 +303,7 @@ const MAP_POINTS_SQL = `
    where r.created_at >= ($2::date::timestamp at time zone $1)
      and r.created_at < (($3::date + 1)::timestamp at time zone $1)
      and r.lat is not null and r.lon is not null
+     and ${NOT_HIDDEN}
    group by r.lat, r.lon
    order by count desc
 `;
@@ -326,10 +334,25 @@ const periodsOf = (v: unknown): Record<string, number> | null => {
   return Object.keys(out).length ? out : null;
 };
 
+// The hidden set, edited from the page. Hiding is idempotent so a double submit is harmless;
+// unhiding an id that isn't hidden is a no-op for the same reason.
+export async function hiddenAccounts(): Promise<number[]> {
+  const res = await query(`select account_id from stats_hidden_accounts order by account_id`);
+  return res.rows.map((r) => num(r["account_id"]));
+}
+
+export async function hideAccount(id: number): Promise<void> {
+  await query(`insert into stats_hidden_accounts (account_id) values ($1) on conflict do nothing`, [id]);
+}
+
+export async function unhideAccount(id: number): Promise<void> {
+  await query(`delete from stats_hidden_accounts where account_id = $1`, [id]);
+}
+
 export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
   const filtered = requestsFilter(filters);
   const g = groupSql(filters.group);
-  const [daily, totals, requests, groups, components, mapPoints] = await Promise.all([
+  const [daily, totals, requests, groups, components, mapPoints, hidden] = await Promise.all([
     query(dailySql(filtered.where, g), filtered.params),
     query(totalsSql(filtered.where), filtered.params),
     query(requestRowsSql(filtered.where), filtered.params),
@@ -338,8 +361,10 @@ export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
       ? query(varComponentsSql(filtered.where), filtered.params)
       : Promise.resolve({ rows: [] as Record<string, unknown>[] }),
     query(MAP_POINTS_SQL, filtered.params),
+    hiddenAccounts(),
   ]);
   return {
+    hidden,
     daily: daily.rows.map((r) => ({
       day: String(r["day"]),
       grp: r["grp"] == null ? null : String(r["grp"]),
@@ -640,6 +665,14 @@ const CSS = `
   tbody tr:hover { background: #f7fafd; }
   .quiet { color: #898781; }
   .note { color: #666; font-size: 0.85em; margin-top: 1.6em; }
+  /* The hide/unhide controls: an inline form whose button reads as a small link-like action
+     next to the id, not as a full-size button in every table row. */
+  form.act { display: inline; margin-left: 6px; }
+  form.act button { font: inherit; font-size: 0.8em; padding: 0 6px; color: #52514e; }
+  .hidden-list { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 0.6em 0;
+    font-size: 0.9em; }
+  .hidden-list form.act { margin: 0; }
+  .hidden-list input { font: inherit; font-size: 0.95em; width: 7em; }
   @media (max-width: 600px) {
     .summary { gap: 18px; }
     .summary b { font-size: 1.45em; }
@@ -680,6 +713,19 @@ function groupBar(name: string, anchor: string, active: string | null, options: 
   );
 }
 
+// One hide/unhide control: a POST to its own route, so the change is a form submit and not a
+// link a crawler or a prefetch could follow. The page's window rides along so the redirect
+// lands back on the same view.
+function actForm(action: "hide" | "unhide", id: number | null, f: StatsFilters, label: string): string {
+  const idField = id === null
+    ? `<input name=account inputmode=numeric pattern="[0-9]+" required placeholder="Account id">`
+    : `<input type=hidden name=account value="${id}">`;
+  return `<form class=act method=post action="/stats/${action}">${idField}` +
+    `<input type=hidden name=from value="${f.from}"><input type=hidden name=to value="${f.to}">` +
+    `<input type=hidden name=group value="${f.group ?? ""}">` +
+    `<button type=submit>${label}</button></form>`;
+}
+
 // The raw request rows as a table, newest first: every stored column except the token (see
 // RequestRow). Null cells render empty rather than as a word, except outcome, whose absence
 // means a pre-outcome-column success. Location shows the name where one was given ('current' is
@@ -687,7 +733,7 @@ function groupBar(name: string, anchor: string, active: string | null, options: 
 // variables cell lists only the opt-ins — the five defaults are on every row and would drown
 // the signal — folded to their families (clouds, AQI, wind) so a row reads as what was chosen
 // rather than as a column dump.
-function requestTable(requests: RequestRow[]): string {
+function requestTable(requests: RequestRow[], filters: StatsFilters): string {
   if (!requests.length) return `<p class=note>No requests in the window.</p>`;
   // Periods render as the reply's total, with the per-resolution breakdown ("1h×130, 3h×56")
   // in the hover title; timing as codec_ms, with the codec's own fetch/encode split in the
@@ -715,7 +761,7 @@ function requestTable(requests: RequestRow[]): string {
         .map((f) => esc(f === "aqi" ? "AQI" : f))
         .join(", ");
       return (
-        `<tr><td>${r.id}</td><td>${r.time}</td><td>${r.account}</td>` +
+        `<tr><td>${r.id}</td><td>${r.time}</td><td>${r.account}${actForm("hide", r.account, filters, "hide")}</td>` +
         `<td>${r.device === null ? "" : DEVICE_LABELS[r.device] ?? esc(r.device)}</td>` +
         `<td>${r.version ?? ""}</td><td>${place}</td>` +
         `<td>${r.mode === null ? "" : esc(r.mode)}</td>` +
@@ -963,7 +1009,16 @@ ${requestsChart}
 ${groupSection}
 
 <h2>Recent requests</h2>
-${requestTable(requests)}`;
+${requestTable(requests, filters)}`;
+
+  // The hidden set, editable in place. Always rendered, even when empty, since the add field
+  // is the only way to hide an account that isn't in the recent-requests table.
+  const hiddenSection = `
+<h2 class=section id=hidden>Hidden accounts</h2>
+<p class=note>Requests from these accounts are left out of every count, chart, table and the map.</p>
+<div class=hidden-list>${data.hidden
+    .map((id) => `<span>${id}${actForm("unhide", id, filters, "unhide")}</span>`)
+    .join("")}${actForm("hide", null, filters, "Hide")}</div>`;
 
   const body = `<div class=stats>
 ${windowBar(data)}
@@ -971,10 +1026,36 @@ ${windowBar(data)}
 ${requestsSection}
 
 ${locationSection}
+${hiddenSection}
 </div>`;
 
   return PAGE("Stats", body, { showUpdated: false, css: CSS, ...(map && { head: map.head }) });
 }
+
+// POST /stats/hide and /stats/unhide: edit the hidden set, then redirect back to the view the
+// form came from. The account id is validated as a positive integer; the window fields are
+// re-parsed through parseFilters so a malformed one falls back rather than erroring.
+async function editHidden(c: Context, edit: (id: number) => Promise<void>) {
+  const body = await c.req.parseBody();
+  const field = (name: string): string | undefined => {
+    const v = body[name];
+    return typeof v === "string" ? v : undefined;
+  };
+  const id = Number(field("account"));
+  if (!Number.isInteger(id) || id <= 0) return c.text("Bad account id", 400);
+  try {
+    await edit(id);
+  } catch (e) {
+    log.error("stats.edit_hidden_failed", { err: e });
+    return c.text("Stats unavailable", 503);
+  }
+  const f = parseFilters(field);
+  const q = new URLSearchParams({ from: f.from, to: f.to, ...(f.group && { group: f.group }) });
+  return c.redirect(`/stats?${q}#hidden`, 303);
+}
+
+export const hideAccountRoute = (c: Context) => editHidden(c, hideAccount);
+export const unhideAccountRoute = (c: Context) => editHidden(c, unhideAccount);
 
 export async function stats(c: Context) {
   try {

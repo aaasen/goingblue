@@ -190,6 +190,15 @@ export async function migrate(): Promise<void> {
   await query(`
     create index if not exists requests_account_created_idx on requests (account_id, created_at)
   `);
+  // Accounts the /stats dashboard leaves out of every count, chart, table and the map: the
+  // operator's own testing, which otherwise swamps real usage. Membership is edited from the
+  // dashboard itself (pages/stats.ts). Nothing about serving reads this table.
+  await query(`
+    create table if not exists stats_hidden_accounts (
+      account_id  bigint primary key,
+      created_at  timestamptz not null default now()
+    )
+  `);
   // Fold the retired request_shapes table into the shape columns above, then drop it. The two
   // tables shared no key — that was the earlier design's point — so the fold re-derives the
   // pairing the split withheld: a shape matches the served request from the same Pacific day

@@ -11,7 +11,7 @@ import { contactCard } from "./pages/contact-card.js";
 import { image, favicon } from "./assets.js";
 import { vendorAsset } from "./vendor.js";
 import { benchmark } from "./benchmark.js";
-import { stats } from "./pages/stats.js";
+import { stats, hideAccountRoute, unhideAccountRoute } from "./pages/stats.js";
 import { migrate } from "./db.js";
 import { log } from "./log.js";
 
@@ -49,12 +49,18 @@ app.post("/account/delete", deleteAccountRoute);
 // present, middleware absent — is a public read-only view of the request table.
 const statsPass = process.env["STATS_PASS"];
 if (statsPass) {
-  app.use("/stats", basicAuth({
+  const auth = basicAuth({
     username: process.env["STATS_USER"] ?? "lane",
     password: statsPass,
     realm: "Going Blue stats",
-  }));
+  });
+  // The page and its hide/unhide edits share one credential; the edits are plain form POSTs
+  // from the page, so the same header the browser attached for the page covers them.
+  app.use("/stats", auth);
+  app.use("/stats/*", auth);
   app.get("/stats", stats);
+  app.post("/stats/hide", hideAccountRoute);
+  app.post("/stats/unhide", unhideAccountRoute);
 }
 
 const port = parseInt(process.env["PORT"] ?? "8080");
