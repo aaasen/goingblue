@@ -35,13 +35,11 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 # alone as a feature name, and review guideline 2.3.7 polices trademarked terms in App Store
 # metadata specifically — which is exactly what a screenshot caption is.
 CAPTIONS_LIST = [
-    ("mont-blanc", "Detailed forecasts up to 13 days without cell reception"),
-    ("builder", "30+ weather models over SMS, inReach, ZOLEO, and iPhone satellite"),
-    ("denali", "High-altitude winds and freezing level forecasts for mountaineering"),
+    ("overview", "Expedition weather forecasts via inReach, ZOLEO, and iPhone satellite"),
+    ("altitude", "High-altitude winds and freezing level forecasts for mountaineering"),
     ("cloud", "Avoid whiteouts and flat light with detailed cloud cover"),
-    ("air-quality", "Plan around wildfire smoke with air quality forecasts"),
-    # ("past", "All forecasts are saved for comparing multiple weather models"),
-    # ("detail", "Detailed forecast information including sunrise, sunset, and moon phase"),
+    ("aqi", "Plan around wildfire smoke with AQI forecasts"),
+    ("agreement", "Compare forecasts from NOAA, ECMWF, GEM, and ICON models"),
 ]
 
 # The 6.9" iPhone set. Input and output are both this size (see the module docstring).
