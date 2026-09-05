@@ -66,6 +66,23 @@ Filename: agreement
 
 1. How to scrub: Tap the mini meteogram at the target day to jump the window there, then drag the table horizontally to align the first column. Drag slowly and hold at the end, otherwise it flings.
 
+# Android
+
+Google Play takes the same five shots. Run everything from `packages/mobile`.
+1. Start Metro with `pnpm start` if it is not already running.
+2. Start the emulator with `emulator -avd Pixel_9_API_36` and make sure no other Android device is attached. Run `adb reverse tcp:8081 tcp:8081` so the dev client can reach Metro at localhost.
+3. If native dependencies changed since the last build, reinstall the debug build with `npx expo run:android --no-bundler`. A reinstall wipes the app's data, so do this before seeding.
+4. Import test data with `pnpm seed-shots --android`. This writes the app's SQLite database through `run-as`, so it only works with the debug build, not the preview one.
+5. Open the bundle in the dev client with `adb shell am start -a android.intent.action.VIEW -d "exp+mobile://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081" -p com.laneaasen.weather`. Both installed builds claim the scheme, so the package flag matters. Turn off the floating gear with the "Tools button" switch in the dev menu, as on iOS.
+6. Check for 8 entries under "Saved forecasts", then take the same shots as above. Use `scripts/capture-screenshot.sh --android <filename>`; captures land in `screenshots/android/`.
+7. Frame with `scripts/frame-screenshots.py --android`. Output goes to `screenshots/android/framed/` at 1080x2160, since Google Play caps screenshots at 2:1. `ANDROID_CAPTIONS` overrides the overview caption, which names the iPhone in the App Store set.
+8. Cleanup. Run `scripts/capture-screenshot.sh --android --clear` to leave demo mode.
+
+Tips:
+1. `adb shell input swipe x1 y x2 y <ms>` drives everything. A swipe over 1.5 s lands without flinging. One meteogram column is about 90 px on the Pixel 9, and the first 20 px of a drag are eaten as touch slop, so nudge with 40 px rather than 20. Tapping the mini strip on the left half of a day lands at its start.
+2. The page scroll from the post-Load position to the framed position is a 235 px upward drag from the day header row.
+3. The status bar hides the cellular icon instead of showing empty bars: Android 16's demo mode draws a "3G" badge next to any mobile icon. About 20 s after the icon is hidden, SystemUI adds a satellite icon; the capture script exits and re-enters demo mode to reset that, so capture straight after positioning.
+
 # Regenerating seeded data
 
 Each shot's weather is recorded once from live Open-Meteo and replayed through the current codec at seed time, so a codec change never needs a re-record. Re-record one shot with `pnpm record-shot <name>` or all of them with pnpm record-shot --all. Shots are defined in `screenshots/shots.mts`. Add a new shot at the end of the table, since a request's message code is its position and moving earlier shots invalidates their recordings. After recording, run `pnpm test` to confirm every fixture replays, then seed again with step 3.

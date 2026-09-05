@@ -189,8 +189,8 @@ export function storageFiles(entries: Record<string, string>): Map<string, strin
   return files;
 }
 
-// Fixtures → the files, end to end.
-export async function buildSeed(fixtures: ShotFixture[]): Promise<Map<string, string>> {
+// Fixtures → every AsyncStorage key and value, end to end.
+export async function buildSeedEntries(fixtures: ShotFixture[]): Promise<Record<string, string>> {
   const slots: SeedSlot[] = [];
   for (const fixture of fixtures) {
     for (const entry of fixture.requests) {
@@ -198,5 +198,26 @@ export async function buildSeed(fixtures: ShotFixture[]): Promise<Map<string, st
       slots.push(seedSlot(params, wire));
     }
   }
-  return storageFiles(seedEntries(slots));
+  return seedEntries(slots);
+}
+
+// Fixtures → the iOS files.
+export async function buildSeed(fixtures: ShotFixture[]): Promise<Map<string, string>> {
+  return storageFiles(await buildSeedEntries(fixtures));
+}
+
+// The SQL that recreates AsyncStorage's Android database, RKStorage: one table, every value
+// inline. user_version must be 1, since SQLiteOpenHelper treats 0 as a fresh file and runs its
+// CREATE TABLE against the one already here.
+export function storageSql(entries: Record<string, string>): string {
+  const quote = (s: string) => `'${s.replace(/'/g, "''")}'`;
+  const rows = Object.entries(entries).map(([k, v]) => `INSERT INTO catalystLocalStorage VALUES (${quote(k)}, ${quote(v)});`);
+  return [
+    'PRAGMA user_version = 1;',
+    'CREATE TABLE catalystLocalStorage (key TEXT PRIMARY KEY, value TEXT NOT NULL);',
+    'BEGIN;',
+    ...rows,
+    'COMMIT;',
+    '',
+  ].join('\n');
 }

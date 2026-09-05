@@ -8,14 +8,17 @@ captures untouched so a caption change never means re-shooting.
 
 Run from packages/mobile after capturing:
 
-    python3 scripts/frame-screenshots.py
+    python3 scripts/frame-screenshots.py              # the App Store set
+    python3 scripts/frame-screenshots.py --android    # the Google Play set
 
 Needs Pillow (`pip install pillow`) and macOS's system font, same as render-splash.py. Neither is a
 build dependency: this runs by hand when the screenshots or their captions change.
 
-The output is 1320x2868 — the same size as the input, because that is what App Store Connect wants
-for the 6.9" set. So the capture is scaled inside the canvas to make room for the caption; the
-frame is not added around a full-size shot.
+The iOS output is 1320x2868 — the same size as the input, because that is what App Store Connect
+wants for the 6.9" set. So the capture is scaled inside the canvas to make room for the caption;
+the frame is not added around a full-size shot. The Android output is 1080x2160: Google Play
+caps a screenshot at 2:1, so the canvas is shorter than the 1080x2424 capture and the device is
+scaled down a little further to fit. Both sets share one layout, scaled to the canvas width.
 """
 
 import argparse
@@ -42,8 +45,21 @@ CAPTIONS_LIST = [
     ("agreement", "Compare forecasts from NOAA, ECMWF, GEM, and ICON models"),
 ]
 
-# The 6.9" iPhone set. Input and output are both this size (see the module docstring).
-CANVAS_W, CANVAS_H = 1320, 2868
+# The Google Play set uses the same shots in the same order; a caption here replaces the App
+# Store one where it names the other platform.
+ANDROID_CAPTIONS = {
+    "overview": "Expedition weather forecasts via inReach, ZOLEO, and satellite messaging",
+}
+
+# Canvas size, source directory and screen corner radius per store. The radius is a fraction of
+# screen width so it holds as the capture is scaled: the iPhone 17 Pro Max display is ~165px
+# round at its native 1320px; the Pixel 9's is ~130px at 1080. The layout constants below are
+# in iOS canvas pixels and scale with the canvas width.
+PLATFORMS = {
+    "ios": {"canvas": (1320, 2868), "dir": "screenshots", "radius_ratio": 165 / 1320},
+    "android": {"canvas": (1080, 2160), "dir": "screenshots/android", "radius_ratio": 130 / 1080},
+}
+LAYOUT_W = 1320
 
 # The ground is the icon's own sky, sampled straight off assets/icon.png: it runs from #2382e4 at
 # the top of the frame to #83c5fb at the horizon. Taken as a gradient rather than one flat blue
@@ -80,10 +96,6 @@ CAPTION_SIZE_MAX = 82
 CAPTION_SIZE_MIN = 54
 LINE_SPACING = 1.16
 
-# Screen corner radius as a fraction of screen width. The iPhone 17 Pro Max display is ~165px
-# round at its native 1320px width; that ratio holds as the capture is scaled.
-SCREEN_RADIUS_RATIO = 165 / 1320
-
 # The variable system font; 'Bold' is the named instance matching RN's fontWeight 700.
 FONT_PATH = "/System/Library/Fonts/SFNS.ttf"
 
@@ -96,9 +108,6 @@ README_COMBO_N = 5
 README_COMBO_W = 2560
 
 HERE = Path(__file__).resolve().parent
-SRC_DIR = HERE.parent / "screenshots"
-OUT_DIR = SRC_DIR / "framed"
-README_COMBO = SRC_DIR / "readme.png"
 
 
 def rgb(hex_color: str) -> tuple[int, int, int]:
@@ -141,7 +150,7 @@ def wrap(text: str, font: ImageFont.FreeTypeFont, max_w: int) -> list[str]:
     return lines
 
 
-def plan_captions(captions: list[str], max_w: int) -> tuple[ImageFont.FreeTypeFont, list[list[str]]]:
+def plan_captions(captions: list[str], max_w: int, k: float = 1.0) -> tuple[ImageFont.FreeTypeFont, list[list[str]]]:
     """One type size for the whole set — the largest at which *every* caption fits in
     CAPTION_MAX_LINES.
 
@@ -151,11 +160,11 @@ def plan_captions(captions: list[str], max_w: int) -> tuple[ImageFont.FreeTypeFo
     whole set to its longest caption is the cost of holding the layout still.
     """
     for size in range(CAPTION_SIZE_MAX, CAPTION_SIZE_MIN - 1, -2):
-        font = load_font(size)
+        font = load_font(int(size * k))
         wrapped = [wrap(c, font, max_w) for c in captions]
         if max(len(w) for w in wrapped) <= CAPTION_MAX_LINES:
             return font, wrapped
-    font = load_font(CAPTION_SIZE_MIN)
+    font = load_font(int(CAPTION_SIZE_MIN * k))
     return font, [wrap(c, font, max_w) for c in captions]
 
 
@@ -170,7 +179,11 @@ def frame(
     lines: list[str],
     font: ImageFont.FreeTypeFont,
     caption_zone_h: int,
+    canvas_size: tuple[int, int],
+    radius_ratio: float,
 ) -> Image.Image:
+    CANVAS_W, CANVAS_H = canvas_size
+    k = CANVAS_W / LAYOUT_W
     canvas = sky((CANVAS_W, CANVAS_H))
 
     # --- caption ---------------------------------------------------------------------------
@@ -178,7 +191,7 @@ def frame(
     # top-aligned, so two- and three-line captions sit optically level against the device below.
     line_h = int(font.size * LINE_SPACING)
     draw = ImageDraw.Draw(canvas)
-    y = TOP_PAD + (caption_zone_h - len(lines) * line_h) / 2
+    y = TOP_PAD * k + (caption_zone_h - len(lines) * line_h) / 2
     for line in lines:
         w = font.getlength(line)
         draw.text(((CANVAS_W - w) / 2, y), line, font=font, fill=TEXT_COLOR)
@@ -190,36 +203,36 @@ def frame(
 
     # Off the caption zone, not off this frame's caption, so the device lands in the same place
     # at the same size in every frame of the set.
-    device_top = TOP_PAD + caption_zone_h + CAPTION_GAP
+    device_top = int(TOP_PAD * k + caption_zone_h + CAPTION_GAP * k)
 
     # There is no bezel: the capture is the device, rounded at the corners and dropped on the sky.
     # A drawn body would be a second, fake device edge inside the real one the capture already
     # has, and at this size that reads as a mistake rather than as a frame.
-    device_h = CANVAS_H - device_top + DEVICE_BLEED
+    device_h = CANVAS_H - device_top + int(DEVICE_BLEED * k)
     device_w = int(round(device_h * aspect))
     device_x = (CANVAS_W - device_w) // 2
-    if device_x < MIN_DEVICE_MARGIN_X:
+    if device_x < MIN_DEVICE_MARGIN_X * k:
         sys.exit(
             f"device is {device_w}px wide, leaving a {device_x}px side margin — reduce "
             f"DEVICE_BLEED ({DEVICE_BLEED}) or shorten the captions"
         )
 
-    radius = int(round(device_w * SCREEN_RADIUS_RATIO))
+    radius = int(round(device_w * radius_ratio))
     mask = rounded_mask((device_w, device_h), radius)
 
     # --- shadow ----------------------------------------------------------------------------
     # Drawn on its own padded layer so the blur has room to fall off instead of clipping at the
     # device edge. It is what separates a white app UI from a pale sky, so it does real work here
     # rather than being decoration.
-    pad = 90
+    pad = int(90 * k)
     shadow = Image.new("L", (device_w + 2 * pad, device_h + 2 * pad), 0)
     ImageDraw.Draw(shadow).rounded_rectangle(
         (pad, pad, pad + device_w, pad + device_h), radius, fill=SHADOW_ALPHA
     )
-    shadow = shadow.filter(ImageFilter.GaussianBlur(38))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(38 * k))
     canvas.paste(
         Image.new("RGB", shadow.size, "#0a2c52"),
-        (device_x - pad, device_top - pad + 22),
+        (device_x - pad, device_top - pad + int(22 * k)),
         shadow,
     )
 
@@ -229,42 +242,49 @@ def frame(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", type=Path, default=None, help="output directory (default screenshots/framed)")
+    ap.add_argument("--out", type=Path, default=None, help="output directory (default <captures>/framed)")
+    ap.add_argument("--android", action="store_true", help="frame the Google Play set from screenshots/android")
     args = ap.parse_args()
 
-    out_dir = args.out or OUT_DIR
+    platform = PLATFORMS["android" if args.android else "ios"]
+    canvas_w, canvas_h = platform["canvas"]
+    src_dir = HERE.parent / platform["dir"]
+    out_dir = args.out or src_dir / "framed"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if not CAPTIONS_LIST:
         sys.exit("CAPTIONS_LIST is empty — nothing to frame")
 
-    missing = [name for name, _ in CAPTIONS_LIST if not (SRC_DIR / f"{name}.png").exists()]
+    missing = [name for name, _ in CAPTIONS_LIST if not (src_dir / f"{name}.png").exists()]
     if missing:
         sys.exit("no capture for: " + ", ".join(f"{m}.png" for m in missing) + " — run scripts/capture-screenshot.sh")
 
-    captions = [caption for _, caption in CAPTIONS_LIST]
-    font, wrapped = plan_captions(captions, CANVAS_W - 2 * TEXT_MARGIN_X)
+    captions = [ANDROID_CAPTIONS.get(name, caption) if args.android else caption for name, caption in CAPTIONS_LIST]
+    k = canvas_w / LAYOUT_W
+    font, wrapped = plan_captions(captions, int((LAYOUT_W - 2 * TEXT_MARGIN_X) * k), k)
     caption_zone_h = max(len(w) for w in wrapped) * int(font.size * LINE_SPACING)
 
     written = set()
     combo: list[Image.Image] = []
     for i, ((name, _), lines) in enumerate(zip(CAPTIONS_LIST, wrapped)):
-        src = SRC_DIR / f"{name}.png"
+        src = src_dir / f"{name}.png"
         out = out_dir / f"{i + 1:02d}-{name}.png"
-        img = frame(src, lines, font, caption_zone_h)
+        img = frame(src, lines, font, caption_zone_h, (canvas_w, canvas_h), platform["radius_ratio"])
         img.save(out)
         written.add(out.name)
         if len(combo) < README_COMBO_N:
             combo.append(img)
         print(f"{out.name}  {img.width}x{img.height}  ({len(lines)} lines @ {font.size}px)")
 
-    if args.out is None and combo:
-        strip = Image.new("RGB", (CANVAS_W * len(combo), CANVAS_H))
+    # The README shows the App Store set only.
+    if args.out is None and not args.android and combo:
+        readme_combo = src_dir / "readme.png"
+        strip = Image.new("RGB", (canvas_w * len(combo), canvas_h))
         for i, img in enumerate(combo):
-            strip.paste(img, (i * CANVAS_W, 0))
+            strip.paste(img, (i * canvas_w, 0))
         h = round(README_COMBO_W * strip.height / strip.width)
-        strip.resize((README_COMBO_W, h), Image.LANCZOS).save(README_COMBO)
-        print(f"{README_COMBO.name}  {README_COMBO_W}x{h}  (frames 1-{len(combo)})")
+        strip.resize((README_COMBO_W, h), Image.LANCZOS).save(readme_combo)
+        print(f"{readme_combo.name}  {README_COMBO_W}x{h}  (frames 1-{len(combo)})")
 
     # Reordering CAPTIONS_LIST or benching an entry leaves its framed output behind under the old
     # number, and a stale frame sitting next to the real ones is a plausible thing to upload by

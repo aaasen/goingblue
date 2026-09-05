@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { isValidToken } from '@weather/protocol';
 
 // The seed's files, read the way the native store reads them: inline manifest values directly,
@@ -27,7 +31,7 @@ import { loadToken } from '../account';
 import { decodeAny, loadStore } from '../cache';
 import { loadAqiScale, loadDevice, loadTimeFormat, loadTwoMessages, loadUnits } from '../settings';
 import { SEED_SETTINGS, SEED_TOKEN, SHOTS } from '../screenshots/shots.mjs';
-import { buildSeed, loadFixtures, requestCode, seedEntries, storageFiles } from '../scripts/shot-fixtures.mjs';
+import { buildSeed, loadFixtures, requestCode, seedEntries, storageFiles, storageSql } from '../scripts/shot-fixtures.mjs';
 
 describe('screenshot seed', () => {
   it('the seed token is well formed', () => {
@@ -46,6 +50,17 @@ describe('screenshot seed', () => {
     const manifest = JSON.parse(out.get('manifest.json')!);
     expect(manifest).toEqual({ small: 'a', big: null });
     expect(out.get(createHash('md5').update('big').digest('hex'))).toBe(big);
+  });
+
+  it('the Android database round-trips through sqlite3', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shot-sql-'));
+    const db = join(dir, 'RKStorage');
+    const value = `it's {"json": "with 'quotes'"}`;
+    execFileSync('sqlite3', [db], { input: storageSql({ small: 'a', quoted: value }) });
+    const rows = execFileSync('sqlite3', ['-json', db, 'SELECT key, value FROM catalystLocalStorage ORDER BY key'], { encoding: 'utf8' });
+    expect(JSON.parse(rows)).toEqual([{ key: 'quoted', value }, { key: 'small', value: 'a' }]);
+    expect(execFileSync('sqlite3', [db, 'PRAGMA user_version'], { encoding: 'utf8' }).trim()).toBe('1');
+    rmSync(dir, { recursive: true });
   });
 
   it('two slots on one code are refused', () => {
