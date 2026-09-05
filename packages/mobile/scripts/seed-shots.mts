@@ -8,8 +8,8 @@
 //   pnpm seed-shots --bundle com.laneaasen.weather.dev
 //   pnpm seed-shots --out /some/dir      # write the files there instead of a simulator
 //
-// The app must already be installed on the target; install it with `npx expo run:ios`. Dates
-// rebase to today, so run this again on the day the screenshots are taken.
+// The app must already be installed on the target; install it with `npx expo run:ios`. The
+// forecasts keep their recorded dates.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,7 +29,7 @@ if (fixtures.length === 0) {
   console.error('no fixtures recorded yet: run `pnpm record-shot --all` first');
   process.exit(1);
 }
-const files = await buildSeed(fixtures, Date.now());
+const files = await buildSeed(fixtures);
 console.log(`${fixtures.length} shot(s), ${fixtures.reduce((n, f) => n + f.requests.length, 0)} forecast(s)`);
 
 function simctl(...cmd: string[]): string {

@@ -113,15 +113,6 @@ export async function replay(fixture: ShotFixture, entry: FixtureRequest): Promi
   }
 }
 
-// Moves a recorded start forward by whole days to the last such instant at or before `now`.
-// Whole days keep the local hour, and with it the period layout the decoder rebuilds from the
-// stored context; only the calendar date moves.
-export function rebaseStart(recordedMs: number, nowMs: number): number {
-  const DAY = 86400000;
-  const days = Math.floor((nowMs - recordedMs) / DAY);
-  return recordedMs + Math.max(0, days) * DAY;
-}
-
 // The persisted shape of a cache.ts Slot: vars as an array, everything else as stored.
 export interface SeedSlot {
   code: number;
@@ -133,12 +124,14 @@ export interface SeedSlot {
 }
 
 // What the app would have stored for this request had it sent it, the reply attached the way
-// attachResponse does (reassembled, not split), and the date rebased to `nowMs`.
-export function seedSlot(params: ForecastParams, wire: string, nowMs: number): SeedSlot {
+// attachResponse does (reassembled, not split). Dates are the recorded ones: the forecast reads
+// as it did on the day it was recorded, and the app's now marker falls outside it once that day
+// has passed.
+export function seedSlot(params: ForecastParams, wire: string): SeedSlot {
   const mask = params.modelsMask;
   const model = Math.log2(mask & -mask);
   const modelName = Object.keys(MODEL_BIT).find((k) => MODEL_BIT[k] === model) ?? 'BEST';
-  const start = rebaseStart(params.startEpochHour * 3600000, nowMs);
+  const start = params.startEpochHour * 3600000;
   return {
     code: params.code,
     context: {
@@ -196,13 +189,13 @@ export function storageFiles(entries: Record<string, string>): Map<string, strin
   return files;
 }
 
-// Fixtures → the files, end to end. `now` is what the dates rebase to.
-export async function buildSeed(fixtures: ShotFixture[], nowMs: number): Promise<Map<string, string>> {
+// Fixtures → the files, end to end.
+export async function buildSeed(fixtures: ShotFixture[]): Promise<Map<string, string>> {
   const slots: SeedSlot[] = [];
   for (const fixture of fixtures) {
     for (const entry of fixture.requests) {
       const { params, wire } = await replay(fixture, entry);
-      slots.push(seedSlot(params, wire, nowMs));
+      slots.push(seedSlot(params, wire));
     }
   }
   return storageFiles(seedEntries(slots));

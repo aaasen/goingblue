@@ -6,9 +6,9 @@
 //   pnpm record-shot denali lowe-peak
 //   pnpm record-shot --all
 //
-// Run it when the weather at the location suits the shot; each shot records on its own day,
-// since the seed rebases every forecast to the day it runs. Re-recording replaces only the
-// named shots' files. Commit the fixture afterward.
+// Run it when the weather at the location suits the shot; each shot records on its own day and
+// keeps that date through the seed. Re-recording replaces only the named shots' files. Commit
+// the fixture afterward.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { WIRE_VERSION, wireCodec } from '@weather/protocol';
 import { SHOTS } from '../screenshots/shots.mjs';

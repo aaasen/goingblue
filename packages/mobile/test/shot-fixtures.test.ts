@@ -27,7 +27,7 @@ import { loadToken } from '../account';
 import { decodeAny, loadStore } from '../cache';
 import { loadAqiScale, loadDevice, loadTimeFormat, loadTwoMessages, loadUnits } from '../settings';
 import { SEED_SETTINGS, SEED_TOKEN, SHOTS } from '../screenshots/shots.mjs';
-import { buildSeed, loadFixtures, rebaseStart, requestCode, seedEntries, storageFiles } from '../scripts/shot-fixtures.mjs';
+import { buildSeed, loadFixtures, requestCode, seedEntries, storageFiles } from '../scripts/shot-fixtures.mjs';
 
 describe('screenshot seed', () => {
   it('the seed token is well formed', () => {
@@ -38,16 +38,6 @@ describe('screenshot seed', () => {
     const codes = SHOTS.flatMap((s) => s.requests.map((_, i) => requestCode(s, i)));
     expect(new Set(codes).size).toBe(codes.length);
     expect(Math.max(...codes)).toBeLessThan(128);
-  });
-
-  it('rebasing keeps the hour and lands within the day before now', () => {
-    const recorded = Date.UTC(2026, 8, 4, 17);
-    const now = Date.UTC(2026, 10, 20, 3, 25);
-    const start = rebaseStart(recorded, now);
-    expect(new Date(start).getUTCHours()).toBe(17);
-    expect(now - start).toBeGreaterThanOrEqual(0);
-    expect(now - start).toBeLessThan(86400000);
-    expect(rebaseStart(recorded, recorded - 1000)).toBe(recorded);
   });
 
   it('large values leave the manifest for an overflow file', () => {
@@ -67,8 +57,8 @@ describe('screenshot seed', () => {
   // then read the files back through the app's own loaders and decode every forecast.
   const fixtures = loadFixtures();
   it.skipIf(fixtures.length === 0)('the app reads back every seeded forecast and setting', async () => {
-    const now = Date.now();
-    files = await buildSeed(fixtures, now);
+    files = await buildSeed(fixtures);
+    const recordedLatest = Math.max(...fixtures.map((f) => Date.parse(f.recordedAt)));
 
     expect(await loadToken()).toBe(SEED_TOKEN);
     expect(await loadUnits()).toEqual(JSON.parse(SEED_SETTINGS.display_unit_prefs));
@@ -83,7 +73,9 @@ describe('screenshot seed', () => {
     for (const slot of store.slots) {
       const msg = decodeAny(slot.encoded!, SEED_TOKEN);
       expect(msg.periods.length).toBeGreaterThan(0);
-      expect(now - slot.context.start).toBeLessThan(86400000);
+      // Recorded dates, not today's: the start is the hour-aligned request time of its recording.
+      expect(slot.context.start % 3600000).toBe(0);
+      expect(slot.context.start).toBeLessThanOrEqual(recordedLatest);
     }
   }, 60000);
 });
