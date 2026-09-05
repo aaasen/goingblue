@@ -365,6 +365,7 @@ pnpm test
 
  - [`benchmark`](.agents/skills/benchmark/SKILL.md): Regenerate the public encoding benchmark at [going.blue/benchmark](https://going.blue/benchmark)
  - [`logs`](.agents/skills/logs/SKILL.md): Read service logs and investigate issues. 
+ - [`screenshots`](.agents/skills/screenshots/SKILL.md): Take App Store screenshots. 
 
 ### Codec Versioning
 
