@@ -3945,10 +3945,10 @@ function glyphVariantAt(periods: Period[], dates: Date[], steps: number[], i: nu
   const midpoint = dates[i].getTime() + steps[i] * 1800000;
   const night = isNight(midpoint, lat, lon);
   const phase = night ? moonPhaseAt(midpoint) : 'full' as MoonPhase;
-  return { key: `${periods[i].weathercode}|${night}|${phase}`, code: periods[i].weathercode, night, phase };
+  return { code: periods[i].weathercode, night, phase };
 }
 
-// The panel's summary glyph, recorded once per appearance. Same convention as the clouds row:
+// The panel's summary glyph, recorded per appearance. Same convention as the clouds row:
 // the glyph centers on top + 58/2, scaled about the canvas center.
 function DetailGlyphCanvas({ code, night, phase, paint }: { code: number; night: boolean; phase: MoonPhase; paint: number }) {
   const picture = useMemo(() => {
@@ -3983,19 +3983,6 @@ const DetailPanel = memo(function DetailPanel({ periods, index, dates, zoned, st
   // canvas passes: a requested-but-dry column reads back as zeros, and a panel that lists them
   // spends two lines saying a snowless week is snowless.
   const hasAmount = (fn: (q: Period) => number | undefined) => periods.some((q) => (fn(q) ?? 0) > 0);
-
-  // A Skia canvas applies child updates through its own async reconciler, so redrawing one canvas
-  // per selection shows the new glyph a beat after the surrounding text. Instead, mount a canvas
-  // per distinct glyph appearance in this model once, and switch periods by flipping which one is
-  // visible — an ordinary style change that commits with the text.
-  const glyphVariants = useMemo(() => {
-    const seen = new Map<string, { key: string; code: number; night: boolean; phase: MoonPhase }>();
-    periods.forEach((_, i) => {
-      const variant = glyphVariantAt(periods, dates, steps, i, lat, lon);
-      if (!seen.has(variant.key)) seen.set(variant.key, variant);
-    });
-    return [...seen.values()];
-  }, [periods, dates, steps, lat, lon]);
 
   // Scanning both bodies across a day costs a few hundred trig evaluations, so it is held against
   // the day rather than the column: stepping along the columns of one day recomputes nothing.
@@ -4135,11 +4122,9 @@ const DetailPanel = memo(function DetailPanel({ periods, index, dates, zoned, st
       </View>
       <View style={styles.detailSummary}>
         <View style={[styles.detailGlyphWrap, night && { backgroundColor: C.night }]}>
-          {glyphVariants.map((variant) => (
-            <View key={variant.key} style={[styles.detailGlyphLayer, variant.key !== activeGlyph.key && styles.detailGlyphHidden]}>
-              <DetailGlyphCanvas code={variant.code} night={variant.night} phase={variant.phase} paint={paint} />
-            </View>
-          ))}
+          {/* One picture view, re-recorded per selection: the picture is handed to the native view
+              inside React's commit, so the new glyph lands with the text around it. */}
+          <DetailGlyphCanvas code={activeGlyph.code} night={activeGlyph.night} phase={activeGlyph.phase} paint={paint} />
         </View>
         <RNText style={styles.detailCodeName}>{wmoName(p.weathercode)}</RNText>
       </View>
@@ -4250,8 +4235,6 @@ const styles = StyleSheet.create({
   detailClose: { fontSize: 17, color: C.sectionText, paddingLeft: 14, paddingVertical: 2 },
   detailSummary: { flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 4 },
   detailGlyphWrap: { width: 48, height: 48, borderRadius: 8, overflow: 'hidden' },
-  detailGlyphLayer: { position: 'absolute', top: 0, left: 0 },
-  detailGlyphHidden: { opacity: 0 },
   detailCodeName: { fontSize: 14, fontWeight: '600', color: C.label, marginLeft: 10, flexShrink: 1 },
   detailDivider: {
     height: StyleSheet.hairlineWidth,
