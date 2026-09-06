@@ -29,7 +29,8 @@ const MAX_RANGE_DAYS = 732;
 // several groups and the chart's quantity becomes variable requests rather than requests — the
 // renderer relabels the tooltip accordingly.
 export type GroupKey =
-  | "account" | "device" | "outcome" | "mode" | "model" | "messages" | "variable" | "version";
+  | "account" | "device" | "platform" | "outcome" | "mode" | "model" | "messages" | "variable"
+  | "version";
 // `outcome` groups every row, since its point is showing the failures; everything else counts
 // served forecasts only, so a failure's all-null shape columns never surface as a "?" series.
 const SERVED = `coalesce(r.outcome, 'ok') = 'ok'`;
@@ -39,6 +40,7 @@ const NOT_HIDDEN = `r.account_id not in (select account_id from stats_hidden_acc
 const GROUP_EXPRS: Record<Exclude<GroupKey, "variable">, string> = {
   account: "r.account_id::text",
   device: "r.device",
+  platform: "r.platform",
   outcome: "coalesce(r.outcome, 'ok')",
   mode: "r.mode",
   model: "r.model",
@@ -111,7 +113,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // URL params to a validated filter set. Anything malformed falls back to its default rather than
 // erroring: the URL is hand-editable, and the page should always render.
 const GROUP_KEYS: readonly GroupKey[] = [
-  "account", "device", "outcome", "mode", "model", "messages", "variable", "version",
+  "account", "device", "platform", "outcome", "mode", "model", "messages", "variable", "version",
 ];
 
 export function parseFilters(q: (name: string) => string | undefined): StatsFilters {
@@ -146,6 +148,7 @@ export type RequestRow = {
   time: string;
   account: number;
   device: string | null;
+  platform: string | null;
   version: number | null;
   chars: number | null;
   outcome: string | null;
@@ -269,7 +272,7 @@ const groupTotalsSql = (where: string, g: ReturnType<typeof groupSql>) => `
 const REQUESTS_LIMIT = 20;
 const requestRowsSql = (where: string) => `
   select r.id, to_char(r.created_at at time zone $1, 'FMMM/FMDD HH24:MI') as time,
-         r.account_id, r.device, r.version, r.chars, r.outcome,
+         r.account_id, r.device, r.platform, r.version, r.chars, r.outcome,
          r.loc, r.lat::text as lat, r.lon::text as lon, r.mode, r.model, r.messages, r.vars,
          r.periods, r.codec_ms, r.fetch_ms, r.encode_ms
     from requests r
@@ -376,6 +379,7 @@ export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
       time: String(r["time"]),
       account: num(r["account_id"]),
       device: r["device"] == null ? null : String(r["device"]),
+      platform: r["platform"] == null ? null : String(r["platform"]),
       version: r["version"] == null ? null : num(r["version"]),
       chars: r["chars"] == null ? null : num(r["chars"]),
       outcome: r["outcome"] == null ? null : String(r["outcome"]),
@@ -590,6 +594,7 @@ function enumerateDays(from: string, to: string): string[] {
 function groupLabel(group: GroupKey, grp: string | null): string {
   if (grp === null) return "?";
   if (group === "device") return DEVICE_LABELS[grp] ?? grp;
+  if (group === "platform") return PLATFORM_LABELS[grp] ?? grp;
   if (group === "version") return `v${grp}`;
   if (group === "variable" && grp === "aqi") return "AQI";
   return grp;
@@ -693,6 +698,12 @@ const DEVICE_LABELS: Record<string, string> = {
   g: "inReach",
 };
 
+// What each `o:` code is: the operating system of the app that sent the request.
+const PLATFORM_LABELS: Record<string, string> = {
+  i: "iOS",
+  a: "Android",
+};
+
 // The numbers and dates on this page are formatted by this module and need no escaping. The
 // shape facets are different: their strings arrive through the codec's shape header, which
 // dispatch.ts explicitly treats as untrusted input, so everything from it is escaped on the way
@@ -763,6 +774,7 @@ function requestTable(requests: RequestRow[], filters: StatsFilters): string {
       return (
         `<tr><td>${r.id}</td><td>${r.time}</td><td>${r.account}${actForm("hide", r.account, filters, "hide")}</td>` +
         `<td>${r.device === null ? "" : DEVICE_LABELS[r.device] ?? esc(r.device)}</td>` +
+        `<td>${r.platform === null ? "" : PLATFORM_LABELS[r.platform] ?? esc(r.platform)}</td>` +
         `<td>${r.version ?? ""}</td><td>${place}</td>` +
         `<td>${r.mode === null ? "" : esc(r.mode)}</td>` +
         `<td>${r.model === null ? "" : esc(r.model)}</td>` +
@@ -774,7 +786,7 @@ function requestTable(requests: RequestRow[], filters: StatsFilters): string {
     .join("");
   return `<div class=tablewrap>
 <table>
-<thead><tr><th>Id</th><th>Time</th><th>Account</th><th>Device</th><th>Version</th>
+<thead><tr><th>Id</th><th>Time</th><th>Account</th><th>Device</th><th>Platform</th><th>Version</th>
 <th>Location</th><th>Priority</th><th>Model</th><th>Messages</th><th>Chars</th>
 <th>Periods</th><th>Codec ms</th><th>Variables</th><th>Outcome</th></tr></thead>
 <tbody>${body}</tbody>
@@ -939,8 +951,9 @@ export function renderStats(data: StatsData): string {
   // list — a series the chart folded into "Other" still gets its own row here. Absent entirely
   // when the chart is ungrouped: the summary tiles already carry the window total.
   const GROUP_NAMES: Record<GroupKey, string> = {
-    account: "Account", device: "Device", outcome: "Outcome", mode: "Priority", model: "Model",
-    messages: "Messages", variable: "Variable", version: "Version",
+    account: "Account", device: "Device", platform: "Platform", outcome: "Outcome",
+    mode: "Priority", model: "Model", messages: "Messages", variable: "Variable",
+    version: "Version",
   };
   // Under the variable grouping each family row is followed by its components, indented and
   // quiet — "AQI 6" and then which indices carried it. A family of one variable under its own
@@ -1000,7 +1013,8 @@ ${groupTotalRow}
 
 <h2>Requests per day</h2>
 ${groupBar("group", "requests", group, [
-  ["", "None"], ["account", "Account"], ["device", "Device"], ["outcome", "Outcome"],
+  ["", "None"], ["account", "Account"], ["device", "Device"], ["platform", "Platform"],
+  ["outcome", "Outcome"],
   ["mode", "Priority"], ["model", "Model"], ["messages", "Messages"], ["variable", "Variable"],
   ["version", "Version"],
 ])}

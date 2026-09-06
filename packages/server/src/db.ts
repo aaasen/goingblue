@@ -108,6 +108,7 @@ export async function migrate(): Promise<void> {
       max_chars   int,
       messages    int,
       device      text,
+      platform    text,
       periods     jsonb,
       codec_ms    int,
       fetch_ms    int,
@@ -137,7 +138,8 @@ export async function migrate(): Promise<void> {
   // X-Request-Shape header (dispatch.ts, parseShapeHeader). All null for failures and for
   // containers frozen before the header existed. `device` is the `d:` route code, reported by
   // the codec since 2026-08-31 (before that the gateway read it itself); `messages` and
-  // `max_chars` are the reply budget it implies.
+  // `max_chars` are the reply budget it implies. `platform` is the `o:` code, the app's
+  // operating system (i = iOS, a = Android), null from clients that predate the token.
   await query(`
     alter table requests
       add column if not exists lat numeric(4,2),
@@ -148,7 +150,8 @@ export async function migrate(): Promise<void> {
       add column if not exists vars text[],
       add column if not exists max_chars int,
       add column if not exists messages int,
-      add column if not exists device text
+      add column if not exists device text,
+      add column if not exists platform text
   `);
   // What the reply carried and what serving it cost. `periods` maps hours-per-period to how
   // many periods of that resolution the reply held (its sum is the total period count — the

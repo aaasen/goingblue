@@ -12,7 +12,7 @@ const cell = (day: string, requests: number, grp: string | null = ""): DailyRow 
 // One raw request row with every column a served default-forecast reply carries; tests override
 // what they exercise.
 const row = (over: Partial<RequestRow> = {}): RequestRow => ({
-  id: 1, time: "8/30 14:11", account: 29, device: "i", version: 3, chars: 155, outcome: "ok",
+  id: 1, time: "8/30 14:11", account: 29, device: "i", platform: "i", version: 3, chars: 155, outcome: "ok",
   loc: "current", lat: "63.06", lon: "-151.08", mode: "auto", model: "best", messages: 1,
   vars: ["temp", "wind", "snow", "gust", "rain"],
   periods: null, codecMs: null, fetchMs: null, encodeMs: null, ...over,
@@ -207,6 +207,21 @@ describe("renderStats — grouped chart", () => {
     expect(html).toContain("<tfoot><tr><td>Total</td><td>12</td><td>0</td></tr></tfoot>");
   });
 
+  it("labels the platform grouping by operating system", () => {
+    const html = renderStats(data([cell("2026-08-07", 5)], {
+      filters: { group: "platform" },
+      groups: [
+        { grp: "i", requests: 3, users: 2 },
+        { grp: "a", requests: 1, users: 1 },
+        { grp: null, requests: 1, users: 1 },
+      ],
+    }));
+    expect(html).toContain("By platform");
+    expect(html).toContain("<td>iOS</td><td>3</td><td>2</td>");
+    expect(html).toContain("<td>Android</td><td>1</td><td>1</td>");
+    expect(html).toContain("<td>?</td><td>1</td><td>1</td>");
+  });
+
   it("shows no group table when the chart is ungrouped", () => {
     const html = renderStats(data([cell("2026-08-07", 12)], {
       groups: [{ grp: "", requests: 12, users: 3 }],
@@ -259,7 +274,7 @@ describe("renderStats — recent requests", () => {
               lat: "63.07", lon: "-151.00", mode: "auto", model: "best", messages: 2, chars: 288,
               vars: ["temp", "wind", "freeze", "cch", "ccm", "aq_o3", "w500"],
               periods: { "1": 130, "3": 56 }, codecMs: 1037, fetchMs: 1015, encodeMs: 18 }),
-        row({ id: 54, time: "8/29 09:02", account: 12, device: "s", version: 2, loc: "current",
+        row({ id: 54, time: "8/29 09:02", account: 12, device: "s", platform: "a", version: 2, loc: "current",
               lat: "47.62", lon: "-122.29", mode: "detail", model: "eu", messages: null,
               chars: null, vars: ["temp"] }),
       ],
@@ -270,7 +285,7 @@ describe("renderStats — recent requests", () => {
     // The account cell also holds the hide form, so the row is matched around it.
     expect(html).toContain("<td>55</td><td>8/30 14:11</td><td>29<form");
     expect(html).toContain(
-      "<td>iPhone</td><td>3</td><td>summit</td>" +
+      "<td>iPhone</td><td>iOS</td><td>3</td><td>summit</td>" +
       "<td>auto</td><td>best</td><td>2</td><td>288</td>" +
       `<td title="1h×130, 3h×56">186</td><td title="fetch 1015, encode 18 ms">1037</td>` +
       "<td>freeze, clouds, AQI, wind</td>");
@@ -278,18 +293,19 @@ describe("renderStats — recent requests", () => {
     // empty, as do the periods/timing columns the row predates.
     expect(html).toContain("<td>54</td><td>8/29 09:02</td><td>12<form");
     expect(html).toContain(
-      "<td>SMS</td><td>2</td><td>47.62, -122.29</td>" +
+      "<td>SMS</td><td>Android</td><td>2</td><td>47.62, -122.29</td>" +
       "<td>detail</td><td>eu</td><td></td><td></td><td></td><td></td><td></td>");
   });
 
   // A failure has no shape: every codec-reported cell is empty, and the outcome says why.
   it("renders a failed request's shape cells empty and its outcome loud", () => {
     const html = renderStats(data([cell("2026-08-07", 1)], {
-      requests: [row({ device: null, loc: null, lat: null, lon: null, mode: null, model: null,
-                       messages: null, chars: null, vars: [], outcome: "unsupported_version" })],
+      requests: [row({ device: null, platform: null, loc: null, lat: null, lon: null, mode: null,
+                       model: null, messages: null, chars: null, vars: [], outcome: "unsupported_version" })],
     }));
     expect(html).toContain("<td>unsupported_version</td>");
     expect(html).not.toContain("<td>iPhone</td>");
+    expect(html).not.toContain("<td>iOS</td>");
   });
 
   it("says when nothing has been recorded rather than dropping the sections", () => {

@@ -82,6 +82,18 @@ export function isDeviceCode(value: unknown): value is DeviceCode {
   return typeof value === "string" && value in DEVICE_TRANSPORT;
 }
 
+// The operating system of the app that sent the request, carried as the request's `o:` token.
+// Orthogonal to `d:`: an Android phone sends over SMS or the internet exactly as an iPhone does,
+// so the route says nothing about the platform. Nothing about the reply depends on it; it exists
+// so the gateway can record which platform a request came from.
+export type PlatformCode = "i" | "a";
+
+export const PLATFORM_CODES: readonly PlatformCode[] = ["i", "a"];
+
+export function isPlatformCode(value: unknown): value is PlatformCode {
+  return typeof value === "string" && (PLATFORM_CODES as readonly string[]).includes(value);
+}
+
 // The byte cap from the field measurements above. The 70-code-unit cap never binds a wide part —
 // a part is 52 units — so only this one appears in the arithmetic.
 const BUBBLE_BYTES = 140;

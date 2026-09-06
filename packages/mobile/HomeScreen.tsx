@@ -31,7 +31,7 @@ import LocationMap from './LocationMap';
 import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
 import HelpScreen from './HelpScreen';
 import { MODELS, modelLabelFromMask } from './models';
-import { DEVICES, deviceCode, type Device } from './devices';
+import { DEVICES, deviceCode, platformCode, type Device } from './devices';
 import { parseLatLon } from './coords';
 import { SHOW_COORDINATES } from './features';
 import { palette, SEGMENT_PROPS, SWITCH_PROPS } from './palette';
@@ -420,8 +420,9 @@ const DEFAULT_GROUPS = new Set<string>();
 // route allows, which `d:` and `n:` name and both ends derive from one table (see devices.ts).
 // On the internet route there is no budget, so it refines until the upstream data runs out.
 // `z:` is the local-midnight UTC offset the period grid aligns to. `u:` carries the account token
-// so the server can attribute the request to the user. `k:` is the message code the slim response
-// echoes so the client can recover the request context (see cache.ts).
+// so the server can attribute the request to the user. `o:` is the operating system, for the
+// server's records. `k:` is the message code the slim response echoes so the client can recover
+// the request context (see cache.ts).
 function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, vars: ReadonlySet<Variable>, device: Device, messages: number, code: number, startEpochHour: number): string {
   const parts: string[] = [`v${WIRE_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
@@ -438,6 +439,9 @@ function buildMsg(token: string, coords: { lat: number; lon: number } | null, mo
   // alphabet as well as its length. The length is derived from `d:` and `n:` at both ends, off
   // the one table in the protocol, so the request no longer spends characters restating it.
   parts.push(`d:${deviceCode(device)}`);
+  // `o:` names the operating system, which the route does not imply: Android sends over SMS
+  // and the internet exactly as iOS does. The server records it and nothing more.
+  parts.push(`o:${platformCode()}`);
   // Omitted at one message, which is every route but a split iPhone reply — so the requests that
   // worked before this existed still go out byte for byte unchanged.
   if (messages > 1) parts.push(`n:${messages}`);

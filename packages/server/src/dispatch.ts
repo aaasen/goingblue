@@ -26,6 +26,9 @@ export interface RequestShape {
   // gateway must not learn. Null for hand-typed messages and for containers frozen before the
   // header carried it.
   device: string | null;
+  // The `o:` platform code (iOS or Android), codec-reported like `device`. Null for hand-typed
+  // messages and for containers frozen before the header carried it.
+  platform: string | null;
   // What the reply actually carries: hours-per-period → how many periods of that resolution,
   // so the sum is the reply's total period count. Null from containers frozen before the codec
   // reported it.
@@ -151,6 +154,7 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
     // single messages, but null records "not reported" rather than guessing.
     messages: shapeInt(o["messages"]),
     device: shapeString(o["device"]),
+    platform: shapeString(o["platform"]),
     periods: shapePeriods(o["periods"]),
     fetchMs: shapeInt(o["fetchMs"]),
     encodeMs: shapeInt(o["encodeMs"]),

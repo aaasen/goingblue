@@ -22,9 +22,11 @@ import {
   type VersionedCodec,
   type Alphabet,
   type DeviceCode,
+  type PlatformCode,
   DEVICE_TRANSPORT,
   MAX_MESSAGES,
   isDeviceCode,
+  isPlatformCode,
   maxCharsFor,
   UNCAPPED_MAX_CHARS,
   partBodyChars,
@@ -1114,6 +1116,9 @@ export interface ForecastParams {
   // The route itself (`d:`), for the routes whose reply is split into labelled messages —
   // see splitReplyFor. Absent when the request named none.
   device?: DeviceCode;
+  // The sending app's operating system (`o:`), reported to the gateway for its records and
+  // nothing else. Absent when the request named none.
+  platform?: PlatformCode;
   // How many messages the reply may be spread over (`n:`, default 1). Only a route that splits
   // (iPhone, inReach, ZOLEO) sends more than one; SMS spends it as one longer concatenated
   // reply. See splitReplyFor.
@@ -1153,6 +1158,7 @@ export function parseRequest(body: string): ForecastParams {
   // Core variables are implicit; `v:` carries only user-configurable additions.
   const vars = new Set<Variable>(ALWAYS_VARS);
   let device: DeviceCode | null = null; // from `d:`; null keeps the base-85 SMS defaults
+  let platform: PlatformCode | null = null; // from `o:`; recorded, never acted on
   let messages = 1; // from `n:`: how many messages the reply may be spread over
   let decoderVersion: number | null = null; // set from a `vN` token; required, no default
   let userToken: string | null = null; // set from a `u:` token in the request
@@ -1206,6 +1212,11 @@ export function parseRequest(body: string): ForecastParams {
         seen.add(key);
         if (isDeviceCode(val)) device = val;
         else errors.push(`invalid device "d:${val}"`);
+      } else if (key === "o") {
+        // The app's operating system: o:i (iOS), o:a (Android). Optional: it only feeds the
+        // gateway's request record, so a request without it is still served.
+        if (isPlatformCode(val)) platform = val;
+        else errors.push(`invalid platform "o:${val}"`);
       } else if (key === "n") {
         // How many messages the reply may be spread over. Optional: omitted at one message.
         const n = parseInt(val);
@@ -1292,7 +1303,7 @@ export function parseRequest(body: string): ForecastParams {
   // route's limit and so the safe reading of an unidentified sender.
   const maxChars = maxCharsFor(device ?? "s", messages, WIRE_HEADER_CHARS);
 
-  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, vars, maxChars, alphabet, device: device ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
+  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, vars, maxChars, alphabet, device: device ?? undefined, platform: platform ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
 }
 
 // What a request asked for, in names, for the gateway to record (see `X-Request-Shape` in
@@ -1316,6 +1327,8 @@ export interface RequestShape {
   // by the gateway: the codes are part of this version's grammar, and the gateway's frozen
   // sliver stays vN + u:.
   device?: string;
+  // The `o:` platform code, absent when the request named none.
+  platform?: string;
 }
 
 const IDX_TO_LOCATION_NAME: Record<number, string> = Object.fromEntries(
@@ -1350,6 +1363,7 @@ export function describeRequest(params: ForecastParams): RequestShape {
     ...(params.maxChars !== UNCAPPED_MAX_CHARS ? { maxChars: params.maxChars } : {}),
     messages: params.messages,
     ...(params.device ? { device: params.device } : {}),
+    ...(params.platform ? { platform: params.platform } : {}),
   };
 }
 

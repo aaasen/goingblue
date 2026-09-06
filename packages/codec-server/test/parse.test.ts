@@ -314,6 +314,19 @@ describe("parseRequest", () => {
     expect(parseRequest(`d:i n:${MAX_MESSAGES}`).messages).toBe(MAX_MESSAGES);
   });
 
+  it("o: names the platform and is recorded, never acted on", () => {
+    expect(parseRequest("d:s o:i")).toMatchObject({ platform: "i", alphabet: "base124", maxChars: SMS_MAX_CHARS });
+    expect(parseRequest("d:s o:a")).toMatchObject({ platform: "a", alphabet: "base124", maxChars: SMS_MAX_CHARS });
+    expect(parseRequest("d:s o:a").errors).not.toContain(expect.stringContaining("o:"));
+  });
+
+  it("o: is optional, and an unknown platform is an error", () => {
+    expect(parseRequest("d:s").platform).toBeUndefined();
+    expect(parseRequest("d:s").errors).not.toContain("missing o:");
+    expect(parseRequest("d:s o:w").platform).toBeUndefined();
+    expect(parseRequest("d:s o:w").errors).toContain('invalid platform "o:w"');
+  });
+
   it("n: is independent of the device, so token order never matters", () => {
     expect(parseRequest("n:2 d:i").maxChars).toBe(parseRequest("d:i n:2").maxChars);
     expect(parseRequest("n:2 d:g").maxChars).toBe(maxCharsFor("g", 2, WIRE_HEADER_CHARS));

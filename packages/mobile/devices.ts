@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'react';
 import { Platform } from 'react-native';
 import type MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import type { DeviceCode } from '@weather/protocol';
+import type { DeviceCode, PlatformCode } from '@weather/protocol';
 
 // How the request leaves the phone, and how the reply comes back. The builder's single action
 // button is whatever the selected device's `action` says, but the device is more than a button
@@ -53,4 +53,10 @@ export function isDevice(value: unknown): value is Device {
 // client to state and no way for the two ends to disagree about it.
 export function deviceCode(device: Device): DeviceCode {
   return DEVICES.find((d) => d.value === device)!.code;
+}
+
+// The `o:` token: which operating system the request comes from. Independent of the device,
+// which names the route; the server only records this.
+export function platformCode(): PlatformCode {
+  return Platform.OS === 'android' ? 'a' : 'i';
 }
