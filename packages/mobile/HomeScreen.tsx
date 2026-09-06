@@ -970,10 +970,6 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     }
   }
 
-  // Which GPS wait is current. getCurrentPositionAsync can't be aborted, so cancelling one means
-  // abandoning it: the cancel bumps the generation, and a wait whose generation has passed
-  // returns null without alerting, its eventual fix ignored (though fetchPosition still stores
-  // it, which only makes the next send fresher).
   // Store a fix as the phone's position. The OS's own timestamp, not the time of arrival: a watch
   // hands over whatever it last knew before it has anything new, and that can be hours old.
   function takeFix(pos: Location.LocationObject): { lat: number; lon: number } {
@@ -983,6 +979,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     return coords;
   }
 
+  // Which GPS wait is current. getCurrentPositionAsync can't be aborted, so cancelling one means
+  // abandoning it: the cancel bumps the generation, and a wait whose generation has passed
+  // returns null without alerting, its eventual fix ignored (though fetchPosition still stores
+  // it, which only makes the next send fresher).
   const locateGen = useRef(0);
 
   async function requestCurrentLocation(): Promise<{ lat: number; lon: number } | null> {
@@ -990,11 +990,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     setLocating(true);
     try {
       const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+      setLocationGranted(status === 'granted');
       if (locateGen.current !== gen) return null;
       if (status !== 'granted') {
         // Offer Settings only once the OS has stopped asking. While it still prompts, tapping
         // the button again is the shorter way back, and Settings isn't where a soft denial gets
-      setLocationGranted(status === 'granted');
         // fixed. openSettings lands on the app's own page — a deep link to the Location pane
         // needs a private URL scheme Apple rejects for.
         if (canAskAgain) Alert.alert('Location unavailable', LOCATION_DENIED);
@@ -1033,10 +1033,6 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     return () => sub.remove();
   }, []);
 
-  // Pin the location at whatever the field holds. Typing, picking on the map and clearing all come
-  // through here, so each of them takes the pin off the phone's position.
-  function pinCoordsText(text: string) {
-    setCoordsText(text);
   // Follow the phone's position while the app is open, so the map and the model subtext show
   // where the phone is now rather than where it was opened. Only when access has already been
   // granted: an unprompted permission dialog on open asks for something the user hasn't tried to
@@ -1065,6 +1061,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     };
   }, [locationGranted, foreground]);
 
+  // Pin the location at whatever the field holds. Typing, picking on the map and clearing all come
+  // through here, so each of them takes the pin off the phone's position.
+  function pinCoordsText(text: string) {
+    setCoordsText(text);
     setFollowing(false);
   }
 
