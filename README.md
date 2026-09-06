@@ -1,6 +1,6 @@
 # Going Blue
 
-Going Blue is a weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom compression codec and decoder app to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, ZOLEO, or iPhone satellite messaging. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
+Going Blue is an expedition weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom codec to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, ZOLEO, or iPhone satellite messaging. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
 
 <img src="packages/mobile/screenshots/readme.png" width="100%" alt="Four screenshots: a 13-day meteogram for Mont Blanc, the Builder tab's location, model and variable options, a Denali forecast with freezing level and pressure-level winds, and a forecast with air quality">
 
@@ -12,12 +12,15 @@ Going Blue is a weather app designed specifically for satellite messengers. It w
 
 ## Features
 
-- Works via the internet, SMS, Garmin inReach, ZOLEO, and iPhone satellite messaging. 
-- Uses a custom compression codec optimized for weather data that packs hundreds of data points into a single message. Choose between hourly detail and extended range up to 13 days.
-- Temperature, snow, rain, wind, and cloud cover included by default. Optional variables include pressure-level winds for high-altitude mountaineering, AQI for planning around wildfire smoke, detailed cloud cover with 8 levels, and freezing level.
-- Weather forecasts from over 30 models including HRRR (3km), HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for your location.
-- Compare forecasts from American, Canadian, European, and German forecast centers.
-- All forecasts are saved on your device for comparing multiple models and past forecasts.
+- Satellite ready: Get forecasts anywhere in the world, without cell reception. Works with Garmin inReach, ZOLEO, and iPhone satellite messaging. 
+- Hundreds of data points per message: Uses custom compression optimized for weather data to fit a detailed weather forecast into a single message.
+- 30+ weather models: Forecasts from high-resolution models like HRRR (3km), HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for your location.
+- Detailed cloud cover: See up to 10 levels in the atmosphere to differentiate between high clouds, valley fog, and whiteout conditions. 
+- Mountain forecasts: Pressure-level winds and freezing level for high-altitude mountaineering.
+- Air quality: Plan around wildfire smoke and other pollution with AQI forecasts.
+- Model agreement: See how well the forecast agrees with models from NOAA, ECMWF, ECCC, and DWD. 
+- Works offline: All forecasts are saved on your device for comparing multiple models and past forecasts while offline.
+- Private: Going Blue requires no account and does not store your name, email, or phone number. 
 
 ## Architecture
 
@@ -255,7 +258,7 @@ Freezing drizzle (56/57) and freezing rain (66/67) are not transformed.
 
 #### Pressure-level Cloud Interpolation
 
-Open-Meteo provides cloud cover at various pressure levels. This is calculated based on the relative humidity compared to the critical relative humidity at each pressure level using Sundqvist's formula. The pressure-level cloud data drives the detailed cloud view in the meteogram, which shows clouds at 8 different levels in the atmosphere. This information can help determine what type of clouds are forecast: high cirrus overcast, a lenticular on the summit, or valley fog?
+Open-Meteo provides cloud cover at various pressure levels. This is calculated based on the relative humidity compared to the critical relative humidity at each pressure level using Sundqvist's formula. The pressure-level cloud data drives the detailed cloud view in the meteogram, which shows clouds at 10 different levels in the atmosphere. This information can help determine what type of clouds are forecast: high cirrus overcast, a lenticular on the summit, or valley fog?
 
 There is a subtle problem with using clouds at each pressure level directly: the pressure-level variable only reports clouds that are exactly at that band. If there is a cloud at 20k but we only pull the 18k and 24k bands, we will miss that cloud entirely. This can lead to inconsistent forecasts where we report "cloudy" in the weathercode but the meteogram shows no clouds. 
 
@@ -395,14 +398,14 @@ The Going Blue codec relies on the client and server having identical codebooks.
  - Added more options to the unit selector.
  - Merged Builder and Decoder tabs into a single page.
 
-#### In development: Codec v4 (App version 1.3.0)
+#### Codec v4 (App version 1.3.0)
 
- - Added Android support. Adding the app to the Play Store requires a 2 week internal testing period. 
  - Added the ICON model from DWD.
  - Added a model agreement score that shows how well the forecast agrees with forecasts from NOAA, ECCC, ECMWF, and DWD. 
  - Added a model comparison mode. To use it, pull forecasts for the same location from multiple models. A comparison switch will appear below the meteogram.  
  - Improved meteogram rendering performance so that switching between forecasts feels instant.
  - Added humidity variables: dewpoint, relative humidity, and feels-like temperature.
+ - Expanded detailed cloud cover from 8 to 10 levels, adding 250 and 200 hPa for high peaks. 
 
 ## License
 
