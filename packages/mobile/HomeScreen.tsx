@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, Pressable,
+  ActivityIndicator, Alert, Animated, AppState, Image, Linking, Modal, Platform, Pressable,
   ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -92,8 +92,14 @@ const NO_LOCATION_MESSAGE = 'Choose a location to request a forecast';
 
 // A fix taken when the app was opened can be hours old by the time a request goes out, and a
 // forecast for where the phone used to be reads exactly like the right one. Sends re-fix beyond
-// this age; under it, a burst of copies and sends stays instant.
+// this age; under it, a burst of copies and sends stays instant. The map holds itself to the same
+// age: a fix this old is dropped rather than drawn as the phone's position.
 const GPS_FIX_MAX_AGE_MS = 60_000;
+// How the foreground position watch is tuned: coarse (cell and wifi) accuracy keeps it cheap, and
+// a fix is only delivered once the phone has moved this far, so a phone on a table costs nothing.
+const GPS_WATCH_OPTIONS: Location.LocationOptions = {
+  accuracy: Location.Accuracy.Balanced, distanceInterval: 25, timeInterval: 30_000,
+};
 
 // Variables a forecast center can't supply. Only the freezing level varies now — GEM and ECMWF
 // have no freezing-level product (Europe's pressure winds are filled from IFS 0.25°). The
@@ -954,11 +960,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // differ only in whether a failure is worth reporting, so that stays with them.
   async function fetchPosition(): Promise<{ lat: number; lon: number } | null> {
     try {
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-      setGpsCoords(coords);
-      gpsFixedAt.current = pos.timestamp;
-      return coords;
+      return takeFix(await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
     } catch {
       return null;
     }
@@ -968,6 +970,15 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // abandoning it: the cancel bumps the generation, and a wait whose generation has passed
   // returns null without alerting, its eventual fix ignored (though fetchPosition still stores
   // it, which only makes the next send fresher).
+  // Store a fix as the phone's position. The OS's own timestamp, not the time of arrival: a watch
+  // hands over whatever it last knew before it has anything new, and that can be hours old.
+  function takeFix(pos: Location.LocationObject): { lat: number; lon: number } {
+    const coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+    setGpsCoords(coords);
+    gpsFixedAt.current = pos.timestamp;
+    return coords;
+  }
+
   const locateGen = useRef(0);
 
   async function requestCurrentLocation(): Promise<{ lat: number; lon: number } | null> {
@@ -979,6 +990,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       if (status !== 'granted') {
         // Offer Settings only once the OS has stopped asking. While it still prompts, tapping
         // the button again is the shorter way back, and Settings isn't where a soft denial gets
+      setLocationGranted(status === 'granted');
         // fixed. openSettings lands on the app's own page — a deep link to the Location pane
         // needs a private URL scheme Apple rejects for.
         if (canAskAgain) Alert.alert('Location unavailable', LOCATION_DENIED);
@@ -1001,23 +1013,54 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     }
   }
 
-  // Fill in the current location when the app opens, so the model subtext has coordinates to
-  // attribute before the user touches anything. Only when access has already been granted: an
-  // unprompted permission dialog on open asks for something the user hasn't tried to do yet, and
-  // the send buttons still raise the prompt at the moment it's actually needed. The attempt is
-  // silent and doesn't set `locating` either — nothing waits on it, so a background convenience
-  // shouldn't spin the buttons or raise an alert about a fix nobody asked for.
+  // Whether the app is in the foreground. The position watch below only runs while it is, and
+  // each return to the foreground is where a fix taken before the app was put away gets dropped.
+  const [foreground, setForeground] = useState(AppState.currentState !== 'background');
   useEffect(() => {
-    (async () => {
-      const { granted } = await Location.getForegroundPermissionsAsync();
-      if (granted) await fetchPosition();
-    })();
+    const sub = AppState.addEventListener('change', (state) => {
+      const active = state === 'active';
+      setForeground(active);
+      // Permission can change in Settings while the app is away, in either direction.
+      if (active) Location.getForegroundPermissionsAsync().then(({ granted }) => setLocationGranted(granted));
+      // Whatever fix was on the map is now as old as the time away. Showing nothing until the
+      // watch delivers is better than showing where the phone was when it was put away.
+      if (active) setGpsCoords((c) => (c && Date.now() - gpsFixedAt.current > GPS_FIX_MAX_AGE_MS ? null : c));
+    });
+    return () => sub.remove();
   }, []);
 
   // Pin the location at whatever the field holds. Typing, picking on the map and clearing all come
   // through here, so each of them takes the pin off the phone's position.
   function pinCoordsText(text: string) {
     setCoordsText(text);
+  // Follow the phone's position while the app is open, so the map and the model subtext show
+  // where the phone is now rather than where it was opened. Only when access has already been
+  // granted: an unprompted permission dialog on open asks for something the user hasn't tried to
+  // do yet, and the send buttons still raise the prompt at the moment it's actually needed. The
+  // watch is silent and doesn't set `locating` either: nothing waits on it, so a background
+  // convenience shouldn't spin the buttons or raise an alert about a fix nobody asked for.
+  // A watch opens with the last fix the OS has, which may predate the app; one that old is left
+  // for the send path to replace rather than drawn as current.
+  const [locationGranted, setLocationGranted] = useState(false);
+  useEffect(() => {
+    Location.getForegroundPermissionsAsync().then(({ granted }) => setLocationGranted(granted));
+  }, []);
+  useEffect(() => {
+    if (!locationGranted || !foreground) return;
+    let sub: Location.LocationSubscription | null = null;
+    let stopped = false;
+    Location.watchPositionAsync(GPS_WATCH_OPTIONS, (pos) => {
+      if (Date.now() - pos.timestamp <= GPS_FIX_MAX_AGE_MS) takeFix(pos);
+    }).then((s) => {
+      if (stopped) s.remove();
+      else sub = s;
+    }, () => {});
+    return () => {
+      stopped = true;
+      sub?.remove();
+    };
+  }, [locationGranted, foreground]);
+
     setFollowing(false);
   }
 
