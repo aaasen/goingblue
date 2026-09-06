@@ -37,8 +37,10 @@ interface Props {
   following?: boolean;
 }
 
-// Wide view of the contiguous US, used as the picker's starting point before any coordinate is set.
-const DEFAULT_VIEW = { center: [-96, 37] as [number, number], zoom: 2.2 };
+// The picker's starting point before any coordinate is set: as far out as the basemap allows,
+// centered so the 220pt builder map holds North America from the Florida Keys to the Arctic
+// coast. Mercator spends most of that height on the north, so the Arctic islands are out.
+const DEFAULT_VIEW = { center: [-110, 54] as [number, number], zoom: MIN_ZOOM };
 // Zoom applied once a coordinate exists — tight enough to confirm the spot, loose enough to nudge it.
 const PICKED_ZOOM = 9;
 

@@ -22,9 +22,9 @@ const GLYPHS = 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{r
 // Data ends at z10; overzoom keeps the map usable past it (~35 m/px at 63°N by 12.5).
 export const DATA_MAX_ZOOM = 10;
 export const MAX_ZOOM = 12.5;
-// Floor keeps the camera at a useful scale — continent-wide, but never the whole world tiled
+// Floor keeps the camera at a useful scale: a hemisphere at most, never the whole world tiled
 // out at once on a phone screen.
-export const MIN_ZOOM = 2;
+export const MIN_ZOOM = 1;
 
 const LANDCOVER_COLORS: Record<string, string> = {
   forest: '#aac29e',
