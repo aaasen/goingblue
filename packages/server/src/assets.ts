@@ -49,11 +49,11 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   // Resized to 750px wide, which keeps them past 2x at the widest the strip draws them. They are
   // JPEG, not PNG, because the masters are 4x the weight for UI text nobody reads at strip size;
   // keep the App Store listing on the PNG masters.
-  "shot-mont-blanc.jpg": { file: "../public/shot-mont-blanc.jpg", type: "image/jpeg" },
-  "shot-builder.jpg": { file: "../public/shot-builder.jpg", type: "image/jpeg" },
-  "shot-denali.jpg": { file: "../public/shot-denali.jpg", type: "image/jpeg" },
+  "shot-overview.jpg": { file: "../public/shot-overview.jpg", type: "image/jpeg" },
+  "shot-altitude.jpg": { file: "../public/shot-altitude.jpg", type: "image/jpeg" },
   "shot-cloud.jpg": { file: "../public/shot-cloud.jpg", type: "image/jpeg" },
-  "shot-air-quality.jpg": { file: "../public/shot-air-quality.jpg", type: "image/jpeg" },
+  "shot-aqi.jpg": { file: "../public/shot-aqi.jpg", type: "image/jpeg" },
+  "shot-agreement.jpg": { file: "../public/shot-agreement.jpg", type: "image/jpeg" },
   // Apple's "Download on the App Store" badge, the white US/UK artwork, byte-for-byte as served by
   // toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/white/en-us. White
   // because the button sits in the photo band, which Apple's guidelines count as a dark background;

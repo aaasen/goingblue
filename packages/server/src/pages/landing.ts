@@ -203,31 +203,24 @@ or iPhone satellite messaging.</p>
 
 <div class=shots>
   <figure>
-    <img src="${img("shot-mont-blanc.jpg")}" width=750 height=1630 loading=lazy
-      alt="&ldquo;Detailed forecasts up to 13 days without cell reception&rdquo; — a thirteen-day
-      Mont Blanc forecast, with hourly weather icons, temperature, snow, wind and gusts below it.">
+    <img src="${img("shot-overview.jpg")}" width=750 height=1630 loading=lazy
+      alt="Expedition weather forecasts via inReach, ZOLEO, and iPhone satellite">
   </figure>
   <figure>
-    <img src="${img("shot-builder.jpg")}" width=750 height=1630 loading=lazy
-      alt="&ldquo;30+ weather models over SMS, inReach, ZOLEO, and iPhone satellite&rdquo; — the
-      forecast request builder, with location, priority, model and extra-variable choices above a
-      device picker.">
-  </figure>
-  <figure>
-    <img src="${img("shot-denali.jpg")}" width=750 height=1630 loading=lazy
-      alt="&ldquo;High-altitude winds and freezing level forecasts for mountaineering&rdquo; — a
-      Denali forecast showing freezing level and winds at 10, 14, 18 and 24 thousand feet.">
+    <img src="${img("shot-altitude.jpg")}" width=750 height=1630 loading=lazy
+      alt="High-altitude winds and freezing level forecasts for mountaineering">
   </figure>
   <figure>
     <img src="${img("shot-cloud.jpg")}" width=750 height=1630 loading=lazy
-      alt="&ldquo;Avoid whiteouts and flat light with detailed cloud cover&rdquo; — a forecast in
-      Norway's Lyngen Alps with a clouds-by-altitude band from two to thirty thousand feet.">
+      alt="Avoid whiteouts and flat light with detailed cloud cover">
   </figure>
   <figure>
-    <img src="${img("shot-air-quality.jpg")}" width=750 height=1630 loading=lazy
-      alt="&ldquo;Plan around wildfire smoke with air quality forecasts&rdquo; — a forecast with an
-      air quality section listing AQI, the leading pollutant, and rows for PM2.5, PM10, ozone,
-      nitrogen dioxide and sulfur dioxide.">
+    <img src="${img("shot-aqi.jpg")}" width=750 height=1630 loading=lazy
+      alt="Plan around wildfire smoke with AQI forecasts">
+  </figure>
+  <figure>
+    <img src="${img("shot-agreement.jpg")}" width=750 height=1630 loading=lazy
+      alt="Compare forecasts from NOAA, ECMWF, GEM, and ICON models">
   </figure>
 </div>
 

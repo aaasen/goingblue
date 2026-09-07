@@ -86,3 +86,7 @@ Tips:
 # Regenerating seeded data
 
 Each shot's weather is recorded once from live Open-Meteo and replayed through the current codec at seed time, so a codec change never needs a re-record. Re-record one shot with `pnpm record-shot <name>` or all of them with pnpm record-shot --all. Shots are defined in `screenshots/shots.mts`. Add a new shot at the end of the table, since a request's message code is its position and moving earlier shots invalidates their recordings. After recording, run `pnpm test` to confirm every fixture replays, then seed again with step 3.
+
+# Website screenshots
+
+The landing page also shows a copy of the framed iOS screenshots. Update it at `packages/server/public` after regenerating screenshots.
