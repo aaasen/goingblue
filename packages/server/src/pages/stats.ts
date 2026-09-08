@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { VAR, WIND_LEVEL_VARS } from "@weather/protocol";
 import { DAY_TZ, query } from "../db.js";
 import { PAGE } from "./shell.js";
 import { log } from "../log.js";
@@ -63,14 +64,20 @@ const VAR_GROUP_EXPR = `case
   else v end`;
 const VAR_GROUP_WHERE = ` and v not in (${DEFAULT_VARS.map((v) => `'${v}'`).join(", ")})`;
 
-// The same family mapping for rows already in JS (the recent-requests table); keep in step with
-// VAR_GROUP_EXPR above.
-function varFamily(v: string): string {
-  if (v === "cch" || v === "ccm" || v === "ccl") return "clouds";
-  if (v.startsWith("aq")) return "aqi";
-  if (/^w\d+$/.test(v)) return "wind";
-  return v;
-}
+// The request table's variable badges: the same tags, in the same order, as the app's
+// past-forecast list (HomeScreen.tsx, OPTIONAL_VARIABLE_TAGS); keep the two in step. The
+// cch/ccm/ccl arm covers rows recorded before the codec reported the cloud band as one
+// 'clouds' var, and the AQ arm is the same prefix rule as VAR_GROUP_EXPR.
+const VARIABLE_TAGS: { vars: readonly string[]; tag: string; label: string }[] = [
+  { vars: [VAR.clouds, "cch", "ccm", "ccl"], tag: "C", label: "Detailed clouds" },
+  { vars: WIND_LEVEL_VARS, tag: "W", label: "Pressure-level winds" },
+  { vars: [VAR.freeze], tag: "FL", label: "Freezing level" },
+  { vars: [VAR.dewpoint], tag: "H", label: "Humidity" },
+  { vars: [VAR.precip], tag: "P", label: "Precipitation probability" },
+  { vars: [VAR.agreement], tag: "A", label: "Model agreement" },
+  { vars: Object.values(VAR).filter((v) => v.startsWith("aq")), tag: "AQI", label: "Air quality" },
+];
+const TAGGED_VARS = new Set(VARIABLE_TAGS.flatMap((t) => t.vars));
 
 // Everything the grouping's SQL varies by. The variable grouping unnests vars, excludes the
 // defaults, and counts DISTINCT requests: a request carrying three AQ columns is one AQI
@@ -97,6 +104,10 @@ export type StatsFilters = {
   from: string; // YYYY-MM-DD, inclusive, Pacific
   to: string;
   group: GroupKey | null; // how to split the chart; null draws one series
+  // The request table's page, as the number of newer rows skipped; 0 is the newest page. A
+  // plain offset so the pager can list every page by position; a request arriving mid-scroll
+  // shifts the pages by one, which a dashboard can wear.
+  offset: number;
 };
 
 // Today as a Pacific date, without touching the database: en-CA is the locale whose date format
@@ -124,7 +135,20 @@ export function parseFilters(q: (name: string) => string | undefined): StatsFilt
   if (daysBefore(to, MAX_RANGE_DAYS) >= from) from = daysBefore(to, MAX_RANGE_DAYS - 1);
   const grp = q("group") ?? "";
   const group = (GROUP_KEYS as readonly string[]).includes(grp) ? (grp as GroupKey) : null;
-  return { from, to, group };
+  const offset = /^\d{1,9}$/.test(q("offset") ?? "") ? Number(q("offset")) : 0;
+  return { from, to, group, offset };
+}
+
+// The page's own URL for a view: the window, the grouping and the table offset, ending at an
+// anchor so a reload lands where the click was.
+function statsUrl(f: StatsFilters, offset: number, anchor: string): string {
+  const q = new URLSearchParams({
+    from: f.from,
+    to: f.to,
+    ...(f.group && { group: f.group }),
+    ...(offset > 0 && { offset: String(offset) }),
+  });
+  return `/stats?${q}#${anchor}`;
 }
 
 // One (day, group value) cell of the daily chart. `grp` is the grouped column's raw value: ""
@@ -133,12 +157,16 @@ export function parseFilters(q: (name: string) => string | undefined): StatsFilt
 export type DailyRow = { day: string; grp: string | null; requests: number };
 // avgPeriods / avgCodecMs are window means over served forecasts, null when no served row in
 // the window carries the column (it arrived 2026-08-31; older rows have nothing to average).
+// `listed` is every row the request table can page through: served and failed alike, so it is
+// not the sum of the other tiles.
 export type StatsTotals = {
-  requests: number; users: number; failed: number;
+  requests: number; users: number; failed: number; listed: number;
   avgPeriods: number | null; avgCodecMs: number | null;
 };
-// One raw request row, every stored column except the token: the surrogate account id exists
-// precisely so a request can be shown without its credential (db.ts), and this page keeps that.
+// One raw request row, every stored column except the token and the reply's character count
+// (max_chars and chars, which the messages count already summarizes): the surrogate account id
+// exists precisely so a request can be shown without its credential (db.ts), and this page
+// keeps that.
 // `time` arrives formatted in Pacific. Account is non-null because rows without one are
 // excluded from the page; the shape columns are null on failures and on rows whose codec sent
 // no header. lat/lon arrive as strings because `numeric` comes back from node-postgres as text.
@@ -150,7 +178,6 @@ export type RequestRow = {
   device: string | null;
   platform: string | null;
   version: number | null;
-  chars: number | null;
   outcome: string | null;
   loc: string | null;
   lat: string | null;
@@ -177,7 +204,8 @@ export type StatsData = {
   totals: StatsTotals;
   // What the page was asked to show, echoed back so the form can render its own state.
   filters: StatsFilters;
-  // The window's newest raw request rows, at most REQUESTS_LIMIT of them.
+  // One page of the window's raw request rows, newest first: REQUESTS_LIMIT rows starting at
+  // the filters' offset. totals.listed says how many pages there are.
   requests: RequestRow[];
   // Window totals per value of the selected group; empty when the chart is ungrouped.
   groups: GroupTotalRow[];
@@ -205,6 +233,7 @@ const COUNTS = `
   count(distinct r.account_id)                                                     as users,
   count(r.id) filter (where r.outcome in
     ('missing_version', 'unsupported_version', 'unavailable'))                     as failed,
+  count(r.id)                                                                      as listed,
   avg((select sum(value::int) from jsonb_each_text(r.periods)))
     filter (where ${SERVED})                                                       as avg_periods,
   avg(r.codec_ms) filter (where ${SERVED})                                         as avg_codec_ms
@@ -267,18 +296,20 @@ const groupTotalsSql = (where: string, g: ReturnType<typeof groupSql>) => `
    order by requests desc, grp
 `;
 
-// The raw rows behind the section's aggregates, newest first. The timestamp is formatted here,
-// in the same Pacific frame every other date on the page lives in.
-const REQUESTS_LIMIT = 20;
+// One page of the raw rows behind the section's aggregates, newest first, $4 rows in. Ordered
+// by id so page boundaries are stable: ids are assigned in insertion order, which is arrival
+// order, and unlike created_at never tie. The timestamp is formatted here, in the same Pacific
+// frame every other date on the page lives in.
+export const REQUESTS_LIMIT = 20;
 const requestRowsSql = (where: string) => `
   select r.id, to_char(r.created_at at time zone $1, 'FMMM/FMDD HH24:MI') as time,
-         r.account_id, r.device, r.platform, r.version, r.chars, r.outcome,
+         r.account_id, r.device, r.platform, r.version, r.outcome,
          r.loc, r.lat::text as lat, r.lon::text as lon, r.mode, r.model, r.messages, r.vars,
          r.periods, r.codec_ms, r.fetch_ms, r.encode_ms
     from requests r
    where ${where}
-   order by r.created_at desc
-   limit ${REQUESTS_LIMIT}
+   order by r.id desc
+   limit ${REQUESTS_LIMIT} offset $4
 `;
 
 // The variable grouping's component breakdown: how many requests carried each individual
@@ -320,6 +351,7 @@ const counts = (r: Record<string, unknown> | undefined): StatsTotals => ({
   requests: num(r?.["requests"]),
   users: num(r?.["users"]),
   failed: num(r?.["failed"]),
+  listed: num(r?.["listed"]),
   avgPeriods: r?.["avg_periods"] == null ? null : Math.round(num(r["avg_periods"])),
   avgCodecMs: r?.["avg_codec_ms"] == null ? null : Math.round(num(r["avg_codec_ms"])),
 });
@@ -358,7 +390,7 @@ export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
   const [daily, totals, requests, groups, components, mapPoints, hidden] = await Promise.all([
     query(dailySql(filtered.where, g), filtered.params),
     query(totalsSql(filtered.where), filtered.params),
-    query(requestRowsSql(filtered.where), filtered.params),
+    query(requestRowsSql(filtered.where), [...filtered.params, filters.offset]),
     query(groupTotalsSql(filtered.where, g), filtered.params),
     filters.group === "variable"
       ? query(varComponentsSql(filtered.where), filtered.params)
@@ -381,7 +413,6 @@ export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
       device: r["device"] == null ? null : String(r["device"]),
       platform: r["platform"] == null ? null : String(r["platform"]),
       version: r["version"] == null ? null : num(r["version"]),
-      chars: r["chars"] == null ? null : num(r["chars"]),
       outcome: r["outcome"] == null ? null : String(r["outcome"]),
       loc: r["loc"] == null ? null : String(r["loc"]),
       lat: r["lat"] == null ? null : String(r["lat"]),
@@ -644,7 +675,9 @@ const CSS = `
   .chartbar select { font: inherit; font-size: 0.95em; margin-left: 4px; }
   /* The anchor the group-by select submits to; the offset keeps a heading from hiding under
      the viewport's very top edge when jumped to. */
-  #requests { scroll-margin-top: 12px; }
+  #requests, #recent { scroll-margin-top: 12px; }
+  .pager { display: flex; gap: 6px 14px; flex-wrap: wrap; margin: 0.6em 0; font-size: 0.9em;
+    color: #52514e; font-variant-numeric: tabular-nums; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 0.2em 0 0.6em; font-size: 0.85em;
     color: #52514e; }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -667,6 +700,11 @@ const CSS = `
   thead th { color: #52514e; font-weight: 600; font-size: 0.85em; }
   tfoot td { font-weight: 600; border-top: 1px solid #c3c2b7; border-bottom: none; }
   td.comp { padding-left: 26px; }
+  /* The variable badges, styled after the app's past-forecast tags. */
+  td.tags { white-space: nowrap; }
+  td.tags span { display: inline-block; font: 600 0.8em/1.3 "Courier New", monospace;
+    color: #2a78d6; border: 1px solid #c3c2b7; border-radius: 4px; padding: 0 4px; }
+  td.tags span + span { margin-left: 4px; }
   tbody tr:hover { background: #f7fafd; }
   .quiet { color: #898781; }
   .note { color: #666; font-size: 0.85em; margin-top: 1.6em; }
@@ -734,18 +772,47 @@ function actForm(action: "hide" | "unhide", id: number | null, f: StatsFilters, 
   return `<form class=act method=post action="/stats/${action}">${idField}` +
     `<input type=hidden name=from value="${f.from}"><input type=hidden name=to value="${f.to}">` +
     `<input type=hidden name=group value="${f.group ?? ""}">` +
+    `<input type=hidden name=offset value="${f.offset}">` +
     `<button type=submit>${label}</button></form>`;
 }
 
-// The raw request rows as a table, newest first: every stored column except the token (see
-// RequestRow). Null cells render empty rather than as a word, except outcome, whose absence
+// The raw request rows as a table, newest first, one column per RequestRow field. Null cells
+// render empty rather than as a word, except outcome, whose absence
 // means a pre-outcome-column success. Location shows the name where one was given ('current' is
 // the app's marker for "my location", not a name), else the stored ~1 km coordinates. The
 // variables cell lists only the opt-ins — the five defaults are on every row and would drown
-// the signal — folded to their families (clouds, AQI, wind) so a row reads as what was chosen
-// rather than as a column dump.
-function requestTable(requests: RequestRow[], filters: StatsFilters): string {
-  if (!requests.length) return `<p class=note>No requests in the window.</p>`;
+// the signal — as the app's badges (VARIABLE_TAGS), with the full name in the hover title. A
+// variable no badge covers shows under its own name rather than vanishing.
+//
+// The table is one page; the pager under it reads previous page, current page (bold), next
+// page, each named by the 1-based range of rows it holds, bracketed by the window's first and
+// last row numbers behind ellipses wherever the three pages don't already reach them:
+// "1 … 11-20 21-30 31-40 … 414". The brackets are plain text, not links. A single page that
+// holds everything gets no pager at all. A hand-edited offset past the end lists no rows and
+// only a link to the last page.
+function requestPager(filters: StatsFilters, listed: number): string {
+  if (listed === 0) return "";
+  const { offset } = filters;
+  const lastStart = Math.floor((listed - 1) / REQUESTS_LIMIT) * REQUESTS_LIMIT;
+  const end = (start: number): number => Math.min(start + REQUESTS_LIMIT, listed);
+  const link = (start: number): string =>
+    `<a href="${statsUrl(filters, start, "recent")}">${start + 1}-${end(start)}</a>`;
+  const prevStart = offset > 0 ? Math.min(Math.max(0, offset - REQUESTS_LIMIT), lastStart) : null;
+  const nextStart = offset + REQUESTS_LIMIT < listed ? offset + REQUESTS_LIMIT : null;
+  const items: string[] = [];
+  if (prevStart !== null && prevStart > 0) items.push(`<span>1</span>`, `<span>…</span>`);
+  if (prevStart !== null) items.push(link(prevStart));
+  if (offset < listed) items.push(`<b>${offset + 1}-${end(offset)}</b>`);
+  if (nextStart !== null) items.push(link(nextStart));
+  const reached = nextStart ?? (offset < listed ? offset : prevStart ?? 0);
+  if (end(reached) < listed) items.push(`<span>…</span>`, `<span>${listed}</span>`);
+  return items.some((i) => i.startsWith("<a")) ? `<div class=pager>${items.join("")}</div>` : "";
+}
+
+function requestTable(data: StatsData): string {
+  const { requests, filters, totals } = data;
+  const pager = requestPager(filters, totals.listed);
+  if (!requests.length) return pager || `<p class=note>No requests in the window.</p>`;
   // Periods render as the reply's total, with the per-resolution breakdown ("1h×130, 3h×56")
   // in the hover title; timing as codec_ms, with the codec's own fetch/encode split in the
   // title. The periods keys arrived through the untrusted shape header, so they are escaped
@@ -768,30 +835,35 @@ function requestTable(requests: RequestRow[], filters: StatsFilters): string {
     .map((r) => {
       const named = r.loc !== null && r.loc !== "current";
       const place = named ? esc(r.loc ?? "") : r.lat !== null && r.lon !== null ? `${esc(r.lat)}, ${esc(r.lon)}` : "";
-      const vars = [...new Set(r.vars.filter((v) => !DEFAULT_VARS.includes(v)).map(varFamily))]
-        .map((f) => esc(f === "aqi" ? "AQI" : f))
-        .join(", ");
+      const chosen = r.vars.filter((v) => !DEFAULT_VARS.includes(v));
+      const vars = VARIABLE_TAGS
+        .filter((t) => t.vars.some((v) => chosen.includes(v)))
+        .map((t) => `<span title="${t.label}">${t.tag}</span>`)
+        .concat([...new Set(chosen.filter((v) => !TAGGED_VARS.has(v)))].map((v) => `<span>${esc(v)}</span>`))
+        .join("");
       return (
         `<tr><td>${r.id}</td><td>${r.time}</td><td>${r.account}${actForm("hide", r.account, filters, "hide")}</td>` +
-        `<td>${r.device === null ? "" : DEVICE_LABELS[r.device] ?? esc(r.device)}</td>` +
+        `<td>${r.version ?? ""}</td>` +
         `<td>${r.platform === null ? "" : PLATFORM_LABELS[r.platform] ?? esc(r.platform)}</td>` +
-        `<td>${r.version ?? ""}</td><td>${place}</td>` +
+        `<td>${r.device === null ? "" : DEVICE_LABELS[r.device] ?? esc(r.device)}</td>` +
+        `<td>${place}</td>` +
         `<td>${r.mode === null ? "" : esc(r.mode)}</td>` +
         `<td>${r.model === null ? "" : esc(r.model)}</td>` +
-        `<td>${r.messages ?? ""}</td><td>${r.chars ?? ""}</td>` +
-        periodsCell(r.periods) + msCell(r) + `<td>${vars}</td>` +
+        `<td>${r.messages ?? ""}</td>` +
+        periodsCell(r.periods) + msCell(r) + `<td class=tags>${vars}</td>` +
         `<td>${r.outcome === null || r.outcome === "ok" ? `<span class=quiet>ok</span>` : esc(r.outcome)}</td></tr>`
       );
     })
     .join("");
   return `<div class=tablewrap>
 <table>
-<thead><tr><th>Id</th><th>Time</th><th>Account</th><th>Device</th><th>Platform</th><th>Version</th>
-<th>Location</th><th>Priority</th><th>Model</th><th>Messages</th><th>Chars</th>
+<thead><tr><th>Id</th><th>Time</th><th>Account</th><th>Version</th><th>Platform</th><th>Device</th>
+<th>Location</th><th>Priority</th><th>Model</th><th>Messages</th>
 <th>Periods</th><th>Codec ms</th><th>Variables</th><th>Outcome</th></tr></thead>
 <tbody>${body}</tbody>
 </table>
-</div>`;
+</div>
+${pager}`;
 }
 
 // The window bar at the top of the page, a plain GET form holding the shared date range:
@@ -928,7 +1000,7 @@ map.on("mouseleave", "requests", () => {
 }
 
 export function renderStats(data: StatsData): string {
-  const { daily, totals, filters, requests, groups, mapPoints } = data;
+  const { daily, totals, filters, groups, mapPoints } = data;
 
   const days = enumerateDays(filters.from, filters.to);
   const group = filters.group;
@@ -1022,8 +1094,8 @@ ${legend}
 ${requestsChart}
 ${groupSection}
 
-<h2>Recent requests</h2>
-${requestTable(requests, filters)}`;
+<h2 id=recent>Recent requests</h2>
+${requestTable(data)}`;
 
   // The hidden set, editable in place. Always rendered, even when empty, since the add field
   // is the only way to hide an account that isn't in the recent-requests table.
@@ -1064,8 +1136,7 @@ async function editHidden(c: Context, edit: (id: number) => Promise<void>) {
     return c.text("Stats unavailable", 503);
   }
   const f = parseFilters(field);
-  const q = new URLSearchParams({ from: f.from, to: f.to, ...(f.group && { group: f.group }) });
-  return c.redirect(`/stats?${q}#hidden`, 303);
+  return c.redirect(statsUrl(f, f.offset, "hidden"), 303);
 }
 
 export const hideAccountRoute = (c: Context) => editHidden(c, hideAccount);

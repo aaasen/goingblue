@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { formatDay, renderStats, type DailyRow, type RequestRow, type StatsData } from "../src/pages/stats.js";
+import {
+  formatDay, parseFilters, renderStats, REQUESTS_LIMIT,
+  type DailyRow, type RequestRow, type StatsData,
+} from "../src/pages/stats.js";
 
 // Rendering is pure, so every case here feeds cells straight in — no Postgres, matching the rest
 // of the server tests. Assertions are on structure and numbers rather than exact markup, so
@@ -12,7 +15,7 @@ const cell = (day: string, requests: number, grp: string | null = ""): DailyRow 
 // One raw request row with every column a served default-forecast reply carries; tests override
 // what they exercise.
 const row = (over: Partial<RequestRow> = {}): RequestRow => ({
-  id: 1, time: "8/30 14:11", account: 29, device: "i", platform: "i", version: 3, chars: 155, outcome: "ok",
+  id: 1, time: "8/30 14:11", account: 29, device: "i", platform: "i", version: 3, outcome: "ok",
   loc: "current", lat: "63.06", lon: "-151.08", mode: "auto", model: "best", messages: 1,
   vars: ["temp", "wind", "snow", "gust", "rain"],
   periods: null, codecMs: null, fetchMs: null, encodeMs: null, ...over,
@@ -36,6 +39,7 @@ const data = (
     from: daily[0]?.day ?? "2026-08-01",
     to: daily[daily.length - 1]?.day ?? "2026-08-01",
     group: null,
+    offset: 0,
     ...filters,
   },
   groups,
@@ -46,6 +50,7 @@ const data = (
     requests: daily.reduce((n, c) => n + c.requests, 0),
     failed: 0,
     users: 0,
+    listed: requests.length,
     avgPeriods: null,
     avgCodecMs: null,
     ...totals,
@@ -271,37 +276,46 @@ describe("renderStats — recent requests", () => {
     const html = renderStats(data([cell("2026-08-07", 2)], {
       requests: [
         row({ id: 55, time: "8/30 14:11", account: 29, device: "i", version: 3, loc: "summit",
-              lat: "63.07", lon: "-151.00", mode: "auto", model: "best", messages: 2, chars: 288,
+              lat: "63.07", lon: "-151.00", mode: "auto", model: "best", messages: 2,
               vars: ["temp", "wind", "freeze", "cch", "ccm", "aq_o3", "w500"],
               periods: { "1": 130, "3": 56 }, codecMs: 1037, fetchMs: 1015, encodeMs: 18 }),
         row({ id: 54, time: "8/29 09:02", account: 12, device: "s", platform: "a", version: 2, loc: "current",
               lat: "47.62", lon: "-122.29", mode: "detail", model: "eu", messages: null,
-              chars: null, vars: ["temp"] }),
+              vars: ["temp"] }),
       ],
     }));
     expect(html).toContain("Recent requests");
-    // Components fold to their families, deduplicated: cch+ccm are one clouds entry. Periods
-    // show the total with the resolution split in the title; codec ms carries its own split.
-    // The account cell also holds the hide form, so the row is matched around it.
+    // Variables show as the app's badges in the app's order, one per family: cch+ccm are one
+    // C, aq_o3 one AQI, w500 one W. Periods show the total with the resolution split in the
+    // title; codec ms carries its own split. The account cell also holds the hide form, so the
+    // row is matched around it.
     expect(html).toContain("<td>55</td><td>8/30 14:11</td><td>29<form");
     expect(html).toContain(
-      "<td>iPhone</td><td>iOS</td><td>3</td><td>summit</td>" +
-      "<td>auto</td><td>best</td><td>2</td><td>288</td>" +
+      "<td>3</td><td>iOS</td><td>iPhone</td><td>summit</td>" +
+      "<td>auto</td><td>best</td><td>2</td>" +
       `<td title="1h×130, 3h×56">186</td><td title="fetch 1015, encode 18 ms">1037</td>` +
-      "<td>freeze, clouds, AQI, wind</td>");
+      `<td class=tags><span title="Detailed clouds">C</span><span title="Pressure-level winds">W</span>` +
+      `<span title="Freezing level">FL</span><span title="Air quality">AQI</span></td>`);
     // 'current' is not a name; the coordinates stand in, and all-default vars leave the cell
     // empty, as do the periods/timing columns the row predates.
     expect(html).toContain("<td>54</td><td>8/29 09:02</td><td>12<form");
     expect(html).toContain(
-      "<td>SMS</td><td>Android</td><td>2</td><td>47.62, -122.29</td>" +
-      "<td>detail</td><td>eu</td><td></td><td></td><td></td><td></td><td></td>");
+      "<td>2</td><td>Android</td><td>SMS</td><td>47.62, -122.29</td>" +
+      "<td>detail</td><td>eu</td><td></td><td></td><td></td><td class=tags></td>");
+  });
+
+  it("shows a variable no badge covers under its own name, escaped", () => {
+    const html = renderStats(data([cell("2026-08-07", 1)], {
+      requests: [row({ vars: ["temp", "dewpoint", "<b>x</b>"] })],
+    }));
+    expect(html).toContain(`<td class=tags><span title="Humidity">H</span><span>&lt;b&gt;x&lt;/b&gt;</span></td>`);
   });
 
   // A failure has no shape: every codec-reported cell is empty, and the outcome says why.
   it("renders a failed request's shape cells empty and its outcome loud", () => {
     const html = renderStats(data([cell("2026-08-07", 1)], {
       requests: [row({ device: null, platform: null, loc: null, lat: null, lon: null, mode: null,
-                       model: null, messages: null, chars: null, vars: [], outcome: "unsupported_version" })],
+                       model: null, messages: null, vars: [], outcome: "unsupported_version" })],
     }));
     expect(html).toContain("<td>unsupported_version</td>");
     expect(html).not.toContain("<td>iPhone</td>");
@@ -312,6 +326,112 @@ describe("renderStats — recent requests", () => {
     const html = renderStats(data([cell("2026-08-07", 1)]));
     expect(html).toContain("No requests in the window");
     expect(html).toContain("No locations recorded");
+  });
+});
+
+describe("renderStats — request paging", () => {
+  const filters = { from: "2026-08-01", to: "2026-08-07", group: "device" as const };
+
+  // Ranges are written in terms of the page size so the cases survive a change to it. The
+  // large window has to run past four pages, the small one past two.
+  const N = REQUESTS_LIMIT;
+  const BIG = 5 * N + 14;
+  const SMALL = 2 * N + 5;
+  const range = (start: number, listed: number): string => `${start + 1}-${Math.min(start + N, listed)}`;
+  const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => row({ id: from - i }));
+
+  const links = (html: string): string[] =>
+    [...(html.match(/<div class=pager>.*?<\/div>/s)?.[0] ?? "").matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)]
+      .map(([, href, label]) => `${label} ${href}`);
+
+  // The pager's visible text, tags stripped, one item per space.
+  const pagerText = (html: string): string =>
+    (html.match(/<div class=pager>(.*?)<\/div>/s)?.[1] ?? "").replace(/<\/[^>]+><[^>]+>/g, " ").replace(/<[^>]+>/g, "");
+
+  it("brackets previous, current and next with the first and last row numbers", () => {
+    // Third page of the big window.
+    const html = renderStats(data([cell("2026-08-07", 3)], {
+      requests: page(620, N),
+      totals: { listed: BIG },
+      filters: { ...filters, offset: 2 * N },
+    }));
+    expect(pagerText(html)).toBe(`1 … ${range(N, BIG)} ${range(2 * N, BIG)} ${range(3 * N, BIG)} … ${BIG}`);
+    // Only the neighbours link; the brackets are text.
+    expect(links(html)).toEqual([
+      `${range(N, BIG)} /stats?from=2026-08-01&to=2026-08-07&group=device&offset=${N}#recent`,
+      `${range(3 * N, BIG)} /stats?from=2026-08-01&to=2026-08-07&group=device&offset=${3 * N}#recent`,
+    ]);
+    expect(html).toContain(`<b>${range(2 * N, BIG)}</b>`);
+    // The hide forms carry the offset so a hide lands back on the same page.
+    expect(html).toContain(`name=offset value="${2 * N}"`);
+  });
+
+  it("drops a bracket once the neighbouring page reaches it", () => {
+    // Second page: the previous page starts at 1, so no leading bracket.
+    const second = renderStats(data([cell("2026-08-07", 3)], {
+      requests: page(620, N),
+      totals: { listed: BIG },
+      filters: { ...filters, offset: N },
+    }));
+    expect(pagerText(second)).toBe(`${range(0, BIG)} ${range(N, BIG)} ${range(2 * N, BIG)} … ${BIG}`);
+    expect(links(second)[0]).toBe(`${range(0, BIG)} /stats?from=2026-08-01&to=2026-08-07&group=device#recent`);
+    // Second to last: the next page ends on the total, so no trailing bracket.
+    const nearEnd = renderStats(data([cell("2026-08-07", 3)], {
+      requests: page(620, N),
+      totals: { listed: BIG },
+      filters: { ...filters, offset: 4 * N },
+    }));
+    expect(pagerText(nearEnd)).toBe(`1 … ${range(3 * N, BIG)} ${range(4 * N, BIG)} ${range(5 * N, BIG)}`);
+    // The newest page has no previous link; the last page has no next link.
+    const newest = renderStats(data([cell("2026-08-07", 3)], {
+      requests: page(640, N),
+      totals: { listed: SMALL },
+      filters,
+    }));
+    expect(pagerText(newest)).toBe(`${range(0, SMALL)} ${range(N, SMALL)} … ${SMALL}`);
+    expect(newest).toContain(`<b>${range(0, SMALL)}</b>`);
+    const last = renderStats(data([cell("2026-08-07", 3)], {
+      requests: page(5, 5),
+      totals: { listed: SMALL },
+      filters: { ...filters, offset: 2 * N },
+    }));
+    expect(pagerText(last)).toBe(`1 … ${range(N, SMALL)} ${range(2 * N, SMALL)}`);
+    expect(last).toContain(`<b>${range(2 * N, SMALL)}</b>`);
+  });
+
+  it("shows no pager when everything fits on one page", () => {
+    const html = renderStats(data([cell("2026-08-07", 3)], {
+      requests: page(7, 7),
+      totals: { listed: 7 },
+      filters,
+    }));
+    expect(html).not.toContain("class=pager");
+  });
+
+  it("links the last page when an offset points past the end", () => {
+    const listed = N + 5;
+    const html = renderStats(data([cell("2026-08-07", 3)], {
+      totals: { listed },
+      filters: { ...filters, offset: 4 * N },
+    }));
+    expect(html).not.toContain("No requests in the window");
+    expect(pagerText(html)).toBe(`1 … ${range(N, listed)}`);
+    expect(links(html)).toEqual([`${range(N, listed)} /stats?from=2026-08-01&to=2026-08-07&group=device&offset=${N}#recent`]);
+    // No rows are current, so no range is bold.
+    expect(html.match(/<div class=pager>.*?<\/div>/s)?.[0]).not.toContain("<b>");
+  });
+});
+
+describe("parseFilters", () => {
+  const q = (params: Record<string, string>) => (name: string) => params[name];
+
+  it("reads the table offset as a whole number and falls back to the newest page", () => {
+    expect(parseFilters(q({ offset: "20" })).offset).toBe(20);
+    expect(parseFilters(q({ offset: "0" })).offset).toBe(0);
+    expect(parseFilters(q({})).offset).toBe(0);
+    expect(parseFilters(q({ offset: "" })).offset).toBe(0);
+    expect(parseFilters(q({ offset: "-5" })).offset).toBe(0);
+    expect(parseFilters(q({ offset: "12abc" })).offset).toBe(0);
   });
 });
 
