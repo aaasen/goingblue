@@ -43,7 +43,9 @@ export const PAGE = (title: string, body: string, { showUpdated = true, updated 
   .bar img { width: 32px; height: 32px; border-radius: 7px; }
   .cta { background: #f0f6fc; border: 1px solid #cfe2f5; border-radius: 8px; padding: 16px 20px; margin: 1.8em 0; }
   a { color: #0b62c4; }
-  footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
+  footer { margin-top: 3em; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }
+  footer .inner { max-width: 720px; margin: 0 auto; padding: 1em 20px 40px;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 1em; }
 ${css ?? ""}</style>
 ${head ?? ""}</head>
 <body>
@@ -52,10 +54,10 @@ ${header ?? `<header class=bar><a class=brand href="/"><img src="${img("icon-512
 ${header ? "" : `<h1>${title}</h1>`}
 ${showUpdated ? `<p class=updated>Last updated: ${updated}</p>` : ""}
 ${body}
-<footer>
-  ${BRAND} is operated as a sole proprietorship by Lane Aasen.<br>
-  <a href="/">Home</a> · <a href="/support">Support</a> · <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a>
-</footer>
 </div>
+<footer><div class=inner>
+  <span>${BRAND} is operated by Lane Aasen</span>
+  <span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a></span>
+</div></footer>
 </body>
 </html>`;
