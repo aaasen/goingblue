@@ -62,13 +62,19 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   "howto-build.jpg": { file: "../public/howto-build.jpg", type: "image/jpeg" },
   "howto-send.jpg": { file: "../public/howto-send.jpg", type: "image/jpeg" },
   "howto-view.jpg": { file: "../public/howto-view.jpg", type: "image/jpeg" },
-  // Apple's "Download on the App Store" badge, the white US/UK artwork, byte-for-byte as served by
-  // toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/white/en-us. White
-  // because the button sits in the photo band, which Apple's guidelines count as a dark background;
-  // take the black variant back if it ever moves down onto the page. Those same guidelines allow no
-  // redrawing, recoloring or effects, so this file is not ours to optimize: re-download it rather
-  // than editing it.
-  "appstore-badge-white.svg": { file: "../public/appstore-badge-white.svg", type: "image/svg+xml" },
+  // Apple's "Download on the App Store" badge, the black US/UK artwork, byte-for-byte as served by
+  // toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us. Black
+  // is Apple's preferred badge, and the only one its guidelines allow once a badge for another
+  // platform shares the layout, which the Google Play badge beside it does. Those same guidelines
+  // allow no redrawing, recoloring or effects, so this file is not ours to optimize: re-download it
+  // rather than editing it.
+  "appstore-badge-black.svg": { file: "../public/appstore-badge-black.svg", type: "image/svg+xml" },
+  // Google's "Get it on Google Play" badge, the English web SVG byte-for-byte from the badge
+  // guidelines zip at partnermarketinghub.withgoogle.com/brands/google-play (the artwork is
+  // GetItOnGooglePlay_Badge_Web_color_English.svg in that download). Google offers one color
+  // variant, black with a gray edge, and the guidelines forbid recoloring, rescaling any element
+  // or otherwise adjusting it, so like Apple's badge this file is re-downloaded, never edited.
+  "googleplay-badge.svg": { file: "../public/googleplay-badge.svg", type: "image/svg+xml" },
 };
 
 // The browser-tab icon, the app icon rendered down to the three sizes a tab, a bookmark bar and a
