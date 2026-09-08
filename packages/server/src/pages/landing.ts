@@ -175,7 +175,7 @@ const HERO = `<header class=hero>
   <div>
     <img class=appicon src="${img("icon-512.jpg")}" width=116 height=116 alt="">
     <h1>${BRAND}</h1>
-    <p class=subtitle>Weather forecasts over satellite</p>
+    <p class=subtitle>Expedition weather forecasts via satellite</p>
     <div class=badges>
       <a class=appbtn href="${APP_STORE_URL}"><img src="${img("appstore-badge-white.svg")}" width=150
         height=50 alt="Download on the App Store"></a>
@@ -195,11 +195,11 @@ const HERO = `<header class=hero>
 // disclaimer live on /support, /privacy and /terms, reached through the footer. If an A2P 10DLC
 // campaign review asks for consent language on the public site, it goes back here.
 const LANDING_BODY = `
-<p>${BRAND} is a weather app designed specifically for satellite messengers. It was built for a
-Denali ski expedition with one goal: to get you all the weather information you would have at
-home, wherever you are. ${BRAND} uses a custom compression codec and decoder app to pack hundreds
-of forecast data points into a single message that can be sent over SMS, Garmin inReach, ZOLEO,
-or iPhone satellite messaging.</p>
+<p>${BRAND} is an expedition weather app designed specifically for satellite messengers. It was
+built for a Denali ski expedition with one goal: to get you all the weather information you would
+have at home, wherever you are. ${BRAND} uses a custom codec to pack hundreds of forecast data
+points into a single message that can be sent over SMS, Garmin inReach, ZOLEO, or iPhone
+satellite messaging.</p>
 
 <div class=shots>
   <figure>
@@ -236,18 +236,25 @@ or iPhone satellite messaging.</p>
 
 <h2>Features</h2>
 <ul>
-  <li>Works via the internet, SMS, Garmin inReach, ZOLEO, and iPhone satellite messaging.</li>
-  <li>Uses a custom compression codec optimized for weather data that packs hundreds of data
-  points into a single message. Choose between hourly detail and extended range up to 13
-  days.</li>
-  <li>Temperature, snow, rain, wind, and cloud cover included by default. Optional variables
-  include pressure-level winds for high-altitude mountaineering, AQI for planning around wildfire
-  smoke, detailed cloud cover with 8 levels, and freezing level.</li>
-  <li>Weather forecasts from over 30 models including HRRR (3km), HRDPS (2.5km), ICON-D2 (2km),
-  and MET Norway (1km). Automatically chooses the best model for your location.</li>
-  <li>Compare forecasts from American, Canadian, and European forecast centers.</li>
-  <li>All forecasts are saved on your device for comparing multiple models and past
+  <li><strong>Satellite ready</strong>: Get forecasts anywhere in the world, without cell
+  reception. Works with Garmin inReach, ZOLEO, and iPhone satellite messaging.</li>
+  <li><strong>Hundreds of data points per message</strong>: Uses custom compression optimized for
+  weather data to fit a detailed weather forecast into a single message.</li>
+  <li><strong>30+ weather models</strong>: Forecasts from high-resolution models like HRRR (3km),
+  HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for
+  your location.</li>
+  <li><strong>Detailed cloud cover</strong>: See up to 10 levels in the atmosphere to
+  differentiate between high clouds, valley fog, and whiteout conditions.</li>
+  <li><strong>Mountain forecasts</strong>: Pressure-level winds and freezing level for
+  high-altitude mountaineering.</li>
+  <li><strong>Air quality</strong>: Plan around wildfire smoke and other pollution with AQI
   forecasts.</li>
+  <li><strong>Model agreement</strong>: See how well the forecast agrees with models from NOAA,
+  ECMWF, ECCC, and DWD.</li>
+  <li><strong>Works offline</strong>: All forecasts are saved on your device for comparing
+  multiple models and past forecasts while offline.</li>
+  <li><strong>Private</strong>: ${BRAND} requires no account and does not store your name, email,
+  or phone number.</li>
 </ul>
 
 <h2>Open source</h2>

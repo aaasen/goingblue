@@ -1,6 +1,6 @@
-# Going Blue
+# Going Blue: Expedition Weather Forecasts via Satellite
 
-Going Blue is an expedition weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom codec to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, ZOLEO, or iPhone satellite messaging. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
+Going Blue is an expedition weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom codec to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, ZOLEO, or iPhone satellite messaging. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927). 
 
 <img src="packages/mobile/screenshots/readme.png" width="100%" alt="Four screenshots: a 13-day meteogram for Mont Blanc, the Builder tab's location, model and variable options, a Denali forecast with freezing level and pressure-level winds, and a forecast with air quality">
 
@@ -12,15 +12,15 @@ Going Blue is an expedition weather app designed specifically for satellite mess
 
 ## Features
 
-- Satellite ready: Get forecasts anywhere in the world, without cell reception. Works with Garmin inReach, ZOLEO, and iPhone satellite messaging. 
-- Hundreds of data points per message: Uses custom compression optimized for weather data to fit a detailed weather forecast into a single message.
-- 30+ weather models: Forecasts from high-resolution models like HRRR (3km), HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for your location.
-- Detailed cloud cover: See up to 10 levels in the atmosphere to differentiate between high clouds, valley fog, and whiteout conditions. 
-- Mountain forecasts: Pressure-level winds and freezing level for high-altitude mountaineering.
-- Air quality: Plan around wildfire smoke and other pollution with AQI forecasts.
-- Model agreement: See how well the forecast agrees with models from NOAA, ECMWF, ECCC, and DWD. 
-- Works offline: All forecasts are saved on your device for comparing multiple models and past forecasts while offline.
-- Private: Going Blue requires no account and does not store your name, email, or phone number. 
+- **Satellite ready**: Get forecasts anywhere in the world, without cell reception. Works with Garmin inReach, ZOLEO, and iPhone satellite messaging. 
+- **Hundreds of data points per message**: Uses custom compression optimized for weather data to fit a detailed weather forecast into a single message.
+- **30+ weather models**: Forecasts from high-resolution models like HRRR (3km), HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for your location.
+- **Detailed cloud cover**: See up to 10 levels in the atmosphere to differentiate between high clouds, valley fog, and whiteout conditions. 
+- **Mountain forecasts**: Pressure-level winds and freezing level for high-altitude mountaineering.
+- **Air quality**: Plan around wildfire smoke and other pollution with AQI forecasts.
+- **Model agreement**: See how well the forecast agrees with models from NOAA, ECMWF, ECCC, and DWD. 
+- **Works offline**: All forecasts are saved on your device for comparing multiple models and past forecasts while offline.
+- **Private**: Going Blue requires no account and does not store your name, email, or phone number. 
 
 ## Architecture
 
