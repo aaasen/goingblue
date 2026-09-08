@@ -99,6 +99,10 @@ function groupSql(group: GroupKey | null): { expr: string; from: string; where: 
   };
 }
 
+// A point on the map, as the stored ~1 km cell's coordinates. They travel as the strings
+// Postgres returned so a round trip through the URL can't reformat them.
+export type MapPlace = { lat: string; lon: string };
+
 // The page's filters, all optional in the URL.
 export type StatsFilters = {
   from: string; // YYYY-MM-DD, inclusive, Pacific
@@ -108,6 +112,10 @@ export type StatsFilters = {
   // plain offset so the pager can list every page by position; a request arriving mid-scroll
   // shifts the pages by one, which a dashboard can wear.
   offset: number;
+  // The map point clicked, whose requests are listed under the map; null when none is selected.
+  place: MapPlace | null;
+  // That table's page, kept separate from `offset` so paging one table leaves the other alone.
+  placeOffset: number;
 };
 
 // Today as a Pacific date, without touching the database: en-CA is the locale whose date format
@@ -127,6 +135,12 @@ const GROUP_KEYS: readonly GroupKey[] = [
   "account", "device", "platform", "outcome", "mode", "model", "messages", "variable", "version",
 ];
 
+// A coordinate as the map hands it back: a decimal within the earth's range. Anything else is
+// no selection at all, so a hand-edited URL falls back to the unselected page.
+const COORD_RE = /^-?\d{1,3}(\.\d{1,8})?$/;
+const coord = (v: string | undefined, limit: number): string | null =>
+  v !== undefined && COORD_RE.test(v) && Math.abs(Number(v)) <= limit ? v : null;
+
 export function parseFilters(q: (name: string) => string | undefined): StatsFilters {
   const today = pacificToday();
   let from = DATE_RE.test(q("from") ?? "") ? q("from")! : daysBefore(today, WINDOW_DAYS - 1);
@@ -136,20 +150,34 @@ export function parseFilters(q: (name: string) => string | undefined): StatsFilt
   const grp = q("group") ?? "";
   const group = (GROUP_KEYS as readonly string[]).includes(grp) ? (grp as GroupKey) : null;
   const offset = /^\d{1,9}$/.test(q("offset") ?? "") ? Number(q("offset")) : 0;
-  return { from, to, group, offset };
+  const lat = coord(q("lat"), 90);
+  const lon = coord(q("lon"), 180);
+  const place = lat !== null && lon !== null ? { lat, lon } : null;
+  const placeOffset =
+    place !== null && /^\d{1,9}$/.test(q("poffset") ?? "") ? Number(q("poffset")) : 0;
+  return { from, to, group, offset, place, placeOffset };
 }
 
-// The page's own URL for a view: the window, the grouping and the table offset, ending at an
-// anchor so a reload lands where the click was.
-function statsUrl(f: StatsFilters, offset: number, anchor: string): string {
-  const q = new URLSearchParams({
-    from: f.from,
-    to: f.to,
-    ...(f.group && { group: f.group }),
-    ...(offset > 0 && { offset: String(offset) }),
-  });
-  return `/stats?${q}#${anchor}`;
+// The page's own query string for a view: the window, the grouping, the selected point and each
+// table's page. `over` replaces fields for links that change one of them: a pager link moves
+// its own offset and leaves everything else alone.
+function statsQuery(f: StatsFilters, over: Partial<StatsFilters> = {}): string {
+  const v = { ...f, ...over };
+  return String(
+    new URLSearchParams({
+      from: v.from,
+      to: v.to,
+      ...(v.group && { group: v.group }),
+      ...(v.offset > 0 && { offset: String(v.offset) }),
+      ...(v.place && { lat: v.place.lat, lon: v.place.lon }),
+      ...(v.place && v.placeOffset > 0 && { poffset: String(v.placeOffset) }),
+    }),
+  );
 }
+
+// That view as a URL, ending at an anchor so a reload lands where the click was.
+const statsUrl = (f: StatsFilters, anchor: string, over: Partial<StatsFilters> = {}): string =>
+  `/stats?${statsQuery(f, over)}#${anchor}`;
 
 // One (day, group value) cell of the daily chart. `grp` is the grouped column's raw value: ""
 // when the chart is ungrouped, null when the column itself is null (an internet request has no
@@ -167,14 +195,15 @@ export type StatsTotals = {
 // (max_chars and chars, which the messages count already summarizes): the surrogate account id
 // exists precisely so a request can be shown without its credential (db.ts), and this page
 // keeps that.
-// `time` arrives formatted in Pacific. Account is non-null because rows without one are
-// excluded from the page; the shape columns are null on failures and on rows whose codec sent
-// no header. lat/lon arrive as strings because `numeric` comes back from node-postgres as text.
+// `time` arrives formatted in Pacific. Account is null only in the table under a map point,
+// which lists what the map counted and so includes the accountless rows the window's own
+// exclusions drop; the shape columns are null on failures and on rows whose codec sent no
+// header. lat/lon arrive as strings because `numeric` comes back from node-postgres as text.
 // Strings from the shape columns arrive through the untrusted shape header.
 export type RequestRow = {
   id: number;
   time: string;
-  account: number;
+  account: number | null;
   device: string | null;
   platform: string | null;
   version: number | null;
@@ -213,6 +242,10 @@ export type StatsData = {
   // otherwise.
   groupComponents: { grp: string; component: string; count: number }[];
   mapPoints: MapPointRow[];
+  // One page of the rows behind the selected map point, newest first; empty when no point is
+  // selected. How many there are in total is the point's own count in mapPoints, since the two
+  // come from the same predicate, so nothing here has to be counted twice.
+  placeRequests: RequestRow[];
   // The hidden set, ascending, so the page can list it for editing.
   hidden: number[];
 };
@@ -301,11 +334,13 @@ const groupTotalsSql = (where: string, g: ReturnType<typeof groupSql>) => `
 // order, and unlike created_at never tie. The timestamp is formatted here, in the same Pacific
 // frame every other date on the page lives in.
 export const REQUESTS_LIMIT = 20;
-const requestRowsSql = (where: string) => `
-  select r.id, to_char(r.created_at at time zone $1, 'FMMM/FMDD HH24:MI') as time,
+const REQUEST_COLUMNS = `
+         r.id, to_char(r.created_at at time zone $1, 'FMMM/FMDD HH24:MI') as time,
          r.account_id, r.device, r.platform, r.version, r.outcome,
          r.loc, r.lat::text as lat, r.lon::text as lon, r.mode, r.model, r.messages, r.vars,
-         r.periods, r.codec_ms, r.fetch_ms, r.encode_ms
+         r.periods, r.codec_ms, r.fetch_ms, r.encode_ms`;
+const requestRowsSql = (where: string) => `
+  select ${REQUEST_COLUMNS}
     from requests r
    where ${where}
    order by r.id desc
@@ -323,23 +358,40 @@ const varComponentsSql = (where: string) => `
    order by 1, count desc, 2
 `;
 
-// Every place in the window with stored coordinates, one point per ~1 km cell. Windowed by time
-// and the hidden set alone — a located request belongs on the map even when the other identity
-// exclusions would keep it out of the counts, but a hidden account's test locations are noise
-// here too. Named and unnamed requests for the same cell fold together; min(loc) picks
-// a stable representative name where any request carried one ('current' is the app's marker for
-// "my location", not a name).
+// What the map is drawn from: located requests in the window, kept by time and the hidden set
+// alone — a located request belongs on the map even when the other identity exclusions would
+// keep it out of the counts, but a hidden account's test locations are noise here too. The
+// table under a clicked point reads the same rows, so the two can never disagree about what a
+// point holds.
+const MAP_WHERE = `r.created_at >= ($2::date::timestamp at time zone $1)
+     and r.created_at < (($3::date + 1)::timestamp at time zone $1)
+     and r.lat is not null and r.lon is not null
+     and ${NOT_HIDDEN}`;
+
+// Every place in the window, one point per ~1 km cell. Named and unnamed requests for the same
+// cell fold together; min(loc) picks a stable representative name where any request carried one
+// ('current' is the app's marker for "my location", not a name).
 const MAP_POINTS_SQL = `
   select r.lat::text as lat, r.lon::text as lon,
          min(r.loc) filter (where r.loc is not null and r.loc <> 'current') as loc,
          count(*) as count
     from requests r
-   where r.created_at >= ($2::date::timestamp at time zone $1)
-     and r.created_at < (($3::date + 1)::timestamp at time zone $1)
-     and r.lat is not null and r.lon is not null
-     and ${NOT_HIDDEN}
+   where ${MAP_WHERE}
    group by r.lat, r.lon
    order by count desc
+`;
+
+// One page of the rows behind a clicked point, newest first, $6 rows in. MAP_WHERE narrowed to
+// one cell, so the table lists exactly the requests the point counted: an accountless row the
+// window's counts leave out is on the map and so belongs in its table. The coordinates are
+// compared as numerics, not text, so a URL that lost a trailing zero still names the same cell.
+const PLACE_ROWS_SQL = `
+  select ${REQUEST_COLUMNS}
+    from requests r
+   where ${MAP_WHERE}
+     and r.lat = $4::numeric and r.lon = $5::numeric
+   order by r.id desc
+   limit ${REQUESTS_LIMIT} offset $6
 `;
 
 // Postgres returns count() as bigint, which node-postgres hands back as a string to avoid
@@ -384,10 +436,35 @@ export async function unhideAccount(id: number): Promise<void> {
   await query(`delete from stats_hidden_accounts where account_id = $1`, [id]);
 }
 
+// One request row as the page holds it. The shape columns arrive through the untrusted shape
+// header and are escaped at render time, not here.
+const toRequestRow = (r: Record<string, unknown>): RequestRow => ({
+  id: num(r["id"]),
+  time: String(r["time"]),
+  account: r["account_id"] == null ? null : num(r["account_id"]),
+  device: r["device"] == null ? null : String(r["device"]),
+  platform: r["platform"] == null ? null : String(r["platform"]),
+  version: r["version"] == null ? null : num(r["version"]),
+  outcome: r["outcome"] == null ? null : String(r["outcome"]),
+  loc: r["loc"] == null ? null : String(r["loc"]),
+  lat: r["lat"] == null ? null : String(r["lat"]),
+  lon: r["lon"] == null ? null : String(r["lon"]),
+  mode: r["mode"] == null ? null : String(r["mode"]),
+  model: r["model"] == null ? null : String(r["model"]),
+  messages: r["messages"] == null ? null : num(r["messages"]),
+  vars: Array.isArray(r["vars"]) ? (r["vars"] as unknown[]).map(String) : [],
+  periods: periodsOf(r["periods"]),
+  codecMs: r["codec_ms"] == null ? null : num(r["codec_ms"]),
+  fetchMs: r["fetch_ms"] == null ? null : num(r["fetch_ms"]),
+  encodeMs: r["encode_ms"] == null ? null : num(r["encode_ms"]),
+});
+
 export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
   const filtered = requestsFilter(filters);
   const g = groupSql(filters.group);
-  const [daily, totals, requests, groups, components, mapPoints, hidden] = await Promise.all([
+  const place = filters.place;
+  const [daily, totals, requests, groups, components, mapPoints, placeRequests, hidden] =
+    await Promise.all([
     query(dailySql(filtered.where, g), filtered.params),
     query(totalsSql(filtered.where), filtered.params),
     query(requestRowsSql(filtered.where), [...filtered.params, filters.offset]),
@@ -396,6 +473,9 @@ export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
       ? query(varComponentsSql(filtered.where), filtered.params)
       : Promise.resolve({ rows: [] as Record<string, unknown>[] }),
     query(MAP_POINTS_SQL, filtered.params),
+    place
+      ? query(PLACE_ROWS_SQL, [...filtered.params, place.lat, place.lon, filters.placeOffset])
+      : Promise.resolve({ rows: [] as Record<string, unknown>[] }),
     hiddenAccounts(),
   ]);
   return {
@@ -406,26 +486,8 @@ export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
       requests: num(r["requests"]),
     })),
     filters,
-    requests: requests.rows.map((r) => ({
-      id: num(r["id"]),
-      time: String(r["time"]),
-      account: num(r["account_id"]),
-      device: r["device"] == null ? null : String(r["device"]),
-      platform: r["platform"] == null ? null : String(r["platform"]),
-      version: r["version"] == null ? null : num(r["version"]),
-      outcome: r["outcome"] == null ? null : String(r["outcome"]),
-      loc: r["loc"] == null ? null : String(r["loc"]),
-      lat: r["lat"] == null ? null : String(r["lat"]),
-      lon: r["lon"] == null ? null : String(r["lon"]),
-      mode: r["mode"] == null ? null : String(r["mode"]),
-      model: r["model"] == null ? null : String(r["model"]),
-      messages: r["messages"] == null ? null : num(r["messages"]),
-      vars: Array.isArray(r["vars"]) ? (r["vars"] as unknown[]).map(String) : [],
-      periods: periodsOf(r["periods"]),
-      codecMs: r["codec_ms"] == null ? null : num(r["codec_ms"]),
-      fetchMs: r["fetch_ms"] == null ? null : num(r["fetch_ms"]),
-      encodeMs: r["encode_ms"] == null ? null : num(r["encode_ms"]),
-    })),
+    requests: requests.rows.map(toRequestRow),
+    placeRequests: placeRequests.rows.map(toRequestRow),
     totals: counts(totals.rows[0]),
     groups:
       filters.group === null
@@ -675,7 +737,10 @@ const CSS = `
   .chartbar select { font: inherit; font-size: 0.95em; margin-left: 4px; }
   /* The anchor the group-by select submits to; the offset keeps a heading from hiding under
      the viewport's very top edge when jumped to. */
-  #requests, #recent { scroll-margin-top: 12px; }
+  #requests, #recent, #map, #place { scroll-margin-top: 12px; }
+  /* The selected point's heading and the link that clears it, on one line. */
+  .placehead { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+  .placehead a { font-size: 0.85rem; }
   .pager { display: flex; gap: 6px 14px; flex-wrap: wrap; margin: 0.6em 0; font-size: 0.9em;
     color: #52514e; font-variant-numeric: tabular-nums; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 0.2em 0 0.6em; font-size: 0.85em;
@@ -773,6 +838,9 @@ function actForm(action: "hide" | "unhide", id: number | null, f: StatsFilters, 
     `<input type=hidden name=from value="${f.from}"><input type=hidden name=to value="${f.to}">` +
     `<input type=hidden name=group value="${f.group ?? ""}">` +
     `<input type=hidden name=offset value="${f.offset}">` +
+    `<input type=hidden name=lat value="${f.place?.lat ?? ""}">` +
+    `<input type=hidden name=lon value="${f.place?.lon ?? ""}">` +
+    `<input type=hidden name=poffset value="${f.placeOffset}">` +
     `<button type=submit>${label}</button></form>`;
 }
 
@@ -790,13 +858,14 @@ function actForm(action: "hide" | "unhide", id: number | null, f: StatsFilters, 
 // "1 … 11-20 21-30 31-40 … 414". The brackets are plain text, not links. A single page that
 // holds everything gets no pager at all. A hand-edited offset past the end lists no rows and
 // only a link to the last page.
-function requestPager(filters: StatsFilters, listed: number): string {
+//
+// `url` is where a page starting at a given row goes, so the same pager serves the window's
+// table and the selected point's, each moving its own offset.
+function requestPager(listed: number, offset: number, url: (start: number) => string): string {
   if (listed === 0) return "";
-  const { offset } = filters;
   const lastStart = Math.floor((listed - 1) / REQUESTS_LIMIT) * REQUESTS_LIMIT;
   const end = (start: number): number => Math.min(start + REQUESTS_LIMIT, listed);
-  const link = (start: number): string =>
-    `<a href="${statsUrl(filters, start, "recent")}">${start + 1}-${end(start)}</a>`;
+  const link = (start: number): string => `<a href="${url(start)}">${start + 1}-${end(start)}</a>`;
   const prevStart = offset > 0 ? Math.min(Math.max(0, offset - REQUESTS_LIMIT), lastStart) : null;
   const nextStart = offset + REQUESTS_LIMIT < listed ? offset + REQUESTS_LIMIT : null;
   const items: string[] = [];
@@ -809,10 +878,16 @@ function requestPager(filters: StatsFilters, listed: number): string {
   return items.some((i) => i.startsWith("<a")) ? `<div class=pager>${items.join("")}</div>` : "";
 }
 
-function requestTable(data: StatsData): string {
-  const { requests, filters, totals } = data;
-  const pager = requestPager(filters, totals.listed);
-  if (!requests.length) return pager || `<p class=note>No requests in the window.</p>`;
+// One page of raw rows with its pager under it. Both request tables on the page render through
+// here: same columns and same paging, over a different set of rows. `empty` is what to say when
+// the set holds nothing at all, as opposed to an offset that simply overshot its last page.
+function requestTable(
+  requests: RequestRow[],
+  filters: StatsFilters,
+  pager: string,
+  empty: string,
+): string {
+  if (!requests.length) return pager || `<p class=note>${empty}</p>`;
   // Periods render as the reply's total, with the per-resolution breakdown ("1h×130, 3h×56")
   // in the hover title; timing as codec_ms, with the codec's own fetch/encode split in the
   // title. The periods keys arrived through the untrusted shape header, so they are escaped
@@ -833,16 +908,28 @@ function requestTable(data: StatsData): string {
   };
   const body = requests
     .map((r) => {
+      // Coordinates select their own point on the map, the same view clicking that circle
+      // gives, map included: every located row in the window is a point on it, since the map
+      // keeps a superset of the rows this table lists.
       const named = r.loc !== null && r.loc !== "current";
-      const place = named ? esc(r.loc ?? "") : r.lat !== null && r.lon !== null ? `${esc(r.lat)}, ${esc(r.lon)}` : "";
+      const coordinates =
+        r.lat !== null && r.lon !== null
+          ? `<a href="${statsUrl(filters, "map", {
+              place: { lat: r.lat, lon: r.lon },
+              placeOffset: 0,
+            })}">${esc(r.lat)}, ${esc(r.lon)}</a>`
+          : "";
+      const place = named ? esc(r.loc ?? "") : coordinates;
       const chosen = r.vars.filter((v) => !DEFAULT_VARS.includes(v));
       const vars = VARIABLE_TAGS
         .filter((t) => t.vars.some((v) => chosen.includes(v)))
         .map((t) => `<span title="${t.label}">${t.tag}</span>`)
         .concat([...new Set(chosen.filter((v) => !TAGGED_VARS.has(v)))].map((v) => `<span>${esc(v)}</span>`))
         .join("");
+      // No account to name is no account to hide, so the cell carries no form either.
+      const account = r.account === null ? "" : `${r.account}${actForm("hide", r.account, filters, "hide")}`;
       return (
-        `<tr><td>${r.id}</td><td>${r.time}</td><td>${r.account}${actForm("hide", r.account, filters, "hide")}</td>` +
+        `<tr><td>${r.id}</td><td>${r.time}</td><td>${account}</td>` +
         `<td>${r.version ?? ""}</td>` +
         `<td>${r.platform === null ? "" : PLATFORM_LABELS[r.platform] ?? esc(r.platform)}</td>` +
         `<td>${r.device === null ? "" : DEVICE_LABELS[r.device] ?? esc(r.device)}</td>` +
@@ -870,12 +957,17 @@ ${pager}`;
 // applying it reloads the page with the window in the URL, so a view is a link. The charts'
 // group-by selects live next to their charts but belong to this form via the `form` attribute,
 // so an Apply here carries them along unchanged.
+// The selected map point rides along as hidden fields, so changing the window or the grouping
+// keeps looking at the same place. Its table's page does not: those are different rows.
 function windowBar(data: StatsData): string {
   const f = data.filters;
+  const place = f.place
+    ? `<input type=hidden name=lat value="${f.place.lat}"><input type=hidden name=lon value="${f.place.lon}">`
+    : "";
   return `<form id=filters class=windowbar method=get action=/stats>
 <label>From <input type=date name=from value="${f.from}"></label>
 <label>To <input type=date name=to value="${f.to}"></label>
-<button type=submit>Apply</button>
+${place}<button type=submit>Apply</button>
 <a href="/stats">Reset</a>
 </form>`;
 }
@@ -885,10 +977,22 @@ function windowBar(data: StatsData): string {
 // read < back as `<`.
 const jsonForScript = (v: unknown): string => JSON.stringify(v).replace(/</g, "\\u003c");
 
+// How close the map sits over a selected point when the viewer has no zoom of their own yet.
+// The same cap the fit over every point uses, so a first selection reads at a familiar scale.
+const SELECTED_ZOOM = 8;
+
 // The location map: the app's basemap with one circle per requested place, sized by request
 // count. The style is built here rather than in the browser so the inline script stays small:
-// it registers the pmtiles protocol, fits the camera, and wires the hover popup.
-function locationMap(points: MapPointRow[]): { head: string; html: string } {
+// it registers the pmtiles protocol, places the camera, and wires the hover popup and the click
+// that selects a point. `place` is the point the URL names, which the map opens centered on;
+// `selected` is that point's row when the window still holds requests for it, drawn darker than
+// the rest; `base` is this view's URL without a selection, which the click adds coordinates to.
+function locationMap(
+  points: MapPointRow[],
+  place: MapPlace | null,
+  selected: MapPointRow | null,
+  base: string,
+): { head: string; html: string } {
   const style = basemapStyle();
   style.sources["requests"] = {
     type: "geojson",
@@ -897,9 +1001,10 @@ function locationMap(points: MapPointRow[]): { head: string; html: string } {
       features: points.map((p) => ({
         type: "Feature",
         geometry: { type: "Point", coordinates: [Number(p.lon), Number(p.lat)] },
-        // lat/lon ride along at the stored rounding for the popup on unnamed points; the name
-        // is untrusted shape-header text, escaped client-side by being set via textContent.
-        properties: { n: p.count, name: p.loc, lat: p.lat, lon: p.lon },
+        // lat/lon ride along at the stored rounding, both for the popup on unnamed points and
+        // as what a click puts in the URL; the name is untrusted shape-header text, escaped
+        // client-side by being set via textContent.
+        properties: { n: p.count, name: p.loc, lat: p.lat, lon: p.lon, sel: p === selected ? 1 : 0 },
       })),
     },
   };
@@ -908,16 +1013,19 @@ function locationMap(points: MapPointRow[]): { head: string; html: string } {
   const maxN = Math.max(...points.map((p) => p.count), 1);
   const radius =
     maxN > 1 ? ["interpolate", ["linear"], ["sqrt", ["get", "n"]], 1, 4, Math.sqrt(maxN), 14] : 4;
+  // The selected point keeps the series color and takes a dark ring instead: selection is a
+  // state of the same point, not a second thing on the map.
+  const ifSelected = (yes: unknown, no: unknown) => ["case", ["==", ["get", "sel"], 1], yes, no];
   style.layers.push({
     id: "requests",
     type: "circle",
     source: "requests",
     paint: {
       "circle-color": C_KNOWN,
-      "circle-opacity": 0.7,
+      "circle-opacity": ifSelected(0.95, 0.7) as never,
       "circle-radius": radius as never,
-      "circle-stroke-color": "#ffffff",
-      "circle-stroke-width": 1.5,
+      "circle-stroke-color": ifSelected("#1c1b19", "#ffffff") as never,
+      "circle-stroke-width": ifSelected(2.5, 1.5) as never,
     },
   });
 
@@ -927,7 +1035,15 @@ function locationMap(points: MapPointRow[]): { head: string; html: string } {
     ? [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]]
     : null;
 
-  const cfg = { style, bounds, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM };
+  const cfg = {
+    style,
+    bounds,
+    base,
+    center: place ? [Number(place.lon), Number(place.lat)] : null,
+    selectedZoom: SELECTED_ZOOM,
+    minZoom: MIN_ZOOM,
+    maxZoom: MAX_ZOOM,
+  };
   const script = `
 import * as maplibregl from "${vendorUrl("maplibre-gl.mjs")}";
 
@@ -945,7 +1061,39 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }));
 map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: "\\u00a9 OpenStreetMap" }));
-if (cfg.bounds) map.fitBounds(cfg.bounds, { padding: 48, maxZoom: 8, animate: false });
+
+// The map opens on the point the URL names, so a selection made anywhere on the page — a
+// circle here, a row's coordinates in either table — brings the map to it. Only the zoom is
+// carried across that reload: the center is the selection's to set, but the scale the viewer
+// chose is theirs to keep. With nothing selected the map fits every point instead.
+const ZOOM_KEY = "stats.map.zoom";
+const savedZoom = () => {
+  try {
+    const raw = sessionStorage.getItem(ZOOM_KEY);
+    const z = raw === null ? NaN : Number(raw);
+    return Number.isFinite(z) ? Math.min(Math.max(z, cfg.minZoom), cfg.maxZoom) : null;
+  } catch { return null; }
+};
+if (cfg.center) map.jumpTo({ center: cfg.center, zoom: savedZoom() ?? cfg.selectedZoom });
+else if (cfg.bounds) map.fitBounds(cfg.bounds, { padding: 48, maxZoom: 8, animate: false });
+// Placing the camera above is itself a move, and recording it would make the scale a viewer
+// never chose look like one they did. Recording starts after it, so every zoom stored is one
+// somebody moved the map to.
+map.once("moveend", () => {
+  map.on("moveend", () => {
+    try { sessionStorage.setItem(ZOOM_KEY, String(map.getZoom())); } catch {}
+  });
+});
+
+// Clicking a point lists its requests under the map. The selection lives in the URL, like the
+// window and the grouping, so the view stays a link.
+map.on("click", "requests", (e) => {
+  const f = e.features && e.features[0];
+  if (!f) return;
+  const p = f.properties;
+  location.assign(cfg.base +
+    "&lat=" + encodeURIComponent(p.lat) + "&lon=" + encodeURIComponent(p.lon) + "#map");
+});
 
 // The peak icon the basemap's peaks layers ask for, drawn once on demand: the app registers it
 // as an image asset, a canvas is the browser equivalent.
@@ -1064,8 +1212,46 @@ ${groupTotalRow}
 </div>`
       : "";
 
-  const map = mapPoints.length ? locationMap(mapPoints) : null;
-  const locationSection = map ? map.html : `<p class=note>No locations recorded in the window.</p>`;
+  // The clicked point, matched numerically so a URL that dropped a trailing zero still finds
+  // it. A selection the window no longer holds any requests for matches nothing, and the
+  // section below says so rather than the page pretending nothing was clicked.
+  const selected =
+    filters.place === null
+      ? null
+      : mapPoints.find(
+          (p) =>
+            Number(p.lat) === Number(filters.place!.lat) &&
+            Number(p.lon) === Number(filters.place!.lon),
+        ) ?? null;
+  const map = mapPoints.length
+    ? locationMap(
+        mapPoints,
+        filters.place,
+        selected,
+        `/stats?${statsQuery(filters, { offset: 0, place: null })}`,
+      )
+    : null;
+  // The table under the map, present only once a point has been clicked. Its total is the
+  // point's own count: the map and the table select the same rows.
+  const placeSection =
+    filters.place === null
+      ? ""
+      : `
+<div class=placehead><h2 id=place>Requests at ${
+          selected?.loc ? esc(selected.loc) : `${esc(filters.place.lat)}, ${esc(filters.place.lon)}`
+        }</h2><a href="${statsUrl(filters, "map", { place: null, placeOffset: 0 })}">Clear</a></div>
+${requestTable(
+  data.placeRequests,
+  filters,
+  requestPager(selected?.count ?? 0, filters.placeOffset, (start) =>
+    statsUrl(filters, "place", { placeOffset: start }),
+  ),
+  "No requests at this point in the window.",
+)}`;
+  // A selection outlives an empty map: shrinking the window to days the place has no requests
+  // in leaves nothing to draw, and the section under it is what says so.
+  const locationSection =
+    (map ? map.html : `<p class=note>No locations recorded in the window.</p>`) + placeSection;
 
   // The number is read first and the label second, so the label agrees with it: "1 request",
   // not "1 requests". `word` is the singular; the caller's adjectives come before it.
@@ -1095,7 +1281,12 @@ ${requestsChart}
 ${groupSection}
 
 <h2 id=recent>Recent requests</h2>
-${requestTable(data)}`;
+${requestTable(
+  data.requests,
+  filters,
+  requestPager(totals.listed, filters.offset, (start) => statsUrl(filters, "recent", { offset: start })),
+  "No requests in the window.",
+)}`;
 
   // The hidden set, editable in place. Always rendered, even when empty, since the add field
   // is the only way to hide an account that isn't in the recent-requests table.
@@ -1111,6 +1302,7 @@ ${windowBar(data)}
 <h2 class=section id=requests>Requests</h2>
 ${requestsSection}
 
+<h2 class=section id=map>Request map</h2>
 ${locationSection}
 ${hiddenSection}
 </div>`;
@@ -1136,7 +1328,7 @@ async function editHidden(c: Context, edit: (id: number) => Promise<void>) {
     return c.text("Stats unavailable", 503);
   }
   const f = parseFilters(field);
-  return c.redirect(statsUrl(f, f.offset, "hidden"), 303);
+  return c.redirect(statsUrl(f, "hidden"), 303);
 }
 
 export const hideAccountRoute = (c: Context) => editHidden(c, hideAccount);

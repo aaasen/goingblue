@@ -28,6 +28,7 @@ const data = (
     groupComponents = [] as StatsData["groupComponents"],
     mapPoints = [] as StatsData["mapPoints"],
     requests = [] as StatsData["requests"],
+    placeRequests = [] as StatsData["placeRequests"],
     hidden = [] as number[],
     totals = {} as Partial<StatsData["totals"]>,
     filters = {} as Partial<StatsData["filters"]>,
@@ -35,11 +36,14 @@ const data = (
 ): StatsData => ({
   daily,
   requests,
+  placeRequests,
   filters: {
     from: daily[0]?.day ?? "2026-08-01",
     to: daily[daily.length - 1]?.day ?? "2026-08-01",
     group: null,
     offset: 0,
+    place: null,
+    placeOffset: 0,
     ...filters,
   },
   groups,
@@ -296,12 +300,38 @@ describe("renderStats — recent requests", () => {
       `<td title="1h×130, 3h×56">186</td><td title="fetch 1015, encode 18 ms">1037</td>` +
       `<td class=tags><span title="Detailed clouds">C</span><span title="Pressure-level winds">W</span>` +
       `<span title="Freezing level">FL</span><span title="Air quality">AQI</span></td>`);
-    // 'current' is not a name; the coordinates stand in, and all-default vars leave the cell
-    // empty, as do the periods/timing columns the row predates.
+    // 'current' is not a name; the coordinates stand in, linking to their own point, and
+    // all-default vars leave the cell empty, as do the periods/timing columns the row predates.
     expect(html).toContain("<td>54</td><td>8/29 09:02</td><td>12<form");
     expect(html).toContain(
-      "<td>2</td><td>Android</td><td>SMS</td><td>47.62, -122.29</td>" +
+      "<td>2</td><td>Android</td><td>SMS</td>" +
+      `<td><a href="/stats?from=2026-08-07&to=2026-08-07&lat=47.62&lon=-122.29#map">` +
+      "47.62, -122.29</a></td>" +
       "<td>detail</td><td>eu</td><td></td><td></td><td></td><td class=tags></td>");
+  });
+
+  // The link is the same selection a click on the map makes, so both ways into a point land on
+  // the same view. A row whose place has a name shows the name, and nothing to click.
+  it("links coordinates to their point on the map", () => {
+    const html = renderStats(data([cell("2026-08-07", 2)], {
+      requests: [row({ id: 55, loc: "current", lat: "63.06", lon: "-151.08" }),
+                 row({ id: 54, loc: "denali", lat: "63.06", lon: "-151.08" })],
+      filters: { group: "device" },
+    }));
+    expect(html).toContain(
+      `<td><a href="/stats?from=2026-08-07&to=2026-08-07&group=device&lat=63.06&lon=-151.08#map">` +
+      "63.06, -151.08</a></td>");
+    expect(html).toContain("<td>denali</td>");
+  });
+
+  // A failure recorded no coordinates, so there is no point to link to.
+  it("leaves the location cell empty when the row has no coordinates", () => {
+    const html = renderStats(data([cell("2026-08-07", 1)], {
+      requests: [row({ loc: null, lat: null, lon: null })],
+    }));
+    // Version, platform, device, then an empty location.
+    expect(html).toContain("<td>3</td><td>iOS</td><td>iPhone</td><td></td>");
+    expect(html).not.toContain("<a href=\"/stats?from=2026-08-07&to=2026-08-07&lat=");
   });
 
   it("shows a variable no badge covers under its own name, escaped", () => {
@@ -422,6 +452,113 @@ describe("renderStats — request paging", () => {
   });
 });
 
+describe("renderStats — selected map point", () => {
+  const point = (over: Partial<StatsData["mapPoints"][number]> = {}) =>
+    ({ lat: "63.06", lon: "-151.08", loc: "denali", count: 3, ...over });
+  const selected = { lat: "63.06", lon: "-151.08" };
+
+  it("lists the point's requests under the map, named by the place", () => {
+    const html = renderStats(data([cell("2026-08-07", 3)], {
+      mapPoints: [point(), point({ lat: "47.62", lon: "-122.29", loc: null, count: 1 })],
+      placeRequests: [row({ id: 55, loc: "denali" }), row({ id: 54, loc: "denali" })],
+      filters: { place: selected },
+    }));
+    expect(html).toContain("Requests at denali");
+    expect(html).toContain("<td>55</td>");
+    expect(html).toContain("<td>54</td>");
+  });
+
+  // A point nobody named is still a point; its coordinates carry the heading.
+  it("falls back to the coordinates when the point has no name", () => {
+    const html = renderStats(data([cell("2026-08-07", 1)], {
+      mapPoints: [point({ loc: null })],
+      placeRequests: [row()],
+      filters: { place: selected },
+    }));
+    expect(html).toContain("Requests at 63.06, -151.08");
+  });
+
+  // The window's own table is unaffected: selecting a point adds a table, it doesn't filter
+  // the page.
+  it("leaves the recent requests table alone", () => {
+    const html = renderStats(data([cell("2026-08-07", 3)], {
+      mapPoints: [point()],
+      requests: [row({ id: 99, loc: "elsewhere" })],
+      placeRequests: [row({ id: 55 })],
+      totals: { listed: 1 },
+      filters: { place: selected },
+    }));
+    expect(html).toContain("<td>99</td>");
+    expect(html).toContain("Recent requests");
+  });
+
+  it("shows no point table until a point is clicked", () => {
+    const html = renderStats(data([cell("2026-08-07", 3)], { mapPoints: [point()] }));
+    expect(html).not.toContain("Requests at");
+    expect(html).not.toContain("id=place");
+  });
+
+  // Changing the window can empty a selection that had rows a moment ago; the section stays and
+  // says so, rather than the page silently dropping what was clicked.
+  it("keeps the section when the selection has no requests in the window", () => {
+    const html = renderStats(data([cell("2026-08-07", 1)], {
+      mapPoints: [point({ lat: "47.62", lon: "-122.29" })],
+      filters: { place: selected },
+    }));
+    expect(html).toContain("Requests at 63.06, -151.08");
+    expect(html).toContain("No requests at this point in the window.");
+  });
+
+  // The point's own count is the table's total, so the page needs no second count query.
+  it("pages the point's table on the point's count, independently of the other table", () => {
+    const html = renderStats(data([cell("2026-08-07", 3)], {
+      mapPoints: [point({ count: REQUESTS_LIMIT + 5 })],
+      placeRequests: Array.from({ length: REQUESTS_LIMIT }, (_, i) => row({ id: 100 - i })),
+      requests: [row({ id: 9 })],
+      totals: { listed: 1 },
+      filters: { place: selected, offset: 0 },
+    }));
+    // Only the point's table has a pager, and its link moves poffset while the selection and
+    // the window ride along.
+    expect(html).toContain(
+      `<a href="/stats?from=2026-08-07&to=2026-08-07&lat=63.06&lon=-151.08&poffset=${REQUESTS_LIMIT}#place">`,
+    );
+  });
+
+  it("clears the selection with a link back to the unselected view", () => {
+    const html = renderStats(data([cell("2026-08-07", 3)], {
+      mapPoints: [point()],
+      placeRequests: [row()],
+      filters: { place: selected },
+    }));
+    expect(html).toContain(`<a href="/stats?from=2026-08-07&to=2026-08-07#map">Clear</a>`);
+  });
+
+  // The rows under a point are the rows the map counted, which includes requests that carried
+  // no account. There is nothing to hide there, so the cell holds no form.
+  it("renders an accountless row without a hide form", () => {
+    const html = renderStats(data([cell("2026-08-07", 1)], {
+      mapPoints: [point({ count: 1 })],
+      placeRequests: [row({ id: 55, account: null })],
+      filters: { place: selected },
+    }));
+    expect(html).toContain("<td>55</td><td>8/30 14:11</td><td></td>");
+    expect(html).not.toContain('action="/stats/hide"><input type=hidden name=account value="null"');
+  });
+
+  // A selection survives a change of window or grouping, so the point stays under the eye while
+  // the view around it moves.
+  it("carries the selection through the window form", () => {
+    const html = renderStats(data([cell("2026-08-07", 3)], {
+      mapPoints: [point()],
+      placeRequests: [row()],
+      filters: { place: selected },
+    }));
+    expect(html).toContain('<input type=hidden name=lat value="63.06">');
+    expect(html).toContain('<input type=hidden name=lon value="-151.08">');
+  });
+});
+
 describe("parseFilters", () => {
   const q = (params: Record<string, string>) => (name: string) => params[name];
 
@@ -432,6 +569,24 @@ describe("parseFilters", () => {
     expect(parseFilters(q({ offset: "" })).offset).toBe(0);
     expect(parseFilters(q({ offset: "-5" })).offset).toBe(0);
     expect(parseFilters(q({ offset: "12abc" })).offset).toBe(0);
+  });
+
+  it("reads a selected point as a coordinate pair, or no selection at all", () => {
+    expect(parseFilters(q({ lat: "63.06", lon: "-151.08" })).place)
+      .toEqual({ lat: "63.06", lon: "-151.08" });
+    // Half a pair is not a point, and neither is anything off the earth or not a number.
+    expect(parseFilters(q({ lat: "63.06" })).place).toBeNull();
+    expect(parseFilters(q({ lon: "-151.08" })).place).toBeNull();
+    expect(parseFilters(q({ lat: "91", lon: "0" })).place).toBeNull();
+    expect(parseFilters(q({ lat: "0", lon: "181" })).place).toBeNull();
+    expect(parseFilters(q({ lat: "63.06", lon: "x" })).place).toBeNull();
+    expect(parseFilters(q({ lat: "63.06", lon: "-151.08'" })).place).toBeNull();
+  });
+
+  it("reads the point table's page only when a point is selected", () => {
+    expect(parseFilters(q({ lat: "63.06", lon: "-151.08", poffset: "20" })).placeOffset).toBe(20);
+    expect(parseFilters(q({ poffset: "20" })).placeOffset).toBe(0);
+    expect(parseFilters(q({ lat: "63.06", lon: "-151.08", poffset: "-1" })).placeOffset).toBe(0);
   });
 });
 
