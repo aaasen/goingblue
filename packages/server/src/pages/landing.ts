@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { img } from "../assets.js";
-import { APP_STORE_URL, BRAND, CONTACT_EMAIL, REPO_URL } from "../constants.js";
+import { APP_STORE_URL, BRAND, REPO_URL } from "../constants.js";
 import { PAGE } from "./shell.js";
 
 // The landing page is headed by a full-bleed photo of Sultana in a band of its own, with the
@@ -272,12 +272,9 @@ satellite messaging.</p>
   multiple models and past forecasts while offline.</li>
   <li><strong>Private</strong>: ${BRAND} requires no account and does not store your name, email,
   or phone number.</li>
+  <li><strong>Open source</strong>: View the source and a detailed explanation of the codec on
+  <a href="${REPO_URL}">GitHub</a>.</li>
 </ul>
-
-<h2>Open source</h2>
-<p>${BRAND} is open source under the Apache License 2.0 and the source code is hosted at
-<a href="${REPO_URL}">github.com/aaasen/goingblue</a>. Feedback is welcome! If you have suggestions or need weather data that is not included in the app,
-file an issue on GitHub or email <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>
 `;
 
 export function landing(c: Context) {
