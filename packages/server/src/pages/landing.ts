@@ -142,7 +142,17 @@ const HERO_CSS = `
 // The shots carry their own captions, baked into the image by
 // packages/mobile/scripts/frame-screenshots.py — the same frames the App Store listing uses. There
 // is deliberately no figcaption under them: a second caption in the page's voice under a caption in
-// the listing's voice reads as two different pages arguing.
+// the listing's voice reads as two different pages arguing. The "How it works" section is a second
+// strip of the same class, its three step frames (assets.ts) drawn at the same 750px width, so
+// the two scroll the same way. Those frames are
+// the opposite case: cards on white with their own shadows inside and no caption, so the strip's
+// shadow comes off them (`.howto`) and each carries a figcaption above the image with a title
+// and a line of text. Each figure is a column with the image pushed to its bottom: the figures
+// stretch to the row's height and the images are one size, so the images start level whether a
+// caption wraps to one line or three, with no more gap than the tallest caption needs. With only
+// three, the frames are drawn a
+// little wider than the five shots. Captions sit inside the figure's padding so the text stays
+// flush with the cards, which are inset in the frame by their own shadow margin.
 //
 // `scroll-snap-type: proximity`, not `mandatory`: the strip is a glance, not a carousel, and
 // mandatory snapping fights a user who is flicking through it.
@@ -163,6 +173,14 @@ const SHOTS_CSS = `
   .shots img { display: block; width: 100%; height: auto; border-radius: 14px;
     box-shadow: 0 2px 10px rgba(6, 18, 36, 0.08); }
   @media (max-width: 600px) { .shots figure { flex: 0 0 230px; min-width: 0; } }
+  .stripHead { text-align: center; font-size: 1.7em; margin-bottom: 0; }
+  .howto figure { flex-basis: 340px; }
+  .howto figure { display: flex; flex-direction: column; }
+  .howto img { box-shadow: none; margin-top: auto; }
+  .howto figcaption { padding: 0 20px 0.8em; text-align: center; }
+  .howto h3 { margin: 0 0 0.3em; font-size: 1.05em; }
+  .howto figcaption p { margin: 0; color: #555; font-size: 0.85em; line-height: 1.4; }
+  @media (max-width: 600px) { .howto figure { flex-basis: 260px; } }
 `;
 
 // GitHub's `mark-github` octicon at 16px, as distributed. The fill is left to CSS (currentColor)
@@ -224,15 +242,36 @@ satellite messaging.</p>
   </figure>
 </div>
 
-<h2>How it works</h2>
-<ol>
-  <li>Build a forecast request in the app. Choose the location, model, and variables that you
-  care about.</li>
-  <li>Send the forecast request to ${BRAND} via the internet, SMS, Garmin inReach, ZOLEO, or
-  iPhone satellite messaging.</li>
-  <li>Receive an encoded message from ${BRAND}. Paste it into the app to see a detailed
-  forecast.</li>
-</ol>
+<h2 class=stripHead>How it works</h2>
+<div class="shots howto">
+  <figure>
+    <figcaption>
+      <h3>Build a forecast request</h3>
+      <p>Choose the location, weather model, and variables that you care about.</p>
+    </figcaption>
+    <img src="${img("howto-build.jpg")}" width=750 height=1351 loading=lazy
+      alt="The request builder: Denali pinned on the map, the weather model selector, and the
+      extra variable toggles">
+  </figure>
+  <figure>
+    <figcaption>
+      <h3>Send the request</h3>
+      <p>Send the request via the internet, SMS, Garmin inReach, ZOLEO, or iPhone satellite
+      messaging.</p>
+    </figcaption>
+    <img src="${img("howto-send.jpg")}" width=750 height=1351 loading=lazy
+      alt="The device selector with SMS chosen and the Send SMS button, the request in the
+      Messages compose field, and the Copy menu on the encoded reply">
+  </figure>
+  <figure>
+    <figcaption>
+      <h3>View the forecast</h3>
+      <p>Paste the forecast response into the app to visualize the forecast.</p>
+    </figcaption>
+    <img src="${img("howto-view.jpg")}" width=750 height=1351 loading=lazy
+      alt="The Paste Forecast button and the decoded Denali meteogram">
+  </figure>
+</div>
 
 <h2>Features</h2>
 <ul>

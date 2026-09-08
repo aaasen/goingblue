@@ -54,6 +54,14 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   "shot-cloud.jpg": { file: "../public/shot-cloud.jpg", type: "image/jpeg" },
   "shot-aqi.jpg": { file: "../public/shot-aqi.jpg", type: "image/jpeg" },
   "shot-agreement.jpg": { file: "../public/shot-agreement.jpg", type: "image/jpeg" },
+  // The landing page's "How it works" strip, one frame per step in step order: hand-cropped phone
+  // captures composed as a stack of rounded cards on white, 750px wide like the shots. The step
+  // captions are page text in landing.ts, not part of the frame. These are made by hand from
+  // device screenshots (the Messages round trip cannot be staged in the simulator); the sources
+  // and the compositing script are not kept in the repository.
+  "howto-build.jpg": { file: "../public/howto-build.jpg", type: "image/jpeg" },
+  "howto-send.jpg": { file: "../public/howto-send.jpg", type: "image/jpeg" },
+  "howto-view.jpg": { file: "../public/howto-view.jpg", type: "image/jpeg" },
   // Apple's "Download on the App Store" badge, the white US/UK artwork, byte-for-byte as served by
   // toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/white/en-us. White
   // because the button sits in the photo band, which Apple's guidelines count as a dark background;
