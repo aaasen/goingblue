@@ -38,6 +38,10 @@ const SERVED = `coalesce(r.outcome, 'ok') = 'ok'`;
 // Accounts hidden from the whole page (db.ts, stats_hidden_accounts): the operator's own
 // testing. Applied wherever `r` is a requests row, the map included.
 const NOT_HIDDEN = `r.account_id not in (select account_id from stats_hidden_accounts)`;
+// Hiding is a view over the rows, not a deletion, so the window bar can put them back. Every
+// query that would otherwise exclude them reads this, so the whole page includes or excludes
+// the same set at once.
+const notHidden = (f: StatsFilters): string => (f.includeHidden ? "" : `\n     and ${NOT_HIDDEN}`);
 const GROUP_EXPRS: Record<Exclude<GroupKey, "variable">, string> = {
   account: "r.account_id::text",
   device: "r.device",
@@ -116,6 +120,10 @@ export type StatsFilters = {
   place: MapPlace | null;
   // That table's page, kept separate from `offset` so paging one table leaves the other alone.
   placeOffset: number;
+  // Whether the hidden accounts count on this page. Off by default: hiding is what keeps the
+  // operator's own testing out of the numbers, and a page that quietly included it would be
+  // reporting the wrong thing.
+  includeHidden: boolean;
 };
 
 // Today as a Pacific date, without touching the database: en-CA is the locale whose date format
@@ -155,7 +163,7 @@ export function parseFilters(q: (name: string) => string | undefined): StatsFilt
   const place = lat !== null && lon !== null ? { lat, lon } : null;
   const placeOffset =
     place !== null && /^\d{1,9}$/.test(q("poffset") ?? "") ? Number(q("poffset")) : 0;
-  return { from, to, group, offset, place, placeOffset };
+  return { from, to, group, offset, place, placeOffset, includeHidden: q("hidden") === "1" };
 }
 
 // The page's own query string for a view: the window, the grouping, the selected point and each
@@ -171,6 +179,7 @@ function statsQuery(f: StatsFilters, over: Partial<StatsFilters> = {}): string {
       ...(v.offset > 0 && { offset: String(v.offset) }),
       ...(v.place && { lat: v.place.lat, lon: v.place.lon }),
       ...(v.place && v.placeOffset > 0 && { poffset: String(v.placeOffset) }),
+      ...(v.includeHidden && { hidden: "1" }),
     }),
   );
 }
@@ -284,8 +293,7 @@ function requestsFilter(f: StatsFilters): { where: string; params: unknown[] } {
   // named anyway so they stay out if they ever gain an identity.
   const where = `r.created_at >= ($2::date::timestamp at time zone $1)
      and r.created_at < (($3::date + 1)::timestamp at time zone $1)
-     and r.account_id is not null
-     and ${NOT_HIDDEN}
+     and r.account_id is not null${notHidden(f)}
      and coalesce(r.outcome, 'ok') not in ('probe', 'help')`;
   return { where, params };
 }
@@ -363,32 +371,32 @@ const varComponentsSql = (where: string) => `
 // keep it out of the counts, but a hidden account's test locations are noise here too. The
 // table under a clicked point reads the same rows, so the two can never disagree about what a
 // point holds.
-const MAP_WHERE = `r.created_at >= ($2::date::timestamp at time zone $1)
+const mapWhere = (f: StatsFilters): string => `r.created_at >= ($2::date::timestamp at time zone $1)
      and r.created_at < (($3::date + 1)::timestamp at time zone $1)
-     and r.lat is not null and r.lon is not null
-     and ${NOT_HIDDEN}`;
+     and r.lat is not null and r.lon is not null${notHidden(f)}`;
 
 // Every place in the window, one point per ~1 km cell. Named and unnamed requests for the same
 // cell fold together; min(loc) picks a stable representative name where any request carried one
 // ('current' is the app's marker for "my location", not a name).
-const MAP_POINTS_SQL = `
+const mapPointsSql = (f: StatsFilters) => `
   select r.lat::text as lat, r.lon::text as lon,
          min(r.loc) filter (where r.loc is not null and r.loc <> 'current') as loc,
          count(*) as count
     from requests r
-   where ${MAP_WHERE}
+   where ${mapWhere(f)}
    group by r.lat, r.lon
    order by count desc
 `;
 
-// One page of the rows behind a clicked point, newest first, $6 rows in. MAP_WHERE narrowed to
-// one cell, so the table lists exactly the requests the point counted: an accountless row the
-// window's counts leave out is on the map and so belongs in its table. The coordinates are
-// compared as numerics, not text, so a URL that lost a trailing zero still names the same cell.
-const PLACE_ROWS_SQL = `
+// One page of the rows behind a clicked point, newest first, $6 rows in. The map's own
+// predicate narrowed to one cell, so the table lists exactly the requests the point counted: an
+// accountless row the window's counts leave out is on the map and so belongs in its table. The
+// coordinates are compared as numerics, not text, so a URL that lost a trailing zero still
+// names the same cell.
+const placeRowsSql = (f: StatsFilters) => `
   select ${REQUEST_COLUMNS}
     from requests r
-   where ${MAP_WHERE}
+   where ${mapWhere(f)}
      and r.lat = $4::numeric and r.lon = $5::numeric
    order by r.id desc
    limit ${REQUESTS_LIMIT} offset $6
@@ -472,9 +480,9 @@ export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
     filters.group === "variable"
       ? query(varComponentsSql(filtered.where), filtered.params)
       : Promise.resolve({ rows: [] as Record<string, unknown>[] }),
-    query(MAP_POINTS_SQL, filtered.params),
+    query(mapPointsSql(filters), filtered.params),
     place
-      ? query(PLACE_ROWS_SQL, [...filtered.params, place.lat, place.lon, filters.placeOffset])
+      ? query(placeRowsSql(filters), [...filtered.params, place.lat, place.lon, filters.placeOffset])
       : Promise.resolve({ rows: [] as Record<string, unknown>[] }),
     hiddenAccounts(),
   ]);
@@ -777,10 +785,10 @@ const CSS = `
      next to the id, not as a full-size button in every table row. */
   form.act { display: inline; margin-left: 6px; }
   form.act button { font: inherit; font-size: 0.8em; padding: 0 6px; color: #52514e; }
-  .hidden-list { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 0.6em 0;
-    font-size: 0.9em; }
-  .hidden-list form.act { margin: 0; }
-  .hidden-list input { font: inherit; font-size: 0.95em; width: 7em; }
+  /* Two short columns. At the page's full width the unhide button would sit a screen away
+     from the account it belongs to, so this table is only as wide as it needs to be. */
+  table.narrow { width: auto; min-width: 16em; }
+  table.narrow form.act { margin: 0; }
   @media (max-width: 600px) {
     .summary { gap: 18px; }
     .summary b { font-size: 1.45em; }
@@ -830,17 +838,16 @@ function groupBar(name: string, anchor: string, active: string | null, options: 
 // One hide/unhide control: a POST to its own route, so the change is a form submit and not a
 // link a crawler or a prefetch could follow. The page's window rides along so the redirect
 // lands back on the same view.
-function actForm(action: "hide" | "unhide", id: number | null, f: StatsFilters, label: string): string {
-  const idField = id === null
-    ? `<input name=account inputmode=numeric pattern="[0-9]+" required placeholder="Account id">`
-    : `<input type=hidden name=account value="${id}">`;
-  return `<form class=act method=post action="/stats/${action}">${idField}` +
+function actForm(action: "hide" | "unhide", id: number, f: StatsFilters, label: string): string {
+  return `<form class=act method=post action="/stats/${action}">` +
+    `<input type=hidden name=account value="${id}">` +
     `<input type=hidden name=from value="${f.from}"><input type=hidden name=to value="${f.to}">` +
     `<input type=hidden name=group value="${f.group ?? ""}">` +
     `<input type=hidden name=offset value="${f.offset}">` +
     `<input type=hidden name=lat value="${f.place?.lat ?? ""}">` +
     `<input type=hidden name=lon value="${f.place?.lon ?? ""}">` +
     `<input type=hidden name=poffset value="${f.placeOffset}">` +
+    (f.includeHidden ? `<input type=hidden name=hidden value="1">` : "") +
     `<button type=submit>${label}</button></form>`;
 }
 
@@ -959,6 +966,10 @@ ${pager}`;
 // so an Apply here carries them along unchanged.
 // The selected map point rides along as hidden fields, so changing the window or the grouping
 // keeps looking at the same place. Its table's page does not: those are different rows.
+//
+// The hidden-accounts checkbox submits on its own, like the group-by selects: it is a switch,
+// and waiting for Apply would read as a dead control. An unchecked box submits nothing, which
+// is exactly the default the page wants.
 function windowBar(data: StatsData): string {
   const f = data.filters;
   const place = f.place
@@ -967,6 +978,8 @@ function windowBar(data: StatsData): string {
   return `<form id=filters class=windowbar method=get action=/stats>
 <label>From <input type=date name=from value="${f.from}"></label>
 <label>To <input type=date name=to value="${f.to}"></label>
+<label><input type=checkbox name=hidden value=1${f.includeHidden ? " checked" : ""} ` +
+    `onchange="this.form.submit()">Include hidden accounts</label>
 ${place}<button type=submit>Apply</button>
 <a href="/stats">Reset</a>
 </form>`;
@@ -1288,14 +1301,21 @@ ${requestTable(
   "No requests in the window.",
 )}`;
 
-  // The hidden set, editable in place. Always rendered, even when empty, since the add field
-  // is the only way to hide an account that isn't in the recent-requests table.
+  // The hidden set, unhidden from here one account at a time. Hiding happens where an account
+  // is read, on its row in a request table. An empty set draws no table: a header row over
+  // nothing says less than the heading already does.
+  const hiddenRows = data.hidden
+    .map((id) => `<tr><td>${id}</td><td>${actForm("unhide", id, filters, "unhide")}</td></tr>`)
+    .join("");
   const hiddenSection = `
-<h2 class=section id=hidden>Hidden accounts</h2>
-<p class=note>Requests from these accounts are left out of every count, chart, table and the map.</p>
-<div class=hidden-list>${data.hidden
-    .map((id) => `<span>${id}${actForm("unhide", id, filters, "unhide")}</span>`)
-    .join("")}${actForm("hide", null, filters, "Hide")}</div>`;
+<h2 class=section id=hidden>Hidden accounts</h2>${
+    hiddenRows &&
+    `
+<table class=narrow>
+<thead><tr><th>Account</th><th></th></tr></thead>
+<tbody>${hiddenRows}</tbody>
+</table>`
+  }`;
 
   const body = `<div class=stats>
 ${windowBar(data)}

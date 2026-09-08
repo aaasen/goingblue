@@ -44,6 +44,7 @@ const data = (
     offset: 0,
     place: null,
     placeOffset: 0,
+    includeHidden: false,
     ...filters,
   },
   groups,
@@ -583,6 +584,15 @@ describe("parseFilters", () => {
     expect(parseFilters(q({ lat: "63.06", lon: "-151.08'" })).place).toBeNull();
   });
 
+  it("reads the hidden-account switch as on only for the value the form submits", () => {
+    expect(parseFilters(q({ hidden: "1" })).includeHidden).toBe(true);
+    expect(parseFilters(q({})).includeHidden).toBe(false);
+    expect(parseFilters(q({ hidden: "" })).includeHidden).toBe(false);
+    expect(parseFilters(q({ hidden: "0" })).includeHidden).toBe(false);
+    // A checkbox with no value= submits "on"; this one carries value=1, so that is not it.
+    expect(parseFilters(q({ hidden: "on" })).includeHidden).toBe(false);
+  });
+
   it("reads the point table's page only when a point is selected", () => {
     expect(parseFilters(q({ lat: "63.06", lon: "-151.08", poffset: "20" })).placeOffset).toBe(20);
     expect(parseFilters(q({ poffset: "20" })).placeOffset).toBe(0);
@@ -591,12 +601,17 @@ describe("parseFilters", () => {
 });
 
 describe("renderStats — hidden accounts", () => {
-  it("lists the hidden set with an unhide form for each id and an add form", () => {
+  // The section unhides; hiding happens on a request row, so an account is only ever hidden
+  // from somewhere it can be read.
+  it("lists the hidden set with an unhide form for each id and nothing to hide from", () => {
     const html = renderStats(data([cell("2026-08-07", 2)], { hidden: [7, 29] }));
     expect(html).toContain("Hidden accounts");
     expect(html.split('action="/stats/unhide"').length - 1).toBe(2);
     expect(html).toContain('<input type=hidden name=account value="29">');
-    expect(html).toContain('action="/stats/hide"');
+    expect(html).not.toContain('action="/stats/hide"');
+    // One row per account, the id and its button in cells of their own.
+    expect(html).toContain("<tr><td>7</td><td><form");
+    expect(html).toContain("<thead><tr><th>Account</th><th></th></tr></thead>");
   });
 
   it("offers a hide form on every recent request row, carrying the window along", () => {
@@ -604,16 +619,45 @@ describe("renderStats — hidden accounts", () => {
       requests: [row({ account: 29 }), row({ id: 2, account: 30 })],
       filters: { from: "2026-08-06", to: "2026-08-07", group: "device" },
     }));
-    // Two row forms plus the add form in the hidden section.
-    expect(html.split('action="/stats/hide"').length - 1).toBe(3);
+    // One form per row, and none anywhere else on the page.
+    expect(html.split('action="/stats/hide"').length - 1).toBe(2);
     expect(html).toContain('<input type=hidden name=account value="30">');
     expect(html).toContain('name=group value="device"');
     expect(html).toContain('name=from value="2026-08-06"');
   });
 
-  it("renders the hidden section with only the add form when nothing is hidden", () => {
+  it("offers the include switch, unchecked by default", () => {
+    const html = renderStats(data([cell("2026-08-07", 2)], { hidden: [7] }));
+    expect(html).toContain("<input type=checkbox name=hidden value=1 ");
+    expect(html).not.toContain("value=1 checked");
+  });
+
+  it("checks the switch when the hidden set is being counted", () => {
+    const html = renderStats(data([cell("2026-08-07", 2)], {
+      hidden: [7],
+      filters: { includeHidden: true },
+    }));
+    expect(html).toContain("value=1 checked");
+  });
+
+  // Every link and form on the page has to carry the switch, or acting on a row would silently
+  // drop back to the excluded view.
+  it("carries the switch through the pager and the hide forms", () => {
+    const html = renderStats(data([cell("2026-08-07", 2)], {
+      requests: [row()],
+      totals: { listed: 3 * REQUESTS_LIMIT },
+      filters: { includeHidden: true, offset: REQUESTS_LIMIT },
+    }));
+    expect(html).toContain(`&offset=${2 * REQUESTS_LIMIT}&hidden=1#recent`);
+    expect(html).toContain('<input type=hidden name=hidden value="1">');
+  });
+
+  // The section is what the include switch acts on, so it stays even with nothing in it, as a
+  // heading alone rather than a table of no rows.
+  it("keeps the hidden section when nothing is hidden", () => {
     const html = renderStats(data([cell("2026-08-07", 2)]));
     expect(html).toContain("Hidden accounts");
     expect(html).not.toContain('action="/stats/unhide"');
+    expect(html).not.toContain("table class=narrow");
   });
 });
