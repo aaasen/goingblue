@@ -18,7 +18,8 @@ the Play Store. If you would like to test ${BRAND} on Android, follow these step
 <ol>
   <li>Join the Google Group <a href="${ANDROID_GROUP_URL}">${ANDROID_GROUP_EMAIL}</a>.</li>
   <li>Join the <a href="${ANDROID_TESTING_URL}">closed test</a>.</li>
-  <li>Download the app on <a href="${ANDROID_PLAY_URL}">Google Play</a>.</li>
+  <li>Install the app from <a href="${ANDROID_PLAY_URL}">Google Play</a>. If you see "We're sorry, the requested URL was not found on this server", check back again in a few minutes.</li>
+  <li>Get a forecast in the app. Google considers engagement when applying for Google Play access so try to pull a forecast weekly.</li>
 </ol>
 <p>Thank you for your help getting ${BRAND} on the Play Store! If you find any bugs or have any
 feedback, please email <a href="mailto:${FEEDBACK_EMAIL}">${FEEDBACK_EMAIL}</a>.</p>
