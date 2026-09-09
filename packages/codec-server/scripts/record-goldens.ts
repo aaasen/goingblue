@@ -36,9 +36,9 @@ const SITES = [
 // groups. The `ca` case also exercises the GEM horizon clamp (nulls past day 10 → seq search
 // clamps). The two `w:` cases cover all seven wind-aloft ladder rungs between them.
 const VARIANTS = [
-  // No d:/n: — budgeted as one 160-character base-85 SMS segment, the reply an unidentified
-  // (hand-typed) sender gets.
-  { name: "auto-best", tokens: "p:a m:best" },
+  // Plain SMS with no variables: base124, one 160-character segment, the smallest request the
+  // app sends.
+  { name: "auto-best", tokens: "p:a m:best d:s" },
   // iPhone satellite: base32768, two labelled parts, all three non-AQ var groups.
   { name: "detail-us-i2-pcf", tokens: "p:d m:us d:i n:2 v:pcf" },
   // Internet: base94 with no length cap, so the fill binds on the upstream data horizon.
@@ -82,6 +82,10 @@ const version = WIRE_VERSION;
 const codec = wireCodec;
 const startEpochHour = Math.floor(Date.now() / 3600000);
 
+// `u:` is required by the grammar but never reaches the encoder; the codec checks only its
+// shape, so a fixed well-formed token stands in for an account.
+const ACCOUNT_TOKEN = "G01DENG01DENG01D";
+
 const cases: GoldenCase[] = [];
 const realFetch = globalThis.fetch;
 let recording: Record<string, string> = {};
@@ -101,10 +105,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 let k = 0;
 for (const site of SITES) {
   for (const variant of VARIANTS) {
-    const request = `v${version} ${site.loc} z:${site.z} ${variant.tokens} k:${k} t:${startEpochHour}`;
+    const request = `v${version} ${site.loc} z:${site.z} ${variant.tokens} u:${ACCOUNT_TOKEN} k:${k} t:${startEpochHour}`;
     k = (k + 1) % 128;
     recording = {};
     const params = parseRequest(request);
+    // /encode rejects a request with parse errors, so a golden recorded from one can never be
+    // replayed against a container.
+    if (params.errors.length > 0) throw new Error(`${site.name}/${variant.name}: ${params.errors.join("; ")}`);
     const parts = splitReplyFor(params, (await fetchForecast(params, codec)).encoded, codec.headerChars);
     const encoded = parts.join("\n");
     cases.push({ name: `${site.name}/${variant.name}`, request, responses: recording, encoded });

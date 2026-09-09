@@ -39,6 +39,8 @@ describe.skipIf(!goldens)("golden corpus (bit-exact encode)", () => {
       });
 
       const params = parseRequest(c.request);
+      // A request /encode would reject records nothing a container can be verified against.
+      expect(params.errors).toEqual([]);
       expect(goldens!.protocolVersion).toBe(WIRE_VERSION);
       expect(params.decoderVersion).toBe(goldens!.protocolVersion);
       // Compare the WIRE text — post-split, newline-joined, the same construction the codec
