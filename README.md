@@ -367,7 +367,8 @@ pnpm test
 ### Skills
 
  - [`benchmark`](.agents/skills/benchmark/SKILL.md): Regenerate the public encoding benchmark at [going.blue/benchmark](https://going.blue/benchmark)
- - [`logs`](.agents/skills/logs/SKILL.md): Read service logs and investigate issues. 
+ - [`logs`](.agents/skills/logs/SKILL.md): Read gcloud logs.
+ - [`twilio`](.agents/skills/twilio/SKILL.md): Read Twilio logs and alerts.
  - [`screenshots`](.agents/skills/screenshots/SKILL.md): Take App Store screenshots. 
 
 ### Codec Versioning
