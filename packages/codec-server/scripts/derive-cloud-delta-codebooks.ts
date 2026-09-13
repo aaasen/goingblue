@@ -32,7 +32,7 @@
  * price transitions only. The level index is the CLOUD_BAND_LEVELS_HPA index minus
  * CLOUD_BAND_TRAINED_LEVEL_OFFSET and the prev index IS the previous quantized step.
  *
- * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
+ * Tables land in packages/protocol/src/codebooks/cloud-delta.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
  *   pnpm exec tsx packages/codec-server/scripts/derive-cloud-delta-codebooks.ts

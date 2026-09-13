@@ -28,7 +28,7 @@
  * every (lower, upper) pair of the ladder. All of these contexts are known to both sides, so
  * none cost wire bits.
  *
- * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
+ * Tables land in packages/protocol/src/codebooks/wind-speed-delta.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
  *   pnpm exec tsx packages/codec-server/scripts/derive-wind-speed-delta-codebooks.ts

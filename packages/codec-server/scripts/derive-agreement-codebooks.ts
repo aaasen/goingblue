@@ -11,7 +11,7 @@
  * The set is small for now and grows as snapshots accumulate; retrain then.
  *
  * The corpus-scan CellCounter is a no-op — the shared scan never sees these tables — but the
- * script still rides `pnpm generate` so the tables land in codebooks.gen.ts with the rest.
+ * script still rides `pnpm generate` so the tables land in codebooks/agreement.gen.ts with the rest.
  */
 import { DatabaseSync } from "node:sqlite";
 import {

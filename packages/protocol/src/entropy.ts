@@ -1,5 +1,5 @@
-// All weight tables live in codebooks.gen.ts, written by the derive pipeline (`pnpm generate`)
-// — never edited by hand. They are wire format; see WIRE_CODEBOOKS at the bottom of this file.
+// All weight tables live in codebooks/*.gen.ts, one file per derive script, written by the
+// derive pipeline (`pnpm generate`) — never edited by hand. They are wire format; see WIRE_CODEBOOKS at the bottom of this file.
 import {
   WEATHERCODE_BOOTSTRAP_WEIGHTS, WEATHERCODE_WEIGHTS,
   WIND_DIR_BOOTSTRAP_WEIGHTS, WIND_DIR_WEIGHTS_BY_RES, WIND_DIR_UPPER_WEIGHTS_BY_RES,
@@ -21,7 +21,7 @@ import {
   AQ_DOMINANT_BOOTSTRAP_WEIGHTS, AQ_DOMINANT_WEIGHTS,
   AQ_DOMINANT_EU_BOOTSTRAP_WEIGHTS, AQ_DOMINANT_EU_WEIGHTS,
   AGREEMENT_WEIGHTS_BY_LEAD,
-} from "./codebooks.gen.js";
+} from "./codebooks/index.gen.js";
 import {
   AGREEMENT_CUTS, AGREEMENT_LEAD_EDGES, AGREEMENT_CENTERS,
 } from "./constants.js";
@@ -400,7 +400,7 @@ export function aqiMid(sym: number, lower: readonly number[]): number | undefine
 
 // ── The codebooks ───────────────────────────────────────────────────────────────
 // The complete set of table-lookup functions the body codec (wire.ts) keys symbols with, built once
-// from the global (train-corpus-wide) tables in codebooks.gen.ts. (An EM-learned 8-class
+// from the global (train-corpus-wide) tables in codebooks/. (An EM-learned 8-class
 // selectable-table-set scheme lived here until 2026-08-20 — held-out it bought −2.4% body bits
 // for 8× encoder passes, ~4/5 of the shipped table bytes, and a second corpus-scan pipeline
 // stage; removed as not worth the complexity.)
@@ -645,7 +645,7 @@ const AQ_BOOKS = {
   aqDominantEuBook: aqDominantOrder1(AQ_DOMINANT_EU_BOOTSTRAP_WEIGHTS, AQ_DOMINANT_EU_WEIGHTS),
 };
 
-// The table set — codebooks.gen.ts gathered into one object, the shape buildBooks reads.
+// The table set — the codebooks/ files gathered into one object, the shape buildBooks reads.
 const BASE_TABLES = {
   CLOUD_BAND_WEIGHTS_BY_LEVEL_PREV,
   FREEZE_DELTA_WEIGHTS_BY_RES, FREEZE_DELTA_TEMP_WEIGHTS_BY_RES,

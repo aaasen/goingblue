@@ -23,7 +23,7 @@
  * same quantizer as wire.ts. The 24h row (resolution index 0) is trained even though fill layouts
  * never emit 24h periods — it keeps the [res][ctx][sym] shape uniform.
  *
- * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
+ * Tables land in packages/protocol/src/codebooks/gust-delta.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
  *   pnpm exec tsx packages/codec-server/scripts/derive-gust-delta-codebooks.ts

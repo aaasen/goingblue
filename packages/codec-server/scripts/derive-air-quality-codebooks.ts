@@ -38,7 +38,7 @@
  *   particulates; it is a far smoother series than the instantaneous US sub-index.
  *
  *
- * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
+ * Tables land in packages/protocol/src/codebooks/air-quality.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
  *   pnpm exec tsx packages/codec-server/scripts/derive-air-quality-codebooks.ts
@@ -68,7 +68,7 @@ const NTOD = TEMP_DELTA_TOD_BUCKETS;         // 8 uniform 3h buckets of the peri
 // column shares one [res][ctx][sym] shape and one counting loop.
 interface Column {
   name: string;                      // count-table name (and the axis label in the log)
-  table: string;                     // the constant it becomes in codebooks.gen.ts
+  table: string;                     // the constant it becomes in codebooks/air-quality.gen.ts
   of: (r: Row) => number | null;     // the raw index value on this row
   lower: readonly number[];          // which AQI ladder quantizes it
   tod: boolean;

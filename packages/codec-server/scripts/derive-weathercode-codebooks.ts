@@ -7,7 +7,7 @@
  * NSYM tables (one per possible previous symbol) plus one bootstrap table (the first-symbol
  * distribution) for the start of each sequence, where there is no predecessor.
  *
- * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
+ * Tables land in packages/protocol/src/codebooks/weathercode.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
  *   pnpm exec tsx packages/codec-server/scripts/derive-weathercode-codebooks.ts

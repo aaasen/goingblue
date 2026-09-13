@@ -54,7 +54,7 @@ export type RansOp =
 
 // Quantizes positive integer weights to frequencies summing to `M` with every entry >= 1.
 // Deterministic (largest-remainder with index tiebreaks) — both sides derive identical tables
-// from codebooks.gen.ts, and the result is wire format, digest-pinned by test/codebooks.test.ts.
+// from the codebooks/ tables, and the result is wire format, digest-pinned by test/codebooks.test.ts.
 export function quantizeFreqs(weights: number[], M: number = RANS_M): number[] {
   const n = weights.length;
   if (n < 1 || n > M) throw new Error(`rans: ${n} symbols cannot fit precision ${M}`);

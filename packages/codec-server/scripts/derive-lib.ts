@@ -1,10 +1,13 @@
 /**
  * Shared helpers for the codebook derivation scripts (derive-*.ts). Each derive script exports
  * `derive()`, returning the integer weight tables it owns keyed by the constant name they get in
- * packages/protocol/src/codebooks.gen.ts — generate-codebooks.ts collects them all and writes
- * that file. Run standalone (`pnpm exec tsx scripts/derive-foo.ts`), a script prints its tables and stats
+ * its file under packages/protocol/src/codebooks (one generated file per script, see
+ * renderCodebookFile below); generate-codebooks.ts runs the scripts and writes those files.
+ * Run standalone (`pnpm exec tsx scripts/derive-foo.ts`), a script prints its tables and stats
  * without writing anything.
  */
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   adjustPrecipPhase, aggregateHourly, fillCloudBand, rowsFromWindows, HOURS_PER_PERIOD,
@@ -89,7 +92,8 @@ export function quantWind(kph: number | undefined): number {
   return f;
 }
 
-// Tables a derive script contributes, keyed by their codebooks.gen.ts constant name.
+// Tables a derive script contributes, keyed by the constant name each gets in the script's
+// generated codebook file.
 export type DerivedTables = Record<string, number[] | number[][] | number[][][]>;
 
 // ── Per-cell counting ────────────────────────────────────────────────────────────
@@ -354,7 +358,7 @@ export function scaledWeights(counts: number[]): number[] {
   return counts.map((c) => Math.max(1, Math.round((c / total) * WEIGHT_SCALE)));
 }
 
-// Renders one table as the `export const` declaration it gets in codebooks.gen.ts.
+// Renders one table as the `export const` declaration it gets in its codebook file.
 export function renderTable(name: string, t: number[] | number[][] | number[][][]): string {
   if (Array.isArray(t[0]) && Array.isArray((t[0] as number[][])[0])) {
     const outer = (t as number[][][]).map((m, i) =>
@@ -366,8 +370,45 @@ export function renderTable(name: string, t: number[] | number[][] | number[][][
   return `export const ${name}: number[] = [${(t as number[]).join(", ")}];`;
 }
 
+// ── Generated codebook files ─────────────────────────────────────────────────────
+//
+// Each derive script owns one file, packages/protocol/src/codebooks/<name>.gen.ts, where <name>
+// is the script's middle segment (derive-<name>-codebooks.ts). The header records the script and
+// the date the weights last changed: generate-codebooks.ts rewrites a file only when its rendered
+// tables differ from what is on disk, so a no-op regeneration leaves the tree clean and the date
+// answers "when did these numbers move" rather than "when was the generator last run".
+export const CODEBOOKS_DIR = join(fileURLToPath(import.meta.url), "..", "..", "..", "protocol", "src", "codebooks");
+
+export const codebookNameOf = (script: string): string =>
+  script.replace(/^derive-/, "").replace(/-codebooks\.ts$/, "");
+
+export const codebookFileFor = (name: string): string => join(CODEBOOKS_DIR, `${name}.gen.ts`);
+
+// The header ends at the first blank line; everything after it is the tables, which is the part
+// compared to decide whether the file is rewritten.
+const bodyOf = (text: string): string => text.slice(text.indexOf("\n\n") + 2);
+
+export function renderCodebookFile(script: string, tables: DerivedTables, date: string): string {
+  const header = `// GENERATED FILE, do not edit by hand. Written by \`pnpm generate\`
+// (packages/codec-server/scripts/generate-codebooks.ts).
+// Source: scripts/${script}
+// Last changed: ${date}
+// Integer weight tables derived from the corpus in data/corpus.db. These tables are wire
+// format: regenerating changes what already-encoded messages mean, so test/codebooks.test.ts
+// pins their digest. See packages/protocol/src/entropy.ts for how each table is used and the
+// derive script for methodology.
+`;
+  const body = Object.entries(tables).map(([name, t]) => renderTable(name, t)).join("\n\n");
+  return `${header}\n${body}\n`;
+}
+
+// True when `rendered` carries the same tables as the file already at `path` (header aside).
+export function codebookFileUnchanged(path: string, rendered: string): boolean {
+  return existsSync(path) && bodyOf(readFileSync(path, "utf8")) === bodyOf(rendered);
+}
+
 // Direct-run guard: `pnpm exec tsx scripts/derive-foo.ts` derives and prints that script's tables (stats
-// go to the console from derive() itself) without touching codebooks.gen.ts.
+// go to the console from derive() itself) without touching its codebook file.
 export function runStandalone(moduleUrl: string, derive: () => Promise<DerivedTables>): void {
   if (process.argv[1] !== fileURLToPath(moduleUrl)) return;
   derive()

@@ -29,7 +29,7 @@
  * accounting must not charge it under [res][prev] too. The SHIPPED [res][prev] tables still pool
  * every level (their sum).
  *
- * Tables land in packages/protocol/src/codebooks.gen.ts via `pnpm generate`; run standalone
+ * Tables land in packages/protocol/src/codebooks/wind-dir.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
  *   pnpm exec tsx packages/codec-server/scripts/derive-wind-dir-codebooks.ts
