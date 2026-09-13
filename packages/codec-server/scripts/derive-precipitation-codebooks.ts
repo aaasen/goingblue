@@ -37,7 +37,7 @@
  *
  *   pnpm exec tsx packages/codec-server/scripts/derive-precipitation-codebooks.ts
  */
-import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
+import { toFullPeriod } from "../src/forecast.ts";
 import {
   VAR, type Variable, compandSqrt, SNOW_K, RAIN_K, ACCUM_BITS,
   WMO2IDX, WEATHERCODE_CLASS, WC_CLASSES, TABLE_RES_IDXS, type Period,
@@ -106,9 +106,9 @@ export function counter(): CellCounter {
     vars: ["precipitation_probability", "rain", "showers", "snowfall", "weather_code"],
     countCell(ctx, add) {
       for (let resIdx = 0; resIdx < NRES; resIdx++) {
-        // Periods anchored to the request hour, aggregated once per cell and shared with every
-        // other counter using this anchoring.
-        const slice = ctx.atRequest(TABLE_RES_IDXS[resIdx]);
+        // Periods from the cell's first local midnight, aggregated once per cell and shared with
+        // every other counter.
+        const slice = ctx.atMidnight(TABLE_RES_IDXS[resIdx]);
         if (!slice) continue;
         const { n, rows } = slice;
         const periods: Period[] = rows.map((r) => toFullPeriod(r, VAR_SET, "US"));
