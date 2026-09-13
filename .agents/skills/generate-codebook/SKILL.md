@@ -1,6 +1,6 @@
 ---
 name: generate-codebook
-description: Generate a codebook
+description: Analyze entropy of variables and generate codebooks
 ---
 
 Codebooks are the probability distributions that power the rANS entropy coder. They are shared by the client and server. The server and client need to use the exact same codebooks for a message to be decoded, so the codebooks are versioned with the rest of the codec. Codebooks can only be re-generated if the codec version is not frozen (no goldens exist). See the `codec-version` skill for more information on codec versioning. 
