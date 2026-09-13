@@ -367,6 +367,7 @@ pnpm test
 ### Skills
 
  - [`benchmark`](.agents/skills/benchmark/SKILL.md): Regenerate the public encoding benchmark at [going.blue/benchmark](https://going.blue/benchmark)
+ - [`codec-version`](.agents/skills/codec-version/SKILL.md): Freeze the codec and bump the codec version.
  - [`database`](.agents/skills/database/SKILL.md): Read the CloudSQL database.
  - [`logs`](.agents/skills/logs/SKILL.md): Read gcloud logs.
  - [`trace`](.agents/skills/trace/SKILL.md): Trace a request through Twilio, service logs, and the database.
