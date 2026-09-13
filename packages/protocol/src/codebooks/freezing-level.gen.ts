@@ -1,6 +1,6 @@
 // GENERATED FILE, do not edit by hand. Written by `pnpm generate`
 // (packages/codec-server/scripts/generate-codebooks.ts).
-// Source: scripts/derive-freeze-delta-codebooks.ts
+// Source: scripts/derive-freezing-level-codebooks.ts
 // Last changed: 2026-09-13
 // Integer weight tables derived from the corpus in data/corpus.db. These tables are wire
 // format: regenerating changes what already-encoded messages mean, so test/codebooks.test.ts

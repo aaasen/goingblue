@@ -23,10 +23,10 @@
  * against the reconstruction. Only the resolutions layouts emit are trained — TABLE_RES_IDXS
  * (12h/6h/3h/1h) in table-row order, the same mapping resTableIdx applies at the codec.
  *
- * Tables land in packages/protocol/src/codebooks/freeze-delta.gen.ts via `pnpm generate`; run standalone
+ * Tables land in packages/protocol/src/codebooks/freezing-level.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
- *   pnpm exec tsx packages/codec-server/scripts/derive-freeze-delta-codebooks.ts
+ *   pnpm exec tsx packages/codec-server/scripts/derive-freezing-level-codebooks.ts
  */
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {

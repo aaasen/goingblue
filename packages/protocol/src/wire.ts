@@ -144,7 +144,7 @@ const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0)
 // out; see analyze-cloud-neighbor-heldout.ts). Tables are trained on the post-fillCloudBand
 // stack at the band's serving resolutions only, for the [300..1000] levels the corpus carries;
 // the 250/200 cirrus levels ride the 300 hPa books (CLOUD_BAND_TRAINED_LEVEL_OFFSET in
-// entropy.ts) — see codec-server/scripts/derive-cloud-delta-codebooks.ts.
+// entropy.ts) — see codec-server/scripts/derive-clouds-codebooks.ts.
 const CLOUD_ANCHOR_BITS = 3;
 const CLOUD_STEPS = (1 << CLOUD_ANCHOR_BITS) - 1;    // 7: the top step of the quantized scale
 export const quantCover = (pct: number | undefined): number =>

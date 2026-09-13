@@ -4,7 +4,7 @@
  * packages/protocol/src/codebooks (see renderCodebookFile in derive-lib.ts):
  *
  *   pnpm generate                       # every script, from the repo root (builds the protocol first)
- *   pnpm generate --only wind-dir       # one script: derive-wind-dir-codebooks.ts (repeatable)
+ *   pnpm generate --only wind           # one script: derive-wind-codebooks.ts (repeatable)
  *
  * A file is rewritten only when its tables changed, so its header date records when the weights
  * last moved and a no-op run leaves the tree clean. codebooks/index.gen.ts re-exports every file

@@ -186,7 +186,7 @@ export function windGapClass(gap: number): number {
 export const FREEZE_DELTA_MAX = 31;
 
 // Previous-value buckets for the accumulation columns: 0 | 1-3 | 4-9 | 10-20 | 21+.
-// Must match ACCUM_BUCKET_EDGES in derive-precip-accum-codebooks.ts.
+// Must match ACCUM_BUCKET_EDGES in derive-precipitation-codebooks.ts.
 const ACCUM_BUCKET_EDGES = [1, 4, 10, 21];
 function accumBucket(v: number): number {
   let b = 0;
@@ -415,16 +415,16 @@ export interface Books {
   // (null for the column's first — bootstrap), `upper` the upper level's same-period displayed
   // direction (null when that column is absent or this level has none), `gap` the ladder
   // distance to that level (see windGapClass). See
-  // codec-server/scripts/derive-wind-dir-codebooks.ts for the context ladder.
+  // codec-server/scripts/wind-direction.ts for the context ladder.
   windDirBook(res: number, prev: number | null, upper: number | null, gap: number): CodeBook;
   // The codebook for one speed delta. `level` indexes the unconditioned table axis (0 = surface,
   // 1 + WIND_LEVELS_HPA index for the pressure levels); `upperDelta` is the served level above's
   // same-period delta (null when there is none), `gap` the ladder distance to it. See
-  // codec-server/scripts/derive-wind-speed-delta-codebooks.ts.
+  // codec-server/scripts/wind-speed.ts.
   windSpeedBook(res: number, level: number, upperDelta: number | null, gap: number): CodeBook;
   // The codebook for one gust delta. Gust decodes FIRST among the wind columns (no context of
   // its own) — chosen so the surface column can lean on it, and can one day become optional
-  // without touching gust. See codec-server/scripts/derive-gust-delta-codebooks.ts.
+  // without touching gust. See codec-server/scripts/wind-gust.ts.
   gustDeltaBook(res: number): CodeBook;
   // The codebook for one SURFACE wind speed delta. `gustDelta` is the gust column's same-period
   // decoded delta (free context — gusts and sustained wind move together), or null when gust is
@@ -434,7 +434,7 @@ export interface Books {
   // post-clamp reconstruction, never the raw input), or null when temp is absent from the request
   // — the res-keyed fallback (the tempΔ marginal). The freezing level is where the 0°C isotherm
   // sits, so it moves with the airmass temperature, and temp decodes first, making its delta
-  // free context. See codec-server/scripts/derive-freeze-delta-codebooks.ts.
+  // free context. See codec-server/scripts/derive-freezing-level-codebooks.ts.
   freezeDeltaBook(res: number, tempDelta: number | null): CodeBook;
   // The codebook for one cloud-band cover step (0..7 quantized VALUE symbols, order-1): keyed
   // by (CLOUD_BAND_LEVELS_HPA index, the level's own previous decoded step). Persistence varies
@@ -446,12 +446,12 @@ export interface Books {
   // stack at the band's serving resolutions only (3h/1h — see cloudBandPeriodCount in wire.ts).
   // Tables exist for the trained [300..1000] levels only; the 250/200 cirrus levels alias the
   // 300 hPa rows (CLOUD_BAND_TRAINED_LEVEL_OFFSET), since the corpus has no data above 300.
-  // See codec-server/scripts/derive-cloud-delta-codebooks.ts.
+  // See codec-server/scripts/derive-clouds-codebooks.ts.
   cloudBandBook(level: number, prev: number): CodeBook;
   // Order-1 codebooks over the wet columns' quantized VALUES (not deltas — zero is an absorbing
   // regime), keyed by (resolution, SAME-period weathercode class, previous decoded value) —
   // bootstrap for a column's first cell. Rain/snow key on a BUCKET of the previous value (see
-  // accumBucket). See codec-server/scripts/derive-precip-accum-codebooks.ts.
+  // accumBucket). See codec-server/scripts/derive-precipitation-codebooks.ts.
   precipBook(res: number, wcClass: number, prev: number | null): CodeBook;
   snowBook(res: number, wcClass: number, prev: number | null): CodeBook;
   rainBook(res: number, wcClass: number, prev: number | null): CodeBook;
@@ -459,12 +459,12 @@ export interface Books {
   // the previous decoded delta in this column — the post-clamp reconstruction, never the raw
   // input — or null for the column's first delta (bootstrap). The diurnal cycle drives the delta
   // sign; the previous delta adds the airmass's actual trajectory. See
-  // codec-server/scripts/derive-temp-delta-codebooks.ts.
+  // codec-server/scripts/derive-temperature-codebooks.ts.
   tempDeltaBook(res: number, tod: number, prevDelta: number | null): CodeBook;
   // The codebook for one dewpoint delta. `tempDelta` is the same period's decoded temp delta
   // (post-clamp reconstruction), `prevDepression` the previous period's reconstructed
   // temp − dewpoint. Temp is required: the column is never carried without it. See
-  // codec-server/scripts/derive-dewpoint-delta-codebooks.ts.
+  // codec-server/scripts/derive-dewpoint-codebooks.ts.
   dewpointDeltaBook(res: number, tempDelta: number, prevDepression: number): CodeBook;
   // Air quality. Every AQ book is CLASS-INDEPENDENT — see AQ_BOOKS below — so these five resolve
   // to the same tables whichever class the header selected. `prevDelta` is the previous decoded
@@ -500,7 +500,7 @@ export interface Books {
   // lead, which is the strongest context this column has) and the pair's previously decoded
   // symbol (null for the pair's first — bootstrap row). Pairs never condition on each other,
   // and the tables are shared across pairs. See
-  // codec-server/scripts/derive-agreement-codebooks.ts.
+  // codec-server/scripts/derive-model-agreement-codebooks.ts.
   agreementBook(lead: number, prev: number | null): CodeBook;
 }
 

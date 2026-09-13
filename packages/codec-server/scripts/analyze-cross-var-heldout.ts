@@ -22,12 +22,12 @@
  * the context they had BEFORE it ran:
  *   SHIPPED: precip / snow / rain + wcClass (0.978 → 0.876, 0.708 → 0.445, 1.101 → 0.770 b/period).
  *     Stacked candidates (rain also on snow ≠ 0, snow also on the precip bucket) were redundant
- *     with the class. See derive-precip-accum-codebooks.ts and WEATHERCODE_CLASS in entropy.ts.
+ *     with the class. See derive-precipitation-codebooks.ts and WEATHERCODE_CLASS in entropy.ts.
  *   REJECTED: clouds × anything (-0.03), weathercode × res (-0.033) — too small to pay for.
  *   SHIPPED: freeze × (res × same-period tempΔ bucket). Initially deferred (-0.131 under the old
  *     4-bit anchor, whose 15,000 ft cap real forecasts clipped at); re-scanned after the anchor
  *     widened to 5 bits and the gain held: pooled 1.445 → res 1.393 → res × tempΔ 1.308 b/period
- *     (-0.136, occ min=858). See derive-freeze-delta-codebooks.ts and freezeDeltaBook in
+ *     (-0.136, occ min=858). See derive-freezing-level-codebooks.ts and freezeDeltaBook in
  *     entropy.ts.
  *
  *   pnpm exec tsx packages/codec-server/scripts/analyze-cross-var-heldout.ts

@@ -8,7 +8,7 @@
  * in the alphabet — no escape needed.
  *
  * The surface column is conditioned on the gust column's same-period delta on the wire (gust
- * decodes first — see derive-gust-delta-codebooks.ts, which owns those tables and charges
+ * decodes first — see wind-gust.ts, which owns those tables and charges
  * sfc's wire cost); the [res][level 0] tables emitted here are sfc's FALLBACK for messages
  * without gust requested, so their costBits stay 0.
  *
@@ -28,10 +28,11 @@
  * every (lower, upper) pair of the ladder. All of these contexts are known to both sides, so
  * none cost wire bits.
  *
- * Tables land in packages/protocol/src/codebooks/wind-speed-delta.gen.ts via `pnpm generate`; run standalone
- * (below) to derive and print without writing:
+ * Tables land in packages/protocol/src/codebooks/wind.gen.ts through derive-wind-codebooks.ts
+ * and `pnpm generate`; run standalone (below) to derive and print this module's tables without
+ * writing:
  *
- *   pnpm exec tsx packages/codec-server/scripts/derive-wind-speed-delta-codebooks.ts
+ *   pnpm exec tsx packages/codec-server/scripts/wind-speed.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {

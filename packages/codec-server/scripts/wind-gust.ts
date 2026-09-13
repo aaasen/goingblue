@@ -10,7 +10,7 @@
  * Quantization is the shared extended Beaufort scale (forces 0..17, quantWind in derive-lib.ts,
  * must match wire.ts): deltas -17..17 (35 symbols), no escape needed. The surface fallback for
  * messages without gust requested is the [res][level 0] table in
- * derive-wind-speed-delta-codebooks.ts (which charges no wire cost for it — sfc's corpus cost
+ * wind-speed.ts (which charges no wire cost for it — sfc's corpus cost
  * lives HERE, in the conditioned tables, since gust is always present when counting).
  *
  * Held-out numbers are the scan's job; this script prints training-set means for the
@@ -23,10 +23,11 @@
  * same quantizer as wire.ts. The 24h row (resolution index 0) is trained even though fill layouts
  * never emit 24h periods — it keeps the [res][ctx][sym] shape uniform.
  *
- * Tables land in packages/protocol/src/codebooks/gust-delta.gen.ts via `pnpm generate`; run standalone
- * (below) to derive and print without writing:
+ * Tables land in packages/protocol/src/codebooks/wind.gen.ts through derive-wind-codebooks.ts
+ * and `pnpm generate`; run standalone (below) to derive and print this module's tables without
+ * writing:
  *
- *   pnpm exec tsx packages/codec-server/scripts/derive-gust-delta-codebooks.ts
+ *   pnpm exec tsx packages/codec-server/scripts/wind-gust.ts
  */
 import { rowsFromWindows, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import { VAR, type Variable, upperDeltaBucket, TABLE_RES_IDXS, type Period } from "@weather/protocol";

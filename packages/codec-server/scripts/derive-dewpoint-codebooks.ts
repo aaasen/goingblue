@@ -10,10 +10,10 @@
  * Only the resolutions layouts emit are trained — TABLE_RES_IDXS (12h/6h/3h/1h) in table-row
  * order, the same mapping resTableIdx applies at the codec.
  *
- * Tables land in packages/protocol/src/codebooks/dewpoint-delta.gen.ts via `pnpm generate`; run standalone
+ * Tables land in packages/protocol/src/codebooks/dewpoint.gen.ts via `pnpm generate`; run standalone
  * (below) to derive and print without writing:
  *
- *   pnpm exec tsx packages/codec-server/scripts/derive-dewpoint-delta-codebooks.ts
+ *   pnpm exec tsx packages/codec-server/scripts/derive-dewpoint-codebooks.ts
  */
 import { toFullPeriod } from "../src/forecast.ts";
 import {

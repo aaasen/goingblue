@@ -29,10 +29,11 @@
  * accounting must not charge it under [res][prev] too. The SHIPPED [res][prev] tables still pool
  * every level (their sum).
  *
- * Tables land in packages/protocol/src/codebooks/wind-dir.gen.ts via `pnpm generate`; run standalone
- * (below) to derive and print without writing:
+ * Tables land in packages/protocol/src/codebooks/wind.gen.ts through derive-wind-codebooks.ts
+ * and `pnpm generate`; run standalone (below) to derive and print this module's tables without
+ * writing:
  *
- *   pnpm exec tsx packages/codec-server/scripts/derive-wind-dir-codebooks.ts
+ *   pnpm exec tsx packages/codec-server/scripts/wind-direction.ts
  */
 import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import {

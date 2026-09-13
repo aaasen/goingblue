@@ -224,7 +224,7 @@ function columnCostQuantized(hist: number[], tables: number[][], selectorBits: n
   return best + selectorBits;
 }
 
-// ── k-means (lifted from derive-temp-delta-codebooks.ts; fewer restarts — measurement only) ──
+// ── k-means (lifted from derive-temperature-codebooks.ts; fewer restarts — measurement only) ──
 
 function rng(seed: number) {
   return () => {

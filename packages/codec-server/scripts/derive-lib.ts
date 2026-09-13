@@ -210,6 +210,40 @@ export interface CellCounter {
   costBits(counts: ArrayLike<number>): Float64Array;
 }
 
+// Several counters as one, their slot spaces laid end to end, so a script can own the tables of
+// several column families while each family keeps its own module (derive-wind-codebooks.ts).
+export function combineCounters(parts: CellCounter[]): CellCounter {
+  const starts: number[] = [];
+  let nSlots = 0;
+  for (const p of parts) { starts.push(nSlots); nSlots += p.nSlots; }
+  return {
+    tables: parts.flatMap((p) => p.tables),
+    nSlots,
+    countCell(ctx, add) {
+      parts.forEach((p, i) => p.countCell(ctx, (slot) => add(starts[i] + slot)));
+    },
+    tablesFrom(counts) {
+      return Object.assign({}, ...splitCounts(parts, counts).map((v, i) => parts[i].tablesFrom(v)));
+    },
+    costBits(counts) {
+      const L = new Float64Array(nSlots);
+      splitCounts(parts, counts).forEach((v, i) => L.set(parts[i].costBits(v), starts[i]));
+      return L;
+    },
+  };
+}
+
+// The combined vector cut back into one vector per part, in order.
+export function splitCounts(parts: CellCounter[], counts: ArrayLike<number>): Float64Array[] {
+  const out: Float64Array[] = [];
+  let start = 0;
+  for (const p of parts) {
+    out.push(Float64Array.from({ length: p.nSlots }, (_, k) => counts[start + k]));
+    start += p.nSlots;
+  }
+  return out;
+}
+
 // Copies one row out of a flat count vector.
 export function rowAt(counts: ArrayLike<number>, start: number, n: number): number[] {
   const r = new Array<number>(n);
