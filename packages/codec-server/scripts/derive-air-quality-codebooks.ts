@@ -5,7 +5,7 @@
  * in full — each headline plus every constituent the scale defines.
  *
  * Each column's conditioning was chosen from the corpus, not assumed. Held-out b/period pooled
- * over 12h/6h/3h/1h (analyze-aq-constituents-heldout.ts), `tod` where it earned its place:
+ * over 12h/6h/3h/1h (analyze/air-quality.ts), `tod` where it earned its place:
  *
  *   US    pm2.5 0.800   ozone 1.083   pm10 0.528   no2 0.204   so2 0.124
  *   EU    pm2.5 0.703   ozone 1.319   pm10 0.621   no2 0.263   so2 0.061

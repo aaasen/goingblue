@@ -27,27 +27,19 @@
  * It reports accumulation RATE (per hour, resolution-independent) per emitted code, which is the
  * table the intensity thresholds get read off.
  *
- *   pnpm exec tsx packages/codec-server/scripts/analyze-weathercode-aggregation.ts
+ *   pnpm exec tsx packages/codec-server/scripts/analyze/weathercode-aggregation.ts [--stride N]
  */
-import { rowsFromWindows, HOURS_PER_PERIOD, type HourlyData } from "../src/forecast.ts";
 import { WMO_CODES } from "@weather/protocol";
-import { eachForecast } from "./derive-lib.ts";
+import { RES_LABEL, argStride, eachColumn, hourRange, hourlyOf, runStandalone, type Column } from "./lib.ts";
 
 // 12h/6h/3h are where an aggregation rule has anything to decide; 1h is included for reference
-// only — a one-hour window has coverage 0 or 1, so every candidate rule degenerates to
-// pass-through there (and 1h is the resolution today's codebooks are trained at).
-const RES_IDXS = [1, 2, 3, 4];
-const RES_LABEL: Record<number, string> = { 1: "12h", 2: "6h", 3: "3h", 4: "1h" };
-const MAX_PERIODS = 128; // matches derive-weathercode-codebooks.ts
+// only: a one-hour window has coverage 0 or 1, so every candidate rule degenerates to
+// pass-through there (and 1h is the resolution the codebooks are trained at).
+const MAX_PERIODS = 128; // periods per column, matches derive-weathercode-codebooks.ts
 
-// eachForecast loads only these series. weather_code/rain/showers/snowfall are what this scan
-// reads; temperature_2m and freezing_level_height are required because eachForecast runs
-// adjustPrecipPhase before the callback — omit them and the phase correction silently no-ops,
-// so the scan would measure a rain/snow split production never encodes.
-const SCAN_VARS = [
-  "weather_code", "rain", "showers", "snowfall",
-  "temperature_2m", "freezing_level_height",
-];
+// What this scan reads; eachForecast loads the precip-phase correction's inputs alongside and
+// applies it before the callback, so the rain/snow split here is the one production encodes.
+const SCAN_VARS = ["weather_code", "rain", "showers", "snowfall"];
 
 // ── Code classification ─────────────────────────────────────────────────────────
 // Finer than protocol's WEATHERCODE_CLASS (which folds thunder into rain-ish and is indexed by
@@ -151,113 +143,83 @@ function hist<K>(m: Map<K, number[]>, k: K, n: number): number[] {
   return h;
 }
 
-const stats = new Map<number, ResStats>(RES_IDXS.map((r) => [r, newResStats()]));
+const stats = new Map<number, ResStats>(RES_LABEL.map((_, res) => [res, newResStats()]));
 
-// Mirrors the window construction in aggregateHourly (src/forecast.ts) — local-date/hour keyed,
-// anchored at the cell's start hour — so the windows this scan inspects are the ones production
-// aggregates over. Returns the hourly indices per window; rowsFromWindows then produces the
-// production Row (weathercode = max, snow_cm/rain_mm = sums) for each.
-function windowsFor(times: string[], hoursPerPeriod: number, startEpochHour: number): number[][] {
-  const anchorKey = new Date(startEpochHour * 3600000).toISOString().slice(0, 13);
-  const windows: number[][] = [];
-  const byKey = new Map<string, number[]>();
-  for (let i = 0; i < times.length; i++) {
-    const date = times[i].slice(0, 10);
-    const hour = parseInt(times[i].slice(11, 13));
-    const key = `${date}T${String(Math.floor(hour / hoursPerPeriod) * hoursPerPeriod).padStart(2, "0")}`;
-    if (key < anchorKey) continue;
-    if (!byKey.has(key)) {
-      if (windows.length >= MAX_PERIODS) break;
-      const w: number[] = [];
-      byKey.set(key, w);
-      windows.push(w);
-    }
-    byKey.get(key)!.push(i);
-  }
-  return windows;
-}
-
-function scanCell(h: HourlyData, startHour: number): void {
-  const wc = h.weather_code as (number | null)[] | undefined;
+function scanCell(col: Column): void {
+  const wc = hourlyOf(col).weather_code as (number | null)[] | undefined;
   if (!wc) return;
-
-  for (const res of RES_IDXS) {
-    const s = stats.get(res)!;
-    const windows = windowsFor(h.time, HOURS_PER_PERIOD[res], startHour);
-    if (windows.length === 0) continue;
-    const rows = rowsFromWindows(h, h.time, windows, 0);
-
-    for (let w = 0; w < windows.length; w++) {
-      const idx = windows[w];
-      const codes: number[] = [];
-      for (const i of idx) {
-        const c = wc[i];
-        if (c == null) continue;
-        if (!KNOWN.has(c)) s.unknownCodes++;
-        codes.push(c);
-      }
-      if (codes.length === 0) continue;
-
-      // The FORMER `maxOf` aggregation. Computed here, not read off rows[w].weathercode:
-      // rowsFromWindows now returns the coverage-aware rule this scan was written to motivate,
-      // and reading it back would silently turn every "today's wire" column below into a
-      // description of the new rule instead of the max baseline it is measuring against.
-      const emitted = Math.max(...codes);
-      s.periods++;
-      bump(s.occupancy, emitted);
-
-      // F — numeric max vs the client's severity ranking, counting only CROSS-PHASE disagreements
-      // (same-phase differences are intensity, which codeSeverity does not rank — see severityRank).
-      let sevBest = codes[0];
-      for (const c of codes) if (severityRank(c) > severityRank(sevBest)) sevBest = c;
-      if (phaseOf(sevBest) !== phaseOf(emitted)) {
-        s.inversions++;
-        bump(s.inversionPairs, `${emitted}(${phaseOf(emitted)})→${sevBest}(${phaseOf(sevBest)})`);
-      }
-
-      const wet = codes.filter(isWet);
-      if (wet.length === 0) continue;
-      s.wetPeriods++;
-
-      const fWet = wet.length / codes.length;
-      const cb = covBin(fWet);
-
-      // Dominant wet phase, thunder and freezing first (they stay winner-take-all in the rule).
-      const nSnow = wet.filter((c) => phaseOf(c) === "snow").length;
-      const nRain = wet.filter((c) => phaseOf(c) === "rain").length;
-      const nFrz = wet.filter((c) => phaseOf(c) === "freezing").length;
-      const nThu = wet.filter((c) => phaseOf(c) === "thunder").length;
-      const dominant: Phase =
-        nThu > 0 ? "thunder" : nFrz > 0 ? "freezing" : nSnow > nRain ? "snow" : "rain";
-      hist(s.covByPhase, dominant, COV_BINS.length)[cb]++;
-
-      // B/C — coverage under the form actually emitted.
-      if (isContinuousForm(emitted)) {
-        const p = SNOW_CONT.has(emitted) ? "snow" : "rain";
-        hist(s.contCoverage, p, COV_BINS.length)[cb]++;
-      } else if (isShowerForm(emitted)) {
-        const p = SNOW_SHWR.has(emitted) ? "snow" : "rain";
-        hist(s.shwrCoverage, p, COV_BINS.length)[cb]++;
-      }
-
-      // D — mixed rain/snow in one window (the 68/69 case).
-      if (nSnow > 0 && nRain > 0) {
-        s.mixedAny++;
-        if (Math.min(nSnow, nRain) / wet.length >= 0.25) {
-          s.mixedStrong++;
-          bump(s.mixedEmitted, emitted);
-        }
-      }
-
-      // E — accumulation rate under the emitted code, per WET hour. Dividing by the whole window
-      // instead would fold coverage back into the intensity number — the same 71 reads .05-.1 cm/h
-      // at 1h but .01-.05 at 3h purely because the dry hours dilute it — and separating those two
-      // axes is the entire point of the rule. Per wet hour, the rate is resolution-stable and the
-      // 1h rows are the undiluted ground truth every coarser row should reproduce.
-      const snowy = SNOW_CONT.has(emitted) || SNOW_SHWR.has(emitted);
-      const rate = (snowy ? rows[w].snow_cm : rows[w].rain_mm) / wet.length;
-      if (isWet(emitted)) hist(s.rateByCode, emitted, RATE_BINS.length)[rateBin(rate)]++;
+  const s = stats.get(col.res)!;
+  const rows = col.slice.rows.slice(0, MAX_PERIODS);
+  for (let w = 0; w < rows.length; w++) {
+    const [from, to] = hourRange(col, w);
+    const codes: number[] = [];
+    for (let i = from; i < to; i++) {
+      const c = wc[i];
+      if (c == null) continue;
+      if (!KNOWN.has(c)) s.unknownCodes++;
+      codes.push(c);
     }
+    if (codes.length === 0) continue;
+
+    // The FORMER `maxOf` aggregation. Computed here, not read off rows[w].weathercode:
+    // rowsFromWindows now returns the coverage-aware rule this scan was written to motivate,
+    // and reading it back would silently turn every "today's wire" column below into a
+    // description of the new rule instead of the max baseline it is measuring against.
+    const emitted = Math.max(...codes);
+    s.periods++;
+    bump(s.occupancy, emitted);
+
+    // F — numeric max vs the client's severity ranking, counting only CROSS-PHASE disagreements
+    // (same-phase differences are intensity, which codeSeverity does not rank — see severityRank).
+    let sevBest = codes[0];
+    for (const c of codes) if (severityRank(c) > severityRank(sevBest)) sevBest = c;
+    if (phaseOf(sevBest) !== phaseOf(emitted)) {
+      s.inversions++;
+      bump(s.inversionPairs, `${emitted}(${phaseOf(emitted)})→${sevBest}(${phaseOf(sevBest)})`);
+    }
+
+    const wet = codes.filter(isWet);
+    if (wet.length === 0) continue;
+    s.wetPeriods++;
+
+    const fWet = wet.length / codes.length;
+    const cb = covBin(fWet);
+
+    // Dominant wet phase, thunder and freezing first (they stay winner-take-all in the rule).
+    const nSnow = wet.filter((c) => phaseOf(c) === "snow").length;
+    const nRain = wet.filter((c) => phaseOf(c) === "rain").length;
+    const nFrz = wet.filter((c) => phaseOf(c) === "freezing").length;
+    const nThu = wet.filter((c) => phaseOf(c) === "thunder").length;
+    const dominant: Phase =
+      nThu > 0 ? "thunder" : nFrz > 0 ? "freezing" : nSnow > nRain ? "snow" : "rain";
+    hist(s.covByPhase, dominant, COV_BINS.length)[cb]++;
+
+    // B/C — coverage under the form actually emitted.
+    if (isContinuousForm(emitted)) {
+      const p = SNOW_CONT.has(emitted) ? "snow" : "rain";
+      hist(s.contCoverage, p, COV_BINS.length)[cb]++;
+    } else if (isShowerForm(emitted)) {
+      const p = SNOW_SHWR.has(emitted) ? "snow" : "rain";
+      hist(s.shwrCoverage, p, COV_BINS.length)[cb]++;
+    }
+
+    // D — mixed rain/snow in one window (the 68/69 case).
+    if (nSnow > 0 && nRain > 0) {
+      s.mixedAny++;
+      if (Math.min(nSnow, nRain) / wet.length >= 0.25) {
+        s.mixedStrong++;
+        bump(s.mixedEmitted, emitted);
+      }
+    }
+
+    // E — accumulation rate under the emitted code, per WET hour. Dividing by the whole window
+    // instead would fold coverage back into the intensity number — the same 71 reads .05-.1 cm/h
+    // at 1h but .01-.05 at 3h purely because the dry hours dilute it — and separating those two
+    // axes is the entire point of the rule. Per wet hour, the rate is resolution-stable and the
+    // 1h rows are the undiluted ground truth every coarser row should reproduce.
+    const snowy = SNOW_CONT.has(emitted) || SNOW_SHWR.has(emitted);
+    const rate = (snowy ? rows[w].snow_cm : rows[w].rain_mm) / wet.length;
+    if (isWet(emitted)) hist(s.rateByCode, emitted, RATE_BINS.length)[rateBin(rate)]++;
   }
 }
 
@@ -270,8 +232,7 @@ const row = (label: string, h: number[], width = 8): string => {
 };
 
 function report(): void {
-  for (const res of RES_IDXS) {
-    const s = stats.get(res)!;
+  for (const [res, s] of stats) {
     const L = RES_LABEL[res];
     console.log(`\n${"═".repeat(88)}\n  RESOLUTION ${L}   periods=${s.periods}  wet=${s.wetPeriods} (${pctStr(s.wetPeriods, s.periods)})` +
       (s.unknownCodes ? `  UNKNOWN HOURLY CODES=${s.unknownCodes}` : ""));
@@ -330,6 +291,10 @@ function report(): void {
   console.log();
 }
 
-console.log("Scanning corpus (train split) for weathercode aggregation sizing…");
-await eachForecast((h, startHour) => scanCell(h, startHour), "train", SCAN_VARS);
-report();
+export async function analyze(args: string[]): Promise<void> {
+  console.log("Scanning corpus (train split) for weathercode aggregation sizing…");
+  await eachColumn({ vars: SCAN_VARS, stride: argStride(args) }, scanCell);
+  report();
+}
+
+runStandalone(import.meta.url, analyze);

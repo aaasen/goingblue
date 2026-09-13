@@ -1,7 +1,7 @@
 /**
  * Derive dewpoint-delta codebooks keyed by (resolution, SAME-period temp delta, PREVIOUS
  * period's depression) — see the dewpoint section of entropy.ts for the contexts and the
- * held-out ladder behind them (analyze-dewpoint-entropy.ts). Both contexts are free: temp
+ * held-out ladder behind them (analyze/dewpoint.ts). Both contexts are free: temp
  * decodes first, and the depression is the difference of two reconstructions the decoder holds.
  *
  * Training mirrors the wire exactly: local-midnight-aligned uniform windows per resolution, the

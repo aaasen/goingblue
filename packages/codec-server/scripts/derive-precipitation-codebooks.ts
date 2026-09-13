@@ -25,13 +25,13 @@
  *   snow:   adaptive 1.302 | order-0 1.084 | bucket5 0.766 | ×res 0.741 | ×res×wc 0.470  ← shipped
  *   rain:   adaptive 1.983 | order-0 1.632 | bucket5 1.192 | ×res 1.153 | ×res×wc 0.814  ← shipped
  *
- * analyze-cross-var-heldout.ts, which ranked wcClass against the other cross-variable candidates,
+ * analyze/precipitation.ts, which ranked wcClass against the other cross-variable candidates,
  * reports the same win a shade larger (0.876 / 0.445 / 0.770) because it scans transitions only,
  * over the four resolutions layouts actually emit. Stacking a second cross-variable signal on top
  * — rain on snow≠0, snow on the precip-chance bucket — measured redundant with the class. Full
  * 64-context order-1 × res edged bucket5 × res by only ~0.02 b/period held-out (0.719 snow,
  * 1.129 rain) — not worth 40k more table entries. (The full scheme ladder used to be re-costed
- * here on every generate; it lives in analyze-cross-var-heldout.ts now that this script counts at
+ * here on every generate; it lives in analyze/precipitation.ts now that this script counts at
  * emission granularity.) Run standalone to derive and print without writing (build the protocol
  * first — WEATHERCODE_CLASS is imported from it, so derivation and wire can't drift):
  *
@@ -157,7 +157,7 @@ export async function derive(precounted?: Float64Array): Promise<DerivedTables> 
   const counts = precounted ?? await deriveCounts(c);
   const { offsets } = tableOffsets(c.tables);
   // Training-set mean bits/transition per variable, for the generation log (the held-out scheme
-  // ladder lives in analyze-cross-var-heldout.ts).
+  // ladder lives in analyze/precipitation.ts).
   const L = c.costBits(counts);
   for (const v of VARS) {
     let bits = 0, n = 0;

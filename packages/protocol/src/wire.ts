@@ -141,7 +141,7 @@ const quantFreeze = (p: Period): number => clampInt(Math.floor((p.freeze_m ?? 0)
 // the same model the wet columns use. The previous value is the band's dominant context (the
 // RH-diagnostic fill pins levels at exactly 0 for long runs; held-out −27% vs unconditioned
 // per-level deltas — the vertical-neighbor chain added only −0.19 b/period on top and was left
-// out; see analyze-cloud-neighbor-heldout.ts). Tables are trained on the post-fillCloudBand
+// out; see analyze/clouds.ts). Tables are trained on the post-fillCloudBand
 // stack at the band's serving resolutions only, for the [300..1000] levels the corpus carries;
 // the 250/200 cirrus levels ride the 300 hPa books (CLOUD_BAND_TRAINED_LEVEL_OFFSET in
 // entropy.ts) — see codec-server/scripts/derive-clouds-codebooks.ts.

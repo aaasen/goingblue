@@ -123,8 +123,8 @@ function makeConditionalCodec(bootstrapWeights: number[], weights: number[][]) {
 //   2 freezing (freezing drizzle/rain) · 3 snow-ish (snow/snow showers/mixed)
 //
 // The mixed codes 68/69 join snow-ish rather than taking a fifth class of their own: held-out,
-// a fifth class moved the three wet columns by -0.003 b/period total (analyze-wc-aggregation-
-// heldout.ts) while widening every wet-column table by 25% and dropping their minimum
+// a fifth class moved the three wet columns by -0.003 b/period total (analyze/weathercode.ts,
+// section A) while widening every wet-column table by 25% and dropping their minimum
 // per-context training occupancy to zero. Not a trade worth making for ~0.8% of periods.
 export const WC_CLASSES = 4;
 export const WEATHERCODE_CLASS: readonly number[] = [
@@ -142,7 +142,7 @@ const NDIR = 8;
 // force 13..17 extension so hurricane-force gusts and jet winds don't clip (corpus maxima:
 // gust 225, 500 hPa 293 kph; force 17 is ≥202). Chosen 2026-07-31 over linear and sqrt/lin-log
 // companded scales (held-out sfc+gust 2.638 vs 3.595 b/period under linear 5 kph — see
-// analyze-wind-scale-heldout.ts): Beaufort bands track perceptible wind differences, which is
+// analyze/wind.ts): Beaufort bands track perceptible wind differences, which is
 // also where the delta probability mass moves. Decoded values are band midpoints (kph); the
 // bounds are wire format and pinned in WIRE_CODEBOOKS below.
 export const BEAUFORT_KPH_LOWER: readonly number[] =
@@ -232,7 +232,7 @@ function tempDeltaSym(delta: number): number {
 // and the PREVIOUS period's reconstructed depression (temp − dewpoint) in five bands. The
 // depression is what makes the temp delta informative: at zero the dewpoint is pinned to the
 // falling temperature (dewpoint ≤ temp), at 11+ it is decoupled from the diurnal swing. Held-out
-// (analyze-dewpoint-entropy.ts): res-only 4.024/3.373/2.709/1.748 → 3.550/2.915/2.351/1.582
+// (analyze/dewpoint.ts): res-only 4.024/3.373/2.709/1.748 → 3.550/2.915/2.351/1.582
 // b/period (12h/6h/3h/1h). The depression itself was rejected as the coded quantity — it
 // inherits the diurnal cycle and costs 0.3-1.1 b/period more under every context tried.
 export const DEWPOINT_TEMP_CTX = 2 * TEMP_DELTA_CORE_RADIUS + 1; // 15

@@ -1,7 +1,7 @@
 /**
  * Derive weathercode Huffman codebooks from the corpus's order-1 transition structure: weather
- * persists hour-to-hour far more than it varies by climate/region (see
- * analyze-weathercode-transitions.ts), so instead of k-means-clustering per-forecast regime
+ * persists hour-to-hour far more than it varies by climate/region, so instead of
+ * k-means-clustering per-forecast regime
  * histograms into a handful of tables selected per message, each symbol gets a codebook keyed by
  * the *previously decoded* symbol — context both sides already have, so it costs no header bits.
  * NSYM tables (one per possible previous symbol) plus one bootstrap table (the first-symbol

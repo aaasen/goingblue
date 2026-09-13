@@ -3,7 +3,7 @@
  * bucket) — context both sides already have, so none of it costs wire bits. This replaced the
  * cheapest-of-16 k-means tables + 4-bit per-message selector: the selector was mostly
  * re-discovering resolution (which is free), and the held-out ladder (5-fold by location, see
- * analyze-temp-heldout.ts) found
+ * analyze/temperature.ts) found
  *
  *   shipped ×16 + selector 2.648 b/period
  *   res only               2.678

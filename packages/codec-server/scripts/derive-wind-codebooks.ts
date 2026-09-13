@@ -6,7 +6,7 @@
  *
  * Quantization is the shared extended Beaufort scale for EVERY speed column (forces 0..17,
  * quantWind in derive-lib.ts, must match wire.ts — chosen 2026-07-31 over linear and other
- * companded scales, analyze-wind-scale-heldout.ts). Deltas -17..17 (35 symbols) fit the alphabet
+ * companded scales, analyze/wind.ts). Deltas -17..17 (35 symbols) fit the alphabet
  * directly, no escape needed.
  *
  * GUST AND SURFACE. Gust-delta tables are res-keyed; surface-wind deltas are keyed by
@@ -23,7 +23,7 @@
  * DIRECTION. Order-1 transition tables keyed by resolution, plus upper-level-conditioned tables
  * for the pressure-level columns, keyed by the ladder gap to the served level above (windGapClass
  * in entropy.ts — the reader picks any subset of the WIND_LEVELS_HPA levels, so every (lower,
- * upper) pair of the ladder is counted under its gap). Held-out (analyze-wind-heldout.ts):
+ * upper) pair of the ladder is counted under its gap). Held-out (analyze/wind.ts):
  *
  *   prev only, trained at 1h, applied everywhere (old design):  3.04 (24h) … 0.76 (1h) b/dir
  *   [res][prev]:                                                2.15 (24h) … 0.76 (1h)
@@ -41,7 +41,7 @@
  * [res][prev] tables still pool every level.
  *
  * SPEED. Delta tables keyed by (resolution, level), plus upper-Δ-conditioned tables for the
- * pressure-level columns, keyed by the ladder gap. Held-out (analyze-wind-heldout.ts):
+ * pressure-level columns, keyed by the ladder gap. Held-out (analyze/wind.ts):
  *
  *   pooled levels, trained at 1h, applied everywhere (old design): 4.45 (24h) … 1.46 (1h) b/Δ
  *   [res][level]:                                                  3.21 (24h) … 1.44 (1h)

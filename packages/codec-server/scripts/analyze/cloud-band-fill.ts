@@ -29,25 +29,19 @@
  * The default stride of 50 lands ~600 windows, the sample size every figure in the plan was
  * measured at, in a couple of minutes. `--stride 1` scans the whole split.
  *
- *   pnpm exec tsx packages/codec-server/scripts/analyze-cloud-band-fill.ts
- *   pnpm exec tsx packages/codec-server/scripts/analyze-cloud-band-fill.ts --stride 10
+ *   pnpm exec tsx packages/codec-server/scripts/analyze/cloud-band-fill.ts
+ *   pnpm exec tsx packages/codec-server/scripts/analyze/cloud-band-fill.ts --stride 10
  */
-import {
-  fillCloudBand, rhCritical, rowsFromWindows, sundqvistCover, toFullPeriod,
-  HOURS_PER_PERIOD, type HourlyData,
-} from "../src/forecast.ts";
+import { fillCloudBand, rhCritical, sundqvistCover, toFullPeriod, type HourlyData } from "../../src/forecast.ts";
 import { CLOUD_BAND_LEVELS_HPA, VAR, type Variable, quantCover } from "@weather/protocol";
-import { DERIVE_VARS, eachForecast } from "./derive-lib.ts";
+import { DERIVE_VARS, eachForecast, makeCellCtx, type ResSlice } from "../derive-lib.ts";
+import { RES_IDXS, RES_LABEL, argStride, runStandalone } from "./lib.ts";
 
 const LEVELS = CLOUD_BAND_LEVELS_HPA;
 const NL = LEVELS.length;
 const CLOUD_VARS = LEVELS.map((l) => `cloud_cover_${l}hPa`);
 const RH_VARS = LEVELS.map((l) => `relative_humidity_${l}hPa`);
-const RES_IDXS = [1, 2, 3, 4]; // 12h/6h/3h/1h — the resolutions layouts actually emit
 const BAND_VARS: ReadonlySet<Variable> = new Set([VAR.clouds]);
-
-const args = process.argv.slice(2);
-const stride = Math.max(1, Number(args[args.indexOf("--stride") + 1]) || 50);
 
 // DERIVE_VARS already carries all three level families (the band codebooks train on them), so
 // the default load is enough. What this scan must NOT take is eachForecast's own fillCloudBand:
@@ -107,10 +101,10 @@ function countHours(h: HourlyData, wc: (number | null)[], s: HourStats): void {
 
 // The band exactly as the wire carries it: maxOf over the period's hours (rowsFromWindows),
 // hole-bridged (repairCloudBand, via toFullPeriod), then quantized by the encoder.
-function countPeriods(h: HourlyData, windows: number[][], off: number, s: PeriodStats): void {
+function countPeriods(slice: ResSlice, s: PeriodStats): void {
   // toFullPeriod already runs repairCloudBand over the aggregated stack, so cloud_band here is
-  // exactly the eight values the encoder quantizes.
-  const periods = rowsFromWindows(h, h.time, windows, off).map((r) => toFullPeriod(r, BAND_VARS, "US"));
+  // exactly the values the encoder quantizes.
+  const periods = slice.rows.map((r) => toFullPeriod(r, BAND_VARS, "US"));
   for (let p = 0; p < periods.length; p++) {
     const stack = periods[p].cloud_band ?? [];
     let lit = 0;
@@ -125,88 +119,83 @@ function countPeriods(h: HourlyData, windows: number[][], off: number, s: Period
   }
 }
 
-let cells = 0;
-await eachForecast((raw, _startHour, _loc, pos, _split, elevM) => {
-  const wc = raw.weather_code as (number | null)[] | undefined;
-  if (!wc || !pos) return;
-  // Section A first — on the RAW cell, before the fill overwrites the served diagnostic.
-  const served = CLOUD_VARS.map((v) => raw[v] as (number | null)[] | undefined);
-  const rh = RH_VARS.map((v) => raw[v] as (number | null)[] | undefined);
-  if (served.every((c) => c == null) || rh.every((c) => c == null)) return;
-  cells++;
-  for (let li = 0; li < NL; li++) {
-    const crit = rhCritical(LEVELS[li]);
-    for (let i = 0; i < raw.time.length; i++) {
-      const r = rh[li]?.[i], c = served[li]?.[i];
-      if (r == null || c == null) continue;
-      const err = Math.abs(sundqvistCover(r, crit) - c);
-      provN[li]++; provErr[li] += err;
-      if (err <= 0.5) provExact[li]++;
+export async function analyze(args: string[]): Promise<void> {
+  const stride = argStride(args, 50);
+  let cells = 0;
+  await eachForecast((raw, _startHour, _loc, pos, _split, elevM) => {
+    const wc = raw.weather_code as (number | null)[] | undefined;
+    if (!wc || !pos) return;
+    // Section A first — on the RAW cell, before the fill overwrites the served diagnostic.
+    const served = CLOUD_VARS.map((v) => raw[v] as (number | null)[] | undefined);
+    const rh = RH_VARS.map((v) => raw[v] as (number | null)[] | undefined);
+    if (served.every((c) => c == null) || rh.every((c) => c == null)) return;
+    cells++;
+    for (let li = 0; li < NL; li++) {
+      const crit = rhCritical(LEVELS[li]);
+      for (let i = 0; i < raw.time.length; i++) {
+        const r = rh[li]?.[i], c = served[li]?.[i];
+        if (r == null || c == null) continue;
+        const err = Math.abs(sundqvistCover(r, crit) - c);
+        provN[li]++; provErr[li] += err;
+        if (err <= 0.5) provExact[li]++;
+      }
     }
-  }
 
-  const filled = fillCloudBand(raw, elevM ?? 0);
-  countHours(raw, wc, hourly0);
-  countHours(filled, wc, hourly1);
+    const filled = fillCloudBand(raw, elevM ?? 0);
+    countHours(raw, wc, hourly0);
+    countHours(filled, wc, hourly1);
 
-  // Production's window construction: local-midnight-justified, whole periods only. Same as the
-  // other held-out scans (analyze-wc-aggregation-heldout.ts).
-  const off = Math.round(pos.lon / 15);
-  const dataStart = Math.floor(Date.parse(`${raw.time[0]}:00Z`) / 3600000);
-  const dataEnd = dataStart + raw.time.length;
-  for (const res of RES_IDXS) {
-    const hpp = HOURS_PER_PERIOD[res];
-    const firstUtc = Math.ceil((dataStart + off) / 24) * 24 - off;
-    const n = Math.floor((dataEnd - firstUtc) / hpp);
-    if (n < 3) continue;
-    const windows: number[][] = [];
-    for (let p = 0; p < n; p++) {
-      const w: number[] = [];
-      for (let eh = firstUtc + p * hpp; eh < firstUtc + (p + 1) * hpp; eh++) w.push(eh - dataStart);
-      windows.push(w);
+    // Production's window construction: local-midnight-aligned whole periods, the same
+    // aggregation the derive scripts train on, over the raw stack and the filled one.
+    const rawCtx = makeCellCtx(raw, pos), filledCtx = makeCellCtx(filled, pos);
+    for (const res of RES_IDXS) {
+      const before = rawCtx.atMidnight(res), after = filledCtx.atMidnight(res);
+      if (!before || !after) continue;
+      countPeriods(before, period0.get(res)!);
+      countPeriods(after, period1.get(res)!);
     }
-    countPeriods(raw, windows, off, period0.get(res)!);
-    countPeriods(filled, windows, off, period1.get(res)!);
-  }
-}, "eval", DERIVE_VARS, { index: 0, total: stride }, false);
+  }, "eval", DERIVE_VARS, { index: 0, total: stride }, false);
 
-console.log(`\ncloud-band fill — ${cells} eval cells (1 in ${stride}), ` +
-  `${hourly0.hours.toLocaleString()} hours\n`);
+  console.log(`\ncloud-band fill — ${cells} eval cells (1 in ${stride}), ` +
+    `${hourly0.hours.toLocaleString()} hours\n`);
 
-console.log("A. cloud_cover_XhPa vs Sundqvist(relative_humidity_XhPa)");
-console.log("   If this stops reading ~100% exact, the variable swap in forecast.ts is unsound.");
-row("level", LEVELS.map((l) => String(l).padStart(8)));
-row("exact (±0.5 pp) %", LEVELS.map((_, li) => pct(provExact[li], provN[li]).padStart(8)));
-row("mean abs err (pp)", LEVELS.map((_, li) =>
-  (provN[li] ? (provErr[li] / provN[li]).toFixed(3) : "—").padStart(8)));
+  console.log("A. cloud_cover_XhPa vs Sundqvist(relative_humidity_XhPa)");
+  console.log("   If this stops reading ~100% exact, the variable swap in forecast.ts is unsound.");
+  row("level", LEVELS.map((l) => String(l).padStart(8)));
+  row("exact (±0.5 pp) %", LEVELS.map((_, li) => pct(provExact[li], provN[li]).padStart(8)));
+  row("mean abs err (pp)", LEVELS.map((_, li) =>
+    (provN[li] ? (provErr[li] / provN[li]).toFixed(3) : "—").padStart(8)));
 
-const hourRows: [string, (s: HourStats) => string][] = [
-  ["band empty, % of all hours", (s) => pct(s.empty, s.hours)],
-  ["band empty, % of cloudy hours", (s) => pct(s.emptyCloudy, s.cloudy)],
-  ["false cloud, % of clear hours", (s) => pct(s.falseCloud, s.clear)],
-  ["lit levels, mean of non-empty", (s) => (s.litHours ? s.lit / s.litHours : 0).toFixed(2).padStart(5)],
-  ["top slot lit, % of hours", (s) => pct(s.topLit, s.hours)],
-];
-console.log("\nB. hourly, post-quantization — the mechanism, NOT the shipped number");
-row("", ["  before", "   after"]);
-for (const [label, f] of hourRows) row(label, [`  ${f(hourly0)}`, `  ${f(hourly1)}`]);
-console.log(`  recovery of empty-on-cloudy hours: ` +
-  `${pct(hourly0.emptyCloudy - hourly1.emptyCloudy, hourly0.emptyCloudy)}%`);
-
-console.log("\nC. per period, through maxOf + repairCloudBand + quantCover — THE ACCEPTANCE CHECK");
-const periodRows: [string, (s: PeriodStats) => string][] = [
-  ["band empty, % of all periods", (s) => pct(s.empty, s.periods)],
-  ["band empty, % of cloudy periods", (s) => pct(s.emptyCloudy, s.cloudy)],
-  ["false cloud, % of clear periods", (s) => pct(s.falseCloud, s.clear)],
-  ["lit levels, mean of non-empty", (s) => (s.litPeriods ? s.lit / s.litPeriods : 0).toFixed(2).padStart(5)],
-  ["top slot lit, % of periods", (s) => pct(s.topLit, s.periods)],
-];
-for (const res of RES_IDXS) {
-  const a = period0.get(res)!, b = period1.get(res)!;
-  if (a.periods === 0) continue;
-  console.log(`\n  ${HOURS_PER_PERIOD[res]}h periods (${a.periods.toLocaleString()})`);
+  const hourRows: [string, (s: HourStats) => string][] = [
+    ["band empty, % of all hours", (s) => pct(s.empty, s.hours)],
+    ["band empty, % of cloudy hours", (s) => pct(s.emptyCloudy, s.cloudy)],
+    ["false cloud, % of clear hours", (s) => pct(s.falseCloud, s.clear)],
+    ["lit levels, mean of non-empty", (s) => (s.litHours ? s.lit / s.litHours : 0).toFixed(2).padStart(5)],
+    ["top slot lit, % of hours", (s) => pct(s.topLit, s.hours)],
+  ];
+  console.log("\nB. hourly, post-quantization — the mechanism, NOT the shipped number");
   row("", ["  before", "   after"]);
-  for (const [label, f] of periodRows) row(label, [`  ${f(a)}`, `  ${f(b)}`]);
-  console.log(`    recovery of empty-on-cloudy periods: ` +
-    `${pct(a.emptyCloudy - b.emptyCloudy, a.emptyCloudy)}%`);
+  for (const [label, f] of hourRows) row(label, [`  ${f(hourly0)}`, `  ${f(hourly1)}`]);
+  console.log(`  recovery of empty-on-cloudy hours: ` +
+    `${pct(hourly0.emptyCloudy - hourly1.emptyCloudy, hourly0.emptyCloudy)}%`);
+
+  console.log("\nC. per period, through maxOf + repairCloudBand + quantCover — THE ACCEPTANCE CHECK");
+  const periodRows: [string, (s: PeriodStats) => string][] = [
+    ["band empty, % of all periods", (s) => pct(s.empty, s.periods)],
+    ["band empty, % of cloudy periods", (s) => pct(s.emptyCloudy, s.cloudy)],
+    ["false cloud, % of clear periods", (s) => pct(s.falseCloud, s.clear)],
+    ["lit levels, mean of non-empty", (s) => (s.litPeriods ? s.lit / s.litPeriods : 0).toFixed(2).padStart(5)],
+    ["top slot lit, % of periods", (s) => pct(s.topLit, s.periods)],
+  ];
+  RES_IDXS.forEach((res, i) => {
+    const a = period0.get(res)!, b = period1.get(res)!;
+    if (a.periods === 0) return;
+    console.log(`\n  ${RES_LABEL[i]} periods (${a.periods.toLocaleString()})`);
+    row("", ["  before", "   after"]);
+    for (const [label, f] of periodRows) row(label, [`  ${f(a)}`, `  ${f(b)}`]);
+    console.log(`    recovery of empty-on-cloudy periods: ` +
+      `${pct(a.emptyCloudy - b.emptyCloudy, a.emptyCloudy)}%`);
+  });
 }
+
+runStandalone(import.meta.url, analyze);

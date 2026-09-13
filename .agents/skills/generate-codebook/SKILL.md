@@ -26,7 +26,7 @@ Always run these checks from the main checkout, not a worktree. The corpus is gi
 
 The encoder can use existing context to reduce the entropy of the data. For example, the weathercode uses the weathercode of the previous period. Temperature uses local time of day. The README explains the context used by each variable. 
 
-The `analyze-<name>-heldout.ts` scripts in `packages/codec-server/scripts` analyze the entropy of different conditioning techniques. They report held-out cost, 5-fold by location. When adding a new variable, add it to `DERIVE_VARS` in `derive-lib.ts` and add a script here following the existing patterns. Ask the user for input on what should be used for conditioning. 
+The `packages/codec-server/scripts/analyze/<name>.ts` scripts, one per derive codebook, analyze the entropy of different conditioning techniques. Each exports `analyze(args)` and reports held-out cost, 5-fold by location, as a ladder of candidate contexts with the shipped rung marked. They share `analyze/lib.ts`: `eachColumn` walks the corpus with the same local-midnight aggregation the derive scripts train on, `heldOut` prices one scheme, and `printLadder` reports it. Run one with `pnpm exec tsx packages/codec-server/scripts/analyze/<name>.ts`; `--stride N` scans one train cell in N for a quick look. When adding a new variable, add it to `DERIVE_VARS` in `derive-lib.ts` and add a script here following the existing patterns. Ask the user for input on what should be used for conditioning. 
 
 Some guidelines:
 1. The context must be available to the decoder for the symbol. Forecast resolution, local time of day, elevation, or variables already decoded.

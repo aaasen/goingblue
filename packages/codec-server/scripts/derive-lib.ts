@@ -97,7 +97,7 @@ export const CLOUD_FILL_INPUTS: readonly string[] = [
 // Every wind speed column quantizes to the extended Beaufort scale (forces 0..17): band lower
 // bounds in km/h — the standard 13 forces plus the force 13..17 extension so hurricane-force
 // gusts and jet winds don't clip (corpus maxima: gust 225, 500 hPa 293 kph). Chosen 2026-07-31:
-// held-out sfc+gust 2.638 b/period vs 3.595 under linear 5 kph (analyze-wind-scale-heldout.ts);
+// held-out sfc+gust 2.638 b/period vs 3.595 under linear 5 kph (analyze/wind.ts);
 // the scale spends resolution where wind differences are perceptible, which is also where the
 // probability mass moves.
 export const BEAUFORT_KPH_LOWER = [0, 1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118, 134, 150, 167, 184, 202];
@@ -327,7 +327,7 @@ export function assertCorpusHas(vars: readonly string[]): void {
 // when they do. A null `vars` loads and corrects everything.
 //
 // `fillBand: false` hands the callback the cloud band exactly as the corpus served it, skipping
-// fillCloudBand. Only a scan MEASURING the fill wants that (analyze-cloud-band-fill.ts) — every
+// fillCloudBand. Only a scan MEASURING the fill wants that (analyze/cloud-band-fill.ts) — every
 // derivation wants production's corrected stack, which is the default.
 export async function eachForecast(
   cb: (hourly: HourlyData, startHour: number, loc: string, pos?: { lat: number; lon: number },

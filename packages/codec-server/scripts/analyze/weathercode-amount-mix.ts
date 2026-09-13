@@ -28,24 +28,16 @@
  *      field case), the 68 vs 69 split under the existing MIX_HEAVY_MM rate rule, and the
  *      combined 68/69 occupancy after the change.
  *
- *   pnpm exec tsx packages/codec-server/scripts/analyze-wc-amount-mix.ts
+ *   pnpm exec tsx packages/codec-server/scripts/analyze/weathercode-amount-mix.ts [--stride N]
  */
-import { rowsFromWindows, HOURS_PER_PERIOD, type HourlyData } from "../src/forecast.ts";
-import { MIX_FRAC, MIX_HEAVY_MM, WMO_MIX_LIGHT, WMO_MIX_HEAVY } from "../src/weathercode.ts";
-import { eachForecast } from "./derive-lib.ts";
+import { MIX_FRAC, MIX_HEAVY_MM, WMO_MIX_LIGHT, WMO_MIX_HEAVY } from "../../src/weathercode.ts";
+import { RES_LABEL, argStride, eachColumn, hourRange, hourlyOf, runStandalone, type Column } from "./lib.ts";
 
-const RES_IDXS = [1, 2, 3, 4];
-const RES_LABEL: Record<number, string> = { 1: "12h", 2: "6h", 3: "3h", 4: "1h" };
-const MAX_PERIODS = 128; // matches derive-weathercode-codebooks.ts
+const MAX_PERIODS = 128; // periods per column, matches derive-weathercode-codebooks.ts
 
-// weather_code/rain/showers/snowfall are what this scan reads; temperature_2m and
-// freezing_level_height are required because eachForecast runs adjustPrecipPhase before the
-// callback — omit them and the phase correction silently no-ops, so the scan would measure a
-// rain/snow split production never encodes.
-const SCAN_VARS = [
-  "weather_code", "rain", "showers", "snowfall",
-  "temperature_2m", "freezing_level_height",
-];
+// What this scan reads; eachForecast loads the precip-phase correction's inputs alongside and
+// applies it before the callback, so the rain/snow split here is the one production encodes.
+const SCAN_VARS = ["weather_code", "rain", "showers", "snowfall"];
 
 // Open-Meteo's snow:liquid convention (1 mm WE = 0.7 cm snow) — matches SNOW_CM_PER_MM in both
 // src/weathercode.ts and src/forecast.ts, which do not export it.
@@ -94,76 +86,50 @@ const newResStats = (): ResStats => ({
   recEmitted: new Map(), recRainMinor: 0, recSnowMinor: 0, rec68: 0, rec69: 0,
 });
 const bump = <K,>(m: Map<K, number>, k: K, by = 1): void => { m.set(k, (m.get(k) ?? 0) + by); };
-const stats = new Map<number, ResStats>(RES_IDXS.map((r) => [r, newResStats()]));
+const stats = new Map<number, ResStats>(RES_LABEL.map((_, res) => [res, newResStats()]));
 
-// Mirrors the window construction in aggregateHourly (src/forecast.ts) — local-date/hour keyed,
-// anchored at the cell's start hour — same as analyze-weathercode-aggregation.ts.
-function windowsFor(times: string[], hoursPerPeriod: number, startEpochHour: number): number[][] {
-  const anchorKey = new Date(startEpochHour * 3600000).toISOString().slice(0, 13);
-  const windows: number[][] = [];
-  const byKey = new Map<string, number[]>();
-  for (let i = 0; i < times.length; i++) {
-    const date = times[i].slice(0, 10);
-    const hour = parseInt(times[i].slice(11, 13));
-    const key = `${date}T${String(Math.floor(hour / hoursPerPeriod) * hoursPerPeriod).padStart(2, "0")}`;
-    if (key < anchorKey) continue;
-    if (!byKey.has(key)) {
-      if (windows.length >= MAX_PERIODS) break;
-      const w: number[] = [];
-      byKey.set(key, w);
-      windows.push(w);
-    }
-    byKey.get(key)!.push(i);
-  }
-  return windows;
-}
-
-function scanCell(h: HourlyData, startHour: number): void {
-  const wc = h.weather_code as (number | null)[] | undefined;
+function scanCell(col: Column): void {
+  const wc = hourlyOf(col).weather_code as (number | null)[] | undefined;
   if (!wc) return;
+  const s = stats.get(col.res)!;
+  const rows = col.slice.rows.slice(0, MAX_PERIODS);
+  for (let w = 0; w < rows.length; w++) {
+    const [from, to] = hourRange(col, w);
+    const codes: number[] = [];
+    for (let i = from; i < to; i++) { const c = wc[i]; if (c != null) codes.push(c); }
+    if (codes.length === 0) continue;
+    s.periods++;
 
-  for (const res of RES_IDXS) {
-    const s = stats.get(res)!;
-    const windows = windowsFor(h.time, HOURS_PER_PERIOD[res], startHour);
-    if (windows.length === 0) continue;
-    const rows = rowsFromWindows(h, h.time, windows, 0);
+    // Step-1 escapes win before the mix gate would run; the amount arm never sees these.
+    if (codes.some((c) => THUNDER.has(c) || FREEZING.has(c))) { s.escaped++; continue; }
+    const wet = codes.filter(isWet);
+    if (wet.length === 0) continue;
+    s.wetPeriods++;
 
-    for (let w = 0; w < windows.length; w++) {
-      const codes = windows[w].map((i) => wc[i]).filter((c): c is number => c != null);
-      if (codes.length === 0) continue;
-      s.periods++;
+    const shipped = rows[w].weathercode; // the SHIPPED aggregation, code-count mix arm included
+    const alreadyMixed = shipped === WMO_MIX_LIGHT || shipped === WMO_MIX_HEAVY;
+    if (alreadyMixed) s.shippedMixed++;
 
-      // Step-1 escapes win before the mix gate would run; the amount arm never sees these.
-      if (codes.some((c) => THUNDER.has(c) || FREEZING.has(c))) { s.escaped++; continue; }
-      const wet = codes.filter(isWet);
-      if (wet.length === 0) continue;
-      s.wetPeriods++;
+    const rainMm = rows[w].rain_mm;
+    const snowWE = rows[w].snow_cm / SNOW_CM_PER_MM;
+    if (!(rainMm > 0 && snowWE > 0)) continue;
+    s.bothAmount++;
 
-      const shipped = rows[w].weathercode; // the SHIPPED aggregation, code-count mix arm included
-      const alreadyMixed = shipped === WMO_MIX_LIGHT || shipped === WMO_MIX_HEAVY;
-      if (alreadyMixed) s.shippedMixed++;
+    const minority = Math.min(rainMm, snowWE);
+    const share = minority / (rainMm + snowWE);
+    s.shareHist[shareBin(share)]++;
 
-      const rainMm = rows[w].rain_mm;
-      const snowWE = rows[w].snow_cm / SNOW_CM_PER_MM;
-      if (!(rainMm > 0 && snowWE > 0)) continue;
-      s.bothAmount++;
+    if (!alreadyMixed) {
+      for (let si = 0; si < SHARES.length; si++)
+        for (let fi = 0; fi < FLOORS.length; fi++)
+          if (share >= SHARES[si] && minority >= FLOORS[fi]) s.grid[si][fi]++;
 
-      const minority = Math.min(rainMm, snowWE);
-      const share = minority / (rainMm + snowWE);
-      s.shareHist[shareBin(share)]++;
-
-      if (!alreadyMixed) {
-        for (let si = 0; si < SHARES.length; si++)
-          for (let fi = 0; fi < FLOORS.length; fi++)
-            if (share >= SHARES[si] && minority >= FLOORS[fi]) s.grid[si][fi]++;
-
-        if (share >= REC_SHARE && minority >= REC_FLOOR) {
-          bump(s.recEmitted, shipped ?? -1);
-          if (rainMm < snowWE) s.recRainMinor++; else s.recSnowMinor++;
-          // Same intensity split the shipped mix arm uses: total WE per wet hour vs MIX_HEAVY_MM.
-          const rate = (rainMm + snowWE) / wet.length;
-          if (rate < MIX_HEAVY_MM) s.rec68++; else s.rec69++;
-        }
+      if (share >= REC_SHARE && minority >= REC_FLOOR) {
+        bump(s.recEmitted, shipped ?? -1);
+        if (rainMm < snowWE) s.recRainMinor++; else s.recSnowMinor++;
+        // Same intensity split the shipped mix arm uses: total WE per wet hour vs MIX_HEAVY_MM.
+        const rate = (rainMm + snowWE) / wet.length;
+        if (rate < MIX_HEAVY_MM) s.rec68++; else s.rec69++;
       }
     }
   }
@@ -173,8 +139,7 @@ function scanCell(h: HourlyData, startHour: number): void {
 const pctStr = (n: number, d: number): string => (d === 0 ? "  -  " : `${((100 * n) / d).toFixed(2)}%`);
 
 function report(): void {
-  for (const res of RES_IDXS) {
-    const s = stats.get(res)!;
+  for (const [res, s] of stats) {
     console.log(`\n${"═".repeat(96)}\n  RESOLUTION ${RES_LABEL[res]}   periods=${s.periods}  escaped(thunder/frz)=${s.escaped}  wet(step-3)=${s.wetPeriods} (${pctStr(s.wetPeriods, s.periods)} of all)`);
 
     console.log(`\n  A. Populations`);
@@ -206,6 +171,10 @@ function report(): void {
   console.log();
 }
 
-console.log("Scanning corpus (train split) for amount-aware mixed-phase sizing…");
-await eachForecast((h, startHour) => scanCell(h, startHour), "train", SCAN_VARS);
-report();
+export async function analyze(args: string[]): Promise<void> {
+  console.log("Scanning corpus (train split) for amount-aware mixed-phase sizing…");
+  await eachColumn({ vars: SCAN_VARS, stride: argStride(args) }, scanCell);
+  report();
+}
+
+runStandalone(import.meta.url, analyze);

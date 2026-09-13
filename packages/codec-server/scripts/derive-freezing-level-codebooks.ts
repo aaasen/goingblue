@@ -4,7 +4,7 @@
  * and the bucket is taken from the CLAMPED reconstruction delta the decoder actually sees (the
  * same tempDeltaBucket the temp column keys its own tables on). The freezing level is where the
  * 0°C isotherm sits, so it moves with the airmass temperature — a warming period pulls it up, a
- * cooling one down. Held-out (5-fold by location, analyze-cross-var-heldout.ts, post 5-bit
+ * cooling one down. Held-out (5-fold by location, analyze/freezing-level.ts, post 5-bit
  * widening): pooled 1.445 → res 1.393 → res × tempΔ 1.308 b/period.
  *
  * Temp is not guaranteed in the request, so a res-keyed fallback table set (the tempΔ marginal)
@@ -126,7 +126,7 @@ export async function derive(precounted?: Float64Array): Promise<DerivedTables> 
   const c = counter();
   const counts = precounted ?? await deriveCounts(c);
   // Training-set mean bits/period per resolution, for the generation log (held-out numbers are
-  // the scan's job — see analyze-cross-var-heldout.ts).
+  // the scan's job — see analyze/freezing-level.ts).
   const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
   const bitsUnder = (row: number[], table: number[]): number => {
     const cost = rowCostBits(scaledWeights(table));

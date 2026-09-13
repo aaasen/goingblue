@@ -4,7 +4,7 @@
  * keyed by the level's own previous decoded step. The same model the precip/snow/rain columns
  * ship, and measured to be the band's dominant context: the RH-diagnostic fill pins levels at
  * exactly 0 for long runs (rhCrit floor), so "was clear" reshapes the whole next-step
- * distribution. Held-out (5-fold by location, analyze-cloud-neighbor-heldout.ts, 2026-08-20):
+ * distribution. Held-out (5-fold by location, analyze/clouds.ts, 2026-08-20):
  * per-level pooled deltas 10.59 → per-level × prev exact 7.74 b/period over the 8 levels
  * (−27%); the vertical-neighbor delta added only −0.19 on top and was left out; res keying
  * added ~nothing (−0.09) at the resolutions that serve.

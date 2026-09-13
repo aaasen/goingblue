@@ -21,10 +21,10 @@
  * bit was reclaimed, so weathercode is the only carrier of sky state — the showery/continuous axis
  * is the only "there was sun in there" channel the format has.
  *
- * Thresholds are read off analyze-weathercode-aggregation.ts §E (accumulation rate per WET hour,
+ * Thresholds are read off analyze/weathercode-aggregation.ts §E (accumulation rate per WET hour,
  * 1h rows as ground truth). Each reproduces its code's modal rate bin.
  *
- * COST, held-out 5-fold by location over 52.0M periods (analyze-wc-aggregation-heldout.ts):
+ * COST, held-out 5-fold by location over 52.0M periods (analyze/weathercode.ts):
  * +0.080 b/period vs max, ~0.9% of the body — +0.034 for the wet-side rule and +0.047 for the
  * dry-sky fix, which partition the periods and so sum. The three wet columns, whose codebooks key
  * on the same-period weathercode class, did not move (+0.001): their symbols are untouched and
@@ -96,7 +96,7 @@ export function drySkyCode(codes: number[]): number {
  * `drySkyMax` reverts step 2 to today's `max` for dry windows, leaving the wet-side rule intact —
  * used only by the cost scan to price the two halves of the change independently. `noAmountMix`
  * disables the amount arm of the mixed-phase gate — used only by its cost scan
- * (analyze-wc-amount-mix-heldout.ts) to price that arm against the code-count arm alone.
+ * (analyze/weathercode.ts) to price that arm against the code-count arm alone.
  */
 export function aggregateWeathercode(
   codes: number[], snowCm: number, rainMm: number, drySkyMax = false, noAmountMix = false,
@@ -137,7 +137,7 @@ export function aggregateWeathercode(
   //            Compare the phases in water equivalent instead: minority ≥ MIX_FRAC of total WE,
   //            above a trace floor. Catches ~0.85% of wet periods at every resolution (67-72%
   //            of them rain-under-snow, emitted as pure snow before), including 1h, where the
-  //            code arm structurally cannot fire (analyze-wc-amount-mix.ts).
+  //            code arm structurally cannot fire (analyze/weathercode-amount-mix.ts).
   const snowWE = snowCm / SNOW_CM_PER_MM;
   const minorityWE = Math.min(rainMm, snowWE);
   const codeMix = Math.min(liquid, snow.length) / nWet >= MIX_FRAC;
