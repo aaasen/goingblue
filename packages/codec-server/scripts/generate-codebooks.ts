@@ -23,8 +23,8 @@ import { cpus, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  CODEBOOKS_DIR, codebookFileFor, codebookFileUnchanged, codebookNameOf, deriveCountsMulti,
-  renderCodebookFile, type CellCounter, type DerivedTables,
+  CODEBOOKS_DIR, assertCorpusHas, codebookFileFor, codebookFileUnchanged, codebookNameOf,
+  counterVars, deriveCountsMulti, renderCodebookFile, type CellCounter, type DerivedTables,
 } from "./derive-lib.ts";
 import { DB_PATH } from "./corpus-db.ts";
 
@@ -129,10 +129,21 @@ async function scanSharded(): Promise<Float64Array[]> {
   return totals;
 }
 
-console.log(`Scanning the corpus once for ${mods.length} derive scripts across ${WORKERS} processes…`);
-const scanStarted = Date.now();
-const countVecs = WORKERS > 1 ? await scanSharded() : await deriveCountsMulti(mods.map((m) => m.counter));
-console.log(`(scan ${((Date.now() - scanStarted) / 1000).toFixed(1)}s)`);
+// Only the series the selected counters declare are loaded, so a one-script run parses a
+// fraction of each cell. A selection that reads nothing (the agreement script alone) skips the
+// scan outright.
+const vars = counterVars(mods.map((m) => m.counter));
+assertCorpusHas(vars);
+let countVecs: Float64Array[];
+if (vars.length === 0) {
+  console.log("Nothing to scan: the selected scripts read no corpus series.");
+  countVecs = mods.map((m) => new Float64Array(m.counter.nSlots));
+} else {
+  console.log(`Scanning the corpus once for ${mods.length} derive scripts (${vars.length} series) across ${WORKERS} processes…`);
+  const scanStarted = Date.now();
+  countVecs = WORKERS > 1 ? await scanSharded() : await deriveCountsMulti(mods.map((m) => m.counter));
+  console.log(`(scan ${((Date.now() - scanStarted) / 1000).toFixed(1)}s)`);
+}
 
 mkdirSync(CODEBOOKS_DIR, { recursive: true });
 const date = new Date().toISOString().slice(0, 10);

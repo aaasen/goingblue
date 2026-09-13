@@ -45,6 +45,7 @@ import {
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, huffmanLengths, scaledWeights, runStandalone,
   type CellCounter, type DerivedTables,
+  CLOUD_FILL_OUTPUTS,
 } from "./derive-lib.ts";
 
 const LEVELS = CLOUD_BAND_LEVELS_HPA.slice(CLOUD_BAND_TRAINED_LEVEL_OFFSET);
@@ -77,6 +78,8 @@ export function counter(): CellCounter {
 
   return {
     tables, nSlots,
+    // The filled band (fillCloudBand runs because these are its outputs) plus the trio.
+    vars: ["cloud_cover_high", "cloud_cover_mid", "cloud_cover_low", ...CLOUD_FILL_OUTPUTS],
     countCell(ctx, add) {
       for (const res of SERVING_RES_IDXS) {
         // Periods anchored to the cell's first local midnight, aggregated once per cell and

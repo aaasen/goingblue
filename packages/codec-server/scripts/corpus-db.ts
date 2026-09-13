@@ -38,7 +38,9 @@ export interface SeriesRow {
 
 export function openDb(path: string = DB_PATH): DatabaseSync {
   mkdirSync(dirname(path), { recursive: true });
-  const db = new DatabaseSync(path);
+  // The scan opens the DB from several processes at once; the busy timeout makes a momentary
+  // lock (another opener setting the journal mode) a wait rather than a failed shard.
+  const db = new DatabaseSync(path, { timeout: 5000 });
   db.exec(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS series (

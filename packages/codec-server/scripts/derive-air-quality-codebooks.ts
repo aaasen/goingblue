@@ -54,6 +54,7 @@ import {
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, scaledWeights, runStandalone,
   type CellCounter, type DerivedTables,
+  EXTRA_SOURCE_VARS,
 } from "./derive-lib.ts";
 
 const NRES = TABLE_RES_IDXS.length;          // 12h/6h/3h/1h — the resolutions layouts emit
@@ -181,6 +182,7 @@ export function counter(): CellCounter {
 
   return {
     tables, nSlots,
+    vars: EXTRA_SOURCE_VARS.cams,
     countCell(ctx, add) {
       const { hourly: h, pos } = ctx;
       // Air quality rides a second corpus source; a cell the CAMS pull didn't cover has no AQ
@@ -373,13 +375,13 @@ export async function derive(precounted?: Float64Array): Promise<DerivedTables> 
       `  unknown=${unknownPct.toFixed(1)}%`);
     // The unknown symbol is for upstream returning a headline without its constituents, which the
     // corpus barely sees. A large share means the constituents weren't LOADED rather than missing
-    // — the usual cause being a variable routed in EXTRA_SOURCE_VARS but left out of DERIVE_VARS,
-    // which reads as an absent column and counts as no attribution. Shipping that would cost
+    // — the usual cause being a constituent left out of this counter's `vars`, which reads as an
+    // absent column and counts as no attribution. Shipping that would cost
     // ~10 b/period on a column measured at 0.25.
     if (unknownPct > 5)
       console.warn(
         `  !! ${d.name}: ${unknownPct.toFixed(1)}% of periods have NO attribution — check that` +
-        ` every constituent it reads is in DERIVE_VARS, not only in EXTRA_SOURCE_VARS.`);
+        ` every constituent it reads is in this counter's vars list.`);
   }
 
   // Every residual mask, so the log shows both the ones the wire selects and the ones it rejects

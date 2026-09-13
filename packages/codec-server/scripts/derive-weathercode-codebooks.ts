@@ -43,6 +43,8 @@ export function counter(): CellCounter {
 
   return {
     tables, nSlots,
+    // The aggregation reads the accumulations too: form from coverage, intensity from amount.
+    vars: ["weather_code", "rain", "showers", "snowfall"],
     countCell(ctx, add) {
       // Its own aggregation: one resolution, capped at 128 periods and anchored on the raw
       // request hour, so neither shared slice fits.

@@ -67,6 +67,7 @@ export function counter(): CellCounter {
 
   return {
     tables, nSlots,
+    vars: ["temperature_2m"],
     countCell(ctx, add) {
       const { hourly: h, pos } = ctx;
       if (!pos || !h.time?.length || !h.temperature_2m) return;

@@ -73,6 +73,7 @@ export function counter(): CellCounter {
 
   return {
     tables, nSlots,
+    vars: ["temperature_2m", "freezing_level_height"],
     countCell(ctx, add) {
       const { hourly: h, pos } = ctx;
       if (!pos || !h.time?.length) return;

@@ -14,7 +14,7 @@ import {
   type HourlyData, type Row,
 } from "../src/forecast.ts";
 import { CLOUD_BAND_LEVELS_HPA, WIND_LEVELS_HPA } from "@weather/protocol";
-import { dbLocations, listCells, loadCell, modelElevations, openDb } from "./corpus-db.ts";
+import { dbLocations, listCells, loadCell, modelElevations, openDb, windowTimes } from "./corpus-db.ts";
 
 // The derivation corpus: the production source's cells in the corpus DB (see corpus-db.ts).
 // Only `split: "train"` locations are visited — eval sites (including all favorites) are
@@ -27,6 +27,10 @@ export const DERIVE_SOURCE = "best_match";
 // unused ones tripled scan time. IMPORTANT: a derive/analyze script that reads a variable not
 // listed here sees an absent column and silently counts nothing — add the variable here (or
 // pass `vars: null` to eachForecast for an unfiltered load) when introducing one.
+//
+// This is the default for the analyze scripts. The derive scripts do not use it: each counter
+// declares the series it reads (CellCounter.vars) and the codebook scan loads only the union of
+// the selected counters' lists, so `pnpm generate --only wind` parses wind and nothing else.
 export const DERIVE_VARS: readonly string[] = [
   "temperature_2m", "dew_point_2m", "freezing_level_height", "weather_code",
   "rain", "showers", "snowfall", "precipitation_probability",
@@ -72,6 +76,22 @@ export const EXTRA_SOURCE_VARS: Record<string, readonly string[]> = {
   ],
 };
 const EXTRA_SOURCE_VAR_SET = new Set(Object.values(EXTRA_SOURCE_VARS).flat());
+
+// ── The two production corrections and what they touch ──────────────────────────
+//
+// eachForecast applies both before any counter sees a cell (see there). Each is gated on whether
+// the requested variables include anything it WRITES, and when it runs its inputs are loaded
+// whether or not they were requested — so a counter declares only what it reads, and the
+// corrected values it reads arrive corrected.
+export const PRECIP_PHASE_OUTPUTS: readonly string[] = ["rain", "showers", "snowfall", "weather_code"];
+export const PRECIP_PHASE_INPUTS: readonly string[] = [
+  ...PRECIP_PHASE_OUTPUTS, "temperature_2m", "freezing_level_height",
+];
+export const CLOUD_FILL_OUTPUTS: readonly string[] = CLOUD_BAND_LEVELS_HPA.map((l) => `cloud_cover_${l}hPa`);
+export const CLOUD_FILL_INPUTS: readonly string[] = [
+  ...CLOUD_FILL_OUTPUTS, "cloud_cover_high", "cloud_cover_mid", "cloud_cover_low",
+  ...CLOUD_BAND_LEVELS_HPA.flatMap((l) => [`relative_humidity_${l}hPa`, `geopotential_height_${l}hPa`]),
+];
 
 // ── Wind quantization (must match wire.ts) ────────────────────────────────────────
 // Every wind speed column quantizes to the extended Beaufort scale (forces 0..17): band lower
@@ -198,6 +218,12 @@ export function makeCellCtx(
 export interface CellCounter {
   tables: CountedTable[];
   nSlots: number;
+  // The hourly series this counter reads, directly or through the period rows (rowsFromWindows
+  // / toFullPeriod: a Period field comes from the hourly series of the same name, weathercode
+  // also from rain/showers/snowfall, the cloud band from cloud_cover_XhPa). The codebook scan
+  // loads only the union of the selected counters' lists, so an undeclared series reads as
+  // absent and counts nothing — the `--only` run for a new counter must reproduce its file.
+  vars: readonly string[];
   // Adds this cell's symbol emissions (wire granularity — one add per symbol the encoder would
   // emit under these tables) into `add(slot)`.
   countCell(ctx: CellCtx, add: (slot: number) => void): void;
@@ -219,6 +245,7 @@ export function combineCounters(parts: CellCounter[]): CellCounter {
   return {
     tables: parts.flatMap((p) => p.tables),
     nSlots,
+    vars: [...new Set(parts.flatMap((p) => p.vars))],
     countCell(ctx, add) {
       parts.forEach((p, i) => p.countCell(ctx, (slot) => add(starts[i] + slot)));
     },
@@ -272,13 +299,42 @@ export async function deriveCountsMulti(
 ): Promise<Float64Array[]> {
   const vecs = counters.map((c) => new Float64Array(c.nSlots));
   const adds = vecs.map((v) => (slot: number) => { v[slot]++; });
+  // Only what the selected counters read is loaded. Nothing to read (the agreement script, which
+  // trains off the live snapshots) means nothing to scan.
+  const vars = counterVars(counters);
+  if (vars.length === 0) return vecs;
   await eachForecast((h, startHour, _loc, pos) => {
     // One context per cell: the aggregation every counter would otherwise redo is computed on
     // first use and shared by all of them.
     const ctx = makeCellCtx(h, startHour, pos);
     for (let i = 0; i < counters.length; i++) counters[i].countCell(ctx, adds[i]);
-  }, "train", DERIVE_VARS, shard);
+  }, "train", vars, shard);
   return vecs;
+}
+
+// The union of the counters' declared series, in first-seen order.
+export function counterVars(counters: CellCounter[]): string[] {
+  return [...new Set(counters.flatMap((c) => c.vars))];
+}
+
+// Fails on a declared series the corpus does not carry (a typo, or a variable never collected),
+// read off one cell per source — every cell of a source carries the same variable set, and the
+// primary key makes the single-cell read instant where a DISTINCT over the table takes ~20s.
+export function assertCorpusHas(vars: readonly string[]): void {
+  const db = openDb();
+  const have = new Set<string>();
+  for (const source of [DERIVE_SOURCE, ...Object.keys(EXTRA_SOURCE_VARS)]) {
+    const first = listCells(db, source)[0];
+    if (!first) continue;
+    const cell = loadCell(db, source, first.locationId, first.windowStart);
+    for (const k of Object.keys(cell ?? {})) have.add(k);
+  }
+  db.close();
+  // The cloud fill writes every band level, including the 200/250 hPa rungs the corpus never
+  // stored (fillCloudBand synthesizes them), so a counter may declare those without them existing.
+  const synthesized = new Set(CLOUD_FILL_OUTPUTS);
+  const missing = vars.filter((v) => !have.has(v) && !synthesized.has(v));
+  if (missing.length) throw new Error(`corpus carries no series named: ${missing.join(", ")}`);
 }
 
 // Visits every train-split forecast in the corpus DB (WAL mode — safe alongside a concurrent
@@ -286,6 +342,10 @@ export async function deriveCountsMulti(
 // location's lat/lon from the registry mirror, for scripts that need geography (UTC offset,
 // solar position). Cells are loaded with only the DERIVE_VARS series by default (see that
 // list's caveat); pass `vars: null` for the full ~80-variable load.
+//
+// The two production corrections run only when `vars` asks for something they write (see
+// PRECIP_PHASE_OUTPUTS / CLOUD_FILL_OUTPUTS above), and their inputs are loaded alongside `vars`
+// when they do. A null `vars` loads and corrects everything.
 //
 // `fillBand: false` hands the callback the cloud band exactly as the corpus served it, skipping
 // fillCloudBand. Only a scan MEASURING the fill wants that (analyze-cloud-band-fill.ts) — every
@@ -303,13 +363,21 @@ export async function eachForecast(
   // Site elevation for the precip-phase correction: the elevation the API downscaled the cell's
   // temperature to (grid-snap or pinned), same input production hands adjustPrecipPhase.
   const elevs = modelElevations(db, DERIVE_SOURCE);
+  const wants = (outputs: readonly string[]) => vars === null || vars.some((v) => outputs.includes(v));
+  const adjustPhase = wants(PRECIP_PHASE_OUTPUTS);
+  const fillBandHere = fillBand && wants(CLOUD_FILL_OUTPUTS);
+  const loadVars = vars === null ? null : [...new Set([
+    ...vars,
+    ...(adjustPhase ? PRECIP_PHASE_INPUTS : []),
+    ...(fillBandHere ? CLOUD_FILL_INPUTS : []),
+  ])];
   // Split the requested variables by which source carries them, once, outside the cell loop. A
   // source nobody asked for is never queried, so scripts that read no air quality pay nothing.
-  const primaryVars = vars?.filter((v) => !EXTRA_SOURCE_VAR_SET.has(v)) ?? null;
+  const primaryVars = loadVars?.filter((v) => !EXTRA_SOURCE_VAR_SET.has(v)) ?? null;
   const extraLoads = Object.entries(EXTRA_SOURCE_VARS)
     .map(([source, srcVars]) => ({
       source,
-      vars: vars ? srcVars.filter((v) => vars.includes(v)) : [...srcVars],
+      vars: loadVars ? srcVars.filter((v) => loadVars.includes(v)) : [...srcVars],
     }))
     .filter((e) => e.vars.length > 0);
   let cells = 0;
@@ -326,7 +394,11 @@ export async function eachForecast(
     // the mirror, for scans that MUST run held-out (a change measured on the sites that trained
     // the tables it runs against would flatter itself).
     if (split !== "all" && loc.split !== split) continue;
-    const raw = loadCell(db, DERIVE_SOURCE, locationId, windowStart, primaryVars);
+    // An empty primary list (only second-source variables wanted) still needs the time axis;
+    // loadCell reads the whole cell when given no filter, so the axis is built here instead.
+    const raw = primaryVars && primaryVars.length === 0
+      ? ({ time: windowTimes(windowStart) } as HourlyData)
+      : loadCell(db, DERIVE_SOURCE, locationId, windowStart, primaryVars);
     if (!raw) continue;
     for (const e of extraLoads) {
       const extra = loadCell(db, e.source, locationId, windowStart, e.vars);
@@ -339,8 +411,8 @@ export async function eachForecast(
     // cell carries no pressure-level humidity, so cells predating the level collection are
     // unaffected.
     const elevM = elevs.get(locationId) ?? loc.elev_m ?? null;
-    const corrected = adjustPrecipPhase(raw, elevM);
-    const hourly = fillBand ? fillCloudBand(corrected, elevM ?? 0) : corrected;
+    const corrected = adjustPhase ? adjustPrecipPhase(raw, elevM) : raw;
+    const hourly = fillBandHere ? fillCloudBand(corrected, elevM ?? 0) : corrected;
     cells++;
     seen.add(locationId);
     cb(hourly, Math.floor(Date.parse(windowStart + "Z") / 3600000), locationId,

@@ -85,6 +85,11 @@ const RES_LABEL = ["12h", "6h", "3h", "1h"];
 const GUST_VARS: ReadonlySet<Variable> = new Set([VAR.wind, VAR.gust]);
 const LEVEL_VARS: ReadonlySet<Variable> = new Set([VAR.wind, ...WIND_LEVEL_VARS]);
 const deltaSym = (delta: number): number => delta + FORCE_MAX; // -17..17 -> 0..34
+// Surface speed and direction plus both fields at every ladder level, for the two level counters.
+const LEVEL_HOURLY: readonly string[] = [
+  "wind_speed_10m", "wind_direction_10m",
+  ...WIND_LEVELS_HPA.flatMap((l) => [`wind_speed_${l}hPa`, `wind_direction_${l}hPa`]),
+];
 const sum = (r: number[]) => r.reduce((a, b) => a + b, 0);
 const speedOf = (p: Period, L: number): number | undefined =>
   L === 0 ? p.wind_sfc_kph : p.wind_aloft?.[L - 1]?.kph;
@@ -113,6 +118,7 @@ function gustCounter(): CellCounter {
 
   return {
     tables, nSlots,
+    vars: ["wind_speed_10m", "wind_gusts_10m"],
     countCell(ctx, add) {
       const { hourly: h, pos } = ctx;
       if (!pos || !h.time?.length) return;
@@ -210,6 +216,7 @@ function directionCounter(): CellCounter {
 
   return {
     tables, nSlots,
+    vars: LEVEL_HOURLY,
     countCell(ctx, add) {
       for (let resIdx = 0; resIdx < NRES; resIdx++) {
         // Periods anchored to the request hour, aggregated once per cell and shared with every
@@ -327,6 +334,7 @@ function speedCounter(): CellCounter {
 
   return {
     tables, nSlots,
+    vars: LEVEL_HOURLY,
     countCell(ctx, add) {
       for (let resIdx = 0; resIdx < NRES; resIdx++) {
         // Periods anchored to the request hour, aggregated once per cell and shared with every

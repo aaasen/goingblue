@@ -44,6 +44,7 @@ const NPREV = AGREEMENT_NSYM + 1; // bootstrap row + one per previous symbol
 export function counter(): CellCounter {
   return {
     tables: [],
+    vars: [],
     nSlots: 1,
     countCell() {},
     tablesFrom: () => ({}),

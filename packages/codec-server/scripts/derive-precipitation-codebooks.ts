@@ -102,6 +102,8 @@ export function counter(): CellCounter {
 
   return {
     tables, nSlots,
+    // weather_code for the same-period class context; the amounts also feed the code itself.
+    vars: ["precipitation_probability", "rain", "showers", "snowfall", "weather_code"],
     countCell(ctx, add) {
       for (let resIdx = 0; resIdx < NRES; resIdx++) {
         // Periods anchored to the request hour, aggregated once per cell and shared with every
