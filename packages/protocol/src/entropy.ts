@@ -415,16 +415,16 @@ export interface Books {
   // (null for the column's first — bootstrap), `upper` the upper level's same-period displayed
   // direction (null when that column is absent or this level has none), `gap` the ladder
   // distance to that level (see windGapClass). See
-  // codec-server/scripts/wind-direction.ts for the context ladder.
+  // codec-server/scripts/derive-wind-codebooks.ts for the context ladder.
   windDirBook(res: number, prev: number | null, upper: number | null, gap: number): CodeBook;
   // The codebook for one speed delta. `level` indexes the unconditioned table axis (0 = surface,
   // 1 + WIND_LEVELS_HPA index for the pressure levels); `upperDelta` is the served level above's
   // same-period delta (null when there is none), `gap` the ladder distance to it. See
-  // codec-server/scripts/wind-speed.ts.
+  // codec-server/scripts/derive-wind-codebooks.ts.
   windSpeedBook(res: number, level: number, upperDelta: number | null, gap: number): CodeBook;
   // The codebook for one gust delta. Gust decodes FIRST among the wind columns (no context of
   // its own) — chosen so the surface column can lean on it, and can one day become optional
-  // without touching gust. See codec-server/scripts/wind-gust.ts.
+  // without touching gust. See codec-server/scripts/derive-wind-codebooks.ts.
   gustDeltaBook(res: number): CodeBook;
   // The codebook for one SURFACE wind speed delta. `gustDelta` is the gust column's same-period
   // decoded delta (free context — gusts and sustained wind move together), or null when gust is

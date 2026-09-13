@@ -211,7 +211,7 @@ export interface CellCounter {
 }
 
 // Several counters as one, their slot spaces laid end to end, so a script can own the tables of
-// several column families while each family keeps its own module (derive-wind-codebooks.ts).
+// several column families under one file (derive-wind-codebooks.ts).
 export function combineCounters(parts: CellCounter[]): CellCounter {
   const starts: number[] = [];
   let nSlots = 0;
