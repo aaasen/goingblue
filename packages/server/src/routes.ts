@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { ping } from "./db.js";
 import { extractUserToken, extractVersion } from "./dispatch.js";
 import { createAccount, deleteAccount, recordRequest } from "./accounts.js";
@@ -11,7 +12,8 @@ import {
   replyChars, resolveForecast,
 } from "./forecast.js";
 import { isAppUserAgent, isValidToken, normalizeToken } from "@weather/protocol";
-import { isMessageSid, twiml, validateTwilioSignature } from "./twilio.js";
+import { fetchMessage, isMessageSid, twiml, validateTwilioSignature } from "./twilio.js";
+import { FORECAST_NUMBER } from "./constants.js";
 import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 
 // Record an internet request without ever failing the response: the reply is already built by
@@ -64,12 +66,10 @@ export async function forecast(c: Context) {
 // From, To, ...). When TWILIO_AUTH_TOKEN is set the request signature is verified so the public
 // endpoint can't be spoofed; an unsigned or invalid request is rejected with 403.
 //
-// The message is recorded by SID and answered by the encode task, which sends the reply through
-// the Twilio REST API; the webhook response itself carries no message. With a queue configured
-// the task is enqueued on Cloud Tasks and this returns at once; an enqueue that fails is a 503,
-// and the message is picked up again by the Twilio event sink. Without a queue (local dev) the
-// task runs inline with no retry window, so a transient failure gets the unavailable reply at
-// once, and a send that could not complete is a 503 that Twilio's webhook retry resumes.
+// The message is recorded by SID and its encode task queued (queueMessage); the task sends the
+// reply through the Twilio REST API, so the webhook response itself carries no message. A
+// failure to record or enqueue is a 503, and the message is picked up again by the event sink.
+// The sink delivers the same message too, so a missed webhook is not a lost message.
 export async function sms(c: Context) {
   const requestId = randomUUID();
   const traceId = traceIdFrom(c.req.header("X-Cloud-Trace-Context"));
@@ -107,32 +107,109 @@ async function handleSms(c: Context, requestId: string, traceId: string | null) 
   // HELP, STOP and START never reach this webhook: Twilio's Advanced Opt-Out intercepts the
   // keywords and sends its own replies, configured in the Twilio console.
 
-  // The row is the record that the message exists; without it nothing downstream can be
-  // deduplicated or resumed, so a database failure here is a failure of the request.
+  const result = await queueMessage(sid, requestId, traceId, null);
+  if (result !== "queued") return c.text("Unavailable", 503);
+  return c.text(twiml(""), 200, { "Content-Type": "text/xml" });
+}
+
+// Record a message by SID and put its encode task on the queue. Shared by the webhook and the
+// event sink, so both deliveries of the same message do the same thing and the second finds
+// the first's row. "unavailable" means the row could not be written or the task could not be
+// enqueued: the caller answers 503 and Twilio delivers the message again.
+//
+// The row is the record that the message exists; without it nothing downstream can be
+// deduplicated or resumed, so a database failure here is a failure of the request. Without a
+// queue configured (local dev) the task runs inline instead, with no retry window.
+export async function queueMessage(
+  sid: string,
+  requestId: string,
+  traceId: string | null,
+  twilioReceivedAt: Date | null,
+): Promise<"queued" | "unavailable"> {
   let row: Awaited<ReturnType<typeof receiveMessage>>;
   try {
-    row = await receiveMessage({ requestId, messageSid: sid, twilioReceivedAt: null });
+    row = await receiveMessage({ requestId, messageSid: sid, twilioReceivedAt });
   } catch (e) {
-    log.error("sms.receive_failed", { sid, err: e });
-    return c.text("Unavailable", 503);
+    log.error("message.receive_failed", { sid, err: e });
+    return "unavailable";
   }
-  const empty = () => c.text(twiml(""), 200, { "Content-Type": "text/xml" });
-
   if (!tasksConfigured()) {
     const result = await runEncodeTask(sid, { retryWindowMs: 0, traceId });
-    return result === "done" ? empty() : c.text("Retry", 503);
+    return result === "done" ? "queued" : "unavailable";
   }
   // Already on the queue from an earlier delivery of this message: nothing more to do.
-  if (row.queuedAt !== null) return empty();
+  if (row.queuedAt !== null) return "queued";
   try {
     const enqueued = await enqueueEncode(sid);
     await markQueued(row.id);
-    log.info("sms.queued", { sid, enqueued });
+    log.info("message.queued", { sid, enqueued });
   } catch (e) {
-    log.error("sms.enqueue_failed", { sid, err: e });
-    return c.text("Unavailable", 503);
+    log.error("message.enqueue_failed", { sid, err: e });
+    return "unavailable";
   }
-  return empty();
+  return "queued";
+}
+
+// POST /twilio-sink: the Event Streams webhook sink, subscribed to inbound messages. Twilio
+// delivers each event at least once, retrying for hours until it gets a 2xx, which is what
+// makes message receipt survive a missed /sms webhook. The sink is configured without
+// batching, so each delivery is one CloudEvent.
+//
+// The route is public and takes no credential. Instead the message is read back from Twilio
+// before anything is written: a SID Twilio does not know, or that is not an inbound message to
+// the service number, is a 404 and leaves no row, so the only thing a caller can make the
+// service do is look up a message. If Twilio's API cannot be reached the event is a 503 and
+// comes back later; when Twilio is down there are no events to receive anyway.
+export async function twilioSink(c: Context) {
+  const requestId = randomUUID();
+  const traceId = traceIdFrom(c.req.header("X-Cloud-Trace-Context"));
+  return withTrace(traceId, () => withRequestId(requestId, () => handleSink(c, requestId, traceId)));
+}
+
+const INBOUND_EVENT = "com.twilio.messaging.inbound-message.received";
+
+async function handleSink(c: Context, requestId: string, traceId: string | null) {
+  const event = await c.req.json().catch(() => null) as unknown;
+  const status = await handleEvent(event, requestId, traceId);
+  return c.text(SINK_TEXT[status] ?? "Unavailable", status as ContentfulStatusCode);
+}
+
+const SINK_TEXT: Record<number, string> = { 200: "ok", 400: "Bad event", 404: "Unknown message", 503: "Unavailable" };
+
+// One event to its HTTP status. Only the message-received type does anything; every other
+// type, including the sink's own test event, is acknowledged and ignored.
+async function handleEvent(event: unknown, requestId: string, traceId: string | null): Promise<number> {
+  if (typeof event !== "object" || event === null || Array.isArray(event)) {
+    log.error("sink.bad_event", { reason: Array.isArray(event) ? "batch" : "not_an_object" });
+    return 400;
+  }
+  const e = event as Record<string, unknown>;
+  const type = typeof e["type"] === "string" ? e["type"] : "";
+  if (type !== INBOUND_EVENT) {
+    log.info("sink.ignored", { type });
+    return 200;
+  }
+  const data = (typeof e["data"] === "object" && e["data"] !== null ? e["data"] : {}) as Record<string, unknown>;
+  const sid = data["messageSid"];
+  if (!isMessageSid(sid)) {
+    // The key names say what shape arrived; the values would be the sender and the text.
+    log.error("sink.bad_event", { reason: "no_sid", keys: Object.keys(data) });
+    return 400;
+  }
+  log.info("sink.inbound", { sid });
+  const fetched = await fetchMessage(sid);
+  if (fetched.kind === "retry") return 503;
+  if (fetched.kind === "not_found") {
+    log.error("sink.rejected", { sid, reason: "not_found" });
+    return 404;
+  }
+  const m = fetched.message;
+  if (m.direction !== "inbound" || m.to !== FORECAST_NUMBER) {
+    log.error("sink.rejected", { sid, reason: "not_inbound", direction: m.direction });
+    return 404;
+  }
+  const result = await queueMessage(sid, requestId, traceId, m.dateCreated);
+  return result === "queued" ? 200 : 503;
 }
 
 export async function health(c: Context) {

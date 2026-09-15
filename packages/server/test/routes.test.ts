@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import { appUserAgent, generateToken } from "@weather/protocol";
-import { createAccountRoute, forecast, sms } from "../src/routes.js";
+import { createAccountRoute, forecast, sms, twilioSink } from "../src/routes.js";
+import { fetchMessage } from "../src/twilio.js";
+import { FORECAST_NUMBER } from "../src/constants.js";
 import { accountExists, createAccount, recordRequest } from "../src/accounts.js";
 import { markQueued, receiveMessage } from "../src/delivery.js";
 import { runEncodeTask } from "../src/encode-task.js";
@@ -32,6 +34,11 @@ vi.mock("../src/tasks.js", () => ({
   tasksConfigured: vi.fn(() => false),
   enqueueEncode: vi.fn(async () => "queued"),
 }));
+// The sink reads the message back from Twilio before writing anything; only that call is mocked.
+vi.mock("../src/twilio.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/twilio.js")>()),
+  fetchMessage: vi.fn(),
+}));
 
 const TOKEN = generateToken((n) => Uint8Array.from(randomBytes(n)));
 const BODY = `v1 p:a u:${TOKEN}`;
@@ -40,6 +47,7 @@ const SID = "SM" + "0".repeat(31) + "1";
 const app = new Hono();
 app.post("/forecast", forecast);
 app.post("/sms", sms);
+app.post("/twilio-sink", twilioSink);
 
 const post = (body: string) => app.request("/forecast", { method: "POST", body });
 const postSms = (body: string, params: Record<string, string> = { MessageSid: SID }) =>
@@ -59,6 +67,19 @@ beforeEach(() => {
   vi.mocked(tasksConfigured).mockReturnValue(false);
   vi.mocked(enqueueEncode).mockClear();
   vi.mocked(enqueueEncode).mockResolvedValue("queued");
+  vi.mocked(fetchMessage).mockReset();
+  vi.mocked(fetchMessage).mockResolvedValue({ kind: "ok", message: INBOUND });
+});
+
+const RECEIVED = new Date("2026-09-15T21:54:20Z");
+const INBOUND = { sid: SID, direction: "inbound", from: "+15550100", to: FORECAST_NUMBER, body: BODY, dateCreated: RECEIVED };
+const inboundEvent = (sid: unknown = SID) => ({
+  specversion: "1.0", type: "com.twilio.messaging.inbound-message.received", id: "evt-1",
+  time: "2026-09-15T21:54:20.100Z", data: { messageSid: sid, from: "+15550100", to: FORECAST_NUMBER, body: BODY },
+});
+const testEvent = { specversion: "1.0", type: "com.twilio.eventstreams.test-event", id: "evt-0", data: {} };
+const postSink = (body: unknown) => app.request("/twilio-sink", {
+  method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" },
 });
 
 afterEach(() => {
@@ -159,6 +180,80 @@ describe("sms webhook", () => {
     });
     expect(vi.mocked(runEncodeTask)).toHaveBeenCalledWith(SID, { retryWindowMs: 0, traceId: TRACE });
   });
+});
+
+// The event sink: the same record-and-queue step as the webhook, after reading the message back
+// from Twilio so that only a real inbound message to the service number leaves a row.
+describe("twilio sink", () => {
+  beforeEach(() => vi.mocked(tasksConfigured).mockReturnValue(true));
+
+  it("validates the message at Twilio, records it with Twilio's time, and enqueues", async () => {
+    const resp = await postSink(inboundEvent());
+    expect(resp.status).toBe(200);
+    expect(vi.mocked(fetchMessage)).toHaveBeenCalledWith(SID);
+    expect(vi.mocked(receiveMessage)).toHaveBeenCalledWith(
+      expect.objectContaining({ messageSid: SID, twilioReceivedAt: RECEIVED }));
+    expect(vi.mocked(enqueueEncode)).toHaveBeenCalledWith(SID);
+    expect(vi.mocked(markQueued)).toHaveBeenCalledWith("1");
+  });
+
+  it("acknowledges and ignores any other event type, including the sink test", async () => {
+    const resp = await postSink(testEvent);
+    expect(resp.status).toBe(200);
+    expect(vi.mocked(fetchMessage)).not.toHaveBeenCalled();
+    expect(vi.mocked(receiveMessage)).not.toHaveBeenCalled();
+  });
+
+  it("is a 404 with no row for a SID Twilio does not know, or a message not inbound to us", async () => {
+    vi.mocked(fetchMessage).mockResolvedValue({ kind: "not_found" });
+    expect((await postSink(inboundEvent())).status).toBe(404);
+    vi.mocked(fetchMessage).mockResolvedValue({ kind: "ok", message: { ...INBOUND, direction: "outbound-api" } });
+    expect((await postSink(inboundEvent())).status).toBe(404);
+    vi.mocked(fetchMessage).mockResolvedValue({ kind: "ok", message: { ...INBOUND, to: "+15559999" } });
+    expect((await postSink(inboundEvent())).status).toBe(404);
+    expect(vi.mocked(receiveMessage)).not.toHaveBeenCalled();
+    expect(vi.mocked(enqueueEncode)).not.toHaveBeenCalled();
+  });
+
+  it("asks Twilio to retry the event when its API cannot be reached", async () => {
+    vi.mocked(fetchMessage).mockResolvedValue({ kind: "retry" });
+    expect((await postSink(inboundEvent())).status).toBe(503);
+    expect(vi.mocked(receiveMessage)).not.toHaveBeenCalled();
+  });
+
+  it("rejects an event without a message SID, or that is not JSON", async () => {
+    expect((await postSink(inboundEvent(null))).status).toBe(400);
+    expect((await postSink(inboundEvent("SM123"))).status).toBe(400);
+    const raw = await app.request("/twilio-sink", { method: "POST", body: "not json" });
+    expect(raw.status).toBe(400);
+    expect(vi.mocked(fetchMessage)).not.toHaveBeenCalled();
+  });
+
+  it("does not enqueue a message already queued by the webhook", async () => {
+    vi.mocked(receiveMessage).mockResolvedValue({ id: "1", requestId: "r", queuedAt: new Date() });
+    expect((await postSink(inboundEvent())).status).toBe(200);
+    expect(vi.mocked(enqueueEncode)).not.toHaveBeenCalled();
+  });
+
+  it("asks Twilio to retry when the row or the enqueue fails", async () => {
+    vi.mocked(enqueueEncode).mockRejectedValue(new Error("Cloud Tasks: HTTP 503"));
+    expect((await postSink(inboundEvent())).status).toBe(503);
+    vi.mocked(receiveMessage).mockRejectedValue(new Error("db down"));
+    expect((await postSink(inboundEvent())).status).toBe(503);
+  });
+
+  it("rejects a batch: the sink is configured to send one event per delivery", async () => {
+    expect((await postSink([testEvent, inboundEvent()])).status).toBe(400);
+    expect(vi.mocked(fetchMessage)).not.toHaveBeenCalled();
+  });
+
+  it("runs the task inline without a queue, like the webhook", async () => {
+    vi.mocked(tasksConfigured).mockReturnValue(false);
+    expect((await postSink(inboundEvent())).status).toBe(200);
+    expect(vi.mocked(runEncodeTask)).toHaveBeenCalledWith(SID, { retryWindowMs: 0, traceId: null });
+    expect(vi.mocked(enqueueEncode)).not.toHaveBeenCalled();
+  });
+
 });
 
 describe("account gate", () => {

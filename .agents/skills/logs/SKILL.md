@@ -101,21 +101,21 @@ Request logs for serving forecasts:
 gcloud logging read \
   'log_id("run.googleapis.com/requests")
    AND (httpRequest.requestUrl:"/forecast" OR httpRequest.requestUrl:"/sms"
-        OR httpRequest.requestUrl:"/encode")' \
+        OR httpRequest.requestUrl:"/twilio-sink" OR httpRequest.requestUrl:"/encode")' \
   --project "$PROJECT" --limit 50 --freshness 7d \
   --format 'value(timestamp,resource.labels.service_name,httpRequest.status,httpRequest.requestMethod,httpRequest.requestUrl,httpRequest.latency)'
 ```
 
 ## Forecast Request Logs
 
-The saved query `forecast-request-path` shows only the logs relevant to a forecast request. It includes app logs from both the gateway and the codec services. It also includes request logs for relevant endpoints (`/forecast`, `/sms`, `/encode`). It does not include container lifecycle events.
+The saved query `forecast-request-path` shows only the logs relevant to a forecast request. It includes app logs from both the gateway and the codec services. It also includes request logs for relevant endpoints (`/forecast`, `/sms`, `/twilio-sink`, `/encode`). It does not include container lifecycle events.
 
 ```bash
 gcloud logging read \
   '(log_id("run.googleapis.com/stdout") OR log_id("run.googleapis.com/stderr")
     OR (log_id("run.googleapis.com/requests")
         AND (httpRequest.requestUrl:"/forecast" OR httpRequest.requestUrl:"/sms"
-             OR httpRequest.requestUrl:"/encode")))
+             OR httpRequest.requestUrl:"/twilio-sink" OR httpRequest.requestUrl:"/encode")))
    AND NOT (jsonPayload.event="server.listening" OR jsonPayload.event="db.schema_ready"
             OR jsonPayload.event="codec.listening")' \
   --project "$PROJECT" --limit 100 --freshness 1d \

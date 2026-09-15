@@ -11,10 +11,10 @@ Every source keeps 30 days. A request older than that cannot be traced.
 
 Every messaging route (SMS, inReach, ZOLEO, iPhone satellite) arrives as a text to the service number, so it passes through Twilio. The internet route posts to `/forecast` directly, never touches Twilio or the queue, and is served inside that one request.
 
-On the messaging routes the webhook only records the message and enqueues it. The work happens later, in an encode task that Cloud Tasks posts back to the gateway, and the task may run more than once. In order, with the source that records each hop:
+On the messaging routes, receipt only records the message and enqueues it. The work happens later, in an encode task that Cloud Tasks posts back to the gateway, and the task may run more than once. Twilio delivers each inbound message twice: as the `/sms` webhook, and as an Event Streams event to `/twilio-sink`, which Twilio retries for up to four hours until it gets a 2xx. Whichever arrives first records the row and enqueues; the other finds the row already queued. In order, with the source that records each hop:
 1. Twilio: the inbound message. `sid`, `date_created`, `status` `received`.
-2. Gateway request log: `POST /sms`, with status and latency. Carries the webhook's trace.
-3. Gateway app logs `sms.inbound`, with the Twilio `sid` and the text length, then `sms.queued`. The first lines with the `request_id`.
+2. Gateway request log: `POST /sms` and, usually a few seconds later, `POST /twilio-sink`, each with status and latency and its own trace.
+3. Gateway app logs `sms.inbound` or `sink.inbound`, with the Twilio `sid`, then `message.queued`. The first lines with the `request_id`. The sink reads the message back from Twilio before writing anything, so `sink.rejected` here means the event named a SID that is not an inbound message to the service number, and no row exists.
 4. Database: the `requests` row, written at hop 3 with `message_sid` and advanced at every later hop. Its `state` says how far the message got, and `attempts` how many times the task ran.
 5. Cloud Tasks: the task, named by the SID on the `encode` queue. Visible only while it is waiting or retrying; a finished task is gone.
 6. Gateway request log: `POST /encode?sid=<SID>` from `Google-Cloud-Tasks`, one per attempt, each with its own trace. 200 cleared the task, 503 asked for it back.
@@ -28,8 +28,8 @@ On the messaging routes the webhook only records the message and enqueues it. Th
 
 Keys:
  - `request_id` joins hops 3 through 12, across every attempt: every app log line on both services and the database row. The task runs under the row's id, so a retry continues the same sequence.
- - A trace joins one HTTP request into the gateway and what it caused: the webhook has one (hops 2 and 3), and each task attempt has its own (hops 6 through 12 for that attempt, including the codec's request log). The request logs carry the trace and not the `request_id`.
- - The Twilio `sid` joins hop 1 to the row (`message_sid`), to the task's name, to the `/encode` request URL, to the `sid` field on every `sms.*`, `encode.*`, and `reply.*` line, and to any alert (`resource_sid`).
+ - A trace joins one HTTP request into the gateway and what it caused: the webhook and the sink delivery have one each (hops 2 and 3), and each task attempt has its own (hops 6 through 12 for that attempt, including the codec's request log). The request logs carry the trace and not the `request_id`. The two receipts mint separate `request_id`s, but only the first one's is stored on the row and used by the task; the second's appears only on its own `sink.inbound` or `sms.inbound` line.
+ - The Twilio `sid` joins hop 1 to the row (`message_sid`), to the task's name, to the `/encode` request URL, to the `sid` field on every `sms.*`, `sink.*`, `message.*`, `encode.*`, and `reply.*` line, and to any alert (`resource_sid`).
  - `replies.sid` joins each reply row to its Twilio message at hop 13.
 
 ## Starting points
@@ -53,7 +53,7 @@ gcloud logging read 'jsonPayload.request_id="<UUID>"' \
   --format 'value(timestamp,resource.labels.service_name,jsonPayload.event,jsonPayload.attempt,jsonPayload.kind,jsonPayload.part,jsonPayload.reply_sid,jsonPayload.chars,jsonPayload.status,jsonPayload.err,trace)'
 ```
 
-2. The last column holds one trace for the webhook and one per task attempt. Pull the request logs for each. This is hops 2, 6, and 8, with status and latency:
+2. The last column holds one trace per receipt (webhook, sink) and one per task attempt. Pull the request logs for each. This is hops 2, 6, and 8, with status and latency:
 
 ```bash
 gcloud logging read "log_id(\"run.googleapis.com/requests\") AND trace=\"projects/$PROJECT/traces/<TRACE_ID>\"" \
@@ -87,11 +87,13 @@ Each row is where the trail ends and what that means:
 
 | Last thing seen | Meaning | Where to look next |
 |---|---|---|
-| Twilio inbound only, no gateway request log | Twilio could not reach the webhook | Twilio alerts: `11200` timeout or 5xx, `11205` connection failed |
+| Twilio inbound only, no gateway request log for `/sms` or `/twilio-sink` | Twilio could not reach the gateway by either path | Twilio alerts: `11200` timeout or 5xx, `11205` connection failed. The sink keeps retrying for four hours, so check again later |
+| `/sms` missing or failed, `/twilio-sink` 200 and `sink.inbound` | The webhook was missed and the event sink carried the message | Nothing for this message; the webhook failure itself, if it repeats |
 | Gateway request log 403, `sms.invalid_signature` | The signature check failed, usually a webhook URL mismatch | `TWILIO_WEBHOOK_URL` against the URL in the Twilio console |
-| `sms.inbound`, `sms.receive_failed`, request log 503 | The row could not be written; nothing downstream can run without it | The `err` field; database health. Twilio retries the webhook once |
-| `sms.inbound`, `sms.enqueue_failed`, request log 503, row `received` | Cloud Tasks refused the task | The `err` field: an HTTP status from the Tasks API. 403 is the service account's enqueuer role, 404 the queue, 429 or 5xx Cloud Tasks itself. Twilio retries the webhook once |
-| `sms.queued`, row `queued`, no `encode.start` | The task never ran, or has not yet | `gcloud tasks describe` as in step 4: waiting, or gone |
+| `sms.inbound` or `sink.inbound`, `message.receive_failed`, request log 503 | The row could not be written; nothing downstream can run without it | The `err` field; database health. Twilio retries the webhook once and the event for hours |
+| `message.enqueue_failed`, request log 503, row `received` | Cloud Tasks refused the task | The `err` field: an HTTP status from the Tasks API. 403 is the service account's enqueuer role, 404 the queue, 429 or 5xx Cloud Tasks itself. Twilio retries the webhook once and the event for hours |
+| `sink.rejected`, request log 404, no row | The event named a SID Twilio does not know, or a message not inbound to the service number | The message at Twilio by SID; a rejection of a real inbound message is a bug |
+| `message.queued`, row `queued`, no `encode.start` | The task never ran, or has not yet | `gcloud tasks describe` as in step 4: waiting, or gone |
 | `encode.start`, then `twilio.fetch_failed` or `twilio.fetch_unreachable`, attempt 503 | The gateway could not read the inbound message back from Twilio | Twilio API status; the queue retries the attempt |
 | `encode.rejected`, row `no_reply` with outcome `rejected` | Twilio did not know the SID, or it was not an inbound message to the service number | The message at Twilio by SID; a `rejected` on a real message is a bug |
 | `forecast.dispatch` with `kind` `unknown_token`, no codec lines | The account check rejected the token before dispatch. The malformed reply was sent | The row has outcome `unknown_token`; the account was deleted or never existed |
