@@ -114,7 +114,7 @@ async function handleSms(c: Context, requestId: string, traceId: string | null) 
     return c.text("Unavailable", 503);
   }
   const result = await runEncodeTask(sid, { retryWindowMs: 0, traceId });
-  if (result === "retry") return c.text("Retry", 503);
+  if (result !== "done") return c.text("Retry", 503);
   return c.text(twiml(""), 200, { "Content-Type": "text/xml" });
 }
 

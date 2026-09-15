@@ -13,6 +13,7 @@ import { image, favicon } from "./assets.js";
 import { vendorAsset } from "./vendor.js";
 import { benchmark } from "./benchmark.js";
 import { stats, hideAccountRoute, unhideAccountRoute } from "./pages/stats.js";
+import { encodeTaskRoute } from "./encode-task.js";
 import { migrate } from "./db.js";
 import { log } from "./log.js";
 
@@ -34,6 +35,7 @@ app.get("/favicon.ico", favicon);
 app.use("/forecast", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/forecast", forecast);
 app.post("/sms", sms);
+app.post("/encode", encodeTaskRoute);
 app.use("/account", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/account", createAccountRoute);
 app.use("/account/delete", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));

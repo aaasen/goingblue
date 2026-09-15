@@ -15,8 +15,9 @@ import { fetchMessage, isMessageSid, sendMessage } from "./twilio.js";
 // failure, and running it twice never sends a reply twice.
 //
 // "done" means the row reached a terminal state, or the run found nothing left to do; "retry"
-// means a transient failure stopped it and a later run should pick up where it left off.
-export type TaskResult = "done" | "retry";
+// means a transient failure stopped it and a later run should pick up where it left off;
+// "unknown" means no message with that SID was ever received.
+export type TaskResult = "done" | "retry" | "unknown";
 
 export interface TaskOptions {
   // How long after receipt a codec or upstream failure is still worth retrying. Past it the
@@ -33,8 +34,8 @@ export const ENCODE_RETRY_WINDOW_MS = 5 * 60_000;
 export async function runEncodeTask(sid: string, opts: TaskOptions): Promise<TaskResult> {
   const row = await loadDelivery(sid);
   if (row === null) {
-    log.error("encode.unknown_sid", { sid });
-    return "done";
+    log.info("encode.unknown_sid", { sid });
+    return "unknown";
   }
   return withTrace(opts.traceId, () => withRequestId(row.requestId, () => runAttempt(row, opts)));
 }
@@ -126,13 +127,21 @@ async function runAttempt(row: DeliveryRequest, opts: TaskOptions): Promise<Task
   return "done";
 }
 
-// POST /api/encode { sid }: the Cloud Tasks target. 200 clears the task from the queue and 503
-// asks for it back. Not registered until the queue exists; only /sms runs the task today.
+// POST /encode?sid=<MessageSid>: run the task for one message. This is the Cloud Tasks target,
+// and it is public: a SID names a message only if it was already received here, the recipient
+// and the reply come from Twilio and the row rather than from the caller, and every step is
+// guarded, so the most a caller can do is run a task that was going to run anyway. The SID is
+// in the query so a task is just a URL and a method, and the Cloud Tasks console and the Cloud
+// Run request log both show it. 200 clears the task from the queue, 503 asks for it back, and a
+// SID never received is a 404.
 export async function encodeTaskRoute(c: Context) {
-  const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
-  const sid = body?.sid;
+  const sid = c.req.query("sid");
   if (!isMessageSid(sid)) return c.text("Invalid sid", 400);
   const traceId = traceIdFrom(c.req.header("X-Cloud-Trace-Context"));
   const result = await runEncodeTask(sid, { retryWindowMs: ENCODE_RETRY_WINDOW_MS, traceId });
-  return result === "done" ? c.text("ok", 200) : c.text("retry", 503);
+  switch (result) {
+    case "done": return c.text("ok", 200);
+    case "retry": return c.text("retry", 503);
+    case "unknown": return c.text("Unknown sid", 404);
+  }
 }

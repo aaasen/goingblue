@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import { generateToken } from "@weather/protocol";
 import { FORECAST_NUMBER } from "../src/constants.js";
-import { ENCODE_RETRY_WINDOW_MS, runEncodeTask } from "../src/encode-task.js";
+import { Hono } from "hono";
+import { ENCODE_RETRY_WINDOW_MS, encodeTaskRoute, runEncodeTask } from "../src/encode-task.js";
 import { accountExists } from "../src/accounts.js";
 import type { DeliveryRequest, EncodedRecord, Reply } from "../src/delivery.js";
 
@@ -201,8 +202,8 @@ describe("the happy path", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("is done for a SID it has no row for", async () => {
-    expect(await run()).toBe("done");
+  it("reports a SID it has no row for", async () => {
+    expect(await run()).toBe("unknown");
     expect(fetch).not.toHaveBeenCalled();
   });
 });
@@ -376,5 +377,48 @@ describe("sending", () => {
     expect(sentBodies).toEqual(["STORED"]);
     expect(row.sentAt).not.toBeNull();
     expect(vi.mocked(fetch).mock.calls.some((c) => String(c[0]).startsWith("http://codec-v1/"))).toBe(false);
+  });
+});
+
+// The public route: the SID is a query parameter, and the status is the task's result, with a
+// SID never received as a 404 rather than an error.
+describe("POST /encode", () => {
+  const app = new Hono();
+  app.post("/encode", encodeTaskRoute);
+  const post = (sid: string) => app.request(`/encode?sid=${sid}`, { method: "POST" });
+
+  it("runs the task for the SID", async () => {
+    receive();
+    expect((await post(SID)).status).toBe(200);
+    expect(sentBodies).toEqual(["ENCODED"]);
+  });
+
+  it("rejects a missing or malformed SID without touching anything", async () => {
+    expect((await app.request("/encode", { method: "POST" })).status).toBe(400);
+    expect((await post("SM123")).status).toBe(400);
+    // A body is not where the SID lives.
+    const body = await app.request("/encode", {
+      method: "POST", body: JSON.stringify({ sid: SID }), headers: { "Content-Type": "application/json" },
+    });
+    expect(body.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("is a 404 for a SID never received", async () => {
+    expect((await post(SID)).status).toBe(404);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("asks for the task back with 503 when the run must retry", async () => {
+    codec = () => new Response("boom", { status: 503 });
+    receive();
+    expect((await post(SID)).status).toBe(503);
+  });
+
+  it("uses the full retry window", async () => {
+    codec = () => new Response("boom", { status: 503 });
+    const row = receive({ createdAt: new Date(Date.now() - ENCODE_RETRY_WINDOW_MS + 60_000) });
+    expect((await post(SID)).status).toBe(503);
+    expect(row.outcome).toBeNull();
   });
 });
