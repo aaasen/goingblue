@@ -204,6 +204,16 @@ describe("twilio sink", () => {
     expect(vi.mocked(receiveMessage)).not.toHaveBeenCalled();
   });
 
+  // Twilio's opt-out handling already answered these; the webhook never sees them either.
+  it("acknowledges and skips a STOP, START, or HELP keyword message", async () => {
+    const event = inboundEvent();
+    event.data = { ...event.data, optOutType: "STOP" };
+    const resp = await postSink([event]);
+    expect(resp.status).toBe(200);
+    expect(vi.mocked(fetchMessage)).not.toHaveBeenCalled();
+    expect(vi.mocked(receiveMessage)).not.toHaveBeenCalled();
+  });
+
   it("is a 404 with no row for a SID Twilio does not know, or a message not inbound to us", async () => {
     vi.mocked(fetchMessage).mockResolvedValue({ kind: "not_found" });
     expect((await postSink(inboundEvent())).status).toBe(404);
@@ -242,9 +252,14 @@ describe("twilio sink", () => {
     expect((await postSink(inboundEvent())).status).toBe(503);
   });
 
-  it("rejects a batch: the sink is configured to send one event per delivery", async () => {
-    expect((await postSink([testEvent, inboundEvent()])).status).toBe(400);
-    expect(vi.mocked(fetchMessage)).not.toHaveBeenCalled();
+  // Twilio delivers an array whatever the batching setting: one element with batching off.
+  it("handles the array Twilio delivers, answering by the worst element", async () => {
+    expect((await postSink([inboundEvent()])).status).toBe(200);
+    expect(vi.mocked(enqueueEncode)).toHaveBeenCalledTimes(1);
+    expect((await postSink([testEvent])).status).toBe(200);
+    vi.mocked(fetchMessage).mockResolvedValueOnce({ kind: "not_found" });
+    expect((await postSink([inboundEvent(), inboundEvent()])).status).toBe(404);
+    expect(vi.mocked(enqueueEncode)).toHaveBeenCalledTimes(2);
   });
 
   it("runs the task inline without a queue, like the webhook", async () => {

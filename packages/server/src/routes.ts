@@ -152,8 +152,10 @@ export async function queueMessage(
 
 // POST /twilio-sink: the Event Streams webhook sink, subscribed to inbound messages. Twilio
 // delivers each event at least once, retrying for hours until it gets a 2xx, which is what
-// makes message receipt survive a missed /sms webhook. The sink is configured without
-// batching, so each delivery is one CloudEvent.
+// makes message receipt survive a missed /sms webhook. A delivery is a JSON array of
+// CloudEvents whatever the sink's batching setting; with batching off it holds one. Every
+// element is handled and the delivery is answered by its worst outcome, so a retry redelivers
+// the whole array and the row-level dedup absorbs the repeats.
 //
 // The route is public and takes no credential. Instead the message is read back from Twilio
 // before anything is written: a SID Twilio does not know, or that is not an inbound message to
@@ -169,9 +171,13 @@ export async function twilioSink(c: Context) {
 const INBOUND_EVENT = "com.twilio.messaging.inbound-message.received";
 
 async function handleSink(c: Context, requestId: string, traceId: string | null) {
-  const event = await c.req.json().catch(() => null) as unknown;
-  const status = await handleEvent(event, requestId, traceId);
-  return c.text(SINK_TEXT[status] ?? "Unavailable", status as ContentfulStatusCode);
+  const body = await c.req.json().catch(() => null) as unknown;
+  const events = Array.isArray(body) ? body : [body];
+  let worst = 200;
+  for (const event of events) {
+    worst = Math.max(worst, await handleEvent(event, requestId, traceId));
+  }
+  return c.text(SINK_TEXT[worst] ?? "Unavailable", worst as ContentfulStatusCode);
 }
 
 const SINK_TEXT: Record<number, string> = { 200: "ok", 400: "Bad event", 404: "Unknown message", 503: "Unavailable" };
@@ -179,8 +185,8 @@ const SINK_TEXT: Record<number, string> = { 200: "ok", 400: "Bad event", 404: "U
 // One event to its HTTP status. Only the message-received type does anything; every other
 // type, including the sink's own test event, is acknowledged and ignored.
 async function handleEvent(event: unknown, requestId: string, traceId: string | null): Promise<number> {
-  if (typeof event !== "object" || event === null || Array.isArray(event)) {
-    log.error("sink.bad_event", { reason: Array.isArray(event) ? "batch" : "not_an_object" });
+  if (typeof event !== "object" || event === null) {
+    log.error("sink.bad_event", { reason: "not_an_object" });
     return 400;
   }
   const e = event as Record<string, unknown>;
@@ -195,6 +201,12 @@ async function handleEvent(event: unknown, requestId: string, traceId: string | 
     // The key names say what shape arrived; the values would be the sender and the text.
     log.error("sink.bad_event", { reason: "no_sid", keys: Object.keys(data) });
     return 400;
+  }
+  // STOP, START and HELP: Twilio's Advanced Opt-Out answered these itself and kept them from the
+  // /sms webhook, and the event stream still carries them, so they are skipped here the same way.
+  if (typeof data["optOutType"] === "string" && data["optOutType"] !== "") {
+    log.info("sink.ignored", { type, sid, opt_out: data["optOutType"] });
+    return 200;
   }
   log.info("sink.inbound", { sid });
   const fetched = await fetchMessage(sid);
