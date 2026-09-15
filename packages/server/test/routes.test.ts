@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import { appUserAgent, generateToken } from "@weather/protocol";
 import { createAccountRoute, forecast, sms, twilioSink } from "../src/routes.js";
@@ -301,6 +301,50 @@ describe("twilio sink", () => {
   it("asks Twilio to retry a delivery event the database could not record", async () => {
     vi.mocked(recordReplyDelivery).mockRejectedValue(new Error("db down"));
     expect((await postSink([deliveryEvent("delivered")])).status).toBe(503);
+  });
+
+  // With the auth token set, a delivery must carry Twilio's signature over the public sink URL
+  // plus the body hash it appends. The in-process URL has the wrong scheme, so the public one is
+  // pinned by TWILIO_SINK_URL.
+  describe("signature", () => {
+    const AUTH = "test-auth-token";
+    const SINK_URL = "https://going.blue/twilio-sink";
+    const signed = (body: string, token = AUTH) => {
+      const url = `${SINK_URL}?bodySHA256=${createHash("sha256").update(body, "utf8").digest("hex")}`;
+      const signature = createHmac("sha1", token).update(url, "utf8").digest("base64");
+      return app.request(`http://localhost${new URL(url).pathname}${new URL(url).search}`, {
+        method: "POST", body, headers: { "Content-Type": "application/json", "X-Twilio-Signature": signature },
+      });
+    };
+
+    beforeEach(() => {
+      process.env["TWILIO_AUTH_TOKEN"] = AUTH;
+      process.env["TWILIO_SINK_URL"] = SINK_URL;
+    });
+    afterEach(() => {
+      delete process.env["TWILIO_AUTH_TOKEN"];
+      delete process.env["TWILIO_SINK_URL"];
+    });
+
+    it("accepts a delivery Twilio signed", async () => {
+      const resp = await signed(JSON.stringify([inboundEvent()]));
+      expect(resp.status).toBe(200);
+      expect(vi.mocked(enqueueEncode)).toHaveBeenCalledWith(SID);
+    });
+
+    it("rejects an unsigned delivery, one signed with another token, and a tampered body", async () => {
+      expect((await postSink([inboundEvent()])).status).toBe(403);
+      expect((await signed(JSON.stringify([inboundEvent()]), "other")).status).toBe(403);
+      const body = JSON.stringify([inboundEvent()]);
+      const url = `${SINK_URL}?bodySHA256=${createHash("sha256").update(body, "utf8").digest("hex")}`;
+      const signature = createHmac("sha1", AUTH).update(url, "utf8").digest("base64");
+      const tampered = await app.request(`http://localhost/twilio-sink${new URL(url).search}`, {
+        method: "POST", body: body + " ", headers: { "Content-Type": "application/json", "X-Twilio-Signature": signature },
+      });
+      expect(tampered.status).toBe(403);
+      expect(vi.mocked(fetchMessage)).not.toHaveBeenCalled();
+      expect(vi.mocked(enqueueEncode)).not.toHaveBeenCalled();
+    });
   });
 
   it("runs the task inline without a queue, like the webhook", async () => {

@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { log } from "./log.js";
 
 // XML special characters that must be escaped inside a TwiML text node / attribute.
@@ -48,6 +48,30 @@ export function validateTwilioSignature(
   const b = Buffer.from(signature);
   // Lengths must match before timingSafeEqual, which throws on differing-length buffers.
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// Validate the signature on a Twilio request with a JSON body. Twilio appends the body's
+// SHA-256 to the URL as `bodySHA256` and signs that full URL alone, with no form parameters, so
+// the check is the hash against the body received and then the URL signature. `url` is the
+// public URL as Twilio called it, query included.
+// https://www.twilio.com/docs/usage/webhooks/webhooks-security#validating-json-requests
+export function validateTwilioJsonSignature(
+  authToken: string,
+  signature: string,
+  url: string,
+  body: string,
+): boolean {
+  let expectedHash: string | null;
+  try {
+    expectedHash = new URL(url).searchParams.get("bodySHA256");
+  } catch {
+    return false;
+  }
+  if (!expectedHash) return false;
+  const actual = Buffer.from(createHash("sha256").update(body, "utf8").digest("hex"));
+  const expected = Buffer.from(expectedHash.toLowerCase());
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return false;
+  return validateTwilioSignature(authToken, signature, url, {});
 }
 
 // Twilio REST client for the delivery path: the inbound

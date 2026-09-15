@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createHmac } from "node:crypto";
-import { twiml, validateTwilioSignature } from "../src/twilio.js";
+import { createHash, createHmac } from "node:crypto";
+import { twiml, validateTwilioJsonSignature, validateTwilioSignature } from "../src/twilio.js";
 
 // Reproduce Twilio's signing scheme so the test signs the same way the validator verifies.
 function sign(authToken: string, url: string, params: Record<string, string>): string {
@@ -69,5 +69,33 @@ describe("validateTwilioSignature", () => {
     const sig = sign(authToken, url, params);
     const reordered = { To: params.To, Body: params.Body, From: params.From };
     expect(validateTwilioSignature(authToken, sig, url, reordered)).toBe(true);
+  });
+});
+
+// Twilio's scheme for JSON bodies: the body's SHA-256 rides on the URL as bodySHA256 and the
+// signature covers that URL with no parameters.
+describe("validateTwilioJsonSignature", () => {
+  const authToken = "test-auth-token";
+  const body = '[{"type":"com.twilio.eventstreams.test-event","data":{}}]';
+  const signedUrl = (b: string) =>
+    `https://going.blue/twilio-sink?bodySHA256=${createHash("sha256").update(b, "utf8").digest("hex")}`;
+
+  it("accepts a correctly signed request", () => {
+    const url = signedUrl(body);
+    expect(validateTwilioJsonSignature(authToken, sign(authToken, url, {}), url, body)).toBe(true);
+  });
+
+  it("rejects a body that does not match the hash on the URL", () => {
+    const url = signedUrl(body);
+    expect(validateTwilioJsonSignature(authToken, sign(authToken, url, {}), url, body + " ")).toBe(false);
+  });
+
+  it("rejects a URL without the hash, a bad signature, and the wrong token", () => {
+    const bare = "https://going.blue/twilio-sink";
+    expect(validateTwilioJsonSignature(authToken, sign(authToken, bare, {}), bare, body)).toBe(false);
+    const url = signedUrl(body);
+    expect(validateTwilioJsonSignature(authToken, "nope", url, body)).toBe(false);
+    expect(validateTwilioJsonSignature(authToken, sign("other", url, {}), url, body)).toBe(false);
+    expect(validateTwilioJsonSignature(authToken, sign(authToken, url, {}), "not a url", body)).toBe(false);
   });
 });

@@ -12,7 +12,7 @@ import {
   replyChars, resolveForecast,
 } from "./forecast.js";
 import { isAppUserAgent, isValidToken, normalizeToken } from "@weather/protocol";
-import { fetchMessage, isMessageSid, twiml, validateTwilioSignature } from "./twilio.js";
+import { fetchMessage, isMessageSid, twiml, validateTwilioJsonSignature, validateTwilioSignature } from "./twilio.js";
 import { FORECAST_NUMBER } from "./constants.js";
 import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 
@@ -158,11 +158,12 @@ export async function queueMessage(
 // element is handled and the delivery is answered by its worst outcome, so a retry redelivers
 // the whole array and the row-level dedup absorbs the repeats.
 //
-// The route is public and takes no credential. Instead the message is read back from Twilio
-// before anything is written: a SID Twilio does not know, or that is not an inbound message to
-// the service number, is a 404 and leaves no row, so the only thing a caller can make the
-// service do is look up a message. If Twilio's API cannot be reached the event is a 503 and
-// comes back later; when Twilio is down there are no events to receive anyway.
+// When TWILIO_AUTH_TOKEN is set the request signature is verified, as on /sms; Twilio signs
+// these JSON deliveries over the URL with the body's hash appended. The message is also read
+// back from Twilio before anything is written: a SID Twilio does not know, or that is not an
+// inbound message to the service number, is a 404 and leaves no row. If Twilio's API cannot be
+// reached the event is a 503 and comes back later; when Twilio is down there are no events to
+// receive anyway.
 export async function twilioSink(c: Context) {
   const requestId = randomUUID();
   const traceId = traceIdFrom(c.req.header("X-Cloud-Trace-Context"));
@@ -179,7 +180,25 @@ const DELIVERY_EVENTS: Record<string, DeliveryOutcome> = {
 };
 
 async function handleSink(c: Context, requestId: string, traceId: string | null) {
-  const body = await c.req.json().catch(() => null) as unknown;
+  const raw = await c.req.text();
+  const authToken = process.env["TWILIO_AUTH_TOKEN"];
+  if (authToken) {
+    const signature = c.req.header("X-Twilio-Signature") ?? "";
+    // The public URL Twilio signed, with the query it appended. Behind Cloud Run the in-process
+    // URL has the wrong scheme, so the origin and path come from TWILIO_SINK_URL.
+    const query = new URL(c.req.url).search;
+    const url = (process.env["TWILIO_SINK_URL"] ?? c.req.url.split("?")[0]!) + query;
+    if (!validateTwilioJsonSignature(authToken, signature, url, raw)) {
+      log.error("sink.invalid_signature", { url });
+      return c.text("Invalid signature", 403);
+    }
+  }
+  let body: unknown = null;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    body = null;
+  }
   const events = Array.isArray(body) ? body : [body];
   let worst = 200;
   for (const event of events) {
