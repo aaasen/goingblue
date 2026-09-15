@@ -748,18 +748,21 @@ async function fetchHourly(
 
 // ── Model agreement fetch ──────────────────────────────────────────────────────
 // The other centers' hourly data for the agreement column, indexed by AGREEMENT_CENTERS order
-// (null = the served center itself, or a center whose fetch failed — its pair rides the wire's
-// no-data symbol rather than failing the request). Surface sources only: every agreement input
-// is a surface variable, so Europe needs no pressure-level split here. Each center gets the
-// same phase correction the served pipeline applies, so a summit's rain-vs-snow bookkeeping
-// can't read as disagreement.
+// (null = the served center itself; its own pair rides the wire's no-data symbol). Surface
+// sources only: every agreement input is a surface variable, so Europe needs no pressure-level
+// split here. Each center gets the same phase correction the served pipeline applies, so a
+// summit's rain-vs-snow bookkeeping can't read as disagreement.
+//
+// A center whose fetch fails fails the whole request, the same as the served model's fetch:
+// the gateway's encode task retries an unavailable codec, so a momentary upstream failure
+// costs a retry rather than a reply with an agreement column missing a center.
 export type AgreementHourly = ({ h: HourlyData; times: string[] } | null)[];
 
 const AGREEMENT_CENTER_KEYS = AGREEMENT_CENTERS.map(
   (c) => Object.keys(MODEL_BIT).find((k) => MODEL_BIT[k] === c.bit)!,
 );
 
-async function fetchAgreementHourly(
+export async function fetchAgreementHourly(
   servedModelKey: string, nDays: number, lat: number, lon: number, tz: string,
   elev_m?: number, pastDays = 0,
 ): Promise<AgreementHourly> {
@@ -771,8 +774,8 @@ async function fetchAgreementHourly(
       const adjusted = adjustPrecipPhase(hourly, elevation);
       return { h: adjusted, times: adjusted.time };
     } catch (err) {
-      log.error("agreement.fetch_failed", { center: key, error: String(err) });
-      return null;
+      log.info("agreement.fetch_failed", { center: key, error: String(err) });
+      throw new Error(`agreement fetch failed for ${key}: ${String(err)}`);
     }
   }));
 }
