@@ -4,7 +4,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { ping } from "./db.js";
 import { extractUserToken, extractVersion } from "./dispatch.js";
 import { createAccount, deleteAccount, recordRequest } from "./accounts.js";
-import { markQueued, receiveMessage } from "./delivery.js";
+import { markQueued, receiveMessage, recordReplyDelivery, type DeliveryOutcome } from "./delivery.js";
 import { runEncodeTask } from "./encode-task.js";
 import { enqueueEncode, tasksConfigured } from "./tasks.js";
 import {
@@ -150,9 +150,10 @@ export async function queueMessage(
   return "queued";
 }
 
-// POST /twilio-sink: the Event Streams webhook sink, subscribed to inbound messages. Twilio
-// delivers each event at least once, retrying for hours until it gets a 2xx, which is what
-// makes message receipt survive a missed /sms webhook. A delivery is a JSON array of
+// POST /twilio-sink: the Event Streams webhook sink, subscribed to inbound messages and to the
+// delivery outcomes of outbound ones. Twilio delivers each event at least once, retrying for
+// hours until it gets a 2xx, which is what makes message receipt survive a missed /sms webhook
+// and delivery receipts survive a missed delivery. A delivery is a JSON array of
 // CloudEvents whatever the sink's batching setting; with batching off it holds one. Every
 // element is handled and the delivery is answered by its worst outcome, so a retry redelivers
 // the whole array and the row-level dedup absorbs the repeats.
@@ -169,6 +170,13 @@ export async function twilioSink(c: Context) {
 }
 
 const INBOUND_EVENT = "com.twilio.messaging.inbound-message.received";
+// The outbound events subscribed to, by what each says about the reply. `queued` and `sent` are
+// not subscribed: the 201 on the send already records acceptance.
+const DELIVERY_EVENTS: Record<string, DeliveryOutcome> = {
+  "com.twilio.messaging.message.delivered": "delivered",
+  "com.twilio.messaging.message.undelivered": "undelivered",
+  "com.twilio.messaging.message.failed": "failed",
+};
 
 async function handleSink(c: Context, requestId: string, traceId: string | null) {
   const body = await c.req.json().catch(() => null) as unknown;
@@ -191,7 +199,8 @@ async function handleEvent(event: unknown, requestId: string, traceId: string | 
   }
   const e = event as Record<string, unknown>;
   const type = typeof e["type"] === "string" ? e["type"] : "";
-  if (type !== INBOUND_EVENT) {
+  const outcome = DELIVERY_EVENTS[type];
+  if (type !== INBOUND_EVENT && outcome === undefined) {
     log.info("sink.ignored", { type });
     return 200;
   }
@@ -202,6 +211,7 @@ async function handleEvent(event: unknown, requestId: string, traceId: string | 
     log.error("sink.bad_event", { reason: "no_sid", keys: Object.keys(data) });
     return 400;
   }
+  if (outcome !== undefined) return handleDelivery(sid, outcome, data);
   // STOP, START and HELP: Twilio's Advanced Opt-Out answered these itself and kept them from the
   // /sms webhook, and the event stream still carries them, so they are skipped here the same way.
   if (typeof data["optOutType"] === "string" && data["optOutType"] !== "") {
@@ -222,6 +232,30 @@ async function handleEvent(event: unknown, requestId: string, traceId: string | 
   }
   const result = await queueMessage(sid, requestId, traceId, m.dateCreated);
   return result === "queued" ? 200 : 503;
+}
+
+// A delivery outcome for a reply the gateway sent, matched to its row by the Twilio SID. The
+// row is only updated, never created, and the SID is Twilio's own, so no lookup at Twilio is
+// needed first. A SID with no reply row is a 404: Twilio retries the event, which covers an
+// event outrunning the row's SID write, and gives up on its own for a message that was never
+// the gateway's.
+async function handleDelivery(sid: string, outcome: DeliveryOutcome, data: Record<string, unknown>): Promise<number> {
+  const at = Date.parse(typeof data["timestamp"] === "string" ? data["timestamp"] : "");
+  const code = Number(data["errorCode"]);
+  const errorCode = Number.isInteger(code) && code > 0 ? code : null;
+  let found: boolean;
+  try {
+    found = await recordReplyDelivery(sid, outcome, Number.isNaN(at) ? new Date() : new Date(at), errorCode);
+  } catch (e) {
+    log.error("sink.delivery_failed", { sid, outcome, err: e });
+    return 503;
+  }
+  if (!found) {
+    log.info("sink.unknown_reply", { sid, outcome });
+    return 404;
+  }
+  log.info("sink.delivery", { sid, outcome, code: errorCode });
+  return 200;
 }
 
 export async function health(c: Context) {

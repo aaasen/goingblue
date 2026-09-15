@@ -24,13 +24,13 @@ On the messaging routes, receipt only records the message and enqueues it. The w
 10. Codec app logs `openmeteo.request`, one per upstream call. One for the served model, plus one per other center when model agreement is on.
 11. Gateway app log `forecast.dispatch` with `kind` and, when `ok`, `chars`. The codec logs nothing on success, so this line is the codec's completion signal. The row becomes `encoded` and its `replies` rows exist.
 12. Gateway app logs `reply.sent`, one per part, with `reply_sid` and `segments`, then `encode.sent`. The row becomes `sent`.
-13. Twilio: the reply, `direction` `outbound-api`, one message per reply row, with delivery `status`.
+13. Twilio: the reply, `direction` `outbound-api`, one message per reply row, with delivery `status`. Twilio also posts the outcome to `/twilio-sink` as a `message.delivered`, `message.undelivered`, or `message.failed` event, logged as `sink.delivery` with the reply's SID and written onto the reply row, so the row's `status` normally already says how delivery ended.
 
 Keys:
  - `request_id` joins hops 3 through 12, across every attempt: every app log line on both services and the database row. The task runs under the row's id, so a retry continues the same sequence.
  - A trace joins one HTTP request into the gateway and what it caused: the webhook and the sink delivery have one each (hops 2 and 3), and each task attempt has its own (hops 6 through 12 for that attempt, including the codec's request log). The request logs carry the trace and not the `request_id`. The two receipts mint separate `request_id`s, but only the first one's is stored on the row and used by the task; the second's appears only on its own `sink.inbound` or `sms.inbound` line.
  - The Twilio `sid` joins hop 1 to the row (`message_sid`), to the task's name, to the `/encode` request URL, to the `sid` field on every `sms.*`, `sink.*`, `message.*`, `encode.*`, and `reply.*` line, and to any alert (`resource_sid`).
- - `replies.sid` joins each reply row to its Twilio message at hop 13.
+ - `replies.sid` joins each reply row to its Twilio message at hop 13, and to the `sink.delivery` line for its outcome. A `sink.unknown_reply` line is a delivery event for a message that is not one of the gateway's replies, or one whose row had not yet recorded its SID; Twilio retries it.
 
 ## Starting points
 
@@ -78,7 +78,7 @@ gcloud tasks describe "<SID>" --queue encode --project "$PROJECT" --location "$R
 ```
 
    A task that exists is waiting for its `scheduleTime`; `dispatchCount` and the last attempt's status say how the earlier attempts went. A not-found error that says a task with this name existed recently means the task finished, either by a 200 or by the queue giving up after its retry limit, ten minutes; a plain not-found means it was never created.
-5. Fetch the Twilio inbound by the `sid`, then each reply by the `sid` on its reply row, then any alerts with the inbound `sid` as `resource_sid`. This is hops 1 and 13.
+5. Fetch the Twilio inbound by the `sid`, then any alerts with the inbound `sid` as `resource_sid`. This is hop 1. The reply rows from step 3 already carry hop 13; fetch a reply at Twilio by its `sid` only when its row is still `sent`, or when the `error_message` behind an `error_code` is needed.
 6. Lay the hops out in time order and read the timeline against the table below.
 
 ## Reading the timeline
@@ -105,9 +105,10 @@ Each row is where the trail ends and what that means:
 | `forecast.dispatch` `ok`, `twilio.send_failed` or `twilio.send_unreachable`, attempt 503 | Twilio would not accept the reply (429 or 5xx); the part went back to `pending` and the attempt is retried | Twilio API status; the next attempt's `reply.sent` |
 | `reply.failed` with `code`, row `failed` | Twilio refused the reply for this recipient at send time; later parts were not sent | The Error Dictionary for the code. `21610` is a STOP from the recipient |
 | Row `encoded` with a reply `sending` and no `sid`, no newer attempt lines | A task run died between claiming the part and recording the send. The part is not retried, so it cannot be sent twice | Messages to the recipient at Twilio around that time: the send may or may not have gone out |
-| `encode.sent`, Twilio reply `undelivered` or `failed` | The carrier refused it after Twilio accepted it | `error_code` and the Error Dictionary |
+| `encode.sent`, reply row `undelivered` or `failed` with an `error_code` | The carrier refused it after Twilio accepted it | The Error Dictionary for the code; Twilio's `error_message` on the reply SID |
+| `encode.sent`, reply row still `sent` well after the fact | No delivery event arrived: the carrier has not reported, or the event was missed | The reply at Twilio by SID; `delivered` there with no `sink.delivery` line means the sink missed it |
 | Row not terminal, no task, no recent attempt lines | The queue gave up after its retry limit, or the task was never created | The attempts' lines for what kept failing; the database skill's non-terminal query for others like it |
-| Everything `ok` and `delivered` | The system served it. For a satellite messenger, `delivered` is the carrier gateway's receipt, not the device's | The reply's segment count against the route's expectations |
+| Everything `ok` and every reply row `delivered` | The system served it. For a satellite messenger, `delivered` is the carrier gateway's receipt, not the device's | The reply's segment count against the route's expectations |
 
 Timing, from the database row and the request logs:
  - `created_at` to `queued_at` is the webhook's own time, and matches the `/sms` request log's latency.

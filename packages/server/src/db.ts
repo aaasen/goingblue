@@ -233,27 +233,53 @@ export async function migrate(): Promise<void> {
   // was encoded without another codec call; the recipient is not, and is read from the inbound
   // message at Twilio when the part is sent. `sid` is the Twilio SID of the sent message, null
   // until Twilio accepts it; `sending_at` is the claim taken just before the send, so a part
-  // whose send outcome was never recorded is not sent twice.
+  // whose send outcome was never recorded is not sent twice. `delivered_at`, `undelivered_at`
+  // and a `failed_at` after the send come from Twilio's delivery events (routes.ts, the sink);
+  // `failed_at` is also set when Twilio refuses the send itself.
   await query(`
     create table if not exists replies (
-      id          bigserial primary key,
-      request_id  bigint not null references requests(id),
-      body        text not null,
-      part        int not null,
-      sid         text unique,
-      segments    int,
-      error_code  int,
-      created_at  timestamptz not null default now(),
-      sending_at  timestamptz,
-      sent_at     timestamptz,
-      failed_at   timestamptz,
-      status text generated always as (
-        case when failed_at  is not null then 'failed'
-             when sent_at    is not null then 'sent'
-             when sending_at is not null then 'sending'
-             else 'pending' end) stored,
+      id             bigserial primary key,
+      request_id     bigint not null references requests(id),
+      body           text not null,
+      part           int not null,
+      sid            text unique,
+      segments       int,
+      error_code     int,
+      created_at     timestamptz not null default now(),
+      sending_at     timestamptz,
+      sent_at        timestamptz,
+      delivered_at   timestamptz,
+      undelivered_at timestamptz,
+      failed_at      timestamptz,
       unique (request_id, part)
     )
+  `);
+  await query(`
+    alter table replies
+      add column if not exists delivered_at   timestamptz,
+      add column if not exists undelivered_at timestamptz
+  `);
+  // The derived status, terminal states first. A generated column's expression cannot be
+  // altered in place, so it is rebuilt when the stored expression predates a column it reads.
+  await query(`
+    do $$
+    begin
+      if not exists (
+        select 1 from information_schema.columns
+         where table_name = 'replies' and column_name = 'status'
+           and generation_expression like '%undelivered_at%'
+      ) then
+        alter table replies drop column if exists status;
+        alter table replies add column status text generated always as (
+          case when failed_at      is not null then 'failed'
+               when undelivered_at is not null then 'undelivered'
+               when delivered_at   is not null then 'delivered'
+               when sent_at        is not null then 'sent'
+               when sending_at     is not null then 'sending'
+               else 'pending' end) stored;
+      end if;
+    end
+    $$
   `);
   // Accounts the /stats dashboard leaves out of every count, chart, table and the map: the
   // operator's own testing, which otherwise swamps real usage. Membership is edited from the

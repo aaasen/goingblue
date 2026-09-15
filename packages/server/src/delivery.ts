@@ -216,3 +216,26 @@ export async function recordReplyFailed(id: string, replyId: string, errorCode: 
 export async function recordRequestSent(id: string): Promise<void> {
   await query("update requests set sent_at = now() where id = $1 and sent_at is null", [id]);
 }
+
+// What Twilio's delivery events report about a sent reply, after the send itself succeeded.
+export type DeliveryOutcome = "delivered" | "undelivered" | "failed";
+
+// Record a delivery event on the reply with that Twilio SID. Each timestamp is written once and
+// never moved, so events arriving twice or out of order leave the first word standing. False
+// when no reply has that SID.
+export async function recordReplyDelivery(
+  sid: string,
+  outcome: DeliveryOutcome,
+  at: Date,
+  errorCode: number | null,
+): Promise<boolean> {
+  const column = { delivered: "delivered_at", undelivered: "undelivered_at", failed: "failed_at" }[outcome];
+  const r = await query(
+    `update replies
+        set ${column} = coalesce(${column}, $2),
+            error_code = coalesce(error_code, $3)
+      where sid = $1`,
+    [sid, at, errorCode],
+  );
+  return (r.rowCount ?? 0) > 0;
+}

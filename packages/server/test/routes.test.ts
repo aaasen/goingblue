@@ -6,7 +6,7 @@ import { createAccountRoute, forecast, sms, twilioSink } from "../src/routes.js"
 import { fetchMessage } from "../src/twilio.js";
 import { FORECAST_NUMBER } from "../src/constants.js";
 import { accountExists, createAccount, recordRequest } from "../src/accounts.js";
-import { markQueued, receiveMessage } from "../src/delivery.js";
+import { markQueued, receiveMessage, recordReplyDelivery } from "../src/delivery.js";
 import { runEncodeTask } from "../src/encode-task.js";
 import { enqueueEncode, tasksConfigured } from "../src/tasks.js";
 import { log } from "../src/log.js";
@@ -26,6 +26,7 @@ vi.mock("../src/accounts.js", () => ({
 vi.mock("../src/delivery.js", () => ({
   receiveMessage: vi.fn(async (r: { requestId: string }) => ({ id: "1", requestId: r.requestId, queuedAt: null })),
   markQueued: vi.fn(async () => {}),
+  recordReplyDelivery: vi.fn(async () => true),
 }));
 vi.mock("../src/encode-task.js", () => ({
   runEncodeTask: vi.fn(async () => "done"),
@@ -69,6 +70,14 @@ beforeEach(() => {
   vi.mocked(enqueueEncode).mockResolvedValue("queued");
   vi.mocked(fetchMessage).mockReset();
   vi.mocked(fetchMessage).mockResolvedValue({ kind: "ok", message: INBOUND });
+  vi.mocked(recordReplyDelivery).mockReset();
+  vi.mocked(recordReplyDelivery).mockResolvedValue(true);
+});
+
+const REPLY_SID = "SM" + "c".repeat(32);
+const deliveryEvent = (status: string, data: Record<string, unknown> = {}) => ({
+  specversion: "1.0", type: `com.twilio.messaging.message.${status}`, id: "evt-2",
+  data: { messageSid: REPLY_SID, messageStatus: status, timestamp: "2026-09-15T21:54:26.000Z", ...data },
 });
 
 const RECEIVED = new Date("2026-09-15T21:54:20Z");
@@ -260,6 +269,38 @@ describe("twilio sink", () => {
     vi.mocked(fetchMessage).mockResolvedValueOnce({ kind: "not_found" });
     expect((await postSink([inboundEvent(), inboundEvent()])).status).toBe(404);
     expect(vi.mocked(enqueueEncode)).toHaveBeenCalledTimes(2);
+  });
+
+  it("records a delivery outcome on the reply by its SID, with Twilio's time", async () => {
+    expect((await postSink([deliveryEvent("delivered")])).status).toBe(200);
+    expect(vi.mocked(recordReplyDelivery)).toHaveBeenCalledWith(
+      REPLY_SID, "delivered", new Date("2026-09-15T21:54:26.000Z"), null);
+    expect(vi.mocked(fetchMessage)).not.toHaveBeenCalled();
+    expect(vi.mocked(receiveMessage)).not.toHaveBeenCalled();
+  });
+
+  it("records undelivered and failed with the carrier's error code, however it is typed", async () => {
+    expect((await postSink([deliveryEvent("undelivered", { errorCode: 30003 })])).status).toBe(200);
+    expect(vi.mocked(recordReplyDelivery)).toHaveBeenLastCalledWith(REPLY_SID, "undelivered", expect.any(Date), 30003);
+    expect((await postSink([deliveryEvent("failed", { errorCode: "30008" })])).status).toBe(200);
+    expect(vi.mocked(recordReplyDelivery)).toHaveBeenLastCalledWith(REPLY_SID, "failed", expect.any(Date), 30008);
+  });
+
+  it("falls back to now when the event has no usable timestamp", async () => {
+    const before = Date.now();
+    expect((await postSink([deliveryEvent("delivered", { timestamp: undefined })])).status).toBe(200);
+    const at = vi.mocked(recordReplyDelivery).mock.calls[0]![2];
+    expect(at.getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("is a 404 for a delivery event on a SID that is not one of the gateway's replies", async () => {
+    vi.mocked(recordReplyDelivery).mockResolvedValue(false);
+    expect((await postSink([deliveryEvent("delivered")])).status).toBe(404);
+  });
+
+  it("asks Twilio to retry a delivery event the database could not record", async () => {
+    vi.mocked(recordReplyDelivery).mockRejectedValue(new Error("db down"));
+    expect((await postSink([deliveryEvent("delivered")])).status).toBe(503);
   });
 
   it("runs the task inline without a queue, like the webhook", async () => {

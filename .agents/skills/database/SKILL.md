@@ -45,10 +45,20 @@ How far delivery got, on the messaging routes:
 
 One row per outbound message, joined to its request by `request_id` (the row id, not the UUID):
  - `part`: the message's position in the reply, from 1.
- - `status`: `pending`, `sending` (claimed by a task run whose send outcome was never recorded), `sent`, or `failed`.
+ - `status`: `pending`, `sending` (claimed by a task run whose send outcome was never recorded), `sent` (Twilio accepted it), `delivered` (the carrier confirmed delivery; for a satellite messenger that is the carrier gateway's receipt, not the device's), `undelivered` (the carrier reported failure), or `failed` (Twilio refused the send, or reported failure after accepting it).
  - `sid`: the Twilio SID of the sent message. `segments` is the billable segment count Twilio reported.
- - `error_code`: Twilio's error code when the send was refused.
+ - `sent_at`, `delivered_at`, `undelivered_at`, `failed_at`: when each happened. The last three come from Twilio's delivery events and are written once, on the first event to arrive. `delivered_at` minus `sent_at` is the carrier's time.
+ - `error_code`: Twilio's error code when the send was refused or the carrier reported failure. The Error Dictionary entry is at `https://www.twilio.com/docs/api/errors/<error_code>`.
  - `body`: the message text. Do not select it; the request shape is in the request row.
+
+Delivery outcomes by route over the last 30 days:
+
+```sql
+select q.device, r.status, count(*)
+  from replies r join requests q on q.id = r.request_id
+ where r.created_at > now() - interval '30 days'
+ group by 1, 2 order by 1, 2 limit 30;
+```
 
 ## Connecting
 

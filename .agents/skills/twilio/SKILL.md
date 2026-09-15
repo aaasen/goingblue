@@ -80,7 +80,7 @@ An inbound message has status `received`. Status meanings for a reply:
  - `delivered`: the carrier confirmed delivery. For a phone that is a handset receipt. For a satellite messenger it is the receipt from the carrier gateway in front of the device, not from the device itself.
  - `sent`: the carrier accepted the message and has not reported delivery. Every reply on every route has reached `delivered`, so a reply stuck at `sent` is unusual and worth reporting.
  - `undelivered` or `failed`: read `error_code` and `error_message`. The Error Dictionary entry is at `https://www.twilio.com/docs/api/errors/<error_code>`.
- - `failed` on a reply the gateway sent means Twilio refused it at send time. The reply row carries the same `error_code` with `status` `failed`, and its request has `state` `failed`.
+ - Every one of these outcomes is also on the reply row. Twilio's delivery events write `delivered_at`, `undelivered_at`, or `failed_at` and the `error_code`, so the database skill's one-message query answers the delivery question without a Twilio call; Twilio is the place to read `error_message` and to check a row whose `status` is still `sent`. A `failed` at send time, Twilio refusing the message when the gateway sent it, also marks the request `state` `failed`.
 
 ## Alerts
 
