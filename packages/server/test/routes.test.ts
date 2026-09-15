@@ -4,8 +4,9 @@ import { Hono } from "hono";
 import { appUserAgent, generateToken } from "@weather/protocol";
 import { createAccountRoute, forecast, sms } from "../src/routes.js";
 import { accountExists, createAccount, recordRequest } from "../src/accounts.js";
-import { receiveMessage } from "../src/delivery.js";
+import { markQueued, receiveMessage } from "../src/delivery.js";
 import { runEncodeTask } from "../src/encode-task.js";
+import { enqueueEncode, tasksConfigured } from "../src/tasks.js";
 import { log } from "../src/log.js";
 
 // The account gate: a request whose token names no account is rejected before dispatch. The
@@ -21,10 +22,15 @@ vi.mock("../src/accounts.js", () => ({
 // The SMS route records the message and hands it to the encode task; both are mocked here, and
 // the task itself is covered in encode-task.test.ts.
 vi.mock("../src/delivery.js", () => ({
-  receiveMessage: vi.fn(async (r: { requestId: string }) => ({ id: "1", requestId: r.requestId })),
+  receiveMessage: vi.fn(async (r: { requestId: string }) => ({ id: "1", requestId: r.requestId, queuedAt: null })),
+  markQueued: vi.fn(async () => {}),
 }));
 vi.mock("../src/encode-task.js", () => ({
   runEncodeTask: vi.fn(async () => "done"),
+}));
+vi.mock("../src/tasks.js", () => ({
+  tasksConfigured: vi.fn(() => false),
+  enqueueEncode: vi.fn(async () => "queued"),
 }));
 
 const TOKEN = generateToken((n) => Uint8Array.from(randomBytes(n)));
@@ -46,8 +52,13 @@ beforeEach(() => {
   vi.mocked(accountExists).mockResolvedValue(true);
   vi.mocked(recordRequest).mockClear();
   vi.mocked(receiveMessage).mockClear();
+  vi.mocked(receiveMessage).mockImplementation(async (r) => ({ id: "1", requestId: r.requestId, queuedAt: null }));
+  vi.mocked(markQueued).mockClear();
   vi.mocked(runEncodeTask).mockClear();
   vi.mocked(runEncodeTask).mockResolvedValue("done");
+  vi.mocked(tasksConfigured).mockReturnValue(false);
+  vi.mocked(enqueueEncode).mockClear();
+  vi.mocked(enqueueEncode).mockResolvedValue("queued");
 });
 
 afterEach(() => {
@@ -108,6 +119,35 @@ describe("sms webhook", () => {
     const resp = await postSms(BODY, {});
     expect(resp.status).toBe(400);
     expect(vi.mocked(receiveMessage)).not.toHaveBeenCalled();
+  });
+
+  describe("with a queue", () => {
+    beforeEach(() => vi.mocked(tasksConfigured).mockReturnValue(true));
+
+    it("enqueues the task, marks the row queued, and answers with an empty response", async () => {
+      const resp = await postSms(BODY);
+      expect(resp.status).toBe(200);
+      expect(await resp.text()).toBe('<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>');
+      expect(vi.mocked(enqueueEncode)).toHaveBeenCalledWith(SID);
+      expect(vi.mocked(markQueued)).toHaveBeenCalledWith("1");
+      expect(vi.mocked(runEncodeTask)).not.toHaveBeenCalled();
+    });
+
+    it("skips the enqueue for a message already queued", async () => {
+      vi.mocked(receiveMessage).mockResolvedValue({ id: "1", requestId: "r", queuedAt: new Date() });
+      const resp = await postSms(BODY);
+      expect(resp.status).toBe(200);
+      expect(vi.mocked(enqueueEncode)).not.toHaveBeenCalled();
+      expect(vi.mocked(markQueued)).not.toHaveBeenCalled();
+    });
+
+    it("fails the webhook when the enqueue fails, leaving the row received", async () => {
+      vi.mocked(enqueueEncode).mockRejectedValue(new Error("Cloud Tasks: HTTP 503"));
+      const resp = await postSms(BODY);
+      expect(resp.status).toBe(503);
+      expect(vi.mocked(markQueued)).not.toHaveBeenCalled();
+      expect(vi.mocked(runEncodeTask)).not.toHaveBeenCalled();
+    });
   });
 
   it("forwards the trace to the task", async () => {

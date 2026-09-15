@@ -3,8 +3,9 @@ import type { Context } from "hono";
 import { ping } from "./db.js";
 import { extractUserToken, extractVersion } from "./dispatch.js";
 import { createAccount, deleteAccount, recordRequest } from "./accounts.js";
-import { receiveMessage } from "./delivery.js";
+import { markQueued, receiveMessage } from "./delivery.js";
 import { runEncodeTask } from "./encode-task.js";
+import { enqueueEncode, tasksConfigured } from "./tasks.js";
 import {
   REPLY_FUTURE, REPLY_MALFORMED, REPLY_STALE, REPLY_UNAVAILABLE, REPLY_UNSUPPORTED,
   replyChars, resolveForecast,
@@ -64,10 +65,11 @@ export async function forecast(c: Context) {
 // endpoint can't be spoofed; an unsigned or invalid request is rejected with 403.
 //
 // The message is recorded by SID and answered by the encode task, which sends the reply through
-// the Twilio REST API; the webhook response itself carries no message. The task runs inline
-// here, with no retry window: a transient failure gets the unavailable reply at once, as the
-// sender would otherwise wait on nothing. A send that could not complete returns 503 so Twilio
-// retries the webhook, and the recorded row makes that retry resume rather than start over.
+// the Twilio REST API; the webhook response itself carries no message. With a queue configured
+// the task is enqueued on Cloud Tasks and this returns at once; an enqueue that fails is a 503,
+// and the message is picked up again by the Twilio event sink. Without a queue (local dev) the
+// task runs inline with no retry window, so a transient failure gets the unavailable reply at
+// once, and a send that could not complete is a 503 that Twilio's webhook retry resumes.
 export async function sms(c: Context) {
   const requestId = randomUUID();
   const traceId = traceIdFrom(c.req.header("X-Cloud-Trace-Context"));
@@ -107,15 +109,30 @@ async function handleSms(c: Context, requestId: string, traceId: string | null) 
 
   // The row is the record that the message exists; without it nothing downstream can be
   // deduplicated or resumed, so a database failure here is a failure of the request.
+  let row: Awaited<ReturnType<typeof receiveMessage>>;
   try {
-    await receiveMessage({ requestId, messageSid: sid, twilioReceivedAt: null });
+    row = await receiveMessage({ requestId, messageSid: sid, twilioReceivedAt: null });
   } catch (e) {
     log.error("sms.receive_failed", { sid, err: e });
     return c.text("Unavailable", 503);
   }
-  const result = await runEncodeTask(sid, { retryWindowMs: 0, traceId });
-  if (result !== "done") return c.text("Retry", 503);
-  return c.text(twiml(""), 200, { "Content-Type": "text/xml" });
+  const empty = () => c.text(twiml(""), 200, { "Content-Type": "text/xml" });
+
+  if (!tasksConfigured()) {
+    const result = await runEncodeTask(sid, { retryWindowMs: 0, traceId });
+    return result === "done" ? empty() : c.text("Retry", 503);
+  }
+  // Already on the queue from an earlier delivery of this message: nothing more to do.
+  if (row.queuedAt !== null) return empty();
+  try {
+    const enqueued = await enqueueEncode(sid);
+    await markQueued(row.id);
+    log.info("sms.queued", { sid, enqueued });
+  } catch (e) {
+    log.error("sms.enqueue_failed", { sid, err: e });
+    return c.text("Unavailable", 503);
+  }
+  return empty();
 }
 
 export async function health(c: Context) {

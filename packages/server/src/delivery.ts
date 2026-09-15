@@ -77,17 +77,22 @@ export async function receiveMessage(r: {
   requestId: string;
   messageSid: string;
   twilioReceivedAt: Date | null;
-}): Promise<{ id: string; requestId: string }> {
+}): Promise<{ id: string; requestId: string; queuedAt: Date | null }> {
   await query(
     `insert into requests (request_id, message_sid, twilio_received_at)
      values ($1, $2, $3)
      on conflict (message_sid) do nothing`,
     [r.requestId, r.messageSid, r.twilioReceivedAt],
   );
-  const row = (await query<{ id: string; request_id: string }>(
-    "select id, request_id from requests where message_sid = $1", [r.messageSid],
+  const row = (await query<{ id: string; request_id: string; queued_at: Date | null }>(
+    "select id, request_id, queued_at from requests where message_sid = $1", [r.messageSid],
   )).rows[0]!;
-  return { id: row.id, requestId: row.request_id };
+  return { id: row.id, requestId: row.request_id, queuedAt: row.queued_at };
+}
+
+// The encode task is on the queue.
+export async function markQueued(id: string): Promise<void> {
+  await query("update requests set queued_at = now() where id = $1 and queued_at is null", [id]);
 }
 
 export async function loadDelivery(messageSid: string): Promise<DeliveryRequest | null> {
