@@ -10,13 +10,15 @@ SQL_INSTANCE="${SQL_INSTANCE:?set SQL_INSTANCE in deploy.env}"
 DB_NAME="${DB_NAME:?set DB_NAME in deploy.env}"
 PUBLIC_URL="${PUBLIC_URL:?set PUBLIC_URL in deploy.env}"
 SERVICE="${SERVICE:?set SERVICE in deploy.env}"
+TWILIO_ACCOUNT_SID="${TWILIO_ACCOUNT_SID:?set TWILIO_ACCOUNT_SID in deploy.env}"
 DB_USER="${DB_USER:-postgres}"
 
 # Cloud SQL connection. INSTANCE_CONNECTION_NAME is "project:region:instance" (see the
 # instance's "Connection name" in the console). Secrets are NOT here — DB_PASS (database
-# password), TWILIO_AUTH_TOKEN (verifies the inbound-SMS webhook signature) and STATS_PASS (the
-# /stats dashboard's basic-auth password) live in Secret Manager (see one-time setup in
-# docs/private/DEPLOYMENT.md) and are injected as env vars.
+# password), TWILIO_AUTH_TOKEN (verifies the inbound-SMS webhook signature and, with
+# TWILIO_ACCOUNT_SID, sends replies through the REST API) and STATS_PASS (the /stats dashboard's
+# basic-auth password) live in Secret Manager (see one-time setup in docs/private/DEPLOYMENT.md)
+# and are injected as env vars.
 INSTANCE_CONNECTION_NAME="${PROJECT}:${REGION}:${SQL_INSTANCE}"
 TWILIO_WEBHOOK_URL="${PUBLIC_URL}/sms"
 # Protocol version → codec-server service URL (deployed by deploy-codec.sh; see VERSIONING.md).
@@ -31,5 +33,5 @@ CODEC_URL_V5="$(gcloud run services describe "${SERVICE}-codec-v5" --project "$P
 gcloud run deploy "$SERVICE" --project "$PROJECT" --source . --region "$REGION" \
   --allow-unauthenticated --platform managed \
   --add-cloudsql-instances "$INSTANCE_CONNECTION_NAME" \
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT,INSTANCE_CONNECTION_NAME=$INSTANCE_CONNECTION_NAME,DB_USER=$DB_USER,DB_NAME=$DB_NAME,TWILIO_WEBHOOK_URL=$TWILIO_WEBHOOK_URL,CODEC_URL_V1=$CODEC_URL_V1,CODEC_URL_V2=$CODEC_URL_V2,CODEC_URL_V3=$CODEC_URL_V3,CODEC_URL_V4=$CODEC_URL_V4,CODEC_URL_V5=$CODEC_URL_V5" \
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT,INSTANCE_CONNECTION_NAME=$INSTANCE_CONNECTION_NAME,DB_USER=$DB_USER,DB_NAME=$DB_NAME,TWILIO_WEBHOOK_URL=$TWILIO_WEBHOOK_URL,TWILIO_ACCOUNT_SID=$TWILIO_ACCOUNT_SID,CODEC_URL_V1=$CODEC_URL_V1,CODEC_URL_V2=$CODEC_URL_V2,CODEC_URL_V3=$CODEC_URL_V3,CODEC_URL_V4=$CODEC_URL_V4,CODEC_URL_V5=$CODEC_URL_V5" \
   --set-secrets "DB_PASS=DB_PASS:latest,TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest,STATS_PASS=STATS_PASS:latest"

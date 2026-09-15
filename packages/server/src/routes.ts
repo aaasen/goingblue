@@ -1,73 +1,19 @@
 import { randomUUID } from "node:crypto";
 import type { Context } from "hono";
-import { dispatchForecast, extractUserToken, extractVersion, type DispatchResult } from "./dispatch.js";
 import { ping } from "./db.js";
-import { createAccount, accountExists, deleteAccount, recordRequest } from "./accounts.js";
+import { extractUserToken, extractVersion } from "./dispatch.js";
+import { createAccount, deleteAccount, recordRequest } from "./accounts.js";
+import { receiveMessage } from "./delivery.js";
+import { runEncodeTask } from "./encode-task.js";
+import {
+  REPLY_FUTURE, REPLY_MALFORMED, REPLY_STALE, REPLY_UNAVAILABLE, REPLY_UNSUPPORTED,
+  replyChars, resolveForecast,
+} from "./forecast.js";
 import { isAppUserAgent, isValidToken, normalizeToken } from "@weather/protocol";
-import { twiml, validateTwilioSignature } from "./twilio.js";
+import { isMessageSid, twiml, validateTwilioSignature } from "./twilio.js";
 import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 
-// Human-readable replies for requests that get no forecast, one per error class. These go back
-// over SMS, so each must fit a single GSM-7 segment and tell the person what to do next.
-//
-// Malformed covers everything that isn't a well-formed request from the app — random texts to
-// the number, hand-typed attempts, requests with missing or invalid components. The sender may
-// have never heard of the service, so the reply says what it is and where the app lives.
-const REPLY_MALFORMED =
-  "Going Blue: expedition weather forecasts via satellite. Download the app at going.blue";
-// The request named a protocol version this deployment no longer serves.
-const REPLY_UNSUPPORTED = "Invalid app version. Update the app at going.blue and try again";
-// Transient service failure (codec unreachable, upstream data down): retrying is the fix.
-const REPLY_UNAVAILABLE = "Going Blue is not available right now. Please try again in a few minutes";
-// A request whose start time is off the servable axis gets no message at all over SMS. Stale
-// means the message sat in a queue for days: the sender's failure happened back then, and a
-// reply now would cost them an inbound message to say what they already know. Future means a
-// wrong clock, which has never been seen in practice. Both are recorded as their own outcomes.
-// The HTTP route names each for the app or a direct caller.
-const REPLY_STALE = "Request is stale. Build a new request and try again.";
-const REPLY_FUTURE = "Request is from the future. Build a new request and try again.";
-
-// What a request can come to: a dispatch result, or the gateway's own rejection of a token
-// that names no account. The codec validates that a token is present and well-formed; whether
-// it maps to a real account only the gateway can know, since only the gateway has the database.
-type RequestResult = DispatchResult | { kind: "unknown_token" };
-
-// A codec returns its reply as one message per line — the gateway's whole knowledge of the
-// format. Splitting here rather than in the codec keeps the grammar out of the gateway (see
-// dispatch.ts): a reply that fits one message is one line and comes back as one message, which
-// is what every frozen codec image returns.
-function replyFor(result: RequestResult): string | string[] {
-  switch (result.kind) {
-    case "ok": return result.encoded.split("\n");
-    // A message with no version word isn't a request at all, so it reads as malformed here even
-    // though the gateway detects it before dispatch.
-    case "missing_version": return REPLY_MALFORMED;
-    case "malformed": return REPLY_MALFORMED;
-    // A well-formed token from another environment, or from an account since deleted. The same
-    // reply as malformed: it is not a request this deployment can attribute, and the sender's
-    // fix is the same — get the app and its setup flow.
-    case "unknown_token": return REPLY_MALFORMED;
-    case "unsupported_version": return REPLY_UNSUPPORTED;
-    case "unavailable": return REPLY_UNAVAILABLE;
-    // Empty: twiml() turns it into a bare <Response/>, and Twilio sends nothing.
-    case "stale": return "";
-    case "future": return "";
-  }
-}
-
-// Whether the token names an account, erring toward yes: a database outage must not become a
-// forecast outage when everything else about the request can still be served — the same
-// posture recordRequest takes on the way out.
-async function tokenKnown(token: string): Promise<boolean> {
-  try {
-    return await accountExists(token);
-  } catch (e) {
-    log.error("token.check_failed", { err: e });
-    return true;
-  }
-}
-
-// Record an inbound message without ever failing the response: the reply is already built by
+// Record an internet request without ever failing the response: the reply is already built by
 // the time we get here, so a DB hiccup must not turn a served forecast into an error.
 async function logRequest(record: Parameters<typeof recordRequest>[0]): Promise<void> {
   try {
@@ -77,48 +23,28 @@ async function logRequest(record: Parameters<typeof recordRequest>[0]): Promise<
   }
 }
 
-// Dispatch a request body to its version's codec server and record the attempt. Every outcome
-// is recorded, not just the served ones: a number that asked and got "please update the app" is
-// still a person using the service, and the failures are the only signal that a version has
-// clients it can no longer answer. The per-version counts are also the sunset metric — a frozen
-// codec container is retired only once its version has gone quiet (VERSIONING.md).
-async function buildForecast(body: string, requestId: string, traceId: string | null): Promise<RequestResult> {
-  const version = extractVersion(body);
-  const token = extractUserToken(body);
-  // The account check runs before dispatch, so a rejected request never costs a codec call or
-  // an upstream fetch. Only a present, well-formed token is checked here: a missing or mangled
-  // one goes to the codec, whose reply names what is wrong with it.
-  if (token !== null && !(await tokenKnown(token))) {
-    log.info("forecast.dispatch", { version, kind: "unknown_token" });
-    await logRequest({ requestId, token, chars: null, version, outcome: "unknown_token", codecMs: null, shape: null });
-    return { kind: "unknown_token" };
-  }
-  const result = await dispatchForecast(body, requestId, traceId);
-  log.info("forecast.dispatch", {
-    version,
-    kind: result.kind,
-    chars: result.kind === "ok" ? result.encoded.length : undefined,
-  });
-  await logRequest({
-    requestId,
-    token,
-    // A multi-message reply arrives one message per line; the newlines are gateway framing, not
-    // reply characters, so they don't count.
-    chars: result.kind === "ok" ? result.encoded.split("\n").join("").length : null,
-    version,
-    outcome: result.kind,
-    codecMs: "codecMs" in result ? result.codecMs : null,
-    shape: result.kind === "ok" ? result.shape : null,
-  });
-  return result;
-}
-
+// POST /forecast: the internet route, which answers in the response body and bypasses the
+// delivery queue. Every outcome is recorded, not just the served ones: a client that asked and
+// got "please update the app" is still a person using the service, and the failures are the
+// only signal that a version has clients it can no longer answer. The per-version counts are
+// also the sunset metric for frozen codec containers (VERSIONING.md).
 export async function forecast(c: Context) {
   const requestId = randomUUID();
   const traceId = traceIdFrom(c.req.header("X-Cloud-Trace-Context"));
   const body = (await c.req.text()).trim();
-  const result = await withTrace(traceId, () =>
-    withRequestId(requestId, () => buildForecast(body, requestId, traceId)));
+  const result = await withTrace(traceId, () => withRequestId(requestId, async () => {
+    const result = await resolveForecast(body, requestId, traceId);
+    await logRequest({
+      requestId,
+      token: extractUserToken(body),
+      chars: replyChars(result),
+      version: extractVersion(body),
+      outcome: result.kind,
+      codecMs: "codecMs" in result ? result.codecMs : null,
+      shape: result.kind === "ok" ? result.shape : null,
+    });
+    return result;
+  }));
   switch (result.kind) {
     case "ok": return c.text(result.encoded, 200);
     case "missing_version": return c.text(REPLY_MALFORMED, 400);
@@ -133,14 +59,16 @@ export async function forecast(c: Context) {
   }
 }
 
-// POST /sms — Twilio inbound-SMS webhook. Twilio delivers each text a user sends to the Going
-// Blue number here as form-encoded params (Body, From, To, …) and sends whatever <Message> we
-// return in TwiML back to that sender, so the reply path needs no Twilio REST credentials. When
-// TWILIO_AUTH_TOKEN is set, the request signature is verified so the public endpoint can't be
-// spoofed; an unsigned/invalid request is rejected with 403.
+// POST /sms: Twilio's inbound-SMS webhook, delivered as form-encoded params (MessageSid, Body,
+// From, To, ...). When TWILIO_AUTH_TOKEN is set the request signature is verified so the public
+// endpoint can't be spoofed; an unsigned or invalid request is rejected with 403.
+//
+// The message is recorded by SID and answered by the encode task, which sends the reply through
+// the Twilio REST API; the webhook response itself carries no message. The task runs inline
+// here, with no retry window: a transient failure gets the unavailable reply at once, as the
+// sender would otherwise wait on nothing. A send that could not complete returns 503 so Twilio
+// retries the webhook, and the recorded row makes that retry resume rather than start over.
 export async function sms(c: Context) {
-  // The id is minted here and the whole handler runs inside its scope, so every line the message
-  // produces carries it, from the signature check to the recorded row.
   const requestId = randomUUID();
   const traceId = traceIdFrom(c.req.header("X-Cloud-Trace-Context"));
   return withTrace(traceId, () => withRequestId(requestId, () => handleSms(c, requestId, traceId)));
@@ -164,17 +92,30 @@ async function handleSms(c: Context, requestId: string, traceId: string | null) 
     }
   }
 
+  const sid = params["MessageSid"];
+  if (!isMessageSid(sid)) {
+    log.error("sms.missing_sid");
+    return c.text("Missing MessageSid", 400);
+  }
   // Neither the sender's number nor the message text is logged; both sit in Twilio's own logs
   // under the MessageSid, which is what gets logged so a message can still be looked up there
   // while Twilio retains it.
-  const body = params["Body"] ?? "";
-  log.info("sms.inbound", { sid: params["MessageSid"], len: body.length });
+  log.info("sms.inbound", { sid, len: (params["Body"] ?? "").length });
 
   // HELP, STOP and START never reach this webhook: Twilio's Advanced Opt-Out intercepts the
   // keywords and sends its own replies, configured in the Twilio console.
 
-  const result = await buildForecast(body.trim(), requestId, traceId);
-  return c.text(twiml(replyFor(result)), 200, { "Content-Type": "text/xml" });
+  // The row is the record that the message exists; without it nothing downstream can be
+  // deduplicated or resumed, so a database failure here is a failure of the request.
+  try {
+    await receiveMessage({ requestId, messageSid: sid, twilioReceivedAt: null });
+  } catch (e) {
+    log.error("sms.receive_failed", { sid, err: e });
+    return c.text("Unavailable", 503);
+  }
+  const result = await runEncodeTask(sid, { retryWindowMs: 0, traceId });
+  if (result === "retry") return c.text("Retry", 503);
+  return c.text(twiml(""), 200, { "Content-Type": "text/xml" });
 }
 
 export async function health(c: Context) {

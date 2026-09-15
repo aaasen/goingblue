@@ -4,6 +4,8 @@ import { Hono } from "hono";
 import { appUserAgent, generateToken } from "@weather/protocol";
 import { createAccountRoute, forecast, sms } from "../src/routes.js";
 import { accountExists, createAccount, recordRequest } from "../src/accounts.js";
+import { receiveMessage } from "../src/delivery.js";
+import { runEncodeTask } from "../src/encode-task.js";
 import { log } from "../src/log.js";
 
 // The account gate: a request whose token names no account is rejected before dispatch. The
@@ -16,16 +18,26 @@ vi.mock("../src/accounts.js", () => ({
   deleteAccount: vi.fn(),
 }));
 
+// The SMS route records the message and hands it to the encode task; both are mocked here, and
+// the task itself is covered in encode-task.test.ts.
+vi.mock("../src/delivery.js", () => ({
+  receiveMessage: vi.fn(async (r: { requestId: string }) => ({ id: "1", requestId: r.requestId })),
+}));
+vi.mock("../src/encode-task.js", () => ({
+  runEncodeTask: vi.fn(async () => "done"),
+}));
+
 const TOKEN = generateToken((n) => Uint8Array.from(randomBytes(n)));
 const BODY = `v1 p:a u:${TOKEN}`;
+const SID = "SM" + "0".repeat(31) + "1";
 
 const app = new Hono();
 app.post("/forecast", forecast);
 app.post("/sms", sms);
 
 const post = (body: string) => app.request("/forecast", { method: "POST", body });
-const postSms = (body: string) =>
-  app.request("/sms", { method: "POST", body: new URLSearchParams({ Body: body, From: "+15550100" }) });
+const postSms = (body: string, params: Record<string, string> = { MessageSid: SID }) =>
+  app.request("/sms", { method: "POST", body: new URLSearchParams({ Body: body, From: "+15550100", ...params }) });
 
 beforeEach(() => {
   process.env["CODEC_URL_V1"] = "http://codec-v1";
@@ -33,6 +45,9 @@ beforeEach(() => {
   vi.mocked(accountExists).mockClear();
   vi.mocked(accountExists).mockResolvedValue(true);
   vi.mocked(recordRequest).mockClear();
+  vi.mocked(receiveMessage).mockClear();
+  vi.mocked(runEncodeTask).mockClear();
+  vi.mocked(runEncodeTask).mockResolvedValue("done");
 });
 
 afterEach(() => {
@@ -59,14 +74,50 @@ describe("off-axis start time", () => {
     );
   });
 
-  it("sends nothing over SMS", async () => {
-    for (const side of ["stale", "future"]) {
-      vi.stubGlobal("fetch", vi.fn(async () => new Response(side, { status: 422 })));
-      const resp = await postSms(BODY);
-      expect(resp.status).toBe(200);
-      expect(await resp.text()).toBe('<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>');
-      expect(vi.mocked(recordRequest)).toHaveBeenLastCalledWith(expect.objectContaining({ outcome: side }));
-    }
+});
+
+// The webhook records the message by SID and runs the encode task inline, with no retry window.
+// The reply goes out through the REST API, so the webhook response is always an empty TwiML.
+describe("sms webhook", () => {
+  it("records the message and runs the task, answering with an empty response", async () => {
+    const resp = await postSms(BODY);
+    expect(resp.status).toBe(200);
+    expect(await resp.text()).toBe('<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>');
+    expect(vi.mocked(receiveMessage)).toHaveBeenCalledWith(
+      expect.objectContaining({ messageSid: SID, twilioReceivedAt: null }));
+    expect(vi.mocked(runEncodeTask)).toHaveBeenCalledWith(SID, { retryWindowMs: 0, traceId: null });
+    // Nothing is dispatched or recorded by the route itself.
+    expect(fetch).not.toHaveBeenCalled();
+    expect(vi.mocked(recordRequest)).not.toHaveBeenCalled();
+  });
+
+  it("asks Twilio to retry when the task could not finish", async () => {
+    vi.mocked(runEncodeTask).mockResolvedValue("retry");
+    const resp = await postSms(BODY);
+    expect(resp.status).toBe(503);
+  });
+
+  it("fails the request when the message cannot be recorded", async () => {
+    vi.mocked(receiveMessage).mockRejectedValueOnce(new Error("db down"));
+    const resp = await postSms(BODY);
+    expect(resp.status).toBe(503);
+    expect(vi.mocked(runEncodeTask)).not.toHaveBeenCalled();
+  });
+
+  it("rejects a webhook without a message SID", async () => {
+    const resp = await postSms(BODY, {});
+    expect(resp.status).toBe(400);
+    expect(vi.mocked(receiveMessage)).not.toHaveBeenCalled();
+  });
+
+  it("forwards the trace to the task", async () => {
+    const TRACE = "0123456789abcdef0123456789abcdef";
+    await app.request("/sms", {
+      method: "POST",
+      body: new URLSearchParams({ Body: BODY, From: "+15550100", MessageSid: SID }),
+      headers: { "X-Cloud-Trace-Context": `${TRACE}/1234567890;o=1` },
+    });
+    expect(vi.mocked(runEncodeTask)).toHaveBeenCalledWith(SID, { retryWindowMs: 0, traceId: TRACE });
   });
 });
 
@@ -88,15 +139,6 @@ describe("account gate", () => {
     expect(vi.mocked(recordRequest)).toHaveBeenCalledWith(
       expect.objectContaining({ token: TOKEN, outcome: "unknown_token", version: 1, shape: null }),
     );
-  });
-
-  it("rejects an unknown token over SMS with the same reply, as TwiML", async () => {
-    vi.mocked(accountExists).mockResolvedValue(false);
-    const resp = await postSms(BODY);
-    expect(resp.status).toBe(200);
-    const xml = await resp.text();
-    expect(xml).toContain("Download the app at going.blue");
-    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("leaves a tokenless request to the codec, whose reply names what is missing", async () => {
@@ -137,9 +179,9 @@ describe("request id", () => {
     expect(recordedIds()[0]).toEqual(expect.any(String));
   });
 
-  it("mints a fresh one per message, on both routes", async () => {
+  it("mints a fresh one per message", async () => {
     await post(BODY);
-    await postSms(BODY);
+    await post(BODY);
     expect(new Set(recordedIds()).size).toBe(2);
     expect(sentIds()).toEqual(recordedIds());
   });
@@ -158,15 +200,6 @@ describe("trace propagation", () => {
 
   it("forwards the id from POST /forecast", async () => {
     await app.request("/forecast", { method: "POST", body: BODY, headers });
-    expect(sentTraces()).toEqual([TRACE]);
-  });
-
-  it("forwards the id from POST /sms", async () => {
-    await app.request("/sms", {
-      method: "POST",
-      body: new URLSearchParams({ Body: BODY, From: "+15550100" }),
-      headers,
-    });
     expect(sentTraces()).toEqual([TRACE]);
   });
 

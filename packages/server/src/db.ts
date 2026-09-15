@@ -193,6 +193,68 @@ export async function migrate(): Promise<void> {
   await query(`
     create index if not exists requests_account_created_idx on requests (account_id, created_at)
   `);
+  // Delivery tracking for messaging routes. A row is written
+  // the moment a message arrives, keyed by its Twilio SID so a redelivered webhook or event
+  // finds the row instead of making a second one, and the timestamps below record how far the
+  // message got. `state` is derived from them, terminal states first: a request is `sent` once
+  // every reply part has a Twilio SID, `failed` when a part hit a terminal send error,
+  // `no_reply` when nothing is owed (stale, future, or a message that failed validation).
+  // Internet requests are written complete, straight to `sent`.
+  await query(`
+    alter table requests
+      add column if not exists message_sid        text unique,
+      add column if not exists twilio_received_at timestamptz,
+      add column if not exists queued_at          timestamptz,
+      add column if not exists encoded_at         timestamptz,
+      add column if not exists sent_at            timestamptz,
+      add column if not exists failed_at          timestamptz,
+      add column if not exists no_reply_at        timestamptz,
+      add column if not exists attempts           int not null default 0,
+      add column if not exists state text generated always as (
+        case when failed_at   is not null then 'failed'
+             when no_reply_at is not null then 'no_reply'
+             when sent_at     is not null then 'sent'
+             when encoded_at  is not null then 'encoded'
+             when queued_at   is not null then 'queued'
+             else 'received' end) stored
+  `);
+  // Rows written before delivery tracking existed reached their end when they were written: the
+  // reply went back in the webhook response, or nothing was owed. Only such rows match, since
+  // every row written since carries a message SID or is inserted already sent.
+  await query(`
+    update requests
+       set encoded_at = created_at,
+           sent_at = case when coalesce(outcome, 'ok') in ('stale', 'future') then null else created_at end,
+           no_reply_at = case when coalesce(outcome, 'ok') in ('stale', 'future') then created_at else null end
+     where message_sid is null and encoded_at is null and sent_at is null
+       and no_reply_at is null and failed_at is null and queued_at is null
+  `);
+  // One row per outbound message of a reply. The body is kept so a retry can send exactly what
+  // was encoded without another codec call; the recipient is not, and is read from the inbound
+  // message at Twilio when the part is sent. `sid` is the Twilio SID of the sent message, null
+  // until Twilio accepts it; `sending_at` is the claim taken just before the send, so a part
+  // whose send outcome was never recorded is not sent twice.
+  await query(`
+    create table if not exists replies (
+      id          bigserial primary key,
+      request_id  bigint not null references requests(id),
+      body        text not null,
+      part        int not null,
+      sid         text unique,
+      segments    int,
+      error_code  int,
+      created_at  timestamptz not null default now(),
+      sending_at  timestamptz,
+      sent_at     timestamptz,
+      failed_at   timestamptz,
+      status text generated always as (
+        case when failed_at  is not null then 'failed'
+             when sent_at    is not null then 'sent'
+             when sending_at is not null then 'sending'
+             else 'pending' end) stored,
+      unique (request_id, part)
+    )
+  `);
   // Accounts the /stats dashboard leaves out of every count, chart, table and the map: the
   // operator's own testing, which otherwise swamps real usage. Membership is edited from the
   // dashboard itself (pages/stats.ts). Nothing about serving reads this table.

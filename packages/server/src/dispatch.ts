@@ -81,6 +81,10 @@ export function codecUrlFor(version: number): string | null {
   return process.env[`CODEC_URL_V${version}`] || null;
 }
 
+// A codec call that has not answered by now is treated as unavailable. The bound keeps the
+// encode task inside the 40 second dispatch deadline of its Cloud Tasks queue.
+const CODEC_TIMEOUT_MS = 15_000;
+
 // Longest header we will parse. A shape is a few dozen bytes; anything approaching this is a
 // misbehaving or compromised codec, and the cost of ignoring it is one row with no shape.
 const MAX_SHAPE_BYTES = 2048;
@@ -182,6 +186,7 @@ export async function dispatchForecast(
     const resp = await fetch(`${url}/encode`, {
       method: "POST",
       body,
+      signal: AbortSignal.timeout(CODEC_TIMEOUT_MS),
       headers: traceId === null
         ? { "X-Request-Id": requestId }
         : { "X-Request-Id": requestId, "X-Cloud-Trace-Context": traceId },

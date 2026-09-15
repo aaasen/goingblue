@@ -64,8 +64,7 @@ export async function deleteAccount(token: string): Promise<boolean> {
   }
 }
 
-// One inbound message, as recorded. The sending number is deliberately not part of it — see the
-// header comment in db.ts.
+// One internet request, as recorded.
 export interface RequestRecord {
   // The gateway's id for this message, carried by every log line it produced (log.ts).
   requestId: string;
@@ -84,12 +83,12 @@ export interface RequestRecord {
   shape: RequestShape | null;
 }
 
-// Record one inbound message as one row.
+// Record one internet request as one complete row. The reply went back in the response, so the
+// row is written already encoded and sent (db.ts, the delivery columns).
 //
 // A token is stored only when it references a real account (the column has a foreign key);
-// anything else — anonymous, or a token from another environment — is recorded with a null
-// token and null account so the row still counts toward overall volume. Phase 1 is
-// observe-only; quotas will later read these rows.
+// anything else, anonymous or a token from another environment, is recorded with a null token
+// and null account so the row still counts toward overall volume.
 export async function recordRequest(r: RequestRecord): Promise<void> {
   // One lookup resolves both columns, replacing the accountExists round-trip: an unknown token
   // simply yields no row and the request is recorded as anonymous.
@@ -100,8 +99,9 @@ export async function recordRequest(r: RequestRecord): Promise<void> {
   await query(
     `insert into requests (request_id, token, account_id, chars, version, outcome, codec_ms,
                            lat, lon, loc, mode, model, vars, max_chars, messages, device, platform,
-                           periods, fetch_ms, encode_ms)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+                           periods, fetch_ms, encode_ms, encoded_at, sent_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+             now(), now())`,
     [r.requestId, account ? r.token : null, account?.id ?? null, r.chars, r.version, r.outcome, r.codecMs,
      s?.lat ?? null, s?.lon ?? null, s?.loc ?? null, s?.mode ?? null, s?.model ?? null,
      s?.vars ?? null, s?.maxChars ?? null, s?.messages ?? null, s?.device ?? null, s?.platform ?? null,

@@ -70,7 +70,7 @@ describe("dispatchForecast", () => {
     // The id rides along as a header so the codec's own log lines carry it too: the body is the
     // frozen wire message and nothing may be added to it.
     expect(fetchSpy).toHaveBeenCalledWith("http://codec-v1/encode", {
-      method: "POST", body, headers: { "X-Request-Id": RID },
+      method: "POST", body, headers: { "X-Request-Id": RID }, signal: expect.any(AbortSignal),
     });
   });
 
@@ -86,6 +86,7 @@ describe("dispatchForecast", () => {
     expect(fetchSpy).toHaveBeenCalledWith("http://codec-v1/encode", {
       method: "POST", body,
       headers: { "X-Request-Id": RID, "X-Cloud-Trace-Context": TRACE },
+      signal: expect.any(AbortSignal),
     });
   });
 
