@@ -3,23 +3,24 @@ name: database
 description: Read the going.blue Postgres database through a read-only role
 ---
 
-The gateway keeps one Postgres database on Cloud SQL. The schema is defined in `migrate()` in `packages/server/src/db.ts` and has three tables:
+The gateway keeps one Postgres database on Cloud SQL. The schema is defined in `migrate()` in `packages/server/src/db.ts` and has four tables:
 1. `accounts`: one row per app account. `token` is the primary key, `id` is a surrogate number, `created_at` is when the app minted it. A token maps to no name, number, or address anywhere.
-2. `requests`: one row per inbound message on every route, written by the gateway after the reply is sent. This is the table almost every question is about.
-3. `stats_hidden_accounts`: the operator's own accounts, which the `/stats` dashboard leaves out of every count.
+2. `requests`: one row per inbound message on every route, written when the message arrives and updated as it is answered. This is the table almost every question is about.
+3. `replies`: one row per outbound message of a reply on the messaging routes, with the SID Twilio assigned on send, its segment count, and how the send ended.
+4. `stats_hidden_accounts`: the operator's own accounts, which the `/stats` dashboard leaves out of every count.
 
-No phone number is stored in any form. The sender's number and the message text live only at Twilio. The join to the service logs is `requests.request_id`, the same value the gateway and codec log lines carry as `request_id`. There is no key shared with Twilio; a Twilio message and its request row match by time.
+No phone number is stored in any form. The sender's number and the message text live only at Twilio. The join to the service logs is `requests.request_id`, the same value the gateway and codec log lines carry as `request_id`. `requests.message_sid` is the inbound Twilio SID and `replies.sid` the reply's, so a Twilio message and its row match by SID. Rows written before September 15, 2026 have neither and match by time.
 
 ## The requests table
 
 Identity and timing:
  - `request_id`: the gateway's id for the message. Null on rows written before the id existed.
  - `account_id`: the account as a number. `token` is the same account as its token, and is null when the request carried no valid token. Refer to accounts by `account_id`. Never print a token: it is the credential that lets anyone request forecasts as that account.
- - `created_at`: when the row was written, at the end of handling. `timestamptz`, so render it in UTC to match the logs and Twilio, and in `America/Los_Angeles` to match the dashboard's days (`DAY_TZ` in db.ts).
+ - `created_at`: when the message arrived. On rows written before September 15, 2026 it is the end of handling, a few seconds later. `timestamptz`, so render it in UTC to match the logs and Twilio, and in `America/Los_Angeles` to match the dashboard's days (`DAY_TZ` in db.ts).
  - `version`: the protocol version the request named. Per-version counts are the sunset metric for frozen codec containers.
 
 How it ended:
- - `outcome`: `ok`, or one of `unknown_token`, `missing_version`, `unsupported_version`, `malformed`, `stale`, `future`, `unavailable` (the dispatch result kinds in `packages/server/src/dispatch.ts`). Rows written before the column existed are all successes: read a null as `ok`.
+ - `outcome`: `ok`, or one of `unknown_token`, `missing_version`, `unsupported_version`, `malformed`, `stale`, `future`, `unavailable` (the dispatch result kinds in `packages/server/src/dispatch.ts`), or `rejected` for a message SID that Twilio did not know or that was not an inbound message to the service number. Rows written before the column existed are all successes: read a null as `ok`.
  - `codec_ms`: the gateway's wall clock around the whole codec call. Null when no codec was called.
 
 What was asked for, as the codec reported it. All null on failures, and missing on rows from older versions (see Version changes below):
@@ -33,6 +34,21 @@ What the reply carried and cost:
  - `chars`: the encoded reply's length.
  - `periods`: JSON mapping hours per period to how many periods of that resolution the reply held. The sum is the total period count, the quality the reader saw.
  - `fetch_ms` (Open-Meteo) and `encode_ms` (the fill search) are the codec's own components. `codec_ms` minus their sum is container overhead.
+
+How far delivery got, on the messaging routes:
+ - `message_sid`: the inbound Twilio message's SID. Null on the internet route and on rows written before September 15, 2026.
+ - `state`: `received`, `queued` (the encode task is on Cloud Tasks), `encoded` (the codec answered and the reply rows exist), `sent` (every reply row has a Twilio SID), `failed` (Twilio refused a reply at send time), or `no_reply` (stale, future, or rejected: nothing was owed). Internet requests and backfilled rows are `sent`. Derived from `queued_at`, `encoded_at`, `sent_at`, `failed_at`, and `no_reply_at`, so the gap between two of those is the time that step took.
+ - `twilio_received_at`: Twilio's own timestamp for the inbound message.
+ - `attempts`: how many times the encode task ran. More than one means a retry happened; the logs under the row's `request_id` say why.
+
+## The replies table
+
+One row per outbound message, joined to its request by `request_id` (the row id, not the UUID):
+ - `part`: the message's position in the reply, from 1.
+ - `status`: `pending`, `sending` (claimed by a task run whose send outcome was never recorded), `sent`, or `failed`.
+ - `sid`: the Twilio SID of the sent message. `segments` is the billable segment count Twilio reported.
+ - `error_code`: Twilio's error code when the send was refused.
+ - `body`: the message text. Do not select it; the request shape is in the request row.
 
 ## Connecting
 
@@ -87,7 +103,25 @@ select created_at at time zone 'UTC' as utc, version, outcome, device, platform,
   from requests where request_id = '<UUID>' and version = 4 limit 1;
 ```
 
-Requests in a time window, to match a Twilio message or a log line. The row is written after the codec call, so its timestamp is three to four seconds after Twilio's inbound message and just before Twilio's timestamp on the reply:
+One message by its Twilio SID, with its replies:
+
+```sql
+select q.state, q.outcome, q.attempts, q.created_at at time zone 'UTC' as utc,
+       q.sent_at - q.created_at as to_sent, r.part, r.status, r.sid, r.segments, r.error_code
+  from requests q left join replies r on r.request_id = q.id
+ where q.message_sid = '<SID>' order by r.part limit 10;
+```
+
+Messaging requests that have not reached a terminal state, oldest first:
+
+```sql
+select message_sid, state, attempts, created_at at time zone 'UTC' as utc
+  from requests
+ where message_sid is not null and state not in ('sent', 'failed', 'no_reply')
+ order by created_at limit 20;
+```
+
+Requests in a time window, to match a log line:
 
 ```sql
 select request_id, created_at at time zone 'UTC' as utc, outcome, device, chars, codec_ms

@@ -14,7 +14,7 @@ Twilio's logs contain the following information:
 3. Segment (billable unit) count. 
 4. Alerts for webhook failures.
 
-The Going Blue database intentionally does not include phone numbers or request/reply text. Twilio is the only place these are stored. Retention is set to 30 days. 
+The Going Blue database intentionally does not include phone numbers or request text. Twilio is the only place these are stored. Reply text is kept in `replies.body` so a retry can resend it; do not read it. Retention is set to 30 days. 
 
 ## Credentials
 
@@ -56,11 +56,19 @@ Messages on or after a date use `DateSent>=`, on or before use `DateSent<=`. Bot
 
 ## Finding the replies to an inbound message
 
-Twilio does not link a reply to the message it answers. A reply has `direction` `outbound-reply`, `from` the service number, `to` the sender, and is created within a few seconds of the inbound. A reply spread over several messages (the `n:` switch) is several separate resources.
+The database links the two. `requests.message_sid` is the inbound message's SID, and each reply is a row in `replies` whose `sid` is the SID Twilio assigned when the gateway sent it. Read them with the database skill:
 
-1. Fetch the inbound message by SID and note its `from` and `date_created`.
-2. List messages with `To` set to that number and `DateSent>=` set to that day.
-3. Take the `outbound-reply` entries created just after the inbound.
+```sql
+select r.part, r.status, r.sid, r.segments, r.error_code
+  from replies r join requests q on q.id = r.request_id
+ where q.message_sid = '<SID>' order by r.part limit 10;
+```
+
+Then fetch each reply by SID with the one-message command above. A reply has `direction` `outbound-api`, since the gateway sends it through the Messages API rather than in the webhook response. A reply spread over several messages (the `n:` switch) is several rows and several SIDs; on the SMS route it is one row whose `num_segments` shows the split.
+
+The reverse also works: a reply SID from Twilio finds its request with `select q.message_sid from replies r join requests q on q.id = r.request_id where r.sid = '<SID>'`.
+
+Rows written before September 15, 2026 have no `message_sid` and no reply rows. For those, match by time: fetch the inbound message by SID, list messages with `To` set to its `from` and `DateSent>=` set to that day, and take the `outbound-reply` entries created just after the inbound.
 
 ```bash
 curl -s -G -u "$TW_AUTH" "$TW_MESSAGES.json" \
@@ -72,6 +80,7 @@ An inbound message has status `received`. Status meanings for a reply:
  - `delivered`: the carrier confirmed delivery. For a phone that is a handset receipt. For a satellite messenger it is the receipt from the carrier gateway in front of the device, not from the device itself.
  - `sent`: the carrier accepted the message and has not reported delivery. Every reply on every route has reached `delivered`, so a reply stuck at `sent` is unusual and worth reporting.
  - `undelivered` or `failed`: read `error_code` and `error_message`. The Error Dictionary entry is at `https://www.twilio.com/docs/api/errors/<error_code>`.
+ - `failed` on a reply the gateway sent means Twilio refused it at send time. The reply row carries the same `error_code` with `status` `failed`, and its request has `state` `failed`.
 
 ## Alerts
 
