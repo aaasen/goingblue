@@ -168,10 +168,16 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
 // `requestId` and `traceId` are passed rather than read from the logger's ambient store because
 // they travel on the wire: the codec tags its own lines with both, so one request reads as one
 // sequence across both services and nests under one request log in the Logs Explorer.
+//
+// An unavailable codec (unreachable, 5xx, an unrecognized 422) is logged as a warning when the
+// caller will try again and as an error when this was the last chance: the encode task retries
+// inside its window and the internet route cannot retry at all. Alerts fire on errors, so a
+// blip the next attempt fixes never pages anyone; the attempt that gives up does.
 export async function dispatchForecast(
   body: string,
   requestId: string,
   traceId: string | null,
+  willRetry = false,
 ): Promise<DispatchResult> {
   const version = extractVersion(body);
   if (version === null) return { kind: "missing_version" };
@@ -201,16 +207,18 @@ export async function dispatchForecast(
       };
     }
     const text = await resp.text();
-    log.error("codec.error_response", { version, status: resp.status, body: text });
     const codecMs = Date.now() - start;
     // A 400 is the codec's verdict on the request itself, and a 422 names which side of the
-    // servable axis its start time fell on (its body is exactly the word); anything else (503,
-    // unexpected statuses, an unrecognized 422 body) is a service problem the sender should retry.
+    // servable axis its start time fell on (its body is exactly the word). Both are the sender's
+    // problem, logged as warnings so they never raise an alert. Anything else (503, unexpected
+    // statuses, an unrecognized 422 body) is a service problem the sender should retry.
+    const senders = resp.status === 400 || (resp.status === 422 && (text === "stale" || text === "future"));
+    (senders || willRetry ? log.warn : log.error)("codec.error_response", { version, status: resp.status, body: text });
     if (resp.status === 400) return { kind: "malformed", reason: text.slice(0, 500), codecMs };
     if (resp.status === 422 && (text === "stale" || text === "future")) return { kind: text, codecMs };
     return { kind: "unavailable", codecMs };
   } catch (e) {
-    log.error("codec.unreachable", { version, err: e });
+    (willRetry ? log.warn : log.error)("codec.unreachable", { version, err: e });
     return { kind: "unavailable", codecMs: Date.now() - start };
   }
 }

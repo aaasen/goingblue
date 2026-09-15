@@ -5,6 +5,7 @@ import { FORECAST_NUMBER } from "../src/constants.js";
 import { Hono } from "hono";
 import { ENCODE_RETRY_WINDOW_MS, encodeTaskRoute, runEncodeTask } from "../src/encode-task.js";
 import { accountExists } from "../src/accounts.js";
+import { log } from "../src/log.js";
 import type { DeliveryRequest, EncodedRecord, Reply } from "../src/delivery.js";
 
 // The task's state machine, run against an in-memory copy of the delivery store with the same
@@ -288,6 +289,26 @@ describe("codec unavailable", () => {
     });
     expect(await run()).toBe("retry");
     expect(row.encodedAt).toBeNull();
+  });
+
+  // The alert fires on errors, so the attempt that will be retried logs the codec failure as a
+  // warning and only the attempt that gives up logs an error.
+  it("logs the codec failure as a warning while retrying and as an error on giving up", async () => {
+    codec = () => new Response("boom", { status: 503 });
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(log, "error").mockImplementation(() => {});
+    receive();
+    expect(await run()).toBe("retry");
+    expect(warn).toHaveBeenCalledWith("codec.error_response", expect.objectContaining({ status: 503 }));
+    expect(error).not.toHaveBeenCalled();
+
+    rows.clear();
+    receive({ createdAt: new Date(Date.now() - ENCODE_RETRY_WINDOW_MS - 1) });
+    expect(await run()).toBe("done");
+    expect(error).toHaveBeenCalledWith("codec.error_response", expect.objectContaining({ status: 503 }));
+    expect(error).toHaveBeenCalledWith("encode.gave_up", expect.anything());
+    warn.mockRestore();
+    error.mockRestore();
   });
 
   it("answers on the first failure with no window", async () => {

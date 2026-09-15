@@ -37,9 +37,10 @@ describe("log", () => {
     const lines = capture(() => {
       log.debug("a");
       log.info("b");
-      log.error("c");
+      log.warn("c");
+      log.error("d");
     });
-    expect(lines.map((l) => JSON.parse(l).severity)).toEqual(["DEBUG", "INFO", "ERROR"]);
+    expect(lines.map((l) => JSON.parse(l).severity)).toEqual(["DEBUG", "INFO", "WARNING", "ERROR"]);
   });
 
   it("writes errors to stderr and everything else to stdout", () => {

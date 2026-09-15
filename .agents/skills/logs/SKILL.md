@@ -56,6 +56,8 @@ gcloud logging read \
   --format 'value(timestamp,resource.labels.service_name,jsonPayload.event)'
 ```
 
+Severities: `ERROR` is a service problem and raises the Cloud Monitoring alert (policy "Gateway or codec error", one email per 30 minutes to alerts@going.blue). `WARNING` raises nothing: a request that failed for the sender's own reasons, such as a malformed or stale message; a signature check that failed on a public route; or a codec failure that the encode task will retry, which becomes an `ERROR` only on the attempt that gives up (`encode.gave_up`).
+
 Filter to only errors:
 
 ```bash

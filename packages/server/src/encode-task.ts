@@ -73,10 +73,13 @@ async function runAttempt(row: DeliveryRequest, opts: TaskOptions): Promise<Task
   if (current.encodedAt === null) {
     const body = message.body.trim();
     log.info("encode.start", { sid: row.messageSid, attempt, len: body.length });
-    const result = await resolveForecast(body, row.requestId, opts.traceId);
+    // Whether a failure now can still be retried, decided before the call so dispatch can log
+    // a failure at the right level.
+    const deadline = (row.queuedAt ?? row.createdAt).getTime() + opts.retryWindowMs;
+    const willRetry = Date.now() < deadline;
+    const result = await resolveForecast(body, row.requestId, opts.traceId, willRetry);
     if (result.kind === "unavailable") {
-      const deadline = (row.queuedAt ?? row.createdAt).getTime() + opts.retryWindowMs;
-      if (Date.now() < deadline) {
+      if (willRetry) {
         log.info("encode.retry", { sid: row.messageSid, attempt });
         return "retry";
       }

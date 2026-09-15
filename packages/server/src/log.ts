@@ -14,7 +14,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 type Fields = Record<string, unknown>;
-type Severity = "DEBUG" | "INFO" | "ERROR";
+// WARNING is for a request that failed for the sender's own reasons: worth seeing in the logs,
+// not worth an alert, which fires on ERROR (Cloud Monitoring, the log-based policy).
+type Severity = "DEBUG" | "INFO" | "WARNING" | "ERROR";
 
 // The request the current call belongs to. Held ambiently rather than passed to every log call:
 // the events of one request are emitted from every depth of the code that serves it, and the
@@ -91,5 +93,6 @@ function emit(severity: Severity, event: string, fields?: Fields): void {
 export const log = {
   debug: (event: string, fields?: Fields) => emit("DEBUG", event, fields),
   info: (event: string, fields?: Fields) => emit("INFO", event, fields),
+  warn: (event: string, fields?: Fields) => emit("WARNING", event, fields),
   error: (event: string, fields?: Fields) => emit("ERROR", event, fields),
 };

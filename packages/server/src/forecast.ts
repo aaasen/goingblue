@@ -64,7 +64,14 @@ async function tokenKnown(token: string): Promise<boolean> {
 
 // Gate a request on its account and dispatch it to its version's codec. Nothing is recorded
 // here: the internet route and the encode task each record the result their own way.
-export async function resolveForecast(body: string, requestId: string, traceId: string | null): Promise<RequestResult> {
+// `willRetry` says whether an unavailable codec will be tried again by the caller, which sets
+// how loudly dispatch logs it.
+export async function resolveForecast(
+  body: string,
+  requestId: string,
+  traceId: string | null,
+  willRetry: boolean,
+): Promise<RequestResult> {
   const version = extractVersion(body);
   const token = extractUserToken(body);
   // The account check runs before dispatch, so a rejected request never costs a codec call or
@@ -74,7 +81,7 @@ export async function resolveForecast(body: string, requestId: string, traceId: 
     log.info("forecast.dispatch", { version, kind: "unknown_token" });
     return { kind: "unknown_token" };
   }
-  const result = await dispatchForecast(body, requestId, traceId);
+  const result = await dispatchForecast(body, requestId, traceId, willRetry);
   log.info("forecast.dispatch", {
     version,
     kind: result.kind,

@@ -36,7 +36,7 @@ export async function forecast(c: Context) {
   const traceId = traceIdFrom(c.req.header("X-Cloud-Trace-Context"));
   const body = (await c.req.text()).trim();
   const result = await withTrace(traceId, () => withRequestId(requestId, async () => {
-    const result = await resolveForecast(body, requestId, traceId);
+    const result = await resolveForecast(body, requestId, traceId, false);
     await logRequest({
       requestId,
       token: extractUserToken(body),
@@ -88,8 +88,10 @@ async function handleSms(c: Context, requestId: string, traceId: string | null) 
     // The URL Twilio signed is the public webhook URL. Behind Cloud Run the in-process URL can
     // differ (internal scheme/host), so allow pinning it via TWILIO_WEBHOOK_URL.
     const url = process.env["TWILIO_WEBHOOK_URL"] ?? c.req.url;
+    // A warning, not an error: the URL is public, so a bad signature is usually someone else's
+    // request. A URL mismatch after a deploy shows on the first test message.
     if (!validateTwilioSignature(authToken, signature, url, params)) {
-      log.error("sms.invalid_signature", { url });
+      log.warn("sms.invalid_signature", { url });
       return c.text("Invalid signature", 403);
     }
   }
@@ -189,7 +191,7 @@ async function handleSink(c: Context, requestId: string, traceId: string | null)
     const query = new URL(c.req.url).search;
     const url = (process.env["TWILIO_SINK_URL"] ?? c.req.url.split("?")[0]!) + query;
     if (!validateTwilioJsonSignature(authToken, signature, url, raw)) {
-      log.error("sink.invalid_signature", { url });
+      log.warn("sink.invalid_signature", { url });
       return c.text("Invalid signature", 403);
     }
   }

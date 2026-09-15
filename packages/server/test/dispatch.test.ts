@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateToken } from "@weather/protocol";
 import { codecUrlFor, dispatchForecast, extractUserToken, extractVersion, parseShapeHeader } from "../src/dispatch.js";
+import { log } from "../src/log.js";
 
 // A real token so extraction exercises the same validity check parseRequest applies.
 const TOKEN = generateToken((n) => Uint8Array.from({ length: n }, (_, i) => i * 7 + 3));
@@ -209,5 +210,51 @@ describe("codecUrlFor", () => {
     process.env["CODEC_URL_V7"] = "";
     expect(codecUrlFor(7)).toBeNull();
     delete process.env["CODEC_URL_V7"];
+  });
+});
+
+// The alert policy fires on ERROR, so a sender's own mistake must log below it while a service
+// failure stays at ERROR.
+describe("codec response severity", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    delete process.env["CODEC_URL_V1"];
+  });
+
+  it.each([
+    [400, "invalid request", "warn"],
+    [422, "stale", "warn"],
+    [422, "future", "warn"],
+    [422, "something else", "error"],
+    [503, "boom", "error"],
+  ] as const)("logs a %s '%s' at %s when this is the last attempt", async (status, body, level) => {
+    process.env["CODEC_URL_V1"] = "http://codec-v1";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status })));
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(log, "error").mockImplementation(() => {});
+    await dispatchForecast("v1 p:a", RID, null, false);
+    expect((level === "warn" ? warn : error)).toHaveBeenCalledWith("codec.error_response", expect.objectContaining({ status }));
+    expect((level === "warn" ? error : warn)).not.toHaveBeenCalled();
+  });
+
+  // A transient failure that the caller will retry is a warning; the same failure on the last
+  // attempt is an error. The sender's own errors are warnings either way.
+  it("logs an unavailable codec at warning when a retry will follow", async () => {
+    process.env["CODEC_URL_V1"] = "http://codec-v1";
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(log, "error").mockImplementation(() => {});
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 503 })));
+    await dispatchForecast("v1 p:a", RID, null, true);
+    expect(warn).toHaveBeenLastCalledWith("codec.error_response", expect.objectContaining({ status: 503 }));
+
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("ECONNREFUSED"); }));
+    await dispatchForecast("v1 p:a", RID, null, true);
+    expect(warn).toHaveBeenLastCalledWith("codec.unreachable", expect.anything());
+    expect(error).not.toHaveBeenCalled();
+
+    await dispatchForecast("v1 p:a", RID, null, false);
+    expect(error).toHaveBeenLastCalledWith("codec.unreachable", expect.anything());
   });
 });
