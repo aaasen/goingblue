@@ -282,9 +282,18 @@ async function handleDelivery(sid: string, outcome: DeliveryOutcome, data: Recor
 // (not over satellite). The token only identifies the user for usage limits; messaging opt-in
 // is consumer-initiated (the user opts in by texting a forecast request to the number), so this
 // records no consent and takes no body. Returns { token }.
+//
+// Only the app may mint: scanners that hit the route mint junk rows, so a caller whose user
+// agent does not name the app is refused before any row is written. Every app in the field
+// sends the header (it shipped with 1.3.0, the first v4 app, and older versions are sunset).
+const REPLY_UNSUPPORTED_CLIENT = "Unsupported client";
+
 export async function createAccountRoute(c: Context) {
-  // Log whether the user agent matches the app. This will reject requests once v4 is fully rolled out.
   const client = isAppUserAgent(c.req.header("User-Agent")) ? "app" : "other";
+  if (client === "other") {
+    log.info("account.rejected", { client });
+    return c.text(REPLY_UNSUPPORTED_CLIENT, 403);
+  }
   try {
     const token = await createAccount();
     log.info("account.create", { client });

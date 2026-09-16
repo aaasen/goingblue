@@ -93,9 +93,9 @@ Rules:
 
 ## Version changes
 
-Every query filters on the current protocol version, `version = 4`. The current version is the highest `CODEC_URL_V<N>` in `deploy.sh`. When a new version ships, update the filter in every query here and extend the list below.
+Every query filters on the current protocol version, `version = 4`. The current version is the highest `CODEC_URL_V<N>` in `deploy.sh` that real clients send. When a new version ships, update the filter in every query here and extend the list below.
 
-Each codec version is a frozen container, and older containers report fewer fields to the gateway, so rows from older versions have columns that newer rows fill:
+Versions 1 through 3 were sunset on September 16, 2026: their containers are gone and a request naming one gets the `unsupported_version` outcome. Their rows remain. Each codec version is a frozen container, and older containers reported fewer fields to the gateway, so rows from older versions have columns that newer rows fill:
  - Version 1: none of the shape or reply columns. Only `token`, `account_id`, `created_at`, `chars`, `version`, and `outcome`.
  - Versions 2 and 3: the shape columns (`lat`, `lon`, `loc`, `mode`, `model`, `vars`, `max_chars`, `messages`) and `device` on some rows, since the header grew during those versions. No `request_id`.
  - Version 4: everything, including `request_id`, `periods`, `fetch_ms`, and `encode_ms`. `platform` is present only when the client sent it, which the app started doing partway through version 4.
