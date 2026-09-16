@@ -1,4 +1,5 @@
 import { isValidToken, normalizeToken } from "@weather/protocol";
+import { codecAuthConfigured, identityToken } from "./identity.js";
 import { log } from "./log.js";
 
 // Routes a forecast request to the codec server for its protocol version. The gateway's
@@ -188,14 +189,24 @@ export async function dispatchForecast(
   // Wall time of the whole codec call, body included, on every path that actually reached one:
   // the gateway's own view of response time, next to the codec's reported components.
   const start = Date.now();
+  const headers: Record<string, string> = { "X-Request-Id": requestId };
+  if (traceId !== null) headers["X-Cloud-Trace-Context"] = traceId;
+  // The codec services admit only IAM-authorized callers (identity.ts). A token that cannot be
+  // minted is a gateway-side outage, reported like an unreachable codec.
+  if (codecAuthConfigured()) {
+    try {
+      headers["Authorization"] = `Bearer ${await identityToken(url)}`;
+    } catch (e) {
+      (willRetry ? log.warn : log.error)("codec.identity_unavailable", { version, err: e });
+      return { kind: "unavailable", codecMs: Date.now() - start };
+    }
+  }
   try {
     const resp = await fetch(`${url}/encode`, {
       method: "POST",
       body,
       signal: AbortSignal.timeout(CODEC_TIMEOUT_MS),
-      headers: traceId === null
-        ? { "X-Request-Id": requestId }
-        : { "X-Request-Id": requestId, "X-Cloud-Trace-Context": traceId },
+      headers,
     });
     if (resp.ok) {
       const encoded = await resp.text();

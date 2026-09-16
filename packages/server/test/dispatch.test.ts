@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateToken } from "@weather/protocol";
 import { codecUrlFor, dispatchForecast, extractUserToken, extractVersion, parseShapeHeader } from "../src/dispatch.js";
 import { log } from "../src/log.js";
+import { resetIdentityTokens } from "../src/identity.js";
 
 // A real token so extraction exercises the same validity check parseRequest applies.
 const TOKEN = generateToken((n) => Uint8Array.from({ length: n }, (_, i) => i * 7 + 3));
@@ -256,5 +257,77 @@ describe("codec response severity", () => {
 
     await dispatchForecast("v1 p:a", RID, null, false);
     expect(error).toHaveBeenLastCalledWith("codec.unreachable", expect.anything());
+  });
+});
+
+// With CODEC_AUTH=iam every codec call carries an identity token from the metadata server,
+// minted for the codec's URL as audience and reused until it nears expiry.
+describe("dispatchForecast codec auth", () => {
+  const METADATA = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
+  const jwt = (exp: number) =>
+    `${Buffer.from("{}").toString("base64url")}.${Buffer.from(JSON.stringify({ exp })).toString("base64url")}.sig`;
+  const body = "v4 63.0630,-151.0810 p:a c:160";
+
+  beforeEach(() => {
+    process.env["CODEC_URL_V4"] = "https://codec-v4.example";
+    process.env["CODEC_AUTH"] = "iam";
+    resetIdentityTokens();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env["CODEC_URL_V4"];
+    delete process.env["CODEC_AUTH"];
+  });
+
+  // A fetch stub that answers the metadata server and the codec, recording each call.
+  const stub = (token: string | (() => Response)) => {
+    const calls: { url: string; headers: Record<string, string> }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, headers: (init?.headers ?? {}) as Record<string, string> });
+      if (url.startsWith(METADATA)) return typeof token === "string" ? new Response(token) : token();
+      return new Response("ENCODED", { status: 200 });
+    }));
+    return calls;
+  };
+
+  it("mints a token for the codec URL and sends it as a bearer", async () => {
+    const calls = stub(jwt(Math.floor(Date.now() / 1000) + 3600));
+    const result = await dispatchForecast(body, RID, null);
+    expect(result.kind).toBe("ok");
+    expect(calls[0].url).toBe(`${METADATA}?audience=${encodeURIComponent("https://codec-v4.example")}`);
+    expect(calls[0].headers).toEqual({ "Metadata-Flavor": "Google" });
+    expect(calls[1].url).toBe("https://codec-v4.example/encode");
+    expect(calls[1].headers["Authorization"]).toBe(`Bearer ${jwt(Math.floor(Date.now() / 1000) + 3600)}`);
+  });
+
+  it("reuses the token until it nears expiry", async () => {
+    const calls = stub(jwt(Math.floor(Date.now() / 1000) + 3600));
+    await dispatchForecast(body, RID, null);
+    await dispatchForecast(body, RID, null);
+    expect(calls.filter((c) => c.url.startsWith(METADATA))).toHaveLength(1);
+  });
+
+  it("mints again once the token is about to expire", async () => {
+    const calls = stub(jwt(Math.floor(Date.now() / 1000) + 30));
+    await dispatchForecast(body, RID, null);
+    await dispatchForecast(body, RID, null);
+    expect(calls.filter((c) => c.url.startsWith(METADATA))).toHaveLength(2);
+  });
+
+  it("reports unavailable without calling the codec when no token can be minted", async () => {
+    const error = vi.spyOn(log, "error").mockImplementation(() => {});
+    const calls = stub(() => new Response("nope", { status: 500 }));
+    expect(await dispatchForecast(body, RID, null)).toEqual({ kind: "unavailable", codecMs: expect.any(Number) });
+    expect(calls.map((c) => c.url)).toHaveLength(1);
+    expect(error).toHaveBeenCalledWith("codec.identity_unavailable", expect.objectContaining({ version: 4 }));
+    error.mockRestore();
+  });
+
+  it("calls the codec bare when auth is not configured", async () => {
+    delete process.env["CODEC_AUTH"];
+    const calls = stub("unused");
+    await dispatchForecast(body, RID, null);
+    expect(calls.map((c) => c.url)).toEqual(["https://codec-v4.example/encode"]);
+    expect(calls[0].headers["Authorization"]).toBeUndefined();
   });
 });

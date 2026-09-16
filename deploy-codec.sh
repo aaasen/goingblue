@@ -27,13 +27,18 @@ gcloud builds submit --project "$PROJECT" --config cloudbuild-codec.yaml \
   --substitutions "_IMAGE=${IMAGE}" .
 
 # Scale-to-zero (the default min-instances) keeps a quiet frozen version effectively free.
-# The service is unauthenticated for now: it holds no secrets and serves only public weather
-# data; tightening to IAM-authenticated invocation from the gateway is a later hardening step.
+# The service admits only IAM-authorized invokers: Cloud Run rejects every other caller at its
+# edge, and the gateway, running as the project's default compute account, sends an identity
+# token for this service with each call (packages/server/src/identity.ts).
 # GOOGLE_CLOUD_PROJECT names the project the trace field's resource name resolves under; without
 # it the codec's lines still carry their request id, they just don't nest under the request log.
 gcloud run deploy "$CODEC_SERVICE" --project "$PROJECT" --region "$REGION" \
-  --image "$IMAGE" --platform managed --allow-unauthenticated \
+  --image "$IMAGE" --platform managed --no-allow-unauthenticated \
   --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT"
+
+INVOKER_EMAIL="$(gcloud projects describe "$PROJECT" --format 'value(projectNumber)')-compute@developer.gserviceaccount.com"
+gcloud run services add-iam-policy-binding "$CODEC_SERVICE" --project "$PROJECT" --region "$REGION" \
+  --member "serviceAccount:$INVOKER_EMAIL" --role roles/run.invoker --quiet >/dev/null
 
 echo
 echo "Service URL (set CODEC_URL_V${V} to this in deploy.sh, then redeploy the gateway):"
