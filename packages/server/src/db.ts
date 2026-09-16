@@ -334,17 +334,6 @@ export async function migrate(): Promise<void> {
   `);
 }
 
-// Lightweight liveness probe for the DB connection.
-export async function ping(): Promise<boolean> {
-  try {
-    await query("select 1");
-    return true;
-  } catch (e) {
-    log.error("db.ping_failed", { err: e });
-    return false;
-  }
-}
-
 export async function closePool(): Promise<void> {
   if (pool) {
     await pool.end();

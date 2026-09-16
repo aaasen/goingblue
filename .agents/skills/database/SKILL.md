@@ -37,7 +37,7 @@ What the reply carried and cost:
 
 How far delivery got, on the messaging routes:
  - `message_sid`: the inbound Twilio message's SID. Null on the internet route and on rows written before September 15, 2026.
- - `state`: `received`, `queued` (the encode task is on Cloud Tasks), `encoded` (the codec answered and the reply rows exist), `sent` (every reply row has a Twilio SID), `failed` (Twilio refused a reply at send time), or `no_reply` (stale, future, or rejected: nothing was owed). Internet requests and backfilled rows are `sent`. Derived from `queued_at`, `encoded_at`, `sent_at`, `failed_at`, and `no_reply_at`, so the gap between two of those is the time that step took.
+ - `state`: `received`, `queued` (the encode task is on Cloud Tasks), `encoded` (the codec answered and the reply rows exist), `sent` (every reply row has a Twilio SID), `failed` (Twilio refused a reply at send time, or the health check found the request still unanswered 15 minutes after its task was queued), or `no_reply` (stale, future, or rejected: nothing was owed). Internet requests and backfilled rows are `sent`. Derived from `queued_at`, `encoded_at`, `sent_at`, `failed_at`, and `no_reply_at`, so the gap between two of those is the time that step took.
  - `twilio_received_at`: Twilio's own timestamp for the inbound message.
  - `attempts`: how many times the encode task ran. More than one means a retry happened; the logs under the row's `request_id` say why.
 

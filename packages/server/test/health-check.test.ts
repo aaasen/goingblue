@@ -1,0 +1,147 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Hono } from "hono";
+import { countPending, failOverdue, listUnqueued, markQueued } from "../src/delivery.js";
+import { runEncodeTask } from "../src/encode-task.js";
+import { enqueueEncode, tasksConfigured } from "../src/tasks.js";
+import { log } from "../src/log.js";
+import { healthCheckRoute, runHealthCheck } from "../src/health-check.js";
+
+// The health check against a stubbed store: what each run reports and what it hands to the queue.
+
+vi.mock("../src/delivery.js", () => ({
+  failOverdue: vi.fn(async () => []),
+  listUnqueued: vi.fn(async () => []),
+  countPending: vi.fn(async () => 0),
+  markQueued: vi.fn(async () => {}),
+}));
+vi.mock("../src/tasks.js", () => ({
+  tasksConfigured: vi.fn(() => true),
+  enqueueEncode: vi.fn(async () => "queued"),
+}));
+vi.mock("../src/encode-task.js", () => ({
+  runEncodeTask: vi.fn(async () => "done"),
+}));
+
+const SID = "SM" + "c".repeat(32);
+const SID2 = "SM" + "d".repeat(32);
+const OPTS = { deadlineMs: 15 * 60_000, graceMs: 60_000 };
+
+let info: ReturnType<typeof vi.spyOn>;
+let warn: ReturnType<typeof vi.spyOn>;
+let error: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  vi.mocked(failOverdue).mockResolvedValue([]);
+  vi.mocked(listUnqueued).mockResolvedValue([]);
+  vi.mocked(countPending).mockResolvedValue(0);
+  vi.mocked(markQueued).mockClear();
+  vi.mocked(enqueueEncode).mockClear().mockResolvedValue("queued");
+  vi.mocked(tasksConfigured).mockReturnValue(true);
+  vi.mocked(runEncodeTask).mockClear();
+  info = vi.spyOn(log, "info").mockImplementation(() => {});
+  warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+  error = vi.spyOn(log, "error").mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+const events = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.map((c) => c[0]);
+
+describe("a quiet run", () => {
+  it("logs only the heartbeat", async () => {
+    const counts = await runHealthCheck(OPTS);
+    expect(counts).toEqual({ overdue: 0, enqueued: 0, pending: 0 });
+    expect(events(info)).toEqual(["health_check.heartbeat"]);
+    expect(info).toHaveBeenCalledWith("health_check.heartbeat", counts);
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it("passes the deadline and grace to the store in seconds", async () => {
+    await runHealthCheck(OPTS);
+    expect(failOverdue).toHaveBeenCalledWith(900);
+    expect(listUnqueued).toHaveBeenCalledWith(60);
+  });
+});
+
+describe("overdue requests", () => {
+  it("logs one error per request the store failed, tagged with its request id", async () => {
+    vi.mocked(failOverdue).mockResolvedValue([
+      { id: "1", requestId: "req-1", messageSid: SID, state: "queued", queuedAt: new Date(Date.now() - 20 * 60_000), attempts: 7 },
+      { id: "2", requestId: "req-2", messageSid: SID2, state: "encoded", queuedAt: new Date(Date.now() - 16 * 60_000), attempts: 3 },
+    ]);
+    vi.mocked(countPending).mockResolvedValue(1);
+    const counts = await runHealthCheck(OPTS);
+    expect(counts).toEqual({ overdue: 2, enqueued: 0, pending: 1 });
+    expect(events(error)).toEqual(["health_check.overdue", "health_check.overdue"]);
+    expect(error).toHaveBeenCalledWith("health_check.overdue", { sid: SID, state: "queued", attempts: 7, age_s: 1200 });
+    expect(error).toHaveBeenCalledWith("health_check.overdue", { sid: SID2, state: "encoded", attempts: 3, age_s: 960 });
+  });
+});
+
+describe("received but never queued", () => {
+  const unqueued = () => vi.mocked(listUnqueued).mockResolvedValue([
+    { id: "1", requestId: "req-1", messageSid: SID, createdAt: new Date(Date.now() - 90_000) },
+  ]);
+
+  it("enqueues the task and marks the row", async () => {
+    unqueued();
+    const counts = await runHealthCheck(OPTS);
+    expect(enqueueEncode).toHaveBeenCalledWith(SID);
+    expect(markQueued).toHaveBeenCalledWith("1");
+    expect(counts.enqueued).toBe(1);
+    expect(warn).toHaveBeenCalledWith("health_check.enqueued", { sid: SID, enqueued: "queued", age_s: 90 });
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it("marks the row when the queue already has the task", async () => {
+    unqueued();
+    vi.mocked(enqueueEncode).mockResolvedValue("exists");
+    await runHealthCheck(OPTS);
+    expect(markQueued).toHaveBeenCalledWith("1");
+    expect(warn).toHaveBeenCalledWith("health_check.enqueued", expect.objectContaining({ enqueued: "exists" }));
+  });
+
+  it("logs an error and leaves the row when the enqueue fails, and still heartbeats", async () => {
+    unqueued();
+    vi.mocked(enqueueEncode).mockRejectedValue(new Error("Cloud Tasks: HTTP 503"));
+    const counts = await runHealthCheck(OPTS);
+    expect(markQueued).not.toHaveBeenCalled();
+    expect(counts.enqueued).toBe(0);
+    expect(events(error)).toEqual(["health_check.enqueue_failed"]);
+    expect(events(info)).toEqual(["health_check.heartbeat"]);
+  });
+
+  it("runs the task inline when there is no queue", async () => {
+    unqueued();
+    vi.mocked(tasksConfigured).mockReturnValue(false);
+    await runHealthCheck(OPTS);
+    expect(runEncodeTask).toHaveBeenCalledWith(SID, { retryWindowMs: 0, traceId: null });
+    expect(enqueueEncode).not.toHaveBeenCalled();
+    expect(markQueued).not.toHaveBeenCalled();
+    expect(events(info)).toEqual(["health_check.ran", "health_check.heartbeat"]);
+  });
+});
+
+describe("POST /health-check", () => {
+  const app = new Hono();
+  app.post("/health-check", healthCheckRoute);
+  const post = () => app.request("/health-check", { method: "POST" });
+
+  it("answers with the run's counts", async () => {
+    vi.mocked(countPending).mockResolvedValue(2);
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ overdue: 0, enqueued: 0, pending: 2 });
+  });
+
+  it("is a 500 with no heartbeat when the store fails", async () => {
+    vi.mocked(failOverdue).mockRejectedValue(new Error("connection refused"));
+    const res = await post();
+    expect(res.status).toBe(500);
+    expect(events(info)).toEqual([]);
+    expect(events(error)).toEqual(["health_check.failed"]);
+  });
+});

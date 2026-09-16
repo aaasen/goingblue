@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { ping } from "./db.js";
 import { extractUserToken, extractVersion } from "./dispatch.js";
 import { createAccount, deleteAccount, recordRequest } from "./accounts.js";
 import { markQueued, receiveMessage, recordReplyDelivery, type DeliveryOutcome } from "./delivery.js";
@@ -277,12 +276,6 @@ async function handleDelivery(sid: string, outcome: DeliveryOutcome, data: Recor
   }
   log.info("sink.delivery", { sid, outcome, code: errorCode });
   return 200;
-}
-
-export async function health(c: Context) {
-  const dbUp = await ping();
-  // Always 200 so this stays a valid liveness probe; the body reports DB reachability.
-  return c.text(`OK db:${dbUp ? "up" : "down"}`, 200);
 }
 
 // POST /account — mint a new account token. Called once over normal internet during app setup

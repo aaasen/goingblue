@@ -31,8 +31,6 @@ import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 //   never interpreted.
 const app = new Hono();
 
-app.get("/health", (c) => c.text("OK", 200));
-
 // The gateway's id for the message being served, tagging every line this request logs so its
 // path through both services reads as one sequence. A caller that sends no header logs no id.
 // The trace comes from the same call and does the same job for the Logs Explorer, which nests

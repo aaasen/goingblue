@@ -239,3 +239,66 @@ export async function recordReplyDelivery(
   );
   return (r.rowCount ?? 0) > 0;
 }
+
+// The health check's view of the store (health-check.ts): messaging requests that have not reached
+// a terminal state. Internet requests are inserted already sent, so `message_sid is not null`
+// is what makes each of these a delivery question.
+
+const NOT_TERMINAL = "sent_at is null and failed_at is null and no_reply_at is null";
+
+export interface UnqueuedRequest {
+  id: string;
+  requestId: string;
+  messageSid: string;
+  createdAt: Date;
+}
+
+// Messages received at least `graceSeconds` ago that no encode task was ever recorded for.
+export async function listUnqueued(graceSeconds: number): Promise<UnqueuedRequest[]> {
+  const rows = (await query<{ id: string; request_id: string; message_sid: string; created_at: Date }>(
+    `select id, request_id, message_sid, created_at from requests
+      where message_sid is not null and queued_at is null and ${NOT_TERMINAL}
+        and created_at < now() - make_interval(secs => $1)
+      order by created_at`,
+    [graceSeconds],
+  )).rows;
+  return rows.map((r) => ({ id: r.id, requestId: r.request_id, messageSid: r.message_sid, createdAt: r.created_at }));
+}
+
+export interface OverdueRequest {
+  id: string;
+  requestId: string;
+  messageSid: string;
+  // The state the request was stuck in.
+  state: "queued" | "encoded";
+  queuedAt: Date;
+  attempts: number;
+}
+
+// Fail every request whose encode task was queued more than `deadlineSeconds` ago and never
+// finished: past the queue's own retry limit nothing will run it again. Returns the rows this
+// call failed, so a request is reported once however many runs see it.
+export async function failOverdue(deadlineSeconds: number): Promise<OverdueRequest[]> {
+  const rows = (await query<{
+    id: string; request_id: string; message_sid: string; was: "queued" | "encoded"; queued_at: Date; attempts: number;
+  }>(
+    `update requests set failed_at = now()
+      where message_sid is not null and queued_at is not null and ${NOT_TERMINAL}
+        and queued_at < now() - make_interval(secs => $1)
+      returning id, request_id, message_sid, queued_at, attempts,
+                case when encoded_at is not null then 'encoded' else 'queued' end as was`,
+    [deadlineSeconds],
+  )).rows;
+  return rows.map((r) => ({
+    id: r.id, requestId: r.request_id, messageSid: r.message_sid, state: r.was,
+    queuedAt: r.queued_at, attempts: r.attempts,
+  }));
+}
+
+// Messaging requests still on their way to a terminal state.
+export async function countPending(): Promise<number> {
+  const r = await query<{ n: string }>(
+    `select count(*)::text as n from requests where message_sid is not null and ${NOT_TERMINAL}`,
+  );
+  return parseInt(r.rows[0]!.n);
+}
