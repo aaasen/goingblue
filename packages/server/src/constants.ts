@@ -3,6 +3,7 @@
 // live. They are here rather than in the page shell because pages are the things that read them —
 // the shell is only one more reader.
 export const BRAND = "Going Blue";
+export const SITE_URL = "https://going.blue";
 export const LAST_UPDATED = "August 17, 2026";
 export const PRIVACY_UPDATED = "September 3, 2026";
 export const CONTACT_EMAIL = "help@going.blue";

@@ -9,7 +9,7 @@ import { android } from "./pages/android.js";
 import { privacy } from "./pages/privacy.js";
 import { terms } from "./pages/terms.js";
 import { contactCard } from "./pages/contact-card.js";
-import { image, favicon } from "./assets.js";
+import { image, favicon, robots, sitemap } from "./assets.js";
 import { vendorAsset } from "./vendor.js";
 import { benchmark } from "./benchmark.js";
 import { stats, hideAccountRoute, unhideAccountRoute } from "./pages/stats.js";
@@ -33,6 +33,8 @@ app.get("/img/:name", image);
 // open-source code, and keeping them here lets them cache independently of the login.
 app.get("/vendor/:v/:name", vendorAsset);
 app.get("/favicon.ico", favicon);
+app.get("/robots.txt", robots);
+app.get("/sitemap.xml", sitemap);
 app.use("/forecast", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/forecast", forecast);
 app.post("/sms", sms);

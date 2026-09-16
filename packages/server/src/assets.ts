@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { SITE_URL } from "./constants.js";
 import { log } from "./log.js";
 
 // Static images for the public pages. There are only a couple of them and they are small, so
@@ -151,6 +152,32 @@ export async function favicon(c: Context): Promise<Response> {
   }
   return c.body(faviconBytes, 200, {
     "Content-Type": "image/x-icon",
+    "Cache-Control": "public, max-age=86400",
+  });
+}
+
+// GET /robots.txt and GET /sitemap.xml — the other two paths fixed by convention. Everything
+// public is crawlable, so robots.txt lists no exclusions: the stats dashboard is behind auth,
+// and naming it would only advertise it. The API routes are POST-only and get no entry either.
+const ROBOTS = `User-agent: *
+Allow: /
+Sitemap: ${SITE_URL}/sitemap.xml
+`;
+export function robots(c: Context): Response {
+  return c.text(ROBOTS, 200, { "Cache-Control": "public, max-age=86400" });
+}
+
+// The public pages. Assets, the contact
+// card, and the API routes are not pages and are left out.
+const PAGES = ["/", "/support", "/android", "/privacy", "/terms", "/benchmark"];
+const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${PAGES.map((path) => `  <url><loc>${SITE_URL}${path}</loc></url>`).join("\n")}
+</urlset>
+`;
+export function sitemap(c: Context): Response {
+  return c.body(SITEMAP, 200, {
+    "Content-Type": "application/xml; charset=utf-8",
     "Cache-Control": "public, max-age=86400",
   });
 }
