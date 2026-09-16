@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
 import {
   MODEL_BIT, VAR, ALWAYS_VARS, type Variable, generateToken, MODE_DETAIL, MODE_AUTO, MODE_RANGE,
-  IPHONE_MAX_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, UNCAPPED_MAX_CHARS, MAX_MESSAGES, WIRE_HEADER_CHARS, WIRE_VERSION, maxCharsFor,
+  IPHONE_MAX_CHARS, SMS_MAX_CHARS, SMS_CONCAT_SEGMENT_CHARS, ZOLEO_MAX_CHARS, UNCAPPED_MAX_CHARS, MAX_MESSAGES, WIRE_HEADER_CHARS, WIRE_VERSION, maxCharsFor,
 } from "@weather/protocol";
 
 // The always-on core plus the given extras, as parseRequest builds its selection.
@@ -330,7 +330,7 @@ describe("parseRequest", () => {
   it("n: is independent of the device, so token order never matters", () => {
     expect(parseRequest("n:2 d:i").maxChars).toBe(parseRequest("d:i n:2").maxChars);
     expect(parseRequest("n:2 d:g").maxChars).toBe(maxCharsFor("g", 2, WIRE_HEADER_CHARS));
-    expect(parseRequest("n:2 d:s").maxChars).toBe(2 * SMS_MAX_CHARS);
+    expect(parseRequest("n:2 d:s").maxChars).toBe(2 * SMS_CONCAT_SEGMENT_CHARS);
   });
 
   // Requests are only ever written by the app, so every component it always sends is required
