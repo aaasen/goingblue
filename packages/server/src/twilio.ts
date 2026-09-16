@@ -168,6 +168,55 @@ export async function fetchMessage(sid: string): Promise<FetchMessageResult> {
   };
 }
 
+// Every inbound message to `to` created since `since`, newest first as Twilio lists them. The
+// list is paged; each page is one request and a failure on any page fails the whole read, since
+// a partial list would read as messages that were never sent. Twilio's own filter is on the sent
+// date, which for an inbound message is when Twilio received it.
+export type ListMessagesResult =
+  | { kind: "ok"; messages: InboundMessage[] }
+  | { kind: "retry" };
+
+const LIST_PAGE_SIZE = 1000;
+
+export async function listInboundMessages(to: string, since: Date): Promise<ListMessagesResult> {
+  const creds = credentials();
+  if (!creds) {
+    log.error("twilio.no_credentials");
+    return { kind: "retry" };
+  }
+  const params = new URLSearchParams({ To: to, "DateSent>": since.toISOString(), PageSize: String(LIST_PAGE_SIZE) });
+  let url: string | null = `${TWILIO_API}/Accounts/${creds.accountSid}/Messages.json?${params}`;
+  const messages: InboundMessage[] = [];
+  while (url !== null) {
+    let resp: Response;
+    try {
+      resp = await fetch(url, { headers: { Authorization: creds.auth }, signal: AbortSignal.timeout(TWILIO_TIMEOUT_MS) });
+    } catch (e) {
+      log.error("twilio.list_unreachable", { err: e });
+      return { kind: "retry" };
+    }
+    if (!resp.ok) {
+      log.error("twilio.list_failed", { status: resp.status, code: await errorCode(resp) });
+      return { kind: "retry" };
+    }
+    const page = await resp.json() as { messages?: unknown; next_page_uri?: unknown };
+    for (const m of Array.isArray(page.messages) ? page.messages as Record<string, unknown>[] : []) {
+      const created = Date.parse(str(m["date_created"]));
+      messages.push({
+        sid: str(m["sid"]),
+        direction: str(m["direction"]),
+        from: str(m["from"]),
+        to: str(m["to"]),
+        body: str(m["body"]),
+        dateCreated: Number.isNaN(created) ? null : new Date(created),
+      });
+    }
+    url = typeof page.next_page_uri === "string" && page.next_page_uri
+      ? `https://api.twilio.com${page.next_page_uri}` : null;
+  }
+  return { kind: "ok", messages };
+}
+
 export async function sendMessage(to: string, from: string, body: string): Promise<SendMessageResult> {
   const creds = credentials();
   if (!creds) {

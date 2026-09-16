@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash, createHmac } from "node:crypto";
-import { twiml, validateTwilioJsonSignature, validateTwilioSignature } from "../src/twilio.js";
+import { listInboundMessages, twiml, validateTwilioJsonSignature, validateTwilioSignature } from "../src/twilio.js";
+import { log } from "../src/log.js";
 
 // Reproduce Twilio's signing scheme so the test signs the same way the validator verifies.
 function sign(authToken: string, url: string, params: Record<string, string>): string {
@@ -97,5 +98,75 @@ describe("validateTwilioJsonSignature", () => {
     expect(validateTwilioJsonSignature(authToken, "nope", url, body)).toBe(false);
     expect(validateTwilioJsonSignature(authToken, sign("other", url, {}), url, body)).toBe(false);
     expect(validateTwilioJsonSignature(authToken, sign(authToken, url, {}), "not a url", body)).toBe(false);
+  });
+});
+
+describe("listInboundMessages", () => {
+  const ACCOUNT = "ACtest";
+  const TO = "+14254345858";
+  const SINCE = new Date("2026-09-14T12:00:00Z");
+  const m = (n: number) => ({
+    sid: "SM" + String(n).padStart(32, "0"), direction: "inbound", from: "+15550100", to: TO,
+    body: `v1 ${n}`, date_created: "Tue, 15 Sep 2026 16:00:00 +0000",
+  });
+
+  let pages: { status: number; body?: unknown }[];
+  let urls: string[];
+  beforeEach(() => {
+    process.env["TWILIO_ACCOUNT_SID"] = ACCOUNT;
+    process.env["TWILIO_AUTH_TOKEN"] = "token";
+    urls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(url);
+      const page = pages[urls.length - 1];
+      if (!page) throw new Error("ECONNRESET");
+      return new Response(JSON.stringify(page.body ?? {}), { status: page.status, headers: { "Content-Type": "application/json" } });
+    }));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env["TWILIO_ACCOUNT_SID"];
+    delete process.env["TWILIO_AUTH_TOKEN"];
+  });
+
+  it("asks for messages to the number since the date, and follows every page", async () => {
+    pages = [
+      { status: 200, body: { messages: [m(1), m(2)], next_page_uri: `/2010-04-01/Accounts/${ACCOUNT}/Messages.json?PageSize=1000&Page=1&PageToken=PAxyz` } },
+      { status: 200, body: { messages: [m(3)], next_page_uri: null } },
+    ];
+    const result = await listInboundMessages(TO, SINCE);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+    expect(result.messages.map((x) => x.sid)).toEqual([m(1).sid, m(2).sid, m(3).sid]);
+    expect(result.messages[0]).toMatchObject({ direction: "inbound", from: "+15550100", to: TO, body: "v1 1" });
+    expect(result.messages[0]!.dateCreated?.toISOString()).toBe("2026-09-15T16:00:00.000Z");
+    const first = new URL(urls[0]!);
+    expect(first.pathname).toBe(`/2010-04-01/Accounts/${ACCOUNT}/Messages.json`);
+    expect(first.searchParams.get("To")).toBe(TO);
+    expect(first.searchParams.get("DateSent>")).toBe("2026-09-14T12:00:00.000Z");
+    expect(urls[1]).toBe(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT}/Messages.json?PageSize=1000&Page=1&PageToken=PAxyz`);
+  });
+
+  it("is a retry when any page fails, rather than a short list", async () => {
+    pages = [
+      { status: 200, body: { messages: [m(1)], next_page_uri: `/2010-04-01/Accounts/${ACCOUNT}/Messages.json?Page=1` } },
+      { status: 503 },
+    ];
+    vi.spyOn(log, "error").mockImplementation(() => {});
+    expect((await listInboundMessages(TO, SINCE)).kind).toBe("retry");
+  });
+
+  it("is a retry when Twilio cannot be reached", async () => {
+    pages = [];
+    vi.spyOn(log, "error").mockImplementation(() => {});
+    expect((await listInboundMessages(TO, SINCE)).kind).toBe("retry");
+  });
+
+  it("is a retry without credentials", async () => {
+    delete process.env["TWILIO_AUTH_TOKEN"];
+    pages = [{ status: 200, body: { messages: [] } }];
+    vi.spyOn(log, "error").mockImplementation(() => {});
+    expect((await listInboundMessages(TO, SINCE)).kind).toBe("retry");
+    expect(urls).toEqual([]);
   });
 });

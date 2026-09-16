@@ -302,3 +302,30 @@ export async function countPending(): Promise<number> {
   );
   return parseInt(r.rows[0]!.n);
 }
+
+// Which of these SIDs have no row: messages Twilio holds that were never received here.
+export async function findUnknownSids(sids: string[]): Promise<string[]> {
+  if (sids.length === 0) return [];
+  const rows = (await query<{ sid: string }>(
+    `select s.sid from unnest($1::text[]) as s(sid)
+      where not exists (select 1 from requests where message_sid = s.sid)`,
+    [sids],
+  )).rows;
+  return rows.map((r) => r.sid);
+}
+
+// Record a message that never reached the service, as a request nothing is owed for. Returns
+// false when the SID already has a row, so a message is recorded, and reported, once.
+export async function recordMissed(r: {
+  requestId: string;
+  messageSid: string;
+  twilioReceivedAt: Date | null;
+}): Promise<boolean> {
+  const result = await query(
+    `insert into requests (request_id, message_sid, twilio_received_at, outcome, no_reply_at)
+     values ($1, $2, $3, 'missed', now())
+     on conflict (message_sid) do nothing`,
+    [r.requestId, r.messageSid, r.twilioReceivedAt],
+  );
+  return (result.rowCount ?? 0) > 0;
+}

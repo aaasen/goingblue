@@ -20,7 +20,7 @@ Identity and timing:
  - `version`: the protocol version the request named. Per-version counts are the sunset metric for frozen codec containers.
 
 How it ended:
- - `outcome`: `ok`, or one of `unknown_token`, `missing_version`, `unsupported_version`, `malformed`, `stale`, `future`, `unavailable` (the dispatch result kinds in `packages/server/src/dispatch.ts`), or `rejected` for a message SID that Twilio did not know or that was not an inbound message to the service number. Rows written before the column existed are all successes: read a null as `ok`.
+ - `outcome`: `ok`, or one of `unknown_token`, `missing_version`, `unsupported_version`, `malformed`, `stale`, `future`, `unavailable` (the dispatch result kinds in `packages/server/src/dispatch.ts`), or `rejected` for a message SID that Twilio did not know or that was not an inbound message to the service number, or `missed` for a message the health check found at Twilio that never reached the service (no reply was sent; `created_at` is when the check found it, `twilio_received_at` when it arrived at Twilio). Rows written before the column existed are all successes: read a null as `ok`.
  - `codec_ms`: the gateway's wall clock around the whole codec call. Null when no codec was called.
 
 What was asked for, as the codec reported it. All null on failures, and missing on rows from older versions (see Version changes below):
@@ -37,7 +37,7 @@ What the reply carried and cost:
 
 How far delivery got, on the messaging routes:
  - `message_sid`: the inbound Twilio message's SID. Null on the internet route and on rows written before September 15, 2026.
- - `state`: `received`, `queued` (the encode task is on Cloud Tasks), `encoded` (the codec answered and the reply rows exist), `sent` (every reply row has a Twilio SID), `failed` (Twilio refused a reply at send time, or the health check found the request still unanswered 15 minutes after its task was queued), or `no_reply` (stale, future, or rejected: nothing was owed). Internet requests and backfilled rows are `sent`. Derived from `queued_at`, `encoded_at`, `sent_at`, `failed_at`, and `no_reply_at`, so the gap between two of those is the time that step took.
+ - `state`: `received`, `queued` (the encode task is on Cloud Tasks), `encoded` (the codec answered and the reply rows exist), `sent` (every reply row has a Twilio SID), `failed` (Twilio refused a reply at send time, or the health check found the request still unanswered 15 minutes after its task was queued), or `no_reply` (stale, future, rejected, or missed: nothing was owed). Internet requests and backfilled rows are `sent`. Derived from `queued_at`, `encoded_at`, `sent_at`, `failed_at`, and `no_reply_at`, so the gap between two of those is the time that step took.
  - `twilio_received_at`: Twilio's own timestamp for the inbound message.
  - `attempts`: how many times the encode task ran. More than one means a retry happened; the logs under the row's `request_id` say why.
 
