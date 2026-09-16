@@ -131,12 +131,13 @@ async function runAttempt(row: DeliveryRequest, opts: TaskOptions): Promise<Task
 }
 
 // POST /encode?sid=<MessageSid>: run the task for one message. This is the Cloud Tasks target,
-// and it is public: a SID names a message only if it was already received here, the recipient
-// and the reply come from Twilio and the row rather than from the caller, and every step is
-// guarded, so the most a caller can do is run a task that was going to run anyway. The SID is
-// in the query so a task is just a URL and a method, and the Cloud Tasks console and the Cloud
-// Run request log both show it. 200 clears the task from the queue, 503 asks for it back, and a
-// SID never received is a 404.
+// behind the invoker check (invoker.ts, applied in index.ts). The route itself trusts the caller
+// with nothing: a SID names a message only if it was already received here, the recipient and
+// the reply come from Twilio and the row rather than from the caller, and every step is guarded,
+// so even an unchecked call could do no more than run a task that was going to run anyway. The
+// SID is in the query so a task is just a URL and a method, and the Cloud Tasks console and the
+// Cloud Run request log both show it. 200 clears the task from the queue, 503 asks for it back,
+// and a SID never received is a 404.
 export async function encodeTaskRoute(c: Context) {
   const sid = c.req.query("sid");
   if (!isMessageSid(sid)) return c.text("Invalid sid", 400);

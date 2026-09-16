@@ -87,3 +87,21 @@ describe("enqueueEncode", () => {
     expect(new Set(bearers).size).toBe(1);
   });
 });
+
+describe("the identity token", () => {
+  const body = () => JSON.parse(vi.mocked(fetch).mock.calls.find((c) => String(c[0]).startsWith("https://cloudtasks"))![1]!.body as string);
+
+  afterEach(() => { delete process.env["INVOKER_EMAIL"]; });
+
+  it("is attached for the invoker account with the route URL as audience", async () => {
+    process.env["INVOKER_EMAIL"] = "sa@example.iam.gserviceaccount.com";
+    await enqueueEncode(SID);
+    expect(body().task.httpRequest.oidcToken).toEqual({ serviceAccountEmail: "sa@example.iam.gserviceaccount.com", audience: URL_ });
+    expect(body().task.httpRequest.url).toBe(`${URL_}?sid=${SID}`);
+  });
+
+  it("is absent when no invoker account is set", async () => {
+    await enqueueEncode(SID);
+    expect(body().task.httpRequest.oidcToken).toBeUndefined();
+  });
+});

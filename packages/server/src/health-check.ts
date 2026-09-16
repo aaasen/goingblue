@@ -131,9 +131,9 @@ async function scanTwilio(opts: HealthCheckOptions): Promise<{ scanned: number; 
   return { scanned: candidates.length, missed };
 }
 
-// POST /health-check: one run, called by Cloud Scheduler. Public like /encode: the run does
-// only what the next run would do anyway. A failure is a 500 with no heartbeat, which is what
-// the heartbeat alert is for.
+// POST /health-check: one run, called by Cloud Scheduler, behind the invoker check like /encode
+// (index.ts). The run itself does only what the next run would do anyway. A failure is a 500
+// with no heartbeat, which is what the heartbeat alert is for.
 export async function healthCheckRoute(c: Context) {
   try {
     const counts = await runHealthCheck({

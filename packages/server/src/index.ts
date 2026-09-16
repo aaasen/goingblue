@@ -15,6 +15,7 @@ import { benchmark } from "./benchmark.js";
 import { stats, hideAccountRoute, unhideAccountRoute } from "./pages/stats.js";
 import { encodeTaskRoute } from "./encode-task.js";
 import { healthCheckRoute } from "./health-check.js";
+import { invokerEmail, requireInvoker } from "./invoker.js";
 import { migrate } from "./db.js";
 import { log } from "./log.js";
 
@@ -36,7 +37,12 @@ app.use("/forecast", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/forecast", forecast);
 app.post("/sms", sms);
 app.post("/twilio-sink", twilioSink);
+// The task and scheduler targets. Called only by Google's services with an identity token for
+// the runtime service account (invoker.ts); with INVOKER_EMAIL unset, as in local dev, both are
+// open, and the startup line below says so.
+app.use("/encode", requireInvoker("ENCODE_URL"));
 app.post("/encode", encodeTaskRoute);
+app.use("/health-check", requireInvoker("HEALTH_CHECK_URL"));
 app.post("/health-check", healthCheckRoute);
 app.use("/account", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/account", createAccountRoute);
@@ -79,5 +85,8 @@ migrate()
   .catch((e) => log.error("db.migrate_failed", { err: e }));
 
 serve({ fetch: app.fetch, port }, () => {
-  log.info("server.listening", { port, stats: statsPass ? "enabled" : "disabled_no_secret" });
+  log.info("server.listening", {
+    port, stats: statsPass ? "enabled" : "disabled_no_secret",
+    invoker: invokerEmail() === null ? "unchecked" : "checked",
+  });
 });

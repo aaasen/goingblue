@@ -1,3 +1,4 @@
+import { invokerEmail } from "./invoker.js";
 import { log } from "./log.js";
 
 // Cloud Tasks enqueue for the encode task, over the REST API with a token from the Cloud Run
@@ -5,7 +6,9 @@ import { log } from "./log.js";
 //
 // Configured by ENCODE_QUEUE, the queue's full resource name, and ENCODE_URL, the public
 // /encode URL each task posts to. With neither set there is no queue, and /sms runs the task
-// inline instead.
+// inline instead. With INVOKER_EMAIL set each task carries an identity token for that service
+// account, minted by Cloud Tasks with the /encode URL as its audience, which is what /encode
+// checks (invoker.ts).
 
 const TASKS_API = "https://cloudtasks.googleapis.com/v2";
 const METADATA_TOKEN_URL =
@@ -51,7 +54,11 @@ export async function enqueueEncode(sid: string): Promise<"queued" | "exists"> {
     body: JSON.stringify({
       task: {
         name: `${queue}/tasks/${sid}`,
-        httpRequest: { url: `${url}?sid=${sid}`, httpMethod: "POST" },
+        httpRequest: {
+          url: `${url}?sid=${sid}`,
+          httpMethod: "POST",
+          ...(invokerEmail() ? { oidcToken: { serviceAccountEmail: invokerEmail(), audience: url } } : {}),
+        },
         dispatchDeadline: DISPATCH_DEADLINE,
       },
     }),
