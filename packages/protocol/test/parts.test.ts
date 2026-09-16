@@ -3,7 +3,7 @@ import {
   splitReply, reassembleReply, mergeParts, partLabel, PART_LABEL_CHARS,
   chunkLines, collectingChunks, type ReplyOracles,
 } from "../src/parts.js";
-import { maxCharsFor, partBodyChars, widePartBodyChars, MAX_MESSAGES, UNCAPPED_MAX_CHARS } from "../src/devices.js";
+import { maxCharsFor, partBodyChars, widePartBodyChars, MAX_MESSAGES, SMS_CONCAT_SEGMENT_CHARS, UNCAPPED_MAX_CHARS } from "../src/devices.js";
 import { WIRE_HEADER_CHARS, wireCodec } from "../src/wire.js";
 import type { ForecastMessage, Variable } from "../src/model.js";
 import wireFixture from "./fixtures/wire.fixture.json";
@@ -160,8 +160,11 @@ describe("the multi-message budget", () => {
   });
 
   it("leaves SMS at whole concatenated segments", () => {
+    // One message is a plain 160-character SMS. A concatenated one spends 7 septets a segment on
+    // the user data header, so two segments carry 2 × 153, not 320 (which would be three).
     expect(maxCharsFor("s", 1, H)).toBe(160);
-    expect(maxCharsFor("s", 2, H)).toBe(320);
+    expect(maxCharsFor("s", 2, H)).toBe(2 * SMS_CONCAT_SEGMENT_CHARS);
+    expect(maxCharsFor("s", 2, H)).toBe(306);
     expect(partBodyChars("s", H)).toBeNull();
   });
 

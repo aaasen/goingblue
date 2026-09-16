@@ -19,6 +19,11 @@ export interface DeviceTransport {
 // of them (inReach's limit), so it is the safe shared default.
 export const SMS_MAX_CHARS = 160;
 
+// One segment of a CONCATENATED SMS. Each segment of a multi-part message carries a 6-byte user
+// data header, which costs 7 septets of the 160, so a reply meant to span n segments has n × 153
+// characters to spend, not n × 160: 320 characters leave as three segments, 306 as two.
+export const SMS_CONCAT_SEGMENT_CHARS = 153;
+
 // One ZOLEO message: the gateway truncates at exactly 240 raw UTF-8 bytes (measured in the
 // field), which in an ASCII alphabet is 240 characters.
 export const ZOLEO_MAX_CHARS = 240;
@@ -159,8 +164,10 @@ export function maxCharsFor(code: DeviceCode, messages: number, headerChars: num
   if (transport.maxChars === UNCAPPED_MAX_CHARS) return UNCAPPED_MAX_CHARS;
   if (n === 1) return transport.maxChars;
   const partBody = partBodyChars(code, headerChars);
-  // A route whose transport concatenates (SMS): one string, n segments long.
-  if (partBody === null) return n * transport.maxChars;
+  // A route whose transport concatenates (SMS): one string, n segments long. A concatenated
+  // segment holds 153 characters, not 160 (SMS_CONCAT_SEGMENT_CHARS), so n × 160 would leave
+  // as n + 1 segments.
+  if (partBody === null) return n * SMS_CONCAT_SEGMENT_CHARS;
   return headerChars + n * partBody;
 }
 
