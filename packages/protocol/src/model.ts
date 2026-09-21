@@ -15,6 +15,26 @@ export function relativeHumidityPct(tempC: number, dewpointC: number): number {
   return Math.min(100, Math.round((100 * es(dewpointC)) / es(tempC)));
 }
 
+// Wet-bulb temperature in °C from a temperature/dewpoint pair and the station pressure, by
+// bisection on the psychrometric equation e(Td) = es(Tw) − A·p·(T − Tw), with the same Magnus
+// form as relativeHumidityPct and A = 6.53e-4 /°C (ventilated psychrometer). Pressure is an
+// input because the fits that skip it (Stull 2011) assume sea level and read degrees high on a
+// mountain. Saturation is over water at every temperature, the meteorological convention, so
+// this is not the ice-bulb below freezing. The root lies in [Td, T]; a dewpoint at or above
+// temp is saturated air.
+export function wetBulbC(tempC: number, dewpointC: number, pressureHpa: number): number {
+  if (dewpointC >= tempC) return tempC;
+  const es = (t: number) => 6.1094 * Math.exp((17.625 * t) / (243.04 + t));
+  const e = es(dewpointC);
+  let lo = dewpointC, hi = tempC;
+  for (let i = 0; i < 24; i++) {
+    const tw = (lo + hi) / 2;
+    if (es(tw) - 6.53e-4 * pressureHpa * (tempC - tw) < e) lo = tw;
+    else hi = tw;
+  }
+  return (lo + hi) / 2;
+}
+
 // Apparent ("feels like") temperature in °C from the readings a message already carries: wind
 // chill (Environment Canada / NWS, 2001) below 10 °C with wind over 4.8 km/h, the NWS heat index
 // (Rothfusz 1990) at or above 27 °C when humidity is known and 40% or more, the air temperature

@@ -278,7 +278,7 @@ const VAR_GROUPS: VarGroup[] = [
   },
   {
     value: 'humidity', code: 'h', label: 'Humidity', vars: [VAR_CODES.h],
-    desc: 'Dewpoint, relative humidity, and feels-like temperature.',
+    desc: 'Dew point, relative humidity, wet-bulb temperature, and feels-like temperature.',
   },
   {
     value: 'precip', code: 'p', label: 'Precipitation Probability', vars: [VAR_CODES.p],

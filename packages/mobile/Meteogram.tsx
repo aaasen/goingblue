@@ -12,7 +12,7 @@ import {
 import {
   CARDINALS, RAIN_K, modelsFromMask, startDatetime, predictCenter, attributeHour,
   AQ_DOMINANT_US, AQ_DOMINANT_EU, WIND_LEVELS_HPA, quantWind, AGREEMENT_CENTERS, MODEL_BIT,
-  relativeHumidityPct, apparentTempC,
+  relativeHumidityPct, apparentTempC, wetBulbC,
   type Center, type ForecastMessage, type ModelSpec, type Period,
 } from '@weather/protocol';
 import type { AltitudeUnit, TimeFormat, UnitPrefs } from './settings';
@@ -4031,6 +4031,9 @@ const DetailPanel = memo(function DetailPanel({ periods, index, dates, zoned, st
   if (has((q) => q.dewpoint_c)) {
     const t = p.temp_c, d = p.dewpoint_c;
     thermal.push(['Dew point', d != null ? `${fmtTemp(d, units)}${units.temp === 'f' ? 'F' : 'C'}` : '—']);
+    // Pressure comes off the header's elevation (standard atmosphere): the wire carries none.
+    thermal.push(['Wet-bulb', t != null && d != null
+      ? `${fmtTemp(wetBulbC(t, d, metersToPressure(elevation)), units)}${units.temp === 'f' ? 'F' : 'C'}` : '—']);
     thermal.push(['Humidity', t != null && d != null ? `${relativeHumidityPct(t, d)}%` : '—']);
   }
 
