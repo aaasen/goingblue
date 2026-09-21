@@ -34,8 +34,6 @@ export interface Palette {
   // A filled gray button on the page, for an action that undoes (Clear under a paste).
   pageButton: string;
   pageButtonText: string;
-  // The past-forecast row that is currently loaded.
-  selectedRow: string;
 
   // White surfaces: cards, list rows, the ⓘ sheets.
   card: string;
@@ -103,7 +101,6 @@ const system: Palette = {
   pageChipBorder: '#d1d1d6',
   pageButton: '#e5e5ea',
   pageButtonText: '#3a3a3c',
-  selectedRow: '#e7f1fc',
   card: '#ffffff',
   cardInset: '#fafafc',
   cardWell: '#f2f2f7',

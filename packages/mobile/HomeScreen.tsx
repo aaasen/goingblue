@@ -1937,16 +1937,14 @@ const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, las
   onLoad: (encoded: string) => void; onToggle: (code: number) => void;
 }) {
   const variableTags = cacheVariableTags(msg);
-  // While editing the whole row is the checkbox. Otherwise it is not an accessibility element of
-  // its own, so the Load button inside it stays reachable.
+  // A tap views the forecast, or while editing selects it. The row on screen has nothing to view.
   return (
     <Pressable
-      style={[styles.pastItem, !last && styles.pastItemBorder, isLoaded && styles.pastItemLoaded]}
-      onPress={() => onToggle(slot.code)}
-      disabled={!editing}
-      accessible={editing}
-      accessibilityRole={editing ? 'checkbox' : undefined}
-      accessibilityState={editing ? { checked: selected } : undefined}
+      style={({ pressed }) => [styles.pastItem, !last && styles.pastItemBorder, pressed && styles.pastItemPressed]}
+      onPress={() => (editing ? onToggle(slot.code) : onLoad(slot.encoded!))}
+      disabled={!editing && isLoaded}
+      accessibilityRole={editing ? 'checkbox' : 'button'}
+      accessibilityState={editing ? { checked: selected } : { selected: isLoaded }}
     >
       {editing && <SelectMark selected={selected} color={palette.textFaint} />}
       <View style={styles.pastDetails}>
@@ -1966,17 +1964,10 @@ const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, las
           </View>
         )}
       </View>
-      {!editing && (
-        <View style={styles.pastBtns}>
-          <TouchableOpacity
-            style={[styles.pastLoadBtn, isLoaded && styles.pastLoadBtnDisabled]}
-            onPress={() => onLoad(slot.encoded!)}
-            disabled={isLoaded}
-          >
-            <Text style={styles.pastLoadText}>Load</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* The check's width is held on every row, so viewing a row re-wraps no label. */}
+      <View style={styles.pastCheck}>
+        {isLoaded && <MaterialCommunityIcons name="check" size={20} color={palette.link} />}
+      </View>
     </Pressable>
   );
 });
@@ -2002,9 +1993,9 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
   units: UnitPrefs; favorites: readonly Favorite[]; coordFormat: CoordFormat; onLoad: (encoded: string) => void;
   onDelete: (slots: Slot[]) => void;
 }) {
-  // Editing swaps every row's Load for a selection circle, and the header's pencil for Delete and
+  // Editing turns a row's tap from viewing to selecting, and the header's Edit into Delete and
   // Done. It ends with the list, so the next forecast saved after the last one is deleted arrives
-  // in a list that loads.
+  // in a list that can be viewed.
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const empty = groups.length === 0;
@@ -2064,7 +2055,7 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               accessibilityRole="button"
             >
-              <Text style={styles.savedDone}>Done</Text>
+              <Text style={[styles.savedAction, styles.savedDone]}>Done</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -2074,7 +2065,7 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
             accessibilityRole="button"
             accessibilityLabel="Edit saved forecasts"
           >
-            <MaterialCommunityIcons name="pencil-outline" size={22} color={palette.pageLink} />
+            <Text style={styles.savedAction}>Edit</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -2602,8 +2593,9 @@ const styles = StyleSheet.create({
   savedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, marginBottom: 14 },
   savedTitle: { fontSize: 18, fontWeight: '600', color: palette.pageHeading },
   savedActions: { flexDirection: 'row', alignItems: 'center', gap: 22 },
-  savedDelete: { fontSize: 16, fontWeight: '600', color: palette.destructive },
-  savedDone: { fontSize: 16, fontWeight: '600', color: palette.pageLink },
+  savedDelete: { fontSize: 16, color: palette.destructive },
+  savedAction: { fontSize: 16, color: palette.pageLink },
+  savedDone: { fontWeight: '600' },
   savedActionDisabled: { opacity: 0.35 },
   // The rule that closes a section's bottom, bleeding past the page padding to the screen edge.
   sectionEnd: {
@@ -2735,8 +2727,7 @@ const styles = StyleSheet.create({
   segmentMissing: { backgroundColor: palette.pageChip, borderColor: palette.pageChipBorder, borderStyle: 'dashed' },
   segmentCheck: { fontSize: 13, lineHeight: 16, color: palette.collectCheck, fontWeight: '700' },
   collectCaption: { fontSize: 12, color: palette.pageTextSecondary },
-  // The past list's Load button in gray: the same shape at the row's right edge, quieter because
-  // it undoes rather than does.
+  // A small filled button in gray, quiet because it undoes rather than does.
   collectClearBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: palette.pageButton },
   collectClearText: { color: palette.pageButtonText, fontSize: 13, fontWeight: '600' },
 
@@ -2778,7 +2769,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12, paddingHorizontal: 14, gap: 12,
   },
   pastItemBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule },
-  pastItemLoaded: { backgroundColor: palette.selectedRow },
+  pastItemPressed: { opacity: 0.6 },
+  pastCheck: { width: 20 },
   pastDetails: { flex: 1, gap: 3 },
   pastMeta: { flexShrink: 1, fontSize: 13, color: palette.textBody, lineHeight: 18 },
   pastTag: {
@@ -2795,8 +2787,4 @@ const styles = StyleSheet.create({
     backgroundColor: palette.linkTint,
     overflow: 'hidden',
   },
-  pastBtns: { flexDirection: 'row', gap: 8 },
-  pastLoadBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: palette.primary },
-  pastLoadBtnDisabled: { backgroundColor: palette.primaryDisabled },
-  pastLoadText: { color: palette.onPrimary, fontSize: 13, fontWeight: '600' },
 });
