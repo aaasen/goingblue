@@ -17,6 +17,12 @@
 // The parser is strict about anything it doesn't recognise: a word that isn't a coordinate label
 // or a hemisphere letter, three numbers, a minute value of 61 all return null, so the field's
 // invalid state stays meaningful. It never guesses at a lon-first pair.
+//
+// A UTM position (utm.ts) is read first. Its zone and band open the string with a number and a
+// letter, as a latitude and its hemisphere would, so it can't go through the grammar above. The
+// two never overlap: an easting is at least 100000, far past any degree value.
+
+import { parseUtm } from './utm';
 
 export interface LatLon { lat: number; lon: number }
 
@@ -164,7 +170,8 @@ function parseReading(s: string): LatLon | null {
   return { lat, lon };
 }
 
-// Parse one string into coordinates, or null if it doesn't read as exactly one lat/lon pair.
+// Parse one string into coordinates, or null if it doesn't read as exactly one lat/lon pair or
+// one UTM position.
 //
 // Commas are the one genuinely ambiguous character: a pair separator to most of the world, the
 // decimal mark to the rest. A string with a dot in it settles the question. Without one, both
@@ -172,6 +179,8 @@ function parseReading(s: string): LatLon | null {
 // comma is taken — puts the decimal reading first. Only a comma between two digits can be a
 // decimal mark; "57, -152" stays a pair.
 export function parseLatLon(input: string): LatLon | null {
+  const utm = parseUtm(input);
+  if (utm != null) return utm;
   if (count(input, '(') !== count(input, ')') || count(input, '[') !== count(input, ']')) return null;
   const s = normalize(input);
   const decimalComma = s.replace(/(\d),(?=\d)/g, '$1.');
