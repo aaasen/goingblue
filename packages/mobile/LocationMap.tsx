@@ -11,6 +11,7 @@ import { useBasemapStyle } from './useBasemapStyle';
 import { palette } from './palette';
 import { favoriteKey, type Favorite } from './favorites';
 import FavoriteSheet from './FavoriteSheet';
+import type { CoordFormat } from './settings';
 
 export interface LatLon {
   lat: number;
@@ -45,6 +46,8 @@ interface Props {
   onSaveFavorite?: (name: string) => void;
   onRemoveFavorite?: () => void;
   currentFavorite?: Favorite | null;
+  // How the favorite sheet writes the point it is saving.
+  coordFormat?: CoordFormat;
 }
 
 // The picker's starting point before any coordinate is set: as far out as the basemap allows,
@@ -63,7 +66,7 @@ const MAP_IMAGES = {
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
 // picks a coordinate. The picker's corner button opens the same map fullscreen; the preview has no
 // controls.
-export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, coordFormat = 'latlon' }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
@@ -228,6 +231,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
     return (
       <FavoriteSheet
         coord={coord}
+        coordFormat={coordFormat}
         onSave={(name) => { onSaveFavorite(name); setFavoriteSheet(false); }}
         onClose={() => setFavoriteSheet(false)}
       />

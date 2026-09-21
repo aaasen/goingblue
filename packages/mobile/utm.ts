@@ -1,4 +1,5 @@
-// UTM parsing for the builder's coordinates field.
+// UTM parsing for the builder's coordinates field, and UTM writing for the reader who chose it
+// as their coordinate format.
 //
 // Gaia, CalTopo, Garmin and Google Earth all write a UTM position as a zone number, an MGRS
 // latitude band letter, and an easting and northing in meters:
@@ -55,6 +56,61 @@ export function utmToLatLon(zone: number, south: boolean, easting: number, north
   const centralMeridian = zone * 6 - 183;
   const lon = centralMeridian + (Math.atan2(Math.sinh(etaP), Math.cos(xiP)) * 180) / Math.PI;
   return { lat: (phi * 180) / Math.PI, lon: ((lon + 540) % 360) - 180 };
+}
+
+export interface Utm { zone: number; band: string; easting: number; northing: number }
+
+// The zone a point is written in: 6° columns, except where the grid is redrawn around Norway.
+// 32V is widened west to 3°E to take in the southwest coast, and over Svalbard 32X, 34X and 36X
+// are dropped, their ground split among 31X, 33X, 35X and 37X.
+function zoneOf(lat: number, lon: number): number {
+  if (lat >= 56 && lat < 64 && lon >= 3 && lon < 12) return 32;
+  if (lat >= 72 && lon >= 0 && lon < 42) return lon < 9 ? 31 : lon < 21 ? 33 : lon < 33 ? 35 : 37;
+  return Math.min(60, Math.floor((lon + 180) / 6) + 1);
+}
+
+// Forward transverse Mercator, the same series and order as the inverse above. Null outside
+// 80°S to 84°N, where UTM is not defined.
+export function latLonToUtm(c: LatLon): Utm | null {
+  if (!(c.lat >= -80 && c.lat <= 84)) return null;
+  const lon = ((c.lon + 540) % 360) - 180;
+  const zone = zoneOf(c.lat, lon);
+
+  const n = F / (2 - F);
+  const n2 = n * n;
+  const n3 = n2 * n;
+  const radius = (A / (1 + n)) * (1 + n2 / 4 + (n2 * n2) / 64);
+  const alpha = [n / 2 - (2 * n2) / 3 + (5 * n3) / 16, (13 * n2) / 48 - (3 * n3) / 5, (61 * n3) / 240];
+
+  const phi = (c.lat * Math.PI) / 180;
+  const dLambda = ((lon - (zone * 6 - 183)) * Math.PI) / 180;
+  const e = (2 * Math.sqrt(n)) / (1 + n);
+  const t = Math.sinh(Math.atanh(Math.sin(phi)) - e * Math.atanh(e * Math.sin(phi)));
+  const xiP = Math.atan2(t, Math.cos(dLambda));
+  const etaP = Math.atanh(Math.sin(dLambda) / Math.sqrt(1 + t * t));
+  let xi = xiP;
+  let eta = etaP;
+  for (let j = 1; j <= 3; j++) {
+    xi += alpha[j - 1] * Math.sin(2 * j * xiP) * Math.cosh(2 * j * etaP);
+    eta += alpha[j - 1] * Math.cos(2 * j * xiP) * Math.sinh(2 * j * etaP);
+  }
+
+  return {
+    zone,
+    band: BANDS[Math.min(BANDS.length - 1, Math.floor((c.lat + 80) / 8))],
+    easting: FALSE_EASTING + K0 * radius * eta,
+    northing: (c.lat < 0 ? FALSE_NORTHING_SOUTH : 0) + K0 * radius * xi,
+  };
+}
+
+// A point as parseUtm reads it back: `10S 559741 4282182`. `roundTo` is the step in meters the
+// easting and northing are rounded to, for a caller whose point is coarser than a meter. Null
+// where latLonToUtm is.
+export function formatUtm(c: LatLon, roundTo = 1): string | null {
+  const utm = latLonToUtm(c);
+  if (utm == null) return null;
+  const round = (v: number) => Math.round(v / roundTo) * roundTo;
+  return `${utm.zone}${utm.band} ${round(utm.easting)} ${round(utm.northing)}`;
 }
 
 const ZONE = /^\s*(?:utm(?![a-z])[\s:]*)?(?:zone(?![a-z])[\s:]*)?(\d{1,2})\s*([c-hj-np-x])(?![a-z])/i;

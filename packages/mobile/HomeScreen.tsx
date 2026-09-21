@@ -21,7 +21,7 @@ import {
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import {
-  type AqiScale, type TimeFormat, type UnitPrefs, loadFavoritesSort, loadFavoritesSortReversed, loadPinnedCoords,
+  type AqiScale, type CoordFormat, type TimeFormat, type UnitPrefs, loadFavoritesSort, loadFavoritesSortReversed, loadPinnedCoords,
   saveFavoritesSort, saveFavoritesSortReversed, savePinnedCoords,
 } from './settings';
 import { ladderLabel } from './cloudBand';
@@ -35,7 +35,8 @@ import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
 import HelpScreen from './HelpScreen';
 import { MODELS, modelLabelFromMask } from './models';
 import { DEVICES, deviceCode, platformCode, type Device } from './devices';
-import { formatLatLon, parseLatLon } from './coords';
+import { formatCoords, formatLatLon, parseLatLon } from './coords';
+import { formatUtm } from './utm';
 import {
   type Favorite, type FavoriteSort, findFavorite, kmBetween, loadFavorites, removeFavorite, saveFavorites,
   sortFavorites, touchFavorite, upsertFavorite,
@@ -548,7 +549,11 @@ interface InFlight {
 
 // ── Reading the reply ──────────────────────────────────────────────────────
 
-function latLonLabel(msg: ForecastMessage): string {
+// A forecast's point as text. The wire carries it to about a kilometer, so lat/lon is written to
+// two decimals and UTM is rounded to 100 m. Past UTM's latitude limits it is lat/lon either way.
+function pointLabel(msg: ForecastMessage, coordFormat: CoordFormat): string {
+  const utm = coordFormat === 'utm' ? formatUtm(msg, 100) : null;
+  if (utm != null) return utm;
   const latStr = `${Math.abs(msg.lat).toFixed(2)}°${msg.lat >= 0 ? 'N' : 'S'}`;
   const lonStr = `${Math.abs(msg.lon).toFixed(2)}°${msg.lon >= 0 ? 'E' : 'W'}`;
   return `${latStr} ${lonStr}`;
@@ -598,27 +603,27 @@ function normalizedForecastData(encoded: string): string {
 // coordinates. Looked up when drawn rather than stored with the forecast, so naming, renaming or
 // removing a favorite carries to every forecast for that point. The slot keeps the request's
 // coordinates in full, so they match a favorite the way the builder's pin does.
-function placeLabel(slot: Slot, msg: ForecastMessage, favorites: readonly Favorite[]): string {
-  return findFavorite(favorites, slot.context)?.name ?? latLonLabel(msg);
+function placeLabel(slot: Slot, msg: ForecastMessage, favorites: readonly Favorite[], coordFormat: CoordFormat): string {
+  return findFavorite(favorites, slot.context)?.name ?? pointLabel(msg, coordFormat);
 }
 
 /** The loaded forecast's own meta row: when it was requested and where it is for. */
-function loadedMetaLabel(slot: Slot, msg: ForecastMessage | null, units: UnitPrefs, favorites: readonly Favorite[]): string {
+function loadedMetaLabel(slot: Slot, msg: ForecastMessage | null, units: UnitPrefs, favorites: readonly Favorite[], coordFormat: CoordFormat): string {
   if (!msg) return 'Unknown';
   const elev = elevationLabel(msg, units);
   const elevStr = elev ? ` · ${elev}` : '';
-  return `${requestDateTimeLabel(slot.requestedAt)} · ${placeLabel(slot, msg, favorites)}${elevStr}`;
+  return `${requestDateTimeLabel(slot.requestedAt)} · ${placeLabel(slot, msg, favorites, coordFormat)}${elevStr}`;
 }
 
 /**
  * One line per entry in the past-forecast list: request time · model · priority ·
  * location, naming the priority only when it isn't the Auto default.
  */
-function pastMetaLabel(slot: Slot, msg: ForecastMessage | null, favorites: readonly Favorite[]): string {
+function pastMetaLabel(slot: Slot, msg: ForecastMessage | null, favorites: readonly Favorite[], coordFormat: CoordFormat): string {
   if (!msg) return 'Unknown';
   const priority = msg.mode !== MODE_AUTO ? ` · ${priorityLabel(msg)}` : '';
   const model = modelLabelFromMask(msg.models_mask);
-  return `${requestTimeLabel(slot.requestedAt)} · ${model}${priority} · ${placeLabel(slot, msg, favorites)}`;
+  return `${requestTimeLabel(slot.requestedAt)} · ${model}${priority} · ${placeLabel(slot, msg, favorites, coordFormat)}`;
 }
 
 const OPTIONAL_VARIABLE_TAGS: { vars: readonly Variable[]; tag: string; label: string }[] = [
@@ -768,6 +773,7 @@ interface Props {
   // The reader's units, for the wind levels' altitude rungs and the forecast display.
   units: UnitPrefs;
   timeFormat: TimeFormat;
+  coordFormat: CoordFormat;
   // Owned by App so deleting the account can clear it along with everything else.
   forecastData: string;
   onForecastDataChange: (v: string) => void;
@@ -775,7 +781,7 @@ interface Props {
   onOpenSettings: () => void;
 }
 
-export default function HomeScreen({ token, device, onDeviceChange, twoMessages, onTwoMessagesChange, aqiScale, units, timeFormat, forecastData, onForecastDataChange, onOpenSettings }: Props) {
+export default function HomeScreen({ token, device, onDeviceChange, twoMessages, onTwoMessagesChange, aqiScale, units, timeFormat, coordFormat, forecastData, onForecastDataChange, onOpenSettings }: Props) {
   // ── Builder state ────────────────────────────────────────────────────────
   // Whether the pin rides the phone's position. Following resolves the location from the last fix
   // and re-fixes at send; pinned takes whatever is in the coordinates field. A fresh install starts
@@ -786,6 +792,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // getCurrentPositionAsync may hand back a cached fix, and its age is the fix's, not the call's.
   const gpsFixedAt = useRef(0);
   const [coordsText, setCoordsText] = useState('');
+  // Whether the app wrote the pinned text (a map pick, a favorite) rather than the reader. What
+  // the app writes is formatLatLon text, the form a favorite is matched in, and the field shows
+  // that point in the reader's coordinate format: a UTM string rounded to the meter would parse
+  // back to a neighboring point and lose the favorite. What the reader typed shows as typed.
+  const [pinWritten, setPinWritten] = useState(false);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [favoritesSort, setFavoritesSort] = useState<FavoriteSort>('name');
@@ -971,7 +982,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const resolvedCoords = following ? gpsCoords : parsedCoords;
   const coordsInvalid = !following && coordsText.trim().length > 0 && parsedCoords == null;
   // What the field shows: the fix while following, otherwise whatever was typed, pasted or picked.
-  const coordsField = following ? (gpsCoords ? formatLatLon(gpsCoords) : '') : coordsText;
+  const coordsField = following
+    ? (gpsCoords ? formatCoords(gpsCoords, coordFormat) : '')
+    : pinWritten && parsedCoords ? formatCoords(parsedCoords, coordFormat) : coordsText;
   const coordsValid = resolvedCoords != null
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
   const mapCoord = coordsValid ? resolvedCoords : null;
@@ -1093,9 +1106,14 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // Pin the location at whatever the field holds. Typing, pasting, picking on the map, choosing a
   // favorite and clearing all come through here, so each of them takes the pin off the phone's
   // position.
-  function pinCoordsText(text: string) {
+  function pinCoordsText(text: string, written = false) {
     setCoordsText(text);
+    setPinWritten(written);
     setFollowing(false);
+  }
+
+  function pinPoint(c: { lat: number; lon: number }) {
+    pinCoordsText(formatLatLon(c), true);
   }
 
   // The locate button: a fresh fix, and the pin back on the phone's position if one came. A failed
@@ -1112,7 +1130,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   useEffect(() => {
     loadPinnedCoords().then((text) => {
       if (text != null) {
+        // Text in the app's own spelling is text the app wrote.
+        const c = parseLatLon(text);
         setCoordsText(text);
+        setPinWritten(c != null && formatLatLon(c) === text);
         setFollowing(false);
       }
       pinRestored.current = true;
@@ -1503,13 +1524,13 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
   // The builder's handlers, with one identity each (useStableHandler): the functions above are
   // rewritten every render because they read this screen's state through their closures.
-  const onPick = useStableHandler((c: { lat: number; lon: number }) => pinCoordsText(formatLatLon(c)));
-  const onCoordsText = useStableHandler(pinCoordsText);
+  const onPick = useStableHandler(pinPoint);
+  const onCoordsText = useStableHandler((text: string) => pinCoordsText(text));
   const onLocate = useStableHandler(follow);
   // Picking a favorite pins its own coordinates, which is what makes the star read as saved,
   // and counts as a use for the recent order.
   const onPickFavorite = useStableHandler((f: Favorite) => {
-    pinCoordsText(formatLatLon(f));
+    pinPoint(f);
     updateFavorites(touchFavorite(favorites, f));
     setFavoritesOpen(false);
   });
@@ -1639,6 +1660,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       <RequestBuilder
         mapCoord={mapCoord} onPick={onPick} gpsCoords={gpsCoords} following={following} onLocate={onLocate}
         locating={locating} coordsField={coordsField} coordsInvalid={coordsInvalid} onCoordsText={onCoordsText}
+        coordFormat={coordFormat}
         favorites={favorites} currentFavorite={currentFavorite} onPickFavorite={onPickFavorite}
         onSaveFavorite={onSaveFavorite} onRemoveFavorite={onRemoveFavorite} onOpenFavorites={onOpenFavorites}
         model={model} modelStack={modelStack} onModel={setModel} setModelInfo={setModelInfo}
@@ -1663,7 +1685,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             {/* Blank for the frames between the decode and the cache write that gives the
                 message its slot; the row holds a line's height so nothing under it moves. */}
             <Text style={styles.metaText} numberOfLines={3}>
-              {loadedSlot ? loadedMetaLabel(loadedSlot, slotMessage(loadedSlot), units, favorites) : ''}
+              {loadedSlot ? loadedMetaLabel(loadedSlot, slotMessage(loadedSlot), units, favorites, coordFormat) : ''}
             </Text>
           </View>
 
@@ -1735,7 +1757,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         </View>
       )}
 
-      <PastForecasts groups={pastGroups} loadedKey={loadedKey} slotMessage={slotMessage} units={units} favorites={favorites} onLoad={loadPast} />
+      <PastForecasts groups={pastGroups} loadedKey={loadedKey} slotMessage={slotMessage} units={units} favorites={favorites}
+        coordFormat={coordFormat} onLoad={loadPast} />
 
       {/* Open-Meteo's data is CC BY 4.0, which asks for credit where the data is shown —
           the Settings footer alone doesn't satisfy that. Same wording as there. */}
@@ -1891,15 +1914,16 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
 // One cached forecast in the past list. Memoized on its own so a switch, which changes only which
 // row is loaded, re-renders the two rows whose highlight flips and no others.
-const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, units, favorites, onLoad }: {
+const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, units, favorites, coordFormat, onLoad }: {
   slot: Slot; msg: ForecastMessage | null; isLoaded: boolean; units: UnitPrefs; favorites: readonly Favorite[];
+  coordFormat: CoordFormat;
   onLoad: (encoded: string) => void;
 }) {
   const variableTags = cacheVariableTags(msg);
   return (
     <View style={[styles.pastItem, isLoaded && styles.pastItemLoaded]}>
       <View style={styles.pastDetails}>
-        <Text style={styles.pastMeta} numberOfLines={2}>{pastMetaLabel(slot, msg, favorites)}</Text>
+        <Text style={styles.pastMeta} numberOfLines={2}>{pastMetaLabel(slot, msg, favorites, coordFormat)}</Text>
         {variableTags.length > 0 && (
           <View style={styles.variableRow}>
             <Text style={styles.variableLabel}>Variables:</Text>
@@ -1933,9 +1957,9 @@ const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, uni
 // normalized (a string, so it compares by value), and the lookup and load handler are memoized
 // callbacks. A layout measurement or the minute tick then re-renders HomeScreen without
 // walking this subtree, which on a long history is the taller half of the screen.
-const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessage, units, favorites, onLoad }: {
+const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessage, units, favorites, coordFormat, onLoad }: {
   groups: PastForecastGroup[]; loadedKey: string; slotMessage: (slot: Slot) => ForecastMessage | null;
-  units: UnitPrefs; favorites: readonly Favorite[]; onLoad: (encoded: string) => void;
+  units: UnitPrefs; favorites: readonly Favorite[]; coordFormat: CoordFormat; onLoad: (encoded: string) => void;
 }) {
   // Nothing saved, no section: the page ends at the paste step.
   if (groups.length === 0) return null;
@@ -1948,7 +1972,8 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
           <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
           {group.slots.map((slot) => (
             <PastForecastRow key={slot.code} slot={slot} msg={slotMessage(slot)}
-              isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} units={units} favorites={favorites} onLoad={onLoad} />
+              isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} units={units} favorites={favorites}
+              coordFormat={coordFormat} onLoad={onLoad} />
           ))}
         </View>
       ))}
@@ -1970,7 +1995,7 @@ function useStableHandler<A extends unknown[], R>(fn: (...args: A) => R): (...ar
 // memoized derivation or a stable handler, so a render of HomeScreen that concerns the forecast
 // below it (a load, a switch, a layout measurement) does not walk the builder.
 const RequestBuilder = memo(function RequestBuilder({
-  mapCoord, onPick, gpsCoords, following, onLocate, locating, coordsField, coordsInvalid, onCoordsText,
+  mapCoord, onPick, gpsCoords, following, onLocate, locating, coordsField, coordsInvalid, onCoordsText, coordFormat,
   favorites, currentFavorite, onPickFavorite, onSaveFavorite, onRemoveFavorite, onOpenFavorites,
   model, modelStack, onModel, setModelInfo,
   varRows, unavail, openSubgroups, activeValues, groups, units, onToggleGroup, onToggleSubgroup, setVarsInfo,
@@ -1981,7 +2006,7 @@ const RequestBuilder = memo(function RequestBuilder({
 }: {
   mapCoord: { lat: number; lon: number } | null; onPick: (c: { lat: number; lon: number }) => void;
   gpsCoords: { lat: number; lon: number } | null; following: boolean; onLocate: () => Promise<{ lat: number; lon: number } | null>; locating: boolean;
-  coordsField: string; coordsInvalid: boolean; onCoordsText: (text: string) => void;
+  coordsField: string; coordsInvalid: boolean; onCoordsText: (text: string) => void; coordFormat: CoordFormat;
   favorites: readonly Favorite[]; currentFavorite: Favorite | null; onPickFavorite: (f: Favorite) => void;
   onSaveFavorite: (name: string) => void; onRemoveFavorite: () => void; onOpenFavorites: () => void;
   model: string; modelStack: string | null; onModel: (model: string) => void; setModelInfo: (open: boolean) => void;
@@ -2016,6 +2041,7 @@ const RequestBuilder = memo(function RequestBuilder({
             currentFavorite={currentFavorite}
             onSaveFavorite={onSaveFavorite}
             onRemoveFavorite={onRemoveFavorite}
+            coordFormat={coordFormat}
           />
         </View>
         <View style={[styles.coordsCard, coordsInvalid && styles.coordsCardInvalid]}>

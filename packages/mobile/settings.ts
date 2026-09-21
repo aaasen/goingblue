@@ -109,6 +109,10 @@ export function applyUnitSystem(prefs: UnitPrefs, system: Units): UnitPrefs {
 
 export type TimeFormat = '12h' | '24h';
 
+// How the app writes a point: in the coordinates field, on the favorite sheet and as the place of
+// a forecast no favorite names. The field reads both whichever is chosen.
+export type CoordFormat = 'latlon' | 'utm';
+
 // Which air-quality index the app works in. Unlike units this isn't a conversion — the US and
 // European indices are separate scales built from different averaging windows and breakpoints, so
 // the same number means different things on each and there's no arithmetic between them. It's a
@@ -128,6 +132,7 @@ const LEGACY_UNITS_KEY = 'display_units';
 const UNIT_PREFS_KEY = 'display_unit_prefs';
 const TIME_FORMAT_KEY = 'time_format';
 const AQI_SCALE_KEY = 'aqi_scale';
+const COORD_FORMAT_KEY = 'coord_format';
 const DEVICE_KEY = 'builder_device';
 const TWO_MESSAGES_KEY = 'builder_two_messages';
 const PINNED_COORDS_KEY = 'pinned_coords';
@@ -136,6 +141,7 @@ const FAVORITES_SORT_REVERSED_KEY = 'favorites_sort_reversed';
 const DEFAULT_TWO_MESSAGES = true;
 const DEFAULT_SYSTEM: Units = 'imperial';
 const DEFAULT_TIME_FORMAT: TimeFormat = '12h';
+const DEFAULT_COORD_FORMAT: CoordFormat = 'latlon';
 // The US index is the default because it's the one this app's readers are most likely to know:
 // the forecast number is a US number and the air-quality question that drives the feature is
 // wildfire smoke over the western US.
@@ -185,6 +191,19 @@ export async function loadTimeFormat(): Promise<TimeFormat> {
 
 export async function saveTimeFormat(format: TimeFormat): Promise<void> {
   try { await AsyncStorage.setItem(TIME_FORMAT_KEY, format); } catch { /* ignore */ }
+}
+
+export async function loadCoordFormat(): Promise<CoordFormat> {
+  try {
+    const value = await AsyncStorage.getItem(COORD_FORMAT_KEY);
+    return value === 'latlon' || value === 'utm' ? value : DEFAULT_COORD_FORMAT;
+  } catch {
+    return DEFAULT_COORD_FORMAT;
+  }
+}
+
+export async function saveCoordFormat(format: CoordFormat): Promise<void> {
+  try { await AsyncStorage.setItem(COORD_FORMAT_KEY, format); } catch { /* ignore */ }
 }
 
 export async function loadAqiScale(): Promise<AqiScale> {
@@ -286,8 +305,8 @@ export async function saveFavoritesSortReversed(reversed: boolean): Promise<void
 export async function clearSettings(): Promise<void> {
   try {
     await AsyncStorage.multiRemove([
-      LEGACY_UNITS_KEY, UNIT_PREFS_KEY, TIME_FORMAT_KEY, AQI_SCALE_KEY, DEVICE_KEY, TWO_MESSAGES_KEY,
-      PINNED_COORDS_KEY, FAVORITES_KEY, FAVORITES_SORT_KEY, FAVORITES_SORT_REVERSED_KEY,
+      LEGACY_UNITS_KEY, UNIT_PREFS_KEY, TIME_FORMAT_KEY, COORD_FORMAT_KEY, AQI_SCALE_KEY, DEVICE_KEY,
+      TWO_MESSAGES_KEY, PINNED_COORDS_KEY, FAVORITES_KEY, FAVORITES_SORT_KEY, FAVORITES_SORT_REVERSED_KEY,
     ]);
   } catch { /* ignore */ }
 }

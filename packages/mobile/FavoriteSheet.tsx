@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { formatLatLon, type LatLon } from './coords';
+import { formatCoords, type LatLon } from './coords';
+import type { CoordFormat } from './settings';
 import { palette } from './palette';
 
 // Longest name a favorite takes. The name is drawn on the map and leads a past-forecast row, and
@@ -10,6 +11,7 @@ const NAME_MAX = 40;
 interface Props {
   // The point being saved, shown under the title so the reader can see what the name will attach to.
   coord: LatLon;
+  coordFormat: CoordFormat;
   onSave: (name: string) => void;
   onClose: () => void;
 }
@@ -17,7 +19,7 @@ interface Props {
 // The sheet every favorite is saved through: the map's star opens it on the marked point. A card
 // on a scrim rather than Alert.prompt, which exists on iOS only. A favorite needs a name, so Save
 // stays off until there is one. Mounted only while open, so the field starts empty each time.
-export default function FavoriteSheet({ coord, onSave, onClose }: Props) {
+export default function FavoriteSheet({ coord, coordFormat, onSave, onClose }: Props) {
   const [name, setName] = useState('');
   const canSave = name.trim().length > 0;
   const save = () => { if (canSave) onSave(name); };
@@ -30,7 +32,7 @@ export default function FavoriteSheet({ coord, onSave, onClose }: Props) {
         <Pressable style={styles.scrim} onPress={onClose} accessible={false}>
           <Pressable style={styles.card} accessible={false}>
             <Text style={styles.title}>Add favorite</Text>
-            <Text style={styles.coords}>{formatLatLon(coord)}</Text>
+            <Text style={styles.coords}>{formatCoords(coord, coordFormat)}</Text>
             <Text style={styles.label}>Name</Text>
             <TextInput
               style={styles.input}

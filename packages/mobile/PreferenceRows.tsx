@@ -2,11 +2,12 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import {
   ALTITUDE_UNITS, AQI_SCALES, LEVEL_UNITS, RAIN_UNITS, SNOW_UNITS, TEMP_UNITS, WIND_UNITS,
-  applyUnitSystem, type AqiScale, type TimeFormat, type UnitOption, type UnitPrefs, type Units,
+  applyUnitSystem, type AqiScale, type CoordFormat, type TimeFormat, type UnitOption, type UnitPrefs,
+  type Units,
 } from './settings';
 import { palette } from './palette';
 
-// The display preferences, as one block: Units, Time format, and Air quality. Both the setup
+// The display preferences, as one block: Units, Time format, Coordinates, and Air quality. Both the setup
 // screen and the Settings tab render this component rather than their own rows, so the two
 // surfaces always offer the same set — a preference added here shows up in both. The one
 // exception is the per-quantity unit rows under the master switch (`detailed`): Settings lists
@@ -20,6 +21,8 @@ interface Props {
   detailed?: boolean;
   timeFormat: TimeFormat;
   onTimeFormatChange: (format: TimeFormat) => void;
+  coordFormat: CoordFormat;
+  onCoordFormatChange: (format: CoordFormat) => void;
   aqiScale: AqiScale;
   onAqiScaleChange: (scale: AqiScale) => void;
 }
@@ -34,8 +37,14 @@ const TIME_FORMAT_OPTIONS: { value: TimeFormat; label: string }[] = [
   { value: '24h', label: '24h' },
 ];
 
+const COORD_FORMAT_OPTIONS: { value: CoordFormat; label: string }[] = [
+  { value: 'latlon', label: 'Lat/Lon' },
+  { value: 'utm', label: 'UTM' },
+];
+
 export default function PreferenceRows({
-  units, onUnitsChange, detailed, timeFormat, onTimeFormatChange, aqiScale, onAqiScaleChange,
+  units, onUnitsChange, detailed, timeFormat, onTimeFormatChange, coordFormat, onCoordFormatChange,
+  aqiScale, onAqiScaleChange,
 }: Props) {
   // One row per quantity. Each writes its own field; the master switch goes through
   // applyUnitSystem, which moves the quantities on a system's standard unit and leaves a
@@ -65,6 +74,9 @@ export default function PreferenceRows({
       )}
       <Row label="Time format" spaced>
         <Toggle options={TIME_FORMAT_OPTIONS} selected={timeFormat} onChange={onTimeFormatChange} />
+      </Row>
+      <Row label="Coordinates" spaced>
+        <Toggle options={COORD_FORMAT_OPTIONS} selected={coordFormat} onChange={onCoordFormatChange} />
       </Row>
       {/* Which scale the air-quality variables are requested and drawn on. A preference rather
           than a builder option: the two indices aren't convertible, so this is the scale the

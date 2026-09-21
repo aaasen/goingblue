@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseLatLon, formatLatLon } from '../coords';
-import { parseUtm } from '../utm';
+import { parseLatLon, formatLatLon, formatCoords } from '../coords';
+import { formatUtm, latLonToUtm, parseUtm } from '../utm';
 
 function near(actual: { lat: number; lon: number } | null, expected: { lat: number; lon: number }) {
   expect(actual).not.toBeNull();
@@ -183,5 +183,88 @@ describe('through the coordinates field', () => {
     near(parseLatLon('57 N 152 W'), { lat: 57, lon: -152 });
     near(parseLatLon('45N 120W'), { lat: 45, lon: -120 });
     near(parseLatLon('57 47 35 N 152 23 39 W'), { lat: 57 + 47 / 60 + 35 / 3600, lon: -(152 + 23 / 60 + 39 / 3600) });
+  });
+});
+
+describe('writing', () => {
+  // The same PROJ reference points as the conversion, read the other way.
+  const REFERENCE: [string, string, number, number][] = [
+    ['Mount Whitney', '11S 384409 4048903', 36.57859564, -118.29199753],
+    ['Denali', '5V 600700 6994861', 63.06919993, -151.00699078],
+    ['Cerro Torre', '18F 638274 4538243', -49.29290239, -73.09829889],
+    ['Jiehkkevarri', '34W 455775 7707179', 69.46999884, 19.86999611],
+    ['Mont Blanc', '32T 334201 5077665', 45.83260374, 6.86520282],
+    ['Everest', '45R 492625 3095886', 27.98809627, 86.92500001],
+    ['Cotopaxi', '17M 785251 9924343', -0.68380311, -78.43720044],
+    ['Mount Cameroon', '32N 518866 464568', 4.20299825, 9.16999787],
+    ['Vinson', '16C 530708 1282631', -78.52540191, -85.6171203],
+  ];
+  for (const [name, text, lat, lon] of REFERENCE) {
+    it(`writes ${name}`, () => expect(formatUtm({ lat, lon })).toBe(text));
+  }
+
+  it('agrees with the inverse to well under a millimeter', () => {
+    const utm = latLonToUtm(WHITNEY)!;
+    expect(utm.easting).toBeCloseTo(384409, 2);
+    expect(utm.northing).toBeCloseTo(4048903, 2);
+  });
+
+  it('writes the widened Norway zone and the Svalbard zones', () => {
+    expect(formatUtm({ lat: 60.38999832, lon: 5.31999619 })).toBe('32V 297230 6700510');
+    expect(formatUtm({ lat: 78.21999858, lon: 15.65002067 })).toBe('33X 514814 8683004');
+    expect(formatUtm({ lat: 78, lon: 8.9 })!.startsWith('31X')).toBe(true);
+    expect(formatUtm({ lat: 78, lon: 21 })!.startsWith('35X')).toBe(true);
+    expect(formatUtm({ lat: 78, lon: 41.9 })!.startsWith('37X')).toBe(true);
+    expect(formatUtm({ lat: 78, lon: 42 })!.startsWith('38X')).toBe(true);
+    // Below band V and X the columns are the plain 6° ones.
+    expect(formatUtm({ lat: 55.9, lon: 5 })!.startsWith('31U')).toBe(true);
+    expect(formatUtm({ lat: 71.9, lon: 8 })!.startsWith('32W')).toBe(true);
+  });
+
+  it('rounds to the step asked for', () => {
+    expect(formatUtm(WHITNEY, 100)).toBe('11S 384400 4048900');
+  });
+
+  it('writes the antimeridian and a longitude past 180', () => {
+    expect(formatUtm({ lat: 0, lon: 180 })!.startsWith('1N')).toBe(true);
+    expect(formatUtm({ lat: 0, lon: -180 })!.startsWith('1N')).toBe(true);
+    expect(formatUtm({ lat: 0, lon: 179.99 })!.startsWith('60N')).toBe(true);
+  });
+
+  it('has nothing to write past 80°S or 84°N', () => {
+    expect(formatUtm({ lat: 84.01, lon: 0 })).toBeNull();
+    expect(formatUtm({ lat: -80.01, lon: 0 })).toBeNull();
+    expect(formatUtm({ lat: NaN, lon: 0 })).toBeNull();
+    expect(formatUtm({ lat: 84, lon: 0 })).not.toBeNull();
+    expect(formatCoords({ lat: 86, lon: 10 }, 'utm')).toBe('86.00000, 10.00000');
+  });
+
+  it('follows the chosen format', () => {
+    expect(formatCoords(WHITNEY, 'utm')).toBe('11S 384409 4048903');
+    expect(formatCoords(WHITNEY, 'latlon')).toBe('36.57860, -118.29200');
+  });
+
+  // Everything written has to read back, at both rounding steps, across every zone and band and
+  // on the band edges, where rounding can carry the northing over the line.
+  it('reads back whatever it writes', () => {
+    let seed = 12345;
+    const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const points: { lat: number; lon: number }[] = [];
+    for (let i = 0; i < 5000; i++) points.push({ lat: -80 + 164 * random(), lon: -180 + 360 * random() });
+    for (let lat = -80; lat <= 84; lat += 8) {
+      for (let lon = -180; lon < 180; lon += 1.5) points.push({ lat, lon }, { lat: lat + 1e-6, lon }, { lat: lat - 1e-6, lon });
+    }
+    for (const p of points) {
+      if (p.lat < -80 || p.lat > 84) continue;
+      for (const step of [1, 100]) {
+        const text = formatUtm(p, step)!;
+        const back = parseUtm(text);
+        expect(back, `${text} from ${p.lat}, ${p.lon}`).not.toBeNull();
+        // Rounding can carry a point across the antimeridian.
+        const dLon = ((back!.lon - p.lon + 540) % 360) - 180;
+        const meters = Math.hypot((back!.lat - p.lat) * 111320, dLon * 111320 * Math.cos((p.lat * Math.PI) / 180));
+        expect(meters, text).toBeLessThan(step);
+      }
+    }
   });
 });

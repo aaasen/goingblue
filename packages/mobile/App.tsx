@@ -10,9 +10,9 @@ import { loadToken, clearToken, deleteAccount } from './account';
 import { clearStore } from './cache';
 import { removeAllPacks } from './packStore';
 import {
-  loadAqiScale, loadDevice, loadTimeFormat, loadTwoMessages, loadUnits,
-  saveAqiScale, saveDevice, saveTimeFormat, saveTwoMessages, saveUnits, clearSettings,
-  defaultUnitPrefs, type AqiScale, type TimeFormat, type UnitPrefs,
+  loadAqiScale, loadCoordFormat, loadDevice, loadTimeFormat, loadTwoMessages, loadUnits,
+  saveAqiScale, saveCoordFormat, saveDevice, saveTimeFormat, saveTwoMessages, saveUnits, clearSettings,
+  defaultUnitPrefs, type AqiScale, type CoordFormat, type TimeFormat, type UnitPrefs,
 } from './settings';
 import { DEFAULT_DEVICE, type Device } from './devices';
 import { clearTileCache, configureTileCache } from './tileCache';
@@ -32,6 +32,7 @@ export default function App() {
   const [token, setToken] = useState<string | null | undefined>(undefined);
   const [units, setUnitsState] = useState<UnitPrefs>(defaultUnitPrefs('imperial'));
   const [timeFormat, setTimeFormatState] = useState<TimeFormat>('12h');
+  const [coordFormat, setCoordFormatState] = useState<CoordFormat>('latlon');
   const [aqiScale, setAqiScaleState] = useState<AqiScale>('us');
   // Belongs to the builder, but loaded here with the rest: the builder is the first thing on
   // screen, so reading it there would draw the action button as Get Forecast and rename it a
@@ -47,10 +48,13 @@ export default function App() {
   useEffect(() => {
     // Not awaited: the map's cache cap has no bearing on the first screen.
     configureTileCache();
-    Promise.all([loadToken(), loadUnits(), loadTimeFormat(), loadAqiScale(), loadDevice(), loadTwoMessages()])
-      .then(([t, u, f, a, d, m]) => {
+    Promise.all([
+      loadToken(), loadUnits(), loadTimeFormat(), loadCoordFormat(), loadAqiScale(), loadDevice(), loadTwoMessages(),
+    ])
+      .then(([t, u, f, c, a, d, m]) => {
         setUnitsState(u);
         setTimeFormatState(f);
+        setCoordFormatState(c);
         setAqiScaleState(a);
         setDeviceState(d);
         setTwoMessagesState(m);
@@ -78,6 +82,11 @@ export default function App() {
   function setTimeFormat(format: TimeFormat) {
     setTimeFormatState(format);
     saveTimeFormat(format);
+  }
+
+  function setCoordFormat(format: CoordFormat) {
+    setCoordFormatState(format);
+    saveCoordFormat(format);
   }
 
   function setAqiScale(scale: AqiScale) {
@@ -115,6 +124,7 @@ export default function App() {
     setForecastData('');
     setUnitsState(defaultUnitPrefs('imperial'));
     setTimeFormatState('12h');
+    setCoordFormatState('latlon');
     setAqiScaleState('us');
     setDeviceState(DEFAULT_DEVICE);
     setTwoMessagesState(true);
@@ -139,6 +149,8 @@ export default function App() {
             onUnitsChange={setUnits}
             timeFormat={timeFormat}
             onTimeFormatChange={setTimeFormat}
+            coordFormat={coordFormat}
+            onCoordFormatChange={setCoordFormat}
             aqiScale={aqiScale}
             onAqiScaleChange={setAqiScale}
           />
@@ -164,6 +176,7 @@ export default function App() {
           aqiScale={aqiScale}
           units={units}
           timeFormat={timeFormat}
+          coordFormat={coordFormat}
           forecastData={forecastData}
           onForecastDataChange={setForecastData}
           onOpenSettings={() => setSettingsOpen(true)}
@@ -176,6 +189,8 @@ export default function App() {
           onUnitsChange={setUnits}
           timeFormat={timeFormat}
           onTimeFormatChange={setTimeFormat}
+          coordFormat={coordFormat}
+          onCoordFormatChange={setCoordFormat}
           aqiScale={aqiScale}
           onAqiScaleChange={setAqiScale}
         />

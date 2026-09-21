@@ -9,7 +9,7 @@ import PreferenceRows from './PreferenceRows';
 import OfflineMapsScreen, { downloadedPacks } from './OfflineMapsScreen';
 import { downloadPack as storeDownloadPack, removePack as storeRemovePack, usePackState } from './packStore';
 import { findPack } from './catalog';
-import type { AqiScale, TimeFormat, UnitPrefs } from './settings';
+import type { AqiScale, CoordFormat, TimeFormat, UnitPrefs } from './settings';
 import { palette } from './palette';
 
 const TERMS_URL = 'https://going.blue/terms';
@@ -18,7 +18,7 @@ const PRIVACY_URL = 'https://going.blue/privacy';
 // Settings, as a full-screen sheet off the header's gear — the same frame as HelpScreen.
 export default function SettingsScreen({
   visible, onClose, onDeleteAccount, units, onUnitsChange, timeFormat, onTimeFormatChange,
-  aqiScale, onAqiScaleChange,
+  coordFormat, onCoordFormatChange, aqiScale, onAqiScaleChange,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -27,6 +27,8 @@ export default function SettingsScreen({
   onUnitsChange: (u: UnitPrefs) => void;
   timeFormat: TimeFormat;
   onTimeFormatChange: (format: TimeFormat) => void;
+  coordFormat: CoordFormat;
+  onCoordFormatChange: (format: CoordFormat) => void;
   aqiScale: AqiScale;
   onAqiScaleChange: (scale: AqiScale) => void;
 }) {
@@ -103,6 +105,8 @@ export default function SettingsScreen({
                 detailed
                 timeFormat={timeFormat}
                 onTimeFormatChange={onTimeFormatChange}
+                coordFormat={coordFormat}
+                onCoordFormatChange={onCoordFormatChange}
                 aqiScale={aqiScale}
                 onAqiScaleChange={onAqiScaleChange}
               />

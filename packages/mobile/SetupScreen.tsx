@@ -5,7 +5,7 @@ import {
 import { createAccount } from './account';
 import GettingStarted from './GettingStarted';
 import PreferenceRows from './PreferenceRows';
-import type { AqiScale, TimeFormat, UnitPrefs } from './settings';
+import type { AqiScale, CoordFormat, TimeFormat, UnitPrefs } from './settings';
 import { palette } from './palette';
 
 const TERMS_URL = 'https://going.blue/terms';
@@ -18,6 +18,8 @@ interface Props {
   onUnitsChange: (u: UnitPrefs) => void;
   timeFormat: TimeFormat;
   onTimeFormatChange: (format: TimeFormat) => void;
+  coordFormat: CoordFormat;
+  onCoordFormatChange: (format: CoordFormat) => void;
   aqiScale: AqiScale;
   onAqiScaleChange: (scale: AqiScale) => void;
 }
@@ -25,7 +27,8 @@ interface Props {
 // First-run gate. The account token identifies the user for usage limits and is created once,
 // here, over normal internet — not over satellite.
 export default function SetupScreen({
-  onReady, units, onUnitsChange, timeFormat, onTimeFormatChange, aqiScale, onAqiScaleChange,
+  onReady, units, onUnitsChange, timeFormat, onTimeFormatChange, coordFormat, onCoordFormatChange,
+  aqiScale, onAqiScaleChange,
 }: Props) {
   const [busy, setBusy] = useState(false);
 
@@ -58,6 +61,8 @@ export default function SetupScreen({
           onUnitsChange={onUnitsChange}
           timeFormat={timeFormat}
           onTimeFormatChange={onTimeFormatChange}
+          coordFormat={coordFormat}
+          onCoordFormatChange={onCoordFormatChange}
           aqiScale={aqiScale}
           onAqiScaleChange={onAqiScaleChange}
         />

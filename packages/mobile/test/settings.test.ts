@@ -15,7 +15,8 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 vi.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
 
 import {
-  applyUnitSystem, clearSettings, defaultUnitPrefs, loadTimeFormat, loadUnits, saveTimeFormat, saveUnits,
+  applyUnitSystem, clearSettings, defaultUnitPrefs, loadCoordFormat, loadTimeFormat, loadUnits, saveCoordFormat,
+  saveTimeFormat, saveUnits,
 } from '../settings';
 
 describe('unit preferences', () => {
@@ -61,13 +62,23 @@ describe('unit preferences', () => {
     expect(await loadUnits()).toEqual(defaultUnitPrefs('imperial'));
   });
 
+  it('the coordinate format defaults to lat/lon, and anything unreadable reads as the default', async () => {
+    expect(await loadCoordFormat()).toBe('latlon');
+    await saveCoordFormat('utm');
+    expect(await loadCoordFormat()).toBe('utm');
+    store.set('coord_format', 'mgrs');
+    expect(await loadCoordFormat()).toBe('latlon');
+  });
+
   it('clearSettings forgets every stored preference', async () => {
     await saveUnits(defaultUnitPrefs('metric'));
     await saveTimeFormat('24h');
+    await saveCoordFormat('utm');
     store.set('display_units', 'metric');
     await clearSettings();
     expect(store.size).toBe(0);
     expect(await loadUnits()).toEqual(defaultUnitPrefs('imperial'));
     expect(await loadTimeFormat()).toBe('12h');
+    expect(await loadCoordFormat()).toBe('latlon');
   });
 });

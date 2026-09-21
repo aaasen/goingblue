@@ -22,12 +22,20 @@
 // letter, as a latitude and its hemisphere would, so it can't go through the grammar above. The
 // two never overlap: an easting is at least 100000, far past any degree value.
 
-import { parseUtm } from './utm';
+import type { CoordFormat } from './settings';
+import { formatUtm, parseUtm } from './utm';
 
 export interface LatLon { lat: number; lon: number }
 
-// How the coordinates field writes a point, and what a map pick puts in it. Five decimals is
-// about a meter, and it is also the precision at which two points count as the same place.
+// A point as the reader asked to see it. UTM stops at 80°S and 84°N, and a point past either is
+// written as lat/lon whatever the format.
+export function formatCoords(c: LatLon, format: CoordFormat): string {
+  return (format === 'utm' ? formatUtm(c) : null) ?? formatLatLon(c);
+}
+
+// A point as lat/lon text: what the reader on that format sees, and the form a point is stored
+// and compared in whatever the format. Five decimals is about a meter, and it is also the
+// precision at which two points count as the same place.
 export function formatLatLon(c: LatLon): string {
   return `${fixed5(c.lat)}, ${fixed5(c.lon)}`;
 }
