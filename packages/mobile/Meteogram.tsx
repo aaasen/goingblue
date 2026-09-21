@@ -777,6 +777,7 @@ function hourParts(d: Date, step: number, timeFormat: TimeFormat): { num: string
   return { num: `${hour % 12 || 12}`, suffix: hour < 12 ? 'AM' : 'PM' };
 }
 function hourLabel(d: Date, step: number, timeFormat: TimeFormat): string {
+  if (timeFormat === '24h') return clockLabel(d, timeFormat);
   const { num, suffix } = hourParts(d, step, timeFormat);
   return num + suffix;
 }
