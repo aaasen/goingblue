@@ -85,6 +85,20 @@ export function removeFavorite(favorites: readonly Favorite[], c: LatLon): Favor
   return favorites.filter((f) => favoriteKey(f) !== key);
 }
 
+// The points the map marks for saved forecasts: one per key however many forecasts share it, and
+// none where a favorite already stands, since its star marks the spot.
+export function pastForecastPoints(points: readonly LatLon[], favorites: readonly Favorite[]): LatLon[] {
+  const seen = new Set(favorites.map(favoriteKey));
+  const out: LatLon[] = [];
+  for (const p of points) {
+    const key = favoriteKey(p);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ lat: p.lat, lon: p.lon });
+  }
+  return out;
+}
+
 // The point a key names: the coordinates rounded to the key's precision.
 function parsePoint(key: string): LatLon {
   const [lat, lon] = key.split(', ').map(Number);

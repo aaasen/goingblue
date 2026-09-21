@@ -12,7 +12,7 @@ vi.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
 
 import { formatLatLon, parseLatLon } from '../coords';
 import {
-  FAVORITES_KEY, findFavorite, kmBetween, loadFavorites, removeFavorite, saveFavorites, sortFavorites, touchFavorite,
+  FAVORITES_KEY, findFavorite, kmBetween, loadFavorites, pastForecastPoints, removeFavorite, saveFavorites, sortFavorites, touchFavorite,
   upsertFavorite,
 } from '../favorites';
 import { clearSettings } from '../settings';
@@ -95,6 +95,14 @@ describe('favorites', () => {
   it('removes by point', () => {
     const list = upsertFavorite(upsertFavorite([], DENALI, 'Denali'), WHITNEY, 'Whitney');
     expect(removeFavorite(list, WHITNEY).map((f) => f.name)).toEqual(['Denali']);
+  });
+
+  it('marks each saved forecast point once, and leaves favorites to their stars', () => {
+    const favorites = upsertFavorite([], DENALI, 'Denali');
+    const nearWhitney = { lat: WHITNEY.lat + 0.000001, lon: WHITNEY.lon };
+    const other = { lat: 45.8326, lon: 6.8652 };
+    expect(pastForecastPoints([WHITNEY, DENALI, nearWhitney, other], favorites)).toEqual([WHITNEY, other]);
+    expect(pastForecastPoints([], favorites)).toEqual([]);
   });
 
   it('round-trips through storage and drops entries it cannot read', async () => {

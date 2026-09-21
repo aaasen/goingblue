@@ -46,6 +46,10 @@ interface Props {
   onSaveFavorite?: (name: string) => void;
   onRemoveFavorite?: () => void;
   currentFavorite?: Favorite | null;
+  // Points with a saved forecast, drawn as gray dots. Tapping one reports it, so the caller can
+  // put the pin on the forecast's own coordinates.
+  pastPoints?: readonly LatLon[];
+  onPickPast?: (c: LatLon) => void;
   // How the favorite sheet writes the point it is saving.
   coordFormat?: CoordFormat;
 }
@@ -66,7 +70,7 @@ const MAP_IMAGES = {
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
 // picks a coordinate. The picker's corner button opens the same map fullscreen; the preview has no
 // controls.
-export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, coordFormat = 'latlon' }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon' }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
@@ -124,6 +128,27 @@ export default function LocationMap({ coord, onPick, height, active = true, user
       }
     : undefined;
 
+  const pastFeatures = useMemo<GeoJSON.FeatureCollection | null>(() => {
+    if (!pastPoints || pastPoints.length === 0) return null;
+    return {
+      type: 'FeatureCollection',
+      features: pastPoints.map((p) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+        properties: { key: favoriteKey(p) },
+      })),
+    };
+  }, [pastPoints]);
+
+  const onPastPress = interactive && onPickPast
+    ? (e: NativeSyntheticEvent<PressEventWithFeatures>) => {
+        e.stopPropagation();
+        const key = e.nativeEvent.features[0]?.properties?.key;
+        const hit = pastPoints?.find((p) => favoriteKey(p) === key);
+        if (hit) onPickPast(hit);
+      }
+    : undefined;
+
   const onPress = interactive
     ? (e: NativeSyntheticEvent<PressEvent>) => {
         const [lon, lat] = e.nativeEvent.lngLat;
@@ -157,6 +182,11 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         {userCoord && (
           <GeoJSONSource id="user-location" data={{ type: 'Point', coordinates: [userCoord.lon, userCoord.lat] }}>
             <Layer id="user-location-dot" type="circle" paint={USER_DOT_PAINT} />
+          </GeoJSONSource>
+        )}
+        {pastFeatures && (
+          <GeoJSONSource id="past-forecasts" data={pastFeatures} onPress={onPastPress}>
+            <Layer id="past-forecast-dots" type="circle" paint={PAST_DOT_PAINT} />
           </GeoJSONSource>
         )}
         {favoriteFeatures && (
@@ -297,6 +327,15 @@ const USER_DOT_PAINT = {
   'circle-radius': 7,
   'circle-color': palette.brand,
   'circle-stroke-width': 3,
+  'circle-stroke-color': '#ffffff',
+  'circle-pitch-alignment': 'map',
+} as const;
+// Saved forecasts: quieter and smaller than the phone's dot, so they read as places visited
+// rather than as a position.
+const PAST_DOT_PAINT = {
+  'circle-radius': 5,
+  'circle-color': '#5f6b7a',
+  'circle-stroke-width': 2,
   'circle-stroke-color': '#ffffff',
   'circle-pitch-alignment': 'map',
 } as const;

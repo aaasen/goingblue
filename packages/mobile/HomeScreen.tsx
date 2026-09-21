@@ -39,8 +39,8 @@ import { DEVICES, deviceCode, platformCode, type Device } from './devices';
 import { formatCoords, formatLatLon, type LatLon, parseLatLon } from './coords';
 import { formatUtm } from './utm';
 import {
-  type Favorite, type FavoriteSort, favoriteKey, findFavorite, kmBetween, loadFavorites, removeFavorite, saveFavorites,
-  sortFavorites, touchFavorite, upsertFavorite,
+  type Favorite, type FavoriteSort, favoriteKey, findFavorite, kmBetween, loadFavorites, pastForecastPoints, removeFavorite,
+  saveFavorites, sortFavorites, touchFavorite, upsertFavorite,
 } from './favorites';
 import { palette, SEGMENT_PROPS, SWITCH_PROPS } from './palette';
 
@@ -1611,6 +1611,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   );
 
   const pastGroups = useMemo(() => groupPastForecasts(cache, slotMessage), [cache, slotMessage]);
+  const pastPoints = useMemo(() => pastForecastPoints(cache.map((s) => s.context), favorites), [cache, favorites]);
   const loadedSlot = cache.find((slot) =>
     normalizedForecastData(slot.encoded!) === normalizedForecastData(forecastData),
   );
@@ -1700,6 +1701,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         coordFormat={coordFormat}
         favorites={favorites} currentFavorite={currentFavorite} onPickFavorite={onPickFavorite}
         onSaveFavorite={onSaveFavorite} onRemoveFavorite={onRemoveFavorite} onOpenFavorites={onOpenFavorites}
+        pastPoints={pastPoints} onPickPast={onPick}
         model={model} modelStack={modelStack} onModel={setModel} setModelInfo={setModelInfo}
         varRows={varRows} unavail={unavail} openSubgroups={openSubgroups} activeValues={activeValues} groups={groups}
         units={units} onToggleGroup={onToggleGroup} onToggleSubgroup={onToggleSubgroup} setVarsInfo={setVarsInfo}
@@ -1748,6 +1750,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               height={200}
               userCoord={gpsCoords}
               favorites={favorites}
+              pastPoints={pastPoints}
             />
           </Animated.View>
 
@@ -2222,6 +2225,7 @@ function useStableHandler<A extends unknown[], R>(fn: (...args: A) => R): (...ar
 const RequestBuilder = memo(function RequestBuilder({
   mapCoord, onPick, gpsCoords, following, onLocate, locating, coordsField, coordsInvalid, onCoordsText, coordFormat,
   favorites, currentFavorite, onPickFavorite, onSaveFavorite, onRemoveFavorite, onOpenFavorites,
+  pastPoints, onPickPast,
   model, modelStack, onModel, setModelInfo,
   varRows, unavail, openSubgroups, activeValues, groups, units, onToggleGroup, onToggleSubgroup, setVarsInfo,
   mode, onMode, setPriorityInfo,
@@ -2234,6 +2238,7 @@ const RequestBuilder = memo(function RequestBuilder({
   coordsField: string; coordsInvalid: boolean; onCoordsText: (text: string) => void; coordFormat: CoordFormat;
   favorites: readonly Favorite[]; currentFavorite: Favorite | null; onPickFavorite: (f: Favorite) => void;
   onSaveFavorite: (name: string) => void; onRemoveFavorite: () => void; onOpenFavorites: () => void;
+  pastPoints: readonly { lat: number; lon: number }[]; onPickPast: (c: { lat: number; lon: number }) => void;
   model: string; modelStack: string | null; onModel: (model: string) => void; setModelInfo: (open: boolean) => void;
   varRows: VarRow[]; unavail: readonly Variable[]; openSubgroups: ReadonlySet<string>; activeValues: ReadonlySet<string>;
   groups: ReadonlySet<string>; units: UnitPrefs; onToggleGroup: (value: string) => void; onToggleSubgroup: (id: string) => void;
@@ -2266,6 +2271,8 @@ const RequestBuilder = memo(function RequestBuilder({
             currentFavorite={currentFavorite}
             onSaveFavorite={onSaveFavorite}
             onRemoveFavorite={onRemoveFavorite}
+            pastPoints={pastPoints}
+            onPickPast={onPickPast}
             coordFormat={coordFormat}
           />
         </View>
