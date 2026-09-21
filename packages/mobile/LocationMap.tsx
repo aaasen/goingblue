@@ -61,8 +61,8 @@ const MAP_IMAGES = {
 
 // MapLibre Native map over the PMTiles basemap (see basemapStyle.ts). One component for both the
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
-// picks a coordinate. Either way the corner button opens the same map fullscreen, where it pans and
-// zooms freely.
+// picks a coordinate. The picker's corner button opens the same map fullscreen; the preview has no
+// controls.
 export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
@@ -128,9 +128,8 @@ export default function LocationMap({ coord, onPick, height, active = true, user
       }
     : undefined;
 
-  // `pannable` is separate from `interactive`: an inline preview stays locked so it doesn't fight
-  // the parent ScrollView, but the same map in the fullscreen modal has no scroll view to fight.
-  function renderMap(ref: React.RefObject<CameraRef | null>, pannable: boolean, key?: number) {
+  // The preview stays locked so it doesn't fight the parent ScrollView.
+  function renderMap(ref: React.RefObject<CameraRef | null>, key?: number) {
     if (!mapStyle) return null;
     return (
       <Map
@@ -138,9 +137,9 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         style={StyleSheet.absoluteFill}
         mapStyle={mapStyle}
         onPress={onPress}
-        dragPan={pannable}
-        touchZoom={pannable}
-        doubleTapZoom={pannable}
+        dragPan={interactive}
+        touchZoom={interactive}
+        doubleTapZoom={interactive}
         touchRotate={false}
         touchPitch={false}
         compass={false}
@@ -239,18 +238,20 @@ export default function LocationMap({ coord, onPick, height, active = true, user
     <View style={[styles.wrap, height == null ? styles.square : { height }]}>
       {!fullscreen && (
         <>
-          {renderMap(cameraRef, interactive, mapRevision)}
+          {renderMap(cameraRef, mapRevision)}
           {mapStyle && <Text style={styles.attribution}>© OpenStreetMap</Text>}
-          <TouchableOpacity
-            style={styles.fullscreenButton}
-            onPress={() => setFullscreen(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Open map fullscreen"
-          >
-            {/* Material's fullscreen glyph rather than a ⛶ text character, which several
-                platforms draw as a plain box or a missing-glyph slug. */}
-            <MaterialCommunityIcons name="fullscreen" size={26} color={palette.link} />
-          </TouchableOpacity>
+          {interactive && (
+            <TouchableOpacity
+              style={styles.fullscreenButton}
+              onPress={() => setFullscreen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Open map fullscreen"
+            >
+              {/* Material's fullscreen glyph rather than a ⛶ text character, which several
+                  platforms draw as a plain box or a missing-glyph slug. */}
+              <MaterialCommunityIcons name="fullscreen" size={26} color={palette.link} />
+            </TouchableOpacity>
+          )}
           {renderLocateButton(styles.locateButton)}
           {renderFavoriteButton(styles.favoriteButton)}
           {renderFavoriteSheet()}
@@ -264,7 +265,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
           onRequestClose={() => setFullscreen(false)}
         >
           <View style={styles.fullscreenWrap}>
-            {renderMap(fullscreenCameraRef, true)}
+            {renderMap(fullscreenCameraRef)}
             {mapStyle && <Text style={styles.attribution}>© OpenStreetMap</Text>}
             <TouchableOpacity
               style={styles.doneButton}
