@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DEFAULT_DEVICE, isDevice, type Device } from './devices';
+import { FAVORITES_KEY, isFavoriteSort, type FavoriteSort } from './favorites';
 
 // Units for displaying decoded forecasts: one master switch and one unit per quantity the app
 // draws. The master switch is the quick path — US or metric sets every quantity to that system's
@@ -130,6 +131,8 @@ const AQI_SCALE_KEY = 'aqi_scale';
 const DEVICE_KEY = 'builder_device';
 const TWO_MESSAGES_KEY = 'builder_two_messages';
 const PINNED_COORDS_KEY = 'pinned_coords';
+const FAVORITES_SORT_KEY = 'favorites_sort';
+const FAVORITES_SORT_REVERSED_KEY = 'favorites_sort_reversed';
 const DEFAULT_TWO_MESSAGES = true;
 const DEFAULT_SYSTEM: Units = 'imperial';
 const DEFAULT_TIME_FORMAT: TimeFormat = '12h';
@@ -250,13 +253,41 @@ export async function savePinnedCoords(text: string | null): Promise<void> {
   } catch { /* ignore */ }
 }
 
+// How the favorites list is ordered. Persisted because it is a habit, not a per-visit choice: a
+// reader who finds points by distance wants the list that way every time it opens.
+export async function loadFavoritesSort(): Promise<FavoriteSort> {
+  try {
+    const value = await AsyncStorage.getItem(FAVORITES_SORT_KEY);
+    return isFavoriteSort(value) ? value : 'name';
+  } catch {
+    return 'name';
+  }
+}
+
+export async function saveFavoritesSort(sort: FavoriteSort): Promise<void> {
+  try { await AsyncStorage.setItem(FAVORITES_SORT_KEY, sort); } catch { /* ignore */ }
+}
+
+// Whether the favorites list runs its order backward. Kept with the order it belongs to.
+export async function loadFavoritesSortReversed(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(FAVORITES_SORT_REVERSED_KEY)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export async function saveFavoritesSortReversed(reversed: boolean): Promise<void> {
+  try { await AsyncStorage.setItem(FAVORITES_SORT_REVERSED_KEY, reversed ? '1' : '0'); } catch { /* ignore */ }
+}
+
 // Forget every stored preference, the pre-per-quantity master switch included. Part of account
 // deletion: the next launch starts from the defaults as a fresh install would.
 export async function clearSettings(): Promise<void> {
   try {
     await AsyncStorage.multiRemove([
       LEGACY_UNITS_KEY, UNIT_PREFS_KEY, TIME_FORMAT_KEY, AQI_SCALE_KEY, DEVICE_KEY, TWO_MESSAGES_KEY,
-      PINNED_COORDS_KEY,
+      PINNED_COORDS_KEY, FAVORITES_KEY, FAVORITES_SORT_KEY, FAVORITES_SORT_REVERSED_KEY,
     ]);
   } catch { /* ignore */ }
 }

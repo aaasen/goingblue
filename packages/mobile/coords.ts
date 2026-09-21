@@ -1,4 +1,4 @@
-// Coordinate parsing for the builder's custom-location field.
+// Coordinate parsing for the builder's coordinates field.
 //
 // The field's keyboard is numbers-and-punctuation, so anything beyond a plain decimal pair arrives
 // by paste — from a map app's share sheet, a Wikipedia infobox, a Garmin screen, a friend's text.
@@ -19,6 +19,19 @@
 // invalid state stays meaningful. It never guesses at a lon-first pair.
 
 export interface LatLon { lat: number; lon: number }
+
+// How the coordinates field writes a point, and what a map pick puts in it. Five decimals is
+// about a meter, and it is also the precision at which two points count as the same place.
+export function formatLatLon(c: LatLon): string {
+  return `${fixed5(c.lat)}, ${fixed5(c.lon)}`;
+}
+
+// A value that rounds to zero from below would print as "-0.00000", a second spelling of the
+// same point.
+function fixed5(v: number): string {
+  const s = v.toFixed(5);
+  return s === '-0.00000' ? '0.00000' : s;
+}
 
 type Unit = '' | '°' | "'" | '"';
 type Hemi = 'N' | 'S' | 'E' | 'W';

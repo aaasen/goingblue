@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Camera, GeoJSONSource, Images, Layer, Map, Marker, type CameraRef, type PressEvent } from '@maplibre/maplibre-react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Camera, GeoJSONSource, Images, Layer, Map, Marker,
+  type CameraRef, type PressEvent, type PressEventWithFeatures, type SymbolLayerSpecification,
+} from '@maplibre/maplibre-react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import type { NativeSyntheticEvent } from 'react-native';
 import { MAX_ZOOM, MIN_ZOOM } from './basemapStyle';
 import { useBasemapStyle } from './useBasemapStyle';
 import { palette } from './palette';
+import { favoriteKey, type Favorite } from './favorites';
+import FavoriteSheet from './FavoriteSheet';
 
 export interface LatLon {
   lat: number;
@@ -27,14 +32,19 @@ interface Props {
   // Null means no fix; the caller has already told the user why.
   onLocate?: () => Promise<LatLon | null>;
   locating?: boolean;
-  // When provided, a clear button takes the pin off the map. Greyed while there is nothing to
-  // clear, which the caller decides: a field holding unparseable text has no pin but still needs
-  // clearing.
-  onClear?: () => void;
-  canClear?: boolean;
   // Whether the pin is riding the phone's position. Only changes the button's glyph: filled while
   // following, outlined when not, the convention map apps use for their tracking button.
   following?: boolean;
+  // Saved points, drawn as stars with their names. Tapping one reports it, so the caller can put
+  // the pin on the favorite's own coordinates rather than wherever the finger landed.
+  favorites?: readonly Favorite[];
+  onPickFavorite?: (f: Favorite) => void;
+  // When provided, a star button saves the marked point under a name, through a sheet, or takes
+  // the favorite already there back out, after asking. Filled while the point is a
+  // favorite, greyed while there is no point to save.
+  onSaveFavorite?: (name: string) => void;
+  onRemoveFavorite?: () => void;
+  currentFavorite?: Favorite | null;
 }
 
 // The picker's starting point before any coordinate is set: as far out as the basemap allows,
@@ -44,17 +54,21 @@ const DEFAULT_VIEW = { center: [-110, 54] as [number, number], zoom: MIN_ZOOM };
 // Zoom applied once a coordinate exists — tight enough to confirm the spot, loose enough to nudge it.
 const PICKED_ZOOM = 9;
 
-const MAP_IMAGES = { 'peak-triangle': require('./assets/peak-triangle.png') };
+const MAP_IMAGES = {
+  'peak-triangle': require('./assets/peak-triangle.png'),
+  'favorite-star': require('./assets/favorite-star.png'),
+};
 
 // MapLibre Native map over the PMTiles basemap (see basemapStyle.ts). One component for both the
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
 // picks a coordinate. Either way the corner button opens the same map fullscreen, where it pans and
-// zooms freely. Callers also expose lat/lon text inputs for setting a location without the map.
-export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, onClear, canClear = coord != null, following = false }: Props) {
+// zooms freely.
+export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
   const [fullscreen, setFullscreen] = useState(false);
+  const [favoriteSheet, setFavoriteSheet] = useState(false);
   const [mapRevision, setMapRevision] = useState(0);
   const interactive = onPick != null;
   const mapStyle = useBasemapStyle();
@@ -81,6 +95,31 @@ export default function LocationMap({ coord, onPick, height, active = true, user
     cameraRef.current?.easeTo(stop);
     fullscreenCameraRef.current?.easeTo(stop);
   }
+
+  // Each feature carries its favorite's key: coordinates that come back from a native hit test
+  // have been through a float, and the key has not.
+  const favoriteFeatures = useMemo<GeoJSON.FeatureCollection | null>(() => {
+    if (!favorites || favorites.length === 0) return null;
+    return {
+      type: 'FeatureCollection',
+      features: favorites.map((f) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [f.lon, f.lat] },
+        properties: { key: favoriteKey(f), name: f.name },
+      })),
+    };
+  }, [favorites]);
+
+  // A tap that lands on a star goes here instead of to the map's own press. Stopped from
+  // bubbling so it can't also pick the point under the finger.
+  const onFavoritePress = interactive && onPickFavorite
+    ? (e: NativeSyntheticEvent<PressEventWithFeatures>) => {
+        e.stopPropagation();
+        const key = e.nativeEvent.features[0]?.properties?.key;
+        const hit = favorites?.find((f) => favoriteKey(f) === key);
+        if (hit) onPickFavorite(hit);
+      }
+    : undefined;
 
   const onPress = interactive
     ? (e: NativeSyntheticEvent<PressEvent>) => {
@@ -118,6 +157,11 @@ export default function LocationMap({ coord, onPick, height, active = true, user
             <Layer id="user-location-dot" type="circle" paint={USER_DOT_PAINT} />
           </GeoJSONSource>
         )}
+        {favoriteFeatures && (
+          <GeoJSONSource id="favorites" data={favoriteFeatures} onPress={onFavoritePress}>
+            <Layer id="favorite-stars" type="symbol" layout={FAVORITE_LAYOUT} paint={FAVORITE_PAINT} />
+          </GeoJSONSource>
+        )}
         {coord && (
           <Marker lngLat={[coord.lon, coord.lat]} anchor="bottom">
             <View style={styles.pin}>
@@ -148,18 +192,46 @@ export default function LocationMap({ coord, onPick, height, active = true, user
     );
   }
 
-  function renderClearButton(style: object) {
-    if (!onClear) return null;
+  // The star toggles: on a point that isn't saved it opens the name sheet, on a favorite it
+  // removes it. Removal asks first, since the name goes with it. An Alert rather than a sheet of
+  // our own: it presents over the fullscreen modal without having to be that modal's child.
+  function onStarPress() {
+    if (!currentFavorite) {
+      setFavoriteSheet(true);
+      return;
+    }
+    Alert.alert(`Remove “${currentFavorite.name}” from favorites?`, undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => onRemoveFavorite?.() },
+    ]);
+  }
+
+  function renderFavoriteButton(style: object) {
+    if (!onSaveFavorite) return null;
+    const saved = currentFavorite != null;
     return (
       <TouchableOpacity
-        style={[style, !canClear && styles.cornerButtonDisabled]}
-        onPress={onClear}
-        disabled={!canClear}
+        style={[style, !coord && styles.cornerButtonDisabled]}
+        onPress={onStarPress}
+        disabled={!coord}
         accessibilityRole="button"
-        accessibilityLabel="Clear location"
+        accessibilityLabel={saved ? 'Remove from favorites' : 'Add favorite'}
       >
-        <MaterialCommunityIcons name="map-marker-off" size={24} color={palette.link} />
+        <MaterialCommunityIcons name={saved ? 'star' : 'star-outline'} size={26} color={saved ? FAVORITE : palette.link} />
       </TouchableOpacity>
+    );
+  }
+
+  // Rendered inside whichever surface is showing. Under the fullscreen modal it has to be that
+  // modal's child: iOS will not present a second modal from beneath one already up.
+  function renderFavoriteSheet() {
+    if (!favoriteSheet || !coord || !onSaveFavorite) return null;
+    return (
+      <FavoriteSheet
+        coord={coord}
+        onSave={(name) => { onSaveFavorite(name); setFavoriteSheet(false); }}
+        onClose={() => setFavoriteSheet(false)}
+      />
     );
   }
 
@@ -180,7 +252,8 @@ export default function LocationMap({ coord, onPick, height, active = true, user
             <MaterialCommunityIcons name="fullscreen" size={26} color={palette.link} />
           </TouchableOpacity>
           {renderLocateButton(styles.locateButton)}
-          {renderClearButton(styles.clearButton)}
+          {renderFavoriteButton(styles.favoriteButton)}
+          {renderFavoriteSheet()}
         </>
       )}
       {fullscreen && (
@@ -201,7 +274,8 @@ export default function LocationMap({ coord, onPick, height, active = true, user
               <Text style={styles.doneButtonText}>Done</Text>
             </TouchableOpacity>
             {renderLocateButton(styles.fullscreenLocateButton)}
-            {renderClearButton(styles.fullscreenClearButton)}
+            {renderFavoriteButton(styles.fullscreenFavoriteButton)}
+            {renderFavoriteSheet()}
           </View>
         </Modal>
       )}
@@ -210,6 +284,8 @@ export default function LocationMap({ coord, onPick, height, active = true, user
 }
 
 const PIN = '#d0433b';
+// The star's fill, on the button and in the map icon.
+const FAVORITE = '#f5b301';
 // The phone's position, in the blue-dot idiom every map app uses, so it reads as "you are here"
 // rather than as a second point of interest.
 const USER_DOT_PAINT = {
@@ -219,6 +295,22 @@ const USER_DOT_PAINT = {
   'circle-stroke-color': '#ffffff',
   'circle-pitch-alignment': 'map',
 } as const;
+// Favorites: a star with the name under it, in the face and halo the basemap labels its peaks
+// with. The star always draws and is never pushed out by a basemap label; the name gives way
+// when there is no room for it. The star carries a dark rim rather than a white one, which
+// would vanish on a glacier.
+const FAVORITE_LAYOUT: SymbolLayerSpecification['layout'] = {
+  'icon-image': 'favorite-star',
+  'icon-allow-overlap': true,
+  'icon-ignore-placement': true,
+  'text-field': ['get', 'name'],
+  'text-font': ['Noto Sans Medium'],
+  'text-size': 12,
+  'text-anchor': 'top',
+  'text-offset': [0, 0.8],
+  'text-optional': true,
+};
+const FAVORITE_PAINT: SymbolLayerSpecification['paint'] = { 'text-color': '#7a5200', 'text-halo-color': '#ffffff', 'text-halo-width': 1.4 };
 // Width of the marker's square before it is turned; the point it lands on is a corner, so the
 // shape reaches half its diagonal below the box center — BALLOON * (√2 - 1) / 2 past the bottom.
 const BALLOON = 26;
@@ -255,20 +347,20 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
     width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
   },
-  // Stacked under the fullscreen button inline, and under Done in the modal: locate, then clear.
+  // Stacked under the fullscreen button inline, and under Done in the modal: locate, then the star.
   locateButton: {
     position: 'absolute', top: 60, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
-    width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
-  },
-  clearButton: {
-    position: 'absolute', top: 108, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
     width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
   },
   fullscreenLocateButton: {
     position: 'absolute', top: 108, right: 16, backgroundColor: 'rgba(255,255,255,0.96)',
     width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
   },
-  fullscreenClearButton: {
+  favoriteButton: {
+    position: 'absolute', top: 108, right: 12, backgroundColor: 'rgba(255,255,255,0.94)',
+    width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+  },
+  fullscreenFavoriteButton: {
     position: 'absolute', top: 156, right: 16, backgroundColor: 'rgba(255,255,255,0.96)',
     width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
   },

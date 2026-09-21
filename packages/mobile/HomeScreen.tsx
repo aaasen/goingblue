@@ -20,7 +20,10 @@ import {
   type RequestContext, type Center, type ForecastMessage, type ModelSpec,
 } from '@weather/protocol';
 import { API_BASE } from './account';
-import { type AqiScale, type TimeFormat, type UnitPrefs, loadPinnedCoords, savePinnedCoords } from './settings';
+import {
+  type AqiScale, type TimeFormat, type UnitPrefs, loadFavoritesSort, loadFavoritesSortReversed, loadPinnedCoords,
+  saveFavoritesSort, saveFavoritesSortReversed, savePinnedCoords,
+} from './settings';
 import { ladderLabel } from './cloudBand';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import {
@@ -32,8 +35,11 @@ import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
 import HelpScreen from './HelpScreen';
 import { MODELS, modelLabelFromMask } from './models';
 import { DEVICES, deviceCode, platformCode, type Device } from './devices';
-import { parseLatLon } from './coords';
-import { SHOW_COORDINATES } from './features';
+import { formatLatLon, parseLatLon } from './coords';
+import {
+  type Favorite, type FavoriteSort, findFavorite, kmBetween, loadFavorites, removeFavorite, saveFavorites,
+  sortFavorites, touchFavorite, upsertFavorite,
+} from './favorites';
 import { palette, SEGMENT_PROPS, SWITCH_PROPS } from './palette';
 
 // The whole flow on one screen, in the order the steps happen: build a request at the top, send
@@ -119,11 +125,6 @@ const NO_UNAVAIL_VARS: readonly Variable[] = [];
 // there for precision.
 const BUILDER_MAP_HEIGHT = 220;
 
-// How the coordinates field writes a point, and what a map pick puts in it.
-function formatLatLon(c: { lat: number; lon: number }): string {
-  return `${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`;
-}
-
 // Priority modes. The server fills the reply by walking the mode's refinement path — Detail
 // spends the budget on hourly detail first, Range on covering the whole horizon first, Auto
 // balances the two. A mode is a priority, not a promise: the weather's entropy decides how far
@@ -200,6 +201,21 @@ function kmApart(a: { lat: number; lon: number }, b: { lat: number; lon: number 
   const dLat = (a.lat - b.lat) * 111.32;
   const dLon = (a.lon - b.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180);
   return Math.sqrt(dLat * dLat + dLon * dLon);
+}
+
+// The favorites list's orders, in selector order.
+const FAVORITE_SORTS: { value: FavoriteSort; label: string }[] = [
+  { value: 'name', label: 'Name' },
+  { value: 'recent', label: 'Recent' },
+  { value: 'distance', label: 'Distance' },
+];
+
+// How far a favorite is from the phone, in the unit system the reader chose. One decimal under
+// ten, where it still tells two nearby camps apart.
+function distanceLabel(km: number, units: UnitPrefs): string {
+  const value = units.system === 'imperial' ? km / 1.609344 : km;
+  const unit = units.system === 'imperial' ? 'mi' : 'km';
+  return `${value < 10 ? value.toFixed(1) : Math.round(value).toLocaleString('en-US')} ${unit}`;
 }
 
 // Stands in for the model stack until there's a location to attribute. Every selector option but
@@ -578,23 +594,31 @@ function normalizedForecastData(encoded: string): string {
   }
 }
 
+// Where a forecast is for: the name of the favorite at the point it was requested for, else the
+// coordinates. Looked up when drawn rather than stored with the forecast, so naming, renaming or
+// removing a favorite carries to every forecast for that point. The slot keeps the request's
+// coordinates in full, so they match a favorite the way the builder's pin does.
+function placeLabel(slot: Slot, msg: ForecastMessage, favorites: readonly Favorite[]): string {
+  return findFavorite(favorites, slot.context)?.name ?? latLonLabel(msg);
+}
+
 /** The loaded forecast's own meta row: when it was requested and where it is for. */
-function loadedMetaLabel(slot: Slot, msg: ForecastMessage | null, units: UnitPrefs): string {
+function loadedMetaLabel(slot: Slot, msg: ForecastMessage | null, units: UnitPrefs, favorites: readonly Favorite[]): string {
   if (!msg) return 'Unknown';
   const elev = elevationLabel(msg, units);
   const elevStr = elev ? ` · ${elev}` : '';
-  return `${requestDateTimeLabel(slot.requestedAt)} · ${latLonLabel(msg)}${elevStr}`;
+  return `${requestDateTimeLabel(slot.requestedAt)} · ${placeLabel(slot, msg, favorites)}${elevStr}`;
 }
 
 /**
  * One line per entry in the past-forecast list: request time · model · priority ·
  * location, naming the priority only when it isn't the Auto default.
  */
-function pastMetaLabel(slot: Slot, msg: ForecastMessage | null): string {
+function pastMetaLabel(slot: Slot, msg: ForecastMessage | null, favorites: readonly Favorite[]): string {
   if (!msg) return 'Unknown';
   const priority = msg.mode !== MODE_AUTO ? ` · ${priorityLabel(msg)}` : '';
   const model = modelLabelFromMask(msg.models_mask);
-  return `${requestTimeLabel(slot.requestedAt)} · ${model}${priority} · ${latLonLabel(msg)}`;
+  return `${requestTimeLabel(slot.requestedAt)} · ${model}${priority} · ${placeLabel(slot, msg, favorites)}`;
 }
 
 const OPTIONAL_VARIABLE_TAGS: { vars: readonly Variable[]; tag: string; label: string }[] = [
@@ -762,6 +786,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // getCurrentPositionAsync may hand back a cached fix, and its age is the fix's, not the call's.
   const gpsFixedAt = useRef(0);
   const [coordsText, setCoordsText] = useState('');
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [favoritesSort, setFavoritesSort] = useState<FavoriteSort>('name');
+  const [favoritesSortReversed, setFavoritesSortReversed] = useState(false);
   const [mode, setMode] = useState(MODE_AUTO);
   const [model, setModel] = useState('best');
   const [groups, setGroups] = useState<Set<string>>(new Set(DEFAULT_GROUPS));
@@ -940,13 +968,14 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const messages = multiMessageShown && twoMessages ? 2 : DEFAULT_MESSAGES;
 
   const parsedCoords = useMemo(() => parseLatLon(coordsText), [coordsText]);
-  const coordsInvalid = !following && coordsText.trim().length > 0 && parsedCoords == null;
   const resolvedCoords = following ? gpsCoords : parsedCoords;
-  // What the field shows: the fix while following, otherwise whatever was typed or picked.
+  const coordsInvalid = !following && coordsText.trim().length > 0 && parsedCoords == null;
+  // What the field shows: the fix while following, otherwise whatever was typed, pasted or picked.
   const coordsField = following ? (gpsCoords ? formatLatLon(gpsCoords) : '') : coordsText;
   const coordsValid = resolvedCoords != null
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
   const mapCoord = coordsValid ? resolvedCoords : null;
+  const currentFavorite = useMemo(() => findFavorite(favorites, mapCoord) ?? null, [favorites, mapCoord]);
   // What the selected option resolves to here, so the choice isn't abstract: "Auto" means a 2km
   // model in the Alps and a 9km one over the Alaska Range, and the US and Canadian stacks drop to
   // their global member outside their short-range domains. Which models serve depends on run age,
@@ -1061,8 +1090,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     };
   }, [locationGranted, foreground]);
 
-  // Pin the location at whatever the field holds. Typing, picking on the map and clearing all come
-  // through here, so each of them takes the pin off the phone's position.
+  // Pin the location at whatever the field holds. Typing, pasting, picking on the map, choosing a
+  // favorite and clearing all come through here, so each of them takes the pin off the phone's
+  // position.
   function pinCoordsText(text: string) {
     setCoordsText(text);
     setFollowing(false);
@@ -1091,6 +1121,32 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   useEffect(() => {
     if (pinRestored.current) savePinnedCoords(following ? null : coordsText);
   }, [following, coordsText]);
+
+  useEffect(() => {
+    loadFavorites().then(setFavorites);
+    loadFavoritesSort().then(setFavoritesSort);
+    loadFavoritesSortReversed().then(setFavoritesSortReversed);
+  }, []);
+
+  // A newly chosen order starts in its own direction: the reversal belongs to the order it was
+  // made on.
+  function chooseFavoritesSort(sort: FavoriteSort) {
+    setFavoritesSort(sort);
+    saveFavoritesSort(sort);
+    reverseFavoritesSort(false);
+  }
+
+  function reverseFavoritesSort(reversed: boolean) {
+    setFavoritesSortReversed(reversed);
+    saveFavoritesSortReversed(reversed);
+  }
+
+  // Written on each change rather than from an effect on the list, so the empty list the screen
+  // mounts with is never saved over the stored one.
+  function updateFavorites(next: Favorite[]) {
+    setFavorites(next);
+    saveFavorites(next);
+  }
 
   // Resolve the location (asking for GPS on demand while following), allocate the message
   // code the reply will echo, and build the request it belongs to. Null when there's no usable
@@ -1450,6 +1506,20 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const onPick = useStableHandler((c: { lat: number; lon: number }) => pinCoordsText(formatLatLon(c)));
   const onCoordsText = useStableHandler(pinCoordsText);
   const onLocate = useStableHandler(follow);
+  // Picking a favorite pins its own coordinates, which is what makes the star read as saved,
+  // and counts as a use for the recent order.
+  const onPickFavorite = useStableHandler((f: Favorite) => {
+    pinCoordsText(formatLatLon(f));
+    updateFavorites(touchFavorite(favorites, f));
+    setFavoritesOpen(false);
+  });
+  const onOpenFavorites = useStableHandler(() => setFavoritesOpen(true));
+  const onSaveFavorite = useStableHandler((name: string) => {
+    if (mapCoord) updateFavorites(upsertFavorite(favorites, mapCoord, name));
+  });
+  const onRemoveFavorite = useStableHandler(() => {
+    if (mapCoord) updateFavorites(removeFavorite(favorites, mapCoord));
+  });
   const onToggleGroup = useStableHandler(toggleGroup);
   const onToggleSubgroup = useStableHandler(toggleSubgroup);
   const onDevice = useStableHandler((next: Device) => {
@@ -1467,6 +1537,20 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // multi-message callback is whatever App passed this render.
   const onPaste = useStableHandler(pasteFromClipboard);
   const onTwoMessages = useStableHandler(onTwoMessagesChange);
+
+  // Distance is offered only while there is a fix to measure from. A list shown on a distance
+  // order with no fix drops the choice to name for good, so a fix that arrives later does not
+  // reorder the list under the reader: they pick distance again.
+  const favoriteSorts = gpsCoords ? FAVORITE_SORTS : FAVORITE_SORTS.filter((o) => o.value !== 'distance');
+  const shownFavoritesSort: FavoriteSort = favoritesSort === 'distance' && !gpsCoords ? 'name' : favoritesSort;
+  useEffect(() => {
+    if (favoritesOpen && favoritesSort === 'distance' && !gpsCoords) chooseFavoritesSort('name');
+  }, [favoritesOpen, favoritesSort, gpsCoords]);
+
+  const listedFavorites = useMemo(
+    () => sortFavorites(favorites, shownFavoritesSort, gpsCoords, favoritesSortReversed),
+    [favorites, shownFavoritesSort, gpsCoords, favoritesSortReversed],
+  );
 
   const pastGroups = useMemo(() => groupPastForecasts(cache, slotMessage), [cache, slotMessage]);
   const loadedSlot = cache.find((slot) =>
@@ -1555,6 +1639,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       <RequestBuilder
         mapCoord={mapCoord} onPick={onPick} gpsCoords={gpsCoords} following={following} onLocate={onLocate}
         locating={locating} coordsField={coordsField} coordsInvalid={coordsInvalid} onCoordsText={onCoordsText}
+        favorites={favorites} currentFavorite={currentFavorite} onPickFavorite={onPickFavorite}
+        onSaveFavorite={onSaveFavorite} onRemoveFavorite={onRemoveFavorite} onOpenFavorites={onOpenFavorites}
         model={model} modelStack={modelStack} onModel={setModel} setModelInfo={setModelInfo}
         varRows={varRows} unavail={unavail} openSubgroups={openSubgroups} activeValues={activeValues} groups={groups}
         units={units} onToggleGroup={onToggleGroup} onToggleSubgroup={onToggleSubgroup} setVarsInfo={setVarsInfo}
@@ -1577,7 +1663,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             {/* Blank for the frames between the decode and the cache write that gives the
                 message its slot; the row holds a line's height so nothing under it moves. */}
             <Text style={styles.metaText} numberOfLines={3}>
-              {loadedSlot ? loadedMetaLabel(loadedSlot, slotMessage(loadedSlot), units) : ''}
+              {loadedSlot ? loadedMetaLabel(loadedSlot, slotMessage(loadedSlot), units, favorites) : ''}
             </Text>
           </View>
 
@@ -1602,6 +1688,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               coord={{ lat: decoded.lat, lon: decoded.lon }}
               height={200}
               userCoord={gpsCoords}
+              favorites={favorites}
             />
           </Animated.View>
 
@@ -1648,7 +1735,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         </View>
       )}
 
-      <PastForecasts groups={pastGroups} loadedKey={loadedKey} slotMessage={slotMessage} units={units} onLoad={loadPast} />
+      <PastForecasts groups={pastGroups} loadedKey={loadedKey} slotMessage={slotMessage} units={units} favorites={favorites} onLoad={loadPast} />
 
       {/* Open-Meteo's data is CC BY 4.0, which asks for credit where the data is shown —
           the Settings footer alone doesn't satisfy that. Same wording as there. */}
@@ -1662,6 +1749,55 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       )}
 
       <HelpScreen visible={help} onClose={() => setHelp(false)} />
+
+      <InfoModal
+        visible={favoritesOpen} title="Favorite Locations" grouped onClose={() => setFavoritesOpen(false)}
+        toolbar={
+          <View style={styles.favoriteSort}>
+            <Text style={styles.favoriteSortLabel}>Sort</Text>
+            <View style={styles.favoriteSortRow}>
+              <SegmentedControl
+                {...SEGMENT_PROPS}
+                style={styles.favoriteSortControl}
+                values={favoriteSorts.map((o) => o.label)}
+                selectedIndex={favoriteSorts.findIndex((o) => o.value === shownFavoritesSort)}
+                onChange={(e) => chooseFavoritesSort(favoriteSorts[e.nativeEvent.selectedSegmentIndex].value)}
+              />
+              <TouchableOpacity
+                style={styles.favoriteSortReverse}
+                onPress={() => reverseFavoritesSort(!favoritesSortReversed)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel="Reverse order"
+                accessibilityState={{ selected: favoritesSortReversed }}
+              >
+                <MaterialCommunityIcons
+                  name={favoritesSortReversed ? 'sort-descending' : 'sort-ascending'} size={22} color={palette.pageLink}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+        }
+      >
+        <View style={styles.favoriteList}>
+          {listedFavorites.map((f, idx) => (
+            <TouchableOpacity
+              key={formatLatLon(f)}
+              style={[styles.favoriteItem, idx < listedFavorites.length - 1 && styles.favoriteItemBorder]}
+              onPress={() => onPickFavorite(f)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: f === currentFavorite }}
+            >
+              <Text style={styles.favoriteItemName} numberOfLines={1}>{f.name}</Text>
+              {/* The distance is what the order is made of, so it shows only in that order. */}
+              {shownFavoritesSort === 'distance' && gpsCoords != null && (
+                <Text style={styles.favoriteItemDistance}>{distanceLabel(kmBetween(gpsCoords, f), units)}</Text>
+              )}
+              {f === currentFavorite && <MaterialCommunityIcons name="check" size={20} color={palette.link} style={styles.favoriteItemCheck} />}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </InfoModal>
 
       <InfoModal visible={priorityInfo} title="Fill Priority" onClose={() => setPriorityInfo(false)}>
         <View style={styles.modalItem}>
@@ -1755,14 +1891,15 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
 // One cached forecast in the past list. Memoized on its own so a switch, which changes only which
 // row is loaded, re-renders the two rows whose highlight flips and no others.
-const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, units, onLoad }: {
-  slot: Slot; msg: ForecastMessage | null; isLoaded: boolean; units: UnitPrefs; onLoad: (encoded: string) => void;
+const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, units, favorites, onLoad }: {
+  slot: Slot; msg: ForecastMessage | null; isLoaded: boolean; units: UnitPrefs; favorites: readonly Favorite[];
+  onLoad: (encoded: string) => void;
 }) {
   const variableTags = cacheVariableTags(msg);
   return (
     <View style={[styles.pastItem, isLoaded && styles.pastItemLoaded]}>
       <View style={styles.pastDetails}>
-        <Text style={styles.pastMeta} numberOfLines={2}>{pastMetaLabel(slot, msg)}</Text>
+        <Text style={styles.pastMeta} numberOfLines={2}>{pastMetaLabel(slot, msg, favorites)}</Text>
         {variableTags.length > 0 && (
           <View style={styles.variableRow}>
             <Text style={styles.variableLabel}>Variables:</Text>
@@ -1796,9 +1933,9 @@ const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, uni
 // normalized (a string, so it compares by value), and the lookup and load handler are memoized
 // callbacks. A layout measurement or the minute tick then re-renders HomeScreen without
 // walking this subtree, which on a long history is the taller half of the screen.
-const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessage, units, onLoad }: {
+const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessage, units, favorites, onLoad }: {
   groups: PastForecastGroup[]; loadedKey: string; slotMessage: (slot: Slot) => ForecastMessage | null;
-  units: UnitPrefs; onLoad: (encoded: string) => void;
+  units: UnitPrefs; favorites: readonly Favorite[]; onLoad: (encoded: string) => void;
 }) {
   // Nothing saved, no section: the page ends at the paste step.
   if (groups.length === 0) return null;
@@ -1811,7 +1948,7 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
           <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
           {group.slots.map((slot) => (
             <PastForecastRow key={slot.code} slot={slot} msg={slotMessage(slot)}
-              isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} units={units} onLoad={onLoad} />
+              isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} units={units} favorites={favorites} onLoad={onLoad} />
           ))}
         </View>
       ))}
@@ -1834,6 +1971,7 @@ function useStableHandler<A extends unknown[], R>(fn: (...args: A) => R): (...ar
 // below it (a load, a switch, a layout measurement) does not walk the builder.
 const RequestBuilder = memo(function RequestBuilder({
   mapCoord, onPick, gpsCoords, following, onLocate, locating, coordsField, coordsInvalid, onCoordsText,
+  favorites, currentFavorite, onPickFavorite, onSaveFavorite, onRemoveFavorite, onOpenFavorites,
   model, modelStack, onModel, setModelInfo,
   varRows, unavail, openSubgroups, activeValues, groups, units, onToggleGroup, onToggleSubgroup, setVarsInfo,
   mode, onMode, setPriorityInfo,
@@ -1844,6 +1982,8 @@ const RequestBuilder = memo(function RequestBuilder({
   mapCoord: { lat: number; lon: number } | null; onPick: (c: { lat: number; lon: number }) => void;
   gpsCoords: { lat: number; lon: number } | null; following: boolean; onLocate: () => Promise<{ lat: number; lon: number } | null>; locating: boolean;
   coordsField: string; coordsInvalid: boolean; onCoordsText: (text: string) => void;
+  favorites: readonly Favorite[]; currentFavorite: Favorite | null; onPickFavorite: (f: Favorite) => void;
+  onSaveFavorite: (name: string) => void; onRemoveFavorite: () => void; onOpenFavorites: () => void;
   model: string; modelStack: string | null; onModel: (model: string) => void; setModelInfo: (open: boolean) => void;
   varRows: VarRow[]; unavail: readonly Variable[]; openSubgroups: ReadonlySet<string>; activeValues: ReadonlySet<string>;
   groups: ReadonlySet<string>; units: UnitPrefs; onToggleGroup: (value: string) => void; onToggleSubgroup: (id: string) => void;
@@ -1859,8 +1999,8 @@ const RequestBuilder = memo(function RequestBuilder({
     <View style={styles.builderPad}>
       {/* No heading: the map is its own label. Edge to edge, since the negative inset cancels
           the builder's horizontal padding, so the map spans the screen rather than sitting
-          inside the column. The coordinates sit under it as the map's readout and a way to
-          type or paste a point. */}
+          inside the column. Under it, the two ways to a point without the map: coordinates typed
+          or pasted, and a saved favorite. */}
       <View style={styles.section}>
         <View style={styles.mapFullBleed}>
           <LocationMap
@@ -1871,14 +2011,16 @@ const RequestBuilder = memo(function RequestBuilder({
             following={following}
             onLocate={onLocate}
             locating={locating}
-            onClear={() => onCoordsText('')}
-            canClear={coordsField.length > 0}
+            favorites={favorites}
+            onPickFavorite={onPickFavorite}
+            currentFavorite={currentFavorite}
+            onSaveFavorite={onSaveFavorite}
+            onRemoveFavorite={onRemoveFavorite}
           />
         </View>
-        {SHOW_COORDINATES && (
         <View style={[styles.coordsCard, coordsInvalid && styles.coordsCardInvalid]}>
-          <View style={[styles.coordRow, styles.coordRowLast]}>
-            <Text style={[styles.coordLabel, styles.coordLabelWide]}>Coordinates</Text>
+          <View style={[styles.coordRow, favorites.length === 0 && styles.coordRowLast]}>
+            <Text style={styles.coordLabel}>Coordinates</Text>
             {/* Editing pins. The first keystroke arrives with the field's whole text, fix
                 included, so nudging the current location's digits works as expected. */}
             <TextInput
@@ -1886,16 +2028,18 @@ const RequestBuilder = memo(function RequestBuilder({
               value={coordsField}
               onChangeText={onCoordsText}
               placeholder="latitude, longitude"
+              placeholderTextColor={palette.textTertiary}
               keyboardType="numbers-and-punctuation"
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="done"
+              accessibilityLabel="Coordinates"
             />
-            {/* Pasted coordinates are long and the keyboard's delete key clears them one
-                character at a time; one tap on the ✕ empties the field. Same action as the
-                map's clear button, placed where someone typing will look for it. Always laid
-                out and merely hidden when there is nothing to clear: the icon is taller than
-                the text line, so adding and removing it would change the row's height. */}
+            {/* The one way to take the pin off: empties the field and leaves the location pinned
+                at nothing. Pasted coordinates are long and the keyboard's delete key clears them
+                one character at a time. Always laid out and merely hidden when there is nothing
+                to clear: the icon is taller than the text line, so adding and removing it would
+                change the row's height. */}
             <TouchableOpacity
               style={[styles.coordClear, coordsField.length === 0 && styles.coordClearHidden]}
               onPress={() => onCoordsText('')}
@@ -1908,8 +2052,20 @@ const RequestBuilder = memo(function RequestBuilder({
               <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
             </TouchableOpacity>
           </View>
+          {/* Only once something is saved, so a reader with no favorites doesn't carry an empty
+              row. Reads as a select field: the favorite the pin is on, or a prompt to pick one.
+              It opens a full-screen list rather than a menu, since a list of favorites runs past
+              a hundred. */}
+          {favorites.length > 0 && (
+            <TouchableOpacity style={[styles.coordRow, styles.coordRowLast]} onPress={onOpenFavorites} accessibilityRole="button">
+              <Text style={styles.coordLabel}>Favorites</Text>
+              <Text style={[styles.favoriteValue, !currentFavorite && styles.favoritePlaceholder]} numberOfLines={1}>
+                {currentFavorite ? currentFavorite.name : 'Choose a location'}
+              </Text>
+              <MaterialCommunityIcons name="chevron-down" size={20} color={palette.textTertiary} style={styles.coordClear} />
+            </TouchableOpacity>
+          )}
         </View>
-        )}
       </View>
 
       <Section label="Weather Model" info={() => setModelInfo(true)}>
@@ -2188,8 +2344,14 @@ function ActionButton({ icon, label, onPress, onCancel, disabled, busy, variant 
 // sheet because UIKit rounds a sheet's corners to the display's own curve, which reads as a lot
 // of radius for a page of text — and RN gives no way to ask for less. The trade is the swipe-down
 // dismissal a sheet comes with, so Done is the way out and sits where a sheet's would.
-function InfoModal({ visible, title, onClose, children }: {
+function InfoModal({ visible, title, onClose, grouped = false, toolbar, children }: {
   visible: boolean; title: string; onClose: () => void; children: React.ReactNode;
+  // Held between the header and the scrolling content, so it stays in reach however long the
+  // content runs.
+  toolbar?: React.ReactNode;
+  // The page's gray with the page's header colors, the frame Settings uses, for a sheet whose
+  // content is a card of rows rather than running text.
+  grouped?: boolean;
 }) {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
@@ -2198,17 +2360,18 @@ function InfoModal({ visible, title, onClose, children }: {
       <SafeAreaProvider>
         {/* No bottom edge: the frame runs to the screen edge so the scroll view fills it,
             and the content padding below clears the home indicator. */}
-        <SafeAreaView edges={['top', 'left', 'right']} style={styles.sheet}>
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{title}</Text>
+        <SafeAreaView edges={['top', 'left', 'right']} style={[styles.sheet, grouped && styles.sheetGrouped]}>
+          <View style={[styles.sheetHeader, grouped && styles.sheetHeaderGrouped]}>
+            <Text style={[styles.sheetTitle, grouped && styles.sheetTitleGrouped]}>{title}</Text>
             <TouchableOpacity
               onPress={onClose}
               accessibilityRole="button"
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <Text style={styles.sheetDone}>Done</Text>
+              <Text style={[styles.sheetDone, grouped && styles.sheetDoneGrouped]}>Done</Text>
             </TouchableOpacity>
           </View>
+          {toolbar}
           <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
             {children}
           </ScrollView>
@@ -2248,6 +2411,10 @@ const styles = StyleSheet.create({
   // Sheet frame, matching HelpScreen's. The safe area carries the status bar inset now that this
   // runs the full height, so the header only needs the same 12pt the app header uses.
   sheet: { flex: 1, backgroundColor: palette.sheet },
+  sheetGrouped: { backgroundColor: palette.page },
+  sheetHeaderGrouped: { borderBottomColor: palette.pageRule },
+  sheetTitleGrouped: { color: palette.pageTitle },
+  sheetDoneGrouped: { color: palette.pageLink },
   sheetHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
@@ -2316,13 +2483,25 @@ const styles = StyleSheet.create({
   coordsCardInvalid: { borderColor: palette.destructive },
   coordRow: { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule },
   coordRowLast: { borderBottomWidth: 0 },
-  coordLabel: { width: 30, fontSize: 15, fontWeight: '600', color: palette.textSecondary },
-  coordLabelWide: { width: 104 },
+  coordLabel: { width: 104, fontSize: 15, fontWeight: '600', color: palette.textSecondary },
   coordInput: { flex: 1, fontSize: 15, color: palette.text },
   coordInputInvalid: { color: palette.destructive },
   // The row aligns on the text baseline, which an icon doesn't have; center it on the row instead.
   coordClear: { alignSelf: 'center', marginLeft: 8 },
   coordClearHidden: { opacity: 0 },
+  favoriteValue: { flex: 1, fontSize: 15, color: palette.text },
+  favoritePlaceholder: { color: palette.textTertiary },
+  favoriteList: { backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden' },
+  favoriteItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12 },
+  favoriteItemBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule },
+  favoriteItemName: { flex: 1, fontSize: 16, color: palette.text },
+  favoriteItemDistance: { marginLeft: 12, fontSize: 15, color: palette.textSecondary, fontVariant: ['tabular-nums'] },
+  favoriteItemCheck: { marginLeft: 10 },
+  favoriteSort: { paddingHorizontal: 16, paddingTop: 12 },
+  favoriteSortRow: { flexDirection: 'row', alignItems: 'center' },
+  favoriteSortControl: { flex: 1 },
+  favoriteSortReverse: { marginLeft: 12 },
+  favoriteSortLabel: { marginBottom: 8, fontSize: 12, fontWeight: '600', color: palette.pageLabel, textTransform: 'uppercase', letterSpacing: 0.5 },
   mapFullBleed: { marginHorizontal: -CONTENT_PAD },
   modelHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 8 },
 
