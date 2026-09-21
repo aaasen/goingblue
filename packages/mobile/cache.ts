@@ -226,9 +226,15 @@ export async function clearStore(token: string): Promise<void> {
   try { await AsyncStorage.removeItem(storeKey(token)); } catch { /* ignore */ }
 }
 
-export async function deleteSlot(token: string, code: number): Promise<Slot[]> {
+// Drop slots' responses and keep the requests they answered. A reply is still in the reader's
+// messages, so pasting it again has to decode, which needs the context under its code.
+export async function deleteResponses(token: string, codes: readonly number[]): Promise<Slot[]> {
   const store = await loadStore(token);
-  store.slots = store.slots.filter((s) => s.code !== code);
+  for (const slot of store.slots) {
+    if (!codes.includes(slot.code)) continue;
+    delete slot.encoded;
+    delete slot.savedAt;
+  }
   await persist(token, store);
   return pastForecasts(store);
 }

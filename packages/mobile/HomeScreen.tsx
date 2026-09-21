@@ -27,8 +27,8 @@ import {
 import { ladderLabel } from './cloudBand';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import {
-  allocCode, attachResponse, chunksCollected, decodeAny, loadStore, mergeReply, normalizeReply,
-  prunePastForecasts, replyParts, type Slot,
+  allocCode, attachResponse, chunksCollected, decodeAny, deleteResponses, loadStore, mergeReply,
+  normalizeReply, prunePastForecasts, replyParts, type Slot,
 } from './cache';
 import LocationMap from './LocationMap';
 import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
@@ -1475,6 +1475,23 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     onForecastDataChange(encoded);
   }, [cache, slotMessages, onForecastDataChange]);
 
+  // Asks first: the list is the only copy the app holds. Deleting the forecast on screen takes it
+  // off the screen too, so nothing is shown that the list no longer has.
+  const deletePast = useStableHandler((slots: Slot[]) => {
+    const noun = slots.length === 1 ? 'saved forecast' : 'saved forecasts';
+    Alert.alert(`Delete ${slots.length} ${noun}?`, undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: () => {
+          const loaded = normalizedForecastData(forecastData);
+          if (slots.some((s) => normalizedForecastData(s.encoded!) === loaded)) clearForecast();
+          deleteResponses(token, slots.map((s) => s.code)).then(setCache);
+        },
+      },
+    ]);
+  });
+
   // A compare-pill tap: loadPast, minus the scroll-to-forecast (see suppressNextViewScroll).
   const loadCompare = useCallback((encoded: string) => {
     suppressNextViewScroll.current = true;
@@ -1758,7 +1775,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       )}
 
       <PastForecasts groups={pastGroups} loadedKey={loadedKey} slotMessage={slotMessage} units={units} favorites={favorites}
-        coordFormat={coordFormat} onLoad={loadPast} />
+        coordFormat={coordFormat} onLoad={loadPast} onDelete={deletePast} />
 
       {/* Open-Meteo's data is CC BY 4.0, which asks for credit where the data is shown —
           the Settings footer alone doesn't satisfy that. Same wording as there. */}
@@ -1914,14 +1931,24 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
 // One cached forecast in the past list. Memoized on its own so a switch, which changes only which
 // row is loaded, re-renders the two rows whose highlight flips and no others.
-const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, last, units, favorites, coordFormat, onLoad }: {
-  slot: Slot; msg: ForecastMessage | null; isLoaded: boolean; last: boolean; units: UnitPrefs;
-  favorites: readonly Favorite[]; coordFormat: CoordFormat;
-  onLoad: (encoded: string) => void;
+const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, last, editing, selected, units, favorites, coordFormat, onLoad, onToggle }: {
+  slot: Slot; msg: ForecastMessage | null; isLoaded: boolean; last: boolean; editing: boolean; selected: boolean;
+  units: UnitPrefs; favorites: readonly Favorite[]; coordFormat: CoordFormat;
+  onLoad: (encoded: string) => void; onToggle: (code: number) => void;
 }) {
   const variableTags = cacheVariableTags(msg);
+  // While editing the whole row is the checkbox. Otherwise it is not an accessibility element of
+  // its own, so the Load button inside it stays reachable.
   return (
-    <View style={[styles.pastItem, !last && styles.pastItemBorder, isLoaded && styles.pastItemLoaded]}>
+    <Pressable
+      style={[styles.pastItem, !last && styles.pastItemBorder, isLoaded && styles.pastItemLoaded]}
+      onPress={() => onToggle(slot.code)}
+      disabled={!editing}
+      accessible={editing}
+      accessibilityRole={editing ? 'checkbox' : undefined}
+      accessibilityState={editing ? { checked: selected } : undefined}
+    >
+      {editing && <SelectMark selected={selected} color={palette.textFaint} />}
       <View style={styles.pastDetails}>
         <Text style={styles.pastMeta} numberOfLines={2}>{pastMetaLabel(slot, msg, favorites, coordFormat)}</Text>
         {variableTags.length > 0 && (
@@ -1939,46 +1966,149 @@ const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, las
           </View>
         )}
       </View>
-      <View style={styles.pastBtns}>
-        <TouchableOpacity
-          style={[styles.pastLoadBtn, isLoaded && styles.pastLoadBtnDisabled]}
-          onPress={() => onLoad(slot.encoded!)}
-          disabled={isLoaded}
-        >
-          <Text style={styles.pastLoadText}>Load</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+      {!editing && (
+        <View style={styles.pastBtns}>
+          <TouchableOpacity
+            style={[styles.pastLoadBtn, isLoaded && styles.pastLoadBtnDisabled]}
+            onPress={() => onLoad(slot.encoded!)}
+            disabled={isLoaded}
+          >
+            <Text style={styles.pastLoadText}>Load</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </Pressable>
   );
 });
+
+// The selection circle of an editing list: filled and checked when selected, else an empty ring
+// in a gray that reads against whatever it sits on.
+function SelectMark({ selected, color }: { selected: boolean; color: string }) {
+  return (
+    <MaterialCommunityIcons
+      name={selected ? 'check-circle' : 'checkbox-blank-circle-outline'} size={22}
+      color={selected ? palette.link : color}
+    />
+  );
+}
 
 // The past-forecast list. Every prop is stable across a HomeScreen render that doesn't concern
 // the list: the groups are memoized on the cache, `loadedKey` is the loaded forecast's text
 // normalized (a string, so it compares by value), and the lookup and load handler are memoized
 // callbacks. A layout measurement or the minute tick then re-renders HomeScreen without
 // walking this subtree, which on a long history is the taller half of the screen.
-const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessage, units, favorites, coordFormat, onLoad }: {
+const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessage, units, favorites, coordFormat, onLoad, onDelete }: {
   groups: PastForecastGroup[]; loadedKey: string; slotMessage: (slot: Slot) => ForecastMessage | null;
   units: UnitPrefs; favorites: readonly Favorite[]; coordFormat: CoordFormat; onLoad: (encoded: string) => void;
+  onDelete: (slots: Slot[]) => void;
 }) {
+  // Editing swaps every row's Load for a selection circle, and the header's pencil for Delete and
+  // Done. It ends with the list, so the next forecast saved after the last one is deleted arrives
+  // in a list that loads.
+  const [editing, setEditing] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
+  const empty = groups.length === 0;
+  useEffect(() => { if (empty) setEditing(false); }, [empty]);
+  // A selection holds only what is listed: a deleted forecast leaves it, so its code coming
+  // around again on a later forecast doesn't arrive selected.
+  useEffect(() => {
+    setSelected((prev) => {
+      const listed = new Set(groups.flatMap((g) => g.slots.map((s) => s.code)));
+      const kept = [...prev].filter((code) => listed.has(code));
+      return kept.length === prev.size ? prev : new Set(kept);
+    });
+  }, [groups]);
+  const toggle = useCallback((code: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(code)) next.add(code);
+      return next;
+    });
+  }, []);
+  // A day's circle selects the whole day, or clears it when the whole day is selected.
+  function toggleDay(slots: Slot[], allSelected: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const s of slots) {
+        if (allSelected) next.delete(s.code);
+        else next.add(s.code);
+      }
+      return next;
+    });
+  }
+  function finish() {
+    setEditing(false);
+    setSelected(new Set());
+  }
   // Nothing saved, no section: the page ends at the paste step.
-  if (groups.length === 0) return null;
+  if (empty) return null;
+  const selectedSlots = groups.flatMap((g) => g.slots.filter((s) => selected.has(s.code)));
   return (
     <View style={styles.pastSection}>
       <View style={styles.sectionEnd} />
-      <Text style={styles.savedTitle}>Saved forecasts</Text>
-      {groups.map((group) => (
-        <View key={group.day} style={styles.pastGroup}>
-          <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
-          <View style={styles.pastCard}>
-            {group.slots.map((slot, idx) => (
-              <PastForecastRow key={slot.code} slot={slot} msg={slotMessage(slot)}
-                isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} last={idx === group.slots.length - 1}
-                units={units} favorites={favorites} coordFormat={coordFormat} onLoad={onLoad} />
-            ))}
+      <View style={styles.savedHeader}>
+        <Text style={styles.savedTitle}>Saved forecasts</Text>
+        {editing ? (
+          <View style={styles.savedActions}>
+            <TouchableOpacity
+              onPress={() => onDelete(selectedSlots)}
+              disabled={selectedSlots.length === 0}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: selectedSlots.length === 0 }}
+            >
+              <Text style={[styles.savedDelete, selectedSlots.length === 0 && styles.savedActionDisabled]}>Delete</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={finish}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+            >
+              <Text style={styles.savedDone}>Done</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-      ))}
+        ) : (
+          <TouchableOpacity
+            onPress={() => setEditing(true)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="Edit saved forecasts"
+          >
+            <MaterialCommunityIcons name="pencil-outline" size={22} color={palette.pageLink} />
+          </TouchableOpacity>
+        )}
+      </View>
+      {groups.map((group) => {
+        const allSelected = group.slots.every((s) => selected.has(s.code));
+        return (
+          <View key={group.day} style={styles.pastGroup}>
+            {editing ? (
+              <Pressable
+                style={[styles.pastDayRow, styles.pastDayRowEditing]}
+                onPress={() => toggleDay(group.slots, allSelected)}
+                hitSlop={{ top: 6 }}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: allSelected }}
+              >
+                <SelectMark selected={allSelected} color={palette.pageTextTertiary} />
+                <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.pastDayRow}>
+                <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
+              </View>
+            )}
+            <View style={styles.pastCard}>
+              {group.slots.map((slot, idx) => (
+                <PastForecastRow key={slot.code} slot={slot} msg={slotMessage(slot)}
+                  isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} last={idx === group.slots.length - 1}
+                  editing={editing} selected={selected.has(slot.code)} units={units} favorites={favorites}
+                  coordFormat={coordFormat} onLoad={onLoad} onToggle={toggle} />
+              ))}
+            </View>
+          </View>
+        );
+      })}
     </View>
   );
 });
@@ -2469,7 +2599,12 @@ const styles = StyleSheet.create({
   modalLink: { color: palette.link, textDecorationLine: 'underline' },
 
   // The archive's heading, set off from the divider that closes the builder above it.
-  savedTitle: { fontSize: 18, fontWeight: '600', color: palette.pageHeading, textAlign: 'center', marginTop: 20, marginBottom: 14 },
+  savedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, marginBottom: 14 },
+  savedTitle: { fontSize: 18, fontWeight: '600', color: palette.pageHeading },
+  savedActions: { flexDirection: 'row', alignItems: 'center', gap: 22 },
+  savedDelete: { fontSize: 16, fontWeight: '600', color: palette.destructive },
+  savedDone: { fontSize: 16, fontWeight: '600', color: palette.pageLink },
+  savedActionDisabled: { opacity: 0.35 },
   // The rule that closes a section's bottom, bleeding past the page padding to the screen edge.
   sectionEnd: {
     height: StyleSheet.hairlineWidth, backgroundColor: palette.pageRule,
@@ -2632,7 +2767,10 @@ const styles = StyleSheet.create({
 
   pastSection: { marginTop: 8, marginHorizontal: 16 },
   pastGroup: { marginBottom: 16 },
-  pastDayText: { fontSize: 13, fontWeight: '600', color: palette.pageTextSecondary, paddingBottom: 8 },
+  pastDayRow: { flexDirection: 'row', alignItems: 'center', paddingBottom: 8 },
+  // Inset to the rows' padding, so the day's circle stands over theirs.
+  pastDayRowEditing: { paddingLeft: 14, gap: 12 },
+  pastDayText: { fontSize: 13, fontWeight: '600', color: palette.pageTextSecondary },
   // One card per day, its rows ruled apart like the favorites list.
   pastCard: { backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden' },
   pastItem: {
