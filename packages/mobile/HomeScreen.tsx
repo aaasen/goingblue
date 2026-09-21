@@ -1914,14 +1914,14 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
 // One cached forecast in the past list. Memoized on its own so a switch, which changes only which
 // row is loaded, re-renders the two rows whose highlight flips and no others.
-const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, units, favorites, coordFormat, onLoad }: {
-  slot: Slot; msg: ForecastMessage | null; isLoaded: boolean; units: UnitPrefs; favorites: readonly Favorite[];
-  coordFormat: CoordFormat;
+const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, last, units, favorites, coordFormat, onLoad }: {
+  slot: Slot; msg: ForecastMessage | null; isLoaded: boolean; last: boolean; units: UnitPrefs;
+  favorites: readonly Favorite[]; coordFormat: CoordFormat;
   onLoad: (encoded: string) => void;
 }) {
   const variableTags = cacheVariableTags(msg);
   return (
-    <View style={[styles.pastItem, isLoaded && styles.pastItemLoaded]}>
+    <View style={[styles.pastItem, !last && styles.pastItemBorder, isLoaded && styles.pastItemLoaded]}>
       <View style={styles.pastDetails}>
         <Text style={styles.pastMeta} numberOfLines={2}>{pastMetaLabel(slot, msg, favorites, coordFormat)}</Text>
         {variableTags.length > 0 && (
@@ -1970,11 +1970,13 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
       {groups.map((group) => (
         <View key={group.day} style={styles.pastGroup}>
           <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
-          {group.slots.map((slot) => (
-            <PastForecastRow key={slot.code} slot={slot} msg={slotMessage(slot)}
-              isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} units={units} favorites={favorites}
-              coordFormat={coordFormat} onLoad={onLoad} />
-          ))}
+          <View style={styles.pastCard}>
+            {group.slots.map((slot, idx) => (
+              <PastForecastRow key={slot.code} slot={slot} msg={slotMessage(slot)}
+                isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} last={idx === group.slots.length - 1}
+                units={units} favorites={favorites} coordFormat={coordFormat} onLoad={onLoad} />
+            ))}
+          </View>
         </View>
       ))}
     </View>
@@ -2623,33 +2625,35 @@ const styles = StyleSheet.create({
   },
   metaText: { flexShrink: 1, fontSize: 13, color: palette.pageText, lineHeight: 18, minHeight: 18, textAlign: 'center' },
   variableRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  variableLabel: { fontSize: 12, color: palette.pageTextSecondary },
+  variableLabel: { fontSize: 12, color: palette.textSecondary },
 
   attribution: { fontSize: 12, color: palette.pageTextTertiary, marginTop: 8, marginHorizontal: 16 },
   attributionLink: { color: palette.pageLink, textDecorationLine: 'underline' },
 
   pastSection: { marginTop: 8, marginHorizontal: 16 },
-  pastGroup: { marginBottom: 8 },
-  pastDayText: { fontSize: 13, fontWeight: '600', color: palette.pageTextSecondary, paddingTop: 4, paddingBottom: 6 },
+  pastGroup: { marginBottom: 16 },
+  pastDayText: { fontSize: 13, fontWeight: '600', color: palette.pageTextSecondary, paddingBottom: 8 },
+  // One card per day, its rows ruled apart like the favorites list.
+  pastCard: { backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden' },
   pastItem: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 10, paddingHorizontal: 8, gap: 12,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.pageRuleLight,
+    paddingVertical: 12, paddingHorizontal: 14, gap: 12,
   },
-  pastItemLoaded: { backgroundColor: palette.selectedRow, borderRadius: 8, borderTopColor: palette.selectedRowBorder },
+  pastItemBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule },
+  pastItemLoaded: { backgroundColor: palette.selectedRow },
   pastDetails: { flex: 1, gap: 3 },
-  pastMeta: { flexShrink: 1, fontSize: 13, color: palette.pageText, lineHeight: 18 },
+  pastMeta: { flexShrink: 1, fontSize: 13, color: palette.textBody, lineHeight: 18 },
   pastTag: {
     fontSize: 11,
     lineHeight: 14,
     fontWeight: '600',
     fontFamily: 'Courier',
-    color: palette.pageLink,
+    color: palette.link,
     paddingHorizontal: 5,
     paddingVertical: 1,
     borderRadius: 4,
     borderWidth: 1,
-    borderColor: palette.pageLink,
+    borderColor: palette.link,
     backgroundColor: palette.linkTint,
     overflow: 'hidden',
   },

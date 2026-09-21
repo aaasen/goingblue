@@ -28,7 +28,6 @@ export interface Palette {
   pageLink: string;
   pageIcon: string;
   pageRule: string;
-  pageRuleLight: string;
   // A quiet, flat control on the page (the empty box of a collection still being pasted).
   pageChip: string;
   pageChipBorder: string;
@@ -37,7 +36,6 @@ export interface Palette {
   pageButtonText: string;
   // The past-forecast row that is currently loaded.
   selectedRow: string;
-  selectedRowBorder: string;
 
   // White surfaces: cards, list rows, the ⓘ sheets.
   card: string;
@@ -101,13 +99,11 @@ const system: Palette = {
   pageLink: '#3a8ee3',
   pageIcon: '#6e6e73',
   pageRule: '#d1d1d6',
-  pageRuleLight: '#e5e5ea',
   pageChip: '#f2f2f7',
   pageChipBorder: '#d1d1d6',
   pageButton: '#e5e5ea',
   pageButtonText: '#3a3a3c',
   selectedRow: '#e7f1fc',
-  selectedRowBorder: '#c5def7',
   card: '#ffffff',
   cardInset: '#fafafc',
   cardWell: '#f2f2f7',
