@@ -202,9 +202,9 @@ export default function LocationMap({ coord, onPick, height, active = true, user
       setFavoriteSheet(true);
       return;
     }
-    Alert.alert(`Remove “${currentFavorite.name}” from favorites?`, undefined, [
+    Alert.alert('Delete 1 favorite?', undefined, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => onRemoveFavorite?.() },
+      { text: 'Delete', style: 'destructive', onPress: () => onRemoveFavorite?.() },
     ]);
   }
 
@@ -217,7 +217,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         onPress={onStarPress}
         disabled={!coord}
         accessibilityRole="button"
-        accessibilityLabel={saved ? 'Remove from favorites' : 'Add favorite'}
+        accessibilityLabel={saved ? 'Delete favorite' : 'Add favorite'}
       >
         <MaterialCommunityIcons name={saved ? 'star' : 'star-outline'} size={26} color={saved ? FAVORITE : palette.link} />
       </TouchableOpacity>

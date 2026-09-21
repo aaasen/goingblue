@@ -36,10 +36,10 @@ import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
 import HelpScreen from './HelpScreen';
 import { MODELS, modelLabelFromMask } from './models';
 import { DEVICES, deviceCode, platformCode, type Device } from './devices';
-import { formatCoords, formatLatLon, parseLatLon } from './coords';
+import { formatCoords, formatLatLon, type LatLon, parseLatLon } from './coords';
 import { formatUtm } from './utm';
 import {
-  type Favorite, type FavoriteSort, findFavorite, kmBetween, loadFavorites, removeFavorite, saveFavorites,
+  type Favorite, type FavoriteSort, favoriteKey, findFavorite, kmBetween, loadFavorites, removeFavorite, saveFavorites,
   sortFavorites, touchFavorite, upsertFavorite,
 } from './favorites';
 import { palette, SEGMENT_PROPS, SWITCH_PROPS } from './palette';
@@ -1553,6 +1553,25 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     setFavoritesOpen(false);
   });
   const onOpenFavorites = useStableHandler(() => setFavoritesOpen(true));
+  const onCloseFavorites = useStableHandler(() => setFavoritesOpen(false));
+  const onFavoritesSort = useStableHandler(chooseFavoritesSort);
+  const onFavoritesReverse = useStableHandler(reverseFavoritesSort);
+  // Asks first: a favorite's name goes with it. The list closes with its last favorite, since
+  // the row that opens it goes too.
+  const onDeleteFavorites = useStableHandler((doomed: Favorite[]) => {
+    const noun = doomed.length === 1 ? 'favorite' : 'favorites';
+    Alert.alert(`Delete ${doomed.length} ${noun}?`, undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: () => {
+          const next = doomed.reduce<Favorite[]>((list, f) => removeFavorite(list, f), favorites);
+          updateFavorites(next);
+          if (next.length === 0) setFavoritesOpen(false);
+        },
+      },
+    ]);
+  });
   const onSaveFavorite = useStableHandler((name: string) => {
     if (mapCoord) updateFavorites(upsertFavorite(favorites, mapCoord, name));
   });
@@ -1791,54 +1810,13 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
       <HelpScreen visible={help} onClose={() => setHelp(false)} />
 
-      <InfoModal
-        visible={favoritesOpen} title="Favorite Locations" grouped onClose={() => setFavoritesOpen(false)}
-        toolbar={
-          <View style={styles.favoriteSort}>
-            <Text style={styles.favoriteSortLabel}>Sort</Text>
-            <View style={styles.favoriteSortRow}>
-              <SegmentedControl
-                {...SEGMENT_PROPS}
-                style={styles.favoriteSortControl}
-                values={favoriteSorts.map((o) => o.label)}
-                selectedIndex={favoriteSorts.findIndex((o) => o.value === shownFavoritesSort)}
-                onChange={(e) => chooseFavoritesSort(favoriteSorts[e.nativeEvent.selectedSegmentIndex].value)}
-              />
-              <TouchableOpacity
-                style={styles.favoriteSortReverse}
-                onPress={() => reverseFavoritesSort(!favoritesSortReversed)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityRole="button"
-                accessibilityLabel="Reverse order"
-                accessibilityState={{ selected: favoritesSortReversed }}
-              >
-                <MaterialCommunityIcons
-                  name={favoritesSortReversed ? 'sort-descending' : 'sort-ascending'} size={22} color={palette.pageLink}
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-        }
-      >
-        <View style={styles.favoriteList}>
-          {listedFavorites.map((f, idx) => (
-            <TouchableOpacity
-              key={formatLatLon(f)}
-              style={[styles.favoriteItem, idx < listedFavorites.length - 1 && styles.favoriteItemBorder]}
-              onPress={() => onPickFavorite(f)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: f === currentFavorite }}
-            >
-              <Text style={styles.favoriteItemName} numberOfLines={1}>{f.name}</Text>
-              {/* The distance is what the order is made of, so it shows only in that order. */}
-              {shownFavoritesSort === 'distance' && gpsCoords != null && (
-                <Text style={styles.favoriteItemDistance}>{distanceLabel(kmBetween(gpsCoords, f), units)}</Text>
-              )}
-              {f === currentFavorite && <MaterialCommunityIcons name="check" size={20} color={palette.link} style={styles.favoriteItemCheck} />}
-            </TouchableOpacity>
-          ))}
-        </View>
-      </InfoModal>
+      <FavoritesModal
+        visible={favoritesOpen} favorites={listedFavorites} current={currentFavorite}
+        sorts={favoriteSorts} sort={shownFavoritesSort} reversed={favoritesSortReversed}
+        gpsCoords={gpsCoords} units={units}
+        onSort={onFavoritesSort} onReverse={onFavoritesReverse}
+        onPick={onPickFavorite} onDelete={onDeleteFavorites} onClose={onCloseFavorites}
+      />
 
       <InfoModal visible={priorityInfo} title="Fill Priority" onClose={() => setPriorityInfo(false)}>
         <View style={styles.modalItem}>
@@ -1929,6 +1907,129 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     </Animated.ScrollView>
   );
 }
+
+// The favorites list, full screen. Picking a row pins it and closes the list; Edit turns a row's
+// tap to selecting, and the header's Edit and Done into Delete and a Done that ends the edit.
+// The selection is kept here so that a tap re-renders the list and not the screen under it.
+const FavoritesModal = memo(function FavoritesModal({
+  visible, favorites, current, sorts, sort, reversed, gpsCoords, units, onSort, onReverse, onPick, onDelete, onClose,
+}: {
+  visible: boolean; favorites: Favorite[]; current: Favorite | null;
+  sorts: { value: FavoriteSort; label: string }[]; sort: FavoriteSort; reversed: boolean;
+  gpsCoords: LatLon | null; units: UnitPrefs;
+  onSort: (sort: FavoriteSort) => void; onReverse: (reversed: boolean) => void;
+  onPick: (f: Favorite) => void; onDelete: (favorites: Favorite[]) => void; onClose: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  // An edit doesn't outlast the list being open.
+  useEffect(() => {
+    if (visible) return;
+    setEditing(false);
+    setSelected(new Set());
+  }, [visible]);
+  // A selection holds only what is listed, so a deleted favorite saved again doesn't arrive selected.
+  useEffect(() => {
+    setSelected((prev) => {
+      const listed = new Set(favorites.map(favoriteKey));
+      const kept = [...prev].filter((key) => listed.has(key));
+      return kept.length === prev.size ? prev : new Set(kept);
+    });
+  }, [favorites]);
+  function toggle(key: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }
+  function finish() {
+    setEditing(false);
+    setSelected(new Set());
+  }
+  const selectedFavorites = favorites.filter((f) => selected.has(favoriteKey(f)));
+  const hitSlop = { top: 10, bottom: 10, left: 10, right: 10 };
+  return (
+    <InfoModal
+      visible={visible} title="Favorite Locations" grouped onClose={onClose}
+      headerRight={
+        <View style={styles.savedActions}>
+          {editing ? (
+            <TouchableOpacity
+              onPress={() => onDelete(selectedFavorites)}
+              disabled={selectedFavorites.length === 0}
+              hitSlop={hitSlop}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: selectedFavorites.length === 0 }}
+            >
+              <Text style={[styles.savedDelete, selectedFavorites.length === 0 && styles.savedActionDisabled]}>Delete</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={() => setEditing(true)} hitSlop={hitSlop}
+              accessibilityRole="button" accessibilityLabel="Edit favorites"
+            >
+              <Text style={styles.savedAction}>Edit</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={editing ? finish : onClose} hitSlop={hitSlop} accessibilityRole="button">
+            <Text style={[styles.savedAction, styles.savedDone]}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      }
+      toolbar={
+        <View style={styles.favoriteSort}>
+          <Text style={styles.favoriteSortLabel}>Sort</Text>
+          <View style={styles.favoriteSortRow}>
+            <SegmentedControl
+              {...SEGMENT_PROPS}
+              style={styles.favoriteSortControl}
+              values={sorts.map((o) => o.label)}
+              selectedIndex={sorts.findIndex((o) => o.value === sort)}
+              onChange={(e) => onSort(sorts[e.nativeEvent.selectedSegmentIndex].value)}
+            />
+            <TouchableOpacity
+              style={styles.favoriteSortReverse}
+              onPress={() => onReverse(!reversed)}
+              hitSlop={hitSlop}
+              accessibilityRole="button"
+              accessibilityLabel="Reverse order"
+              accessibilityState={{ selected: reversed }}
+            >
+              <MaterialCommunityIcons
+                name={reversed ? 'sort-descending' : 'sort-ascending'} size={22} color={palette.pageLink}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+      }
+    >
+      <View style={styles.favoriteList}>
+        {favorites.map((f, idx) => {
+          const key = favoriteKey(f);
+          const isSelected = selected.has(key);
+          return (
+            <TouchableOpacity
+              key={key}
+              style={[styles.favoriteItem, idx < favorites.length - 1 && styles.favoriteItemBorder]}
+              onPress={() => (editing ? toggle(key) : onPick(f))}
+              accessibilityRole={editing ? 'checkbox' : 'button'}
+              accessibilityState={editing ? { checked: isSelected } : { selected: f === current }}
+            >
+              {editing && <View style={styles.favoriteItemSelect}><SelectMark selected={isSelected} color={palette.textFaint} /></View>}
+              <Text style={styles.favoriteItemName} numberOfLines={1}>{f.name}</Text>
+              {/* The distance is what the order is made of, so it shows only in that order. */}
+              {sort === 'distance' && gpsCoords != null && (
+                <Text style={styles.favoriteItemDistance}>{distanceLabel(kmBetween(gpsCoords, f), units)}</Text>
+              )}
+              {f === current && <Ionicons name="checkmark" size={20} color={palette.link} style={styles.favoriteItemCheck} />}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </InfoModal>
+  );
+});
 
 // One cached forecast in the past list. Memoized on its own so a switch, which changes only which
 // row is loaded, re-renders the two rows whose highlight flips and no others.
@@ -2494,8 +2595,10 @@ function ActionButton({ icon, label, onPress, onCancel, disabled, busy, variant 
 // sheet because UIKit rounds a sheet's corners to the display's own curve, which reads as a lot
 // of radius for a page of text — and RN gives no way to ask for less. The trade is the swipe-down
 // dismissal a sheet comes with, so Done is the way out and sits where a sheet's would.
-function InfoModal({ visible, title, onClose, grouped = false, toolbar, children }: {
+function InfoModal({ visible, title, onClose, grouped = false, headerRight, toolbar, children }: {
   visible: boolean; title: string; onClose: () => void; children: React.ReactNode;
+  // Takes the place of Done for a sheet with more to do than close.
+  headerRight?: React.ReactNode;
   // Held between the header and the scrolling content, so it stays in reach however long the
   // content runs.
   toolbar?: React.ReactNode;
@@ -2513,13 +2616,15 @@ function InfoModal({ visible, title, onClose, grouped = false, toolbar, children
         <SafeAreaView edges={['top', 'left', 'right']} style={[styles.sheet, grouped && styles.sheetGrouped]}>
           <View style={[styles.sheetHeader, grouped && styles.sheetHeaderGrouped]}>
             <Text style={[styles.sheetTitle, grouped && styles.sheetTitleGrouped]}>{title}</Text>
-            <TouchableOpacity
-              onPress={onClose}
-              accessibilityRole="button"
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text style={[styles.sheetDone, grouped && styles.sheetDoneGrouped]}>Done</Text>
-            </TouchableOpacity>
+            {headerRight ?? (
+              <TouchableOpacity
+                onPress={onClose}
+                accessibilityRole="button"
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={[styles.sheetDone, grouped && styles.sheetDoneGrouped]}>Done</Text>
+              </TouchableOpacity>
+            )}
           </View>
           {toolbar}
           <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
@@ -2653,6 +2758,7 @@ const styles = StyleSheet.create({
   favoriteItemName: { flex: 1, fontSize: 16, color: palette.text },
   favoriteItemDistance: { marginLeft: 12, fontSize: 15, color: palette.textSecondary, fontVariant: ['tabular-nums'] },
   favoriteItemCheck: { marginLeft: 10 },
+  favoriteItemSelect: { marginRight: 12 },
   favoriteSort: { paddingHorizontal: 16, paddingTop: 12 },
   favoriteSortRow: { flexDirection: 'row', alignItems: 'center' },
   favoriteSortControl: { flex: 1 },
