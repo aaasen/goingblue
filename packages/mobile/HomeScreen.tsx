@@ -8,6 +8,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import * as Network from 'expo-network';
 import { pageInsets } from './insets';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
@@ -1966,7 +1967,7 @@ const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, las
       </View>
       {/* The check's width is held on every row, so viewing a row re-wraps no label. */}
       <View style={styles.pastCheck}>
-        {isLoaded && <MaterialCommunityIcons name="check" size={20} color={palette.link} />}
+        {isLoaded && <Ionicons name="checkmark" size={20} color={palette.link} />}
       </View>
     </Pressable>
   );
@@ -1976,8 +1977,8 @@ const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, las
 // in a gray that reads against whatever it sits on.
 function SelectMark({ selected, color }: { selected: boolean; color: string }) {
   return (
-    <MaterialCommunityIcons
-      name={selected ? 'check-circle' : 'checkbox-blank-circle-outline'} size={22}
+    <Ionicons
+      name={selected ? 'checkmark-circle' : 'ellipse-outline'} size={24}
       color={selected ? palette.link : color}
     />
   );
