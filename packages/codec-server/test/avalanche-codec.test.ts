@@ -4,6 +4,8 @@ import { Model } from "../scripts/avalanche/model.ts";
 import { encode, decode, sectionBits, tokenCosts } from "../scripts/avalanche/codec.ts";
 import { buildTable, normalize, encode as ransEncode, Decoder, SCALE } from "../scripts/avalanche/rans.ts";
 import { htmlToText, type Section } from "../scripts/avalanche/text.ts";
+import { StructuredModel, type Structured } from "../scripts/avalanche/structured.ts";
+import { encodeBulletin, decodeBulletin } from "../scripts/avalanche/bulletin.ts";
 
 const TRAIN: Section[] = [
   { kind: "problem", text: "Wind slabs remain reactive on north through east aspects in the alpine. Use caution near ridge crests." },
@@ -136,5 +138,45 @@ describe("htmlToText", () => {
       .toBe("5 cm of snow & wind.\n\nNext line.");
     expect(htmlToText("<ul><li>one</li><li>two</li></ul>")).toBe("one\n\ntwo");
     expect(htmlToText(null)).toBe("");
+  });
+});
+
+describe("structured", () => {
+  const S: Structured[] = [
+    { ratings: [{ alp: "considerable", tln: "moderate", btl: "low" }, { alp: "considerable", tln: "moderate", btl: "low" }, { alp: "high", tln: "considerable", btl: "moderate" }],
+      confidence: "moderate",
+      problems: [{ type: "windslab", elevations: ["alp", "tln"], aspects: ["e", "n", "ne", "nw"], likelihood: "likely", size: "1.0-2.0" }] },
+    { ratings: [{ alp: "low", tln: "low", btl: "low" }, { alp: "low", tln: "low", btl: "low" }, { alp: "moderate", tln: "low", btl: "low" }],
+      confidence: "high",
+      problems: [] },
+  ];
+  function models(): [Model, StructuredModel] {
+    const m = trained();
+    const sm = new StructuredModel();
+    for (const s of S) sm.observe(s);
+    sm.finalize();
+    return [m, sm];
+  }
+
+  it("round-trips seen and unseen values inside a whole bulletin", () => {
+    const [m, sm] = models();
+    const novel: Structured = {
+      ratings: [{ alp: "extreme", tln: "spring", btl: "norating" }],
+      confidence: "low",
+      problems: [
+        { type: "cornice", elevations: ["alp"], aspects: [], likelihood: "certain_veryLikely", size: "3.0-4.5" },
+        { type: "windslab", elevations: ["alp", "tln"], aspects: ["e", "n", "ne", "nw"], likelihood: "likely", size: "1.0-2.0" },
+      ],
+    };
+    for (const s of [S[0], S[1], novel]) {
+      const b = { structured: s, sections: [TRAIN[0], { kind: "highlights", text: "Novel Zymoetz text." }] };
+      expect(decodeBulletin(m, sm, encodeBulletin(m, sm, b))).toEqual(b);
+    }
+  });
+
+  it("charges seen structure a few bits and unseen values many", () => {
+    const [m, sm] = models();
+    expect(sm.bits(m.byteTable(), S[0])).toBeLessThan(24);
+    expect(sm.bits(m.byteTable(), { ...S[1], confidence: "zzz" })).toBeGreaterThan(30);
   });
 });

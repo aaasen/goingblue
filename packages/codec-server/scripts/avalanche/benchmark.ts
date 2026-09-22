@@ -8,6 +8,8 @@
  * Usage: pnpm avalanche-benchmark [--test-frac 0.2] [--min-count 1] [--word-order 2|3]
  */
 import { encode, decode, sectionBits } from "./codec.ts";
+import { encodeBulletin, decodeBulletin } from "./bulletin.ts";
+import { StructuredModel } from "./structured.ts";
 import { openDb } from "./db.ts";
 import { Model, WORD_ORDER } from "./model.ts";
 import { bulletinProse, isForecast, type BulletinProse } from "./text.ts";
@@ -70,6 +72,9 @@ function main(): void {
   const model = new Model(wordOrder);
   for (const d of train) for (const s of d.sections) model.observe(s);
   model.finalize(minCount);
+  const structured = new StructuredModel();
+  for (const d of train) structured.observe(d.structured);
+  structured.finalize();
   const st = model.stats();
   console.log(`\ntrained in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${st.streams} word streams, vocab ${fmt(st.wordVocab)}, ` + st.entries.map((n, k) => `order ${k + 1}: ${fmt(n)} entries over ${fmt(st.contexts[k])} contexts`).join(", "));
 
@@ -77,6 +82,9 @@ function main(): void {
   let raw = 0;
   let comp = 0;
   let failures = 0;
+  let structBits = 0;
+  let combined = 0;
+  let combinedFailures = 0;
   let oov = 0;
   let tokens = 0;
   const msgHist = new Map<number, number>();
@@ -89,6 +97,14 @@ function main(): void {
     }
     raw += utf8.encode(d.text).length;
     comp += blob.length;
+    structBits += structured.bits(model.byteTable(), d.structured);
+    const whole = encodeBulletin(model, structured, { structured: d.structured, sections: d.sections });
+    combined += whole.length;
+    const back = decodeBulletin(model, structured, whole);
+    if (JSON.stringify(back) !== JSON.stringify({ structured: d.structured, sections: d.sections })) {
+      combinedFailures++;
+      console.log(`  BULLETIN ROUND TRIP FAILED: ${d.id}`);
+    }
     for (const s of d.sections) {
       const stream = model.streamFor(s.kind);
       const toks = tokenize(s.text);
@@ -113,6 +129,9 @@ function main(): void {
   console.log(`  throughput   ${(raw / elapsed / 1000).toFixed(0)} KB/s round trip`);
   const hist = [...msgHist].sort((a, b) => a[0] - b[0]);
   console.log(`  messages of ${MESSAGE_BYTES} bytes: ${hist.map(([m, n]) => `${m}: ${((n / test.length) * 100).toFixed(0)}%`).join("  ")}`);
+  console.log(`\nstructured fields (ratings, confidence, problems)`);
+  console.log(`  model bits   ${(structBits / test.length).toFixed(1)} per bulletin (${(structBits / 8 / test.length).toFixed(1)} bytes)`);
+  console.log(`  whole bulletin, structured + prose in one stream: ${(combined / test.length).toFixed(1)} bytes mean, round trip ${fmt(test.length - combinedFailures)}/${fmt(test.length)} exact`);
 
   // Where the bytes of a bulletin go. Bytes are model bits / 8, so they exclude coder framing;
   // per bulletin = occurrences x bytes, since problems and advice repeat.

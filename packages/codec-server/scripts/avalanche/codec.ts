@@ -53,7 +53,7 @@ function getVarint(buf: Uint8Array, pos: number): [number, number] {
 
 // keys[k] is the token's context at order k + 1; the ladder runs from the highest order down.
 // Returns the id to carry forward and the rung the token was coded on.
-function planToken(plan: Decision[], stream: Stream, byteTable: Table, keys: number[], token: string): [number, Rung] {
+export function planToken(plan: Decision[], stream: Stream, byteTable: Table, keys: number[], token: string): [number, Rung] {
   const sid = stream.vocab.ids.get(token);
   const excluded = new Set<number>();
   for (let level = keys.length - 1; level >= 0; level--) {
@@ -77,7 +77,7 @@ function planToken(plan: Decision[], stream: Stream, byteTable: Table, keys: num
   return [stream.contextFor(token), "bytes"];
 }
 
-function readToken(dec: Decoder, stream: Stream, byteTable: Table, keys: number[]): [string, number] {
+export function readToken(dec: Decoder, stream: Stream, byteTable: Table, keys: number[]): [string, number] {
   const excluded = new Set<number>();
   for (let level = keys.length - 1; level >= 0; level--) {
     const table = stream.contextTable(level, keys[level], excluded);
@@ -133,19 +133,17 @@ function planSection(model: Model, out: Decision[], section: Section): number {
   );
 }
 
-export function encode(model: Model, sections: Section[]): Uint8Array {
+// The varint header (section count, then each section's word count) and the decisions for a
+// list of sections.
+export function planSections(model: Model, sections: Section[]): { header: number[]; plan: Decision[] } {
   const header: number[] = [];
   putVarint(header, sections.length);
   const plan: Decision[] = [];
   for (const s of sections) putVarint(header, planSection(model, plan, s));
-  const body = ransEncode(plan);
-  const out = new Uint8Array(header.length + body.length);
-  out.set(header);
-  out.set(body, header.length);
-  return out;
+  return { header, plan };
 }
 
-export function decode(model: Model, blob: Uint8Array): Section[] {
+export function readHeader(blob: Uint8Array): { wordCounts: number[]; pos: number } {
   let [count, pos] = getVarint(blob, 0);
   const wordCounts: number[] = [];
   for (let i = 0; i < count; i++) {
@@ -153,8 +151,11 @@ export function decode(model: Model, blob: Uint8Array): Section[] {
     wordCounts.push(n);
     pos = p;
   }
+  return { wordCounts, pos };
+}
+
+export function readSections(model: Model, dec: Decoder, wordCounts: number[]): Section[] {
   const byteTable = model.byteTable();
-  const dec = new Decoder(blob, pos);
   const out: Section[] = [];
   for (const nWords of wordCounts) {
     const kind = model.kinds[dec.get(model.kindTable())];
@@ -175,6 +176,24 @@ export function decode(model: Model, blob: Uint8Array): Section[] {
     out.push({ kind, text: detokenize({ words, seps }) });
   }
   return out;
+}
+
+export function frame(header: number[], plan: Decision[]): Uint8Array {
+  const body = ransEncode(plan);
+  const out = new Uint8Array(header.length + body.length);
+  out.set(header);
+  out.set(body, header.length);
+  return out;
+}
+
+export function encode(model: Model, sections: Section[]): Uint8Array {
+  const { header, plan } = planSections(model, sections);
+  return frame(header, plan);
+}
+
+export function decode(model: Model, blob: Uint8Array): Section[] {
+  const { wordCounts, pos } = readHeader(blob);
+  return readSections(model, new Decoder(blob, pos), wordCounts);
 }
 
 // What each token of a section cost. Re-walks the real encoder path, so these are the bits the

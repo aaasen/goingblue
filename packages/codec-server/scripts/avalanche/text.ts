@@ -5,6 +5,8 @@
  * bulletinSections().
  */
 
+import { extractStructured, type Structured } from "./structured.ts";
+
 export interface Section {
   kind: string;   // highlights | avalanche-summary | snowpack-summary | weather-summary | problem | advice
   text: string;
@@ -16,6 +18,7 @@ export interface BulletinProse {
   dateIssued: string;
   sections: Section[];
   text: string;   // all sections joined, the document the codec compresses
+  structured: Structured;
 }
 
 const ENTITIES: Record<string, string> = {
@@ -91,5 +94,6 @@ export function bulletinProse(p: RawProduct): BulletinProse {
     dateIssued: p.report.dateIssued,
     sections,
     text: sections.map((s) => s.text).join("\n\n"),
+    structured: extractStructured(p as Parameters<typeof extractStructured>[0]),
   };
 }
