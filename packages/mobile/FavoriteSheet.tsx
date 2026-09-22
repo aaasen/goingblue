@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { formatCoords, type LatLon, parseLatLon } from './coords';
+import { type Favorite, favoriteKey, findFavorite } from './favorites';
 import type { CoordFormat } from './settings';
 import { palette } from './palette';
 
@@ -14,6 +15,8 @@ interface Props {
   // Set when the sheet is editing a favorite rather than adding one: its name fills the field
   // and the title says so.
   initialName?: string;
+  // What is already saved, so a point that has a favorite is refused rather than overwritten.
+  favorites: readonly Favorite[];
   coordFormat: CoordFormat;
   onSave: (name: string, coord: LatLon) => void;
   onClose: () => void;
@@ -22,9 +25,9 @@ interface Props {
 // The sheet every favorite is saved through: the map's star opens it on the marked point, the
 // list's Add opens it empty, the list's ⓘ opens it on the favorite. Either way both fields can
 // be typed over. A card on a scrim rather than Alert.prompt, which exists on iOS only. A favorite
-// needs a name and a point, so Save stays off until it has both. Mounted only while open, so the
-// fields start fresh each time.
-export default function FavoriteSheet({ coord = null, initialName, coordFormat, onSave, onClose }: Props) {
+// needs a name and a point that isn't already a favorite, so Save stays off until it has both.
+// Mounted only while open, so the fields start fresh each time.
+export default function FavoriteSheet({ coord = null, initialName, favorites, coordFormat, onSave, onClose }: Props) {
   const [name, setName] = useState(initialName ?? '');
   const [initialText] = useState(() => (coord ? formatCoords(coord, coordFormat) : ''));
   const [coordsText, setCoordsText] = useState(initialText);
@@ -43,7 +46,14 @@ export default function FavoriteSheet({ coord = null, initialName, coordFormat, 
   // The written form is rounded, so an untouched field saves the exact point it was given and
   // the favorite lands on the pin rather than a hair off it.
   const point = coord && coordsText === initialText ? coord : typed;
-  const canSave = name.trim().length > 0 && point != null;
+  // The favorite already at the typed point, if any. When the sheet is editing, the favorite it
+  // opened on is the one being edited, not a clash.
+  const taken = useMemo(() => {
+    const hit = findFavorite(favorites, point);
+    if (!hit || (initialName != null && coord && favoriteKey(hit) === favoriteKey(coord))) return null;
+    return hit;
+  }, [favorites, point, initialName, coord]);
+  const canSave = name.trim().length > 0 && point != null && taken == null;
   const save = () => { if (canSave) onSave(name, point); };
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose} onShow={Platform.OS === 'android' ? focusEmpty : undefined}>
@@ -59,7 +69,7 @@ export default function FavoriteSheet({ coord = null, initialName, coordFormat, 
             <Text style={styles.label}>Coordinates</Text>
             <TextInput
               ref={coordsRef}
-              style={[styles.input, coordsInvalid && styles.inputInvalid]}
+              style={[styles.input, (coordsInvalid || taken != null) && styles.inputInvalid]}
               value={coordsText}
               onChangeText={setCoordsText}
               accessibilityLabel="Coordinates"
@@ -73,6 +83,9 @@ export default function FavoriteSheet({ coord = null, initialName, coordFormat, 
               blurOnSubmit={false}
               onSubmitEditing={() => nameRef.current?.focus()}
             />
+            {taken && (
+              <Text style={styles.taken}>Favorite "{taken.name}" already exists at this location</Text>
+            )}
             <Text style={styles.label}>Name</Text>
             <TextInput
               ref={nameRef}
@@ -116,6 +129,7 @@ const styles = StyleSheet.create({
   },
   // Flagged the way the builder's field flags a bad entry: in the text, nothing resizes.
   inputInvalid: { color: palette.destructive },
+  taken: { marginTop: 6, fontSize: 13, color: palette.destructive },
   buttons: { marginTop: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 20 },
   button: { fontSize: 16, color: palette.link },
   save: { fontWeight: '600' },
