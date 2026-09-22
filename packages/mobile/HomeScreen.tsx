@@ -2319,6 +2319,7 @@ const RequestBuilder = memo(function RequestBuilder({
             pastPoints={pastPoints}
             onPickPast={onPickPast}
             coordFormat={coordFormat}
+            offlineMaps
           />
           <View style={styles.coordsRows}>
             <View style={styles.coordRow}>

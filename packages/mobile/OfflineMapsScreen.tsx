@@ -8,16 +8,13 @@ import * as Location from 'expo-location';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { findPack, formatBytes, formatTallyBytes, searchPacks, tally, type Pack } from './catalog';
 import { regionsAt } from './outlines';
-import { cancelDownload, usePackState } from './packStore';
+import { cancelDownload, downloadPack as storeDownloadPack, removePack as storeRemovePack, usePackState } from './packStore';
 import { clearTileCache, tileCacheSize, TILE_CACHE_EMPTY_BYTES } from './tileCache';
 import { palette } from './palette';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
-  downloaded: ReadonlySet<string>;
-  onDownload: (id: string) => void;
-  onRemove: (id: string) => void;
 }
 
 // Everything the map keeps on the phone, holdings first: the tile cache the map fills on its
@@ -34,7 +31,10 @@ type Here =
   | { kind: 'failed' }
   | { kind: 'found'; packs: Pack[] };
 
-export default function OfflineMapsScreen({ visible, onClose, downloaded, onDownload, onRemove }: Props) {
+export default function OfflineMapsScreen({ visible, onClose }: Props) {
+  // The pack store owns the set: ids appear once both archives are on disk, and the map's
+  // style rebuilds off the same subscription.
+  const { installed: downloaded } = usePackState();
   const [here, setHere] = useState<Here>({ kind: 'locating' });
   const [query, setQuery] = useState('');
   // undefined = not read yet; null = couldn't be read.
@@ -103,6 +103,17 @@ export default function OfflineMapsScreen({ visible, onClose, downloaded, onDown
       return;
     }
     setHere(await locate());
+  }
+
+  function onDownload(id: string) {
+    const pack = findPack(id);
+    if (!pack) return;
+    storeDownloadPack(pack).catch(() => {
+      Alert.alert(`Couldn’t download ${pack.name}`, 'Check your connection and try again.');
+    });
+  }
+  function onRemove(id: string) {
+    storeRemovePack(id);
   }
 
   async function runClearCache() {

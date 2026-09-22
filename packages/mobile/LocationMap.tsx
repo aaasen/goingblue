@@ -11,6 +11,7 @@ import { useBasemapStyle } from './useBasemapStyle';
 import { palette } from './palette';
 import { favoriteKey, type Favorite } from './favorites';
 import FavoriteSheet from './FavoriteSheet';
+import OfflineMapsScreen from './OfflineMapsScreen';
 import type { CoordFormat } from './settings';
 
 export interface LatLon {
@@ -52,6 +53,8 @@ interface Props {
   onPickPast?: (c: LatLon) => void;
   // How the favorite sheet writes the point it is saving.
   coordFormat?: CoordFormat;
+  // When set, a download button opens the offline maps sheet.
+  offlineMaps?: boolean;
 }
 
 // The picker's starting point before any coordinate is set: as far out as the basemap allows,
@@ -70,12 +73,13 @@ const MAP_IMAGES = {
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
 // picks a coordinate. The picker's corner button opens the same map fullscreen; the preview has no
 // controls.
-export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon' }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon', offlineMaps = false }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
   const [fullscreen, setFullscreen] = useState(false);
   const [favoriteSheet, setFavoriteSheet] = useState(false);
+  const [offlineMapsSheet, setOfflineMapsSheet] = useState(false);
   const [mapRevision, setMapRevision] = useState(0);
   const interactive = onPick != null;
   const mapStyle = useBasemapStyle();
@@ -254,6 +258,20 @@ export default function LocationMap({ coord, onPick, height, active = true, user
     );
   }
 
+  function renderOfflineMapsButton(style: object) {
+    if (!offlineMaps) return null;
+    return (
+      <TouchableOpacity
+        style={style}
+        onPress={() => setOfflineMapsSheet(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Offline maps"
+      >
+        <MaterialCommunityIcons name="layers-outline" size={26} color={palette.link} />
+      </TouchableOpacity>
+    );
+  }
+
   // Rendered inside whichever surface is showing. Under the fullscreen modal it has to be that
   // modal's child: iOS will not present a second modal from beneath one already up.
   function renderFavoriteSheet() {
@@ -267,6 +285,12 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         onClose={() => setFavoriteSheet(false)}
       />
     );
+  }
+
+  // Same rule as the favorite sheet.
+  function renderOfflineMapsSheet() {
+    if (!offlineMaps) return null;
+    return <OfflineMapsScreen visible={offlineMapsSheet} onClose={() => setOfflineMapsSheet(false)} />;
   }
 
   return (
@@ -289,7 +313,9 @@ export default function LocationMap({ coord, onPick, height, active = true, user
           )}
           {renderLocateButton(styles.locateButton)}
           {renderFavoriteButton(styles.favoriteButton)}
+          {renderOfflineMapsButton(styles.offlineMapsButton)}
           {renderFavoriteSheet()}
+          {renderOfflineMapsSheet()}
         </>
       )}
       {fullscreen && (
@@ -311,7 +337,9 @@ export default function LocationMap({ coord, onPick, height, active = true, user
             </TouchableOpacity>
             {renderLocateButton(styles.fullscreenLocateButton)}
             {renderFavoriteButton(styles.fullscreenFavoriteButton)}
+            {renderOfflineMapsButton(styles.fullscreenOfflineMapsButton)}
             {renderFavoriteSheet()}
+            {renderOfflineMapsSheet()}
           </View>
         </Modal>
       )}
@@ -407,6 +435,15 @@ const styles = StyleSheet.create({
   },
   fullscreenFavoriteButton: {
     position: 'absolute', top: 156, right: 16, backgroundColor: 'rgba(255,255,255,0.96)',
+    width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+  },
+  // Alone in the top-left corner, level with the fullscreen button inline and with Done in the modal.
+  offlineMapsButton: {
+    position: 'absolute', top: 12, left: 12, backgroundColor: 'rgba(255,255,255,0.94)',
+    width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+  },
+  fullscreenOfflineMapsButton: {
+    position: 'absolute', top: 56, left: 16, backgroundColor: 'rgba(255,255,255,0.96)',
     width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
   },
   cornerButtonDisabled: { opacity: 0.4 },
