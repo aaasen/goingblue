@@ -28,7 +28,16 @@ export default function FavoriteSheet({ coord = null, initialName, coordFormat, 
   const [name, setName] = useState(initialName ?? '');
   const [initialText] = useState(() => (coord ? formatCoords(coord, coordFormat) : ''));
   const [coordsText, setCoordsText] = useState(initialText);
+  const coordsRef = useRef<TextInput>(null);
   const nameRef = useRef<TextInput>(null);
+  // Focus lands on whichever field is still empty: the name when the point came in with the
+  // sheet, the coordinates otherwise. On Android autoFocus runs before the modal's window is
+  // attached, so the field takes focus without the keyboard, and even at onShow the dialog
+  // window has not always taken input focus yet, which the keyboard request needs. The timer
+  // lets the window settle first; the ref is null if the sheet closed meanwhile.
+  const focusEmpty = () => {
+    setTimeout(() => (coord == null ? coordsRef : nameRef).current?.focus(), 100);
+  };
   const typed = useMemo(() => parseLatLon(coordsText), [coordsText]);
   const coordsInvalid = coordsText.trim().length > 0 && typed == null;
   // The written form is rounded, so an untouched field saves the exact point it was given and
@@ -37,8 +46,10 @@ export default function FavoriteSheet({ coord = null, initialName, coordFormat, 
   const canSave = name.trim().length > 0 && point != null;
   const save = () => { if (canSave) onSave(name, point); };
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <Modal visible transparent animationType="fade" onRequestClose={onClose} onShow={Platform.OS === 'android' ? focusEmpty : undefined}>
+      {/* Padding on both platforms: the modal's window is edge-to-edge on Android, so it does not
+          shrink for the keyboard on its own. */}
+      <KeyboardAvoidingView style={styles.fill} behavior="padding">
         {/* Neither Pressable is an accessibility element: one that was would swallow the field
             and buttons inside it. The card's own Pressable keeps a tap on the card from reaching
             the scrim under it. */}
@@ -47,6 +58,7 @@ export default function FavoriteSheet({ coord = null, initialName, coordFormat, 
             <Text style={styles.title}>{initialName != null ? 'Edit favorite' : 'Add favorite'}</Text>
             <Text style={styles.label}>Coordinates</Text>
             <TextInput
+              ref={coordsRef}
               style={[styles.input, coordsInvalid && styles.inputInvalid]}
               value={coordsText}
               onChangeText={setCoordsText}
@@ -54,7 +66,7 @@ export default function FavoriteSheet({ coord = null, initialName, coordFormat, 
               placeholder="lat, lon or UTM"
               placeholderTextColor={palette.textTertiary}
               keyboardType="numbers-and-punctuation"
-              autoFocus={coord == null}
+              autoFocus={Platform.OS === 'ios' && coord == null}
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="next"
@@ -62,8 +74,6 @@ export default function FavoriteSheet({ coord = null, initialName, coordFormat, 
               onSubmitEditing={() => nameRef.current?.focus()}
             />
             <Text style={styles.label}>Name</Text>
-            {/* Focus lands on whichever field is still empty: the name when the point came in
-                with the sheet, the coordinates otherwise. */}
             <TextInput
               ref={nameRef}
               style={styles.input}
@@ -71,7 +81,7 @@ export default function FavoriteSheet({ coord = null, initialName, coordFormat, 
               onChangeText={setName}
               accessibilityLabel="Name"
               maxLength={NAME_MAX}
-              autoFocus={coord != null}
+              autoFocus={Platform.OS === 'ios' && coord != null}
               autoCapitalize="words"
               autoCorrect={false}
               returnKeyType="done"
