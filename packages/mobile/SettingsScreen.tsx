@@ -7,8 +7,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import PreferenceRows from './PreferenceRows';
 import OfflineMapsScreen, { downloadedPacks } from './OfflineMapsScreen';
-import { downloadPack as storeDownloadPack, removePack as storeRemovePack, usePackState } from './packStore';
-import { findPack } from './catalog';
+import { usePackState } from './packStore';
 import type { AqiScale, CoordFormat, TimeFormat, UnitPrefs } from './settings';
 import { palette } from './palette';
 
@@ -34,21 +33,7 @@ export default function SettingsScreen({
 }) {
   const [deleting, setDeleting] = useState(false);
   const [offlineMaps, setOfflineMaps] = useState(false);
-  // The pack store owns the set: ids appear once both archives are on disk, and the map's
-  // style rebuilds off the same subscription.
-  const { installed: downloaded } = usePackState();
-  const held = downloadedPacks(downloaded);
-
-  function downloadPack(id: string) {
-    const pack = findPack(id);
-    if (!pack) return;
-    storeDownloadPack(pack).catch(() => {
-      Alert.alert(`Couldn’t download ${pack.name}`, 'Check your connection and try again.');
-    });
-  }
-  function removePack(id: string) {
-    storeRemovePack(id);
-  }
+  const held = downloadedPacks(usePackState().installed);
 
   const DELETE_MESSAGE = 'This erases your data from the server and removes your saved forecasts, settings, and offline maps from this phone. Deletion is permanent.';
 
@@ -128,13 +113,7 @@ export default function SettingsScreen({
                 <MaterialCommunityIcons name="chevron-right" size={24} color={palette.textFaint} />
               </TouchableOpacity>
             </View>
-            <OfflineMapsScreen
-              visible={offlineMaps}
-              onClose={() => setOfflineMaps(false)}
-              downloaded={downloaded}
-              onDownload={downloadPack}
-              onRemove={removePack}
-            />
+            <OfflineMapsScreen visible={offlineMaps} onClose={() => setOfflineMaps(false)} />
 
             {/* Data */}
             <Text style={[styles.heading, { marginTop: 28 }]}>Data</Text>
