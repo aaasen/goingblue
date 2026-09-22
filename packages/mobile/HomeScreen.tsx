@@ -2692,7 +2692,11 @@ function InfoModal({ visible, title, onClose, grouped = false, headerRight, tool
             )}
           </View>
           {toolbar}
-          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
+          {/* Taps persist through the keyboard: the favorite sheets are this scroll view's
+              descendants in the React tree even though they present in a modal of their own,
+              and without this the scroll view spends the first tap on their buttons dismissing
+              the keyboard. */}
+          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
             {children}
           </ScrollView>
         </SafeAreaView>
