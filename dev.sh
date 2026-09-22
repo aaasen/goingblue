@@ -94,7 +94,7 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux split-window -t "$SESSION:servers" -v \
     "PORT=$CODEC_PORT node --watch packages/codec-server/dist/index.js"
   tmux split-window -t "$SESSION:servers" -v \
-    "$DB_ENV PORT=$GATEWAY_PORT CODEC_URL_V5=http://localhost:$CODEC_PORT node --watch packages/server/dist/index.js"
+    "$DB_ENV PORT=$GATEWAY_PORT CODEC_URL_V4=http://localhost:$CODEC_PORT node --watch packages/server/dist/index.js"
   tmux select-layout -t "$SESSION:servers" even-vertical
 
   if [ -n "$TUNNEL" ]; then

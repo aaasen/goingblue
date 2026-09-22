@@ -7,9 +7,9 @@
     "mode": 0,
     "utcOffsetHours": -9
   },
-  "encoded": "&!!'NPdI/Y4z&1OM+E/v<RIReRR19A.D@M$+IQ-UGA;RC3v1ovrS?:\"vO)iA9=D3SVGi@\"PBX$P5EfT&l1bV&M-52@*3A@sEuaz&b(f9Flrisj;hHL.0>v2lYuAa3:U#X-aAHOYtbBOj1G@8=%&rb=;N&MQ:Rv3Q.IK8-Db_K/.x*\"K/=;N%oCMR5@8MzFm&kg5UZzVu!JBbfEk=Zp*9zHv-&1Nlp-\"",
+  "encoded": "%!!'NPdI/Y4z&1OM+E/v<RIReRR19A.D@M$+IQ-UGA;RC3v1ovrS?:\"vO)iA9=D3SVGi@\"PBX$P5EfT&l1bV&M-52@*3A@sEuaz&b(f9Flrisj;hHL.0>v2lYuAa3:U#X-aAHOYtbBOj1G@8=%&rb=;N&MQ:Rv3Q.IK8-Db_K/.x*\"K/=;N%oCMR5@8MzFm&kg5UZzVu!JBbfEk=Zp*9zHv-&1Nlp-\"",
   "decoded": {
-    "version": 5,
+    "version": 4,
     "code": 0,
     "days": 3,
     "models_mask": 1,
