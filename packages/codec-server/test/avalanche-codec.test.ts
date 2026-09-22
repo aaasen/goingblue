@@ -118,6 +118,11 @@ describe("order 2", () => {
     const seen = { kind: "problem", text: "Wind slabs remain reactive on north through east aspects" };
     const rungs = tokenCosts(m, seen).filter((r) => r.stream === "word").map((r) => r.rung);
     expect(rungs.slice(2)).toEqual(rungs.slice(2).map(() => "order2"));
+    // Separators between two seen words use the pair of words around them; the trailing one
+    // pairs the last word with END, which this text never trained.
+    const seps = tokenCosts(m, seen).filter((r) => r.stream === "sep").map((r) => r.rung);
+    expect(seps.slice(0, -1)).toEqual(seps.slice(0, -1).map(() => "order2"));
+    expect(seps[seps.length - 1]).not.toBe("order2");
     const novel = { kind: "problem", text: "Zymoetz Kokanee remain" };
     expect(decode(m, encode(m, [novel]))).toEqual([novel]);
     expect(tokenCosts(m, novel).filter((r) => r.stream === "word").map((r) => r.rung)).toEqual(["bytes", "bytes", "unigram"]);

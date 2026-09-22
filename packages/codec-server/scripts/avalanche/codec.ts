@@ -11,11 +11,11 @@
  *   kind  N  words[0] seps[0] words[1] seps[1] ... words[N-1] seps[N-1] seps[N]
  * where kind is a symbol from the kind table and N is coded as a raw varint in the byte stream
  * ahead of the rANS body. Each separator is coded after the word that follows it in the text,
- * so the decoder has that word as the separator's context; the trailing separator's context
- * is END. Word contexts restart at BOS for every section.
+ * so the decoder has the words on both sides of it as its contexts; the trailing separator's
+ * next word is END. Word contexts restart at BOS for every section.
  *
- * A token walks the ladder in model.ts: order-2 context (words only, when the pair was seen),
- * context, unigram, then bytes. Each rung is entered by an ESC read from the rung above.
+ * A token walks the ladder in model.ts: order-2 context (when the pair was seen), context,
+ * unigram, then bytes. Each rung is entered by an ESC read from the rung above.
  */
 import { BOS, ESC, LIT_END, pairKey, type Model, type Stream } from "./model.ts";
 import { Decoder, costBits, encode as ransEncode, type Decision, type Table } from "./rans.ts";
@@ -45,11 +45,9 @@ function getVarint(buf: Uint8Array, pos: number): [number, number] {
   }
 }
 
-function planToken(
-  plan: Decision[], stream: Stream, byteTable: Table, ctx: number, token: string, ctx2: number | null = null,
-): number {
+function planToken(plan: Decision[], stream: Stream, byteTable: Table, ctx: number, token: string, ctx2: number): number {
   const sid = stream.vocab.ids.get(token);
-  const table2 = ctx2 === null ? null : stream.context2Table(ctx2);
+  const table2 = stream.context2Table(ctx2);
   if (table2) {
     if (sid !== undefined && table2.index.has(sid)) {
       plan.push([table2, sid]);
@@ -74,10 +72,8 @@ function planToken(
   return stream.contextFor(token);
 }
 
-function readToken(
-  dec: Decoder, stream: Stream, byteTable: Table, ctx: number, ctx2: number | null = null,
-): [string, number] {
-  const table2 = ctx2 === null ? null : stream.context2Table(ctx2);
+function readToken(dec: Decoder, stream: Stream, byteTable: Table, ctx: number, ctx2: number): [string, number] {
+  const table2 = stream.context2Table(ctx2);
   let sid = table2 ? dec.get(table2) : ESC;
   if (sid !== ESC) return [stream.vocab.token(sid), sid];
   sid = dec.get(stream.contextTable(ctx));
@@ -99,20 +95,22 @@ function readToken(
 function walkSection(
   model: Model, section: Section,
   word: (token: string, ctx: number, ctx2: number) => number,
-  sep: (token: string, ctx: number) => number,
+  sep: (token: string, ctx: number, ctx2: number) => number,
 ): number {
   const toks = tokenize(section.text);
   const n = toks.words.length;
   let ctxW = BOS;
   let prevW = BOS;
+  let prevToken: string | null = null;
   for (let i = 0; i < n; i++) {
     const token = toks.words[i];
     const next = word(token, ctxW, pairKey(prevW, ctxW));
     prevW = ctxW;
     ctxW = next;
-    sep(toks.seps[i], model.sepContextFor(token));
+    sep(toks.seps[i], model.sepContextFor(token), model.sepContext2For(prevToken, token));
+    prevToken = token;
   }
-  sep(toks.seps[n], model.sepContextFor(null));
+  sep(toks.seps[n], model.sepContextFor(null), model.sepContext2For(prevToken, null));
   return n;
 }
 
@@ -124,7 +122,7 @@ function planSection(model: Model, out: Decision[], section: Section): number {
   return walkSection(
     model, section,
     (token, ctx, ctx2) => planToken(out, words, byteTable, ctx, token, ctx2),
-    (token, ctx) => planToken(out, model.seps, byteTable, ctx, token),
+    (token, ctx, ctx2) => planToken(out, model.seps, byteTable, ctx, token, ctx2),
   );
 }
 
@@ -158,14 +156,16 @@ export function decode(model: Model, blob: Uint8Array): Section[] {
     const seps: string[] = [];
     let ctxW = BOS;
     let prevW = BOS;
+    let prevToken: string | null = null;
     for (let i = 0; i < nWords; i++) {
       const [word, cw] = readToken(dec, stream, byteTable, ctxW, pairKey(prevW, ctxW));
       prevW = ctxW;
       ctxW = cw;
       words.push(word);
-      seps.push(readToken(dec, model.seps, byteTable, model.sepContextFor(word))[0]);
+      seps.push(readToken(dec, model.seps, byteTable, model.sepContextFor(word), model.sepContext2For(prevToken, word))[0]);
+      prevToken = word;
     }
-    seps.push(readToken(dec, model.seps, byteTable, model.sepContextFor(null))[0]);
+    seps.push(readToken(dec, model.seps, byteTable, model.sepContextFor(null), model.sepContext2For(prevToken, null))[0]);
     out.push({ kind, text: detokenize({ words, seps }) });
   }
   return out;
@@ -187,7 +187,7 @@ export function tokenCosts(model: Model, section: Section): TokenCost[] {
   const byteTable = model.byteTable();
   const rows: TokenCost[] = [];
   const plan: Decision[] = [];
-  const costed = (stream: "word" | "sep", target: Stream) => (token: string, ctx: number, ctx2: number | null = null): number => {
+  const costed = (stream: "word" | "sep", target: Stream) => (token: string, ctx: number, ctx2: number): number => {
     const mark = plan.length;
     const next = planToken(plan, target, byteTable, ctx, token, ctx2);
     let bits = 0;
@@ -196,7 +196,7 @@ export function tokenCosts(model: Model, section: Section): TokenCost[] {
       bits += costBits(plan[k][0], plan[k][1]);
       if (plan[k][1] === ESC && plan[k][0] !== byteTable) escapes++;
     }
-    const had2 = ctx2 !== null && target.context2Table(ctx2) !== null;
+    const had2 = target.context2Table(ctx2) !== null;
     const depth = escapes - (had2 ? 1 : 0);
     const rung: Rung = had2 && escapes === 0 ? "order2" : depth <= 0 ? "context" : depth === 1 ? "unigram" : "bytes";
     rows.push({ stream, token, bits, rung });

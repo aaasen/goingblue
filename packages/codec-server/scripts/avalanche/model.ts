@@ -4,9 +4,11 @@
  * Coding a token is a ladder. Each level is a real rANS table, so falling through costs only
  * the bits of the escape symbol:
  *
- *   order-2 table   successors seen after the previous two tokens, plus ESC (word streams
- *                   only; skipped without cost when the pair was never seen)
- *   context table   successors seen after the previous token in this stream, plus ESC
+ *   order-2 table   successors seen in a pair context, plus ESC; skipped without cost when
+ *                   the pair was never seen. Words: the previous two words. Separators: the
+ *                   words on either side.
+ *   context table   successors seen in the order-1 context, plus ESC. Words: the previous
+ *                   word. Separators: the word that follows.
  *   unigram table   every token seen in this stream, plus ESC
  *   byte table      UTF-8 bytes of the literal, plus END
  *
@@ -16,8 +18,9 @@
  * codec total: any input round-trips.
  *
  * Every section kind gets its own word stream with its own vocabulary, contexts, and counts.
- * Separators are one stream used by all sections, predicted from the word that follows each
- * separator (END for the trailing one), and a kind table codes which section comes next.
+ * Separators are one stream used by all sections, predicted from the words around each
+ * separator (BOS before the first, END after the last), and a kind table codes which section
+ * comes next.
  *
  * Both sides build tables from the same stored counts in the same sorted order. That
  * determinism, not the counts themselves, is what keeps them in sync.
@@ -90,18 +93,19 @@ export class Stream {
   private cache2 = new Map<number, Table>();
   private uniTable: Table | null = null;
 
-  // Word streams are order 2; the separator stream is order 1 with explicit contexts.
+  // Word streams chain their own contexts; the separator stream is given explicit ones.
   constructor(readonly order: 1 | 2 = 1) {}
 
-  // Counts each token under its context: contexts[i] when given, else the previous token, and
-  // under the previous pair as well at order 2.
-  observe(seq: string[], contexts?: number[]): void {
+  // Counts each token under its contexts: contexts[i] and contexts2[i] when given, else the
+  // previous token and the previous pair at order 2.
+  observe(seq: string[], contexts?: number[], contexts2?: number[]): void {
     let prev1 = BOS;
     let prev2 = BOS;
     for (let i = 0; i < seq.length; i++) {
       const sid = this.vocab.intern(seq[i]);
       bump(this.ctx, contexts ? contexts[i] : prev1, sid);
-      if (this.order === 2) bump(this.ctx2, pairKey(prev2, prev1), sid);
+      if (contexts2) bump(this.ctx2, contexts2[i], sid);
+      else if (this.order === 2) bump(this.ctx2, pairKey(prev2, prev1), sid);
       this.uni.set(sid, (this.uni.get(sid) ?? 0) + 1);
       prev2 = prev1;
       prev1 = sid;
@@ -176,10 +180,14 @@ export class Model {
   private byteTbl: Table | null = null;
   private kindTbl: Table | null = null;
 
-  // The context a separator is coded under when the word after it is `nextWord`, or END for
-  // the trailing separator.
+  // The order-1 context of a separator: the word after it, or END for the trailing one.
   sepContextFor(nextWord: string | null): number {
     return nextWord === null ? END : (this.sepCtx.ids.get(nextWord) ?? UNK);
+  }
+
+  // The order-2 context of a separator: the words on either side, BOS before the first word.
+  sepContext2For(prevWord: string | null, nextWord: string | null): number {
+    return pairKey(prevWord === null ? BOS : (this.sepCtx.ids.get(prevWord) ?? UNK), this.sepContextFor(nextWord));
   }
 
   kindId(kind: string): number {
@@ -207,9 +215,10 @@ export class Model {
     if (!stream) this.streams.set(section.kind, (stream = new Stream(2)));
     const toks = tokenize(section.text);
     stream.observe(toks.words);
-    const contexts = toks.words.map((w) => this.sepCtx.intern(w));
-    contexts.push(END);
-    this.seps.observe(toks.seps, contexts);
+    const ids = toks.words.map((w) => this.sepCtx.intern(w));
+    const contexts = [...ids, END];
+    const contexts2 = contexts.map((next, i) => pairKey(i === 0 ? BOS : ids[i - 1], next));
+    this.seps.observe(toks.seps, contexts, contexts2);
     for (const b of utf8.encode(section.text)) this.bytes.set(b, (this.bytes.get(b) ?? 0) + 1);
   }
 
