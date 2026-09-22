@@ -13,3 +13,4 @@ export * from "./attribution.js";
 export * from "./layout.js";
 export * from "./wire.js";
 export * from "./registry.js";
+export * from "./avalanche.js";
