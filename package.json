@@ -25,6 +25,8 @@
     "test": "pnpm --filter @weather/protocol test && pnpm --filter @weather/server test && pnpm --filter @weather/codec-server test && pnpm --filter @weather/mobile test",
     "benchmark": "pnpm --filter @weather/protocol build && tsx packages/codec-server/scripts/benchmark.ts",
     "corpus-map": "tsx packages/codec-server/scripts/corpus-map.ts",
+    "avalanche-collect": "tsx packages/codec-server/scripts/avalanche/collect.ts",
+    "avalanche-benchmark": "tsx packages/codec-server/scripts/avalanche/benchmark.ts",
     "generate": "pnpm --filter @weather/protocol build && tsx packages/codec-server/scripts/generate-codebooks.ts"
   },
   "devDependencies": {
