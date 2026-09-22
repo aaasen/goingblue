@@ -1,10 +1,9 @@
 /**
  * Train the Markov model on the bulletin archive and measure it on bulletins it never saw.
  *
- * The holdout is the most recent share of bulletins by issue time. That is the deployment
- * case: a model trained on history compresses bulletins written after it. A positional split
- * would leave yesterday's bulletin for the same region in the training set, and consecutive
- * bulletins reuse whole paragraphs, so it would flatter the ratio.
+ * The holdout is a random sample of bulletins from the whole archive. Membership is decided by
+ * a hash of the product id, so a bulletin's side of the split never changes as the archive
+ * grows and two runs on different snapshots compare the same documents.
  *
  * Usage: pnpm avalanche-benchmark [--test-frac 0.2] [--min-count 1]
  */
@@ -36,14 +35,17 @@ export function loadBulletins(): BulletinProse[] {
   return out;
 }
 
-export function split(docs: BulletinProse[], testFrac: number): { train: BulletinProse[]; test: BulletinProse[]; cutoff: string } {
-  const target = Math.round(docs.length * testFrac);
-  const byTime = [...docs].sort((a, b) => (a.dateIssued < b.dateIssued ? 1 : -1));
-  const cutoff = byTime[Math.max(0, Math.min(target, byTime.length) - 1)].dateIssued;
+// FNV-1a over the id, mapped to [0, 1).
+function unitHash(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  return (h >>> 0) / 4294967296;
+}
+
+export function split(docs: BulletinProse[], testFrac: number): { train: BulletinProse[]; test: BulletinProse[] } {
   return {
-    train: docs.filter((d) => d.dateIssued < cutoff),
-    test: docs.filter((d) => d.dateIssued >= cutoff),
-    cutoff,
+    train: docs.filter((d) => unitHash(d.id) >= testFrac),
+    test: docs.filter((d) => unitHash(d.id) < testFrac),
   };
 }
 
@@ -58,10 +60,9 @@ function main(): void {
 
   const docs = loadBulletins();
   if (docs.length === 0) throw new Error("no forecasts in data/avalanche.db; run pnpm avalanche-collect");
-  const { train, test, cutoff } = split(docs, testFrac);
-  console.log(`${fmt(docs.length)} bulletins with a danger rating; train ${fmt(train.length)} / test ${fmt(test.length)}`);
-  console.log(`  train ${train[0].dateIssued.slice(0, 10)} .. ${cutoff.slice(0, 10)}`);
-  console.log(`  test  ${cutoff.slice(0, 10)} .. ${test[test.length - 1].dateIssued.slice(0, 10)}`);
+  const { train, test } = split(docs, testFrac);
+  console.log(`${fmt(docs.length)} bulletins with a danger rating, ${docs[0].dateIssued.slice(0, 10)} .. ${docs[docs.length - 1].dateIssued.slice(0, 10)}`);
+  console.log(`  train ${fmt(train.length)} / test ${fmt(test.length)}, sampled by id hash`);
 
   const t0 = Date.now();
   const model = new Model();
