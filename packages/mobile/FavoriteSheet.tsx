@@ -11,17 +11,21 @@ const NAME_MAX = 40;
 interface Props {
   // The point to start from, written into the Coordinates field. Omitted, the field starts empty.
   coord?: LatLon | null;
+  // Set when the sheet is editing a favorite rather than adding one: its name fills the field
+  // and the title says so.
+  initialName?: string;
   coordFormat: CoordFormat;
   onSave: (name: string, coord: LatLon) => void;
   onClose: () => void;
 }
 
 // The sheet every favorite is saved through: the map's star opens it on the marked point, the
-// list's Add opens it empty. Either way the point can be typed over. A card on a scrim rather
-// than Alert.prompt, which exists on iOS only. A favorite needs a name and a point, so Save stays
-// off until it has both. Mounted only while open, so the fields start fresh each time.
-export default function FavoriteSheet({ coord = null, coordFormat, onSave, onClose }: Props) {
-  const [name, setName] = useState('');
+// list's Add opens it empty, the list's ⓘ opens it on the favorite. Either way both fields can
+// be typed over. A card on a scrim rather than Alert.prompt, which exists on iOS only. A favorite
+// needs a name and a point, so Save stays off until it has both. Mounted only while open, so the
+// fields start fresh each time.
+export default function FavoriteSheet({ coord = null, initialName, coordFormat, onSave, onClose }: Props) {
+  const [name, setName] = useState(initialName ?? '');
   const [initialText] = useState(() => (coord ? formatCoords(coord, coordFormat) : ''));
   const [coordsText, setCoordsText] = useState(initialText);
   const nameRef = useRef<TextInput>(null);
@@ -40,7 +44,7 @@ export default function FavoriteSheet({ coord = null, coordFormat, onSave, onClo
             the scrim under it. */}
         <Pressable style={styles.scrim} onPress={onClose} accessible={false}>
           <Pressable style={styles.card} accessible={false}>
-            <Text style={styles.title}>Add favorite</Text>
+            <Text style={styles.title}>{initialName != null ? 'Edit favorite' : 'Add favorite'}</Text>
             <Text style={styles.label}>Coordinates</Text>
             <TextInput
               style={[styles.input, coordsInvalid && styles.inputInvalid]}

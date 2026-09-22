@@ -74,6 +74,15 @@ export function upsertFavorite(favorites: readonly Favorite[], c: LatLon, name: 
   return sorted([...favorites.filter((f) => f !== existing), next]);
 }
 
+// Rewrite a favorite's name and point. Editing isn't a use, so its place in the recent order
+// holds. A point moved onto another favorite takes that one over. Returns a new list.
+export function editFavorite(favorites: readonly Favorite[], original: Favorite, c: LatLon, name: string): Favorite[] {
+  const key = favoriteKey(c);
+  const rest = favorites.filter((f) => f !== original && favoriteKey(f) !== key);
+  const next: Favorite = { ...parsePoint(key), name: name.trim(), usedAt: original.usedAt };
+  return sorted([...rest, next]);
+}
+
 // Mark a favorite as used now, which moves it to the top of the recent order. Returns a new list.
 export function touchFavorite(favorites: readonly Favorite[], c: LatLon, now = Date.now()): Favorite[] {
   const key = favoriteKey(c);

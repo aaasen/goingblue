@@ -12,8 +12,8 @@ vi.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
 
 import { formatLatLon, parseLatLon } from '../coords';
 import {
-  FAVORITES_KEY, findFavorite, kmBetween, loadFavorites, pastForecastPoints, removeFavorite, saveFavorites, sortFavorites, touchFavorite,
-  upsertFavorite,
+  FAVORITES_KEY, editFavorite, findFavorite, kmBetween, loadFavorites, pastForecastPoints, removeFavorite, saveFavorites, sortFavorites,
+  touchFavorite, upsertFavorite,
 } from '../favorites';
 import { clearSettings } from '../settings';
 
@@ -48,6 +48,18 @@ describe('favorites', () => {
     let list = upsertFavorite([], DENALI, 'Summit', 1);
     list = upsertFavorite(list, DENALI, '  Denali ', 2);
     expect(list).toEqual([{ ...DENALI, name: 'Denali', usedAt: 2 }]);
+  });
+
+  it('editing rewrites the name and point and keeps the place in the recent order', () => {
+    let list = upsertFavorite([], WHITNEY, 'Whitney', 1);
+    list = upsertFavorite(list, DENALI, 'Denali', 2);
+    const moved = { lat: 63.1, lon: -151.1 };
+    const edited = editFavorite(list, list[0], moved, ' Denali North ');
+    expect(edited).toEqual([{ ...moved, name: 'Denali North', usedAt: 2 }, { lat: 36.57858, lon: -118.292, name: 'Whitney', usedAt: 1 }]);
+    expect(findFavorite(edited, DENALI)).toBeUndefined();
+    // Moved onto another favorite, the edit takes that one's place.
+    const merged = editFavorite(list, list[0], WHITNEY, 'Denali');
+    expect(merged).toEqual([{ lat: 36.57858, lon: -118.292, name: 'Denali', usedAt: 2 }]);
   });
 
   it('selecting a favorite moves it to the top of the recent order', () => {
