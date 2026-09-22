@@ -16,7 +16,8 @@
  *
  * A token walks the ladder in model.ts: its stream's context orders from highest to lowest
  * (unseen higher-order contexts are skipped), unigram, then bytes. Each rung is entered by an
- * ESC read from the rung above.
+ * ESC read from the rung above, and the symbols of every context rung escaped from are
+ * excluded from the context rungs below.
  */
 import { BOS, ESC, LIT_END, chainedKeys, type Model, type Stream } from "./model.ts";
 import { Decoder, costBits, encode as ransEncode, type Decision, type Table } from "./rans.ts";
@@ -25,6 +26,10 @@ import { detokenize, tokenize } from "./tokenizer.ts";
 
 const utf8 = new TextEncoder();
 const utf8Decode = new TextDecoder();
+
+// The ladder rung a token was coded on: a context order, the unigram, or a byte literal.
+export type Rung = "order3" | "order2" | "context" | "unigram" | "bytes";
+const RUNGS: Rung[] = ["context", "order2", "order3"];
 
 function putVarint(out: number[], n: number): void {
   for (;;) {
@@ -47,34 +52,39 @@ function getVarint(buf: Uint8Array, pos: number): [number, number] {
 }
 
 // keys[k] is the token's context at order k + 1; the ladder runs from the highest order down.
-function planToken(plan: Decision[], stream: Stream, byteTable: Table, keys: number[], token: string): number {
+// Returns the id to carry forward and the rung the token was coded on.
+function planToken(plan: Decision[], stream: Stream, byteTable: Table, keys: number[], token: string): [number, Rung] {
   const sid = stream.vocab.ids.get(token);
+  const excluded = new Set<number>();
   for (let level = keys.length - 1; level >= 0; level--) {
-    const table = stream.contextTable(level, keys[level]);
+    const table = stream.contextTable(level, keys[level], excluded);
     if (!table) continue;
     if (sid !== undefined && table.index.has(sid)) {
       plan.push([table, sid]);
-      return sid;
+      return [sid, RUNGS[level]];
     }
     plan.push([table, ESC]);
+    for (const s of table.symbols) excluded.add(s);
   }
   const uni = stream.unigramTable();
   if (sid !== undefined) {
     plan.push([uni, sid]);
-    return sid;
+    return [sid, "unigram"];
   }
   plan.push([uni, ESC]);
   for (const b of utf8.encode(token)) plan.push([byteTable, b]);
   plan.push([byteTable, LIT_END]);
-  return stream.contextFor(token);
+  return [stream.contextFor(token), "bytes"];
 }
 
 function readToken(dec: Decoder, stream: Stream, byteTable: Table, keys: number[]): [string, number] {
+  const excluded = new Set<number>();
   for (let level = keys.length - 1; level >= 0; level--) {
-    const table = stream.contextTable(level, keys[level]);
+    const table = stream.contextTable(level, keys[level], excluded);
     if (!table) continue;
     const sid = dec.get(table);
     if (sid !== ESC) return [stream.vocab.token(sid), sid];
+    for (const s of table.symbols) excluded.add(s);
   }
   const sid = dec.get(stream.unigramTable());
   if (sid !== ESC) return [stream.vocab.token(sid), sid];
@@ -118,8 +128,8 @@ function planSection(model: Model, out: Decision[], section: Section): number {
   const byteTable = model.byteTable();
   return walkSection(
     model, section,
-    (token, keys) => planToken(out, words, byteTable, keys, token),
-    (token, keys) => planToken(out, model.seps, byteTable, keys, token),
+    (token, keys) => planToken(out, words, byteTable, keys, token)[0],
+    (token, keys) => planToken(out, model.seps, byteTable, keys, token)[0],
   );
 }
 
@@ -168,9 +178,7 @@ export function decode(model: Model, blob: Uint8Array): Section[] {
 }
 
 // What each token of a section cost. Re-walks the real encoder path, so these are the bits the
-// coder actually pays. `rung` names the ladder rung the token was coded on: "order3",
-// "order2", "context" (order 1), "unigram", or "bytes".
-export type Rung = "order3" | "order2" | "context" | "unigram" | "bytes";
+// coder actually pays. `rung` names the ladder rung the token was coded on.
 
 export interface TokenCost {
   stream: "word" | "sep";
@@ -186,17 +194,9 @@ export function tokenCosts(model: Model, section: Section): TokenCost[] {
   const plan: Decision[] = [];
   const costed = (stream: "word" | "sep", target: Stream) => (token: string, keys: number[]): number => {
     const mark = plan.length;
-    const next = planToken(plan, target, byteTable, keys, token);
+    const [next, rung] = planToken(plan, target, byteTable, keys, token);
     let bits = 0;
     for (let k = mark; k < plan.length; k++) bits += costBits(plan[k][0], plan[k][1]);
-    const [table] = plan[plan.length - 1];
-    let rung: Rung;
-    if (table === byteTable) rung = "bytes";
-    else if (table === target.unigramTable()) rung = "unigram";
-    else {
-      const level = keys.findIndex((key, l) => target.contextTable(l, key) === table);
-      rung = level === 2 ? "order3" : level === 1 ? "order2" : "context";
-    }
     rows.push({ stream, token, bits, rung });
     return next;
   };

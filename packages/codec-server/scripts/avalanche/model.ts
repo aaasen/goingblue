@@ -11,6 +11,12 @@
  *   unigram table   every token seen in this stream, plus ESC
  *   byte table      UTF-8 bytes of the literal, plus END
  *
+ * Escapes use PPM exclusion on the context rungs: once a context has escaped, the symbols it
+ * held cannot be the answer, so every lower context table is built without them (and without
+ * them counting toward the escape weight). A lower context whose symbols are all excluded is
+ * skipped without cost. The unigram rung is not excluded: rebuilding its thousands of entries
+ * per escape cost ten times the throughput for a tenth of the gain.
+ *
  * Escape counts follow PPM method C: a context's escape weight is its number of distinct
  * successors. A unigram table's escape weight is its hapax count, a Good-Turing estimate of the
  * chance the next word is one it has never seen. The bottom rung is over bytes, which makes the
@@ -65,10 +71,16 @@ function hapaxEscape(counts: Map<number, number>): number {
   return Math.max(1, hapax);
 }
 
-function unigramTable(counts: Map<number, number>, escape: number): Table {
-  const items: [number, number][] = [...counts].sort((a, b) => a[0] - b[0]);
-  items.push([ESC, escape]);
-  return buildTable(items);
+const NONE: ReadonlySet<number> = new Set();
+
+// A table over `items` minus `excluded`, with ESC weighted by the remaining distinct count
+// (or `escape` when given), or null when nothing remains.
+function excludingTable(
+  items: [number, number][], excluded: ReadonlySet<number>, escape?: number,
+): Table | null {
+  const kept = excluded.size === 0 ? items : items.filter(([sid]) => !excluded.has(sid));
+  if (kept.length === 0) return null;
+  return buildTable([...kept, [ESC, escape ?? kept.length]]);
 }
 
 // Contexts above order 1 are keyed by the previous ids packed into one number. Ids stay below
@@ -99,12 +111,14 @@ export class Stream {
   escape = 1;
   readonly vocab = new Vocab();
   private caches: Map<number, Table>[];
+  private sorted: Map<number, [number, number][]>[];
   private uniTable: Table | null = null;
 
   // Word streams chain their own contexts; the separator stream is given explicit ones.
   constructor(readonly order: number = 1) {
     this.levels = Array.from({ length: order }, () => new Map());
     this.caches = Array.from({ length: order }, () => new Map());
+    this.sorted = Array.from({ length: order }, () => new Map());
   }
 
   // Counts each token under its contexts: contexts[k][i] when given, else the keys chained
@@ -134,28 +148,46 @@ export class Stream {
     }
     this.escape = hapaxEscape(this.uni);
     for (const c of this.caches) c.clear();
+    for (const c of this.sorted) c.clear();
     this.uniTable = null;
   }
 
-  // The table for a context at `level` (0 = order 1). Order 1 always has a table, an unseen
-  // context yielding an escape-only one; higher orders return null for an unseen context,
-  // which both sides know, so no escape is coded.
-  contextTable(level: number, key: number): Table | null {
+  // Sorted successors of a context at `level` (0 = order 1), or null when never seen.
+  successors(level: number, key: number): [number, number][] | null {
     const succ = this.levels[level].get(key);
-    if (!succ && level > 0) return null;
+    if (!succ) return null;
+    let sorted = this.sorted[level].get(key);
+    if (!sorted) {
+      sorted = [...succ].sort((a, b) => a[0] - b[0]);
+      this.sorted[level].set(key, sorted);
+    }
+    return sorted;
+  }
+
+  // The table for a context at `level` with `excluded` symbols removed. Order 1 always has a
+  // table when nothing is excluded, an unseen context yielding an escape-only one; otherwise
+  // null means the context was never seen or has nothing left, which both sides know, so no
+  // escape is coded. Tables are cached only when nothing is excluded.
+  contextTable(level: number, key: number, excluded: ReadonlySet<number> = NONE): Table | null {
+    const items = this.successors(level, key);
+    if (!items) {
+      if (level > 0 || excluded.size > 0) return null;
+      let tbl = this.caches[0].get(key);
+      if (!tbl) this.caches[0].set(key, (tbl = buildTable([[ESC, 1]])));
+      return tbl;
+    }
+    if (excluded.size > 0) return excludingTable(items, excluded);
     const cache = this.caches[level];
     let tbl = cache.get(key);
-    if (!tbl) {
-      const items: [number, number][] = succ ? [...succ].sort((a, b) => a[0] - b[0]) : [];
-      items.push([ESC, succ ? succ.size : 1]);
-      tbl = buildTable(items);
-      cache.set(key, tbl);
-    }
+    if (!tbl) cache.set(key, (tbl = excludingTable(items, NONE)!));
     return tbl;
   }
 
   unigramTable(): Table {
-    if (!this.uniTable) this.uniTable = unigramTable(this.uni, this.escape);
+    if (!this.uniTable) {
+      const items: [number, number][] = [...this.uni].sort((a, b) => a[0] - b[0]);
+      this.uniTable = excludingTable(items, NONE, this.escape)!;
+    }
     return this.uniTable;
   }
 
