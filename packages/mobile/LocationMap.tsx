@@ -55,7 +55,7 @@ interface Props {
 }
 
 // The picker's starting point before any coordinate is set: as far out as the basemap allows,
-// centered so the 220pt builder map holds North America from the Florida Keys to the Arctic
+// centered so the 300pt builder map holds North America from the Florida Keys to the Arctic
 // coast. Mercator spends most of that height on the north, so the Arctic islands are out.
 const DEFAULT_VIEW = { center: [-110, 54] as [number, number], zoom: MIN_ZOOM };
 // Zoom applied once a coordinate exists — tight enough to confirm the spot, loose enough to nudge it.

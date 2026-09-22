@@ -125,7 +125,7 @@ const NO_UNAVAIL_VARS: readonly Variable[] = [];
 
 // The map is always on screen, so it shares the builder with everything below it; fullscreen is
 // there for precision.
-const BUILDER_MAP_HEIGHT = 220;
+const BUILDER_MAP_HEIGHT = 300;
 
 // Priority modes. The server fills the reply by walking the mode's refinement path — Detail
 // spends the budget on hourly detail first, Range on covering the whole horizon first, Auto
