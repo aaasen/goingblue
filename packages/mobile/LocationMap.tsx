@@ -40,10 +40,10 @@ interface Props {
   // the pin on the favorite's own coordinates rather than wherever the finger landed.
   favorites?: readonly Favorite[];
   onPickFavorite?: (f: Favorite) => void;
-  // When provided, a star button saves the marked point under a name, through a sheet, or takes
-  // the favorite already there back out, after asking. Filled while the point is a
-  // favorite, greyed while there is no point to save.
-  onSaveFavorite?: (name: string) => void;
+  // When provided, a star button saves a point under a name, through a sheet that starts on the
+  // marked point, or takes the favorite already there back out, after asking. Filled while the
+  // point is a favorite, greyed while there is no point to start from.
+  onSaveFavorite?: (name: string, coord: LatLon) => void;
   onRemoveFavorite?: () => void;
   currentFavorite?: Favorite | null;
   // Points with a saved forecast, drawn as gray dots. Tapping one reports it, so the caller can
@@ -262,7 +262,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
       <FavoriteSheet
         coord={coord}
         coordFormat={coordFormat}
-        onSave={(name) => { onSaveFavorite(name); setFavoriteSheet(false); }}
+        onSave={(name, c) => { onSaveFavorite(name, c); setFavoriteSheet(false); }}
         onClose={() => setFavoriteSheet(false)}
       />
     );

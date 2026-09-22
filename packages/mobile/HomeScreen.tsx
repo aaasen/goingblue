@@ -32,6 +32,7 @@ import {
   normalizeReply, prunePastForecasts, replyParts, type Slot,
 } from './cache';
 import LocationMap from './LocationMap';
+import FavoriteSheet from './FavoriteSheet';
 import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
 import HelpScreen from './HelpScreen';
 import { MODELS, modelLabelFromMask } from './models';
@@ -1572,8 +1573,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       },
     ]);
   });
-  const onSaveFavorite = useStableHandler((name: string) => {
-    if (mapCoord) updateFavorites(upsertFavorite(favorites, mapCoord, name));
+  // From the map's star or the list's Add, at whatever point the sheet ends on. The pin stays
+  // where it is: picking the favorite is what moves it.
+  const onSaveFavorite = useStableHandler((name: string, coord: LatLon) => {
+    updateFavorites(upsertFavorite(favorites, coord, name));
   });
   const onRemoveFavorite = useStableHandler(() => {
     if (mapCoord) updateFavorites(removeFavorite(favorites, mapCoord));
@@ -1816,9 +1819,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       <FavoritesModal
         visible={favoritesOpen} favorites={listedFavorites} current={currentFavorite}
         sorts={favoriteSorts} sort={shownFavoritesSort} reversed={favoritesSortReversed}
-        gpsCoords={gpsCoords} units={units}
+        gpsCoords={gpsCoords} units={units} coordFormat={coordFormat}
         onSort={onFavoritesSort} onReverse={onFavoritesReverse}
-        onPick={onPickFavorite} onDelete={onDeleteFavorites} onClose={onCloseFavorites}
+        onPick={onPickFavorite} onAdd={onSaveFavorite} onDelete={onDeleteFavorites} onClose={onCloseFavorites}
       />
 
       <InfoModal visible={priorityInfo} title="Fill Priority" onClose={() => setPriorityInfo(false)}>
@@ -1915,20 +1918,24 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 // tap to selecting, and the header's Edit and Done into Delete and a Done that ends the edit.
 // The selection is kept here so that a tap re-renders the list and not the screen under it.
 const FavoritesModal = memo(function FavoritesModal({
-  visible, favorites, current, sorts, sort, reversed, gpsCoords, units, onSort, onReverse, onPick, onDelete, onClose,
+  visible, favorites, current, sorts, sort, reversed, gpsCoords, units, coordFormat,
+  onSort, onReverse, onPick, onAdd, onDelete, onClose,
 }: {
   visible: boolean; favorites: Favorite[]; current: Favorite | null;
   sorts: { value: FavoriteSort; label: string }[]; sort: FavoriteSort; reversed: boolean;
-  gpsCoords: LatLon | null; units: UnitPrefs;
+  gpsCoords: LatLon | null; units: UnitPrefs; coordFormat: CoordFormat;
   onSort: (sort: FavoriteSort) => void; onReverse: (reversed: boolean) => void;
-  onPick: (f: Favorite) => void; onDelete: (favorites: Favorite[]) => void; onClose: () => void;
+  onPick: (f: Favorite) => void; onAdd: (name: string, coord: LatLon) => void;
+  onDelete: (favorites: Favorite[]) => void; onClose: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  // An edit doesn't outlast the list being open.
+  // Neither an edit nor an add outlasts the list being open.
   useEffect(() => {
     if (visible) return;
     setEditing(false);
+    setAdding(false);
     setSelected(new Set());
   }, [visible]);
   // A selection holds only what is listed, so a deleted favorite saved again doesn't arrive selected.
@@ -1954,7 +1961,7 @@ const FavoritesModal = memo(function FavoritesModal({
   const hitSlop = { top: 10, bottom: 10, left: 10, right: 10 };
   return (
     <InfoModal
-      visible={visible} title="Favorite Locations" grouped onClose={onClose}
+      visible={visible} title="Favorites" grouped onClose={onClose}
       headerRight={
         <View style={styles.savedActions}>
           {editing ? (
@@ -1968,12 +1975,20 @@ const FavoritesModal = memo(function FavoritesModal({
               <Text style={[styles.savedDelete, selectedFavorites.length === 0 && styles.savedActionDisabled]}>Delete</Text>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity
-              onPress={() => setEditing(true)} hitSlop={hitSlop}
-              accessibilityRole="button" accessibilityLabel="Edit favorites"
-            >
-              <Text style={styles.savedAction}>Edit</Text>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                onPress={() => setAdding(true)} hitSlop={hitSlop}
+                accessibilityRole="button" accessibilityLabel="Add favorite"
+              >
+                <Text style={styles.savedAction}>Add</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setEditing(true)} hitSlop={hitSlop}
+                accessibilityRole="button" accessibilityLabel="Edit favorites"
+              >
+                <Text style={styles.savedAction}>Edit</Text>
+              </TouchableOpacity>
+            </>
           )}
           <TouchableOpacity onPress={editing ? finish : onClose} hitSlop={hitSlop} accessibilityRole="button">
             <Text style={[styles.savedAction, styles.savedDone]}>Done</Text>
@@ -2030,6 +2045,14 @@ const FavoritesModal = memo(function FavoritesModal({
           );
         })}
       </View>
+      {/* Nested in this modal: iOS will not present a second modal from beneath one already up. */}
+      {adding && (
+        <FavoriteSheet
+          coordFormat={coordFormat}
+          onSave={(name, coord) => { onAdd(name, coord); setAdding(false); }}
+          onClose={() => setAdding(false)}
+        />
+      )}
     </InfoModal>
   );
 });
@@ -2237,7 +2260,7 @@ const RequestBuilder = memo(function RequestBuilder({
   gpsCoords: { lat: number; lon: number } | null; following: boolean; onLocate: () => Promise<{ lat: number; lon: number } | null>; locating: boolean;
   coordsField: string; coordsInvalid: boolean; onCoordsText: (text: string) => void; coordFormat: CoordFormat;
   favorites: readonly Favorite[]; currentFavorite: Favorite | null; onPickFavorite: (f: Favorite) => void;
-  onSaveFavorite: (name: string) => void; onRemoveFavorite: () => void; onOpenFavorites: () => void;
+  onSaveFavorite: (name: string, coord: LatLon) => void; onRemoveFavorite: () => void; onOpenFavorites: () => void;
   pastPoints: readonly { lat: number; lon: number }[]; onPickPast: (c: { lat: number; lon: number }) => void;
   model: string; modelStack: string | null; onModel: (model: string) => void; setModelInfo: (open: boolean) => void;
   varRows: VarRow[]; unavail: readonly Variable[]; openSubgroups: ReadonlySet<string>; activeValues: ReadonlySet<string>;
