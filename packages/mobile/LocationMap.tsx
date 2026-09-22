@@ -261,6 +261,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
     return (
       <FavoriteSheet
         coord={coord}
+        favorites={favorites ?? []}
         coordFormat={coordFormat}
         onSave={(name, c) => { onSaveFavorite(name, c); setFavoriteSheet(false); }}
         onClose={() => setFavoriteSheet(false)}

@@ -623,9 +623,10 @@ function loadedMetaLabel(slot: Slot, msg: ForecastMessage | null, units: UnitPre
  */
 function pastMetaLabel(slot: Slot, msg: ForecastMessage | null, favorites: readonly Favorite[], coordFormat: CoordFormat): string {
   if (!msg) return 'Unknown';
+  // The defaults (Auto model, Auto priority) go unsaid; only a choice is worth the room.
+  const model = msg.models_mask & (1 << MODEL_BIT.BEST) ? '' : ` · ${modelLabelFromMask(msg.models_mask)}`;
   const priority = msg.mode !== MODE_AUTO ? ` · ${priorityLabel(msg)}` : '';
-  const model = modelLabelFromMask(msg.models_mask);
-  return `${requestTimeLabel(slot.requestedAt)} · ${model}${priority} · ${placeLabel(slot, msg, favorites, coordFormat)}`;
+  return `${requestTimeLabel(slot.requestedAt)}${model}${priority} · ${placeLabel(slot, msg, favorites, coordFormat)}`;
 }
 
 const OPTIONAL_VARIABLE_TAGS: { vars: readonly Variable[]; tag: string; label: string }[] = [
@@ -1478,8 +1479,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   }, [cache, slotMessages, onForecastDataChange]);
 
   // Asks first: the list is the only copy the app holds. Deleting the forecast on screen takes it
-  // off the screen too, so nothing is shown that the list no longer has.
-  const deletePast = useStableHandler((slots: Slot[]) => {
+  // off the screen too, so nothing is shown that the list no longer has. onDeleted runs only on
+  // confirmation, so a cancelled delete leaves the list as it was.
+  const deletePast = useStableHandler((slots: Slot[], onDeleted: () => void) => {
     const noun = slots.length === 1 ? 'saved forecast' : 'saved forecasts';
     Alert.alert(`Delete ${slots.length} ${noun}?`, undefined, [
       { text: 'Cancel', style: 'cancel' },
@@ -1489,6 +1491,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           const loaded = normalizedForecastData(forecastData);
           if (slots.some((s) => normalizedForecastData(s.encoded!) === loaded)) clearForecast();
           deleteResponses(token, slots.map((s) => s.code)).then(setCache);
+          onDeleted();
         },
       },
     ]);
@@ -1573,10 +1576,15 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       },
     ]);
   });
-  // From the map's star or the list's Add, at whatever point the sheet ends on. The pin stays
-  // where it is: picking the favorite is what moves it.
+  // From the map's star, on the marked point, so the pin is already there.
   const onSaveFavorite = useStableHandler((name: string, coord: LatLon) => {
     updateFavorites(upsertFavorite(favorites, coord, name));
+  });
+  // From the list's Add, at whatever point the sheet ends on. The pin moves to the new favorite,
+  // which the list then shows checked; the list stays open. The upsert stamps it as used now.
+  const onAddFavorite = useStableHandler((name: string, coord: LatLon) => {
+    updateFavorites(upsertFavorite(favorites, coord, name));
+    pinPoint(coord);
   });
   const onEditFavorite = useStableHandler((original: Favorite, name: string, coord: LatLon) => {
     updateFavorites(editFavorite(favorites, original, coord, name));
@@ -1824,7 +1832,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         sorts={favoriteSorts} sort={shownFavoritesSort} reversed={favoritesSortReversed}
         gpsCoords={gpsCoords} units={units} coordFormat={coordFormat}
         onSort={onFavoritesSort} onReverse={onFavoritesReverse}
-        onPick={onPickFavorite} onAdd={onSaveFavorite} onEdit={onEditFavorite} onDelete={onDeleteFavorites} onClose={onCloseFavorites}
+        onPick={onPickFavorite} onAdd={onAddFavorite} onEdit={onEditFavorite} onDelete={onDeleteFavorites} onClose={onCloseFavorites}
       />
 
       <InfoModal visible={priorityInfo} title="Fill Priority" onClose={() => setPriorityInfo(false)}>
@@ -1917,7 +1925,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   );
 }
 
-// The favorites list, full screen. Picking a row pins it and closes the list; Edit turns a row's
+// The favorites list, full screen. Picking a row pins it and closes the list; saving through Add
+// pins the new favorite and leaves the list open on it. Edit turns a row's
 // tap to selecting, and the header's Edit and Done into Delete and a Done that ends the edit.
 // The selection is kept here so that a tap re-renders the list and not the screen under it.
 const FavoritesModal = memo(function FavoritesModal({
@@ -2055,17 +2064,15 @@ const FavoritesModal = memo(function FavoritesModal({
               {sort === 'distance' && gpsCoords != null && (
                 <Text style={styles.favoriteItemDistance}>{distanceLabel(kmBetween(gpsCoords, f), units)}</Text>
               )}
-              {!editing && (
-                <TouchableOpacity
-                  style={styles.favoriteItemInfo}
-                  onPress={() => setTarget(f)}
-                  hitSlop={hitSlop}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Edit ${f.name}`}
-                >
-                  <Ionicons name="information-circle-outline" size={22} color={palette.link} />
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                style={styles.favoriteItemInfo}
+                onPress={() => setTarget(f)}
+                hitSlop={hitSlop}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${f.name}`}
+              >
+                <Ionicons name="information-circle-outline" size={22} color={palette.link} />
+              </TouchableOpacity>
             </TouchableOpacity>
           );
         })}
@@ -2073,6 +2080,7 @@ const FavoritesModal = memo(function FavoritesModal({
       {/* Nested in this modal: iOS will not present a second modal from beneath one already up. */}
       {adding && (
         <FavoriteSheet
+          favorites={favorites}
           coordFormat={coordFormat}
           onSave={(name, coord) => { onAdd(name, coord); setAdding(false); }}
           onClose={() => setAdding(false)}
@@ -2082,6 +2090,7 @@ const FavoritesModal = memo(function FavoritesModal({
         <FavoriteSheet
           coord={target}
           initialName={target.name}
+          favorites={favorites}
           coordFormat={coordFormat}
           onSave={(name, coord) => { onEdit(target, name, coord); setTarget(null); }}
           onClose={() => setTarget(null)}
@@ -2108,7 +2117,14 @@ const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, las
       accessibilityRole={editing ? 'checkbox' : 'button'}
       accessibilityState={editing ? { checked: selected } : { selected: isLoaded }}
     >
-      {editing && <SelectMark selected={selected} color={palette.textFaint} />}
+      {/* Laid out like the favorites list: a leading slot that holds the check on the loaded
+          forecast, or the selection mark while editing. The slot is always there so labels line
+          up and wrap the same in both modes. */}
+      <View style={styles.pastMark}>
+        {editing
+          ? <SelectMark selected={selected} color={palette.textFaint} />
+          : isLoaded && <Ionicons name="checkmark" size={20} color={palette.link} />}
+      </View>
       <View style={styles.pastDetails}>
         <Text style={styles.pastMeta} numberOfLines={2}>{pastMetaLabel(slot, msg, favorites, coordFormat)}</Text>
         {variableTags.length > 0 && (
@@ -2125,10 +2141,6 @@ const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, las
             ))}
           </View>
         )}
-      </View>
-      {/* The check's width is held on every row, so viewing a row re-wraps no label. */}
-      <View style={styles.pastCheck}>
-        {isLoaded && <Ionicons name="checkmark" size={20} color={palette.link} />}
       </View>
     </Pressable>
   );
@@ -2153,11 +2165,11 @@ function SelectMark({ selected, color }: { selected: boolean; color: string }) {
 const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessage, units, favorites, coordFormat, onLoad, onDelete }: {
   groups: PastForecastGroup[]; loadedKey: string; slotMessage: (slot: Slot) => ForecastMessage | null;
   units: UnitPrefs; favorites: readonly Favorite[]; coordFormat: CoordFormat; onLoad: (encoded: string) => void;
-  onDelete: (slots: Slot[]) => void;
+  onDelete: (slots: Slot[], onDeleted: () => void) => void;
 }) {
   // Editing turns a row's tap from viewing to selecting, and the header's Edit into Delete and
-  // Done. It ends with the list, so the next forecast saved after the last one is deleted arrives
-  // in a list that can be viewed.
+  // Done. It ends with a delete, and with the list, so the next forecast saved after the last one
+  // is deleted arrives in a list that can be viewed.
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const empty = groups.length === 0;
@@ -2178,17 +2190,6 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
       return next;
     });
   }, []);
-  // A day's circle selects the whole day, or clears it when the whole day is selected.
-  function toggleDay(slots: Slot[], allSelected: boolean) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      for (const s of slots) {
-        if (allSelected) next.delete(s.code);
-        else next.add(s.code);
-      }
-      return next;
-    });
-  }
   function finish() {
     setEditing(false);
     setSelected(new Set());
@@ -2204,7 +2205,7 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
         {editing ? (
           <View style={styles.savedActions}>
             <TouchableOpacity
-              onPress={() => onDelete(selectedSlots)}
+              onPress={() => onDelete(selectedSlots, finish)}
               disabled={selectedSlots.length === 0}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               accessibilityRole="button"
@@ -2232,25 +2233,11 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
         )}
       </View>
       {groups.map((group) => {
-        const allSelected = group.slots.every((s) => selected.has(s.code));
         return (
           <View key={group.day} style={styles.pastGroup}>
-            {editing ? (
-              <Pressable
-                style={[styles.pastDayRow, styles.pastDayRowEditing]}
-                onPress={() => toggleDay(group.slots, allSelected)}
-                hitSlop={{ top: 6 }}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: allSelected }}
-              >
-                <SelectMark selected={allSelected} color={palette.pageTextTertiary} />
-                <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
-              </Pressable>
-            ) : (
-              <View style={styles.pastDayRow}>
-                <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
-              </View>
-            )}
+            <View style={styles.pastDayRow}>
+              <Text style={styles.pastDayText}>{dayLabel(group.day)}</Text>
+            </View>
             <View style={styles.pastCard}>
               {group.slots.map((slot, idx) => (
                 <PastForecastRow key={slot.code} slot={slot} msg={slotMessage(slot)}
@@ -2829,8 +2816,10 @@ const styles = StyleSheet.create({
   favoriteItemName: { flex: 1, fontSize: 16, color: palette.text },
   favoriteItemDistance: { marginLeft: 12, fontSize: 15, color: palette.textSecondary, fontVariant: ['tabular-nums'] },
   // Wide enough for the check or the selection mark, so the names sit in one column either way.
-  favoriteItemLead: { width: 32, alignItems: 'flex-start', justifyContent: 'center' },
-  favoriteItemInfo: { marginLeft: 12 },
+  // Both icon slots are a fixed height so the row is the same height whichever icons it holds:
+  // the lead swaps between a 20 pt check and a 24 pt select mark.
+  favoriteItemLead: { width: 32, height: 28, alignItems: 'flex-start', justifyContent: 'center' },
+  favoriteItemInfo: { marginLeft: 12, height: 28, justifyContent: 'center' },
   favoriteSort: { paddingHorizontal: 16, paddingTop: 12 },
   favoriteSortRow: { flexDirection: 'row', alignItems: 'center' },
   favoriteSortControl: { flex: 1 },
@@ -2938,8 +2927,6 @@ const styles = StyleSheet.create({
   pastSection: { marginTop: 8, marginHorizontal: 16 },
   pastGroup: { marginBottom: 16 },
   pastDayRow: { flexDirection: 'row', alignItems: 'center', paddingBottom: 8 },
-  // Inset to the rows' padding, so the day's circle stands over theirs.
-  pastDayRowEditing: { paddingLeft: 14, gap: 12 },
   pastDayText: { fontSize: 13, fontWeight: '600', color: palette.pageTextSecondary },
   // One card per day, its rows ruled apart like the favorites list.
   pastCard: { backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden' },
@@ -2949,9 +2936,11 @@ const styles = StyleSheet.create({
   },
   pastItemBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule },
   pastItemPressed: { opacity: 0.6 },
-  pastCheck: { width: 20 },
-  pastDetails: { flex: 1, gap: 3 },
-  pastMeta: { flexShrink: 1, fontSize: 13, color: palette.textBody, lineHeight: 18 },
+  // The leading slot for the loaded check or the selection mark. Its size is fixed, so neither
+  // icon's line height sets the row's; the details' minimum height matches it.
+  pastMark: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  pastDetails: { flex: 1, gap: 5, minHeight: 24, justifyContent: 'center' },
+  pastMeta: { flexShrink: 1, fontSize: 14, color: palette.textBody, lineHeight: 19 },
   pastTag: {
     fontSize: 11,
     lineHeight: 14,
