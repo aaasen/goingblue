@@ -2254,8 +2254,9 @@ const RequestBuilder = memo(function RequestBuilder({
     <View style={styles.builderPad}>
       {/* No heading: the map is its own label. Edge to edge, since the negative inset cancels
           the builder's horizontal padding, so the map spans the screen rather than sitting
-          inside the column. Under it, the two ways to a point without the map: coordinates typed
-          or pasted, and a saved favorite. */}
+          inside the column. Attached under it, at the same width, the two ways to a point
+          without the map: coordinates typed or pasted, and a saved favorite. The rows are part
+          of the map block rather than a card of their own. */}
       <View style={styles.section}>
         <View style={styles.mapFullBleed}>
           <LocationMap
@@ -2275,54 +2276,54 @@ const RequestBuilder = memo(function RequestBuilder({
             onPickPast={onPickPast}
             coordFormat={coordFormat}
           />
-        </View>
-        <View style={[styles.coordsCard, coordsInvalid && styles.coordsCardInvalid]}>
-          <View style={[styles.coordRow, favorites.length === 0 && styles.coordRowLast]}>
-            <Text style={styles.coordLabel}>Coordinates</Text>
-            {/* Editing pins. The first keystroke arrives with the field's whole text, fix
-                included, so nudging the current location's digits works as expected. */}
-            <TextInput
-              style={[styles.coordInput, coordsInvalid && styles.coordInputInvalid]}
-              value={coordsField}
-              onChangeText={onCoordsText}
-              placeholder="lat, lon or UTM"
-              placeholderTextColor={palette.textTertiary}
-              keyboardType="numbers-and-punctuation"
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="done"
-              accessibilityLabel="Coordinates"
-            />
-            {/* The one way to take the pin off: empties the field and leaves the location pinned
-                at nothing. Pasted coordinates are long and the keyboard's delete key clears them
-                one character at a time. Always laid out and merely hidden when there is nothing
-                to clear: the icon is taller than the text line, so adding and removing it would
-                change the row's height. */}
-            <TouchableOpacity
-              style={[styles.coordClear, coordsField.length === 0 && styles.coordClearHidden]}
-              onPress={() => onCoordsText('')}
-              disabled={coordsField.length === 0}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityRole="button"
-              accessibilityLabel="Clear coordinates"
-              accessibilityElementsHidden={coordsField.length === 0}
-            >
-              <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
-            </TouchableOpacity>
+          <View style={styles.coordsRows}>
+            <View style={styles.coordRow}>
+              <Text style={styles.coordLabel}>Coordinates</Text>
+              {/* Editing pins. The first keystroke arrives with the field's whole text, fix
+                  included, so nudging the current location's digits works as expected. */}
+              <TextInput
+                style={[styles.coordInput, coordsInvalid && styles.coordInputInvalid]}
+                value={coordsField}
+                onChangeText={onCoordsText}
+                placeholder="lat, lon or UTM"
+                placeholderTextColor={palette.textTertiary}
+                keyboardType="numbers-and-punctuation"
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="done"
+                accessibilityLabel="Coordinates"
+              />
+              {/* The one way to take the pin off: empties the field and leaves the location
+                  pinned at nothing. Pasted coordinates are long and the keyboard's delete key
+                  clears them one character at a time. Always laid out and merely hidden when
+                  there is nothing to clear: the icon is taller than the text line, so adding and
+                  removing it would change the row's height. */}
+              <TouchableOpacity
+                style={[styles.coordClear, coordsField.length === 0 && styles.coordClearHidden]}
+                onPress={() => onCoordsText('')}
+                disabled={coordsField.length === 0}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear coordinates"
+                accessibilityElementsHidden={coordsField.length === 0}
+              >
+                <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
+              </TouchableOpacity>
+            </View>
+            {/* Only once something is saved, so a reader with no favorites doesn't carry an
+                empty row. Reads as a select field: the favorite the pin is on, or a prompt to
+                pick one. It opens a full-screen list rather than a menu, since a list of
+                favorites runs past a hundred. */}
+            {favorites.length > 0 && (
+              <TouchableOpacity style={styles.coordRow} onPress={onOpenFavorites} accessibilityRole="button">
+                <Text style={styles.coordLabel}>Favorites</Text>
+                <Text style={[styles.favoriteValue, !currentFavorite && styles.favoritePlaceholder]} numberOfLines={1}>
+                  {currentFavorite ? currentFavorite.name : 'Choose a location'}
+                </Text>
+                <MaterialCommunityIcons name="chevron-down" size={20} color={palette.textTertiary} style={styles.coordClear} />
+              </TouchableOpacity>
+            )}
           </View>
-          {/* Only once something is saved, so a reader with no favorites doesn't carry an empty
-              row. Reads as a select field: the favorite the pin is on, or a prompt to pick one.
-              It opens a full-screen list rather than a menu, since a list of favorites runs past
-              a hundred. */}
-          {favorites.length > 0 && (
-            <TouchableOpacity style={[styles.coordRow, styles.coordRowLast]} onPress={onOpenFavorites} accessibilityRole="button">
-              <Text style={styles.coordLabel}>Favorites</Text>
-              <Text style={[styles.favoriteValue, !currentFavorite && styles.favoritePlaceholder]} numberOfLines={1}>
-                {currentFavorite ? currentFavorite.name : 'Choose a location'}
-              </Text>
-              <MaterialCommunityIcons name="chevron-down" size={20} color={palette.textTertiary} style={styles.coordClear} />
-            </TouchableOpacity>
-          )}
         </View>
       </View>
 
@@ -2745,12 +2746,14 @@ const styles = StyleSheet.create({
   varRowTrailing: { flexDirection: 'row', alignItems: 'center' },
   varCount: { fontSize: 13, color: palette.textTertiary, marginRight: 6 },
 
-  // The border is always there, transparent until the field is invalid, so flagging a bad entry
-  // recolors the card without resizing it.
-  coordsCard: { marginTop: 10, backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'transparent' },
-  coordsCardInvalid: { borderColor: palette.destructive },
-  coordRow: { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule },
-  coordRowLast: { borderBottomWidth: 0 },
+  // Attached to the map's bottom edge at its full-bleed width: square, no inset, closed by a
+  // rule against the page. Each row rules its top, so the first rule is the map's edge and the
+  // second separates the rows. A bad entry shows in the field's text, not on the block.
+  coordsRows: { backgroundColor: palette.card, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.pageRule },
+  coordRow: {
+    flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: CONTENT_PAD, paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.cardRule,
+  },
   coordLabel: { width: 104, fontSize: 15, fontWeight: '600', color: palette.textSecondary },
   coordInput: { flex: 1, fontSize: 15, color: palette.text },
   coordInputInvalid: { color: palette.destructive },
