@@ -6,9 +6,9 @@
  * would leave yesterday's bulletin for the same region in the training set, and consecutive
  * bulletins reuse whole paragraphs, so it would flatter the ratio.
  *
- * Usage: pnpm avalanche-benchmark [--test-frac 0.2] [--min-count 1] [--section]
+ * Usage: pnpm avalanche-benchmark [--test-frac 0.2] [--min-count 1]
  */
-import { encode, decode, modelBits } from "./codec.ts";
+import { encode, decode, sectionBits } from "./codec.ts";
 import { openDb } from "./db.ts";
 import { Model } from "./model.ts";
 import { bulletinProse, isForecast, type BulletinProse } from "./text.ts";
@@ -50,6 +50,8 @@ function split(docs: BulletinProse[], testFrac: number): { train: BulletinProse[
 const utf8 = new TextEncoder();
 const fmt = (n: number) => n.toLocaleString("en-US");
 
+interface SectionAcc { n: number; chars: number; bits: number }
+
 function main(): void {
   const testFrac = arg("--test-frac", 0.2);
   const minCount = arg("--min-count", 1);
@@ -63,64 +65,66 @@ function main(): void {
 
   const t0 = Date.now();
   const model = new Model();
-  let trainChars = 0;
-  for (const d of train) {
-    trainChars += d.text.length;
-    model.observe(tokenize(d.text), d.text);
-  }
+  for (const d of train) for (const s of d.sections) model.observe(s);
   model.finalize(minCount);
   const st = model.stats();
-  console.log(`\ntrained in ${((Date.now() - t0) / 1000).toFixed(1)} s on ${fmt(trainChars)} chars`);
-  console.log(`  word vocab ${fmt(st.wordVocab)}, sep vocab ${fmt(st.sepVocab)}, ${fmt(st.wordBigrams)} bigrams over ${fmt(st.wordContexts)} contexts`);
+  console.log(`\ntrained in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${st.streams} word streams, vocab ${fmt(st.wordVocab)}, ${fmt(st.wordBigrams)} bigrams over ${fmt(st.wordContexts)} contexts`);
 
-  // Whole bulletins.
   const t1 = Date.now();
   let raw = 0;
   let comp = 0;
   let failures = 0;
-  let tokens = 0;
   let oov = 0;
+  let tokens = 0;
   const msgHist = new Map<number, number>();
+  const bySection = new Map<string, SectionAcc>();
   for (const d of test) {
-    const blob = encode(model, d.text);
-    if (decode(model, blob) !== d.text) {
+    const blob = encode(model, d.sections);
+    if (JSON.stringify(decode(model, blob)) !== JSON.stringify(d.sections)) {
       failures++;
       console.log(`  ROUND TRIP FAILED: ${d.id}`);
     }
     raw += utf8.encode(d.text).length;
     comp += blob.length;
-    const toks = tokenize(d.text);
-    tokens += toks.words.length;
-    for (const w of toks.words) if (!model.words.ids.has(w)) oov++;
+    for (const s of d.sections) {
+      const stream = model.streamFor(s.kind);
+      const toks = tokenize(s.text);
+      tokens += toks.words.length;
+      for (const w of toks.words) if (!stream.ids.has(w)) oov++;
+      const acc = bySection.get(s.kind) ?? { n: 0, chars: 0, bits: 0 };
+      acc.n++;
+      acc.chars += s.text.length;
+      acc.bits += sectionBits(model, s);
+      bySection.set(s.kind, acc);
+    }
     const msgs = Math.ceil(blob.length / MESSAGE_BYTES);
     msgHist.set(msgs, (msgHist.get(msgs) ?? 0) + 1);
   }
   const elapsed = (Date.now() - t1) / 1000;
+
   console.log(`\nwhole bulletins (${fmt(test.length)} held out)`);
-  console.log(`  round trip  ${fmt(test.length - failures)}/${fmt(test.length)} exact`);
-  console.log(`  size        ${fmt(raw)} -> ${fmt(comp)} bytes   ${(raw / comp).toFixed(2)}x   ${((comp * 8) / raw).toFixed(3)} bits/char`);
-  console.log(`  per doc     ${(raw / test.length).toFixed(0)} chars -> ${(comp / test.length).toFixed(0)} bytes mean`);
+  console.log(`  round trip   ${fmt(test.length - failures)}/${fmt(test.length)} exact`);
+  console.log(`  size         ${fmt(raw)} -> ${fmt(comp)} bytes   ${(raw / comp).toFixed(2)}x   ${((comp * 8) / raw).toFixed(3)} bits/char`);
+  console.log(`  per doc      ${(raw / test.length).toFixed(0)} chars -> ${(comp / test.length).toFixed(0)} bytes mean`);
   console.log(`  held-out OOV ${((oov / tokens) * 100).toFixed(2)}% of ${fmt(tokens)} word tokens`);
-  console.log(`  throughput  ${(raw / elapsed / 1000).toFixed(0)} KB/s round trip`);
+  console.log(`  throughput   ${(raw / elapsed / 1000).toFixed(0)} KB/s round trip`);
   const hist = [...msgHist].sort((a, b) => a[0] - b[0]);
   console.log(`  messages of ${MESSAGE_BYTES} bytes: ${hist.map(([m, n]) => `${m}: ${((n / test.length) * 100).toFixed(0)}%`).join("  ")}`);
 
-  // Each section on its own, which is what a per-section request would cost.
-  const bySection = new Map<string, { n: number; chars: number; bits: number }>();
-  for (const d of test) {
-    for (const s of d.sections) {
-      const acc = bySection.get(s.kind) ?? { n: 0, chars: 0, bits: 0 };
-      acc.n++;
-      acc.chars += s.text.length;
-      acc.bits += modelBits(model, s.text);
-      bySection.set(s.kind, acc);
-    }
+  // Where the bytes of a bulletin go. Bytes are model bits / 8, so they exclude coder framing;
+  // per bulletin = occurrences x bytes, since problems and advice repeat.
+  const kinds = [...bySection].sort((x, y) => y[1].bits - x[1].bits).map(([k]) => k);
+  const totalBits = [...bySection.values()].reduce((a, b) => a + b.bits, 0);
+  console.log(`\nby section`);
+  console.log(`  ${"section".padEnd(18)} ${"per doc".padStart(8)} ${"chars".padStart(6)} ${"bits/char".padStart(10)} ${"B/occur".padStart(8)} ${"B/doc".padStart(6)} ${"share".padStart(6)}`);
+  for (const kind of kinds) {
+    const a = bySection.get(kind)!;
+    console.log(
+      `  ${kind.padEnd(18)} ${(a.n / test.length).toFixed(2).padStart(8)} ${(a.chars / a.n).toFixed(0).padStart(6)} ${(a.bits / a.chars).toFixed(3).padStart(10)}` +
+      ` ${(a.bits / 8 / a.n).toFixed(1).padStart(8)} ${(a.bits / 8 / test.length).toFixed(1).padStart(6)} ${((a.bits / totalBits) * 100).toFixed(0).padStart(5)}%`,
+    );
   }
-  console.log(`\nby section (model bits, coded alone)`);
-  console.log(`  ${"section".padEnd(18)} ${"n".padStart(6)} ${"chars".padStart(7)} ${"bytes".padStart(7)} ${"bits/char".padStart(10)}`);
-  for (const [kind, a] of [...bySection].sort((x, y) => y[1].chars - x[1].chars)) {
-    console.log(`  ${kind.padEnd(18)} ${fmt(a.n).padStart(6)} ${(a.chars / a.n).toFixed(0).padStart(7)} ${(a.bits / 8 / a.n).toFixed(0).padStart(7)} ${(a.bits / a.chars).toFixed(3).padStart(10)}`);
-  }
+  console.log(`  ${"total".padEnd(18)} ${"".padStart(8)} ${"".padStart(6)} ${(totalBits / (raw)).toFixed(3).padStart(10)} ${"".padStart(8)} ${(totalBits / 8 / test.length).toFixed(1).padStart(6)}`);
 }
 
 main();

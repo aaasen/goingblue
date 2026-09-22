@@ -13,11 +13,16 @@
  * the next token is a word never seen. The bottom rung is over bytes, which makes the codec
  * total: any input round-trips.
  *
+ * A Model is a set of word streams keyed by section kind: every kind gets its own vocabulary
+ * and contexts. Separators and the byte literal table are shared, and a kind table codes which
+ * section comes next.
+ *
  * Both sides build tables from the same stored counts in the same sorted order. That
  * determinism, not the counts themselves, is what keeps them in sync.
  */
 import { buildTable, type Table } from "./rans.ts";
-import type { Tokens } from "./tokenizer.ts";
+import type { Section } from "./text.ts";
+import { tokenize } from "./tokenizer.ts";
 
 export const ESC = 0;
 export const BOS = 1;
@@ -104,23 +109,58 @@ export class Stream {
 }
 
 const utf8 = new TextEncoder();
-
 export class Model {
-  words = new Stream();
-  seps = new Stream();
-  bytes = new Map<number, number>();
+  readonly streams = new Map<string, Stream>();
+  readonly seps = new Stream();
+  readonly bytes = new Map<number, number>();
+  readonly kinds: string[] = [];
+  private readonly kindIds = new Map<string, number>();
+  private readonly kindCounts = new Map<number, number>();
   private byteTbl: Table | null = null;
+  private kindTbl: Table | null = null;
 
-  observe(tokens: Tokens, text: string): void {
-    this.words.observe(tokens.words);
-    this.seps.observe(tokens.seps);
-    for (const b of utf8.encode(text)) this.bytes.set(b, (this.bytes.get(b) ?? 0) + 1);
+  kindId(kind: string): number {
+    const id = this.kindIds.get(kind);
+    if (id === undefined) throw new Error(`model: unknown section kind ${kind}`);
+    return id;
+  }
+
+  // The word stream a section of this kind is coded with. Kinds are fixed at training time.
+  streamFor(kind: string): Stream {
+    const s = this.streams.get(kind);
+    if (!s) throw new Error(`model: no stream for section kind ${kind}`);
+    return s;
+  }
+
+  observe(section: Section): void {
+    let id = this.kindIds.get(section.kind);
+    if (id === undefined) {
+      id = this.kinds.length;
+      this.kindIds.set(section.kind, id);
+      this.kinds.push(section.kind);
+    }
+    this.kindCounts.set(id, (this.kindCounts.get(id) ?? 0) + 1);
+    let stream = this.streams.get(section.kind);
+    if (!stream) this.streams.set(section.kind, (stream = new Stream()));
+    const toks = tokenize(section.text);
+    stream.observe(toks.words);
+    this.seps.observe(toks.seps);
+    for (const b of utf8.encode(section.text)) this.bytes.set(b, (this.bytes.get(b) ?? 0) + 1);
   }
 
   finalize(minCount = 1): void {
-    this.words.finalize(minCount);
+    for (const s of this.streams.values()) s.finalize(minCount);
     this.seps.finalize(minCount);
     this.byteTbl = null;
+    this.kindTbl = null;
+  }
+
+  kindTable(): Table {
+    if (!this.kindTbl) {
+      const items: [number, number][] = [...this.kindCounts].sort((a, b) => a[0] - b[0]);
+      this.kindTbl = buildTable(items);
+    }
+    return this.kindTbl;
   }
 
   // Every byte value stays representable even if unseen; literals average about six bytes,
@@ -137,15 +177,16 @@ export class Model {
     return this.byteTbl;
   }
 
-  // Rough ship weight: distinct bigram entries plus vocabulary characters.
-  stats(): { wordVocab: number; sepVocab: number; wordContexts: number; wordBigrams: number } {
+  // Rough ship weight: vocabulary entries and distinct bigram entries summed over streams.
+  stats(): { streams: number; wordVocab: number; wordContexts: number; wordBigrams: number } {
+    let vocab = 0;
+    let contexts = 0;
     let bigrams = 0;
-    for (const succ of this.words.ctx.values()) bigrams += succ.size;
-    return {
-      wordVocab: this.words.tokens.length,
-      sepVocab: this.seps.tokens.length,
-      wordContexts: this.words.ctx.size,
-      wordBigrams: bigrams,
-    };
+    for (const s of this.streams.values()) {
+      vocab += s.tokens.length;
+      contexts += s.ctx.size;
+      for (const succ of s.ctx.values()) bigrams += succ.size;
+    }
+    return { streams: this.streams.size, wordVocab: vocab, wordContexts: contexts, wordBigrams: bigrams };
   }
 }

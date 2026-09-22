@@ -1,17 +1,20 @@
 /**
- * Encode and decode bulletin prose.
+ * Encode and decode a bulletin as a list of prose sections.
  *
- * The encoder walks the token streams forward and records a plan: the flat list of
+ * The encoder walks each section's token streams forward and records a plan: the flat list of
  * (table, symbol) decisions the model makes, escapes and literal bytes included. rANS then runs
  * over the plan in reverse because the coder is LIFO. The decoder re-walks the same state
  * machine, and at every step the model tells it which table to read next from what it has
  * already decoded.
  *
- * Stream layout, with N from a varint header:
- *   seps[0] words[0] seps[1] words[1] ... words[N-1] seps[N]
+ * Layout, with the section count from a varint header and each section as
+ *   kind  N  seps[0] words[0] seps[1] ... words[N-1] seps[N]
+ * where kind is a symbol from the kind table and N is coded as a raw varint in the byte stream
+ * ahead of the rANS body. Word and separator contexts restart at BOS for every section.
  */
 import { BOS, ESC, LIT_END, type Model, type Stream } from "./model.ts";
 import { Decoder, costBits, encode as ransEncode, type Decision, type Table } from "./rans.ts";
+import type { Section } from "./text.ts";
 import { detokenize, tokenize } from "./tokenizer.ts";
 
 const utf8 = new TextEncoder();
@@ -71,54 +74,71 @@ function readToken(dec: Decoder, stream: Stream, byteTable: Table, ctx: number):
   return [token, stream.contextFor(token)];
 }
 
-function plan(model: Model, text: string): Decision[] {
-  const toks = tokenize(text);
+// Appends one section's decisions, kind symbol first, and returns its word count.
+function planSection(model: Model, out: Decision[], section: Section): number {
+  out.push([model.kindTable(), model.kindId(section.kind)]);
+  const words = model.streamFor(section.kind);
   const byteTable = model.byteTable();
-  const out: Decision[] = [];
+  const toks = tokenize(section.text);
   let ctxW = BOS;
   let ctxS = BOS;
   for (let i = 0; i <= toks.words.length; i++) {
     ctxS = planToken(out, model.seps, byteTable, ctxS, toks.seps[i]);
-    if (i < toks.words.length) ctxW = planToken(out, model.words, byteTable, ctxW, toks.words[i]);
+    if (i < toks.words.length) ctxW = planToken(out, words, byteTable, ctxW, toks.words[i]);
   }
-  return out;
+  return toks.words.length;
 }
 
-export function encode(model: Model, text: string): Uint8Array {
-  const nWords = tokenize(text).words.length;
+export function encode(model: Model, sections: Section[]): Uint8Array {
   const header: number[] = [];
-  putVarint(header, nWords);
-  const body = ransEncode(plan(model, text));
+  putVarint(header, sections.length);
+  const plan: Decision[] = [];
+  for (const s of sections) putVarint(header, planSection(model, plan, s));
+  const body = ransEncode(plan);
   const out = new Uint8Array(header.length + body.length);
   out.set(header);
   out.set(body, header.length);
   return out;
 }
 
-export function decode(model: Model, blob: Uint8Array): string {
-  const [nWords, pos] = getVarint(blob, 0);
+export function decode(model: Model, blob: Uint8Array): Section[] {
+  let [count, pos] = getVarint(blob, 0);
+  const wordCounts: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const [n, p] = getVarint(blob, pos);
+    wordCounts.push(n);
+    pos = p;
+  }
   const byteTable = model.byteTable();
   const dec = new Decoder(blob, pos);
-  const words: string[] = [];
-  const seps: string[] = [];
-  let ctxW = BOS;
-  let ctxS = BOS;
-  for (let i = 0; i <= nWords; i++) {
-    const [sep, cs] = readToken(dec, model.seps, byteTable, ctxS);
-    seps.push(sep);
-    ctxS = cs;
-    if (i < nWords) {
-      const [word, cw] = readToken(dec, model.words, byteTable, ctxW);
-      words.push(word);
-      ctxW = cw;
+  const out: Section[] = [];
+  for (const nWords of wordCounts) {
+    const kind = model.kinds[dec.get(model.kindTable())];
+    const stream = model.streamFor(kind);
+    const words: string[] = [];
+    const seps: string[] = [];
+    let ctxW = BOS;
+    let ctxS = BOS;
+    for (let i = 0; i <= nWords; i++) {
+      const [sep, cs] = readToken(dec, model.seps, byteTable, ctxS);
+      seps.push(sep);
+      ctxS = cs;
+      if (i < nWords) {
+        const [word, cw] = readToken(dec, stream, byteTable, ctxW);
+        words.push(word);
+        ctxW = cw;
+      }
     }
+    out.push({ kind, text: detokenize({ words, seps }) });
   }
-  return detokenize({ words, seps });
+  return out;
 }
 
-// Exact model cost of the text in bits, without running the coder.
-export function modelBits(model: Model, text: string): number {
+// Exact model cost of one section in bits, kind symbol included, without running the coder.
+export function sectionBits(model: Model, section: Section): number {
+  const plan: Decision[] = [];
+  planSection(model, plan, section);
   let bits = 0;
-  for (const [table, sym] of plan(model, text)) bits += costBits(table, sym);
+  for (const [table, sym] of plan) bits += costBits(table, sym);
   return bits;
 }

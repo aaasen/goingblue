@@ -1,20 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { tokenize, detokenize } from "../scripts/avalanche/tokenizer.ts";
 import { Model } from "../scripts/avalanche/model.ts";
-import { encode, decode, modelBits } from "../scripts/avalanche/codec.ts";
+import { encode, decode, sectionBits } from "../scripts/avalanche/codec.ts";
 import { buildTable, normalize, encode as ransEncode, Decoder, SCALE } from "../scripts/avalanche/rans.ts";
-import { htmlToText } from "../scripts/avalanche/text.ts";
+import { htmlToText, type Section } from "../scripts/avalanche/text.ts";
 
-const TRAIN = [
-  "Wind slabs remain reactive on north through east aspects in the alpine. Use caution near ridge crests.",
-  "A persistent slab problem exists on all aspects at treeline and above. Avoid steep, unsupported terrain.",
-  "Storm slabs will build with 20-30 cm of new snow. Wind slabs are likely on lee features near ridge crests.",
-  "The snowpack is generally well settled below treeline. Surface hoar was buried on Feb 12 and remains a concern.",
+const TRAIN: Section[] = [
+  { kind: "problem", text: "Wind slabs remain reactive on north through east aspects in the alpine. Use caution near ridge crests." },
+  { kind: "problem", text: "A persistent slab problem exists on all aspects at treeline and above. Avoid steep, unsupported terrain." },
+  { kind: "highlights", text: "Storm slabs will build with 20-30 cm of new snow. Wind slabs are likely on lee features near ridge crests." },
+  { kind: "snowpack-summary", text: "The snowpack is generally well settled below treeline. Surface hoar was buried on Feb 12 and remains a concern." },
 ];
 
 function trained(): Model {
   const m = new Model();
-  for (const t of TRAIN) m.observe(tokenize(t), t);
+  for (const s of TRAIN) m.observe(s);
   m.finalize();
   return m;
 }
@@ -58,34 +58,53 @@ describe("rans", () => {
 });
 
 describe("codec", () => {
-  it("round-trips seen, unseen, and non-ASCII text", () => {
+  it("round-trips seen, unseen, and non-ASCII sections", () => {
     const m = trained();
-    const cases = [
-      TRAIN[0],
-      "Wind slabs remain reactive on north through east aspects at treeline.",
-      "Completely novel words like Kokanee and Zymoetz with -12 °C and a\n\nparagraph break.",
-      "",
-      "\n",
+    const docs: Section[][] = [
+      [TRAIN[0]],
+      TRAIN,
+      [
+        { kind: "problem", text: "Wind slabs remain reactive on north through east aspects at treeline." },
+        { kind: "highlights", text: "Completely novel words like Kokanee and Zymoetz with -12 °C and a\n\nparagraph break." },
+        { kind: "snowpack-summary", text: "" },
+        { kind: "problem", text: "\n" },
+      ],
+      [],
     ];
-    for (const c of cases) expect(decode(m, encode(m, c))).toBe(c);
+    for (const d of docs) expect(decode(m, encode(m, d))).toEqual(d);
+  });
+
+  it("rejects a section kind it was not trained on", () => {
+    const m = trained();
+    expect(() => encode(m, [{ kind: "weather-summary", text: "Sunny." }])).toThrow(/kind/);
   });
 
   it("charges seen text far less than novel text", () => {
     const m = trained();
-    const seen = modelBits(m, TRAIN[0]) / TRAIN[0].length;
-    const novel = "xq zvk qpl mnb vcx".repeat(5);
-    const unseen = modelBits(m, novel) / novel.length;
+    const seen = sectionBits(m, TRAIN[0]) / TRAIN[0].text.length;
+    const novel = { kind: "problem", text: "xq zvk qpl mnb vcx".repeat(5) };
+    const unseen = sectionBits(m, novel) / novel.text.length;
     expect(seen).toBeLessThan(2);
     expect(unseen).toBeGreaterThan(seen * 3);
   });
 
+  it("isolates vocabularies by kind", () => {
+    const m = trained();
+    // "snowpack" appears only in the snowpack summary, so as a problem it escapes to bytes.
+    const asProblem = sectionBits(m, { kind: "problem", text: "snowpack" });
+    const asSummary = sectionBits(m, { kind: "snowpack-summary", text: "snowpack" });
+    expect(asProblem).toBeGreaterThan(asSummary * 2);
+    expect(m.streamFor("problem")).not.toBe(m.streamFor("snowpack-summary"));
+  });
+
   it("model bits match the coded size within the coder's overhead", () => {
     const m = trained();
-    const text = TRAIN.join("\n\n") + " Wind slabs are likely near ridge crests on east aspects.";
-    const bytes = encode(m, text).length;
-    const bits = modelBits(m, text);
+    const doc = [...TRAIN, { kind: "problem", text: "Wind slabs are likely near ridge crests on east aspects." }];
+    const bytes = encode(m, doc).length;
+    let bits = 0;
+    for (const s of doc) bits += sectionBits(m, s);
     expect(bytes * 8).toBeGreaterThanOrEqual(bits);
-    expect(bytes * 8).toBeLessThan(bits + 64);
+    expect(bytes * 8).toBeLessThan(bits + 64 + 8 * (doc.length + 1));
   });
 });
 
