@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { tokenize, detokenize } from "../scripts/avalanche/tokenizer.ts";
 import { Model } from "../scripts/avalanche/model.ts";
-import { encode, decode, sectionBits } from "../scripts/avalanche/codec.ts";
+import { encode, decode, sectionBits, tokenCosts } from "../scripts/avalanche/codec.ts";
 import { buildTable, normalize, encode as ransEncode, Decoder, SCALE } from "../scripts/avalanche/rans.ts";
 import { htmlToText, type Section } from "../scripts/avalanche/text.ts";
 
@@ -71,6 +71,7 @@ describe("codec", () => {
         { kind: "snowpack-summary", text: "" },
         { kind: "problem", text: "\n" },
         { kind: "problem", text: "...leading, trailing punctuation!! (and) \"quotes\" ..." },
+        { kind: "problem", text: "Mixed McKenzie PWLs NW 5cm A. c. iPhone ALL CAPS Here" },
       ],
       [],
     ];
@@ -108,6 +109,18 @@ describe("codec", () => {
     for (const s of doc) bits += sectionBits(m, s);
     expect(bytes * 8).toBeGreaterThanOrEqual(bits);
     expect(bytes * 8).toBeLessThan(bits + 64 + 8 * (doc.length + 1));
+  });
+});
+
+describe("order 2", () => {
+  it("uses the pair context for seen trigrams and falls back on unseen pairs", () => {
+    const m = trained();
+    const seen = { kind: "problem", text: "Wind slabs remain reactive on north through east aspects" };
+    const rungs = tokenCosts(m, seen).filter((r) => r.stream === "word").map((r) => r.rung);
+    expect(rungs.slice(2)).toEqual(rungs.slice(2).map(() => "order2"));
+    const novel = { kind: "problem", text: "Zymoetz Kokanee remain" };
+    expect(decode(m, encode(m, [novel]))).toEqual([novel]);
+    expect(tokenCosts(m, novel).filter((r) => r.stream === "word").map((r) => r.rung)).toEqual(["bytes", "bytes", "unigram"]);
   });
 });
 

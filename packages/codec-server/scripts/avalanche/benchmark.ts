@@ -69,7 +69,7 @@ function main(): void {
   for (const d of train) for (const s of d.sections) model.observe(s);
   model.finalize(minCount);
   const st = model.stats();
-  console.log(`\ntrained in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${st.streams} word streams, vocab ${fmt(st.wordVocab)}, ${fmt(st.wordBigrams)} bigrams over ${fmt(st.wordContexts)} contexts`);
+  console.log(`\ntrained in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${st.streams} word streams, vocab ${fmt(st.wordVocab)}, ${fmt(st.wordBigrams)} bigrams over ${fmt(st.wordContexts)} contexts, ${fmt(st.wordTrigrams)} trigrams over ${fmt(st.wordContexts2)} pairs`);
 
   const t1 = Date.now();
   let raw = 0;

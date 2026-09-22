@@ -1,10 +1,12 @@
 /**
  * Order-1 Markov model over word and separator streams, with PPM-style escapes.
  *
- * Coding a token is a three-level ladder. Each level is a real rANS table, so falling through
- * costs only the bits of the escape symbol:
+ * Coding a token is a ladder. Each level is a real rANS table, so falling through costs only
+ * the bits of the escape symbol:
  *
- *   context table   successors seen after this context in this stream, plus ESC
+ *   order-2 table   successors seen after the previous two tokens, plus ESC (word streams
+ *                   only; skipped without cost when the pair was never seen)
+ *   context table   successors seen after the previous token in this stream, plus ESC
  *   unigram table   every token seen in this stream, plus ESC
  *   byte table      UTF-8 bytes of the literal, plus END
  *
@@ -67,39 +69,74 @@ function unigramTable(counts: Map<number, number>, escape: number): Table {
   return buildTable(items);
 }
 
+// Order-2 contexts are keyed by the pair of previous ids packed into one number; ids stay far
+// below 2^20 so the key is exact in float64.
+const PAIR_BASE = 1048576;
+export const pairKey = (prev2: number, prev1: number): number => prev2 * PAIR_BASE + prev1;
+
+function bump(map: Map<number, Map<number, number>>, c: number, sid: number): void {
+  let succ = map.get(c);
+  if (!succ) map.set(c, (succ = new Map()));
+  succ.set(sid, (succ.get(sid) ?? 0) + 1);
+}
+
 export class Stream {
   readonly ctx = new Map<number, Map<number, number>>();
+  readonly ctx2 = new Map<number, Map<number, number>>();
   readonly uni = new Map<number, number>();
   escape = 1;
   readonly vocab = new Vocab();
   private cache = new Map<number, Table>();
+  private cache2 = new Map<number, Table>();
   private uniTable: Table | null = null;
 
-  // Counts each token under its context: contexts[i] when given, else the previous token.
+  // Word streams are order 2; the separator stream is order 1 with explicit contexts.
+  constructor(readonly order: 1 | 2 = 1) {}
+
+  // Counts each token under its context: contexts[i] when given, else the previous token, and
+  // under the previous pair as well at order 2.
   observe(seq: string[], contexts?: number[]): void {
-    let prev = BOS;
+    let prev1 = BOS;
+    let prev2 = BOS;
     for (let i = 0; i < seq.length; i++) {
       const sid = this.vocab.intern(seq[i]);
-      const c = contexts ? contexts[i] : prev;
-      let succ = this.ctx.get(c);
-      if (!succ) this.ctx.set(c, (succ = new Map()));
-      succ.set(sid, (succ.get(sid) ?? 0) + 1);
+      bump(this.ctx, contexts ? contexts[i] : prev1, sid);
+      if (this.order === 2) bump(this.ctx2, pairKey(prev2, prev1), sid);
       this.uni.set(sid, (this.uni.get(sid) ?? 0) + 1);
-      prev = sid;
+      prev2 = prev1;
+      prev1 = sid;
     }
   }
 
   // Drops context successors seen fewer than minCount times, then fixes the escape weight.
   finalize(minCount = 1): void {
     if (minCount > 1) {
-      for (const [c, succ] of [...this.ctx]) {
-        for (const [s, n] of [...succ]) if (n < minCount) succ.delete(s);
-        if (succ.size === 0) this.ctx.delete(c);
+      for (const map of [this.ctx, this.ctx2]) {
+        for (const [c, succ] of [...map]) {
+          for (const [s, n] of [...succ]) if (n < minCount) succ.delete(s);
+          if (succ.size === 0) map.delete(c);
+        }
       }
     }
     this.escape = hapaxEscape(this.uni);
     this.cache.clear();
+    this.cache2.clear();
     this.uniTable = null;
+  }
+
+  // The order-2 table for a pair, or null when the pair was never seen (both sides know, so
+  // no escape is coded).
+  context2Table(key: number): Table | null {
+    const succ = this.ctx2.get(key);
+    if (!succ) return null;
+    let tbl = this.cache2.get(key);
+    if (!tbl) {
+      const items: [number, number][] = [...succ].sort((a, b) => a[0] - b[0]);
+      items.push([ESC, succ.size]);
+      tbl = buildTable(items);
+      this.cache2.set(key, tbl);
+    }
+    return tbl;
   }
 
   contextTable(ctxId: number): Table {
@@ -167,7 +204,7 @@ export class Model {
     }
     this.kindCounts.set(id, (this.kindCounts.get(id) ?? 0) + 1);
     let stream = this.streams.get(section.kind);
-    if (!stream) this.streams.set(section.kind, (stream = new Stream()));
+    if (!stream) this.streams.set(section.kind, (stream = new Stream(2)));
     const toks = tokenize(section.text);
     stream.observe(toks.words);
     const contexts = toks.words.map((w) => this.sepCtx.intern(w));
@@ -205,16 +242,20 @@ export class Model {
     return this.byteTbl;
   }
 
-  // Rough ship weight: vocabulary entries and bigram entries summed over streams.
-  stats(): { streams: number; wordVocab: number; wordContexts: number; wordBigrams: number } {
+  // Rough ship weight: vocabulary, bigram, and trigram entries summed over streams.
+  stats(): { streams: number; wordVocab: number; wordContexts: number; wordBigrams: number; wordContexts2: number; wordTrigrams: number } {
     let vocab = 0;
     let contexts = 0;
     let bigrams = 0;
+    let contexts2 = 0;
+    let trigrams = 0;
     for (const s of this.streams.values()) {
       vocab += s.vocab.size;
       contexts += s.ctx.size;
       for (const succ of s.ctx.values()) bigrams += succ.size;
+      contexts2 += s.ctx2.size;
+      for (const succ of s.ctx2.values()) trigrams += succ.size;
     }
-    return { streams: this.streams.size, wordVocab: vocab, wordContexts: contexts, wordBigrams: bigrams };
+    return { streams: this.streams.size, wordVocab: vocab, wordContexts: contexts, wordBigrams: bigrams, wordContexts2: contexts2, wordTrigrams: trigrams };
   }
 }
