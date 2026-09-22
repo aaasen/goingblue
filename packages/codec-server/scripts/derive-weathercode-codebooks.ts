@@ -12,7 +12,7 @@
  *
  *   pnpm exec tsx packages/codec-server/scripts/derive-weathercode-codebooks.ts
  */
-import { toFullPeriod } from "../src/forecast.ts";
+import { aggregateHourly, toFullPeriod, HOURS_PER_PERIOD } from "../src/forecast.ts";
 import { WMO2IDX, WMO_CODES } from "@weather/protocol";
 import {
   deriveCounts, tableOffsets, rowAt, rowCostBits, huffmanLengths, scaledWeights, runStandalone,
@@ -46,10 +46,12 @@ export function counter(): CellCounter {
     // The aggregation reads the accumulations too: form from coverage, intensity from amount.
     vars: ["weather_code", "rain", "showers", "snowfall"],
     countCell(ctx, add) {
-      // One resolution, the shared midnight-aligned slice capped at 128 periods per cell.
-      const slice = ctx.atMidnight(RES_IDX);
-      if (!slice) return;
-      const periods = slice.rows.slice(0, 128).map((r) => toFullPeriod(r, new Set(), "US"));
+      // Its own aggregation: one resolution, capped at 128 periods and anchored on the raw
+      // request hour, so neither shared slice fits.
+      const { hourly: h, startHour } = ctx;
+      const n = Math.min(128, Math.floor(h.time.length / HOURS_PER_PERIOD[RES_IDX]));
+      const periods = aggregateHourly(h, h.time, n, RES_IDX, startHour).map((r) => toFullPeriod(r, new Set(), "US", RES_IDX));
+      if (periods.length === 0) return;
       const seq = periods.map((p) => WMO2IDX[p.weathercode] ?? 0);
       add(BOOT + seq[0]);
       for (let i = 1; i < seq.length; i++) add(TRANS + seq[i - 1] * NSYM + seq[i]);

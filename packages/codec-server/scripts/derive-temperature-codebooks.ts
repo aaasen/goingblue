@@ -75,8 +75,8 @@ export function counter(): CellCounter {
       const dataStart = Math.floor(Date.parse(`${h.time[0]}:00Z`) / 3600000);
       const dataEnd = dataStart + h.time.length;
       for (let res = 0; res < NRES; res++) {
-        // Periods from the cell's first local midnight, aggregated once per cell and shared with
-        // every other counter.
+        // Periods anchored to the cell's first local midnight, aggregated once per cell
+        // and shared with every other counter that wants this anchoring.
         const slice = ctx.atMidnight(TABLE_RES_IDXS[res]);
         if (!slice) continue;
         const { hpp, start: firstUtc, n } = slice;
