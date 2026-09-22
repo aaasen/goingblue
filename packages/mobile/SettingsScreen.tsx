@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
   // swapping the label for a spinner mid-delete doesn't make the row jump.
   resetBtn: { backgroundColor: palette.card, borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
   resetBtnDisabled: { opacity: 0.6 },
-  resetBtnText: { color: palette.destructive, fontSize: 15, fontWeight: '600' },
+  resetBtnText: { color: palette.destructive, fontSize: 15 },
   sectionNote: { fontSize: 13, color: palette.pageNote, lineHeight: 19, marginTop: -4, marginBottom: 10 },
   legalLinks: { fontSize: 13, color: palette.pageTextTertiary, marginTop: 20, lineHeight: 19 },
 });

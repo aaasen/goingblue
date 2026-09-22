@@ -439,6 +439,6 @@ const styles = StyleSheet.create({
 
   attribution: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 28 },
 
-  clear: { color: palette.destructive, fontSize: 15, fontWeight: '600' },
+  clear: { color: palette.destructive, fontSize: 15 },
   clearDisabled: { color: palette.textFaint },
 });
