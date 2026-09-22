@@ -3738,8 +3738,11 @@ function ModelCanvas({ periods, rows, dates, zoned, steps, units, timeFormat, no
 
 // Memoized so a HomeScreen render that doesn't concern the forecast (a layout measurement, the
 // compare row) stops here: every prop is a piece of state or a stable handler.
-const Meteogram = memo(function Meteogram({ msg, units, timeFormat, active, scrollY, onDetailHeight, pageScroll }: {
+const Meteogram = memo(function Meteogram({ msg, units, timeFormat, active, originY = 0, scrollY, onDetailHeight, pageScroll }: {
   msg: ForecastMessage; units: UnitPrefs; timeFormat: TimeFormat; active: boolean;
+  // Where this component's parent sits in the page's scroll content: its own measured top is
+  // relative to that parent, and the pinned headers need the sum.
+  originY?: number;
   // The page's vertical scroll offset (native-driven) — see the pinned header in ModelCanvas.
   scrollY: Animated.Value;
   // The page's scroll as something the overview strip can hold still — see OverviewStrip.
@@ -3750,9 +3753,9 @@ const Meteogram = memo(function Meteogram({ msg, units, timeFormat, active, scro
   // status-bar band while the strip and plate ride off, and the stack tears.
   onDetailHeight?: (h: number) => void;
 }) {
-  // The layout chain the pinned headers hang off: this component's top within the page's scroll
-  // content, and each block's top within this component. Summed per block and handed down;
-  // ModelCanvas measures its own internal offsets.
+  // The layout chain the pinned headers hang off: this component's top within its parent (plus
+  // originY for the parent's own top in the scroll content), and each block's top within this
+  // component. Summed per block and handed down; ModelCanvas measures its own internal offsets.
   const [selfY, setSelfY] = useState<number | null>(null);
   const [blockTops, setBlockTops] = useState<Record<number, number>>({});
   // Memoized because `blocks` depends on it: a fresh array here would rebuild every block —
@@ -3856,7 +3859,7 @@ const Meteogram = memo(function Meteogram({ msg, units, timeFormat, active, scro
             selected={sel?.block === bi ? sel.period : null}
             onSelectColumn={selectColumn} paint={paint}
             scrollY={scrollY} msg={msg} sceneKey={sceneKey} pageScroll={pageScroll}
-            pinTop={selfY != null && blockTops[bi] != null ? selfY + blockTops[bi] : null} />
+            pinTop={selfY != null && blockTops[bi] != null ? originY + selfY + blockTops[bi] : null} />
           {bi < blocks.length - 1 && <View style={styles.sep} />}
         </View>
       ))}

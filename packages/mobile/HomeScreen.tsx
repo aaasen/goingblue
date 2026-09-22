@@ -784,6 +784,16 @@ interface Props {
   onOpenSettings: () => void;
 }
 
+// The page's tabs, dev builds only: the weather flow the app ships, and the avalanche view
+// being built beside it. The tab bar scrolls with the page under the title row; the weather body
+// stays mounted and hidden under Avalanche so the builder, the loaded forecast and the scroll
+// position survive.
+type Tab = 'weather' | 'avalanche';
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'weather', label: 'Weather' },
+  { key: 'avalanche', label: 'Avalanche' },
+];
+
 export default function HomeScreen({ token, device, onDeviceChange, twoMessages, onTwoMessagesChange, aqiScale, units, timeFormat, coordFormat, forecastData, onForecastDataChange, onOpenSettings }: Props) {
   // ── Builder state ────────────────────────────────────────────────────────
   // Whether the pin rides the phone's position. Following resolves the location from the last fix
@@ -865,6 +875,12 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const { width: winW, height: winH } = useWindowDimensions();
   const { top: topInset, side: sideInset } = pageInsets(winW, winH);
   const scrollRef = useRef<ScrollView>(null);
+  const [tab, setTab] = useState<Tab>('weather');
+  // Where the weather body starts in the scroll content: it sits in one wrapper under the title
+  // row (so a tab switch can hide it whole), and the positions measured inside it (the meta row,
+  // the map, the end marker, the meteogram's pinned headers) are relative to that wrapper. Each
+  // adds this to land on a scroll offset.
+  const [bodyY, setBodyY] = useState(0);
   // Lets the overview strip hold the page still while it is scrubbed (see OverviewStrip). Set on
   // the native view directly: a prop would re-render this whole screen on every touch.
   const pageScroll = useMemo<PageScroll>(() => ({
@@ -900,7 +916,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const [detailH, setDetailH] = useState(0);
   const mapPark = useMemo(() => {
     if (mapFrame == null || forecastEnd == null) return null;
-    const parkY = mapFrame.y + mapFrame.h - topInset;
+    const parkY = bodyY + mapFrame.y + mapFrame.h - topInset;
     // How far the park carries: the forecast's height below the map, less the docked stack that
     // rides off beneath it. forecastEnd (the end-of-forecast marker) minus the detail panel and the
     // stack height is the same scroll offset Meteogram's own clamp ends at, so the exits align.
@@ -909,11 +925,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     return scrollY.interpolate({
       inputRange: [parkY, parkY + travel], outputRange: [0, travel], extrapolate: 'clamp',
     });
-  }, [mapFrame, forecastEnd, detailH, scrollY, topInset]);
+  }, [mapFrame, forecastEnd, detailH, scrollY, topInset, bodyY]);
   function scrollToForecast() {
     if (!pendingScroll.current || metaY.current == null) return;
     pendingScroll.current = false;
-    scrollRef.current?.scrollTo({ y: Math.max(metaY.current - topInset - 8, 0), animated: true });
+    scrollRef.current?.scrollTo({ y: Math.max(bodyY + metaY.current - topInset - 8, 0), animated: true });
   }
   useEffect(() => { if (decoded) scrollToForecast(); }, [decoded]);
 
@@ -1706,11 +1722,37 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           <MaterialCommunityIcons name="cog-outline" size={24} color={palette.pageIcon} />
         </TouchableOpacity>
       </View>
+      {/* The tab bar (see Tab): equal-width labels under the title row, the active one underlined
+          in the brand color. A hairline parts it from the title row, and the title rule closes it
+          the way it closes the title row alone. */}
+      {__DEV__ && (
+        <View style={styles.tabRow} accessibilityRole="tablist">
+          {TABS.map((t, i) => (
+            <TouchableOpacity
+              key={t.key}
+              style={[styles.tab, i > 0 && styles.tabDivided, t.key === tab && styles.tabActive]}
+              onPress={() => setTab(t.key)}
+              activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: t.key === tab }}
+            >
+              <Text style={[styles.tabText, t.key === tab && styles.tabTextActive]}>{t.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
       <View style={styles.titleRule} />
 
-      {/* The builder carries the scroll content's side padding itself: the forecast pieces below
-          it run full-bleed, and the meteogram's pinned headers measure their offset against the
-          scroll content, which they can only do as its direct children. */}
+      {/* The weather body, hidden whole under the Avalanche tab (see Tab). The builder carries
+          the scroll content's side padding itself: the forecast pieces below it run full-bleed.
+          The meteogram's pinned headers and the map's park measure their offsets against this
+          wrapper, so its own top within the scroll content (bodyY) completes their sums. */}
+      <View
+        style={tab !== 'weather' && styles.hidden}
+        onLayout={(e) => setBodyY(e.nativeEvent.layout.y)}
+        accessibilityElementsHidden={tab !== 'weather'}
+        importantForAccessibility={tab === 'weather' ? 'auto' : 'no-hide-descendants'}
+      >
       <RequestBuilder
         mapCoord={mapCoord} onPick={onPick} gpsCoords={gpsCoords} following={following} onLocate={onLocate}
         locating={locating} coordsField={coordsField} coordsInvalid={coordsInvalid} onCoordsText={onCoordsText}
@@ -1770,9 +1812,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             />
           </Animated.View>
 
-          {/* Forecast meteogram. Nothing hides this screen any more, so it is always active — the
-              prop still exists for the repaint-after-hide machinery it drives inside. */}
-          <Meteogram msg={decoded} units={units} timeFormat={timeFormat} active scrollY={scrollY} onDetailHeight={setDetailH} pageScroll={pageScroll} />
+          {/* Forecast meteogram. Inactive while the Avalanche tab hides the weather body, which
+              drives its repaint on the way back. */}
+          <Meteogram msg={decoded} units={units} timeFormat={timeFormat} active={tab === 'weather'} originY={bodyY} scrollY={scrollY} onDetailHeight={setDetailH} pageScroll={pageScroll} />
 
           {/* Compare selector: one segment per center holding a comparable cached forecast
               (see compareOptions), the same system control the request builder's selectors
@@ -1825,6 +1867,14 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             Open-Meteo
           </Text>.
         </Text>
+      )}
+      </View>
+
+      {tab === 'avalanche' && (
+        <View style={styles.emptyForecast}>
+          <Text style={styles.emptyTitle}>No bulletin loaded</Text>
+          <Text style={styles.emptyHint}>Avalanche forecasts will show here</Text>
+        </View>
       )}
 
       <HelpScreen visible={help} onClose={() => setHelp(false)} />
@@ -2711,6 +2761,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: CONTENT_PAD, paddingTop: 20, paddingBottom: 8,
   },
   titleBrand: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // Ruled top and bottom: the title rule closes it below, and this hairline parts it from the
+  // title row above.
+  tabRow: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.pageRule },
+  // Every tab carries the underline's height so the row doesn't shift as the indicator moves.
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  // A hairline between neighbors, carried on the left edge of every tab but the first.
+  tabDivided: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: palette.pageRule },
+  tabActive: { borderBottomColor: palette.brand },
+  tabText: { fontSize: 15, fontWeight: '500', color: palette.pageTextSecondary },
+  tabTextActive: { color: palette.brand },
+  hidden: { display: 'none' },
   // Closes the title bar the way the section dividers close their sections: a full-width
   // hairline directly under it.
   titleRule: { height: StyleSheet.hairlineWidth, backgroundColor: palette.pageRule },
