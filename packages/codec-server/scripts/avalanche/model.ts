@@ -23,9 +23,10 @@
  * codec total: any input round-trips.
  *
  * Every section kind gets its own word stream with its own vocabulary, contexts, and counts.
- * Separators are one stream used by all sections, predicted from the words around each
- * separator (BOS before the first, END after the last), and a kind table codes which section
- * comes next.
+ * A section with a context (a problem comment's type) starts its word contexts from a marker
+ * for that context instead of BOS, so its first words are predicted from the type. Separators
+ * are one stream used by all sections, predicted from the words around each separator (BOS
+ * before the first, END after the last), and a kind table codes which section comes next.
  *
  * Both sides build tables from the same stored counts in the same sorted order. That
  * determinism, not the counts themselves, is what keeps them in sync.
@@ -122,9 +123,9 @@ export class Stream {
   }
 
   // Counts each token under its contexts: contexts[k][i] when given, else the keys chained
-  // from the previous tokens.
-  observe(seq: string[], contexts?: number[][]): void {
-    const prev = [BOS, BOS, BOS];
+  // from the previous tokens, starting from `start`.
+  observe(seq: string[], contexts?: number[][], start: number = BOS): void {
+    const prev = [start, BOS, BOS];
     for (let i = 0; i < seq.length; i++) {
       const sid = this.vocab.intern(seq[i]);
       if (sid >= KEY_BASE) throw new Error("model: vocabulary exceeds the context key base");
@@ -216,6 +217,14 @@ export class Model {
 
   constructor(readonly wordOrder: number = WORD_ORDER) {}
 
+  // The id a section's word contexts start from: a marker for its context, else BOS. Markers
+  // are interned as context-only ids and never counted as tokens.
+  startContext(stream: Stream, section: Section, intern = false): number {
+    if (section.context === undefined) return BOS;
+    const marker = `\u0001${section.context}`;
+    return intern ? stream.vocab.intern(marker) : (stream.vocab.ids.get(marker) ?? UNK);
+  }
+
   // The order-1 context of a separator: the word after it, or END for the trailing one.
   sepContextFor(nextWord: string | null): number {
     return nextWord === null ? END : (this.sepCtx.ids.get(nextWord) ?? UNK);
@@ -252,7 +261,7 @@ export class Model {
     let stream = this.streams.get(section.kind);
     if (!stream) this.streams.set(section.kind, (stream = new Stream(this.wordOrder)));
     const toks = tokenize(section.text);
-    stream.observe(toks.words);
+    stream.observe(toks.words, undefined, this.startContext(stream, section, true));
     const ids = toks.words.map((w) => this.sepCtx.intern(w));
     const next = [...ids, END];
     const pairs = next.map((n, i) => pairKey(i === 0 ? BOS : ids[i - 1], n));

@@ -10,6 +10,7 @@ import { extractStructured, type Structured } from "./structured.ts";
 export interface Section {
   kind: string;   // highlights | avalanche-summary | snowpack-summary | weather-summary | problem | advice
   text: string;
+  context?: string;   // problem type for a problem comment; the word model starts from it
 }
 
 export interface BulletinProse {
@@ -56,7 +57,7 @@ interface RawProduct {
     dateIssued: string;
     highlights?: string | null;
     summaries?: { type: { value: string }; content: string | null }[];
-    problems?: { comment?: string | null }[];
+    problems?: { type?: { value: string }; comment?: string | null }[];
     terrainAndTravelAdvice?: string[];
     dangerRatings?: { ratings: Record<string, { rating: { value: string } }> }[];
   };
@@ -75,12 +76,14 @@ export function isForecast(p: RawProduct): boolean {
 export function bulletinSections(p: RawProduct): Section[] {
   const r = p.report;
   const out: Section[] = [];
-  const push = (kind: string, html: string | null | undefined) => {
+  const push = (kind: string, html: string | null | undefined, context?: string) => {
     const text = htmlToText(html);
-    if (text) out.push({ kind, text });
+    if (text || context !== undefined) out.push(context === undefined ? { kind, text } : { kind, text, context });
   };
   push("highlights", r.highlights);
-  for (const pr of r.problems ?? []) push("problem", pr.comment);
+  // Every problem gets a section, empty comment or not, so the k-th problem section belongs to
+  // the k-th problem and the decoder can supply its type.
+  for (const pr of r.problems ?? []) push("problem", pr.comment, pr.type?.value ?? "");
   for (const a of r.terrainAndTravelAdvice ?? []) push("advice", a);
   for (const s of r.summaries ?? []) push(s.type.value, s.content);
   return out;

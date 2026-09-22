@@ -91,7 +91,8 @@ function main(): void {
   const bySection = new Map<string, SectionAcc>();
   for (const d of test) {
     const blob = encode(model, d.sections);
-    if (JSON.stringify(decode(model, blob)) !== JSON.stringify(d.sections)) {
+    const contextFor = (kind: string, index: number) => (kind === "problem" ? d.structured.problems[index]?.type : undefined);
+    if (JSON.stringify(decode(model, blob, contextFor)) !== JSON.stringify(d.sections)) {
       failures++;
       console.log(`  ROUND TRIP FAILED: ${d.id}`);
     }

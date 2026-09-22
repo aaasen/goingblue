@@ -169,7 +169,9 @@ describe("structured", () => {
       ],
     };
     for (const s of [S[0], S[1], novel]) {
-      const b = { structured: s, sections: [TRAIN[0], { kind: "highlights", text: "Novel Zymoetz text." }] };
+      // A problem comment carries the type of the problem it belongs to, when there is one.
+      const problem = s.problems.length ? { ...TRAIN[0], context: s.problems[0].type } : TRAIN[0];
+      const b = { structured: s, sections: [problem, { kind: "highlights", text: "Novel Zymoetz text." }] };
       expect(decodeBulletin(m, sm, encodeBulletin(m, sm, b))).toEqual(b);
     }
   });
@@ -178,5 +180,31 @@ describe("structured", () => {
     const [m, sm] = models();
     expect(sm.bits(m.byteTable(), S[0])).toBeLessThan(24);
     expect(sm.bits(m.byteTable(), { ...S[1], confidence: "zzz" })).toBeGreaterThan(30);
+  });
+});
+
+describe("section context", () => {
+  it("starts a problem comment from its type and round-trips through the bulletin", () => {
+    const m = new Model();
+    const a = { kind: "problem", text: "Wind slabs remain reactive near ridge crests.", context: "windslab" };
+    const b = { kind: "problem", text: "Persistent slabs remain a concern on shaded aspects.", context: "persistentslab" };
+    for (const s of [a, b, TRAIN[2]]) m.observe(s);
+    m.finalize();
+    // The same first word costs less under its own type than under the other.
+    const asWind = sectionBits(m, { kind: "problem", text: "Wind", context: "windslab" });
+    const asPersistent = sectionBits(m, { kind: "problem", text: "Wind", context: "persistentslab" });
+    expect(asWind).toBeLessThan(asPersistent);
+    const sm = new StructuredModel();
+    const structured: Structured = {
+      ratings: [{ alp: "low", tln: "low", btl: "low" }], confidence: "high",
+      problems: [
+        { type: "persistentslab", elevations: ["alp"], aspects: [], likelihood: "possible", size: "1.0-2.0" },
+        { type: "windslab", elevations: ["alp"], aspects: [], likelihood: "possible", size: "1.0-2.0" },
+      ],
+    };
+    sm.observe(structured);
+    sm.finalize();
+    const bulletin = { structured, sections: [TRAIN[2], b, a] };
+    expect(decodeBulletin(m, sm, encodeBulletin(m, sm, bulletin))).toEqual(bulletin);
   });
 });

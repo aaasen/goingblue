@@ -107,7 +107,7 @@ function walkSection(
 ): number {
   const toks = tokenize(section.text);
   const n = toks.words.length;
-  const prev = [BOS, BOS, BOS];
+  const prev = [model.startContext(model.streamFor(section.kind), section), BOS, BOS];
   let prevToken: string | null = null;
   for (let i = 0; i < n; i++) {
     const token = toks.words[i];
@@ -154,15 +154,25 @@ export function readHeader(blob: Uint8Array): { wordCounts: number[]; pos: numbe
   return { wordCounts, pos };
 }
 
-export function readSections(model: Model, dec: Decoder, wordCounts: number[]): Section[] {
+// `contextFor` supplies a section's context from its kind and its index among sections of
+// that kind, which the caller knows from the structured fields decoded ahead of the prose.
+export function readSections(
+  model: Model, dec: Decoder, wordCounts: number[],
+  contextFor: (kind: string, index: number) => string | undefined = () => undefined,
+): Section[] {
   const byteTable = model.byteTable();
   const out: Section[] = [];
+  const seen = new Map<string, number>();
   for (const nWords of wordCounts) {
     const kind = model.kinds[dec.get(model.kindTable())];
     const stream = model.streamFor(kind);
+    const index = seen.get(kind) ?? 0;
+    seen.set(kind, index + 1);
+    const context = contextFor(kind, index);
+    const section: Section = context === undefined ? { kind, text: "" } : { kind, text: "", context };
     const words: string[] = [];
     const seps: string[] = [];
-    const prev = [BOS, BOS, BOS];
+    const prev = [model.startContext(stream, section), BOS, BOS];
     let prevToken: string | null = null;
     for (let i = 0; i < nWords; i++) {
       const [word, sid] = readToken(dec, stream, byteTable, chainedKeys(model.wordOrder, prev));
@@ -173,7 +183,8 @@ export function readSections(model: Model, dec: Decoder, wordCounts: number[]): 
       prevToken = word;
     }
     seps.push(readToken(dec, model.seps, byteTable, model.sepKeys(prevToken, null))[0]);
-    out.push({ kind, text: detokenize({ words, seps }) });
+    section.text = detokenize({ words, seps });
+    out.push(section);
   }
   return out;
 }
@@ -191,9 +202,11 @@ export function encode(model: Model, sections: Section[]): Uint8Array {
   return frame(header, plan);
 }
 
-export function decode(model: Model, blob: Uint8Array): Section[] {
+export function decode(
+  model: Model, blob: Uint8Array, contextFor?: (kind: string, index: number) => string | undefined,
+): Section[] {
   const { wordCounts, pos } = readHeader(blob);
-  return readSections(model, new Decoder(blob, pos), wordCounts);
+  return readSections(model, new Decoder(blob, pos), wordCounts, contextFor);
 }
 
 // What each token of a section cost. Re-walks the real encoder path, so these are the bits the

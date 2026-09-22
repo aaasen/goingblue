@@ -26,5 +26,6 @@ export function decodeBulletin(prose: Model, structured: StructuredModel, blob: 
   const { wordCounts, pos } = readHeader(blob);
   const dec = new Decoder(blob, pos);
   const s = structured.read(dec, prose.byteTable());
-  return { structured: s, sections: readSections(prose, dec, wordCounts) };
+  const contextFor = (kind: string, index: number) => (kind === "problem" ? s.problems[index]?.type : undefined);
+  return { structured: s, sections: readSections(prose, dec, wordCounts, contextFor) };
 }
