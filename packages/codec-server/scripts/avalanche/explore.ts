@@ -8,7 +8,6 @@
 import { tokenCosts, type TokenCost } from "./codec.ts";
 import { Model } from "./model.ts";
 import { loadBulletins, split, arg } from "./benchmark.ts";
-import { tokenize } from "./tokenizer.ts";
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;
@@ -22,16 +21,19 @@ const acc = (m: Map<string, Acc>, key: string, bits: number, example?: string): 
   m.set(key, a);
 };
 
-const isWordLike = (t: string) => /^[\p{L}\p{N}]/u.test(t);
 const isNumber = (t: string) => /^\p{N}/u.test(t);
 const isAllCaps = (t: string) => t.length > 1 && t === t.toUpperCase() && t !== t.toLowerCase();
 const isCapitalized = (t: string) => t[0] !== t[0].toLowerCase() && t.slice(1) === t.slice(1).toLowerCase();
 
 function category(c: TokenCost, lowerVocab: Set<string>): string {
-  if (c.stream === "sep") return c.token === " " ? "sep: space" : c.token === "" ? "sep: none" : "sep: other";
   const t = c.token;
-  if (c.rung === "bytes") return isWordLike(t) ? "word: OOV literal" : "punct: OOV literal";
-  if (!isWordLike(t)) return "punct";
+  if (c.stream === "sep") {
+    if (c.rung === "bytes") return "sep: OOV literal";
+    if (t === " ") return "sep: space";
+    if (t === "") return "sep: none";
+    return /\n/.test(t) ? "sep: newline" : "sep: punctuation";
+  }
+  if (c.rung === "bytes") return "word: OOV literal";
   if (isNumber(t)) return "number";
   if (isAllCaps(t)) return "word: ALL CAPS";
   if (isCapitalized(t)) return lowerVocab.has(t.toLowerCase()) ? "word: Capitalized (lowercase form known)" : "word: Capitalized (proper)";
@@ -75,7 +77,7 @@ function main(): void {
         const cat = category(c, lowerVocab);
         acc(byCategory, cat, c.bits, c.token);
         acc(byToken, `${c.stream === "sep" ? "sep " : ""}${c.token}`, c.bits);
-        if (c.rung === "bytes") acc(oov, c.token, c.bits);
+        if (c.rung === "bytes" && c.stream === "word") acc(oov, c.token, c.bits);
         if (cat.startsWith("word: Capitalized (lowercase") || cat === "word: ALL CAPS") acc(capVariants, c.token, c.bits);
       }
     }

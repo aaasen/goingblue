@@ -14,8 +14,8 @@
  * codec total: any input round-trips.
  *
  * Every section kind gets its own word stream with its own vocabulary, contexts, and counts.
- * Separators are one stream used by all sections, and a kind table codes which section comes
- * next.
+ * Separators are one stream used by all sections, predicted from the word that follows each
+ * separator (END for the trailing one), and a kind table codes which section comes next.
  *
  * Both sides build tables from the same stored counts in the same sorted order. That
  * determinism, not the counts themselves, is what keeps them in sync.
@@ -27,7 +27,8 @@ import { tokenize } from "./tokenizer.ts";
 export const ESC = 0;
 export const BOS = 1;
 export const UNK = 2;
-const FIRST = 3;
+export const END = 3;   // context of a section's trailing separator
+const FIRST = 4;
 export const LIT_END = 256;
 
 export class Vocab {
@@ -74,12 +75,14 @@ export class Stream {
   private cache = new Map<number, Table>();
   private uniTable: Table | null = null;
 
-  observe(seq: string[]): void {
+  // Counts each token under its context: contexts[i] when given, else the previous token.
+  observe(seq: string[], contexts?: number[]): void {
     let prev = BOS;
-    for (const tok of seq) {
-      const sid = this.vocab.intern(tok);
-      let succ = this.ctx.get(prev);
-      if (!succ) this.ctx.set(prev, (succ = new Map()));
+    for (let i = 0; i < seq.length; i++) {
+      const sid = this.vocab.intern(seq[i]);
+      const c = contexts ? contexts[i] : prev;
+      let succ = this.ctx.get(c);
+      if (!succ) this.ctx.set(c, (succ = new Map()));
       succ.set(sid, (succ.get(sid) ?? 0) + 1);
       this.uni.set(sid, (this.uni.get(sid) ?? 0) + 1);
       prev = sid;
@@ -127,12 +130,20 @@ const utf8 = new TextEncoder();
 export class Model {
   readonly streams = new Map<string, Stream>();
   readonly seps = new Stream();
+  // Word strings interned as separator contexts; shared across sections.
+  readonly sepCtx = new Vocab();
   readonly bytes = new Map<number, number>();
   readonly kinds: string[] = [];
   private readonly kindIds = new Map<string, number>();
   private readonly kindCounts = new Map<number, number>();
   private byteTbl: Table | null = null;
   private kindTbl: Table | null = null;
+
+  // The context a separator is coded under when the word after it is `nextWord`, or END for
+  // the trailing separator.
+  sepContextFor(nextWord: string | null): number {
+    return nextWord === null ? END : (this.sepCtx.ids.get(nextWord) ?? UNK);
+  }
 
   kindId(kind: string): number {
     const id = this.kindIds.get(kind);
@@ -159,7 +170,9 @@ export class Model {
     if (!stream) this.streams.set(section.kind, (stream = new Stream()));
     const toks = tokenize(section.text);
     stream.observe(toks.words);
-    this.seps.observe(toks.seps);
+    const contexts = toks.words.map((w) => this.sepCtx.intern(w));
+    contexts.push(END);
+    this.seps.observe(toks.seps, contexts);
     for (const b of utf8.encode(section.text)) this.bytes.set(b, (this.bytes.get(b) ?? 0) + 1);
   }
 

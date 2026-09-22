@@ -8,9 +8,11 @@
  * already decoded.
  *
  * Layout, with the section count from a varint header and each section as
- *   kind  N  seps[0] words[0] seps[1] ... words[N-1] seps[N]
+ *   kind  N  words[0] seps[0] words[1] seps[1] ... words[N-1] seps[N-1] seps[N]
  * where kind is a symbol from the kind table and N is coded as a raw varint in the byte stream
- * ahead of the rANS body. Word and separator contexts restart at BOS for every section.
+ * ahead of the rANS body. Each separator is coded after the word that follows it in the text,
+ * so the decoder has that word as the separator's context; the trailing separator's context
+ * is END. Word contexts restart at BOS for every section.
  *
  * A token walks the ladder in model.ts: context, unigram, then bytes. Each rung is entered by
  * an ESC read from the rung above.
@@ -52,7 +54,7 @@ function planToken(plan: Decision[], stream: Stream, byteTable: Table, ctx: numb
   }
   plan.push([table, ESC]);
   const uni = stream.unigramTable();
-  if (sid !== undefined && uni.index.has(sid)) {
+  if (sid !== undefined) {
     plan.push([uni, sid]);
     return sid;
   }
@@ -77,19 +79,34 @@ function readToken(dec: Decoder, stream: Stream, byteTable: Table, ctx: number):
   return [token, stream.contextFor(token)];
 }
 
+// Walks one section's tokens in coding order, calling back with the stream, token, and context
+// of each. The encoder plans with it and the cost breakdown attributes with it.
+function walkSection(
+  model: Model, section: Section,
+  word: (token: string, ctx: number) => number,
+  sep: (token: string, ctx: number) => number,
+): number {
+  const toks = tokenize(section.text);
+  const n = toks.words.length;
+  let ctxW = BOS;
+  for (let i = 0; i < n; i++) {
+    ctxW = word(toks.words[i], ctxW);
+    sep(toks.seps[i], model.sepContextFor(toks.words[i]));
+  }
+  sep(toks.seps[n], model.sepContextFor(null));
+  return n;
+}
+
 // Appends one section's decisions, kind symbol first, and returns its word count.
 function planSection(model: Model, out: Decision[], section: Section): number {
   out.push([model.kindTable(), model.kindId(section.kind)]);
   const words = model.streamFor(section.kind);
   const byteTable = model.byteTable();
-  const toks = tokenize(section.text);
-  let ctxW = BOS;
-  let ctxS = BOS;
-  for (let i = 0; i <= toks.words.length; i++) {
-    ctxS = planToken(out, model.seps, byteTable, ctxS, toks.seps[i]);
-    if (i < toks.words.length) ctxW = planToken(out, words, byteTable, ctxW, toks.words[i]);
-  }
-  return toks.words.length;
+  return walkSection(
+    model, section,
+    (token, ctx) => planToken(out, words, byteTable, ctx, token),
+    (token, ctx) => planToken(out, model.seps, byteTable, ctx, token),
+  );
 }
 
 export function encode(model: Model, sections: Section[]): Uint8Array {
@@ -121,17 +138,13 @@ export function decode(model: Model, blob: Uint8Array): Section[] {
     const words: string[] = [];
     const seps: string[] = [];
     let ctxW = BOS;
-    let ctxS = BOS;
-    for (let i = 0; i <= nWords; i++) {
-      const [sep, cs] = readToken(dec, model.seps, byteTable, ctxS);
-      seps.push(sep);
-      ctxS = cs;
-      if (i < nWords) {
-        const [word, cw] = readToken(dec, stream, byteTable, ctxW);
-        words.push(word);
-        ctxW = cw;
-      }
+    for (let i = 0; i < nWords; i++) {
+      const [word, cw] = readToken(dec, stream, byteTable, ctxW);
+      words.push(word);
+      ctxW = cw;
+      seps.push(readToken(dec, model.seps, byteTable, model.sepContextFor(word))[0]);
     }
+    seps.push(readToken(dec, model.seps, byteTable, model.sepContextFor(null))[0]);
     out.push({ kind, text: detokenize({ words, seps }) });
   }
   return out;
@@ -151,10 +164,11 @@ export interface TokenCost {
 export function tokenCosts(model: Model, section: Section): TokenCost[] {
   const words = model.streamFor(section.kind);
   const byteTable = model.byteTable();
-  const toks = tokenize(section.text);
   const rows: TokenCost[] = [];
   const plan: Decision[] = [];
-  const cost = (stream: "word" | "sep", token: string, mark: number): void => {
+  const costed = (stream: "word" | "sep", target: Stream) => (token: string, ctx: number): number => {
+    const mark = plan.length;
+    const next = planToken(plan, target, byteTable, ctx, token);
     let bits = 0;
     let escapes = 0;
     for (let k = mark; k < plan.length; k++) {
@@ -163,19 +177,9 @@ export function tokenCosts(model: Model, section: Section): TokenCost[] {
     }
     const rung: Rung = escapes === 0 ? "context" : escapes === 1 ? "unigram" : "bytes";
     rows.push({ stream, token, bits, rung });
+    return next;
   };
-  let ctxW = BOS;
-  let ctxS = BOS;
-  for (let i = 0; i <= toks.words.length; i++) {
-    let mark = plan.length;
-    ctxS = planToken(plan, model.seps, byteTable, ctxS, toks.seps[i]);
-    cost("sep", toks.seps[i], mark);
-    if (i < toks.words.length) {
-      mark = plan.length;
-      ctxW = planToken(plan, words, byteTable, ctxW, toks.words[i]);
-      cost("word", toks.words[i], mark);
-    }
-  }
+  walkSection(model, section, costed("word", words), costed("sep", model.seps));
   return rows;
 }
 

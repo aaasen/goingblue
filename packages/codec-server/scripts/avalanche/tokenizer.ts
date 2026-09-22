@@ -5,16 +5,13 @@
  * inverse for any input. Separators are the literal text between matches rather than a pattern
  * of their own, which makes that guarantee structural.
  *
- * Keeping separators out of the word stream is the point: a single stream of word, space,
- * word, space puts a separator in every bigram context, and an order-1 model conditioned on
- * " " is just a unigram model.
- *
- * Word grammar: runs of letters and digits with internal apostrophes stay whole (Tonight's,
- * 70s, 4SM), any other single character is a token on its own except that a run of one
- * repeated punctuation character stays together (... and --).
+ * Words are runs of letters and digits with internal apostrophes (Tonight's, 70s, 4SM).
+ * Everything else, whitespace and punctuation alike, is separator, so ", " and ".\n\n" are
+ * separator tokens and the word stream sees only words. Word bigrams then skip over
+ * punctuation, and each separator is predicted from the word after it (see codec.ts).
  */
 
-const TOKEN_RE = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*|([^\p{L}\p{N}\s])\1*/gu;
+const WORD_RE = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
 
 export interface Tokens {
   words: string[];
@@ -25,7 +22,7 @@ export function tokenize(text: string): Tokens {
   const words: string[] = [];
   const seps: string[] = [];
   let pos = 0;
-  for (const m of text.matchAll(TOKEN_RE)) {
+  for (const m of text.matchAll(WORD_RE)) {
     seps.push(text.slice(pos, m.index));
     words.push(m[0]);
     pos = m.index + m[0].length;

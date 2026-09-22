@@ -32,10 +32,12 @@ describe("tokenizer", () => {
     for (const c of cases) expect(detokenize(tokenize(c))).toBe(c);
   });
 
-  it("keeps apostrophes inside words and splits punctuation runs", () => {
-    const t = tokenize("Tonight's slant-wise ... && 70s");
-    expect(t.words).toEqual(["Tonight's", "slant", "-", "wise", "...", "&&", "70s"]);
-    expect(t.seps).toHaveLength(t.words.length + 1);
+  it("keeps apostrophes inside words and puts punctuation in the separators", () => {
+    const text = "Tonight's slant-wise, and more.\n\nNext (one).";
+    const t = tokenize(text);
+    expect(t.words).toEqual(["Tonight's", "slant", "wise", "and", "more", "Next", "one"]);
+    expect(t.seps).toEqual(["", " ", "-", ", ", " ", ".\n\n", " (", ")."]);
+    expect(detokenize(t)).toBe(text);
   });
 });
 
@@ -68,6 +70,7 @@ describe("codec", () => {
         { kind: "highlights", text: "Completely novel words like Kokanee and Zymoetz with -12 °C and a\n\nparagraph break." },
         { kind: "snowpack-summary", text: "" },
         { kind: "problem", text: "\n" },
+        { kind: "problem", text: "...leading, trailing punctuation!! (and) \"quotes\" ..." },
       ],
       [],
     ];
