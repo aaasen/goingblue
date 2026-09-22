@@ -11,6 +11,9 @@
  *   kind  N  seps[0] words[0] seps[1] ... words[N-1] seps[N]
  * where kind is a symbol from the kind table and N is coded as a raw varint in the byte stream
  * ahead of the rANS body. Word and separator contexts restart at BOS for every section.
+ *
+ * A token walks the ladder in model.ts: context, unigram, then bytes. Each rung is entered by
+ * an ESC read from the rung above.
  */
 import { BOS, ESC, LIT_END, type Model, type Stream } from "./model.ts";
 import { Decoder, costBits, encode as ransEncode, type Decision, type Table } from "./rans.ts";
@@ -42,14 +45,14 @@ function getVarint(buf: Uint8Array, pos: number): [number, number] {
 
 function planToken(plan: Decision[], stream: Stream, byteTable: Table, ctx: number, token: string): number {
   const table = stream.contextTable(ctx);
-  const sid = stream.ids.get(token);
+  const sid = stream.vocab.ids.get(token);
   if (sid !== undefined && table.index.has(sid)) {
     plan.push([table, sid]);
     return sid;
   }
   plan.push([table, ESC]);
   const uni = stream.unigramTable();
-  if (sid !== undefined) {
+  if (sid !== undefined && uni.index.has(sid)) {
     plan.push([uni, sid]);
     return sid;
   }
@@ -61,9 +64,9 @@ function planToken(plan: Decision[], stream: Stream, byteTable: Table, ctx: numb
 
 function readToken(dec: Decoder, stream: Stream, byteTable: Table, ctx: number): [string, number] {
   let sid = dec.get(stream.contextTable(ctx));
-  if (sid !== ESC) return [stream.token(sid), sid];
+  if (sid !== ESC) return [stream.vocab.token(sid), sid];
   sid = dec.get(stream.unigramTable());
-  if (sid !== ESC) return [stream.token(sid), sid];
+  if (sid !== ESC) return [stream.vocab.token(sid), sid];
   const raw: number[] = [];
   for (;;) {
     const b = dec.get(byteTable);
@@ -132,6 +135,48 @@ export function decode(model: Model, blob: Uint8Array): Section[] {
     out.push({ kind, text: detokenize({ words, seps }) });
   }
   return out;
+}
+
+// What each token of a section cost. Re-walks the real encoder path, so these are the bits the
+// coder actually pays. `rung` names the ladder rung the token was coded on.
+export type Rung = "context" | "unigram" | "bytes";
+
+export interface TokenCost {
+  stream: "word" | "sep";
+  token: string;
+  bits: number;
+  rung: Rung;
+}
+
+export function tokenCosts(model: Model, section: Section): TokenCost[] {
+  const words = model.streamFor(section.kind);
+  const byteTable = model.byteTable();
+  const toks = tokenize(section.text);
+  const rows: TokenCost[] = [];
+  const plan: Decision[] = [];
+  const cost = (stream: "word" | "sep", token: string, mark: number): void => {
+    let bits = 0;
+    let escapes = 0;
+    for (let k = mark; k < plan.length; k++) {
+      bits += costBits(plan[k][0], plan[k][1]);
+      if (plan[k][1] === ESC && plan[k][0] !== byteTable) escapes++;
+    }
+    const rung: Rung = escapes === 0 ? "context" : escapes === 1 ? "unigram" : "bytes";
+    rows.push({ stream, token, bits, rung });
+  };
+  let ctxW = BOS;
+  let ctxS = BOS;
+  for (let i = 0; i <= toks.words.length; i++) {
+    let mark = plan.length;
+    ctxS = planToken(plan, model.seps, byteTable, ctxS, toks.seps[i]);
+    cost("sep", toks.seps[i], mark);
+    if (i < toks.words.length) {
+      mark = plan.length;
+      ctxW = planToken(plan, words, byteTable, ctxW, toks.words[i]);
+      cost("word", toks.words[i], mark);
+    }
+  }
+  return rows;
 }
 
 // Exact model cost of one section in bits, kind symbol included, without running the coder.

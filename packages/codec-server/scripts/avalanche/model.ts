@@ -1,21 +1,21 @@
 /**
- * Order-1 Markov model over the two token streams, with PPM-style escapes.
+ * Order-1 Markov model over word and separator streams, with PPM-style escapes.
  *
  * Coding a token is a three-level ladder. Each level is a real rANS table, so falling through
  * costs only the bits of the escape symbol:
  *
- *   context table   successors actually seen after this context, plus ESC
- *   unigram table   every symbol in the vocabulary, plus ESC
+ *   context table   successors seen after this context in this stream, plus ESC
+ *   unigram table   every token seen in this stream, plus ESC
  *   byte table      UTF-8 bytes of the literal, plus END
  *
  * Escape counts follow PPM method C: a context's escape weight is its number of distinct
- * successors. The unigram escape weight is the hapax count, a Good-Turing estimate of the chance
- * the next token is a word never seen. The bottom rung is over bytes, which makes the codec
- * total: any input round-trips.
+ * successors. A unigram table's escape weight is its hapax count, a Good-Turing estimate of the
+ * chance the next word is one it has never seen. The bottom rung is over bytes, which makes the
+ * codec total: any input round-trips.
  *
- * A Model is a set of word streams keyed by section kind: every kind gets its own vocabulary
- * and contexts. Separators and the byte literal table are shared, and a kind table codes which
- * section comes next.
+ * Every section kind gets its own word stream with its own vocabulary, contexts, and counts.
+ * Separators are one stream used by all sections, and a kind table codes which section comes
+ * next.
  *
  * Both sides build tables from the same stored counts in the same sorted order. That
  * determinism, not the counts themselves, is what keeps them in sync.
@@ -30,14 +30,9 @@ export const UNK = 2;
 const FIRST = 3;
 export const LIT_END = 256;
 
-export class Stream {
-  ids = new Map<string, number>();
-  tokens: string[] = [];
-  ctx = new Map<number, Map<number, number>>();
-  uni = new Map<number, number>();
-  escape = 1;
-  private cache = new Map<number, Table>();
-  private uniTable: Table | null = null;
+export class Vocab {
+  readonly ids = new Map<string, number>();
+  readonly tokens: string[] = [];
 
   intern(token: string): number {
     let id = this.ids.get(token);
@@ -53,10 +48,36 @@ export class Stream {
     return this.tokens[sid - FIRST];
   }
 
+  get size(): number {
+    return this.tokens.length;
+  }
+}
+
+// Escape weight for a unigram table: hapax count, at least 1.
+function hapaxEscape(counts: Map<number, number>): number {
+  let hapax = 0;
+  for (const n of counts.values()) if (n === 1) hapax++;
+  return Math.max(1, hapax);
+}
+
+function unigramTable(counts: Map<number, number>, escape: number): Table {
+  const items: [number, number][] = [...counts].sort((a, b) => a[0] - b[0]);
+  items.push([ESC, escape]);
+  return buildTable(items);
+}
+
+export class Stream {
+  readonly ctx = new Map<number, Map<number, number>>();
+  readonly uni = new Map<number, number>();
+  escape = 1;
+  readonly vocab = new Vocab();
+  private cache = new Map<number, Table>();
+  private uniTable: Table | null = null;
+
   observe(seq: string[]): void {
     let prev = BOS;
     for (const tok of seq) {
-      const sid = this.intern(tok);
+      const sid = this.vocab.intern(tok);
       let succ = this.ctx.get(prev);
       if (!succ) this.ctx.set(prev, (succ = new Map()));
       succ.set(sid, (succ.get(sid) ?? 0) + 1);
@@ -73,9 +94,7 @@ export class Stream {
         if (succ.size === 0) this.ctx.delete(c);
       }
     }
-    let hapax = 0;
-    for (const n of this.uni.values()) if (n === 1) hapax++;
-    this.escape = Math.max(1, hapax);
+    this.escape = hapaxEscape(this.uni);
     this.cache.clear();
     this.uniTable = null;
   }
@@ -84,9 +103,7 @@ export class Stream {
     let tbl = this.cache.get(ctxId);
     if (!tbl) {
       const succ = this.ctx.get(ctxId);
-      const items: [number, number][] = succ
-        ? [...succ].sort((a, b) => a[0] - b[0])
-        : [];
+      const items: [number, number][] = succ ? [...succ].sort((a, b) => a[0] - b[0]) : [];
       items.push([ESC, succ ? succ.size : 1]);
       tbl = buildTable(items);
       this.cache.set(ctxId, tbl);
@@ -95,20 +112,18 @@ export class Stream {
   }
 
   unigramTable(): Table {
-    if (!this.uniTable) {
-      const items: [number, number][] = [...this.uni].sort((a, b) => a[0] - b[0]);
-      items.push([ESC, this.escape]);
-      this.uniTable = buildTable(items);
-    }
+    if (!this.uniTable) this.uniTable = unigramTable(this.uni, this.escape);
     return this.uniTable;
   }
 
+  // The context to carry forward after emitting `token`.
   contextFor(token: string): number {
-    return this.ids.get(token) ?? UNK;
+    return this.vocab.ids.get(token) ?? UNK;
   }
 }
 
 const utf8 = new TextEncoder();
+
 export class Model {
   readonly streams = new Map<string, Stream>();
   readonly seps = new Stream();
@@ -177,13 +192,13 @@ export class Model {
     return this.byteTbl;
   }
 
-  // Rough ship weight: vocabulary entries and distinct bigram entries summed over streams.
+  // Rough ship weight: vocabulary entries and bigram entries summed over streams.
   stats(): { streams: number; wordVocab: number; wordContexts: number; wordBigrams: number } {
     let vocab = 0;
     let contexts = 0;
     let bigrams = 0;
     for (const s of this.streams.values()) {
-      vocab += s.tokens.length;
+      vocab += s.vocab.size;
       contexts += s.ctx.size;
       for (const succ of s.ctx.values()) bigrams += succ.size;
     }

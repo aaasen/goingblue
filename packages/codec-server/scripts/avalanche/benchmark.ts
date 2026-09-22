@@ -17,12 +17,12 @@ import { tokenize } from "./tokenizer.ts";
 // Compressed bytes that fit one satellite message on the tightest multi-message route.
 const MESSAGE_BYTES = 140;
 
-function arg(name: string, fallback: number): number {
+export function arg(name: string, fallback: number): number {
   const i = process.argv.indexOf(name);
   return i === -1 ? fallback : Number(process.argv[i + 1]);
 }
 
-function loadBulletins(): BulletinProse[] {
+export function loadBulletins(): BulletinProse[] {
   const db = openDb();
   const rows = db.prepare("SELECT json FROM products ORDER BY date_issued, id").all() as { json: string }[];
   db.close();
@@ -36,7 +36,7 @@ function loadBulletins(): BulletinProse[] {
   return out;
 }
 
-function split(docs: BulletinProse[], testFrac: number): { train: BulletinProse[]; test: BulletinProse[]; cutoff: string } {
+export function split(docs: BulletinProse[], testFrac: number): { train: BulletinProse[]; test: BulletinProse[]; cutoff: string } {
   const target = Math.round(docs.length * testFrac);
   const byTime = [...docs].sort((a, b) => (a.dateIssued < b.dateIssued ? 1 : -1));
   const cutoff = byTime[Math.max(0, Math.min(target, byTime.length) - 1)].dateIssued;
@@ -90,7 +90,7 @@ function main(): void {
       const stream = model.streamFor(s.kind);
       const toks = tokenize(s.text);
       tokens += toks.words.length;
-      for (const w of toks.words) if (!stream.ids.has(w)) oov++;
+      for (const w of toks.words) if (!stream.vocab.ids.has(w)) oov++;
       const acc = bySection.get(s.kind) ?? { n: 0, chars: 0, bits: 0 };
       acc.n++;
       acc.chars += s.text.length;
@@ -113,18 +113,17 @@ function main(): void {
 
   // Where the bytes of a bulletin go. Bytes are model bits / 8, so they exclude coder framing;
   // per bulletin = occurrences x bytes, since problems and advice repeat.
-  const kinds = [...bySection].sort((x, y) => y[1].bits - x[1].bits).map(([k]) => k);
   const totalBits = [...bySection.values()].reduce((a, b) => a + b.bits, 0);
+  const rows = [...bySection].sort((x, y) => y[1].bits - x[1].bits);
   console.log(`\nby section`);
   console.log(`  ${"section".padEnd(18)} ${"per doc".padStart(8)} ${"chars".padStart(6)} ${"bits/char".padStart(10)} ${"B/occur".padStart(8)} ${"B/doc".padStart(6)} ${"share".padStart(6)}`);
-  for (const kind of kinds) {
-    const a = bySection.get(kind)!;
+  for (const [kind, a] of rows) {
     console.log(
       `  ${kind.padEnd(18)} ${(a.n / test.length).toFixed(2).padStart(8)} ${(a.chars / a.n).toFixed(0).padStart(6)} ${(a.bits / a.chars).toFixed(3).padStart(10)}` +
       ` ${(a.bits / 8 / a.n).toFixed(1).padStart(8)} ${(a.bits / 8 / test.length).toFixed(1).padStart(6)} ${((a.bits / totalBits) * 100).toFixed(0).padStart(5)}%`,
     );
   }
-  console.log(`  ${"total".padEnd(18)} ${"".padStart(8)} ${"".padStart(6)} ${(totalBits / (raw)).toFixed(3).padStart(10)} ${"".padStart(8)} ${(totalBits / 8 / test.length).toFixed(1).padStart(6)}`);
+  console.log(`  ${"total".padEnd(18)} ${"".padStart(8)} ${"".padStart(6)} ${(totalBits / raw).toFixed(3).padStart(10)} ${"".padStart(8)} ${(totalBits / 8 / test.length).toFixed(1).padStart(6)}`);
 }
 
-main();
+if (process.argv[1] && /benchmark\.ts$/.test(process.argv[1])) main();
