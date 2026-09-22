@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  adjustPrecipPhase, fillCloudBand, rowsFromWindows, HOURS_PER_PERIOD,
+  adjustPrecipPhase, aggregateHourly, fillCloudBand, rowsFromWindows, HOURS_PER_PERIOD,
   type HourlyData, type Row,
 } from "../src/forecast.ts";
 import { CLOUD_BAND_LEVELS_HPA, WIND_LEVELS_HPA } from "@weather/protocol";
@@ -22,7 +22,7 @@ import { dbLocations, listCells, loadCell, modelElevations, openDb, windowTimes 
 export const DERIVE_SOURCE = "best_match";
 
 // The hourly variables the derivation pipeline consumes: everything adjustPrecipPhase and
-// rowsFromWindows read, plus the counters' direct accesses. eachForecast loads
+// rowsFromWindows/aggregateHourly read, plus the counters' direct accesses. eachForecast loads
 // ONLY these by default — corpus cells carry every collected series (~80), and JSON-parsing the
 // unused ones tripled scan time. IMPORTANT: a derive/analyze script that reads a variable not
 // listed here sees an absent column and silently counts nothing — add the variable here (or
@@ -149,24 +149,32 @@ export function tableOffsets(tables: CountedTable[]): { offsets: Record<string, 
 // meant nine identical aggregations per cell; they now share one, computed on FIRST USE and
 // memoized for the rest of the cell, so a counter that never asks pays nothing.
 //
-// Periods start at the cell's first LOCAL MIDNIGHT, the alignment layoutFor produces on the
-// wire, so every counter trains on the period boundaries the encoder emits.
+// There are two anchorings and they are not interchangeable — a period boundary in one does not
+// land where the other's does:
+//   `atMidnight` — periods from the cell's first LOCAL MIDNIGHT (freeze, gust, temp, air quality)
+//   `atRequest`  — periods from the request hour floored to the period (cloud, precip,
+//                  weathercode, both wind columns)
 export interface ResSlice { hpp: number; start: number; n: number; rows: Row[] }
 
 export interface CellCtx {
   hourly: HourlyData;
+  startHour: number;
   pos?: { lat: number; lon: number };
-  // Null when this cell has too few periods at that resolution to count, or has no position to
-  // take a UTC offset from.
+  // Null when this cell has too few periods at that resolution to count (or, for atMidnight,
+  // when the cell has no position to take a UTC offset from).
   atMidnight(res: number): ResSlice | null;
+  atRequest(res: number): ResSlice | null;
 }
 
 const N_RES_SLICES = 5;
 
-export function makeCellCtx(h: HourlyData, pos?: { lat: number; lon: number }): CellCtx {
+export function makeCellCtx(
+  h: HourlyData, startHour: number, pos?: { lat: number; lon: number },
+): CellCtx {
   const midnight: (ResSlice | null | undefined)[] = new Array(N_RES_SLICES);
+  const request: (ResSlice | null | undefined)[] = new Array(N_RES_SLICES);
   return {
-    hourly: h, pos,
+    hourly: h, startHour, pos,
     atMidnight(res) {
       const memo = midnight[res];
       if (memo !== undefined) return memo;
@@ -189,6 +197,19 @@ export function makeCellCtx(h: HourlyData, pos?: { lat: number; lon: number }): 
         }
       }
       midnight[res] = slice;
+      return slice;
+    },
+    atRequest(res) {
+      const memo = request[res];
+      if (memo !== undefined) return memo;
+      let slice: ResSlice | null = null;
+      if (h.time?.length) {
+        const hpp = HOURS_PER_PERIOD[res];
+        const start = Math.floor(startHour / hpp) * hpp;
+        const n = Math.floor(h.time.length / hpp);
+        if (n >= 2) slice = { hpp, start, n, rows: aggregateHourly(h, h.time, n, res, start) };
+      }
+      request[res] = slice;
       return slice;
     },
   };
@@ -282,10 +303,10 @@ export async function deriveCountsMulti(
   // trains off the live snapshots) means nothing to scan.
   const vars = counterVars(counters);
   if (vars.length === 0) return vecs;
-  await eachForecast((h, _startHour, _loc, pos) => {
+  await eachForecast((h, startHour, _loc, pos) => {
     // One context per cell: the aggregation every counter would otherwise redo is computed on
     // first use and shared by all of them.
-    const ctx = makeCellCtx(h, pos);
+    const ctx = makeCellCtx(h, startHour, pos);
     for (let i = 0; i < counters.length; i++) counters[i].countCell(ctx, adds[i]);
   }, "train", vars, shard);
   return vecs;

@@ -82,8 +82,9 @@ export function counter(): CellCounter {
     vars: ["cloud_cover_high", "cloud_cover_mid", "cloud_cover_low", ...CLOUD_FILL_OUTPUTS],
     countCell(ctx, add) {
       for (const res of SERVING_RES_IDXS) {
-        // Periods from the cell's first local midnight, aggregated once per cell and shared with
-        // every other counter.
+        // Periods anchored to the cell's first local midnight, aggregated once per cell and
+        // shared with every other counter that wants this anchoring — the alignment layoutFor
+        // produces, so training mirrors the wire's period boundaries.
         const slice = ctx.atMidnight(res);
         if (!slice) continue;
         // toFullPeriod fills cloud_band through repairCloudBand, so levels a center leaves

@@ -11,7 +11,7 @@ import { WIRE_CODEBOOKS, WIRE_VERSION } from "../src/index.js";
 // change breaks phones in the field and belongs to the next version. Old versions keep their
 // own digest on their codec-vN tag, so a version bump leaves this constant alone until the
 // tables actually change.
-const FROZEN_DIGEST = "d332b23a18d2b5d0";
+const FROZEN_DIGEST = "1a63eea8ec99a308";
 
 const digest = createHash("sha256").update(JSON.stringify(WIRE_CODEBOOKS)).digest("hex").slice(0, 16);
 
