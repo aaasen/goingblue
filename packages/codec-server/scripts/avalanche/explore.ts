@@ -3,10 +3,10 @@
  * individual tokens, then aggregates by category and lists the most expensive symbols. Same
  * split and model as benchmark.ts.
  *
- * Usage: pnpm avalanche-explore [--test-frac 0.2] [--top 30]
+ * Usage: pnpm avalanche-explore [--test-frac 0.2] [--top 30] [--word-order 2|3]
  */
 import { tokenCosts, type TokenCost } from "./codec.ts";
-import { Model } from "./model.ts";
+import { Model, WORD_ORDER } from "./model.ts";
 import { loadBulletins, split, arg } from "./benchmark.ts";
 
 const fmt = (n: number) => n.toLocaleString("en-US");
@@ -53,7 +53,7 @@ function main(): void {
   const top = arg("--top", 30);
   const docs = loadBulletins();
   const { train, test } = split(docs, testFrac);
-  const model = new Model();
+  const model = new Model(arg("--word-order", WORD_ORDER));
   for (const d of train) for (const s of d.sections) model.observe(s);
   model.finalize();
 

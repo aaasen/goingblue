@@ -5,11 +5,11 @@
  * a hash of the product id, so a bulletin's side of the split never changes as the archive
  * grows and two runs on different snapshots compare the same documents.
  *
- * Usage: pnpm avalanche-benchmark [--test-frac 0.2] [--min-count 1]
+ * Usage: pnpm avalanche-benchmark [--test-frac 0.2] [--min-count 1] [--word-order 2|3]
  */
 import { encode, decode, sectionBits } from "./codec.ts";
 import { openDb } from "./db.ts";
-import { Model } from "./model.ts";
+import { Model, WORD_ORDER } from "./model.ts";
 import { bulletinProse, isForecast, type BulletinProse } from "./text.ts";
 import { tokenize } from "./tokenizer.ts";
 
@@ -65,11 +65,13 @@ function main(): void {
   console.log(`  train ${fmt(train.length)} / test ${fmt(test.length)}, sampled by id hash`);
 
   const t0 = Date.now();
-  const model = new Model();
+  const wordOrder = arg("--word-order", WORD_ORDER);
+  console.log(`  word order ${wordOrder}`);
+  const model = new Model(wordOrder);
   for (const d of train) for (const s of d.sections) model.observe(s);
   model.finalize(minCount);
   const st = model.stats();
-  console.log(`\ntrained in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${st.streams} word streams, vocab ${fmt(st.wordVocab)}, ${fmt(st.wordBigrams)} bigrams over ${fmt(st.wordContexts)} contexts, ${fmt(st.wordTrigrams)} trigrams over ${fmt(st.wordContexts2)} pairs`);
+  console.log(`\ntrained in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${st.streams} word streams, vocab ${fmt(st.wordVocab)}, ` + st.entries.map((n, k) => `order ${k + 1}: ${fmt(n)} entries over ${fmt(st.contexts[k])} contexts`).join(", "));
 
   const t1 = Date.now();
   let raw = 0;

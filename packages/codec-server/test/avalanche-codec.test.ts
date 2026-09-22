@@ -112,12 +112,13 @@ describe("codec", () => {
   });
 });
 
-describe("order 2", () => {
-  it("uses the pair context for seen trigrams and falls back on unseen pairs", () => {
+describe("context orders", () => {
+  it("codes seen phrases on the highest order and falls back on unseen contexts", () => {
     const m = trained();
     const seen = { kind: "problem", text: "Wind slabs remain reactive on north through east aspects" };
     const rungs = tokenCosts(m, seen).filter((r) => r.stream === "word").map((r) => r.rung);
-    expect(rungs.slice(2)).toEqual(rungs.slice(2).map(() => "order2"));
+    // From the third word on, the previous two words plus the section start are all seen.
+    expect(rungs.slice(2)).toEqual(rungs.slice(2).map(() => "order3"));
     // Separators between two seen words use the pair of words around them; the trailing one
     // pairs the last word with END, which this text never trained.
     const seps = tokenCosts(m, seen).filter((r) => r.stream === "sep").map((r) => r.rung);
