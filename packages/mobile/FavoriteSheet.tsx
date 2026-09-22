@@ -84,7 +84,7 @@ export default function FavoriteSheet({ coord = null, initialName, favorites, co
               onSubmitEditing={() => nameRef.current?.focus()}
             />
             {taken && (
-              <Text style={styles.taken}>Favorite "{taken.name}" already exists at this location</Text>
+              <Text style={styles.taken}>Favorite “{taken.name}” already exists at this location</Text>
             )}
             <Text style={styles.label}>Name</Text>
             <TextInput

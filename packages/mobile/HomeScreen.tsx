@@ -1561,8 +1561,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const onFavoritesSort = useStableHandler(chooseFavoritesSort);
   const onFavoritesReverse = useStableHandler(reverseFavoritesSort);
   // Asks first: a favorite's name goes with it. The list closes with its last favorite, since
-  // the row that opens it goes too.
-  const onDeleteFavorites = useStableHandler((doomed: Favorite[]) => {
+  // the row that opens it goes too. onDeleted runs only on confirmation, so a cancelled delete
+  // leaves the list as it was.
+  const onDeleteFavorites = useStableHandler((doomed: Favorite[], onDeleted: () => void) => {
     const noun = doomed.length === 1 ? 'favorite' : 'favorites';
     Alert.alert(`Delete ${doomed.length} ${noun}?`, undefined, [
       { text: 'Cancel', style: 'cancel' },
@@ -1572,6 +1573,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           const next = doomed.reduce<Favorite[]>((list, f) => removeFavorite(list, f), favorites);
           updateFavorites(next);
           if (next.length === 0) setFavoritesOpen(false);
+          onDeleted();
         },
       },
     ]);
@@ -1939,7 +1941,7 @@ const FavoritesModal = memo(function FavoritesModal({
   onSort: (sort: FavoriteSort) => void; onReverse: (reversed: boolean) => void;
   onPick: (f: Favorite) => void; onAdd: (name: string, coord: LatLon) => void;
   onEdit: (original: Favorite, name: string, coord: LatLon) => void;
-  onDelete: (favorites: Favorite[]) => void; onClose: () => void;
+  onDelete: (favorites: Favorite[], onDeleted: () => void) => void; onClose: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -1982,7 +1984,7 @@ const FavoritesModal = memo(function FavoritesModal({
         <View style={styles.savedActions}>
           {editing ? (
             <TouchableOpacity
-              onPress={() => onDelete(selectedFavorites)}
+              onPress={() => onDelete(selectedFavorites, finish)}
               disabled={selectedFavorites.length === 0}
               hitSlop={hitSlop}
               accessibilityRole="button"
