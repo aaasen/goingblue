@@ -40,7 +40,7 @@ import { DEVICES, deviceCode, platformCode, type Device } from './devices';
 import { formatCoords, formatLatLon, type LatLon, parseLatLon } from './coords';
 import { formatUtm } from './utm';
 import {
-  type Favorite, type FavoriteSort, favoriteKey, findFavorite, kmBetween, loadFavorites, pastForecastPoints, removeFavorite,
+  type Favorite, type FavoriteSort, editFavorite, favoriteKey, findFavorite, kmBetween, loadFavorites, pastForecastPoints, removeFavorite,
   saveFavorites, sortFavorites, touchFavorite, upsertFavorite,
 } from './favorites';
 import { palette, SEGMENT_PROPS, SWITCH_PROPS } from './palette';
@@ -1578,6 +1578,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const onSaveFavorite = useStableHandler((name: string, coord: LatLon) => {
     updateFavorites(upsertFavorite(favorites, coord, name));
   });
+  const onEditFavorite = useStableHandler((original: Favorite, name: string, coord: LatLon) => {
+    updateFavorites(editFavorite(favorites, original, coord, name));
+  });
   const onRemoveFavorite = useStableHandler(() => {
     if (mapCoord) updateFavorites(removeFavorite(favorites, mapCoord));
   });
@@ -1821,7 +1824,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         sorts={favoriteSorts} sort={shownFavoritesSort} reversed={favoritesSortReversed}
         gpsCoords={gpsCoords} units={units} coordFormat={coordFormat}
         onSort={onFavoritesSort} onReverse={onFavoritesReverse}
-        onPick={onPickFavorite} onAdd={onSaveFavorite} onDelete={onDeleteFavorites} onClose={onCloseFavorites}
+        onPick={onPickFavorite} onAdd={onSaveFavorite} onEdit={onEditFavorite} onDelete={onDeleteFavorites} onClose={onCloseFavorites}
       />
 
       <InfoModal visible={priorityInfo} title="Fill Priority" onClose={() => setPriorityInfo(false)}>
@@ -1919,23 +1922,27 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 // The selection is kept here so that a tap re-renders the list and not the screen under it.
 const FavoritesModal = memo(function FavoritesModal({
   visible, favorites, current, sorts, sort, reversed, gpsCoords, units, coordFormat,
-  onSort, onReverse, onPick, onAdd, onDelete, onClose,
+  onSort, onReverse, onPick, onAdd, onEdit, onDelete, onClose,
 }: {
   visible: boolean; favorites: Favorite[]; current: Favorite | null;
   sorts: { value: FavoriteSort; label: string }[]; sort: FavoriteSort; reversed: boolean;
   gpsCoords: LatLon | null; units: UnitPrefs; coordFormat: CoordFormat;
   onSort: (sort: FavoriteSort) => void; onReverse: (reversed: boolean) => void;
   onPick: (f: Favorite) => void; onAdd: (name: string, coord: LatLon) => void;
+  onEdit: (original: Favorite, name: string, coord: LatLon) => void;
   onDelete: (favorites: Favorite[]) => void; onClose: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
+  // The favorite whose ⓘ opened the sheet.
+  const [target, setTarget] = useState<Favorite | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  // Neither an edit nor an add outlasts the list being open.
+  // Nothing in progress outlasts the list being open.
   useEffect(() => {
     if (visible) return;
     setEditing(false);
     setAdding(false);
+    setTarget(null);
     setSelected(new Set());
   }, [visible]);
   // A selection holds only what is listed, so a deleted favorite saved again doesn't arrive selected.
@@ -2034,13 +2041,31 @@ const FavoritesModal = memo(function FavoritesModal({
               accessibilityRole={editing ? 'checkbox' : 'button'}
               accessibilityState={editing ? { checked: isSelected } : { selected: f === current }}
             >
-              {editing && <View style={styles.favoriteItemSelect}><SelectMark selected={isSelected} color={palette.textFaint} /></View>}
+              {/* Laid out like the Wi-Fi picker: a leading slot that holds the check on the
+                  favorite the pin is on (or the selection mark while editing), the name, and a
+                  trailing ⓘ that opens the favorite for editing. The slot is always there so
+                  names line up. */}
+              <View style={styles.favoriteItemLead}>
+                {editing
+                  ? <SelectMark selected={isSelected} color={palette.textFaint} />
+                  : f === current && <Ionicons name="checkmark" size={20} color={palette.link} />}
+              </View>
               <Text style={styles.favoriteItemName} numberOfLines={1}>{f.name}</Text>
               {/* The distance is what the order is made of, so it shows only in that order. */}
               {sort === 'distance' && gpsCoords != null && (
                 <Text style={styles.favoriteItemDistance}>{distanceLabel(kmBetween(gpsCoords, f), units)}</Text>
               )}
-              {f === current && <Ionicons name="checkmark" size={20} color={palette.link} style={styles.favoriteItemCheck} />}
+              {!editing && (
+                <TouchableOpacity
+                  style={styles.favoriteItemInfo}
+                  onPress={() => setTarget(f)}
+                  hitSlop={hitSlop}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${f.name}`}
+                >
+                  <Ionicons name="information-circle-outline" size={22} color={palette.link} />
+                </TouchableOpacity>
+              )}
             </TouchableOpacity>
           );
         })}
@@ -2051,6 +2076,15 @@ const FavoritesModal = memo(function FavoritesModal({
           coordFormat={coordFormat}
           onSave={(name, coord) => { onAdd(name, coord); setAdding(false); }}
           onClose={() => setAdding(false)}
+        />
+      )}
+      {target && (
+        <FavoriteSheet
+          coord={target}
+          initialName={target.name}
+          coordFormat={coordFormat}
+          onSave={(name, coord) => { onEdit(target, name, coord); setTarget(null); }}
+          onClose={() => setTarget(null)}
         />
       )}
     </InfoModal>
@@ -2790,8 +2824,9 @@ const styles = StyleSheet.create({
   favoriteItemBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule },
   favoriteItemName: { flex: 1, fontSize: 16, color: palette.text },
   favoriteItemDistance: { marginLeft: 12, fontSize: 15, color: palette.textSecondary, fontVariant: ['tabular-nums'] },
-  favoriteItemCheck: { marginLeft: 10 },
-  favoriteItemSelect: { marginRight: 12 },
+  // Wide enough for the check or the selection mark, so the names sit in one column either way.
+  favoriteItemLead: { width: 32, alignItems: 'flex-start', justifyContent: 'center' },
+  favoriteItemInfo: { marginLeft: 12 },
   favoriteSort: { paddingHorizontal: 16, paddingTop: 12 },
   favoriteSortRow: { flexDirection: 'row', alignItems: 'center' },
   favoriteSortControl: { flex: 1 },
