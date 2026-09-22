@@ -27,7 +27,7 @@ import {
   makeBitSink, makeBitSource, type CodeBook,
 } from "./entropy.js";
 
-export const WIRE_VERSION = 5;
+export const WIRE_VERSION = 4;
 
 // Duration-first fill: the user requests a duration in days and the server fills the message
 // budget by refining days from the front of the window (see layout.ts).
