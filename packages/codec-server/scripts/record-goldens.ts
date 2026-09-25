@@ -105,7 +105,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 let k = 0;
 for (const site of SITES) {
   for (const variant of VARIANTS) {
-    const request = `v${version} ${site.loc} z:${site.z} ${variant.tokens} u:${ACCOUNT_TOKEN} k:${k} t:${startEpochHour}`;
+    const request = `v${version} ${site.loc} f:w z:${site.z} ${variant.tokens} u:${ACCOUNT_TOKEN} k:${k} t:${startEpochHour}`;
     k = (k + 1) % 128;
     recording = {};
     const params = parseRequest(request);

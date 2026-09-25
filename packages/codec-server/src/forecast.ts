@@ -1100,7 +1100,12 @@ export function toFullPeriod(r: Row, vars: ReadonlySet<Variable>, modelKey: stri
   return p;
 }
 
+export type ForecastKind = "weather" | "avalanche";
+
 export interface ForecastParams {
+  // What the request asks for (`f:`): a weather forecast or the avalanche bulletin for the
+  // location.
+  kind: ForecastKind;
   locationIdx: number;
   lat?: number;
   lon?: number;
@@ -1145,6 +1150,14 @@ export interface ForecastParams {
   errors: string[];
 }
 
+// `f:` token values → forecast kinds.
+const KIND_TOKENS: Record<string, ForecastKind> = {
+  w: "weather", a: "avalanche",
+};
+
+// Tokens that only configure a weather forecast, rejected in an avalanche request.
+const WEATHER_KEYS = ["p", "z", "m", "v", "w"];
+
 // `p:` token values → priority modes; a missing or unknown token means Auto.
 const MODE_TOKENS: Record<string, number> = {
   d: MODE_DETAIL, a: MODE_AUTO, r: MODE_RANGE,
@@ -1152,6 +1165,7 @@ const MODE_TOKENS: Record<string, number> = {
 
 export function parseRequest(body: string): ForecastParams {
   const words = body.toLowerCase().trim().split(/\s+/);
+  let kind: ForecastKind = "weather"; // from `f:`; required
   let locationIdx = 0;
   let lat: number | undefined;
   let lon: number | undefined;
@@ -1166,7 +1180,7 @@ export function parseRequest(body: string): ForecastParams {
   let decoderVersion: number | null = null; // set from a `vN` token; required, no default
   let userToken: string | null = null; // set from a `u:` token in the request
   const errors: string[] = []; // validation problems; non-empty rejects the request
-  const seen = new Set<string>(); // request keys encountered, for the required-key check
+  const seen = new Set<string>(); // known request keys encountered, for the per-kind key checks
   let code = 0; // client message code (`k:` token); echoed in the response so the client can
                 // match it to the stored request and recover lat/lon/models/vars/duration
   let startEpochHour = NaN; // request time (`t:`, UTC hours since epoch); see below
@@ -1190,7 +1204,11 @@ export function parseRequest(body: string): ForecastParams {
     if (colonIdx !== -1) {
       const key = word.slice(0, colonIdx);
       const val = word.slice(colonIdx + 1);
-      if (key === "l") {
+      if (key === "f") {
+        seen.add(key);
+        if (val in KIND_TOKENS) kind = KIND_TOKENS[val];
+        else errors.push(`invalid forecast type "f:${val}"`);
+      } else if (key === "l") {
         if (val === "current" || val === "here") {
           locationIdx = 0;
         } else if (val in LOCATION_NAME_TO_IDX) {
@@ -1236,6 +1254,7 @@ export function parseRequest(body: string): ForecastParams {
       } else if (key === "w") {
         // Pressure-level wind: the WIND_LEVELS_HPA ladder indices to carry (`w:234` = 500/600/
         // 700 hPa). Optional: nothing is on without this token.
+        seen.add(key);
         if (val === "") errors.push('invalid wind levels "w:"');
         for (const ch of val) {
           const level = windLevelVar(ch);
@@ -1247,6 +1266,7 @@ export function parseRequest(body: string): ForecastParams {
         // from the group table itself, so a group added there can't be silently unparseable here.
         // Comma-separated and long-form protocol variable names stay accepted for requests
         // produced by older clients.
+        seen.add(key);
         const requestedVars = COMPACT_VAR_CODES.test(val) ? [...val] : val.split(",");
         for (const v of requestedVars) {
           const variable = VAR_CODES[
@@ -1281,10 +1301,16 @@ export function parseRequest(body: string): ForecastParams {
     }
   }
 
-  // Required components: everything the app always sends (HomeScreen's buildMsg). A location is
-  // either coordinates or a named `l:`; the rest must each be present.
-  for (const key of ["p", "z", "m", "d", "u", "k", "t"]) {
+  // Required components: everything the app always sends for the kind (HomeScreen's buildMsg).
+  // A location is either coordinates or a named `l:`; the rest must each be present.
+  const required = kind === "weather" ? ["f", "p", "z", "m", "d", "u", "k", "t"] : ["f", "d", "u", "k", "t"];
+  for (const key of required) {
     if (!seen.has(key)) errors.push(`missing ${key}:`);
+  }
+  if (kind === "avalanche") {
+    for (const key of WEATHER_KEYS) {
+      if (seen.has(key)) errors.push(`${key}: not allowed in an avalanche request`);
+    }
   }
   if (locationIdx === 0 && (lat === undefined || lon === undefined)) {
     errors.push("missing coordinates");
@@ -1306,7 +1332,7 @@ export function parseRequest(body: string): ForecastParams {
   // route's limit and so the safe reading of an unidentified sender.
   const maxChars = maxCharsFor(device ?? "s", messages, WIRE_HEADER_CHARS);
 
-  return { locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, vars, maxChars, alphabet, device: device ?? undefined, platform: platform ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
+  return { kind, locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, vars, maxChars, alphabet, device: device ?? undefined, platform: platform ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
 }
 
 // What a request asked for, in names, for the gateway to record (see `X-Request-Shape` in
@@ -1318,9 +1344,11 @@ export interface RequestShape {
   lat?: number;
   lon?: number;
   loc: string;
-  mode: string;
-  models: string[];
-  vars: string[];
+  kind: ForecastKind;
+  // The weather options, absent from an avalanche request.
+  mode?: string;
+  models?: string[];
+  vars?: string[];
   // Cap on the encoded reply, absent on routes without one (internet, d:d): "no cap" is the
   // absence of a number, and the UNCAPPED_MAX_CHARS sentinel would overflow the gateway's
   // integer column.
@@ -1357,12 +1385,15 @@ export function describeRequest(params: ForecastParams): RequestShape {
     ...(lat != null ? { lat: coarse(lat) } : {}),
     ...(lon != null ? { lon: coarse(lon) } : {}),
     loc: IDX_TO_LOCATION_NAME[params.locationIdx] ?? "current",
-    mode: MODE_NAMES[params.mode] ?? "auto",
-    models: Object.keys(BIT_TO_MODEL_NAME)
-      .map(Number)
-      .filter((bit) => params.modelsMask & (1 << bit))
-      .map((bit) => BIT_TO_MODEL_NAME[bit]),
-    vars: VARIABLES.filter((v) => params.vars.has(v)),
+    kind: params.kind,
+    ...(params.kind === "weather" ? {
+      mode: MODE_NAMES[params.mode] ?? "auto",
+      models: Object.keys(BIT_TO_MODEL_NAME)
+        .map(Number)
+        .filter((bit) => params.modelsMask & (1 << bit))
+        .map((bit) => BIT_TO_MODEL_NAME[bit]),
+      vars: VARIABLES.filter((v) => params.vars.has(v)),
+    } : {}),
     ...(params.maxChars !== UNCAPPED_MAX_CHARS ? { maxChars: params.maxChars } : {}),
     messages: params.messages,
     ...(params.device ? { device: params.device } : {}),

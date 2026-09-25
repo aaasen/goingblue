@@ -58,6 +58,10 @@ async function encode(c: Context) {
     return c.text(`invalid request: ${params.errors.join("; ")}`, 400);
   }
 
+  if (params.kind === "avalanche") {
+    return c.text("avalanche forecasts are not supported yet", 400);
+  }
+
   // Decided before the fetch: an off-axis start can't be served at any layout, so the upstream
   // call would only be spent on a failure.
   const window = requestWindow(params.startEpochHour);

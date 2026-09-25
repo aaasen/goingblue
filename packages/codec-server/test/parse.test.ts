@@ -337,7 +337,7 @@ describe("parseRequest", () => {
   // and anything unrecognized in a known key is an error (see the gateway's malformed reply).
   describe("strict validation", () => {
     const token = newToken();
-    const full = `v${WIRE_VERSION} 63.0630,-151.0810 p:a z:-9 m:best d:s u:${token} k:1 t:480000`;
+    const full = `v${WIRE_VERSION} 63.0630,-151.0810 f:w p:a z:-9 m:best d:s u:${token} k:1 t:480000`;
 
     it("accepts a complete app-built request", () => {
       expect(parseRequest(full).errors).toEqual([]);
@@ -349,7 +349,7 @@ describe("parseRequest", () => {
 
     it("requires every always-sent token", () => {
       expect(parseRequest("").errors).toEqual(expect.arrayContaining(
-        ["missing p:", "missing z:", "missing m:", "missing d:", "missing u:", "missing k:", "missing t:"]));
+        ["missing f:", "missing p:", "missing z:", "missing m:", "missing d:", "missing u:", "missing k:", "missing t:"]));
     });
 
     it("requires coordinates unless a named location is given", () => {
@@ -357,6 +357,36 @@ describe("parseRequest", () => {
       expect(parseRequest("l:14k").errors).not.toContain("missing coordinates");
       expect(parseRequest("63.0630,-151.0810").errors).not.toContain("missing coordinates");
       expect(parseRequest("l:nowhere").errors).toContain('unknown location "nowhere"');
+    });
+
+    it("parses the forecast type", () => {
+      expect(parseRequest(full).kind).toBe("weather");
+      expect(parseRequest("f:a").kind).toBe("avalanche");
+      expect(parseRequest("f:x").errors).toContain('invalid forecast type "f:x"');
+    });
+
+    describe("avalanche requests", () => {
+      const avalanche = `v${WIRE_VERSION} 50.1163,-122.9574 f:a d:s u:${token} k:2 t:480000`;
+
+      it("accepts a complete app-built request", () => {
+        expect(parseRequest(avalanche).errors).toEqual([]);
+        expect(parseRequest(`${avalanche} o:i n:2`).errors).toEqual([]);
+      });
+
+      it("requires only the tokens an avalanche request sends", () => {
+        const errors = parseRequest("f:a").errors;
+        expect(errors).toEqual(expect.arrayContaining(
+          ["missing d:", "missing u:", "missing k:", "missing t:", "missing coordinates"]));
+        for (const key of ["p", "z", "m"]) expect(errors).not.toContain(`missing ${key}:`);
+      });
+
+      it("rejects the weather options", () => {
+        for (const tok of ["p:a", "z:-8", "m:best", "v:pcf", "w:234"]) {
+          const key = tok.slice(0, 1);
+          expect(parseRequest(`${avalanche} ${tok}`).errors, tok)
+            .toEqual([`${key}: not allowed in an avalanche request`]);
+        }
+      });
     });
 
     it("still ignores extra bare words and unknown keys (gateway-appended text)", () => {
@@ -377,6 +407,13 @@ describe("describeRequest", () => {
     expect(describe_("p:a").mode).toBe("auto");
     expect(describe_("p:r").mode).toBe("range");
     expect(describe_("").mode).toBe("auto"); // the default, not an absent value
+  });
+
+  it("names the forecast type, and the weather options only for a weather request", () => {
+    expect(describe_("f:w").kind).toBe("weather");
+    const shape = describe_("f:a 50.1163,-122.9574");
+    expect(shape).toMatchObject({ kind: "avalanche", lat: 50.12, lon: -122.96 });
+    for (const key of ["mode", "models", "vars"]) expect(shape).not.toHaveProperty(key);
   });
 
   it("names the requested models", () => {

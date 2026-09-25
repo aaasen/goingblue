@@ -449,10 +449,12 @@ const DEFAULT_GROUPS = new Set<string>();
 // `z:` is the local-midnight UTC offset the period grid aligns to. `u:` carries the account token
 // so the server can attribute the request to the user. `o:` is the operating system, for the
 // server's records. `k:` is the message code the slim response echoes so the client can recover
-// the request context (see cache.ts).
+// the request context (see cache.ts). `f:w`
+// marks it a weather request.
 function buildMsg(token: string, coords: { lat: number; lon: number } | null, mode: number, model: string, vars: ReadonlySet<Variable>, device: Device, messages: number, code: number, startEpochHour: number): string {
   const parts: string[] = [`v${WIRE_VERSION}`];
   if (coords) parts.push(`${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`);
+  parts.push('f:w');
   parts.push(`p:${PRIORITIES.find((m) => m.value === mode)!.token}`);
   parts.push(`z:${requestOffsetHours(coords, startEpochHour)}`);
   parts.push(`m:${model}`);

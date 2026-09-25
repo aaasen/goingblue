@@ -65,6 +65,7 @@ export function requestText(shot: Shot, index: number, startEpochHour: number): 
   const { model, vars } = shot.requests[index];
   const allVars = new Set(vars);
   const parts = [`v${WIRE_VERSION}`, `${shot.lat.toFixed(4)},${shot.lon.toFixed(4)}`];
+  parts.push('f:w');
   parts.push(`p:${MODE_TOKEN[shot.mode]}`);
   parts.push(`z:${offsetHoursAt(shot.lat, shot.lon, startEpochHour * 3600000)}`);
   parts.push(`m:${model}`);
