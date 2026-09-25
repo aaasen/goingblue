@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { AVALANCHE_PIECES } from '@weather/protocol';
 import {
-  dangerCell, dayLabel, likelihoodScale, pieceFeatures, sizeScale, stampLabel,
+  dangerCell, dayLabel, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -63,6 +64,20 @@ describe('pieces', () => {
     piece(1, ['Sky Pilot'], [-123.5, 49.4, -123, 49.8]),
     piece(2, ['Kitimat', 'Rupert', 'Shames'], [-130, 54, -128, 55]),
   ];
+
+  it('finds the piece a point falls in, holes excluded', () => {
+    const square = (w: number, s: number, e: number, n: number): [number, number][] =>
+      [[w, s], [e, s], [e, n], [w, n], [w, s]];
+    const donut = { ...piece(3, ['Donut'], [0, 0, 10, 10]), polygons: [[square(0, 0, 10, 10), square(4, 4, 6, 6)]] };
+    expect(pieceAt(2, 2, [donut])?.names).toEqual(['Donut']);
+    expect(pieceAt(5, 5, [donut])).toBeNull();
+    expect(pieceAt(20, 20, [donut])).toBeNull();
+  });
+
+  it('places real points in the shipped pieces', () => {
+    expect(pieceAt(50.12, -122.95, AVALANCHE_PIECES)?.names).toEqual(['Spearhead']);
+    expect(pieceAt(49.28, -123.12, AVALANCHE_PIECES)).toBeNull();
+  });
 
   it('turns pieces into MultiPolygon features', () => {
     expect(pieceFeatures(pieces).features[2]).toMatchObject({ properties: { id: 2 }, geometry: { type: 'MultiPolygon' } });

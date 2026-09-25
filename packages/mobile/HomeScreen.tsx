@@ -9,7 +9,7 @@ import * as Location from 'expo-location';
 import * as Network from 'expo-network';
 import { pageInsets } from './insets';
 import AvalancheForecastView from './AvalancheScreen';
-import { pieceFeatures } from './avalancheDisplay';
+import { pieceAt, pieceFeatures } from './avalancheDisplay';
 import sampleAvalanche from './fixtures/avalanche/sea-to-sky-2026-03-01.json';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -22,7 +22,7 @@ import {
   predictCenter, estimatedLastFullRunMs, fillSlotsFor, multiMessageOffered, startDatetime,
   MODELS as MODEL_SPECS,
   AVALANCHE_PIECES,
-  type RequestContext, type Center, type ForecastMessage, type ModelSpec, type AvalancheForecast,
+  type RequestContext, type Center, type ForecastMessage, type ModelSpec, type AvalancheForecast, type AvalanchePiece,
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import {
@@ -1017,6 +1017,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const coordsValid = resolvedCoords != null
     && isFinite(resolvedCoords.lat) && isFinite(resolvedCoords.lon);
   const mapCoord = coordsValid ? resolvedCoords : null;
+  const zonePiece = useMemo(
+    () => (mapCoord ? pieceAt(mapCoord.lat, mapCoord.lon, AVALANCHE_PIECES) : null),
+    [mapCoord?.lat, mapCoord?.lon],
+  );
   const currentFavorite = useMemo(() => findFavorite(favorites, mapCoord) ?? null, [favorites, mapCoord]);
   // What the selected option resolves to here, so the choice isn't abstract: "Auto" means a 2km
   // model in the Alps and a 9km one over the Alaska Range, and the US and Canadian stacks drop to
@@ -1765,6 +1769,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           onPickFavorite={onPickFavorite} onSaveFavorite={onSaveFavorite} onRemoveFavorite={onRemoveFavorite}
           onOpenFavorites={onOpenFavorites} pastPoints={pastPoints} onPickPast={onPick}
           zones={tab === 'avalanche' ? AVALANCHE_ZONES : undefined}
+          zone={tab === 'avalanche' && mapCoord ? zonePiece : undefined}
         />
       </View>
 
@@ -2341,7 +2346,7 @@ function useStableHandler<A extends unknown[], R>(fn: (...args: A) => R): (...ar
 const LocationPicker = memo(function LocationPicker({
   mapCoord, onPick, gpsCoords, following, onLocate, locating, coordsField, coordsInvalid, onCoordsText,
   coordFormat, favorites, currentFavorite, onPickFavorite, onSaveFavorite, onRemoveFavorite, onOpenFavorites,
-  pastPoints, onPickPast, zones,
+  pastPoints, onPickPast, zones, zone,
 }: {
   mapCoord: { lat: number; lon: number } | null; onPick: (c: { lat: number; lon: number }) => void;
   gpsCoords: { lat: number; lon: number } | null; following: boolean; onLocate: () => Promise<{ lat: number; lon: number } | null>; locating: boolean;
@@ -2350,76 +2355,84 @@ const LocationPicker = memo(function LocationPicker({
   onSaveFavorite: (name: string, coord: LatLon) => void; onRemoveFavorite: () => void; onOpenFavorites: () => void;
   pastPoints: readonly { lat: number; lon: number }[]; onPickPast: (c: { lat: number; lon: number }) => void;
   zones?: GeoJSON.FeatureCollection;
+  // The forecast piece under the pin, named in a hint under the rows the way the model selector
+  // names its models; null when the pin is outside every piece, and no hint when undefined.
+  zone?: AvalanchePiece | null;
 }) {
   return (
     <>
-    <LocationMap
-      coord={mapCoord}
-      onPick={onPick}
-      height={BUILDER_MAP_HEIGHT}
-      userCoord={gpsCoords}
-      following={following}
-      onLocate={onLocate}
-      locating={locating}
-      favorites={favorites}
-      onPickFavorite={onPickFavorite}
-      currentFavorite={currentFavorite}
-      onSaveFavorite={onSaveFavorite}
-      onRemoveFavorite={onRemoveFavorite}
-      pastPoints={pastPoints}
-      onPickPast={onPickPast}
-      coordFormat={coordFormat}
-      offlineMaps
-      zones={zones}
-    />
-    <View style={styles.coordsRows}>
-      <View style={styles.coordRow}>
-        <Text style={styles.coordLabel}>Coordinates</Text>
-        {/* Editing pins. The first keystroke arrives with the field's whole text, fix
-            included, so nudging the current location's digits works as expected. */}
-        <TextInput
-          style={[styles.coordInput, coordsInvalid && styles.coordInputInvalid]}
-          value={coordsField}
-          onChangeText={onCoordsText}
-          placeholder="lat, lon or UTM"
-          placeholderTextColor={palette.textTertiary}
-          keyboardType="numbers-and-punctuation"
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="done"
-          accessibilityLabel="Coordinates"
-        />
-        {/* The one way to take the pin off: empties the field and leaves the location
-            pinned at nothing. Pasted coordinates are long and the keyboard's delete key
-            clears them one character at a time. Always laid out and merely hidden when
-            there is nothing to clear: the icon is taller than the text line, so adding and
-            removing it would change the row's height. */}
-        <TouchableOpacity
-          style={[styles.coordClear, coordsField.length === 0 && styles.coordClearHidden]}
-          onPress={() => onCoordsText('')}
-          disabled={coordsField.length === 0}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityRole="button"
-          accessibilityLabel="Clear coordinates"
-          accessibilityElementsHidden={coordsField.length === 0}
-        >
-          <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
-        </TouchableOpacity>
+      <LocationMap
+        coord={mapCoord}
+        onPick={onPick}
+        height={BUILDER_MAP_HEIGHT}
+        userCoord={gpsCoords}
+        following={following}
+        onLocate={onLocate}
+        locating={locating}
+        favorites={favorites}
+        onPickFavorite={onPickFavorite}
+        currentFavorite={currentFavorite}
+        onSaveFavorite={onSaveFavorite}
+        onRemoveFavorite={onRemoveFavorite}
+        pastPoints={pastPoints}
+        onPickPast={onPickPast}
+        coordFormat={coordFormat}
+        offlineMaps
+        zones={zones}
+      />
+      <View style={styles.coordsRows}>
+        <View style={styles.coordRow}>
+          <Text style={styles.coordLabel}>Coordinates</Text>
+          {/* Editing pins. The first keystroke arrives with the field's whole text, fix
+              included, so nudging the current location's digits works as expected. */}
+          <TextInput
+            style={[styles.coordInput, coordsInvalid && styles.coordInputInvalid]}
+            value={coordsField}
+            onChangeText={onCoordsText}
+            placeholder="lat, lon or UTM"
+            placeholderTextColor={palette.textTertiary}
+            keyboardType="numbers-and-punctuation"
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="done"
+            accessibilityLabel="Coordinates"
+          />
+          {/* The one way to take the pin off: empties the field and leaves the location
+              pinned at nothing. Pasted coordinates are long and the keyboard's delete key
+              clears them one character at a time. Always laid out and merely hidden when
+              there is nothing to clear: the icon is taller than the text line, so adding and
+              removing it would change the row's height. */}
+          <TouchableOpacity
+            style={[styles.coordClear, coordsField.length === 0 && styles.coordClearHidden]}
+            onPress={() => onCoordsText('')}
+            disabled={coordsField.length === 0}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="Clear coordinates"
+            accessibilityElementsHidden={coordsField.length === 0}
+          >
+            <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
+          </TouchableOpacity>
+        </View>
+        {/* Only once something is saved, so a reader with no favorites doesn't carry an
+            empty row. Reads as a select field: the favorite the pin is on, or a prompt to
+            pick one. It opens a full-screen list rather than a menu, since a list of
+            favorites runs past a hundred. */}
+        {favorites.length > 0 && (
+          <TouchableOpacity style={styles.coordRow} onPress={onOpenFavorites} accessibilityRole="button">
+            <Text style={styles.coordLabel}>Favorites</Text>
+            <Text style={[styles.favoriteValue, !currentFavorite && styles.favoritePlaceholder]} numberOfLines={1}>
+              {currentFavorite ? currentFavorite.name : 'Choose a location'}
+            </Text>
+            <MaterialCommunityIcons name="chevron-down" size={20} color={palette.textTertiary} style={styles.coordClear} />
+          </TouchableOpacity>
+        )}
       </View>
-      {/* Only once something is saved, so a reader with no favorites doesn't carry an
-          empty row. Reads as a select field: the favorite the pin is on, or a prompt to
-          pick one. It opens a full-screen list rather than a menu, since a list of
-          favorites runs past a hundred. */}
-      {favorites.length > 0 && (
-        <TouchableOpacity style={styles.coordRow} onPress={onOpenFavorites} accessibilityRole="button">
-          <Text style={styles.coordLabel}>Favorites</Text>
-          <Text style={[styles.favoriteValue, !currentFavorite && styles.favoritePlaceholder]} numberOfLines={1}>
-            {currentFavorite ? currentFavorite.name : 'Choose a location'}
-          </Text>
-          <MaterialCommunityIcons name="chevron-down" size={20} color={palette.textTertiary} style={styles.coordClear} />
-        </TouchableOpacity>
+      {zone !== undefined && (
+        <Text style={styles.zoneHint}>
+          {zone ? `Avalanche Canada zone: ${zone.names.join(', ')}` : 'Avalanche forecasts not available for this location'}
+        </Text>
       )}
-    </View>
     </>
   );
 });
@@ -2914,6 +2927,7 @@ const styles = StyleSheet.create({
   favoriteSortLabel: { marginBottom: 8, fontSize: 12, fontWeight: '600', color: palette.pageLabel, textTransform: 'uppercase', letterSpacing: 0.5 },
   mapFullBleed: { marginHorizontal: -CONTENT_PAD },
   modelHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 8 },
+  zoneHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 8, paddingHorizontal: CONTENT_PAD },
 
   // Full-width action, its icon and label on a single centered row.
   buttons: { marginTop: 4 },
