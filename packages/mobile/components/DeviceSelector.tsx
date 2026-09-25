@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { StyleSheet, Switch, Text, View } from 'react-native';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
-import Section from '../Section';
+import Section from './Section';
 import { DEVICES, type Device } from '../devices';
 import { palette, SEGMENT_PROPS, SWITCH_PROPS } from '../palette';
 

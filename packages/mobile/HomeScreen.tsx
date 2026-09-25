@@ -1,9 +1,8 @@
 import { memo, useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Animated, AppState, Image, Linking, Modal, Platform, Pressable,
+  Alert, Animated, AppState, Image, Linking, Platform, Pressable,
   ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import * as Network from 'expo-network';
@@ -37,7 +36,10 @@ import {
 } from './cache';
 import LocationMap from './LocationMap';
 import DeviceSelector from './components/DeviceSelector';
-import Section from './Section';
+import Section from './components/Section';
+import ActionButton from './components/ActionButton';
+import PasteButton, { type Outcome } from './components/PasteButton';
+import InfoModal from './components/InfoModal';
 import FavoriteSheet from './FavoriteSheet';
 import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
 import HelpScreen from './HelpScreen';
@@ -763,10 +765,6 @@ function CollectingBox({ total, have, onClear }: Collecting & { onClear: () => v
 
 // What the paste button says after a press, and whether it says it in green or red. The same
 // dwell as the Copy inReach Message confirmation.
-interface Outcome {
-  label: string;
-  failed: boolean;
-}
 const OUTCOME_MS = 2000;
 const FAILED_LABEL = 'Error loading forecast';
 
@@ -2648,132 +2646,6 @@ const RequestBuilder = memo(function RequestBuilder({
   );
 });
 
-function PasteButton({ outcome, onPress }: { outcome: Outcome | null; onPress: () => void }) {
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.pasteBtn,
-        outcome && (outcome.failed ? styles.pasteBtnFailed : styles.pasteBtnDone),
-        pressed && styles.btnPressed,
-      ]}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={outcome?.label ?? 'Paste Forecast'}
-    >
-      <MaterialCommunityIcons
-        name={outcome ? (outcome.failed ? 'close' : 'check') : 'content-paste'}
-        size={19}
-        color={outcome ? (outcome.failed ? palette.danger : palette.success) : palette.onPrimary}
-        style={styles.pasteBtnIcon}
-      />
-      <Text
-        style={[
-          styles.pasteBtnText,
-          outcome && (outcome.failed ? styles.pasteBtnTextFailed : styles.pasteBtnTextDone),
-        ]}
-        numberOfLines={1}
-      >
-        {outcome?.label ?? 'Paste Forecast'}
-      </Text>
-    </Pressable>
-  );
-}
-
-// A full-width action button: icon and label, replaced by a spinner and Cancel while the action
-// resolves. The variants differ only in fill, so one tint drives the icon and the label together
-// — and a disabled button is filled grey, which needs the light tint whatever its variant. Busy
-// is the exception: a button that is off resolving its own press is working, not unavailable, so
-// it keeps its variant's fill under the spinner — grey there made the GPS re-fix before a copy
-// flash as a grey beat in the middle of the press-to-Copied sequence. While busy the button
-// stays pressable and the press calls the wait off instead of re-firing the action.
-function ActionButton({ icon, label, onPress, onCancel, disabled, busy, variant }: {
-  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
-  label: string;
-  onPress: () => void;
-  onCancel: () => void;
-  disabled: boolean;
-  busy: boolean;
-  variant: 'primary' | 'success';
-}) {
-  const fill = { primary: styles.btnPrimary, success: styles.btnSuccess }[variant];
-  const greyed = disabled && !busy;
-  const tint = greyed || variant === 'primary' ? palette.onPrimary : palette.success;
-  return (
-    <Pressable
-      style={({ pressed }) => [styles.btn, fill, greyed && styles.btnDisabled, pressed && styles.btnPressed]}
-      onPress={busy ? onCancel : onPress}
-      disabled={busy ? false : disabled}
-      accessibilityRole="button"
-      accessibilityLabel={busy ? 'Cancel' : label}
-    >
-      {busy ? (
-        <>
-          <ActivityIndicator color={tint} style={styles.btnIcon} />
-          <Text style={[styles.btnText, { color: tint }]} numberOfLines={1}>Cancel</Text>
-        </>
-      ) : (
-        <>
-          <MaterialCommunityIcons name={icon} size={19} color={tint} style={styles.btnIcon} />
-          {/* One line always: the row is a fixed 50pt, so a label that wrapped would be clipped
-              rather than grow the button. */}
-          <Text style={[styles.btnText, { color: tint }]} numberOfLines={1}>{label}</Text>
-        </>
-      )}
-    </Pressable>
-  );
-}
-
-// The ⓘ screens. A centered card was the wrong container once the variable list grew past a
-// screen: bounding it left the card filling the display anyway, minus a margin, with its body
-// cut mid-sentence at a scroll edge that didn't look like one. Full screen rather than a page
-// sheet because UIKit rounds a sheet's corners to the display's own curve, which reads as a lot
-// of radius for a page of text — and RN gives no way to ask for less. The trade is the swipe-down
-// dismissal a sheet comes with, so Done is the way out and sits where a sheet's would.
-function InfoModal({ visible, title, onClose, grouped = false, headerRight, toolbar, children }: {
-  visible: boolean; title: string; onClose: () => void; children: React.ReactNode;
-  // Takes the place of Done for a sheet with more to do than close.
-  headerRight?: React.ReactNode;
-  // Held between the header and the scrolling content, so it stays in reach however long the
-  // content runs.
-  toolbar?: React.ReactNode;
-  // The page's gray with the page's header colors, the frame Settings uses, for a sheet whose
-  // content is a card of rows rather than running text.
-  grouped?: boolean;
-}) {
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      {/* A Modal is its own window, so the provider at the app root is not above it in the native
-          tree, and the safe-area view reads zero insets without a provider of its own here. */}
-      <SafeAreaProvider>
-        {/* No bottom edge: the frame runs to the screen edge so the scroll view fills it,
-            and the content padding below clears the home indicator. */}
-        <SafeAreaView edges={['top', 'left', 'right']} style={[styles.sheet, grouped && styles.sheetGrouped]}>
-          <View style={[styles.sheetHeader, grouped && styles.sheetHeaderGrouped]}>
-            <Text style={[styles.sheetTitle, grouped && styles.sheetTitleGrouped]}>{title}</Text>
-            {headerRight ?? (
-              <TouchableOpacity
-                onPress={onClose}
-                accessibilityRole="button"
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Text style={[styles.sheetDone, grouped && styles.sheetDoneGrouped]}>Done</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          {toolbar}
-          {/* Taps persist through the keyboard: the favorite sheets are this scroll view's
-              descendants in the React tree even though they present in a modal of their own,
-              and without this the scroll view spends the first tap on their buttons dismissing
-              the keyboard. */}
-          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
-            {children}
-          </ScrollView>
-        </SafeAreaView>
-      </SafeAreaProvider>
-    </Modal>
-  );
-}
-
 // ── Styles ─────────────────────────────────────────────────────────────────
 
 // The builder's horizontal inset. Named so the map can cancel it and run edge to edge.
@@ -2811,23 +2683,6 @@ const styles = StyleSheet.create({
   titleText: { fontSize: 20, fontWeight: '700', color: palette.brand },
   // No top padding: the map opens the builder flush against the title rule.
   builderPad: { padding: CONTENT_PAD, paddingTop: 0 },
-
-  // Sheet frame, matching HelpScreen's. The safe area carries the status bar inset now that this
-  // runs the full height, so the header only needs the same 12pt the app header uses.
-  sheet: { flex: 1, backgroundColor: palette.sheet },
-  sheetGrouped: { backgroundColor: palette.page },
-  sheetHeaderGrouped: { borderBottomColor: palette.pageRule },
-  sheetTitleGrouped: { color: palette.pageTitle },
-  sheetDoneGrouped: { color: palette.pageLink },
-  sheetHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule,
-  },
-  sheetTitle: { flex: 1, fontSize: 20, fontWeight: '700', color: palette.text },
-  sheetDone: { fontSize: 16, fontWeight: '600', color: palette.link, paddingLeft: 12 },
-  sheetScroll: { flex: 1 },
-  sheetContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 72 },
 
   // Sheet body copy, shared by all four ⓘ sheets.
   modalBody: { fontSize: 15, color: palette.textBody, lineHeight: 22 },
@@ -2919,20 +2774,7 @@ const styles = StyleSheet.create({
   modelHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 8 },
   zoneHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 8, paddingHorizontal: CONTENT_PAD },
 
-  // Full-width action, its icon and label on a single centered row.
   buttons: { marginTop: 4 },
-  btn: { flexDirection: 'row', height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  btnPrimary: { backgroundColor: palette.primary },
-  btnSuccess: { backgroundColor: palette.successTint, borderWidth: 1, borderColor: palette.success },
-  btnDisabled: { backgroundColor: palette.primaryDisabled, borderColor: palette.primaryDisabled },
-  // Press feedback for the action and paste buttons. A declarative dim rather than
-  // TouchableOpacity: both buttons re-render themselves from inside their own press handler
-  // (busy, copied, a paste outcome), and a re-render landing mid-fade could strand the touchable's
-  // animated opacity below 1 — the outcome then sat greyed until the next touch. Pressable's
-  // pressed flag has no animation state to strand.
-  btnPressed: { opacity: 0.4 },
-  btnIcon: { marginRight: 8 },
-  btnText: { fontSize: 16, fontWeight: '600' },
 
   actionNote: { fontSize: 13, color: palette.pageNote, lineHeight: 19, textAlign: 'center', marginTop: 10 },
 
@@ -2942,24 +2784,6 @@ const styles = StyleSheet.create({
   // Set off from the divider above by the space a heading would have taken.
   pasteArea: { marginTop: 24 },
   pasteRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  // Same fills as the Copy inReach Message button (ActionButton above), so a confirmed press
-  // looks the same in both places.
-  pasteBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    height: 50,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: palette.primary,
-  },
-  pasteBtnDone: { backgroundColor: palette.successTint, borderWidth: 1, borderColor: palette.success },
-  // The error box's own colours, so the button and the reason under it read as one thing.
-  pasteBtnFailed: { backgroundColor: palette.dangerTint, borderWidth: 1, borderColor: palette.danger },
-  pasteBtnIcon: { marginRight: 8 },
-  pasteBtnText: { color: palette.onPrimary, fontSize: 16, fontWeight: '600' },
-  pasteBtnTextDone: { color: palette.success },
-  pasteBtnTextFailed: { color: palette.danger },
 
   errorBox: { marginTop: 10, padding: 12, backgroundColor: palette.dangerTint, borderRadius: 10 },
   errorText: { color: palette.danger, fontSize: 14, lineHeight: 20 },
