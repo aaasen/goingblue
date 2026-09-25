@@ -24,7 +24,7 @@ How it ended:
  - `codec_ms`: the gateway's wall clock around the whole codec call. Null when no codec was called.
 
 What was asked for, as the codec reported it. All null on failures, and missing on rows from older versions (see Version changes below):
- - `lat`, `lon`: rounded to 0.01 degrees, about 1 km. `loc` is the named location, or `current`.
+ - `lat`, `lon`: rounded to 0.01 degrees, about 1 km.
  - `mode`: `detail`, `auto`, or `range`. `model`: the first served model's name.
  - `vars`: the variable names served, as in `VAR` in `packages/protocol/src/constants.ts`.
  - `device`: the route, `i` iPhone satellite, `s` SMS, `z` ZOLEO, `g` inReach, `d` internet. `platform`: `i` iOS or `a` Android.
@@ -97,7 +97,7 @@ Every query filters on the current protocol version, `version = 4`. The current 
 
 Versions 1 through 3 were sunset on September 16, 2026: their containers are gone and a request naming one gets the `unsupported_version` outcome. Their rows remain. Each codec version is a frozen container, and older containers reported fewer fields to the gateway, so rows from older versions have columns that newer rows fill:
  - Version 1: none of the shape or reply columns. Only `token`, `account_id`, `created_at`, `chars`, `version`, and `outcome`.
- - Versions 2 and 3: the shape columns (`lat`, `lon`, `loc`, `mode`, `model`, `vars`, `max_chars`, `messages`) and `device` on some rows, since the header grew during those versions. No `request_id`.
+ - Versions 2 and 3: the shape columns (`lat`, `lon`, `mode`, `model`, `vars`, `max_chars`, `messages`) and `device` on some rows, since the header grew during those versions. No `request_id`.
  - Version 4: everything, including `request_id`, `periods`, `fetch_ms`, and `encode_ms`. `platform` is present only when the client sent it, which the app started doing partway through version 4.
  - A null `version` is a request that named no version.
 
@@ -183,7 +183,7 @@ select version, count(*), max(created_at) at time zone 'UTC' as last_seen
 One account's recent requests:
 
 ```sql
-select created_at at time zone 'UTC' as utc, outcome, device, loc, mode, model, vars, chars
+select created_at at time zone 'UTC' as utc, outcome, device, mode, model, vars, chars
   from requests where account_id = <id> and version = 4
  order by created_at desc limit 20;
 ```

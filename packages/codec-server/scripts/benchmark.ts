@@ -955,7 +955,7 @@ async function scanReport(args: Args, shard?: { index: number; total: number }):
       // combo: columns encode independently, so one aggregation per seq serves every combo.
       // "US" (American center) keeps the pressure/freeze columns in toFullPeriod.
       const params: ForecastParams = {
-        locationIdx: 0, lat, lon, mode, utcOffsetHours,
+        lat, lon, mode, utcOffsetHours,
         modelsMask: 1, vars: allVars, maxChars: args.maxChars,
         decoderVersion: WIRE_VERSION, code: 0, startEpochHour, userToken: null,
       };

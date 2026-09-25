@@ -101,7 +101,6 @@ export async function migrate(): Promise<void> {
       outcome     text,
       lat         numeric(4,2),
       lon         numeric(5,2),
-      loc         text,
       mode        text,
       model       text,
       vars        text[],
@@ -144,7 +143,6 @@ export async function migrate(): Promise<void> {
     alter table requests
       add column if not exists lat numeric(4,2),
       add column if not exists lon numeric(5,2),
-      add column if not exists loc text,
       add column if not exists mode text,
       add column if not exists model text,
       add column if not exists vars text[],
@@ -152,6 +150,10 @@ export async function migrate(): Promise<void> {
       add column if not exists messages int,
       add column if not exists device text,
       add column if not exists platform text
+  `);
+  // Named locations were never requested: every stored value was 'current' or null.
+  await query(`
+    alter table requests drop column if exists loc
   `);
   // What the reply carried and what serving it cost. `periods` maps hours-per-period to how
   // many periods of that resolution the reply held (its sum is the total period count — the
@@ -319,7 +321,7 @@ export async function migrate(): Promise<void> {
            where coalesce(outcome, 'ok') = 'ok'
         )
         update requests q
-           set lat = s.lat, lon = s.lon, loc = s.loc, mode = s.mode, model = s.model,
+           set lat = s.lat, lon = s.lon, mode = s.mode, model = s.model,
                vars = s.vars, max_chars = s.max_chars, messages = s.messages
           from s
           join r on r.day = s.day

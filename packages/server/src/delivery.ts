@@ -152,15 +152,15 @@ export async function recordEncoded(id: string, r: EncodedRecord): Promise<boole
     const updated = await client.query(
       `update requests
           set token = $2, account_id = $3, chars = $4, version = $5, outcome = $6, codec_ms = $7,
-              lat = $8, lon = $9, loc = $10, mode = $11, model = $12, vars = $13, max_chars = $14,
-              messages = $15, device = $16, platform = $17, periods = $18, fetch_ms = $19,
-              encode_ms = $20,
-              twilio_received_at = coalesce(twilio_received_at, $21),
+              lat = $8, lon = $9, mode = $10, model = $11, vars = $12, max_chars = $13,
+              messages = $14, device = $15, platform = $16, periods = $17, fetch_ms = $18,
+              encode_ms = $19,
+              twilio_received_at = coalesce(twilio_received_at, $20),
               encoded_at = now(),
-              no_reply_at = case when $22 then now() else no_reply_at end
+              no_reply_at = case when $21 then now() else no_reply_at end
         where id = $1 and encoded_at is null`,
       [id, account ? r.token : null, account?.id ?? null, r.chars, r.version, r.outcome, r.codecMs,
-       s?.lat ?? null, s?.lon ?? null, s?.loc ?? null, s?.mode ?? null, s?.model ?? null,
+       s?.lat ?? null, s?.lon ?? null, s?.mode ?? null, s?.model ?? null,
        s?.vars ?? null, s?.maxChars ?? null, s?.messages ?? null, s?.device ?? null,
        s?.platform ?? null, s?.periods ?? null, s?.fetchMs ?? null, s?.encodeMs ?? null,
        r.twilioReceivedAt, r.replies.length === 0],

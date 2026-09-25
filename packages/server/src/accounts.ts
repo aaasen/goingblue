@@ -98,12 +98,12 @@ export async function recordRequest(r: RequestRecord): Promise<void> {
   const s = r.shape;
   await query(
     `insert into requests (request_id, token, account_id, chars, version, outcome, codec_ms,
-                           lat, lon, loc, mode, model, vars, max_chars, messages, device, platform,
+                           lat, lon, mode, model, vars, max_chars, messages, device, platform,
                            periods, fetch_ms, encode_ms, encoded_at, sent_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
              now(), now())`,
     [r.requestId, account ? r.token : null, account?.id ?? null, r.chars, r.version, r.outcome, r.codecMs,
-     s?.lat ?? null, s?.lon ?? null, s?.loc ?? null, s?.mode ?? null, s?.model ?? null,
+     s?.lat ?? null, s?.lon ?? null, s?.mode ?? null, s?.model ?? null,
      s?.vars ?? null, s?.maxChars ?? null, s?.messages ?? null, s?.device ?? null, s?.platform ?? null,
      s?.periods ?? null, s?.fetchMs ?? null, s?.encodeMs ?? null],
   );

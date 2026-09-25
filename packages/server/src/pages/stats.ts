@@ -217,7 +217,6 @@ export type RequestRow = {
   platform: string | null;
   version: number | null;
   outcome: string | null;
-  loc: string | null;
   lat: string | null;
   lon: string | null;
   mode: string | null;
@@ -234,9 +233,8 @@ export type RequestRow = {
 // One row of the group-totals table under the chart: a value of the selected group, its
 // requests, and how many distinct accounts carried them.
 export type GroupTotalRow = { grp: string | null; requests: number; users: number };
-// One point on the location map: a ~1 km cell forecasts were requested for, with a name when at
-// least one of its requests carried one.
-export type MapPointRow = { lat: string; lon: string; loc: string | null; count: number };
+// One point on the location map: a ~1 km cell forecasts were requested for.
+export type MapPointRow = { lat: string; lon: string; count: number };
 export type StatsData = {
   daily: DailyRow[];
   totals: StatsTotals;
@@ -345,7 +343,7 @@ export const REQUESTS_LIMIT = 20;
 const REQUEST_COLUMNS = `
          r.id, to_char(r.created_at at time zone $1, 'FMMM/FMDD HH24:MI') as time,
          r.account_id, r.device, r.platform, r.version, r.outcome,
-         r.loc, r.lat::text as lat, r.lon::text as lon, r.mode, r.model, r.messages, r.vars,
+         r.lat::text as lat, r.lon::text as lon, r.mode, r.model, r.messages, r.vars,
          r.periods, r.codec_ms, r.fetch_ms, r.encode_ms`;
 const requestRowsSql = (where: string) => `
   select ${REQUEST_COLUMNS}
@@ -375,12 +373,9 @@ const mapWhere = (f: StatsFilters): string => `r.created_at >= ($2::date::timest
      and r.created_at < (($3::date + 1)::timestamp at time zone $1)
      and r.lat is not null and r.lon is not null${notHidden(f)}`;
 
-// Every place in the window, one point per ~1 km cell. Named and unnamed requests for the same
-// cell fold together; min(loc) picks a stable representative name where any request carried one
-// ('current' is the app's marker for "my location", not a name).
+// Every place in the window, one point per ~1 km cell.
 const mapPointsSql = (f: StatsFilters) => `
   select r.lat::text as lat, r.lon::text as lon,
-         min(r.loc) filter (where r.loc is not null and r.loc <> 'current') as loc,
          count(*) as count
     from requests r
    where ${mapWhere(f)}
@@ -454,7 +449,6 @@ const toRequestRow = (r: Record<string, unknown>): RequestRow => ({
   platform: r["platform"] == null ? null : String(r["platform"]),
   version: r["version"] == null ? null : num(r["version"]),
   outcome: r["outcome"] == null ? null : String(r["outcome"]),
-  loc: r["loc"] == null ? null : String(r["loc"]),
   lat: r["lat"] == null ? null : String(r["lat"]),
   lon: r["lon"] == null ? null : String(r["lon"]),
   mode: r["mode"] == null ? null : String(r["mode"]),
@@ -513,7 +507,6 @@ export async function dailyStats(filters: StatsFilters): Promise<StatsData> {
     mapPoints: mapPoints.rows.map((r) => ({
       lat: String(r["lat"]),
       lon: String(r["lon"]),
-      loc: r["loc"] == null ? null : String(r["loc"]),
       count: num(r["count"]),
     })),
   };
@@ -853,9 +846,8 @@ function actForm(action: "hide" | "unhide", id: number, f: StatsFilters, label: 
 
 // The raw request rows as a table, newest first, one column per RequestRow field. Null cells
 // render empty rather than as a word, except outcome, whose absence
-// means a pre-outcome-column success. Location shows the name where one was given ('current' is
-// the app's marker for "my location", not a name), else the stored ~1 km coordinates. The
-// variables cell lists only the opt-ins — the five defaults are on every row and would drown
+// means a pre-outcome-column success. Location shows the stored ~1 km coordinates. The variables
+// cell lists only the opt-ins — the five defaults are on every row and would drown
 // the signal — as the app's badges (VARIABLE_TAGS), with the full name in the hover title. A
 // variable no badge covers shows under its own name rather than vanishing.
 //
@@ -918,15 +910,13 @@ function requestTable(
       // Coordinates select their own point on the map, the same view clicking that circle
       // gives, map included: every located row in the window is a point on it, since the map
       // keeps a superset of the rows this table lists.
-      const named = r.loc !== null && r.loc !== "current";
-      const coordinates =
+      const place =
         r.lat !== null && r.lon !== null
           ? `<a href="${statsUrl(filters, "map", {
               place: { lat: r.lat, lon: r.lon },
               placeOffset: 0,
             })}">${esc(r.lat)}, ${esc(r.lon)}</a>`
           : "";
-      const place = named ? esc(r.loc ?? "") : coordinates;
       const chosen = r.vars.filter((v) => !DEFAULT_VARS.includes(v));
       const vars = VARIABLE_TAGS
         .filter((t) => t.vars.some((v) => chosen.includes(v)))
@@ -1014,10 +1004,9 @@ function locationMap(
       features: points.map((p) => ({
         type: "Feature",
         geometry: { type: "Point", coordinates: [Number(p.lon), Number(p.lat)] },
-        // lat/lon ride along at the stored rounding, both for the popup on unnamed points and
-        // as what a click puts in the URL; the name is untrusted shape-header text, escaped
-        // client-side by being set via textContent.
-        properties: { n: p.count, name: p.loc, lat: p.lat, lon: p.lon, sel: p === selected ? 1 : 0 },
+        // lat/lon ride along at the stored rounding, both for the popup and as what a click
+        // puts in the URL.
+        properties: { n: p.count, lat: p.lat, lon: p.lon, sel: p === selected ? 1 : 0 },
       })),
     },
   };
@@ -1129,8 +1118,7 @@ map.on("styleimagemissing", (e) => {
   map.addImage("peak-triangle", ctx.getImageData(0, 0, size, size), { pixelRatio: 2 });
 });
 
-// Hover popup, built with textContent because the name arrives through the untrusted shape
-// header.
+// Hover popup.
 const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12 });
 map.on("mousemove", "requests", (e) => {
   const f = e.features && e.features[0];
@@ -1139,7 +1127,7 @@ map.on("mousemove", "requests", (e) => {
   const p = f.properties;
   const div = document.createElement("div");
   const name = document.createElement("b");
-  name.textContent = p.name || (p.lat + ", " + p.lon);
+  name.textContent = p.lat + ", " + p.lon;
   const n = document.createElement("div");
   n.textContent = p.n === 1 ? "1 request" : p.n + " requests";
   div.append(name, n);
@@ -1251,7 +1239,7 @@ ${groupTotalRow}
       ? ""
       : `
 <div class=placehead><h2 id=place>Requests at ${
-          selected?.loc ? esc(selected.loc) : `${esc(filters.place.lat)}, ${esc(filters.place.lon)}`
+          `${esc(filters.place.lat)}, ${esc(filters.place.lon)}`
         }</h2><a href="${statsUrl(filters, "map", { place: null, placeOffset: 0 })}">Clear</a></div>
 ${requestTable(
   data.placeRequests,

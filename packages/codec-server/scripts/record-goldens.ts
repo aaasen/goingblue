@@ -19,10 +19,10 @@ import { fetchForecast, parseRequest, splitReplyFor } from "../src/forecast.ts";
 
 const OUT_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "golden", "goldens.json");
 
-// Sites spanning the codec's operating envelope: named-location and GPS parsing, hemispheres,
+// Sites spanning the codec's operating envelope: hemispheres,
 // seasons-at-record-time, maritime vs. continental vs. high-altitude regimes.
 const SITES = [
-  { name: "denali-14k", loc: "l:14k", z: -9 },
+  { name: "denali-14k", loc: "63.0630,-151.0810", z: -9 },
   { name: "chamonix", loc: "45.8326,6.8652", z: 1 },
   { name: "aconcagua", loc: "-32.6532,-70.0109", z: -3 },
   { name: "rainier", loc: "46.8523,-121.7603", z: -8 },

@@ -60,7 +60,7 @@ await eachForecast((hourly: HourlyData, _runHour: number) => {
     for (const vars of [ALL_VARS, new Set(DEFAULT_VARS), new Set(ALWAYS_VARS)]) {
       for (const mode of [MODE_DETAIL, MODE_AUTO, MODE_RANGE]) {
         const params: ForecastParams = {
-          locationIdx: 0, lat: 0, lon: 0,
+          lat: 0, lon: 0,
           mode, utcOffsetHours: UTC_OFFSET,
           modelsMask: 1 << 1 /* GFS */, vars,
           maxChars: 160, decoderVersion: WIRE_VERSION, code: messages % 128,

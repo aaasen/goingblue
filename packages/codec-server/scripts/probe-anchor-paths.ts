@@ -268,7 +268,7 @@ function main(): void {
     const startEpochHour = requestUtcHourFor(
       Math.floor(Date.parse(cell.windowStart + "Z") / 3600000), utcOffsetHours, args.requestHour);
     const params: ForecastParams = {
-      locationIdx: 0, lat: loc.lat, lon: loc.lon, mode: 1, utcOffsetHours,
+      lat: loc.lat, lon: loc.lon, mode: 1, utcOffsetHours,
       modelsMask: 1, vars: ALL_VARS, maxChars: args.maxChars,
       decoderVersion: WIRE_VERSION, code: 0, startEpochHour, userToken: null,
     };

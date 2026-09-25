@@ -15,7 +15,6 @@ import { log } from "./log.js";
 export interface RequestShape {
   lat: number | null;
   lon: number | null;
-  loc: string | null;
   mode: string | null;
   // The header's "models" key is a list (and stays one: frozen containers send it forever), but
   // the codec only ever serves the first model named, so one name is what gets stored.
@@ -150,7 +149,6 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
   return {
     lat: coord(o["lat"], 90),
     lon: coord(o["lon"], 180),
-    loc: shapeString(o["loc"]),
     mode: shapeString(o["mode"]),
     model: shapeList(o["models"])[0] ?? null,
     vars: shapeList(o["vars"]),

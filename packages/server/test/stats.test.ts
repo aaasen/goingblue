@@ -16,7 +16,7 @@ const cell = (day: string, requests: number, grp: string | null = ""): DailyRow 
 // what they exercise.
 const row = (over: Partial<RequestRow> = {}): RequestRow => ({
   id: 1, time: "8/30 14:11", account: 29, device: "i", platform: "i", version: 3, outcome: "ok",
-  loc: "current", lat: "63.06", lon: "-151.08", mode: "auto", model: "best", messages: 1,
+  lat: "63.06", lon: "-151.08", mode: "auto", model: "best", messages: 1,
   vars: ["temp", "wind", "snow", "gust", "rain"],
   periods: null, codecMs: null, fetchMs: null, encodeMs: null, ...over,
 });
@@ -277,14 +277,14 @@ describe("renderStats — grouped chart", () => {
 });
 
 describe("renderStats — recent requests", () => {
-  it("lists rows with named or coordinate locations and opt-in variables only", () => {
+  it("lists rows with coordinate locations and opt-in variables only", () => {
     const html = renderStats(data([cell("2026-08-07", 2)], {
       requests: [
-        row({ id: 55, time: "8/30 14:11", account: 29, device: "i", version: 3, loc: "summit",
+        row({ id: 55, time: "8/30 14:11", account: 29, device: "i", version: 3,
               lat: "63.07", lon: "-151.00", mode: "auto", model: "best", messages: 2,
               vars: ["temp", "wind", "freeze", "cch", "ccm", "aq_o3", "w500"],
               periods: { "1": 130, "3": 56 }, codecMs: 1037, fetchMs: 1015, encodeMs: 18 }),
-        row({ id: 54, time: "8/29 09:02", account: 12, device: "s", platform: "a", version: 2, loc: "current",
+        row({ id: 54, time: "8/29 09:02", account: 12, device: "s", platform: "a", version: 2,
               lat: "47.62", lon: "-122.29", mode: "detail", model: "eu", messages: null,
               vars: ["temp"] }),
       ],
@@ -296,13 +296,14 @@ describe("renderStats — recent requests", () => {
     // row is matched around it.
     expect(html).toContain("<td>55</td><td>8/30 14:11</td><td>29<form");
     expect(html).toContain(
-      "<td>3</td><td>iOS</td><td>iPhone</td><td>summit</td>" +
+      "<td>3</td><td>iOS</td><td>iPhone</td>" +
+      `<td><a href="/stats?from=2026-08-07&to=2026-08-07&lat=63.07&lon=-151.00#map">` +
+      "63.07, -151.00</a></td>" +
       "<td>auto</td><td>best</td><td>2</td>" +
       `<td title="1h×130, 3h×56">186</td><td title="fetch 1015, encode 18 ms">1037</td>` +
       `<td class=tags><span title="Detailed clouds">C</span><span title="Pressure-level winds">W</span>` +
       `<span title="Freezing level">FL</span><span title="Air quality">AQI</span></td>`);
-    // 'current' is not a name; the coordinates stand in, linking to their own point, and
-    // all-default vars leave the cell empty, as do the periods/timing columns the row predates.
+    // Coordinates link to their own point, and all-default vars leave the cell empty, as do the periods/timing columns the row predates.
     expect(html).toContain("<td>54</td><td>8/29 09:02</td><td>12<form");
     expect(html).toContain(
       "<td>2</td><td>Android</td><td>SMS</td>" +
@@ -312,23 +313,21 @@ describe("renderStats — recent requests", () => {
   });
 
   // The link is the same selection a click on the map makes, so both ways into a point land on
-  // the same view. A row whose place has a name shows the name, and nothing to click.
+  // the same view.
   it("links coordinates to their point on the map", () => {
     const html = renderStats(data([cell("2026-08-07", 2)], {
-      requests: [row({ id: 55, loc: "current", lat: "63.06", lon: "-151.08" }),
-                 row({ id: 54, loc: "denali", lat: "63.06", lon: "-151.08" })],
+      requests: [row({ id: 55, lat: "63.06", lon: "-151.08" })],
       filters: { group: "device" },
     }));
     expect(html).toContain(
       `<td><a href="/stats?from=2026-08-07&to=2026-08-07&group=device&lat=63.06&lon=-151.08#map">` +
       "63.06, -151.08</a></td>");
-    expect(html).toContain("<td>denali</td>");
   });
 
   // A failure recorded no coordinates, so there is no point to link to.
   it("leaves the location cell empty when the row has no coordinates", () => {
     const html = renderStats(data([cell("2026-08-07", 1)], {
-      requests: [row({ loc: null, lat: null, lon: null })],
+      requests: [row({ lat: null, lon: null })],
     }));
     // Version, platform, device, then an empty location.
     expect(html).toContain("<td>3</td><td>iOS</td><td>iPhone</td><td></td>");
@@ -345,7 +344,7 @@ describe("renderStats — recent requests", () => {
   // A failure has no shape: every codec-reported cell is empty, and the outcome says why.
   it("renders a failed request's shape cells empty and its outcome loud", () => {
     const html = renderStats(data([cell("2026-08-07", 1)], {
-      requests: [row({ device: null, platform: null, loc: null, lat: null, lon: null, mode: null,
+      requests: [row({ device: null, platform: null, lat: null, lon: null, mode: null,
                        model: null, messages: null, vars: [], outcome: "unsupported_version" })],
     }));
     expect(html).toContain("<td>unsupported_version</td>");
@@ -455,28 +454,18 @@ describe("renderStats — request paging", () => {
 
 describe("renderStats — selected map point", () => {
   const point = (over: Partial<StatsData["mapPoints"][number]> = {}) =>
-    ({ lat: "63.06", lon: "-151.08", loc: "denali", count: 3, ...over });
+    ({ lat: "63.06", lon: "-151.08", count: 3, ...over });
   const selected = { lat: "63.06", lon: "-151.08" };
 
-  it("lists the point's requests under the map, named by the place", () => {
+  it("lists the point's requests under the map, headed by its coordinates", () => {
     const html = renderStats(data([cell("2026-08-07", 3)], {
-      mapPoints: [point(), point({ lat: "47.62", lon: "-122.29", loc: null, count: 1 })],
-      placeRequests: [row({ id: 55, loc: "denali" }), row({ id: 54, loc: "denali" })],
-      filters: { place: selected },
-    }));
-    expect(html).toContain("Requests at denali");
-    expect(html).toContain("<td>55</td>");
-    expect(html).toContain("<td>54</td>");
-  });
-
-  // A point nobody named is still a point; its coordinates carry the heading.
-  it("falls back to the coordinates when the point has no name", () => {
-    const html = renderStats(data([cell("2026-08-07", 1)], {
-      mapPoints: [point({ loc: null })],
-      placeRequests: [row()],
+      mapPoints: [point(), point({ lat: "47.62", lon: "-122.29", count: 1 })],
+      placeRequests: [row({ id: 55 }), row({ id: 54 })],
       filters: { place: selected },
     }));
     expect(html).toContain("Requests at 63.06, -151.08");
+    expect(html).toContain("<td>55</td>");
+    expect(html).toContain("<td>54</td>");
   });
 
   // The window's own table is unaffected: selecting a point adds a table, it doesn't filter
@@ -484,7 +473,7 @@ describe("renderStats — selected map point", () => {
   it("leaves the recent requests table alone", () => {
     const html = renderStats(data([cell("2026-08-07", 3)], {
       mapPoints: [point()],
-      requests: [row({ id: 99, loc: "elsewhere" })],
+      requests: [row({ id: 99 })],
       placeRequests: [row({ id: 55 })],
       totals: { listed: 1 },
       filters: { place: selected },

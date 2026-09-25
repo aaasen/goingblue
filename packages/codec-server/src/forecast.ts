@@ -64,22 +64,6 @@ const CENTERS: Record<string, CenterSources> = {
   DE:   { surface: "icon_seamless", pressure: "icon_seamless", freeze: true },
 };
 
-interface NamedLocation { lat: number; lon: number; tz: string; elev_m: number }
-
-// Indexed by locationIdx (0 = current/GPS, 1-5 = named)
-const NAMED_LOCATIONS: (NamedLocation | null)[] = [
-  null,                                                                  // 0: current (GPS)
-  { lat: 63.067, lon: -151.172, tz: "America/Anchorage", elev_m: 3353 }, // 1: 11k  (11,000ft)
-  { lat: 63.063, lon: -151.081, tz: "America/Anchorage", elev_m: 4267 }, // 2: 14k  (14,000ft)
-  { lat: 63.069, lon: -151.047, tz: "America/Anchorage", elev_m: 5182 }, // 3: 17k  (17,000ft)
-  { lat: 63.069, lon: -151.003, tz: "America/Anchorage", elev_m: 6096 }, // 4: summit (20,000ft)
-  { lat: 62.965, lon: -151.177, tz: "America/Anchorage", elev_m: 2134 }, // 5: airstrip (7,000ft)
-];
-
-const LOCATION_NAME_TO_IDX: Record<string, number> = {
-  "11k": 1, "14k": 2, "17k": 3, "summit": 4, "airstrip": 5,
-};
-
 export const HOURS_PER_PERIOD: Record<number, number> = {
   0: 24,
   1: 12,
@@ -1106,7 +1090,6 @@ export interface ForecastParams {
   // What the request asks for (`f:`): a weather forecast or the avalanche bulletin for the
   // location.
   kind: ForecastKind;
-  locationIdx: number;
   lat?: number;
   lon?: number;
   // The requested priority mode (`p:` — MODE_DETAIL/MODE_AUTO/MODE_RANGE) and the location's
@@ -1166,7 +1149,6 @@ const MODE_TOKENS: Record<string, number> = {
 export function parseRequest(body: string): ForecastParams {
   const words = body.toLowerCase().trim().split(/\s+/);
   let kind: ForecastKind = "weather"; // from `f:`; required
-  let locationIdx = 0;
   let lat: number | undefined;
   let lon: number | undefined;
   let mode = DEFAULT_MODE; // priority mode, override with `p:` (d/a/r)
@@ -1192,7 +1174,6 @@ export function parseRequest(body: string): ForecastParams {
   if (gpsMatch) {
     lat = parseFloat(gpsMatch[1]);
     lon = parseFloat(gpsMatch[2]);
-    locationIdx = 0;
   }
 
   // Known keys are validated strictly: every request comes from the app, so an unrecognized
@@ -1208,14 +1189,6 @@ export function parseRequest(body: string): ForecastParams {
         seen.add(key);
         if (val in KIND_TOKENS) kind = KIND_TOKENS[val];
         else errors.push(`invalid forecast type "f:${val}"`);
-      } else if (key === "l") {
-        if (val === "current" || val === "here") {
-          locationIdx = 0;
-        } else if (val in LOCATION_NAME_TO_IDX) {
-          locationIdx = LOCATION_NAME_TO_IDX[val];
-        } else {
-          errors.push(`unknown location "${val}"`);
-        }
       } else if (key === "p") {
         // Priority mode: p:d (Detail), p:a (Auto), p:r (Range).
         seen.add(key);
@@ -1302,7 +1275,7 @@ export function parseRequest(body: string): ForecastParams {
   }
 
   // Required components: everything the app always sends for the kind (HomeScreen's buildMsg).
-  // A location is either coordinates or a named `l:`; the rest must each be present.
+  // Coordinates and each listed key must be present.
   const required = kind === "weather" ? ["f", "p", "z", "m", "d", "u", "k", "t"] : ["f", "d", "u", "k", "t"];
   for (const key of required) {
     if (!seen.has(key)) errors.push(`missing ${key}:`);
@@ -1312,7 +1285,7 @@ export function parseRequest(body: string): ForecastParams {
       if (seen.has(key)) errors.push(`${key}: not allowed in an avalanche request`);
     }
   }
-  if (locationIdx === 0 && (lat === undefined || lon === undefined)) {
+  if (lat === undefined || lon === undefined) {
     errors.push("missing coordinates");
   }
 
@@ -1332,7 +1305,7 @@ export function parseRequest(body: string): ForecastParams {
   // route's limit and so the safe reading of an unidentified sender.
   const maxChars = maxCharsFor(device ?? "s", messages, WIRE_HEADER_CHARS);
 
-  return { kind, locationIdx, lat, lon, mode, utcOffsetHours, modelsMask, vars, maxChars, alphabet, device: device ?? undefined, platform: platform ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
+  return { kind, lat, lon, mode, utcOffsetHours, modelsMask, vars, maxChars, alphabet, device: device ?? undefined, platform: platform ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
 }
 
 // What a request asked for, in names, for the gateway to record (see `X-Request-Shape` in
@@ -1343,7 +1316,6 @@ export function parseRequest(body: string): ForecastParams {
 export interface RequestShape {
   lat?: number;
   lon?: number;
-  loc: string;
   kind: ForecastKind;
   // The weather options, absent from an avalanche request.
   mode?: string;
@@ -1362,9 +1334,6 @@ export interface RequestShape {
   platform?: string;
 }
 
-const IDX_TO_LOCATION_NAME: Record<number, string> = Object.fromEntries(
-  Object.entries(LOCATION_NAME_TO_IDX).map(([name, idx]) => [idx, name]),
-);
 const BIT_TO_MODEL_NAME: Record<number, string> = Object.fromEntries(
   Object.entries(MODEL_NAME_TO_BIT).map(([name, bit]) => [bit, name]),
 );
@@ -1378,13 +1347,10 @@ const MODE_NAMES: Record<number, string> = {
 const coarse = (v: number): number => Math.round(v * 100) / 100;
 
 export function describeRequest(params: ForecastParams): RequestShape {
-  const named = NAMED_LOCATIONS[params.locationIdx];
-  const lat = params.locationIdx === 0 ? params.lat : named?.lat;
-  const lon = params.locationIdx === 0 ? params.lon : named?.lon;
+  const { lat, lon } = params;
   return {
     ...(lat != null ? { lat: coarse(lat) } : {}),
     ...(lon != null ? { lon: coarse(lon) } : {}),
-    loc: IDX_TO_LOCATION_NAME[params.locationIdx] ?? "current",
     kind: params.kind,
     ...(params.kind === "weather" ? {
       mode: MODE_NAMES[params.mode] ?? "auto",
@@ -1401,15 +1367,9 @@ export function describeRequest(params: ForecastParams): RequestShape {
   };
 }
 
-function resolveLocation(params: ForecastParams): { lat: number; lon: number; elev_m?: number } {
-  if (params.locationIdx === 0) {
-    if (params.lat == null || params.lon == null)
-      throw new Error("current location requested but no GPS coordinates in message");
-    return { lat: params.lat, lon: params.lon };
-  }
-  const loc = NAMED_LOCATIONS[params.locationIdx];
-  if (!loc) throw new Error(`Unknown location index: ${params.locationIdx}`);
-  return { lat: loc.lat, lon: loc.lon, elev_m: loc.elev_m };
+function resolveLocation(params: ForecastParams): { lat: number; lon: number } {
+  if (params.lat == null || params.lon == null) throw new Error("no coordinates in message");
+  return { lat: params.lat, lon: params.lon };
 }
 
 // A response carries exactly one model (the decoder assumes nModels=1), so take the first
@@ -1599,7 +1559,7 @@ export function requestWindow(startEpochHour: number, nowMs = Date.now()): Reque
 }
 
 export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<ForecastResult> {
-  const { lat, lon, elev_m } = resolveLocation(params);
+  const { lat, lon } = resolveLocation(params);
   const modelKey = firstModelKey(params.modelsMask);
 
   // The window runs from local midnight of the request day (≤ 24h in the past for any UTC
@@ -1610,9 +1570,9 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   // unservable in buildLayoutMessage, and the seq search clamps to them.
   const fetchStart = Date.now();
   const [[h, times, elevation], agreement] = await Promise.all([
-    fetchHourly(modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1, airQualityVarsFor(params.vars)),
+    fetchHourly(modelKey, FILL_SLOTS + 2, lat, lon, "UTC", undefined, 1, airQualityVarsFor(params.vars)),
     params.vars.has(VAR.agreement)
-      ? fetchAgreementHourly(modelKey, FILL_SLOTS + 2, lat, lon, "UTC", elev_m, 1)
+      ? fetchAgreementHourly(modelKey, FILL_SLOTS + 2, lat, lon, "UTC", undefined, 1)
       : Promise.resolve(null),
   ]);
   const fetchMs = Date.now() - fetchStart;

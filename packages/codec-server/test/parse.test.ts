@@ -18,30 +18,16 @@ const EU   = 1 << MODEL_BIT["EU"];
 const DE   = 1 << MODEL_BIT["DE"];
 
 describe("parseRequest", () => {
-  it("defaults: Auto priority, UTC grid, Best Match, always-on vars, location 0", () => {
+  it("defaults: Auto priority, UTC grid, Best Match, always-on vars", () => {
     const p = parseRequest("");
-    expect(p).toMatchObject({ mode: MODE_AUTO, utcOffsetHours: 0, modelsMask: BEST, locationIdx: 0 });
+    expect(p).toMatchObject({ mode: MODE_AUTO, utcOffsetHours: 0, modelsMask: BEST });
     expect(p.vars).toEqual(withAlways());
   });
 
-  it("l: named location", () => {
-    expect(parseRequest("l:14k").locationIdx).toBe(2);
-    expect(parseRequest("l:11k").locationIdx).toBe(1);
-    expect(parseRequest("l:17k").locationIdx).toBe(3);
-    expect(parseRequest("l:summit").locationIdx).toBe(4);
-    expect(parseRequest("l:airstrip").locationIdx).toBe(5);
-  });
-
-  it("l:current and l:here set locationIdx 0", () => {
-    expect(parseRequest("l:current").locationIdx).toBe(0);
-    expect(parseRequest("l:here").locationIdx).toBe(0);
-  });
-
-  it("GPS coordinates set lat/lon and locationIdx 0", () => {
+  it("GPS coordinates set lat/lon", () => {
     const p = parseRequest("63.06300,-151.08100");
     expect(p.lat).toBeCloseTo(63.063);
     expect(p.lon).toBeCloseTo(-151.081);
-    expect(p.locationIdx).toBe(0);
   });
 
   it("Garmin email footer GPS format", () => {
@@ -148,7 +134,7 @@ describe("parseRequest", () => {
 
   it("precip is opt-in, not part of the always-on set", () => {
     expect(ALWAYS_VARS.includes(VAR.precip)).toBe(false);
-    expect(parseRequest("l:14k").vars.has(VAR.precip)).toBe(false);
+    expect(parseRequest("").vars.has(VAR.precip)).toBe(false);
   });
 
   it("v: combines configurable variable group codes without delimiters", () => {
@@ -177,13 +163,14 @@ describe("parseRequest", () => {
   });
 
   it("includes only the always-on variables when no configurable vars are specified", () => {
-    expect(parseRequest("l:14k m:eu").vars).toEqual(withAlways());
+    expect(parseRequest("m:eu").vars).toEqual(withAlways());
   });
 
   it("full message parses all fields", () => {
-    const p = parseRequest("l:14k p:r z:-9 m:eu v:f");
+    const p = parseRequest("63.0630,-151.0810 p:r z:-9 m:eu v:f");
     expect(p).toMatchObject({
-      locationIdx: 2,
+      lat: 63.063,
+      lon: -151.081,
       mode: MODE_RANGE,
       utcOffsetHours: -9,
       modelsMask: EU,
@@ -241,7 +228,7 @@ describe("parseRequest", () => {
 
   it("u: extracts a valid account token", () => {
     const token = newToken();
-    expect(parseRequest(`l:14k u:${token}`).userToken).toBe(token);
+    expect(parseRequest(`u:${token}`).userToken).toBe(token);
   });
 
   it("u: tolerates lowercase and hyphen grouping (the body is lowercased before parsing)", () => {
@@ -251,8 +238,8 @@ describe("parseRequest", () => {
   });
 
   it("userToken is null when absent or malformed, and a malformed one is an error", () => {
-    expect(parseRequest("l:14k").userToken).toBeNull();
-    expect(parseRequest("l:14k").errors).toContain("missing u:");
+    expect(parseRequest("").userToken).toBeNull();
+    expect(parseRequest("").errors).toContain("missing u:");
     expect(parseRequest("u:not-a-real-token").userToken).toBeNull();
     expect(parseRequest("u:not-a-real-token").errors).toContain("invalid account token");
     // Wrong length (15 chars, need 16) → rejected.
@@ -352,11 +339,9 @@ describe("parseRequest", () => {
         ["missing f:", "missing p:", "missing z:", "missing m:", "missing d:", "missing u:", "missing k:", "missing t:"]));
     });
 
-    it("requires coordinates unless a named location is given", () => {
+    it("requires coordinates", () => {
       expect(parseRequest("p:a").errors).toContain("missing coordinates");
-      expect(parseRequest("l:14k").errors).not.toContain("missing coordinates");
       expect(parseRequest("63.0630,-151.0810").errors).not.toContain("missing coordinates");
-      expect(parseRequest("l:nowhere").errors).toContain('unknown location "nowhere"');
     });
 
     it("parses the forecast type", () => {
@@ -444,11 +429,7 @@ describe("describeRequest", () => {
   // The rounding lives here, in the stateless service, so a position precise enough to place
   // somebody's camp is never sent to the part of the system that has a database.
   it("rounds coordinates to ~1km", () => {
-    expect(describe_("63.0630419,-151.0810871")).toMatchObject({ lat: 63.06, lon: -151.08, loc: "current" });
-  });
-
-  it("resolves a named location to its own coordinates", () => {
-    expect(describe_("l:summit")).toMatchObject({ lat: 63.07, lon: -151, loc: "summit" });
+    expect(describe_("63.0630419,-151.0810871")).toMatchObject({ lat: 63.06, lon: -151.08 });
   });
 
   it("omits coordinates when the request carried none", () => {

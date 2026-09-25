@@ -62,7 +62,6 @@ const TEST_VARS: ReadonlySet<Variable> = new Set([...DEFAULT_VARS, VAR.temp, VAR
 
 function params(overrides: Partial<ForecastParams> = {}): ForecastParams {
   return {
-    locationIdx: 0,
     lat: 63.135,
     lon: -150.989,
     mode: MODE_AUTO,
