@@ -6,7 +6,7 @@ import {
 } from '@maplibre/maplibre-react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import type { NativeSyntheticEvent } from 'react-native';
-import { MAX_ZOOM, MIN_ZOOM } from './basemapStyle';
+import { MAX_ZOOM, MIN_ZOOM, labelAnchors } from './basemapStyle';
 import { useBasemapStyle } from './useBasemapStyle';
 import { palette } from './palette';
 import { favoriteKey, type Favorite } from './favorites';
@@ -85,6 +85,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
   const [mapRevision, setMapRevision] = useState(0);
   const interactive = onPick != null;
   const mapStyle = useBasemapStyle();
+  const zoneAnchors = useMemo(() => (mapStyle ? labelAnchors(mapStyle) : []), [mapStyle]);
   const initialViewState = coord ? { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM } : DEFAULT_VIEW;
 
   // A native map surface can lose its GL context while its parent has `display: none`. Recreate
@@ -187,7 +188,11 @@ export default function LocationMap({ coord, onPick, height, active = true, user
             pin in front. */}
         {zones && (
           <GeoJSONSource id="zones" data={zones}>
-            <Layer id="zone-outlines" type="line" paint={ZONE_LINE_PAINT} />
+            {/* Under the basemap's labels, once per stack (see labelAnchors). */}
+            {zoneAnchors.flatMap((before) => [
+              <Layer key={`fill-${before}`} id={`zone-fills-${before}`} beforeId={before} type="fill" paint={ZONE_FILL_PAINT} />,
+              <Layer key={`line-${before}`} id={`zone-outlines-${before}`} beforeId={before} type="line" paint={ZONE_LINE_PAINT} />,
+            ])}
           </GeoJSONSource>
         )}
         {userCoord && (
@@ -357,10 +362,13 @@ export default function LocationMap({ coord, onPick, height, active = true, user
 const PIN = '#d0433b';
 // The star's fill, on the button and in the map icon.
 const FAVORITE = '#f5b301';
+const ZONE_COLOR = '#1f3f73';
+const ZONE_LINE_PAINT = { 'line-color': ZONE_COLOR, 'line-opacity': 0.7, 'line-width': 1.2 };
+// A faint tint so a point inside a piece reads as covered.
+const ZONE_FILL_PAINT = { 'fill-color': ZONE_COLOR, 'fill-opacity': 0.08 };
+
 // The phone's position, in the blue-dot idiom every map app uses, so it reads as "you are here"
 // rather than as a second point of interest.
-const ZONE_LINE_PAINT = { 'line-color': '#1f3f73', 'line-opacity': 0.7, 'line-width': 1.2 };
-
 const USER_DOT_PAINT = {
   'circle-radius': 7,
   'circle-color': palette.brand,

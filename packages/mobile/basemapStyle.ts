@@ -214,6 +214,15 @@ function stack(p: string, src: StackSources): LayerSpecification[] {
   ];
 }
 
+// The first label layer of each stack, bottom to top: an overlay drawn under each of these sits
+// over that stack's fills and under its labels. Each stack's fills hide the stacks below where
+// its tiles load, so only the copy under the topmost loaded stack shows.
+export function labelAnchors(style: StyleSpecification): string[] {
+  return style.layers
+    .filter((l, i) => l.type === 'symbol' && style.layers[i - 1]?.type !== 'symbol')
+    .map((l) => l.id);
+}
+
 // One archive pair as { base, hs } pmtiles URLs (remote https or local file://).
 export interface ArchivePair {
   base: string;

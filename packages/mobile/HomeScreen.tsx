@@ -2430,7 +2430,7 @@ const LocationPicker = memo(function LocationPicker({
       </View>
       {zone !== undefined && (
         <Text style={styles.zoneHint}>
-          {zone ? `Avalanche Canada zone: ${zone.names.join(', ')}` : 'Avalanche forecasts not available for this location'}
+          {zone ? `Avalanche Canada: ${zone.names.join(', ')}` : 'Avalanche forecasts not available for this location'}
         </Text>
       )}
     </>
