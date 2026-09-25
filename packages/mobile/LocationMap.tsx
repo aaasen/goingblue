@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, Modal, StyleSheet, Text, TouchableOpacity, Vi
 import {
   Camera, GeoJSONSource, Images, Layer, Map, Marker,
   type CameraRef, type PressEvent, type PressEventWithFeatures, type SymbolLayerSpecification,
+  type ViewStateChangeEvent,
 } from '@maplibre/maplibre-react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import type { NativeSyntheticEvent } from 'react-native';
@@ -86,7 +87,15 @@ export default function LocationMap({ coord, onPick, height, active = true, user
   const interactive = onPick != null;
   const mapStyle = useBasemapStyle();
   const zoneAnchors = useMemo(() => (mapStyle ? labelAnchors(mapStyle) : []), [mapStyle]);
-  const initialViewState = coord ? { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM } : DEFAULT_VIEW;
+  // Where the last map left off, so the other surface (preview or fullscreen) and a recreated map
+  // open on the same view.
+  const lastView = useRef<{ center: [number, number]; zoom: number } | null>(null);
+  const initialViewState = lastView.current
+    ?? (coord ? { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM } : DEFAULT_VIEW);
+  const onRegionDidChange = (e: NativeSyntheticEvent<ViewStateChangeEvent>) => {
+    const { center, zoom } = e.nativeEvent;
+    lastView.current = { center: [center[0], center[1]], zoom };
+  };
 
   // A native map surface can lose its GL context while its parent has `display: none`. Recreate
   // it when its tab becomes visible again.
@@ -172,6 +181,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         style={StyleSheet.absoluteFill}
         mapStyle={mapStyle}
         onPress={onPress}
+        onRegionDidChange={onRegionDidChange}
         dragPan={interactive}
         touchZoom={interactive}
         doubleTapZoom={interactive}
