@@ -1,0 +1,127 @@
+{
+  "center": "avalanche-canada",
+  "region": "Brandywine-Garibaldi-Homathko-Sky Pilot-Spearhead-Tantalus",
+  "issued": 1772323200000,
+  "expires": 1772409600000,
+  "timezone": "America/Vancouver",
+  "bottomLine": "Warm temps, sun, and persistent weak layers are creating tricky conditions\n\nChoose conservative low-angle terrain with no overhead hazard.\n\nCheck out this forecaster blog on conditions.",
+  "danger": [
+    {
+      "date": 1772352000000,
+      "btl": "moderate",
+      "tln": "moderate",
+      "alp": "considerable"
+    },
+    {
+      "date": 1772438400000,
+      "btl": "low",
+      "tln": "moderate",
+      "alp": "moderate"
+    },
+    {
+      "date": 1772524800000,
+      "btl": "moderate",
+      "tln": "considerable",
+      "alp": "considerable"
+    }
+  ],
+  "advice": [
+    "Avoid freshly wind-loaded features, especially near ridge crests, rollovers, and in steep terrain.",
+    "Continue to make conservative terrain choices while the storm snow settles and stabilizes.",
+    "Fresh snow rests on a problematic persistent slab, don't let good riding lure you into complacency.",
+    "Back off slopes as the surface becomes moist or wet with rising temperatures."
+  ],
+  "problems": [
+    {
+      "type": "windSlab",
+      "elevations": [
+        "tln",
+        "alp"
+      ],
+      "aspects": [
+        "n",
+        "ne",
+        "e",
+        "se",
+        "w",
+        "nw"
+      ],
+      "likelihood": "possible-likely",
+      "size": {
+        "min": 1,
+        "max": 2
+      },
+      "description": "Strong to extreme southerly winds formed wind slabs and affected areas farther downslope than normal. They may be more reactive where they overlie surface hoar, facets or a crust."
+    },
+    {
+      "type": "persistentSlab",
+      "elevations": [
+        "btl",
+        "tln",
+        "alp"
+      ],
+      "aspects": [
+        "n",
+        "ne",
+        "e",
+        "se",
+        "s",
+        "sw",
+        "w",
+        "nw"
+      ],
+      "likelihood": "possible",
+      "size": {
+        "min": 1.5,
+        "max": 3
+      },
+      "description": "Several weak layers of surface hoar, facets or crusts may exist in the top meter of the snowpack. Wind slabs or wet loose sluffs could step down to this layer causing larger than expected avalanches."
+    },
+    {
+      "type": "wetLoose",
+      "elevations": [
+        "btl",
+        "tln",
+        "alp"
+      ],
+      "aspects": [
+        "se",
+        "s",
+        "sw",
+        "w"
+      ],
+      "likelihood": "likely-veryLikely",
+      "size": {
+        "min": 1,
+        "max": 2
+      },
+      "description": "Sun and rising temperatures may melt the surface snow on steep solar affected slopes, creating the potential for wet loose sluffs. Use extra caution on sun-exposed slopes, if the snow surface is moist or wet."
+    }
+  ],
+  "avalancheSummary": "Friday\nA vehicle remotely triggered some small slabs on road banks. Explosive control triggered some small cornices and wind slabs.\n\nThursday\nExplosive control and ski cutting produced a few small wind slabs in lee and crossloaded terrain.\n\nWednesday\nExplosive control triggered two size 2 cornices and ski cuts produced some small wind slabs.\n\nTuesday\nA few human-triggered size 1 to 2 slabs were reported",
+  "snowpackSummary": "Strong to extreme southwesterly winds have created widespread wind effect and built wind slabs on lee slopes.\n\nA melt-freeze crust may be found on sunny slopes and at lower elevations. This surface crust will likely soften with sun and daytime warming.\n\n40 to 70 cm of storm snow from the past week may be sitting on a layer of surface hoar, facets or a crust in some areas. How quickly the old storm snow will bond to this layer remains uncertain.\n\nAnother concerning weak layer consisting of a crust with facets from early February is buried 80 to 100+ cm deep.\n\nThe remaining snowpack appears to be well settled and bonded.",
+  "weather": [
+    {
+      "label": "Saturday Night",
+      "text": "Clear skies. 20 km/h northwest ridgetop wind. Treeline temperature 0 °C. Freezing level 1600 m."
+    },
+    {
+      "label": "Sunday",
+      "text": "Sunny. 30 km/h northwest ridgetop wind. Treeline temperature 4 °C. Freezing level 2400 m."
+    },
+    {
+      "label": "Monday",
+      "text": "Mostly sunny. 30 km/h west ridgetop wind. Treeline temperature 3 °C. Freezing level 2200 m."
+    },
+    {
+      "label": "Tuesday",
+      "text": "Mostly cloudy. 15 to 35 mm of precipitation as snow or rain at treeline. 50 km/h southwest ridgetop wind. Treeline temperature 0 °C. Freezing level 1600 m."
+    }
+  ],
+  "confidence": {
+    "rating": "low",
+    "statements": [
+      "We are uncertain about how quickly persistent slabs are gaining strength."
+    ]
+  }
+}

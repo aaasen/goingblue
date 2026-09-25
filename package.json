@@ -28,6 +28,7 @@
     "avalanche-collect": "tsx packages/codec-server/scripts/avalanche/collect.ts",
     "avalanche-benchmark": "tsx packages/codec-server/scripts/avalanche/benchmark.ts",
     "avalanche-explore": "tsx packages/codec-server/scripts/avalanche/explore.ts",
+    "avalanche-export": "tsx packages/codec-server/scripts/avalanche/export.ts",
     "generate": "pnpm --filter @weather/protocol build && tsx packages/codec-server/scripts/generate-codebooks.ts"
   },
   "devDependencies": {
