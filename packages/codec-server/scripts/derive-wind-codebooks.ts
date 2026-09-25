@@ -124,8 +124,8 @@ function gustCounter(): CellCounter {
       if (!pos || !h.time?.length) return;
       if (!h.wind_gusts_10m?.some((v: number | null) => v != null)) return; // pre-add-pass cell
       for (let res = 0; res < NRES; res++) {
-        // Periods anchored to the cell's first local midnight, aggregated once per cell
-        // and shared with every other counter that wants this anchoring.
+        // Periods from the cell's first local midnight, aggregated once per cell and shared with
+        // every other counter.
         const slice = ctx.atMidnight(TABLE_RES_IDXS[res]);
         if (!slice) continue;
         const periods = slice.rows.map((r) => toFullPeriod(r, GUST_VARS, "US"));
@@ -219,9 +219,9 @@ function directionCounter(): CellCounter {
     vars: LEVEL_HOURLY,
     countCell(ctx, add) {
       for (let resIdx = 0; resIdx < NRES; resIdx++) {
-        // Periods anchored to the request hour, aggregated once per cell and shared with every
-        // other counter using this anchoring.
-        const slice = ctx.atRequest(TABLE_RES_IDXS[resIdx]);
+        // Periods from the cell's first local midnight, aggregated once per cell and shared with
+        // every other counter.
+        const slice = ctx.atMidnight(TABLE_RES_IDXS[resIdx]);
         if (!slice) continue;
         const { n, rows } = slice;
         const periods: Period[] = rows.map((r) => toFullPeriod(r, LEVEL_VARS, "US"));
@@ -337,9 +337,9 @@ function speedCounter(): CellCounter {
     vars: LEVEL_HOURLY,
     countCell(ctx, add) {
       for (let resIdx = 0; resIdx < NRES; resIdx++) {
-        // Periods anchored to the request hour, aggregated once per cell and shared with every
-        // other counter using this anchoring.
-        const slice = ctx.atRequest(TABLE_RES_IDXS[resIdx]);
+        // Periods from the cell's first local midnight, aggregated once per cell and shared with
+        // every other counter.
+        const slice = ctx.atMidnight(TABLE_RES_IDXS[resIdx]);
         if (!slice) continue;
         const { n, rows } = slice;
         const periods: Period[] = rows.map((r) => toFullPeriod(r, LEVEL_VARS, "US"));
