@@ -1,25 +1,12 @@
 /**
- * Bulletin prose extraction. The API delivers every text field as an HTML fragment; the codec
- * models plain text, so this is the one place HTML is turned into the strings that get
- * compressed. Everything downstream (tokenizer, model, metrics) sees only the output of
- * bulletinSections().
+ * Bulletin prose. The API delivers every text field as an HTML fragment; the codec models plain
+ * text, and htmlToText is the one place HTML is turned into the strings that get compressed.
  */
 
-import { extractStructured, type Structured } from "./structured.ts";
-
 export interface Section {
-  kind: string;   // highlights | avalanche-summary | snowpack-summary | weather-summary | problem | advice
+  kind: string;   // see SECTION_KINDS in bulletin.ts
   text: string;
   context?: string;   // problem type for a problem comment; the word model starts from it
-}
-
-export interface BulletinProse {
-  id: string;
-  owner: string;
-  dateIssued: string;
-  sections: Section[];
-  text: string;   // all sections joined, the document the codec compresses
-  structured: Structured;
 }
 
 const ENTITIES: Record<string, string> = {
@@ -48,55 +35,4 @@ export function htmlToText(html: string | null | undefined): string {
   s = decodeEntities(s).replace(/ /g, " ");
   const lines = s.split("\n").map((l) => l.replace(/[ \t\r\f\v]+/g, " ").trim());
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-}
-
-interface RawProduct {
-  id: string;
-  owner: { value: string };
-  report: {
-    dateIssued: string;
-    highlights?: string | null;
-    summaries?: { type: { value: string }; content: string | null }[];
-    problems?: { type?: { value: string }; comment?: string | null }[];
-    terrainAndTravelAdvice?: string[];
-    dangerRatings?: { ratings: Record<string, { rating: { value: string } }> }[];
-  };
-}
-
-const RATED = new Set(["low", "moderate", "considerable", "high", "extreme"]);
-
-// A bulletin with a real danger rating somewhere. Off-season placeholders and "no rating"
-// regions carry boilerplate, not forecasts, and are excluded from the corpus.
-export function isForecast(p: RawProduct): boolean {
-  return (p.report.dangerRatings ?? []).some((d) =>
-    Object.values(d.ratings ?? {}).some((r) => RATED.has(r.rating?.value)),
-  );
-}
-
-export function bulletinSections(p: RawProduct): Section[] {
-  const r = p.report;
-  const out: Section[] = [];
-  const push = (kind: string, html: string | null | undefined, context?: string) => {
-    const text = htmlToText(html);
-    if (text || context !== undefined) out.push(context === undefined ? { kind, text } : { kind, text, context });
-  };
-  push("highlights", r.highlights);
-  // Every problem gets a section, empty comment or not, so the k-th problem section belongs to
-  // the k-th problem and the decoder can supply its type.
-  for (const pr of r.problems ?? []) push("problem", pr.comment, pr.type?.value ?? "");
-  for (const a of r.terrainAndTravelAdvice ?? []) push("advice", a);
-  for (const s of r.summaries ?? []) push(s.type.value, s.content);
-  return out;
-}
-
-export function bulletinProse(p: RawProduct): BulletinProse {
-  const sections = bulletinSections(p);
-  return {
-    id: p.id,
-    owner: p.owner.value,
-    dateIssued: p.report.dateIssued,
-    sections,
-    text: sections.map((s) => s.text).join("\n\n"),
-    structured: extractStructured(p as Parameters<typeof extractStructured>[0]),
-  };
 }

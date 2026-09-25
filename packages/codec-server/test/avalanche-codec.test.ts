@@ -4,8 +4,10 @@ import { Model } from "../scripts/avalanche/model.ts";
 import { encode, decode, sectionBits, tokenCosts } from "../scripts/avalanche/codec.ts";
 import { buildTable, normalize, encode as ransEncode, Decoder, SCALE } from "../scripts/avalanche/rans.ts";
 import { htmlToText, type Section } from "../scripts/avalanche/text.ts";
-import { StructuredModel, type Structured } from "../scripts/avalanche/structured.ts";
-import { encodeBulletin, decodeBulletin } from "../scripts/avalanche/bulletin.ts";
+import { structuredOf } from "../scripts/avalanche/structured.ts";
+import { UNENCODED, decodeBulletin, encodeBulletin, train, withPlaceholders } from "../scripts/avalanche/bulletin.ts";
+import type { AvalancheForecast, AvalancheProblem } from "@weather/protocol";
+import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.json";
 
 const TRAIN: Section[] = [
   { kind: "problem", text: "Wind slabs remain reactive on north through east aspects in the alpine. Use caution near ridge crests." },
@@ -141,70 +143,101 @@ describe("htmlToText", () => {
   });
 });
 
-describe("structured", () => {
-  const S: Structured[] = [
-    { ratings: [{ alp: "considerable", tln: "moderate", btl: "low" }, { alp: "considerable", tln: "moderate", btl: "low" }, { alp: "high", tln: "considerable", btl: "moderate" }],
-      confidence: "moderate",
-      problems: [{ type: "windslab", elevations: ["alp", "tln"], aspects: ["e", "n", "ne", "nw"], likelihood: "likely", size: "1.0-2.0" }] },
-    { ratings: [{ alp: "low", tln: "low", btl: "low" }, { alp: "low", tln: "low", btl: "low" }, { alp: "moderate", tln: "low", btl: "low" }],
-      confidence: "high",
-      problems: [] },
-  ];
-  function models(): [Model, StructuredModel] {
-    const m = trained();
-    const sm = new StructuredModel();
-    for (const s of S) sm.observe(s);
-    sm.finalize();
-    return [m, sm];
-  }
+// A forecast with every coded field set, for the bulletin tests to vary.
+function forecast(over: Partial<AvalancheForecast> = {}): AvalancheForecast {
+  return {
+    center: "avalanche-canada", issuedBy: "Avalanche Canada", region: "Sea to Sky",
+    issued: Date.parse("2026-02-28T23:00:00Z"), expires: Date.parse("2026-03-01T23:00:00Z"),
+    timezone: "America/Vancouver",
+    bottomLine: "Storm slabs will build with 20-30 cm of new snow.",
+    danger: [
+      { date: 1, alp: "considerable", tln: "moderate", btl: "low" },
+      { date: 2, alp: "considerable", tln: "moderate", btl: "low" },
+      { date: 3, alp: "high", tln: "considerable", btl: "moderate" },
+    ],
+    advice: ["Avoid freshly wind-loaded features.", "Make conservative terrain choices."],
+    problems: [{
+      type: "windSlab", elevations: ["tln", "alp"], aspects: ["n", "ne", "e", "nw"],
+      likelihood: "likely", size: { min: 1, max: 2 },
+      description: "Wind slabs remain reactive on north through east aspects in the alpine.",
+    }],
+    avalancheSummary: "Several size 1 wind slabs were reported.",
+    snowpackSummary: "The snowpack is generally well settled below treeline.",
+    weather: [
+      { label: "Saturday Night", text: "Clear skies. 20 km/h northwest ridgetop wind." },
+      { label: "Sunday", text: "Sunny.\n\nTreeline temperature -5 °C." },
+    ],
+    confidence: { rating: "moderate", statements: ["We are uncertain how quickly slabs are gaining strength."] },
+    ...over,
+  };
+}
 
-  it("round-trips seen and unseen values inside a whole bulletin", () => {
-    const [m, sm] = models();
-    const novel: Structured = {
-      ratings: [{ alp: "extreme", tln: "spring", btl: "norating" }],
-      confidence: "low",
+const QUIET = forecast({
+  danger: [{ date: 1, alp: "low", tln: "low", btl: "low" }, { date: 2, alp: "moderate", tln: "low", btl: "low" }],
+  confidence: { rating: "high", statements: [] },
+  problems: [],
+});
+
+describe("bulletin", () => {
+  const models = () => train([forecast(), QUIET]);
+
+  it("round-trips a forecast, filling the fields the wire does not carry with placeholders", () => {
+    const m = models();
+    for (const f of [forecast(), QUIET]) expect(decodeBulletin(m, encodeBulletin(m, f))).toEqual(withPlaceholders(f));
+    const back = decodeBulletin(m, encodeBulletin(m, forecast()));
+    expect(back).toMatchObject(UNENCODED);
+    expect(back.danger.map((d) => d.date)).toEqual([0, 86400000, 172800000]);
+  });
+
+  it("round-trips unseen values, empty prose, and unlabeled weather periods", () => {
+    const m = models();
+    const novel = forecast({
+      bottomLine: "",
+      danger: [{ date: 1, alp: "extreme", tln: "spring", btl: "noRating" }],
+      advice: ["", "Novel Zymoetz advice."],
       problems: [
-        { type: "cornice", elevations: ["alp"], aspects: [], likelihood: "certain_veryLikely", size: "3.0-4.5" },
-        { type: "windslab", elevations: ["alp", "tln"], aspects: ["e", "n", "ne", "nw"], likelihood: "likely", size: "1.0-2.0" },
+        { type: "cornice", elevations: ["alp"], aspects: [], likelihood: "veryLikely-certain", size: { min: 3, max: 4.5 }, description: "" },
+        { type: "windSlab", elevations: ["btl", "tln", "alp"], aspects: ["s"], likelihood: "unlikely-possible", size: { min: 1.5, max: 1.5 }, description: "Novel Kokanee text." },
       ],
-    };
-    for (const s of [S[0], S[1], novel]) {
-      // A problem comment carries the type of the problem it belongs to, when there is one.
-      const problem = s.problems.length ? { ...TRAIN[0], context: s.problems[0].type } : TRAIN[0];
-      const b = { structured: s, sections: [problem, { kind: "highlights", text: "Novel Zymoetz text." }] };
-      expect(decodeBulletin(m, sm, encodeBulletin(m, sm, b))).toEqual(b);
-    }
+      avalancheSummary: "",
+      weather: [{ label: "", text: "Unheaded weather prose." }, { label: "Monday", text: "" }],
+      confidence: { rating: "noRating", statements: ["First.", "Second statement."] },
+    });
+    expect(decodeBulletin(m, encodeBulletin(m, novel))).toEqual(withPlaceholders(novel));
   });
 
   it("charges seen structure a few bits and unseen values many", () => {
-    const [m, sm] = models();
-    expect(sm.bits(m.byteTable(), S[0])).toBeLessThan(24);
-    expect(sm.bits(m.byteTable(), { ...S[1], confidence: "zzz" })).toBeGreaterThan(30);
+    const m = models();
+    const byteTable = m.prose.byteTable();
+    expect(m.structured.bits(byteTable, structuredOf(forecast()))).toBeLessThan(24);
+    const unseen = forecast({ confidence: { rating: "low", statements: [] } });
+    expect(m.structured.bits(byteTable, structuredOf(unseen))).toBeGreaterThan(30);
+  });
+
+  it("round-trips the Sea to Sky forecast", () => {
+    const f = SEA_TO_SKY as AvalancheForecast;
+    const m = train([f]);
+    expect(decodeBulletin(m, encodeBulletin(m, f))).toEqual(withPlaceholders(f));
   });
 });
 
 describe("section context", () => {
-  it("starts a problem comment from its type and round-trips through the bulletin", () => {
+  it("starts a problem description from its type and round-trips through the bulletin", () => {
     const m = new Model();
-    const a = { kind: "problem", text: "Wind slabs remain reactive near ridge crests.", context: "windslab" };
-    const b = { kind: "problem", text: "Persistent slabs remain a concern on shaded aspects.", context: "persistentslab" };
+    const a = { kind: "problem", text: "Wind slabs remain reactive near ridge crests.", context: "windSlab" };
+    const b = { kind: "problem", text: "Persistent slabs remain a concern on shaded aspects.", context: "persistentSlab" };
     for (const s of [a, b, TRAIN[2]]) m.observe(s);
     m.finalize();
     // The same first word costs less under its own type than under the other.
-    const asWind = sectionBits(m, { kind: "problem", text: "Wind", context: "windslab" });
-    const asPersistent = sectionBits(m, { kind: "problem", text: "Wind", context: "persistentslab" });
+    const asWind = sectionBits(m, { kind: "problem", text: "Wind", context: "windSlab" });
+    const asPersistent = sectionBits(m, { kind: "problem", text: "Wind", context: "persistentSlab" });
     expect(asWind).toBeLessThan(asPersistent);
-    const sm = new StructuredModel();
-    const structured: Structured = {
-      ratings: [{ alp: "low", tln: "low", btl: "low" }], confidence: "high",
-      problems: [
-        { type: "persistentslab", elevations: ["alp"], aspects: [], likelihood: "possible", size: "1.0-2.0" },
-        { type: "windslab", elevations: ["alp"], aspects: [], likelihood: "possible", size: "1.0-2.0" },
-      ],
-    };
-    sm.observe(structured);
-    sm.finalize();
-    const bulletin = { structured, sections: [TRAIN[2], b, a] };
-    expect(decodeBulletin(m, sm, encodeBulletin(m, sm, bulletin))).toEqual(bulletin);
+
+    const problem = (type: "windSlab" | "persistentSlab", description: string): AvalancheProblem => ({
+      type, elevations: ["alp"], aspects: [], likelihood: "possible", size: { min: 1, max: 2 }, description,
+    });
+    const f = forecast({ problems: [problem("persistentSlab", b.text), problem("windSlab", a.text)] });
+    const models = train([f]);
+    expect(decodeBulletin(models, encodeBulletin(models, f))).toEqual(withPlaceholders(f));
   });
 });

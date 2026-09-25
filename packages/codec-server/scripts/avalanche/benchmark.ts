@@ -7,12 +7,13 @@
  *
  * Usage: pnpm avalanche-benchmark [--test-frac 0.2] [--min-count 1] [--word-order 2|3]
  */
+import type { AvalancheForecast } from "@weather/protocol";
 import { encode, decode, sectionBits } from "./codec.ts";
-import { encodeBulletin, decodeBulletin } from "./bulletin.ts";
-import { StructuredModel } from "./structured.ts";
+import { decodeBulletin, encodeBulletin, sectionsOf, train as trainModels, withPlaceholders } from "./bulletin.ts";
 import { openDb } from "./db.ts";
-import { Model, WORD_ORDER } from "./model.ts";
-import { bulletinProse, isForecast, type BulletinProse } from "./text.ts";
+import { isForecast, toForecast, type RawProduct } from "./forecast.ts";
+import { WORD_ORDER } from "./model.ts";
+import { structuredOf } from "./structured.ts";
 import { tokenize } from "./tokenizer.ts";
 
 // Compressed bytes that fit one satellite message on the tightest multi-message route.
@@ -23,16 +24,23 @@ export function arg(name: string, fallback: number): number {
   return i === -1 ? fallback : Number(process.argv[i + 1]);
 }
 
-export function loadBulletins(): BulletinProse[] {
+export interface Doc {
+  id: string;
+  dateIssued: string;
+  forecast: AvalancheForecast;
+}
+
+// Every archived product with a danger rating and some prose, as the app's forecast.
+export function loadBulletins(): Doc[] {
   const db = openDb();
   const rows = db.prepare("SELECT json FROM products ORDER BY date_issued, id").all() as { json: string }[];
   db.close();
-  const out: BulletinProse[] = [];
+  const out: Doc[] = [];
   for (const { json } of rows) {
-    const p = JSON.parse(json);
+    const p = JSON.parse(json) as RawProduct;
     if (!isForecast(p)) continue;
-    const b = bulletinProse(p);
-    if (b.text) out.push(b);
+    const forecast = toForecast(p);
+    if (sectionsOf(forecast).some((s) => s.text)) out.push({ id: p.id, dateIssued: p.report.dateIssued, forecast });
   }
   return out;
 }
@@ -44,7 +52,7 @@ function unitHash(id: string): number {
   return (h >>> 0) / 4294967296;
 }
 
-export function split(docs: BulletinProse[], testFrac: number): { train: BulletinProse[]; test: BulletinProse[] } {
+export function split(docs: Doc[], testFrac: number): { train: Doc[]; test: Doc[] } {
   return {
     train: docs.filter((d) => unitHash(d.id) >= testFrac),
     test: docs.filter((d) => unitHash(d.id) < testFrac),
@@ -69,12 +77,8 @@ function main(): void {
   const t0 = Date.now();
   const wordOrder = arg("--word-order", WORD_ORDER);
   console.log(`  word order ${wordOrder}`);
-  const model = new Model(wordOrder);
-  for (const d of train) for (const s of d.sections) model.observe(s);
-  model.finalize(minCount);
-  const structured = new StructuredModel();
-  for (const d of train) structured.observe(d.structured);
-  structured.finalize();
+  const models = trainModels(train.map((d) => d.forecast), wordOrder, minCount);
+  const { prose: model, structured } = models;
   const st = model.stats();
   console.log(`\ntrained in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${st.streams} word streams, vocab ${fmt(st.wordVocab)}, ` + st.entries.map((n, k) => `order ${k + 1}: ${fmt(n)} entries over ${fmt(st.contexts[k])} contexts`).join(", "));
 
@@ -90,23 +94,25 @@ function main(): void {
   const msgHist = new Map<number, number>();
   const bySection = new Map<string, SectionAcc>();
   for (const d of test) {
-    const blob = encode(model, d.sections);
-    const contextFor = (kind: string, index: number) => (kind === "problem" ? d.structured.problems[index]?.type : undefined);
-    if (JSON.stringify(decode(model, blob, contextFor)) !== JSON.stringify(d.sections)) {
+    const sections = sectionsOf(d.forecast);
+    const struct = structuredOf(d.forecast);
+    const blob = encode(model, sections);
+    const contextFor = (kind: string, index: number) => (kind === "problem" ? struct.problems[index]?.type : undefined);
+    if (JSON.stringify(decode(model, blob, contextFor)) !== JSON.stringify(sections)) {
       failures++;
       console.log(`  ROUND TRIP FAILED: ${d.id}`);
     }
-    raw += utf8.encode(d.text).length;
+    raw += utf8.encode(sections.map((s) => s.text).join("\n\n")).length;
     comp += blob.length;
-    structBits += structured.bits(model.byteTable(), d.structured);
-    const whole = encodeBulletin(model, structured, { structured: d.structured, sections: d.sections });
+    structBits += structured.bits(model.byteTable(), struct);
+    const whole = encodeBulletin(models, d.forecast);
     combined += whole.length;
-    const back = decodeBulletin(model, structured, whole);
-    if (JSON.stringify(back) !== JSON.stringify({ structured: d.structured, sections: d.sections })) {
+    const back = decodeBulletin(models, whole);
+    if (JSON.stringify(back) !== JSON.stringify(withPlaceholders(d.forecast))) {
       combinedFailures++;
       console.log(`  BULLETIN ROUND TRIP FAILED: ${d.id}`);
     }
-    for (const s of d.sections) {
+    for (const s of sections) {
       const stream = model.streamFor(s.kind);
       const toks = tokenize(s.text);
       tokens += toks.words.length;

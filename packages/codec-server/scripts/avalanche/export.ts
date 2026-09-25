@@ -10,7 +10,7 @@ import { toForecast, type RawProduct } from "./forecast.ts";
 const args = process.argv.slice(2);
 const outIdx = args.indexOf("--out");
 const out = outIdx === -1 ? undefined : args[outIdx + 1];
-const id = args.find((a, i) => !a.startsWith("--") && i !== outIdx + 1);
+const id = args.find((a, i) => !a.startsWith("--") && (outIdx === -1 || i !== outIdx + 1));
 if (!id) {
   console.error("usage: pnpm avalanche-export <product id or prefix> [--out path]");
   process.exit(2);

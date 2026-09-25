@@ -135,6 +135,16 @@ function problem(p: NonNullable<RawProduct["report"]["problems"]>[number]): Aval
   };
 }
 
+const RATED = new Set(["low", "moderate", "considerable", "high", "extreme"]);
+
+// A bulletin with a real danger rating somewhere. Off-season placeholders and "no rating"
+// regions carry boilerplate, not forecasts, and are excluded from the corpus.
+export function isForecast(p: RawProduct): boolean {
+  return (p.report.dangerRatings ?? []).some((d) =>
+    Object.values(d.ratings ?? {}).some((r) => RATED.has(r.rating?.value)),
+  );
+}
+
 export function toForecast(raw: RawProduct): AvalancheForecast {
   const r = raw.report;
   const tz = r.timezone ?? "UTC";
@@ -153,7 +163,7 @@ export function toForecast(raw: RawProduct): AvalancheForecast {
       tln: lookup(RATINGS, d.ratings.tln?.rating.value, "danger rating"),
       alp: lookup(RATINGS, d.ratings.alp?.rating.value, "danger rating"),
     })),
-    advice: r.terrainAndTravelAdvice ?? [],
+    advice: (r.terrainAndTravelAdvice ?? []).map(htmlToText),
     problems: (r.problems ?? []).map(problem),
     avalancheSummary: summary("avalanche-summary"),
     snowpackSummary: summary("snowpack-summary"),

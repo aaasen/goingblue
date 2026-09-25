@@ -6,8 +6,9 @@
  * Usage: pnpm avalanche-explore [--test-frac 0.2] [--top 30] [--word-order 2|3]
  */
 import { tokenCosts, type TokenCost } from "./codec.ts";
-import { Model, WORD_ORDER } from "./model.ts";
+import { WORD_ORDER } from "./model.ts";
 import { loadBulletins, split, arg } from "./benchmark.ts";
+import { sectionsOf, train as trainModels } from "./bulletin.ts";
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;
@@ -53,9 +54,7 @@ function main(): void {
   const top = arg("--top", 30);
   const docs = loadBulletins();
   const { train, test } = split(docs, testFrac);
-  const model = new Model(arg("--word-order", WORD_ORDER));
-  for (const d of train) for (const s of d.sections) model.observe(s);
-  model.finalize();
+  const model = trainModels(train.map((d) => d.forecast), arg("--word-order", WORD_ORDER)).prose;
 
   // Lowercase forms known to any stream, for spotting capitalization variants.
   const lowerVocab = new Set<string>();
@@ -69,7 +68,7 @@ function main(): void {
   let chars = 0;
   let sectionsSeen = 0;
   for (const d of test) {
-    for (const s of d.sections) {
+    for (const s of sectionsOf(d.forecast)) {
       sectionsSeen++;
       chars += s.text.length;
       for (const c of tokenCosts(model, s)) {

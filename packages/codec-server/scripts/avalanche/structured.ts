@@ -1,11 +1,14 @@
 /**
  * The quantitative side of a bulletin: danger ratings by day and elevation band, the problem
- * list (type, elevations, aspects, likelihood, expected size), and confidence.
+ * list (type, elevations, aspects, likelihood, expected size), and the confidence rating.
  *
  * Each field is a token stream with explicit contexts, coded on the same escape ladder as the
  * prose (context, unigram, bytes), so a value never seen in training still round-trips. The
  * contexts are the correlations that matter: bands step down within a day, days repeat, and a
  * problem's elevations, aspects, likelihood, and size follow from its type.
+ *
+ * Tokens are the protocol's scale values (avalanche.ts); elevations and aspects are joined in
+ * scale order and size is "min-max".
  *
  * Coding order:
  *   day count, then per day: alpine | (day, alpine the day before), treeline | alpine,
@@ -14,14 +17,15 @@
  *   problem count, then per problem: type | previous type, elevations | type,
  *   aspects | type, likelihood | type, size | type
  */
+import type { AvalancheForecast } from "@weather/protocol";
 import { BOS, Stream, Vocab, UNK } from "./model.ts";
 import { planToken, readToken } from "./codec.ts";
 import { costBits, type Decision, type Decoder } from "./rans.ts";
 
 export interface Problem {
   type: string;
-  elevations: string[];   // sorted
-  aspects: string[];      // sorted
+  elevations: string[];
+  aspects: string[];
   likelihood: string;
   size: string;           // "min-max"
 }
@@ -32,39 +36,16 @@ export interface Structured {
   problems: Problem[];
 }
 
-const BANDS = ["alp", "tln", "btl"] as const;
-
-interface RawProduct {
-  report: {
-    dangerRatings?: { ratings: Record<string, { rating: { value: string } }> }[];
-    confidence?: { rating?: { value: string } };
-    problems?: {
-      type: { value: string };
-      data?: {
-        elevations?: { value: string }[];
-        aspects?: { value: string }[];
-        likelihood?: { value: string };
-        expectedSize?: { min: string; max: string };
-      };
-    }[];
-  };
-}
-
-export function extractStructured(p: RawProduct): Structured {
-  const r = p.report;
+export function structuredOf(f: AvalancheForecast): Structured {
   return {
-    ratings: (r.dangerRatings ?? []).map((d) => ({
-      alp: d.ratings.alp?.rating.value ?? "",
-      tln: d.ratings.tln?.rating.value ?? "",
-      btl: d.ratings.btl?.rating.value ?? "",
-    })),
-    confidence: r.confidence?.rating?.value ?? "",
-    problems: (r.problems ?? []).map((pr) => ({
-      type: pr.type.value,
-      elevations: (pr.data?.elevations ?? []).map((e) => e.value).sort(),
-      aspects: (pr.data?.aspects ?? []).map((a) => a.value).sort(),
-      likelihood: pr.data?.likelihood?.value ?? "",
-      size: `${pr.data?.expectedSize?.min ?? ""}-${pr.data?.expectedSize?.max ?? ""}`,
+    ratings: f.danger.map((d) => ({ alp: d.alp, tln: d.tln, btl: d.btl })),
+    confidence: f.confidence.rating,
+    problems: f.problems.map((p) => ({
+      type: p.type,
+      elevations: [...p.elevations],
+      aspects: [...p.aspects],
+      likelihood: p.likelihood,
+      size: `${p.size.min}-${p.size.max}`,
     })),
   };
 }
