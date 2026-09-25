@@ -1,6 +1,8 @@
 /**
  * The bulletin archive: SQLite (node:sqlite, no dependency) at data/avalanche.db, written by
  * collect.ts. `products` holds each bulletin's raw API JSON verbatim, keyed by product id.
+ * `areas` caches each product area's GeoJSON geometry for pieces.ts, with the walk date it was
+ * fetched for.
  */
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -39,6 +41,11 @@ export function openDb(path: string = DB_PATH): DatabaseSync {
       PRIMARY KEY (walk_date, product_id)
     );
     CREATE INDEX IF NOT EXISTS products_owner_issued ON products (owner, date_issued);
+    CREATE TABLE IF NOT EXISTS areas (
+      id         TEXT PRIMARY KEY,
+      walk_date  TEXT NOT NULL,
+      geometry   TEXT NOT NULL
+    );
   `);
   return db;
 }

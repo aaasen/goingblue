@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  dangerCell, dayLabel, likelihoodScale, sizeScale, stampLabel,
+  dangerCell, dayLabel, likelihoodScale, pieceFeatures, regionBounds, sizeScale, stampLabel,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -52,5 +52,24 @@ describe('zoned labels', () => {
     expect(stampLabel(morning, 'America/Vancouver', '12h')).toBe('Sun, March 1, 2026 at 12:05 AM PT');
     expect(stampLabel(morning, 'America/Vancouver', '24h')).toBe('Sun, March 1, 2026 at 00:05 PT');
     expect(stampLabel(issued, 'Europe/Zurich', '24h')).toBe('Sun, March 1, 2026 at 01:00');
+  });
+});
+
+describe('pieces', () => {
+  const piece = (id: number, names: string[], bbox: [number, number, number, number]) =>
+    ({ id, center: 'avalanche-canada', names, bbox, polygons: [] });
+  const pieces = [
+    piece(0, ['Brandywine'], [-124, 50, -123, 51]),
+    piece(1, ['Sky Pilot'], [-123.5, 49.4, -123, 49.8]),
+    piece(2, ['Kitimat', 'Rupert', 'Shames'], [-130, 54, -128, 55]),
+  ];
+
+  it('frames the pieces a title names, and only whole pieces', () => {
+    expect(regionBounds('Brandywine-Sky Pilot', pieces)).toEqual([-124, 49.4, -123, 51]);
+    expect(regionBounds('Kitimat-Rupert', pieces)).toBeNull();
+  });
+
+  it('turns pieces into MultiPolygon features', () => {
+    expect(pieceFeatures(pieces).features[2]).toMatchObject({ properties: { id: 2 }, geometry: { type: 'MultiPolygon' } });
   });
 });

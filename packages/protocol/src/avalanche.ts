@@ -77,3 +77,16 @@ export interface AvalancheForecast {
   weather: WeatherPeriod[];
   confidence: { rating: Confidence | 'noRating'; statements: string[] };
 }
+
+// Subregion names that contain the "-" forecast area titles join names with.
+const HYPHENATED = ['Chic-Chocs'];
+
+// The subregions a forecast area's title names, in title order: "Bow Valley-Highwood
+// Pass-North 40-Spray - KLakes" joins names on a bare "-", and a spaced " - " is part of a name.
+export function subregionNames(title: string): string[] {
+  let t = title;
+  HYPHENATED.forEach((name, i) => { t = t.replaceAll(name, `\u0000${i}\u0000`); });
+  return t.split(/(?<=\S)-(?=\S)/)
+    .map((s) => s.replace(/\u0000(\d+)\u0000/g, (_, i: string) => HYPHENATED[Number(i)]).trim())
+    .filter(Boolean);
+}

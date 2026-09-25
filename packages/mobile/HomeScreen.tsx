@@ -1878,7 +1878,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
       {/* An archived bulletin stands in for a decoded one until there is a wire format. */}
       {tab === 'avalanche' && (
-        <AvalancheForecastView forecast={SAMPLE_AVALANCHE} timeFormat={timeFormat} />
+        <AvalancheForecastView
+          forecast={SAMPLE_AVALANCHE} timeFormat={timeFormat}
+          userCoord={gpsCoords} favorites={favorites} pastPoints={pastPoints}
+        />
       )}
 
       <HelpScreen visible={help} onClose={() => setHelp(false)} />

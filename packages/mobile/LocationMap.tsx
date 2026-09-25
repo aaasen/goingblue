@@ -55,6 +55,10 @@ interface Props {
   coordFormat?: CoordFormat;
   // When set, a download button opens the offline maps sheet.
   offlineMaps?: boolean;
+  // Areas drawn as outlines under everything else, such as the avalanche forecast pieces.
+  zones?: GeoJSON.FeatureCollection | null;
+  // [west, south, east, north] to frame when there is no coordinate to center on.
+  bounds?: [number, number, number, number] | null;
 }
 
 // The picker's starting point before any coordinate is set: as far out as the basemap allows,
@@ -63,6 +67,7 @@ interface Props {
 const DEFAULT_VIEW = { center: [-110, 54] as [number, number], zoom: MIN_ZOOM };
 // Zoom applied once a coordinate exists — tight enough to confirm the spot, loose enough to nudge it.
 const PICKED_ZOOM = 9;
+const BOUNDS_PADDING = { top: 16, right: 16, bottom: 16, left: 16 };
 
 const MAP_IMAGES = {
   'peak-triangle': require('./assets/peak-triangle.png'),
@@ -73,7 +78,7 @@ const MAP_IMAGES = {
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
 // picks a coordinate. The picker's corner button opens the same map fullscreen; the preview has no
 // controls.
-export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon', offlineMaps = false }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon', offlineMaps = false, zones, bounds }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
@@ -83,7 +88,9 @@ export default function LocationMap({ coord, onPick, height, active = true, user
   const [mapRevision, setMapRevision] = useState(0);
   const interactive = onPick != null;
   const mapStyle = useBasemapStyle();
-  const initialViewState = coord ? { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM } : DEFAULT_VIEW;
+  const initialViewState = coord
+    ? { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM }
+    : bounds ? { bounds, padding: BOUNDS_PADDING } : DEFAULT_VIEW;
 
   // A native map surface can lose its GL context while its parent has `display: none`. Recreate
   // it when its tab becomes visible again.
@@ -183,6 +190,11 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         {/* A style layer rather than a Marker: markers are native views over the GL surface, so a
             layer always sits under the pin, and a forecast on top of the phone's position keeps the
             pin in front. */}
+        {zones && (
+          <GeoJSONSource id="zones" data={zones}>
+            <Layer id="zone-outlines" type="line" paint={ZONE_LINE_PAINT} />
+          </GeoJSONSource>
+        )}
         {userCoord && (
           <GeoJSONSource id="user-location" data={{ type: 'Point', coordinates: [userCoord.lon, userCoord.lat] }}>
             <Layer id="user-location-dot" type="circle" paint={USER_DOT_PAINT} />
@@ -352,6 +364,8 @@ const PIN = '#d0433b';
 const FAVORITE = '#f5b301';
 // The phone's position, in the blue-dot idiom every map app uses, so it reads as "you are here"
 // rather than as a second point of interest.
+const ZONE_LINE_PAINT = { 'line-color': '#1f3f73', 'line-opacity': 0.7, 'line-width': 1.2 };
+
 const USER_DOT_PAINT = {
   'circle-radius': 7,
   'circle-color': palette.brand,

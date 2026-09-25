@@ -1,7 +1,7 @@
 // What the avalanche view says and colors, kept apart from the drawing so it can be tested.
 import {
-  DANGER_LEVELS, LIKELIHOODS,
-  type DangerRating, type Elevation, type Likelihood, type ProblemType,
+  DANGER_LEVELS, LIKELIHOODS, subregionNames,
+  type AvalanchePiece, type DangerRating, type Elevation, type Likelihood, type ProblemType,
 } from '@weather/protocol';
 import type { DangerIcon } from './dangerIcons';
 import type { TimeFormat } from './settings';
@@ -145,4 +145,28 @@ export function stampLabel(ms: number, timezone: string, timeFormat: TimeFormat)
     : `${hour % 12 || 12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`;
   const zone = ZONE_ABBREVIATIONS[timezone];
   return `${date} at ${clock}${zone ? ` ${zone}` : ''}`;
+}
+
+// The pieces as map features, one MultiPolygon each.
+export function pieceFeatures(pieces: readonly AvalanchePiece[]): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: pieces.map((p) => ({
+      type: 'Feature',
+      properties: { id: p.id },
+      geometry: { type: 'MultiPolygon', coordinates: p.polygons },
+    })),
+  };
+}
+
+// [west, south, east, north] around the pieces a forecast area's title names, or null when it
+// names none of them.
+export function regionBounds(region: string, pieces: readonly AvalanchePiece[]): [number, number, number, number] | null {
+  const names = new Set(subregionNames(region));
+  const hits = pieces.filter((p) => p.names.every((n) => names.has(n)));
+  if (hits.length === 0) return null;
+  return [
+    Math.min(...hits.map((p) => p.bbox[0])), Math.min(...hits.map((p) => p.bbox[1])),
+    Math.max(...hits.map((p) => p.bbox[2])), Math.max(...hits.map((p) => p.bbox[3])),
+  ];
 }
