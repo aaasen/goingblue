@@ -1,16 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { SkiaPictureView, Skia, matchFont, type SkCanvas, type SkFont, type SkPicture, type SkSVG } from '@shopify/react-native-skia';
-import { ASPECTS, AVALANCHE_PIECES, type AvalancheForecast, type AvalancheProblem, type DangerDay, type Elevation } from '@weather/protocol';
+import { ASPECTS, type AvalancheForecast, type AvalancheProblem, type DangerDay, type Elevation } from '@weather/protocol';
 import { DANGER_ICONS, DANGER_ICON_HEIGHT, type DangerIcon } from './dangerIcons';
 import { drawText, fillPaint, strokePaint, textWidth } from './skiaPaint';
-import LocationMap, { type LatLon } from './LocationMap';
-import type { Favorite } from './favorites';
 import { palette } from './palette';
 import type { TimeFormat } from './settings';
 import {
   CONFIDENCE_NAMES, DISCLAIMERS, ELEVATION_NAMES, PROBLEM_NAMES, ROSE_ELEVATION_NAMES, dangerCell, dayLabel, likelihoodScale,
-  pieceFeatures, regionBounds, sizeScale, stampLabel,
+  sizeScale, stampLabel,
   type Scale,
 } from './avalancheDisplay';
 
@@ -321,112 +319,88 @@ function Bullets({ items }: { items: string[] }) {
   );
 }
 
-// Every forecast piece's outline, built once: the pieces ship with the app.
-const PIECE_FEATURES = pieceFeatures(AVALANCHE_PIECES);
-
-interface Props {
-  forecast: AvalancheForecast;
-  timeFormat: TimeFormat;
-  // What the weather map shows too: the phone's position, favorites, and past forecast points.
-  userCoord?: LatLon | null;
-  favorites?: readonly Favorite[];
-  pastPoints?: readonly LatLon[];
-}
-
-export default function AvalancheForecastView({ forecast, timeFormat, userCoord, favorites, pastPoints }: Props) {
+export default function AvalancheForecastView({ forecast, timeFormat }: { forecast: AvalancheForecast; timeFormat: TimeFormat }) {
   const fonts = useFonts();
   // The page's width, measured on layout; the pictures draw to what is left inside a card.
   const [pageW, setPageW] = useState(0);
   const graphicW = pageW - 2 * PAD - 2 * CARD_PAD;
   const stamp = (ms: number) => stampLabel(ms, forecast.timezone, timeFormat);
-  const bounds = useMemo(() => regionBounds(forecast.region, AVALANCHE_PIECES), [forecast.region]);
   return (
-    <>
-      <LocationMap
-        coord={null}
-        height={200}
-        bounds={bounds}
-        zones={PIECE_FEATURES}
-        userCoord={userCoord}
-        favorites={favorites}
-        pastPoints={pastPoints}
-      />
-      <View style={styles.page} onLayout={(e) => setPageW(e.nativeEvent.layout.width)}>
-        <Text style={styles.region}>{forecast.region}</Text>
-        <View style={styles.stamps}>
-          <Stamp label="Date issued" value={stamp(forecast.issued)} />
-          <Stamp label="Valid until" value={stamp(forecast.expires)} />
-        </View>
-        <View style={[styles.stamps, styles.stampsLast]}>
-          <Stamp label="Prepared by" value={forecast.issuedBy} />
-          <View style={styles.stampColumn} />
-        </View>
+    <View style={styles.page} onLayout={(e) => setPageW(e.nativeEvent.layout.width)}>
+      <Text style={styles.region}>{forecast.region}</Text>
+      <View style={styles.stamps}>
+        <Stamp label="Date issued" value={stamp(forecast.issued)} />
+        <Stamp label="Valid until" value={stamp(forecast.expires)} />
+      </View>
+      <View style={[styles.stamps, styles.stampsLast]}>
+        <Stamp label="Prepared by" value={forecast.issuedBy} />
+        <View style={styles.stampColumn} />
+      </View>
 
-        {forecast.bottomLine ? (
-          <View style={styles.section}><Card><Prose text={forecast.bottomLine} lead /></Card></View>
-        ) : null}
+      {forecast.bottomLine ? (
+        <View style={styles.section}><Card><Prose text={forecast.bottomLine} lead /></Card></View>
+      ) : null}
 
-        <Section label="Danger Ratings">
-          {forecast.danger.map((d) => <DangerTable key={d.date} day={d} timezone={forecast.timezone} />)}
+      <Section label="Danger Ratings">
+        {forecast.danger.map((d) => <DangerTable key={d.date} day={d} timezone={forecast.timezone} />)}
+      </Section>
+
+      {forecast.advice.length > 0 && (
+        <Section label="Terrain and Travel Advice"><Card><Bullets items={forecast.advice} /></Card></Section>
+      )}
+
+      {forecast.problems.length > 0 && (
+        <Section label="Avalanche Problems">
+          {forecast.problems.map((p, i) => <ProblemCard key={i} problem={p} index={i} width={graphicW} fonts={fonts} />)}
         </Section>
+      )}
 
-        {forecast.advice.length > 0 && (
-          <Section label="Terrain and Travel Advice"><Card><Bullets items={forecast.advice} /></Card></Section>
-        )}
+      {forecast.avalancheSummary ? (
+        <Section label="Avalanche Summary"><Card><Prose text={forecast.avalancheSummary} /></Card></Section>
+      ) : null}
+      {forecast.snowpackSummary ? (
+        <Section label="Snowpack Summary"><Card><Prose text={forecast.snowpackSummary} /></Card></Section>
+      ) : null}
 
-        {forecast.problems.length > 0 && (
-          <Section label="Avalanche Problems">
-            {forecast.problems.map((p, i) => <ProblemCard key={i} problem={p} index={i} width={graphicW} fonts={fonts} />)}
-          </Section>
-        )}
-
-        {forecast.avalancheSummary ? (
-          <Section label="Avalanche Summary"><Card><Prose text={forecast.avalancheSummary} /></Card></Section>
-        ) : null}
-        {forecast.snowpackSummary ? (
-          <Section label="Snowpack Summary"><Card><Prose text={forecast.snowpackSummary} /></Card></Section>
-        ) : null}
-
-        {forecast.weather.length > 0 && (
-          <Section label="Weather Summary">
-            <Card>
-              {forecast.weather.map((w, i) => (
-                <View key={i} style={i < forecast.weather.length - 1 && styles.proseGap}>
-                  {w.label ? <Text style={styles.weatherLabel}>{w.label}</Text> : null}
-                  <Prose text={w.text} />
-                </View>
-              ))}
-            </Card>
-          </Section>
-        )}
-
-        <Section label="Confidence">
+      {forecast.weather.length > 0 && (
+        <Section label="Weather Summary">
           <Card>
-            <Text style={[styles.prose, styles.confidence, forecast.confidence.statements.length > 0 && styles.proseGap]}>
-              {CONFIDENCE_NAMES[forecast.confidence.rating]}
-            </Text>
-            {forecast.confidence.statements.length > 0 && <Bullets items={forecast.confidence.statements} />}
+            {forecast.weather.map((w, i) => (
+              <View key={i} style={i < forecast.weather.length - 1 && styles.proseGap}>
+                {w.label ? <Text style={styles.weatherLabel}>{w.label}</Text> : null}
+                <Prose text={w.text} />
+              </View>
+            ))}
           </Card>
         </Section>
+      )}
 
-        {DISCLAIMERS[forecast.center] && (
-          <Section label="Forecast Disclaimer">
-            <Card>
-              {DISCLAIMERS[forecast.center].map((p, i, all) => (
-                <Text key={i} style={[styles.prose, i < all.length - 1 && styles.proseGap]}>{p}</Text>
-              ))}
-            </Card>
-          </Section>
-        )}
+      <Section label="Confidence">
+        <Card>
+          <Text style={[styles.prose, styles.confidence, forecast.confidence.statements.length > 0 && styles.proseGap]}>
+            {CONFIDENCE_NAMES[forecast.confidence.rating]}
+          </Text>
+          {forecast.confidence.statements.length > 0 && <Bullets items={forecast.confidence.statements} />}
+        </Card>
+      </Section>
 
-        <Text style={styles.attribution}>Avalanche forecast provided by Avalanche Canada.</Text>
-      </View>
-    </>
+      {DISCLAIMERS[forecast.center] && (
+        <Section label="Forecast Disclaimer">
+          <Card>
+            {DISCLAIMERS[forecast.center].map((p, i, all) => (
+              <Text key={i} style={[styles.prose, i < all.length - 1 && styles.proseGap]}>{p}</Text>
+            ))}
+          </Card>
+        </Section>
+      )}
+
+      <Text style={styles.attribution}>Avalanche forecast provided by Avalanche Canada.</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { paddingHorizontal: PAD, paddingTop: 20 },
+  page: { paddingHorizontal: PAD },
   region: { fontSize: 22, fontWeight: '700', color: palette.pageTitle, marginBottom: 12 },
   stamps: { flexDirection: 'row', gap: 16, marginBottom: 10 },
   stampsLast: { marginBottom: 20 },

@@ -57,8 +57,6 @@ interface Props {
   offlineMaps?: boolean;
   // Areas drawn as outlines under everything else, such as the avalanche forecast pieces.
   zones?: GeoJSON.FeatureCollection | null;
-  // [west, south, east, north] to frame when there is no coordinate to center on.
-  bounds?: [number, number, number, number] | null;
 }
 
 // The picker's starting point before any coordinate is set: as far out as the basemap allows,
@@ -67,7 +65,6 @@ interface Props {
 const DEFAULT_VIEW = { center: [-110, 54] as [number, number], zoom: MIN_ZOOM };
 // Zoom applied once a coordinate exists — tight enough to confirm the spot, loose enough to nudge it.
 const PICKED_ZOOM = 9;
-const BOUNDS_PADDING = { top: 16, right: 16, bottom: 16, left: 16 };
 
 const MAP_IMAGES = {
   'peak-triangle': require('./assets/peak-triangle.png'),
@@ -78,7 +75,7 @@ const MAP_IMAGES = {
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
 // picks a coordinate. The picker's corner button opens the same map fullscreen; the preview has no
 // controls.
-export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon', offlineMaps = false, zones, bounds }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon', offlineMaps = false, zones }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
@@ -88,9 +85,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
   const [mapRevision, setMapRevision] = useState(0);
   const interactive = onPick != null;
   const mapStyle = useBasemapStyle();
-  const initialViewState = coord
-    ? { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM }
-    : bounds ? { bounds, padding: BOUNDS_PADDING } : DEFAULT_VIEW;
+  const initialViewState = coord ? { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM } : DEFAULT_VIEW;
 
   // A native map surface can lose its GL context while its parent has `display: none`. Recreate
   // it when its tab becomes visible again.

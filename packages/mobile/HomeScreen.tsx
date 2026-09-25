@@ -9,6 +9,7 @@ import * as Location from 'expo-location';
 import * as Network from 'expo-network';
 import { pageInsets } from './insets';
 import AvalancheForecastView from './AvalancheScreen';
+import { pieceFeatures } from './avalancheDisplay';
 import sampleAvalanche from './fixtures/avalanche/sea-to-sky-2026-03-01.json';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -20,6 +21,7 @@ import {
   MODE_DETAIL, MODE_AUTO, MODE_RANGE, MODE_NAMES, DEFAULT_MODE,
   predictCenter, estimatedLastFullRunMs, fillSlotsFor, multiMessageOffered, startDatetime,
   MODELS as MODEL_SPECS,
+  AVALANCHE_PIECES,
   type RequestContext, type Center, type ForecastMessage, type ModelSpec, type AvalancheForecast,
 } from '@weather/protocol';
 import { API_BASE } from './account';
@@ -789,6 +791,8 @@ interface Props {
 // The Avalanche tab's stand-in bulletin (see AvalancheForecastView). The JSON's enumerations
 // come in as plain strings; the export wrote them from the protocol's scales.
 const SAMPLE_AVALANCHE = sampleAvalanche as AvalancheForecast;
+// Every forecast piece's outline, for the avalanche map; the pieces ship with the app.
+const AVALANCHE_ZONES = pieceFeatures(AVALANCHE_PIECES);
 
 // The page's tabs, dev builds only: the weather flow the app ships, and the avalanche view
 // being built beside it. The tab bar scrolls with the page under the title row; the weather body
@@ -1749,6 +1753,21 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       )}
       <View style={styles.titleRule} />
 
+      {/* The location map, one instance under both tabs so its pin, zoom and pan carry across:
+          no heading, since the map is its own label, edge to edge, with the two ways to a point
+          without it attached underneath (coordinates typed or pasted, and a saved favorite).
+          The Avalanche tab adds the forecast zones on top. */}
+      <View style={styles.section}>
+        <LocationPicker
+          mapCoord={mapCoord} onPick={onPick} gpsCoords={gpsCoords} following={following} onLocate={onLocate}
+          locating={locating} coordsField={coordsField} coordsInvalid={coordsInvalid} onCoordsText={onCoordsText}
+          coordFormat={coordFormat} favorites={favorites} currentFavorite={currentFavorite}
+          onPickFavorite={onPickFavorite} onSaveFavorite={onSaveFavorite} onRemoveFavorite={onRemoveFavorite}
+          onOpenFavorites={onOpenFavorites} pastPoints={pastPoints} onPickPast={onPick}
+          zones={tab === 'avalanche' ? AVALANCHE_ZONES : undefined}
+        />
+      </View>
+
       {/* The weather body, hidden whole under the Avalanche tab (see Tab). The builder carries
           the scroll content's side padding itself: the forecast pieces below it run full-bleed.
           The meteogram's pinned headers and the map's park measure their offsets against this
@@ -1760,12 +1779,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         importantForAccessibility={tab === 'weather' ? 'auto' : 'no-hide-descendants'}
       >
       <RequestBuilder
-        mapCoord={mapCoord} onPick={onPick} gpsCoords={gpsCoords} following={following} onLocate={onLocate}
-        locating={locating} coordsField={coordsField} coordsInvalid={coordsInvalid} onCoordsText={onCoordsText}
-        coordFormat={coordFormat}
-        favorites={favorites} currentFavorite={currentFavorite} onPickFavorite={onPickFavorite}
-        onSaveFavorite={onSaveFavorite} onRemoveFavorite={onRemoveFavorite} onOpenFavorites={onOpenFavorites}
-        pastPoints={pastPoints} onPickPast={onPick}
+        following={following}
         model={model} modelStack={modelStack} onModel={setModel} setModelInfo={setModelInfo}
         varRows={varRows} unavail={unavail} openSubgroups={openSubgroups} activeValues={activeValues} groups={groups}
         units={units} onToggleGroup={onToggleGroup} onToggleSubgroup={onToggleSubgroup} setVarsInfo={setVarsInfo}
@@ -1878,10 +1892,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
       {/* An archived bulletin stands in for a decoded one until there is a wire format. */}
       {tab === 'avalanche' && (
-        <AvalancheForecastView
-          forecast={SAMPLE_AVALANCHE} timeFormat={timeFormat}
-          userCoord={gpsCoords} favorites={favorites} pastPoints={pastPoints}
-        />
+<AvalancheForecastView forecast={SAMPLE_AVALANCHE} timeFormat={timeFormat} />
       )}
 
       <HelpScreen visible={help} onClose={() => setHelp(false)} />
@@ -2325,16 +2336,12 @@ function useStableHandler<A extends unknown[], R>(fn: (...args: A) => R): (...ar
 // button and the paste step. Memoized, and every prop is a primitive, a piece of state, a
 // memoized derivation or a stable handler, so a render of HomeScreen that concerns the forecast
 // below it (a load, a switch, a layout measurement) does not walk the builder.
-const RequestBuilder = memo(function RequestBuilder({
-  mapCoord, onPick, gpsCoords, following, onLocate, locating, coordsField, coordsInvalid, onCoordsText, coordFormat,
-  favorites, currentFavorite, onPickFavorite, onSaveFavorite, onRemoveFavorite, onOpenFavorites,
-  pastPoints, onPickPast,
-  model, modelStack, onModel, setModelInfo,
-  varRows, unavail, openSubgroups, activeValues, groups, units, onToggleGroup, onToggleSubgroup, setVarsInfo,
-  mode, onMode, setPriorityInfo,
-  device, onDevice, setDeviceInfo, multiMessageShown, twoMessages, onTwoMessagesChange,
-  deviceSpec, copied, onAction, onCancelAction, actionDisabled, actionBusy, offline, coordsValid, setHelp,
-  outcome, onPaste, onClearForecast, collecting, error,
+// The map and the two ways to a point without it: coordinates typed or pasted, and a saved
+// favorite.
+const LocationPicker = memo(function LocationPicker({
+  mapCoord, onPick, gpsCoords, following, onLocate, locating, coordsField, coordsInvalid, onCoordsText,
+  coordFormat, favorites, currentFavorite, onPickFavorite, onSaveFavorite, onRemoveFavorite, onOpenFavorites,
+  pastPoints, onPickPast, zones,
 }: {
   mapCoord: { lat: number; lon: number } | null; onPick: (c: { lat: number; lon: number }) => void;
   gpsCoords: { lat: number; lon: number } | null; following: boolean; onLocate: () => Promise<{ lat: number; lon: number } | null>; locating: boolean;
@@ -2342,6 +2349,91 @@ const RequestBuilder = memo(function RequestBuilder({
   favorites: readonly Favorite[]; currentFavorite: Favorite | null; onPickFavorite: (f: Favorite) => void;
   onSaveFavorite: (name: string, coord: LatLon) => void; onRemoveFavorite: () => void; onOpenFavorites: () => void;
   pastPoints: readonly { lat: number; lon: number }[]; onPickPast: (c: { lat: number; lon: number }) => void;
+  zones?: GeoJSON.FeatureCollection;
+}) {
+  return (
+    <>
+    <LocationMap
+      coord={mapCoord}
+      onPick={onPick}
+      height={BUILDER_MAP_HEIGHT}
+      userCoord={gpsCoords}
+      following={following}
+      onLocate={onLocate}
+      locating={locating}
+      favorites={favorites}
+      onPickFavorite={onPickFavorite}
+      currentFavorite={currentFavorite}
+      onSaveFavorite={onSaveFavorite}
+      onRemoveFavorite={onRemoveFavorite}
+      pastPoints={pastPoints}
+      onPickPast={onPickPast}
+      coordFormat={coordFormat}
+      offlineMaps
+      zones={zones}
+    />
+    <View style={styles.coordsRows}>
+      <View style={styles.coordRow}>
+        <Text style={styles.coordLabel}>Coordinates</Text>
+        {/* Editing pins. The first keystroke arrives with the field's whole text, fix
+            included, so nudging the current location's digits works as expected. */}
+        <TextInput
+          style={[styles.coordInput, coordsInvalid && styles.coordInputInvalid]}
+          value={coordsField}
+          onChangeText={onCoordsText}
+          placeholder="lat, lon or UTM"
+          placeholderTextColor={palette.textTertiary}
+          keyboardType="numbers-and-punctuation"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="done"
+          accessibilityLabel="Coordinates"
+        />
+        {/* The one way to take the pin off: empties the field and leaves the location
+            pinned at nothing. Pasted coordinates are long and the keyboard's delete key
+            clears them one character at a time. Always laid out and merely hidden when
+            there is nothing to clear: the icon is taller than the text line, so adding and
+            removing it would change the row's height. */}
+        <TouchableOpacity
+          style={[styles.coordClear, coordsField.length === 0 && styles.coordClearHidden]}
+          onPress={() => onCoordsText('')}
+          disabled={coordsField.length === 0}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityRole="button"
+          accessibilityLabel="Clear coordinates"
+          accessibilityElementsHidden={coordsField.length === 0}
+        >
+          <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
+        </TouchableOpacity>
+      </View>
+      {/* Only once something is saved, so a reader with no favorites doesn't carry an
+          empty row. Reads as a select field: the favorite the pin is on, or a prompt to
+          pick one. It opens a full-screen list rather than a menu, since a list of
+          favorites runs past a hundred. */}
+      {favorites.length > 0 && (
+        <TouchableOpacity style={styles.coordRow} onPress={onOpenFavorites} accessibilityRole="button">
+          <Text style={styles.coordLabel}>Favorites</Text>
+          <Text style={[styles.favoriteValue, !currentFavorite && styles.favoritePlaceholder]} numberOfLines={1}>
+            {currentFavorite ? currentFavorite.name : 'Choose a location'}
+          </Text>
+          <MaterialCommunityIcons name="chevron-down" size={20} color={palette.textTertiary} style={styles.coordClear} />
+        </TouchableOpacity>
+      )}
+    </View>
+    </>
+  );
+});
+
+const RequestBuilder = memo(function RequestBuilder({
+  following,
+  model, modelStack, onModel, setModelInfo,
+  varRows, unavail, openSubgroups, activeValues, groups, units, onToggleGroup, onToggleSubgroup, setVarsInfo,
+  mode, onMode, setPriorityInfo,
+  device, onDevice, setDeviceInfo, multiMessageShown, twoMessages, onTwoMessagesChange,
+  deviceSpec, copied, onAction, onCancelAction, actionDisabled, actionBusy, offline, coordsValid, setHelp,
+  outcome, onPaste, onClearForecast, collecting, error,
+}: {
+  following: boolean;
   model: string; modelStack: string | null; onModel: (model: string) => void; setModelInfo: (open: boolean) => void;
   varRows: VarRow[]; unavail: readonly Variable[]; openSubgroups: ReadonlySet<string>; activeValues: ReadonlySet<string>;
   groups: ReadonlySet<string>; units: UnitPrefs; onToggleGroup: (value: string) => void; onToggleSubgroup: (id: string) => void;
@@ -2355,82 +2447,6 @@ const RequestBuilder = memo(function RequestBuilder({
 }) {
   return (
     <View style={styles.builderPad}>
-      {/* No heading: the map is its own label. Edge to edge, since the negative inset cancels
-          the builder's horizontal padding, so the map spans the screen rather than sitting
-          inside the column. Attached under it, at the same width, the two ways to a point
-          without the map: coordinates typed or pasted, and a saved favorite. The rows are part
-          of the map block rather than a card of their own. */}
-      <View style={styles.section}>
-        <View style={styles.mapFullBleed}>
-          <LocationMap
-            coord={mapCoord}
-            onPick={onPick}
-            height={BUILDER_MAP_HEIGHT}
-            userCoord={gpsCoords}
-            following={following}
-            onLocate={onLocate}
-            locating={locating}
-            favorites={favorites}
-            onPickFavorite={onPickFavorite}
-            currentFavorite={currentFavorite}
-            onSaveFavorite={onSaveFavorite}
-            onRemoveFavorite={onRemoveFavorite}
-            pastPoints={pastPoints}
-            onPickPast={onPickPast}
-            coordFormat={coordFormat}
-            offlineMaps
-          />
-          <View style={styles.coordsRows}>
-            <View style={styles.coordRow}>
-              <Text style={styles.coordLabel}>Coordinates</Text>
-              {/* Editing pins. The first keystroke arrives with the field's whole text, fix
-                  included, so nudging the current location's digits works as expected. */}
-              <TextInput
-                style={[styles.coordInput, coordsInvalid && styles.coordInputInvalid]}
-                value={coordsField}
-                onChangeText={onCoordsText}
-                placeholder="lat, lon or UTM"
-                placeholderTextColor={palette.textTertiary}
-                keyboardType="numbers-and-punctuation"
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="done"
-                accessibilityLabel="Coordinates"
-              />
-              {/* The one way to take the pin off: empties the field and leaves the location
-                  pinned at nothing. Pasted coordinates are long and the keyboard's delete key
-                  clears them one character at a time. Always laid out and merely hidden when
-                  there is nothing to clear: the icon is taller than the text line, so adding and
-                  removing it would change the row's height. */}
-              <TouchableOpacity
-                style={[styles.coordClear, coordsField.length === 0 && styles.coordClearHidden]}
-                onPress={() => onCoordsText('')}
-                disabled={coordsField.length === 0}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityRole="button"
-                accessibilityLabel="Clear coordinates"
-                accessibilityElementsHidden={coordsField.length === 0}
-              >
-                <MaterialCommunityIcons name="close-circle" size={18} color={palette.textTertiary} />
-              </TouchableOpacity>
-            </View>
-            {/* Only once something is saved, so a reader with no favorites doesn't carry an
-                empty row. Reads as a select field: the favorite the pin is on, or a prompt to
-                pick one. It opens a full-screen list rather than a menu, since a list of
-                favorites runs past a hundred. */}
-            {favorites.length > 0 && (
-              <TouchableOpacity style={styles.coordRow} onPress={onOpenFavorites} accessibilityRole="button">
-                <Text style={styles.coordLabel}>Favorites</Text>
-                <Text style={[styles.favoriteValue, !currentFavorite && styles.favoritePlaceholder]} numberOfLines={1}>
-                  {currentFavorite ? currentFavorite.name : 'Choose a location'}
-                </Text>
-                <MaterialCommunityIcons name="chevron-down" size={20} color={palette.textTertiary} style={styles.coordClear} />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      </View>
-
       <Section label="Weather Model" info={() => setModelInfo(true)}>
         <SegmentedControl
           {...SEGMENT_PROPS}

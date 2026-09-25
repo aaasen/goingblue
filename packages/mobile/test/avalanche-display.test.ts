@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  dangerCell, dayLabel, likelihoodScale, pieceFeatures, regionBounds, sizeScale, stampLabel,
+  dangerCell, dayLabel, likelihoodScale, pieceFeatures, sizeScale, stampLabel,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -63,11 +63,6 @@ describe('pieces', () => {
     piece(1, ['Sky Pilot'], [-123.5, 49.4, -123, 49.8]),
     piece(2, ['Kitimat', 'Rupert', 'Shames'], [-130, 54, -128, 55]),
   ];
-
-  it('frames the pieces a title names, and only whole pieces', () => {
-    expect(regionBounds('Brandywine-Sky Pilot', pieces)).toEqual([-124, 49.4, -123, 51]);
-    expect(regionBounds('Kitimat-Rupert', pieces)).toBeNull();
-  });
 
   it('turns pieces into MultiPolygon features', () => {
     expect(pieceFeatures(pieces).features[2]).toMatchObject({ properties: { id: 2 }, geometry: { type: 'MultiPolygon' } });
