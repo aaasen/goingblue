@@ -36,6 +36,8 @@ import {
   normalizeReply, prunePastForecasts, replyParts, type Slot,
 } from './cache';
 import LocationMap from './LocationMap';
+import DeviceSelector from './components/DeviceSelector';
+import Section from './Section';
 import FavoriteSheet from './FavoriteSheet';
 import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
 import HelpScreen from './HelpScreen';
@@ -1897,7 +1899,33 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
       {/* An archived bulletin stands in for a decoded one until there is a wire format. */}
       {tab === 'avalanche' && (
-<AvalancheForecastView forecast={SAMPLE_AVALANCHE} timeFormat={timeFormat} />
+        <>
+          {/* The weather builder's device selector and buttons, without the multi-message switch.
+              The buttons are placeholders until bulletins have a wire format. The send button is
+              greyed while the location is outside every forecast zone. */}
+          <View style={styles.builderPad}>
+            <DeviceSelector device={device} onDevice={onDevice} setDeviceInfo={setDeviceInfo} />
+            <View style={styles.buttons}>
+              <ActionButton
+                icon={deviceSpec.icon}
+                label={deviceSpec.action}
+                onPress={noop}
+                onCancel={noop}
+                disabled={!zonePiece}
+                busy={false}
+                variant="primary"
+              />
+            </View>
+            {!zonePiece && <Text style={styles.actionNote}>Select a location inside the forecast area</Text>}
+            <View style={styles.sectionEnd} />
+            <View style={styles.pasteArea}>
+              <View style={styles.pasteRow}>
+                <PasteButton outcome={null} onPress={noop} />
+              </View>
+            </View>
+          </View>
+          <AvalancheForecastView forecast={SAMPLE_AVALANCHE} timeFormat={timeFormat} />
+        </>
       )}
 
       <HelpScreen visible={help} onClose={() => setHelp(false)} />
@@ -2337,6 +2365,8 @@ function useStableHandler<A extends unknown[], R>(fn: (...args: A) => R): (...ar
   return useCallback((...args: A) => ref.current(...args), []);
 }
 
+function noop() {}
+
 // The request builder: the map, the model, variable, priority and device sections, the action
 // button and the paste step. Memoized, and every prop is a primitive, a piece of state, a
 // memoized derivation or a stable handler, so a render of HomeScreen that concerns the forecast
@@ -2553,32 +2583,10 @@ const RequestBuilder = memo(function RequestBuilder({
 
       {/* The way out. Which device you carry decides how the request travels, so it sits last,
           with the button it drives. */}
-      <Section label="Device" info={() => setDeviceInfo(true)}>
-        <SegmentedControl
-          {...SEGMENT_PROPS}
-          values={DEVICES.map((d) => d.label)}
-          selectedIndex={DEVICES.findIndex((d) => d.value === device)}
-          onChange={(e) => onDevice(DEVICES[e.nativeEvent.selectedSegmentIndex].value)}
-        />
-        {/* A switch rather than an On/Off segment: this is one setting being turned on, not a
-            choice between two things, and it is read far more often than it is changed. */}
-        {multiMessageShown && (
-          <View style={styles.switchRow}>
-            <View style={styles.switchText}>
-              <Text style={styles.switchLabel}>Multi-message forecast</Text>
-              <Text style={styles.switchHint}>Use multiple messages for more range and detail</Text>
-            </View>
-            <Switch
-              {...SWITCH_PROPS}
-              style={styles.switchAlign}
-              value={twoMessages}
-              onValueChange={onTwoMessagesChange}
-              accessibilityLabel="Multi-message forecast"
-              accessibilityHint="Use multiple messages for more range and detail"
-            />
-          </View>
-        )}
-      </Section>
+      <DeviceSelector
+        device={device} onDevice={onDevice} setDeviceInfo={setDeviceInfo}
+        multiMessageShown={multiMessageShown} twoMessages={twoMessages} onTwoMessagesChange={onTwoMessagesChange}
+      />
 
       <View style={styles.buttons}>
         <ActionButton
@@ -2624,32 +2632,7 @@ const RequestBuilder = memo(function RequestBuilder({
           (see CollectingBox). */}
       <View style={styles.pasteArea}>
         <View style={styles.pasteRow}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.pasteBtn,
-              outcome && (outcome.failed ? styles.pasteBtnFailed : styles.pasteBtnDone),
-              pressed && styles.btnPressed,
-            ]}
-            onPress={onPaste}
-            accessibilityRole="button"
-            accessibilityLabel={outcome?.label ?? 'Paste Forecast'}
-          >
-            <MaterialCommunityIcons
-              name={outcome ? (outcome.failed ? 'close' : 'check') : 'content-paste'}
-              size={19}
-              color={outcome ? (outcome.failed ? palette.danger : palette.success) : palette.onPrimary}
-              style={styles.pasteBtnIcon}
-            />
-            <Text
-              style={[
-                styles.pasteBtnText,
-                outcome && (outcome.failed ? styles.pasteBtnTextFailed : styles.pasteBtnTextDone),
-              ]}
-              numberOfLines={1}
-            >
-              {outcome?.label ?? 'Paste Forecast'}
-            </Text>
-          </Pressable>
+          <PasteButton outcome={outcome} onPress={onPaste} />
         </View>
         {/* Both sit under the button, where what they ask for is another press of it. Only one can
             be showing: a paste is either short of its remaining messages or wrong, never both. */}
@@ -2665,24 +2648,34 @@ const RequestBuilder = memo(function RequestBuilder({
   );
 });
 
-function Section({ label, info, children }: { label: string; info?: () => void; children: React.ReactNode }) {
+function PasteButton({ outcome, onPress }: { outcome: Outcome | null; onPress: () => void }) {
   return (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionLabel}>{label}</Text>
-        {info && (
-          <TouchableOpacity
-            onPress={info}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            accessibilityRole="button"
-            accessibilityLabel={`About ${label}`}
-          >
-            <Text style={styles.sectionInfo}>ⓘ</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      {children}
-    </View>
+    <Pressable
+      style={({ pressed }) => [
+        styles.pasteBtn,
+        outcome && (outcome.failed ? styles.pasteBtnFailed : styles.pasteBtnDone),
+        pressed && styles.btnPressed,
+      ]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={outcome?.label ?? 'Paste Forecast'}
+    >
+      <MaterialCommunityIcons
+        name={outcome ? (outcome.failed ? 'close' : 'check') : 'content-paste'}
+        size={19}
+        color={outcome ? (outcome.failed ? palette.danger : palette.success) : palette.onPrimary}
+        style={styles.pasteBtnIcon}
+      />
+      <Text
+        style={[
+          styles.pasteBtnText,
+          outcome && (outcome.failed ? styles.pasteBtnTextFailed : styles.pasteBtnTextDone),
+        ]}
+        numberOfLines={1}
+      >
+        {outcome?.label ?? 'Paste Forecast'}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -2866,9 +2859,6 @@ const styles = StyleSheet.create({
   },
 
   section: { marginBottom: 20 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  sectionLabel: { fontSize: 12, fontWeight: '600', color: palette.pageLabel, textTransform: 'uppercase', letterSpacing: 0.5 },
-  sectionInfo: { fontSize: 14, color: palette.pageLink, marginLeft: 6 },
 
   varList: { backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden' },
   // Sized to a grouped iOS settings row: 50pt tall with 17pt labels, which the switch fits
@@ -2945,14 +2935,6 @@ const styles = StyleSheet.create({
   btnText: { fontSize: 16, fontWeight: '600' },
 
   actionNote: { fontSize: 13, color: palette.pageNote, lineHeight: 19, textAlign: 'center', marginTop: 10 },
-  // A settings row: label left, switch right, the switch's own height setting the row's.
-  switchRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    gap: 12, marginTop: 16,
-  },
-  switchText: { flexShrink: 1 },
-  switchLabel: { fontSize: 15, color: palette.pageTitle },
-  switchHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 2 },
 
   helpLink: { alignSelf: 'center', marginTop: 8, paddingVertical: 6, paddingHorizontal: 12 },
   helpLinkText: { color: palette.pageLink, fontSize: 14, fontWeight: '600' },
