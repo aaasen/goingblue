@@ -13,9 +13,10 @@ import { htmlToText } from "./text.ts";
 
 export interface RawProduct {
   id: string;
-  owner: { value: string };
+  owner: { value: string; display: string };
   report: {
     title: string;
+    forecaster?: string | null;
     dateIssued: string;
     validUntil: string;
     timezone?: string | null;
@@ -140,6 +141,7 @@ export function toForecast(raw: RawProduct): AvalancheForecast {
   const summary = (kind: string) => htmlToText(r.summaries?.find((s) => s.type.value === kind)?.content);
   return {
     center: raw.owner.value,
+    issuedBy: r.forecaster ?? raw.owner.display,
     region: r.title,
     issued: Date.parse(r.dateIssued),
     expires: Date.parse(r.validUntil),

@@ -60,6 +60,8 @@ export interface WeatherPeriod {
 export interface AvalancheForecast {
   // 'avalanche-canada', 'parks-glacier', ...
   center: string;
+  // Who prepared the bulletin, as the center credits it: "Avalanche Canada", "Parks Canada".
+  issuedBy: string;
   region: string;
   // ms epoch.
   issued: number;

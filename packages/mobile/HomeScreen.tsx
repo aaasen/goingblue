@@ -8,6 +8,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import * as Network from 'expo-network';
 import { pageInsets } from './insets';
+import AvalancheForecastView from './AvalancheScreen';
+import sampleAvalanche from './fixtures/avalanche/sea-to-sky-2026-03-01.json';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
@@ -18,7 +20,7 @@ import {
   MODE_DETAIL, MODE_AUTO, MODE_RANGE, MODE_NAMES, DEFAULT_MODE,
   predictCenter, estimatedLastFullRunMs, fillSlotsFor, multiMessageOffered, startDatetime,
   MODELS as MODEL_SPECS,
-  type RequestContext, type Center, type ForecastMessage, type ModelSpec,
+  type RequestContext, type Center, type ForecastMessage, type ModelSpec, type AvalancheForecast,
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import {
@@ -783,6 +785,10 @@ interface Props {
   // Opens the Settings sheet, which App owns — it outlives this screen's scroll position.
   onOpenSettings: () => void;
 }
+
+// The Avalanche tab's stand-in bulletin (see AvalancheForecastView). The JSON's enumerations
+// come in as plain strings; the export wrote them from the protocol's scales.
+const SAMPLE_AVALANCHE = sampleAvalanche as AvalancheForecast;
 
 // The page's tabs, dev builds only: the weather flow the app ships, and the avalanche view
 // being built beside it. The tab bar scrolls with the page under the title row; the weather body
@@ -1870,11 +1876,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       )}
       </View>
 
+      {/* An archived bulletin stands in for a decoded one until there is a wire format. */}
       {tab === 'avalanche' && (
-        <View style={styles.emptyForecast}>
-          <Text style={styles.emptyTitle}>No bulletin loaded</Text>
-          <Text style={styles.emptyHint}>Avalanche forecasts will show here</Text>
-        </View>
+        <AvalancheForecastView forecast={SAMPLE_AVALANCHE} timeFormat={timeFormat} />
       )}
 
       <HelpScreen visible={help} onClose={() => setHelp(false)} />
