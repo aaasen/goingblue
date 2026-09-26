@@ -10,7 +10,7 @@ import { pageInsets } from './insets';
 import AvalancheForecastView from './AvalancheScreen';
 import { pieceAt, pieceFeatures } from './avalancheDisplay';
 import { loadAvalancheModels } from './avalancheModel';
-import DayPicker, { isValidDay } from './components/DayPicker';
+import DayRow from './components/DayRow';
 import sampleAvalanche from './fixtures/avalanche/sea-to-sky-2026-03-01.json';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -1687,8 +1687,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     iphone: { onPress: () => handleSendSms(), disabled: sendDisabled, busy: locating },
   };
   // The Avalanche tab's button: the same handlers, sending an avalanche request, and greyed while
-  // the point is outside every forecast zone or the day field holds no date.
-  const avalancheBlocked = !zonePiece || !isValidDay(avalancheDay);
+  // the point is outside every forecast zone.
+  const avalancheBlocked = !zonePiece;
   const AVALANCHE_ACTIONS: Record<Device, { onPress: () => void; disabled: boolean; busy: boolean }> = {
     internet: { onPress: () => handleFetch('avalanche'), disabled: fetchDisabled || avalancheBlocked, busy: fetching || locating },
     sms: { onPress: () => handleSendSms('avalanche'), disabled: sendDisabled || avalancheBlocked, busy: locating },
@@ -1929,8 +1929,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       {/* The location map, one instance under both tabs so its pin, zoom and pan carry across:
           no heading, since the map is its own label, edge to edge, with the two ways to a point
           without it attached underneath (coordinates typed or pasted, and a saved favorite).
-          The Avalanche tab adds the forecast zones on top. */}
-      <View style={styles.section}>
+          The Avalanche tab adds the forecast zones on top, and sits its Date card close under
+          the zone hint. */}
+      <View style={[styles.section, tab === 'avalanche' && styles.sectionTight]}>
         <LocationPicker
           mapCoord={mapCoord} onPick={onPick} gpsCoords={gpsCoords} following={following} onLocate={onLocate}
           locating={locating} coordsField={coordsField} coordsInvalid={coordsInvalid} onCoordsText={onCoordsText}
@@ -2064,13 +2065,13 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       )}
       </View>
 
-      {/* The Avalanche tab: the device and day to request for, the send and paste steps, the
+      {/* The Avalanche tab: the date and device to request for, the send and paste steps, the
           bulletin (an archived one stands in until a reply is decoded), and the saved bulletins. */}
       {tab === 'avalanche' && (
         <>
           <View style={styles.builderPad}>
+            <DayRow day={avalancheDay} onDay={setAvalancheDay} />
             <DeviceSelector device={device} onDevice={onDevice} setDeviceInfo={setDeviceInfo} />
-            <DayPicker day={avalancheDay} onDay={setAvalancheDay} />
             <View style={styles.buttons}>
               <ActionButton
                 icon={copied ? 'check' : deviceSpec.icon}
@@ -2893,6 +2894,7 @@ const styles = StyleSheet.create({
   },
 
   section: { marginBottom: 20 },
+  sectionTight: { marginBottom: 8 },
 
   varList: { backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden' },
   // Sized to a grouped iOS settings row: 50pt tall with 17pt labels, which the switch fits
