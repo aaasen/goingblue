@@ -13,6 +13,10 @@
  * by the digest in packages/protocol/test/avcan-model.test.ts; rerun it after
  * `pnpm avalanche-pieces`, since the model is keyed by piece id.
  *
+ * Also writes packages/codec-server/src/avalanche-areas.gen.ts: the pieces each archived area
+ * covers, so the codec server only asks Avalanche Canada for an area's geometry when the area
+ * is newer than the archive.
+ *
  * Usage: pnpm avalanche-region
  */
 import { createHash } from "node:crypto";
@@ -30,6 +34,7 @@ const EPS = 0.25;
 // Interior points are searched on a GRID × GRID lattice over each polygon's bounding box.
 const GRID = 30;
 const OUT = join(REPO_ROOT, "packages", "protocol", "src", "avalanche-region.gen.ts");
+const AREAS_OUT = join(REPO_ROOT, "packages", "codec-server", "src", "avalanche-areas.gen.ts");
 
 type Ring = [number, number][];
 type Link = [number, number, number, number];
@@ -59,7 +64,8 @@ function interior(polygons: Ring[][]): [number, number] {
   return best;
 }
 
-function observations(interiors: [number, number][]): Obs[] {
+// Every product-day since FIRST_WALK, and the pieces each area covers.
+function observations(interiors: [number, number][]): { obs: Obs[]; areaPieces: Map<string, number[]> } {
   const db = openDb();
   const areas = new Map<string, { geometry: string }>();
   for (const r of db.prepare("SELECT id, geometry FROM areas").all() as { id: string; geometry: string }[]) areas.set(r.id, r);
@@ -68,20 +74,23 @@ function observations(interiors: [number, number][]): Obs[] {
     JOIN products p ON p.id = wp.product_id WHERE wp.walk_date >= ?`).all(FIRST_WALK) as { day: string; area: string; center: string }[];
   db.close();
   const sets = new Map<string, number[]>();
+  const centers = new Map<string, string>();
   const out: Obs[] = [];
   let missing = 0, empty = 0;
   for (const r of rows) {
     const area = areas.get(r.area);
     if (!area) { missing++; continue; }
-    const key = `${r.area}|${r.center}`;
-    let set = sets.get(key);
-    if (!set) sets.set(key, (set = piecesInArea(JSON.parse(area.geometry), r.center, interiors)));
+    const center = centers.get(r.area) ?? r.center;
+    if (center !== r.center) throw new Error(`region: area ${r.area} belongs to ${center} and ${r.center}`);
+    centers.set(r.area, center);
+    let set = sets.get(r.area);
+    if (!set) sets.set(r.area, (set = piecesInArea(JSON.parse(area.geometry), r.center, interiors)));
     if (set.length === 0) { empty++; continue; }
     const [y, m] = r.day.split("-").map(Number);
     out.push({ season: m >= 8 ? y : y - 1, set });
   }
   console.log(`${out.length} product-days over ${sets.size} areas; skipped ${missing} without geometry, ${empty} covering no piece`);
-  return out;
+  return { obs: out, areaPieces: sets };
 }
 
 const weight = (k: number, n: number) => Math.min(SCALE - 1, Math.max(1, Math.round(((k + EPS) / (n + 2 * EPS)) * SCALE)));
@@ -136,7 +145,7 @@ function cost({ anchors, chains }: ReturnType<typeof train>, obs: Obs[]): { anch
 
 function main(): void {
   const interiors = AVALANCHE_PIECES.map((p) => interior(p.polygons));
-  const obs = observations(interiors);
+  const { obs, areaPieces } = observations(interiors);
 
   const seasons = [...new Set(obs.map((o) => o.season))].sort();
   const last = seasons[seasons.length - 1];
@@ -167,6 +176,17 @@ ${model.chains.map((c) => `  ${JSON.stringify(c)},`).join("\n")}
 `);
   const digest = createHash("sha256").update(JSON.stringify([interiors, model.anchors, model.chains])).digest("hex").slice(0, 16);
   console.log(`wrote ${links} links to ${OUT}, digest ${digest}`);
+
+  const ids = [...areaPieces.keys()].sort();
+  writeFileSync(AREAS_OUT, `// GENERATED FILE, do not edit by hand. Written by \`pnpm avalanche-region\`
+// (scripts/avalanche/region.ts) from the ${ids.length} areas archived since ${FIRST_WALK}.
+// The pieces (AVALANCHE_PIECES ids) each area of the Avalanche Canada API covers.
+
+export const AVALANCHE_AREAS: Record<string, number[]> = {
+${ids.map((id) => `  "${id}": ${JSON.stringify(areaPieces.get(id))},`).join("\n")}
+};
+`);
+  console.log(`wrote ${ids.length} areas to ${AREAS_OUT}`);
 }
 
 main();

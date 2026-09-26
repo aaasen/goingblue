@@ -11,6 +11,7 @@ import {
   type Elevation, type Likelihood, type ProblemType, type WeatherPeriod,
 } from "@weather/protocol";
 import { htmlToText } from "./html-text.js";
+import { AVALANCHE_AREAS } from "./avalanche-areas.gen.js";
 
 export interface RawProduct {
   id: string;
@@ -199,14 +200,14 @@ export async function fetchPointProduct(lat: number, lon: number, at: number | n
   return product && product.id ? product : null;
 }
 
-// Area ids are hashes of the area, so what an id covers never changes.
-const areaPieces = new Map<string, number[]>();
+// Area ids are hashes of the area, so what an id covers never changes. Seeded with every
+// archived area; areas newer than the archive join it as they are fetched.
+const areaPieces = new Map<string, number[]>(Object.entries(AVALANCHE_AREAS));
 
-// The pieces a product's area covers. On a miss, fetches every area in force at the product's
-// instant (`at` as passed to fetchPointProduct) and remembers them all.
+// The pieces a product's area covers. For an area this instance doesn't know, fetches the areas
+// in force at the product's instant (`at` as passed to fetchPointProduct).
 export async function fetchAreaPieces(product: RawProduct, at: number | null): Promise<number[]> {
-  const key = `${product.area.id}|${product.owner.value}`;
-  const known = areaPieces.get(key);
+  const known = areaPieces.get(product.area.id);
   if (known) return known;
   const url = new URL("/forecasts/en/areas", API);
   if (at !== null) url.searchParams.set("date", new Date(at).toISOString());
@@ -216,6 +217,6 @@ export async function fetchAreaPieces(product: RawProduct, at: number | null): P
   const feature = body.features.find((f) => f.id === product.area.id);
   if (!feature) throw new Error(`avcan areas: no area ${product.area.id}`);
   const pieces = piecesInArea(feature.geometry, product.owner.value);
-  areaPieces.set(key, pieces);
+  areaPieces.set(product.area.id, pieces);
   return pieces;
 }

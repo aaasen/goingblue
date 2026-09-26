@@ -87,7 +87,13 @@ describe("serveAvalanche", () => {
     await expect(serveAvalanche(request("d:s"))).rejects.toThrow(/HTTP 500/);
   });
 
-  // Each case uses an area no earlier test has cached.
+  it("looks up an archived area without asking for the areas", async () => {
+    const fetch = answer(SEA_TO_SKY);
+    await serveAvalanche(request("d:s y:20260301"));
+    expect(fetch.mock.calls.map(([url]) => url.pathname)).toEqual(["/forecasts/en/products/point"]);
+  });
+
+  // Each case uses an area neither the archive nor an earlier test has.
   it("fetches the areas in force on the requested day and remembers what an area covers", async () => {
     const product = { ...SEA_TO_SKY, area: { id: "cached-area" } };
     const areas = { type: "FeatureCollection", features: [{ ...(AREAS as { features: object[] }).features[0], id: "cached-area" }] };
