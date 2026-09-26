@@ -96,6 +96,18 @@ afterEach(() => {
   delete process.env["CODEC_URL_V1"];
 });
 
+describe("no avalanche forecast", () => {
+  it("answers over HTTP and records the outcome", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("no_forecast", { status: 422 })));
+    const resp = await post(BODY);
+    expect(resp.status).toBe(422);
+    expect(await resp.text()).toBe("No avalanche forecast available");
+    expect(vi.mocked(recordRequest)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ token: TOKEN, outcome: "no_forecast", shape: null }),
+    );
+  });
+});
+
 describe("off-axis start time", () => {
   it("names the side over HTTP and records the outcome", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("stale", { status: 422 })));

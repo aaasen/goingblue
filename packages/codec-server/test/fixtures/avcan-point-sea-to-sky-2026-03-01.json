@@ -1,0 +1,528 @@
+{
+ "id": "ed9fd328-7381-48b9-a613-2671a2cc878c_ddf50488067c67f241332034ad36b5569a6c80df5fc7bc13407ed561f89f50b8",
+ "slug": "ed9fd328-7381-48b9-a613-2671a2cc878c_ddf50488067c67f241332034ad36b5569a6c80df5fc7bc13407ed561f89f50b8",
+ "url": "https://avalanche.ca/forecasts/ed9fd328-7381-48b9-a613-2671a2cc878c_ddf50488067c67f241332034ad36b5569a6c80df5fc7bc13407ed561f89f50b8",
+ "type": "avalancheforecast",
+ "area": {
+  "id": "ddf50488067c67f241332034ad36b5569a6c80df5fc7bc13407ed561f89f50b8",
+  "name": "ddf50488067c67f241332034ad36b5569a6c80df5fc7bc13407ed561f89f50b8",
+  "bbox": null
+ },
+ "report": {
+  "id": "ed9fd328-7381-48b9-a613-2671a2cc878c_ddf50488067c67f241332034ad36b5569a6c80df5fc7bc13407ed561f89f50b8",
+  "forecaster": "Avalanche Canada",
+  "dateIssued": "2026-03-01T00:00:00Z",
+  "validUntil": "2026-03-02T00:00:00Z",
+  "timezone": "America/Vancouver",
+  "title": "Brandywine-Garibaldi-Homathko-Sky Pilot-Spearhead-Tantalus",
+  "highlights": "<p>Warm temps, sun, and persistent weak layers are creating tricky conditions</p><p>Choose conservative low-angle terrain with no overhead hazard.</p><p><a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"https://avalanche.ca/blogs/feb-27-blog\">Check out this forecaster blog </a>on conditions.</p>",
+  "confidence": {
+   "rating": {
+    "value": "low",
+    "display": "Low"
+   },
+   "statements": [
+    "We are uncertain about how quickly persistent slabs are gaining strength."
+   ]
+  },
+  "summaries": [
+   {
+    "type": {
+     "value": "avalanche-summary",
+     "display": "Avalanche Summary"
+    },
+    "content": " <p><strong>Friday</strong><br>A vehicle remotely triggered some small slabs on road banks. Explosive control triggered some small cornices and wind slabs.</p><p><strong>Thursday</strong><br>Explosive control and ski cutting produced a few small wind slabs in lee and crossloaded terrain.</p><p><strong>Wednesday</strong><br>Explosive control triggered two size 2 cornices and ski cuts produced some small wind slabs.</p><p><strong>Tuesday</strong><br>A few human-triggered size 1 to 2 slabs were reported</p>"
+   },
+   {
+    "type": {
+     "value": "snowpack-summary",
+     "display": "Snowpack Summary"
+    },
+    "content": " <p>Strong to extreme southwesterly winds have created widespread wind effect and built wind slabs on lee slopes.</p><p>A melt-freeze crust may be found on sunny slopes and at lower elevations. This surface crust will likely soften with sun and daytime warming.</p><p>40 to 70 cm of storm snow from the past week may be sitting on a layer of surface hoar, facets or a crust in some areas. How quickly the old storm snow will bond to this layer remains uncertain.</p><p>Another concerning weak layer consisting of a crust with facets from early February is buried 80 to 100+ cm deep.</p><p>The remaining snowpack appears to be well settled and bonded.</p>"
+   },
+   {
+    "type": {
+     "value": "weather-summary",
+     "display": "Weather Summary"
+    },
+    "content": " <p><strong>Saturday Night</strong><br>Clear skies. 20 km/h northwest ridgetop wind. Treeline temperature 0 °C. Freezing level 1600 m.<br><br><strong>Sunday</strong><br>Sunny. 30 km/h northwest ridgetop wind. Treeline temperature 4 °C. Freezing level 2400 m.<br><br><strong>Monday</strong><br>Mostly sunny. 30 km/h west ridgetop wind. Treeline temperature 3 °C. Freezing level 2200 m.<br><br><strong>Tuesday</strong><br>Mostly cloudy. 15 to 35 mm of precipitation as snow or rain at treeline. 50 km/h southwest ridgetop wind. Treeline temperature 0 °C. Freezing level 1600 m.<br><br><br><br></p> <p>More details can be found in the <a href =\"https://www.avalanche.ca/weather/forecast\">Mountain Weather Forecast</a>.</p>"
+   }
+  ],
+  "dangerRatings": [
+   {
+    "date": {
+     "value": "2026-03-02T00:00:00Z",
+     "display": "Sunday"
+    },
+    "ratings": {
+     "alp": {
+      "display": "Alpine",
+      "rating": {
+       "value": "considerable",
+       "display": "3 - Considerable"
+      }
+     },
+     "tln": {
+      "display": "Treeline",
+      "rating": {
+       "value": "moderate",
+       "display": "2 - Moderate"
+      }
+     },
+     "btl": {
+      "display": "Below Treeline",
+      "rating": {
+       "value": "moderate",
+       "display": "2 - Moderate"
+      }
+     }
+    }
+   },
+   {
+    "date": {
+     "value": "2026-03-03T00:00:00Z",
+     "display": "Monday"
+    },
+    "ratings": {
+     "alp": {
+      "display": "Alpine",
+      "rating": {
+       "value": "moderate",
+       "display": "2 - Moderate"
+      }
+     },
+     "tln": {
+      "display": "Treeline",
+      "rating": {
+       "value": "moderate",
+       "display": "2 - Moderate"
+      }
+     },
+     "btl": {
+      "display": "Below Treeline",
+      "rating": {
+       "value": "low",
+       "display": "1 - Low"
+      }
+     }
+    }
+   },
+   {
+    "date": {
+     "value": "2026-03-04T00:00:00Z",
+     "display": "Tuesday"
+    },
+    "ratings": {
+     "alp": {
+      "display": "Alpine",
+      "rating": {
+       "value": "considerable",
+       "display": "3 - Considerable"
+      }
+     },
+     "tln": {
+      "display": "Treeline",
+      "rating": {
+       "value": "considerable",
+       "display": "3 - Considerable"
+      }
+     },
+     "btl": {
+      "display": "Below Treeline",
+      "rating": {
+       "value": "moderate",
+       "display": "2 - Moderate"
+      }
+     }
+    }
+   }
+  ],
+  "problems": [
+   {
+    "type": {
+     "value": "windslab",
+     "display": "Wind slab"
+    },
+    "comment": "<p>Strong to extreme southerly winds formed wind slabs and affected areas farther downslope than normal. They may be more reactive where they overlie surface hoar, facets or a crust.</p>",
+    "factors": [
+     {
+      "type": {
+       "value": "elevation",
+       "display": "What Elevation?"
+      },
+      "graphic": {
+       "id": "elevation-0-1-1_en",
+       "url": "https://assets.avalanche.ca/images/Elevation/Elevation-0-1-1_EN.png",
+       "alt": " Treeline, Alpine"
+      }
+     },
+     {
+      "type": {
+       "value": "aspect",
+       "display": "Which Slopes?"
+      },
+      "graphic": {
+       "id": "aspect-1-1-1-1-0-0-1-1_en",
+       "url": "https://assets.avalanche.ca/images/Compass/compass-1-1-1-1-0-0-1-1_EN.png",
+       "alt": " North, Northeast, East, Southeast, West, Northwest"
+      }
+     },
+     {
+      "type": {
+       "value": "likelihood",
+       "display": "Chances of Avalanches?"
+      },
+      "graphic": {
+       "id": "likelihood-likely_possible_en",
+       "url": "https://assets.avalanche.ca/images/Likelihood/Likelihood-4_EN.png",
+       "alt": " Possible - Likely"
+      }
+     },
+     {
+      "type": {
+       "value": "size",
+       "display": "Expected Size?"
+      },
+      "graphic": {
+       "id": "size-1-3_en",
+       "url": "https://assets.avalanche.ca/images/size/Size-1-3_EN.png",
+       "alt": " Small - Large"
+      }
+     }
+    ],
+    "data": {
+     "elevations": [
+      {
+       "value": "tln",
+       "display": "Treeline"
+      },
+      {
+       "value": "alp",
+       "display": "Alpine"
+      }
+     ],
+     "aspects": [
+      {
+       "value": "nw",
+       "display": "Northwest"
+      },
+      {
+       "value": "n",
+       "display": "North"
+      },
+      {
+       "value": "ne",
+       "display": "Northeast"
+      },
+      {
+       "value": "e",
+       "display": "East"
+      },
+      {
+       "value": "se",
+       "display": "Southeast"
+      },
+      {
+       "value": "w",
+       "display": "West"
+      }
+     ],
+     "aspectElevations": [
+      "n_tln",
+      "n_alp",
+      "ne_tln",
+      "ne_alp",
+      "e_tln",
+      "e_alp",
+      "se_tln",
+      "se_alp",
+      "w_tln",
+      "w_alp",
+      "nw_tln",
+      "nw_alp"
+     ],
+     "likelihood": {
+      "value": "likely_possible",
+      "display": "likely_possible"
+     },
+     "expectedSize": {
+      "min": "1.0",
+      "max": "2.0"
+     }
+    }
+   },
+   {
+    "type": {
+     "value": "persistentslab",
+     "display": "Persistent slab"
+    },
+    "comment": "<p>Several weak layers of surface hoar, facets or crusts may exist in the top meter of the snowpack. Wind slabs or wet loose sluffs could step down to this layer causing larger than expected avalanches.</p>",
+    "factors": [
+     {
+      "type": {
+       "value": "elevation",
+       "display": "What Elevation?"
+      },
+      "graphic": {
+       "id": "elevation-1-1-1_en",
+       "url": "https://assets.avalanche.ca/images/Elevation/Elevation-1-1-1_EN.png",
+       "alt": " Below treeline, Treeline, Alpine"
+      }
+     },
+     {
+      "type": {
+       "value": "aspect",
+       "display": "Which Slopes?"
+      },
+      "graphic": {
+       "id": "aspect-1-1-1-1-1-1-1-1_en",
+       "url": "https://assets.avalanche.ca/images/Compass/compass-1-1-1-1-1-1-1-1_EN.png",
+       "alt": " North, Northeast, East, Southeast, south, Southwest, West, Northwest"
+      }
+     },
+     {
+      "type": {
+       "value": "likelihood",
+       "display": "Chances of Avalanches?"
+      },
+      "graphic": {
+       "id": "likelihood-possible_en",
+       "url": "https://assets.avalanche.ca/images/Likelihood/Likelihood-3_EN.png",
+       "alt": " Possible"
+      }
+     },
+     {
+      "type": {
+       "value": "size",
+       "display": "Expected Size?"
+      },
+      "graphic": {
+       "id": "size-2-5_en",
+       "url": "https://assets.avalanche.ca/images/size/Size-2-5_EN.png",
+       "alt": " Small - Large"
+      }
+     }
+    ],
+    "data": {
+     "elevations": [
+      {
+       "value": "tln",
+       "display": "Treeline"
+      },
+      {
+       "value": "alp",
+       "display": "Alpine"
+      },
+      {
+       "value": "btl",
+       "display": "Below Treeline"
+      }
+     ],
+     "aspects": [
+      {
+       "value": "nw",
+       "display": "Northwest"
+      },
+      {
+       "value": "n",
+       "display": "North"
+      },
+      {
+       "value": "ne",
+       "display": "Northeast"
+      },
+      {
+       "value": "e",
+       "display": "East"
+      },
+      {
+       "value": "se",
+       "display": "Southeast"
+      },
+      {
+       "value": "s",
+       "display": "s"
+      },
+      {
+       "value": "sw",
+       "display": "Southwest"
+      },
+      {
+       "value": "w",
+       "display": "West"
+      }
+     ],
+     "aspectElevations": [
+      "n_btl",
+      "n_tln",
+      "n_alp",
+      "ne_btl",
+      "ne_tln",
+      "ne_alp",
+      "e_btl",
+      "e_tln",
+      "e_alp",
+      "se_btl",
+      "se_tln",
+      "se_alp",
+      "s_btl",
+      "s_tln",
+      "s_alp",
+      "sw_btl",
+      "sw_tln",
+      "sw_alp",
+      "w_btl",
+      "w_tln",
+      "w_alp",
+      "nw_btl",
+      "nw_tln",
+      "nw_alp"
+     ],
+     "likelihood": {
+      "value": "possible",
+      "display": "possible"
+     },
+     "expectedSize": {
+      "min": "1.5",
+      "max": "3.0"
+     }
+    }
+   },
+   {
+    "type": {
+     "value": "wetloose",
+     "display": "Wet Loose"
+    },
+    "comment": "<p>Sun and rising temperatures may melt the surface snow on steep solar affected slopes, creating the potential for wet loose sluffs. Use extra caution on sun-exposed slopes, if the snow surface is moist or wet.</p>",
+    "factors": [
+     {
+      "type": {
+       "value": "elevation",
+       "display": "What Elevation?"
+      },
+      "graphic": {
+       "id": "elevation-1-1-1_en",
+       "url": "https://assets.avalanche.ca/images/Elevation/Elevation-1-1-1_EN.png",
+       "alt": " Below treeline, Treeline, Alpine"
+      }
+     },
+     {
+      "type": {
+       "value": "aspect",
+       "display": "Which Slopes?"
+      },
+      "graphic": {
+       "id": "aspect-0-0-0-1-1-1-1-0_en",
+       "url": "https://assets.avalanche.ca/images/Compass/compass-0-0-0-1-1-1-1-0_EN.png",
+       "alt": " Southeast, south, Southwest, West"
+      }
+     },
+     {
+      "type": {
+       "value": "likelihood",
+       "display": "Chances of Avalanches?"
+      },
+      "graphic": {
+       "id": "likelihood-veryLikely_likely_en",
+       "url": "https://assets.avalanche.ca/images/Likelihood/Likelihood-6_EN.png",
+       "alt": " Likely - Very likely"
+      }
+     },
+     {
+      "type": {
+       "value": "size",
+       "display": "Expected Size?"
+      },
+      "graphic": {
+       "id": "size-1-3_en",
+       "url": "https://assets.avalanche.ca/images/size/Size-1-3_EN.png",
+       "alt": " Small - Large"
+      }
+     }
+    ],
+    "data": {
+     "elevations": [
+      {
+       "value": "btl",
+       "display": "Below Treeline"
+      },
+      {
+       "value": "tln",
+       "display": "Treeline"
+      },
+      {
+       "value": "alp",
+       "display": "Alpine"
+      }
+     ],
+     "aspects": [
+      {
+       "value": "w",
+       "display": "West"
+      },
+      {
+       "value": "sw",
+       "display": "Southwest"
+      },
+      {
+       "value": "s",
+       "display": "s"
+      },
+      {
+       "value": "se",
+       "display": "Southeast"
+      }
+     ],
+     "aspectElevations": [
+      "w_btl",
+      "w_tln",
+      "w_alp",
+      "sw_alp",
+      "s_alp",
+      "se_alp",
+      "se_tln",
+      "se_btl",
+      "s_btl",
+      "s_tln",
+      "sw_tln",
+      "sw_btl"
+     ],
+     "likelihood": {
+      "value": "veryLikely_likely",
+      "display": "veryLikely_likely"
+     },
+     "expectedSize": {
+      "min": "1.0",
+      "max": "2.0"
+     }
+    }
+   }
+  ],
+  "terrainAndTravelAdvice": [
+   "Avoid freshly wind-loaded features, especially near ridge crests, rollovers, and in steep terrain.",
+   "Continue to make conservative terrain choices while the storm snow settles and stabilizes.",
+   "Fresh snow rests on a problematic persistent slab, don't let good riding lure you into complacency.",
+   "Back off slopes as the surface becomes moist or wet with rising temperatures."
+  ],
+  "message": null,
+  "season": null,
+  "comment": null,
+  "isFullTranslation": false
+ },
+ "version": 1,
+ "owner": {
+  "value": "avalanche-canada",
+  "display": "Avalanche Canada",
+  "isExternal": false,
+  "url": "https://avalanche.ca/en"
+ },
+ "notifications": [
+  {
+   "type": "warning",
+   "content": "This is an archived avalanche bulletin."
+  }
+ ],
+ "media": {
+  "images": []
+ }
+}

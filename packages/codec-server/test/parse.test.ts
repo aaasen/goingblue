@@ -355,7 +355,7 @@ describe("parseRequest", () => {
 
       it("accepts a complete app-built request", () => {
         expect(parseRequest(avalanche).errors).toEqual([]);
-        expect(parseRequest(`${avalanche} o:i n:2`).errors).toEqual([]);
+        expect(parseRequest(`${avalanche} o:i y:20260301`).errors).toEqual([]);
       });
 
       it("requires only the tokens an avalanche request sends", () => {
@@ -365,13 +365,22 @@ describe("parseRequest", () => {
         for (const key of ["p", "z", "m"]) expect(errors).not.toContain(`missing ${key}:`);
       });
 
-      it("rejects the weather options", () => {
-        for (const tok of ["p:a", "z:-8", "m:best", "v:pcf", "w:234"]) {
+      it("rejects the weather options and a message count", () => {
+        for (const tok of ["p:a", "z:-8", "m:best", "v:pcf", "w:234", "n:2"]) {
           const key = tok.slice(0, 1);
           expect(parseRequest(`${avalanche} ${tok}`).errors, tok)
             .toEqual([`${key}: not allowed in an avalanche request`]);
         }
       });
+    });
+
+    it("parses the avalanche day, and only on an avalanche request", () => {
+      expect(parseRequest("f:a y:20260301").day).toBe("2026-03-01");
+      expect(parseRequest("f:a").day).toBeNull();
+      for (const bad of ["2026031", "20260230", "20261301", "2026-03-01", "latest"]) {
+        expect(parseRequest(`f:a y:${bad}`).errors, bad).toContain(`invalid day "y:${bad}"`);
+      }
+      expect(parseRequest(`${full} y:20260301`).errors).toEqual(["y: not allowed in a weather request"]);
     });
 
     it("still ignores extra bare words and unknown keys (gateway-appended text)", () => {

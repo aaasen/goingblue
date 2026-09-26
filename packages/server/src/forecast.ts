@@ -24,6 +24,9 @@ export const REPLY_UNAVAILABLE = "Going Blue is not available right now. Please 
 // The HTTP route names each for the app or a direct caller.
 export const REPLY_STALE = "Request is stale. Build a new request and try again.";
 export const REPLY_FUTURE = "Request is from the future. Build a new request and try again.";
+// No avalanche bulletin covers the request's point on the requested day. Sent on every route:
+// unlike a stale request, the reader is waiting for an answer.
+export const REPLY_NO_FORECAST = "No avalanche forecast available";
 
 // What a request can come to: a dispatch result, or the gateway's own rejection of a token
 // that names no account. The codec validates that a token is present and well-formed; whether
@@ -48,6 +51,7 @@ export function replyParts(result: RequestResult): string[] {
     case "unavailable": return [REPLY_UNAVAILABLE];
     case "stale": return [];
     case "future": return [];
+    case "no_forecast": return [REPLY_NO_FORECAST];
   }
 }
 

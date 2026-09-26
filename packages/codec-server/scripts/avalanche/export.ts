@@ -5,7 +5,7 @@
  */
 import { writeFileSync } from "node:fs";
 import { openDb } from "./db.ts";
-import { toForecast, type RawProduct } from "./forecast.ts";
+import { toForecast, type RawProduct } from "../../src/avcan.ts";
 
 const args = process.argv.slice(2);
 const outIdx = args.indexOf("--out");

@@ -4,7 +4,7 @@
  */
 import { sectionsOf, type AvalancheForecast } from "@weather/protocol";
 import { openDb } from "./db.ts";
-import { isForecast, toForecast, type RawProduct } from "./forecast.ts";
+import { isForecast, toForecast, type RawProduct } from "../../src/avcan.ts";
 
 export function arg(name: string, fallback: number): number {
   const i = process.argv.indexOf(name);

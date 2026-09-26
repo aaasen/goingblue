@@ -123,6 +123,9 @@ describe("dispatchForecast", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("future", { status: 422 })));
     expect(await dispatchForecast("v1 p:a", RID, null)).toEqual({ kind: "future", codecMs: expect.any(Number) });
 
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("no_forecast", { status: 422 })));
+    expect(await dispatchForecast("v1 f:a", RID, null)).toEqual({ kind: "no_forecast", codecMs: expect.any(Number) });
+
     // A 422 whose body names neither side is not one of ours: retryable, like any other status.
     vi.stubGlobal("fetch", vi.fn(async () => new Response("something else", { status: 422 })));
     expect(await dispatchForecast("v1 p:a", RID, null)).toEqual({ kind: "unavailable", codecMs: expect.any(Number) });
@@ -227,6 +230,7 @@ describe("codec response severity", () => {
     [400, "invalid request", "warn"],
     [422, "stale", "warn"],
     [422, "future", "warn"],
+    [422, "no_forecast", "warn"],
     [422, "something else", "error"],
     [503, "boom", "error"],
   ] as const)("logs a %s '%s' at %s when this is the last attempt", async (status, body, level) => {

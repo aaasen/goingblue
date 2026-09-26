@@ -262,6 +262,16 @@ describe("no reply owed", () => {
   });
 });
 
+describe("no avalanche forecast", () => {
+  it("replies over SMS and records the outcome", async () => {
+    codec = () => new Response("no_forecast", { status: 422 });
+    const row = receive();
+    expect(await run()).toBe("done");
+    expect(row.outcome).toBe("no_forecast");
+    expect(sentBodies).toEqual(["No avalanche forecast available"]);
+  });
+});
+
 describe("codec unavailable", () => {
   it("retries inside the window without writing an outcome", async () => {
     codec = () => new Response("boom", { status: 503 });

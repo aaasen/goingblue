@@ -11,6 +11,7 @@
  * scale order and size is "min-max".
  *
  * Coding order:
+ *   validity (minutes from the issue time, as the wire carries it, to the expiry)
  *   day count, then per day: alpine | (day, alpine the day before), treeline | alpine,
  *   below treeline | treeline (the first day's alpine is conditioned on nothing)
  *   confidence
@@ -18,6 +19,7 @@
  *   aspects | type, likelihood | type, size | type
  */
 import type { AvalancheForecast } from "../avalanche.js";
+import { quantizeIssued } from "./time.js";
 import { BOS, UNK, type Stream, type Vocab } from "./model.js";
 import { planToken, readToken } from "./codec.js";
 import { costBits, type Decision, type Decoder, type Table } from "./rans.js";
@@ -31,13 +33,16 @@ export interface Problem {
 }
 
 export interface Structured {
+  validity: string;       // minutes, or "" when the bulletin has no expiry
   ratings: { alp: string; tln: string; btl: string }[];   // one entry per day
   confidence: string;
   problems: Problem[];
 }
 
 export function structuredOf(f: AvalancheForecast): Structured {
+  const issued = quantizeIssued(f.issued);
   return {
+    validity: Number.isFinite(f.expires) ? String(Math.round((f.expires - issued) / 60000)) : "",
     ratings: f.danger.map((d) => ({ alp: d.alp, tln: d.tln, btl: d.btl })),
     confidence: f.confidence.rating,
     problems: f.problems.map((p) => ({
@@ -50,7 +55,7 @@ export function structuredOf(f: AvalancheForecast): Structured {
   };
 }
 
-export const FIELDS = ["dayCount", "rating", "confidence", "problemCount", "type", "elevations", "aspects", "likelihood", "size"] as const;
+export const FIELDS = ["validity", "dayCount", "rating", "confidence", "problemCount", "type", "elevations", "aspects", "likelihood", "size"] as const;
 export type FieldName = (typeof FIELDS)[number];
 
 // One order-1 stream per field; contexts are strings interned per field.
@@ -65,7 +70,8 @@ const ctx = (f: Field, context: string | null): number =>
 // Walks a bulletin's fields in coding order. `emit` codes one token under its context and
 // returns the token, which lets the decoder drive the same walk by returning what it read.
 export function walk(s: Structured | null, emit: (field: FieldName, context: string | null, token: string | null) => string): Structured {
-  const out: Structured = { ratings: [], confidence: "", problems: [] };
+  const out: Structured = { validity: "", ratings: [], confidence: "", problems: [] };
+  out.validity = emit("validity", null, s ? s.validity : null);
   const days = Number(emit("dayCount", null, s ? String(s.ratings.length) : null));
   for (let d = 0; d < days; d++) {
     const day = { alp: "", tln: "", btl: "" };

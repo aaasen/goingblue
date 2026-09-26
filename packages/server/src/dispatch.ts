@@ -51,6 +51,9 @@ export type DispatchResult =
   // stale (delivery delay) or from the future (a wrong clock). Not retryable as sent.
   | { kind: "stale"; codecMs: number }
   | { kind: "future"; codecMs: number }
+  // The codec's 422 for an avalanche request that no bulletin covers: outside every forecast
+  // area, or a day with no bulletin.
+  | { kind: "no_forecast"; codecMs: number }
   | { kind: "unavailable"; codecMs: number };
 
 // First `vN` word in the body, or null. A version is required — there is no default, so a
@@ -217,14 +220,15 @@ export async function dispatchForecast(
     }
     const text = await resp.text();
     const codecMs = Date.now() - start;
-    // A 400 is the codec's verdict on the request itself, and a 422 names which side of the
-    // servable axis its start time fell on (its body is exactly the word). Both are the sender's
-    // problem, logged as warnings so they never raise an alert. Anything else (503, unexpected
-    // statuses, an unrecognized 422 body) is a service problem the sender should retry.
-    const senders = resp.status === 400 || (resp.status === 422 && (text === "stale" || text === "future"));
+    // A 400 is the codec's verdict on the request itself, and a 422 names why a well-formed
+    // request can't be served (its body is exactly the word). Both are the sender's problem,
+    // logged as warnings so they never raise an alert. Anything else (503, unexpected statuses,
+    // an unrecognized 422 body) is a service problem the sender should retry.
+    const unservable = resp.status === 422 && (text === "stale" || text === "future" || text === "no_forecast");
+    const senders = resp.status === 400 || unservable;
     (senders || willRetry ? log.warn : log.error)("codec.error_response", { version, status: resp.status, body: text });
     if (resp.status === 400) return { kind: "malformed", reason: text.slice(0, 500), codecMs };
-    if (resp.status === 422 && (text === "stale" || text === "future")) return { kind: text, codecMs };
+    if (unservable) return { kind: text as "stale" | "future" | "no_forecast", codecMs };
     return { kind: "unavailable", codecMs };
   } catch (e) {
     (willRetry ? log.warn : log.error)("codec.unreachable", { version, err: e });

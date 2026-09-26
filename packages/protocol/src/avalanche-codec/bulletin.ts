@@ -12,8 +12,9 @@
  *   weather-summary     one per weather period, as "label\ntext" (the label is "" when absent)
  *   confidence          one per confidence statement
  *
- * The forecast's issuing center, region, times, and time zone are not coded yet: the decoder
- * fills them with UNENCODED.
+ * The issue time travels in the message header (wire.ts) and is handed to the decoder; the
+ * expiry is coded relative to it. The issuing center, region, and time zone are not coded yet:
+ * the decoder fills them with UNENCODED.
  */
 import type {
   AvalancheForecast, AvalancheProblem, Aspect, Confidence, DangerRating, Elevation, Likelihood,
@@ -23,6 +24,7 @@ import { frame, planSections, readHeader, readSections } from "./codec.js";
 import type { Model, Section } from "./model.js";
 import { Decoder } from "./rans.js";
 import { structuredOf, type Structured, type StructuredModel } from "./structured.js";
+import { quantizeIssued } from "./time.js";
 
 export const SECTION_KINDS = [
   "highlights", "problem", "advice", "avalanche-summary", "snowpack-summary", "weather-summary",
@@ -37,14 +39,15 @@ export const UNENCODED = {
   center: "",
   issuedBy: "",
   region: "",
-  issued: 0,
-  expires: 0,
   timezone: "UTC",
 } as const;
 
-// The forecast as it decodes: the coded fields kept, the rest replaced by UNENCODED.
+// The forecast as it decodes: the coded fields kept, the issue time on its 15-minute step, the
+// expiry to the minute, and the rest replaced by UNENCODED.
 export function withPlaceholders(f: AvalancheForecast): AvalancheForecast {
-  return { ...f, ...UNENCODED, danger: f.danger.map((d, i) => ({ ...d, date: i * DAY_MS })) };
+  const issued = quantizeIssued(f.issued);
+  const expires = Number.isFinite(f.expires) ? issued + Math.round((f.expires - issued) / 60000) * 60000 : NaN;
+  return { ...f, ...UNENCODED, issued, expires, danger: f.danger.map((d, i) => ({ ...d, date: i * DAY_MS })) };
 }
 
 export function sectionsOf(f: AvalancheForecast): Section[] {
@@ -59,7 +62,7 @@ export function sectionsOf(f: AvalancheForecast): Section[] {
   return out;
 }
 
-function forecastOf(s: Structured, sections: Section[]): AvalancheForecast {
+function forecastOf(s: Structured, sections: Section[], issued: number): AvalancheForecast {
   const texts = (kind: string) => sections.filter((x) => x.kind === kind).map((x) => x.text);
   const descriptions = texts("problem");
   const problems: AvalancheProblem[] = s.problems.map((p, i) => {
@@ -74,7 +77,12 @@ function forecastOf(s: Structured, sections: Section[]): AvalancheForecast {
     };
   });
   return {
-    ...UNENCODED,
+    center: UNENCODED.center,
+    issuedBy: UNENCODED.issuedBy,
+    region: UNENCODED.region,
+    issued,
+    expires: s.validity === "" ? NaN : issued + Number(s.validity) * 60000,
+    timezone: UNENCODED.timezone,
     bottomLine: texts("highlights")[0] ?? "",
     danger: s.ratings.map((d, i) => ({
       date: i * DAY_MS,
@@ -107,10 +115,11 @@ export function encodeBulletin({ prose, structured }: Models, f: AvalancheForeca
   return frame(header, all);
 }
 
-export function decodeBulletin({ prose, structured }: Models, blob: Uint8Array): AvalancheForecast {
+// `issued` is the issue time from the message header, already on its 15-minute step.
+export function decodeBulletin({ prose, structured }: Models, blob: Uint8Array, issued: number): AvalancheForecast {
   const { wordCounts, pos } = readHeader(blob);
   const dec = new Decoder(blob, pos);
   const s = structured.read(dec, prose.byteTable());
   const contextFor = (kind: string, index: number) => (kind === "problem" ? s.problems[index]?.type : undefined);
-  return forecastOf(s, readSections(prose, dec, wordCounts, contextFor));
+  return forecastOf(s, readSections(prose, dec, wordCounts, contextFor), issued);
 }

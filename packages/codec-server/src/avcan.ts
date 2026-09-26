@@ -1,15 +1,16 @@
 /**
- * An archived Avalanche Canada product as the app's AvalancheForecast: the feed's enumerations
- * mapped onto the protocol's scales, every HTML field reduced to text, and the weather summary
- * split into its per-period headings. Unknown enumeration values throw rather than pass
- * through, so an unmapped product fails at export time.
+ * Avalanche Canada bulletins: fetching the product for a point, and mapping a product onto the
+ * app's AvalancheForecast. The feed's enumerations map onto the protocol's scales, every HTML
+ * field is reduced to text, and the weather summary is split into its per-period headings.
+ * Unknown enumeration values throw rather than pass through, so an unmapped product fails
+ * loudly instead of reaching a reader.
  */
 import {
   ASPECTS, ELEVATIONS,
   type Aspect, type AvalancheForecast, type AvalancheProblem, type Confidence, type DangerRating,
   type Elevation, type Likelihood, type ProblemType, type WeatherPeriod,
 } from "@weather/protocol";
-import { htmlToText } from "./text.ts";
+import { htmlToText } from "./html-text.js";
 
 export interface RawProduct {
   id: string;
@@ -173,4 +174,24 @@ export function toForecast(raw: RawProduct): AvalancheForecast {
       statements: r.confidence?.statements ?? [],
     },
   };
+}
+
+// Overridable so tests can replay recorded responses.
+const API = process.env["AVCAN_BASE_URL"] ?? "https://api.avalanche.ca";
+// Inside the gateway's 15 s budget for the whole codec call. An archive query the API has not
+// cached takes about 7 s; the gateway retries a timeout, by which time the API has it cached.
+const FETCH_TIMEOUT_MS = 10_000;
+
+// The product covering a point at an instant, or null when no center forecasts there then. The
+// API answers both of those with an empty product rather than an error. Without an instant it
+// answers with the product current now.
+export async function fetchPointProduct(lat: number, lon: number, at: number | null): Promise<RawProduct | null> {
+  const url = new URL("/forecasts/en/products/point", API);
+  url.searchParams.set("lat", String(lat));
+  url.searchParams.set("long", String(lon));
+  if (at !== null) url.searchParams.set("date", new Date(at).toISOString());
+  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`avcan: HTTP ${res.status}`);
+  const product = (await res.json()) as RawProduct | null;
+  return product && product.id ? product : null;
 }

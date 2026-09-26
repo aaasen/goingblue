@@ -5,11 +5,11 @@ import { encode, decode, sectionBits, tokenCosts } from "@weather/protocol/avala
 import { buildTable, normalize, encode as ransEncode, Decoder, SCALE } from "@weather/protocol/avalanche-codec/rans";
 import { structuredOf } from "@weather/protocol/avalanche-codec/structured";
 import {
-  UNENCODED, decodeBulletin, encodeBulletin, loadModels, packModels, withPlaceholders,
+  UNENCODED, decodeBulletin, encodeBulletin, loadModels, packModels, quantizeIssued, withPlaceholders,
   type AvalancheForecast, type AvalancheProblem,
 } from "@weather/protocol";
 import { ModelBuilder } from "../scripts/avalanche/model.ts";
-import { htmlToText } from "../scripts/avalanche/text.ts";
+import { htmlToText } from "../src/html-text.ts";
 import { train } from "../scripts/avalanche/train.ts";
 import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.json";
 
@@ -186,8 +186,8 @@ describe("bulletin", () => {
 
   it("round-trips a forecast, filling the fields the wire does not carry with placeholders", () => {
     const m = models();
-    for (const f of [forecast(), QUIET]) expect(decodeBulletin(m, encodeBulletin(m, f))).toEqual(withPlaceholders(f));
-    const back = decodeBulletin(m, encodeBulletin(m, forecast()));
+    for (const f of [forecast(), QUIET]) expect(decodeBulletin(m, encodeBulletin(m, f), quantizeIssued(f.issued))).toEqual(withPlaceholders(f));
+    const back = decodeBulletin(m, encodeBulletin(m, forecast()), quantizeIssued(forecast().issued));
     expect(back).toMatchObject(UNENCODED);
     expect(back.danger.map((d) => d.date)).toEqual([0, 86400000, 172800000]);
   });
@@ -206,7 +206,7 @@ describe("bulletin", () => {
       weather: [{ label: "", text: "Unheaded weather prose." }, { label: "Monday", text: "" }],
       confidence: { rating: "noRating", statements: ["First.", "Second statement."] },
     });
-    expect(decodeBulletin(m, encodeBulletin(m, novel))).toEqual(withPlaceholders(novel));
+    expect(decodeBulletin(m, encodeBulletin(m, novel), quantizeIssued(novel.issued))).toEqual(withPlaceholders(novel));
   });
 
   it("charges seen structure a few bits and unseen values many", () => {
@@ -223,7 +223,7 @@ describe("bulletin", () => {
     for (const f of [forecast(), QUIET]) {
       const bytes = encodeBulletin(m, f);
       expect(encodeBulletin(loaded, f)).toEqual(bytes);
-      expect(decodeBulletin(loaded, bytes)).toEqual(withPlaceholders(f));
+      expect(decodeBulletin(loaded, bytes, quantizeIssued(f.issued))).toEqual(withPlaceholders(f));
     }
     // A file that starts off an 8-byte boundary still loads.
     const packed = packModels(m);
@@ -235,7 +235,7 @@ describe("bulletin", () => {
   it("round-trips the Sea to Sky forecast", () => {
     const f = SEA_TO_SKY as AvalancheForecast;
     const m = train([f]);
-    expect(decodeBulletin(m, encodeBulletin(m, f))).toEqual(withPlaceholders(f));
+    expect(decodeBulletin(m, encodeBulletin(m, f), quantizeIssued(f.issued))).toEqual(withPlaceholders(f));
   });
 });
 
@@ -256,6 +256,6 @@ describe("section context", () => {
     });
     const f = forecast({ problems: [problem("persistentSlab", b.text), problem("windSlab", a.text)] });
     const models = train([f]);
-    expect(decodeBulletin(models, encodeBulletin(models, f))).toEqual(withPlaceholders(f));
+    expect(decodeBulletin(models, encodeBulletin(models, f), quantizeIssued(f.issued))).toEqual(withPlaceholders(f));
   });
 });

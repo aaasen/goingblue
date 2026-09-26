@@ -12,6 +12,8 @@
  *   2. The state stays in [RANS_L, RANS_L * 256), renormalized one byte at a time.
  *   3. rANS is LIFO: the encoder walks its symbols backwards and reverses the output so the
  *      decoder reads forward in the original order.
+ *   4. Reads past the end of the buffer are zeros, so a transport that drops trailing zero
+ *      bytes (the wire's body codecs do) loses nothing.
  */
 
 export const SCALE_BITS = 16;
@@ -119,8 +121,7 @@ export class Decoder {
   }
 
   private next(): number {
-    if (this.pos >= this.buf.length) throw new Error("rans: read past end of buffer");
-    return this.buf[this.pos++];
+    return this.pos < this.buf.length ? this.buf[this.pos++] : (this.pos++, 0);
   }
 
   get(table: Table): number {

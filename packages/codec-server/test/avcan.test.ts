@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dayStart, toForecast, weatherPeriods, type RawProduct } from "../scripts/avalanche/forecast.ts";
+import { dayStart, toForecast, weatherPeriods, type RawProduct } from "../src/avcan.ts";
 
 describe("weatherPeriods", () => {
   it("splits bold headings inside one paragraph and drops the trailing link", () => {

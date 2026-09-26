@@ -1,12 +1,13 @@
 import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import { wireCodec, WIRE_VERSION } from "@weather/protocol";
-import { describeRequest, fetchForecast, parseRequest, requestWindow, splitReplyFor } from "./forecast.js";
+import { serveAvalanche } from "./avalanche.js";
+import { describeRequest, fetchForecast, parseRequest, requestWindow, splitReplyFor, type ForecastParams } from "./forecast.js";
 import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 
 // The codec server: one container per shipped protocol version, frozen at that version's git
 // tag and kept running for as long as clients in the field may still speak it. It is
-// deliberately minimal — parse the request, fetch Open-Meteo, encode — with no database, no
+// deliberately minimal — parse the request, fetch Open-Meteo or Avalanche Canada, encode — with no database, no
 // transport handling, and no static assets, so a frozen image never needs to change when the
 // gateway, accounts, or messaging integrations evolve (see VERSIONING.md).
 //
@@ -22,10 +23,10 @@ import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 //     400  the request is malformed (missing/unsupported version, or a missing/invalid
 //          component — the body names the problems). The gateway replies with its
 //          download-the-app text; the body is for logs and direct callers.
-//     422  the request is well-formed but its start time is off the servable axis. The body is
-//          exactly one word: `stale` (delivery delay carried it past the axis) or `future` (a
-//          wrong clock). Neither is retryable as sent; the gateway decides what, if anything,
-//          to reply.
+//     422  the request is well-formed but can't be served. The body is exactly one word:
+//          `stale` (delivery delay carried its start time past the axis), `future` (a wrong
+//          clock), or `no_forecast` (no avalanche bulletin covers the point on that day). None
+//          is retryable as sent; the gateway decides what, if anything, to reply.
 //     503  upstream data unavailable — the gateway replies with its retry text
 //   The request may carry X-Request-Id and X-Cloud-Trace-Context headers, both logged and
 //   never interpreted.
@@ -58,9 +59,7 @@ async function encode(c: Context) {
     return c.text(`invalid request: ${params.errors.join("; ")}`, 400);
   }
 
-  if (params.kind === "avalanche") {
-    return c.text("avalanche forecasts are not supported yet", 400);
-  }
+  if (params.kind === "avalanche") return encodeAvalanche(c, params);
 
   // Decided before the fetch: an off-axis start can't be served at any layout, so the upstream
   // call would only be spent on a failure.
@@ -78,6 +77,32 @@ async function encode(c: Context) {
     // actually carries and cost (periods by resolution, upstream and encode wall time).
     return c.text(splitReplyFor(params, encoded, wireCodec.headerChars).join("\n"), 200, {
       "X-Request-Shape": JSON.stringify({ ...describeRequest(params), periods, fetchMs, encodeMs }),
+    });
+  } catch (e) {
+    log.error("encode.failed", { version: params.decoderVersion, err: e });
+    return c.text("forecast unavailable", 503);
+  }
+}
+
+async function encodeAvalanche(c: Context, params: ForecastParams) {
+  // A request for the latest bulletin anchors its issue time to the request time, so it has the
+  // same delivery-delay limits as a weather request. A requested day anchors to that day.
+  if (params.day === null) {
+    const window = requestWindow(params.startEpochHour);
+    if (window !== "ok") {
+      log.info(`encode.${window}`, { version: params.decoderVersion, startEpochHour: params.startEpochHour });
+      return c.text(window, 422);
+    }
+  }
+  try {
+    const result = await serveAvalanche(params);
+    if (result.kind === "no_forecast") {
+      log.info("encode.no_forecast", { version: params.decoderVersion });
+      return c.text("no_forecast", 422);
+    }
+    const { replies, fetchMs, encodeMs } = result;
+    return c.text(replies.join("\n"), 200, {
+      "X-Request-Shape": JSON.stringify({ ...describeRequest(params), messages: replies.length, fetchMs, encodeMs }),
     });
   } catch (e) {
     log.error("encode.failed", { version: params.decoderVersion, err: e });

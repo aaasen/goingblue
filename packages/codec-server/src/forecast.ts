@@ -1090,6 +1090,9 @@ export interface ForecastParams {
   // What the request asks for (`f:`): a weather forecast or the avalanche bulletin for the
   // location.
   kind: ForecastKind;
+  // The day an avalanche request wants the bulletin for (`y:`, as "YYYY-MM-DD"), or null for the
+  // latest bulletin.
+  day: string | null;
   lat?: number;
   lon?: number;
   // The requested priority mode (`p:` — MODE_DETAIL/MODE_AUTO/MODE_RANGE) and the location's
@@ -1138,8 +1141,11 @@ const KIND_TOKENS: Record<string, ForecastKind> = {
   w: "weather", a: "avalanche",
 };
 
-// Tokens that only configure a weather forecast, rejected in an avalanche request.
-const WEATHER_KEYS = ["p", "z", "m", "v", "w"];
+// Tokens an avalanche request never carries: the weather options, and `n:`, because an avalanche
+// reply always takes as many messages as the whole bulletin needs.
+const WEATHER_KEYS = ["p", "z", "m", "v", "w", "n"];
+// Tokens only an avalanche request carries.
+const AVALANCHE_KEYS = ["y"];
 
 // `p:` token values → priority modes; a missing or unknown token means Auto.
 const MODE_TOKENS: Record<string, number> = {
@@ -1149,6 +1155,7 @@ const MODE_TOKENS: Record<string, number> = {
 export function parseRequest(body: string): ForecastParams {
   const words = body.toLowerCase().trim().split(/\s+/);
   let kind: ForecastKind = "weather"; // from `f:`; required
+  let day: string | null = null; // from `y:`; avalanche only
   let lat: number | undefined;
   let lon: number | undefined;
   let mode = DEFAULT_MODE; // priority mode, override with `p:` (d/a/r)
@@ -1211,8 +1218,19 @@ export function parseRequest(body: string): ForecastParams {
         // gateway's request record, so a request without it is still served.
         if (isPlatformCode(val)) platform = val;
         else errors.push(`invalid platform "o:${val}"`);
+      } else if (key === "y") {
+        // The day an avalanche bulletin is wanted for, as YYYYMMDD. Optional: omitted for the
+        // latest bulletin.
+        seen.add(key);
+        const m = /^(\d{4})(\d{2})(\d{2})$/.exec(val);
+        const iso = m ? `${m[1]}-${m[2]}-${m[3]}` : "";
+        // Date.parse rejects a month or day out of range; the round trip catches 2026-02-30.
+        const ms = Date.parse(`${iso}T00:00:00Z`);
+        if (m && !isNaN(ms) && new Date(ms).toISOString().startsWith(iso)) day = iso;
+        else errors.push(`invalid day "y:${val}"`);
       } else if (key === "n") {
         // How many messages the reply may be spread over. Optional: omitted at one message.
+        seen.add(key);
         const n = parseInt(val);
         if (!isNaN(n) && n >= 1 && n <= MAX_MESSAGES) messages = n;
         else errors.push(`invalid message count "n:${val}"`);
@@ -1280,10 +1298,9 @@ export function parseRequest(body: string): ForecastParams {
   for (const key of required) {
     if (!seen.has(key)) errors.push(`missing ${key}:`);
   }
-  if (kind === "avalanche") {
-    for (const key of WEATHER_KEYS) {
-      if (seen.has(key)) errors.push(`${key}: not allowed in an avalanche request`);
-    }
+  const foreign = kind === "avalanche" ? WEATHER_KEYS : AVALANCHE_KEYS;
+  for (const key of foreign) {
+    if (seen.has(key)) errors.push(`${key}: not allowed in ${kind === "avalanche" ? "an avalanche" : "a weather"} request`);
   }
   if (lat === undefined || lon === undefined) {
     errors.push("missing coordinates");
@@ -1305,7 +1322,7 @@ export function parseRequest(body: string): ForecastParams {
   // route's limit and so the safe reading of an unidentified sender.
   const maxChars = maxCharsFor(device ?? "s", messages, WIRE_HEADER_CHARS);
 
-  return { kind, lat, lon, mode, utcOffsetHours, modelsMask, vars, maxChars, alphabet, device: device ?? undefined, platform: platform ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
+  return { kind, day, lat, lon, mode, utcOffsetHours, modelsMask, vars, maxChars, alphabet, device: device ?? undefined, platform: platform ?? undefined, messages, decoderVersion, userToken, code, startEpochHour, errors };
 }
 
 // What a request asked for, in names, for the gateway to record (see `X-Request-Shape` in

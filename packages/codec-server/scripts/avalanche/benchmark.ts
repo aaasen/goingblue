@@ -7,7 +7,7 @@
  *
  * Usage: pnpm avalanche-benchmark [--test-frac 0.2] [--min-count 1] [--word-order 2|3]
  */
-import { decodeBulletin, encodeBulletin, loadModels, packModels, sectionsOf, withPlaceholders } from "@weather/protocol";
+import { decodeBulletin, encodeBulletin, loadModels, packModels, quantizeIssued, sectionsOf, withPlaceholders } from "@weather/protocol";
 import { encode, decode, sectionBits } from "@weather/protocol/avalanche-codec/codec";
 import { structuredOf } from "@weather/protocol/avalanche-codec/structured";
 import { tokenize } from "@weather/protocol/avalanche-codec/tokenizer";
@@ -67,7 +67,7 @@ function main(): void {
     structBits += structured.bits(model.byteTable(), struct);
     const whole = encodeBulletin(models, d.forecast);
     combined += whole.length;
-    const back = decodeBulletin(models, whole);
+    const back = decodeBulletin(models, whole, quantizeIssued(d.forecast.issued));
     if (JSON.stringify(back) !== JSON.stringify(withPlaceholders(d.forecast))) {
       combinedFailures++;
       console.log(`  BULLETIN ROUND TRIP FAILED: ${d.id}`);

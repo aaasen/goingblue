@@ -7,7 +7,7 @@ import { markQueued, receiveMessage, recordReplyDelivery, type DeliveryOutcome }
 import { runEncodeTask } from "./encode-task.js";
 import { enqueueEncode, tasksConfigured } from "./tasks.js";
 import {
-  REPLY_FUTURE, REPLY_MALFORMED, REPLY_STALE, REPLY_UNAVAILABLE, REPLY_UNSUPPORTED,
+  REPLY_FUTURE, REPLY_MALFORMED, REPLY_NO_FORECAST, REPLY_STALE, REPLY_UNAVAILABLE, REPLY_UNSUPPORTED,
   replyChars, resolveForecast,
 } from "./forecast.js";
 import { isAppUserAgent, isValidToken, normalizeToken } from "@weather/protocol";
@@ -58,6 +58,7 @@ export async function forecast(c: Context) {
     case "unavailable": return c.text(REPLY_UNAVAILABLE, 503);
     case "stale": return c.text(REPLY_STALE, 422);
     case "future": return c.text(REPLY_FUTURE, 422);
+    case "no_forecast": return c.text(REPLY_NO_FORECAST, 422);
   }
 }
 
