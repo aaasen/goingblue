@@ -45,6 +45,34 @@ export function dangerCell(rating: DangerRating): DangerCell {
   };
 }
 
+// A day's highest danger across its bands: the top level when any band has one, else the alpine
+// band's status.
+export function highestDanger(day: { alp: DangerRating; tln: DangerRating; btl: DangerRating }): DangerRating {
+  const levels = [day.alp, day.tln, day.btl].map((r) => (DANGER_LEVELS as readonly string[]).indexOf(r));
+  const top = Math.max(...levels);
+  return top === -1 ? day.alp : DANGER_LEVELS[top];
+}
+
+export interface ForecastRegion {
+  data: GeoJSON.FeatureCollection;
+  fill: string;
+  outline: string;
+}
+
+// Where a decoded forecast applies, filled with its first day's highest danger for the map; null
+// when the forecast doesn't say where.
+export function forecastRegion(
+  pieces: readonly number[], danger: readonly { alp: DangerRating; tln: DangerRating; btl: DangerRating }[],
+): ForecastRegion | null {
+  if (pieces.length === 0) return null;
+  const cell = dangerCell(danger.length ? highestDanger(danger[0]) : 'noRating');
+  return {
+    data: pieceFeatures(pieces.map((id) => AVALANCHE_PIECES[id])),
+    fill: cell.fill,
+    outline: cell.border ?? cell.fill,
+  };
+}
+
 export const PROBLEM_NAMES: Record<ProblemType, string> = {
   stormSlab: 'Storm slab', windSlab: 'Wind slab', persistentSlab: 'Persistent slab',
   deepPersistentSlab: 'Deep persistent slab', wetSlab: 'Wet slab', wetLoose: 'Wet loose',

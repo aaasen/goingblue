@@ -8,7 +8,7 @@ import * as Location from 'expo-location';
 import * as Network from 'expo-network';
 import { pageInsets } from './insets';
 import AvalancheForecastView from './AvalancheScreen';
-import { pieceAt, pieceFeatures } from './avalancheDisplay';
+import { forecastRegion, pieceAt, pieceFeatures } from './avalancheDisplay';
 import { loadAvalancheModels } from './avalancheModel';
 import DayRow from './components/DayRow';
 import sampleAvalanche from './fixtures/avalanche/sea-to-sky-2026-03-01.json';
@@ -937,7 +937,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // The Avalanche tab's own reply text and what it decodes to, alongside the weather tab's
   // (forecastData): a bulletin loaded under one tab leaves the other tab's forecast in place.
   const [avalancheData, setAvalancheData] = useState('');
-  const [avalanche, setAvalanche] = useState<AvalancheForecast | null>(null);
+  // The decoded bulletin and the point it was requested for.
+  const [avalanche, setAvalanche] = useState<{ forecast: AvalancheForecast; lat: number; lon: number } | null>(null);
   const [avalancheError, setAvalancheError] = useState<string | null>(null);
   const [avalancheCollecting, setAvalancheCollecting] = useState<Collecting | null>(null);
   // The requested day as YYYY-MM-DD, or '' for the latest bulletin.
@@ -1098,6 +1099,12 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const zonePiece = useMemo(
     () => (mapCoord ? pieceAt(mapCoord.lat, mapCoord.lon, AVALANCHE_PIECES) : null),
     [mapCoord?.lat, mapCoord?.lon],
+  );
+  // Where the decoded bulletin applies, in its first day's highest danger. The sample shown before
+  // any reply has no map.
+  const avalancheRegion = useMemo(
+    () => (avalanche ? forecastRegion(avalanche.forecast.pieces, avalanche.forecast.danger) : null),
+    [avalanche],
   );
   const currentFavorite = useMemo(() => findFavorite(favorites, mapCoord) ?? null, [favorites, mapCoord]);
   // What the selected option resolves to here, so the choice isn't abstract: "Auto" means a 2km
@@ -1518,7 +1525,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         if (cancelled) return;
         const d = decodeAny(avalancheData, token);
         if (d.kind !== 'avalanche') throw new Error('Invalid forecast');
-        setAvalanche(d.forecast);
+        setAvalanche({ forecast: d.forecast, lat: d.lat, lon: d.lon });
         setAvalancheError(null);
         setAvalancheCollecting(null);
         if (suppressNextAvalancheCache.current) {
@@ -2097,7 +2104,24 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               )}
             </View>
           </View>
-          <AvalancheForecastView forecast={avalanche ?? SAMPLE_AVALANCHE} timeFormat={timeFormat} />
+          {/* Where the bulletin applies, as the Weather tab maps its forecast: the requested point
+              pinned, the region filled in its first day's highest danger. Keyed on the bulletin so
+              a new one recenters the map. */}
+          {avalanche && (
+            <View style={styles.avalancheMap}>
+              <LocationMap
+                key={`${avalanche.lat},${avalanche.lon},${avalanche.forecast.issued},${avalanche.forecast.pieces.join('-')}`}
+                coord={{ lat: avalanche.lat, lon: avalanche.lon }}
+                height={200}
+                userCoord={gpsCoords}
+                favorites={favorites}
+                pastPoints={pastPoints}
+                region={avalancheRegion}
+                expandable
+              />
+            </View>
+          )}
+          <AvalancheForecastView forecast={avalanche?.forecast ?? SAMPLE_AVALANCHE} timeFormat={timeFormat} />
           <PastForecasts groups={avalancheGroups} loadedKey={loadedAvalancheKey} describe={describeAvalanche}
             onLoad={loadAvalanchePast} onDelete={deletePast} />
         </>
@@ -2989,6 +3013,7 @@ const styles = StyleSheet.create({
 
   // The parked map must draw over what scrolls up beneath it once it stops.
   mapFloat: { zIndex: 1 },
+  avalancheMap: { marginTop: 24, marginBottom: 16 },
 
   // Forecast meta and the past-forecast list, full-bleed siblings of the meteogram — they carry
   // their own margins.

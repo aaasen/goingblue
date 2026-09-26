@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { AVALANCHE_PIECES } from '@weather/protocol';
 import {
-  bulletinTimezone, dangerCell, dayLabel, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
+  bulletinTimezone, dangerCell, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -15,6 +15,38 @@ describe('dangerCell', () => {
   it('shows a band without a level as a gray named cell', () => {
     expect(dangerCell('spring')).toEqual({ fill: '#e5e5ea', text: '#636366', number: '', name: 'Spring', icon: 'noRating' });
     expect(dangerCell('noRating').name).toBe('No Rating');
+  });
+});
+
+describe('highestDanger', () => {
+  it('takes the top level across the bands', () => {
+    expect(highestDanger({ alp: 'moderate', tln: 'considerable', btl: 'low' })).toBe('considerable');
+    expect(highestDanger({ alp: 'noRating', tln: 'noRating', btl: 'low' })).toBe('low');
+  });
+
+  it("falls back to the alpine band's status when no band has a level", () => {
+    expect(highestDanger({ alp: 'spring', tln: 'spring', btl: 'noRating' })).toBe('spring');
+  });
+});
+
+describe('forecastRegion', () => {
+  it("fills the forecast's pieces in the first day's highest danger", () => {
+    const region = forecastRegion([6, 27], [
+      { alp: 'high', tln: 'considerable', btl: 'moderate' },
+      { alp: 'extreme', tln: 'extreme', btl: 'extreme' },
+    ]);
+    expect(region?.data.features.map((f) => f.properties?.id)).toEqual([6, 27]);
+    expect(region).toMatchObject({ fill: '#ed1c24', outline: '#ed1c24' });
+  });
+
+  it('rings extreme in red and grays a day without a level', () => {
+    expect(forecastRegion([6], [{ alp: 'extreme', tln: 'high', btl: 'high' }])).toMatchObject({ fill: '#231f20', outline: '#ed1c24' });
+    expect(forecastRegion([6], [{ alp: 'spring', tln: 'spring', btl: 'spring' }])?.fill).toBe('#e5e5ea');
+    expect(forecastRegion([6], [])?.fill).toBe('#e5e5ea');
+  });
+
+  it('draws nothing for a forecast that does not say where it applies', () => {
+    expect(forecastRegion([], [{ alp: 'low', tln: 'low', btl: 'low' }])).toBeNull();
   });
 });
 

@@ -219,7 +219,8 @@ export function chunksCollected(encoded: string, token: string): number {
 
 export type Decoded =
   | { kind: 'weather'; msg: ForecastMessage }
-  | { kind: 'avalanche'; code: number; forecast: AvalancheForecast };
+  // The point the avalanche request was made for.
+  | { kind: 'avalanche'; code: number; forecast: AvalancheForecast; lat: number; lon: number };
 
 // Decodes a reply of either kind: the code in its header names the stored request, and the
 // request says which kind of reply it is. Both headers keep the code in the same place.
@@ -231,7 +232,9 @@ export function decodeAny(encoded: string, token: string): Decoded {
     const anchor = avalancheAnchor(ctx.day, ctx.start / 3600000);
     const { code, forecast } = decodeAvalancheReply(avalancheModels, reply, anchor, ctx.device);
     // The wire leaves the zone out; the point's center says which one the bulletin is stamped in.
-    return { kind: 'avalanche', code, forecast: { ...forecast, timezone: bulletinTimezone(ctx.lat, ctx.lon) } };
+    return {
+      kind: 'avalanche', code, forecast: { ...forecast, timezone: bulletinTimezone(ctx.lat, ctx.lon) }, lat: ctx.lat, lon: ctx.lon,
+    };
   }
   return { kind: 'weather', msg: decodeMessage(reply, (code) => resolveContext(token, code)) };
 }

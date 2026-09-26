@@ -68,7 +68,9 @@ describe('avalanche requests in the forecast store', () => {
     expect(swapped).not.toBe(reply);
     expect(replyKind(swapped, token)).toBe('avalanche');
     const decoded = decodeAny(swapped, token);
-    expect(decoded).toEqual({ kind: 'avalanche', code, forecast: { ...withPlaceholders(FORECAST), timezone: 'America/Vancouver' } });
+    expect(decoded).toEqual({
+      kind: 'avalanche', code, forecast: { ...withPlaceholders(FORECAST), timezone: 'America/Vancouver' }, lat: 50.1163, lon: -122.9574,
+    });
     const slots = await attachResponse(token, code, reply);
     expect(slots).toHaveLength(1);
     expect(await prunePastForecasts(token)).toHaveLength(1);

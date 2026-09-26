@@ -14,6 +14,7 @@ import { favoriteKey, type Favorite } from './favorites';
 import FavoriteSheet from './FavoriteSheet';
 import OfflineMapsScreen from './OfflineMapsScreen';
 import type { CoordFormat } from './settings';
+import type { ForecastRegion } from './avalancheDisplay';
 
 export interface LatLon {
   lat: number;
@@ -58,6 +59,11 @@ interface Props {
   offlineMaps?: boolean;
   // Areas drawn as outlines under everything else, such as the avalanche forecast pieces.
   zones?: GeoJSON.FeatureCollection | null;
+  // A preview (no onPick) that still offers the fullscreen button; the fullscreen map pans and
+  // zooms, though a tap picks nothing.
+  expandable?: boolean;
+  // Where an avalanche forecast applies, filled in its danger color under the zone outlines.
+  region?: ForecastRegion | null;
 }
 
 // The picker's starting point before any coordinate is set: as far out as the basemap allows,
@@ -76,7 +82,7 @@ const MAP_IMAGES = {
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
 // picks a coordinate. The picker's corner button opens the same map fullscreen; the preview has no
 // controls.
-export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon', offlineMaps = false, zones }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon', offlineMaps = false, zones, region, expandable = false }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
@@ -172,8 +178,8 @@ export default function LocationMap({ coord, onPick, height, active = true, user
       }
     : undefined;
 
-  // The preview stays locked so it doesn't fight the parent ScrollView.
-  function renderMap(ref: React.RefObject<CameraRef | null>, key?: number) {
+  // The preview stays locked so it doesn't fight the parent ScrollView; fullscreen always moves.
+  function renderMap(ref: React.RefObject<CameraRef | null>, key?: number, movable = interactive) {
     if (!mapStyle) return null;
     return (
       <Map
@@ -182,9 +188,9 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         mapStyle={mapStyle}
         onPress={onPress}
         onRegionDidChange={onRegionDidChange}
-        dragPan={interactive}
-        touchZoom={interactive}
-        doubleTapZoom={interactive}
+        dragPan={movable}
+        touchZoom={movable}
+        doubleTapZoom={movable}
         touchRotate={false}
         touchPitch={false}
         compass={false}
@@ -196,6 +202,17 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         {/* A style layer rather than a Marker: markers are native views over the GL surface, so a
             layer always sits under the pin, and a forecast on top of the phone's position keeps the
             pin in front. */}
+        {region && (
+          <GeoJSONSource id="region" data={region.data}>
+            {/* Before the zones, so their outlines draw over it under the same anchors. */}
+            {zoneAnchors.flatMap((before) => [
+              <Layer key={`fill-${before}`} id={`region-fills-${before}`} beforeId={before} type="fill"
+                paint={{ 'fill-color': region.fill, 'fill-opacity': REGION_FILL_OPACITY }} />,
+              <Layer key={`line-${before}`} id={`region-outlines-${before}`} beforeId={before} type="line"
+                paint={{ 'line-color': region.outline, 'line-width': REGION_LINE_WIDTH }} />,
+            ])}
+          </GeoJSONSource>
+        )}
         {zones && (
           <GeoJSONSource id="zones" data={zones}>
             {/* Under the basemap's labels, once per stack (see labelAnchors). */}
@@ -321,7 +338,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         <>
           {renderMap(cameraRef, mapRevision)}
           {mapStyle && <Text style={styles.attribution}>© OpenStreetMap</Text>}
-          {interactive && (
+          {(interactive || expandable) && (
             <TouchableOpacity
               style={styles.fullscreenButton}
               onPress={() => setFullscreen(true)}
@@ -348,7 +365,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
           onRequestClose={() => setFullscreen(false)}
         >
           <View style={styles.fullscreenWrap}>
-            {renderMap(fullscreenCameraRef)}
+            {renderMap(fullscreenCameraRef, undefined, true)}
             {mapStyle && <Text style={styles.attribution}>© OpenStreetMap</Text>}
             <TouchableOpacity
               style={styles.doneButton}
@@ -376,6 +393,9 @@ const ZONE_COLOR = '#1f3f73';
 const ZONE_LINE_PAINT = { 'line-color': ZONE_COLOR, 'line-opacity': 0.7, 'line-width': 1.2 };
 // A faint tint so a point inside a piece reads as covered.
 const ZONE_FILL_PAINT = { 'fill-color': ZONE_COLOR, 'fill-opacity': 0.08 };
+// Strong enough that the danger color reads over the terrain, light enough to see it through.
+const REGION_FILL_OPACITY = 0.4;
+const REGION_LINE_WIDTH = 2;
 
 // The phone's position, in the blue-dot idiom every map app uses, so it reads as "you are here"
 // rather than as a second point of interest.
