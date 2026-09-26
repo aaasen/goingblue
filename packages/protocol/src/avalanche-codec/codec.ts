@@ -23,9 +23,9 @@ import { BOS, ESC, LIT_END, chainedKeys, type Model, type Stream } from "./model
 import { Decoder, costBits, encode as ransEncode, type Decision, type Table } from "./rans.js";
 import type { Section } from "./model.js";
 import { detokenize, tokenize } from "./tokenizer.js";
+import { decodeUtf8 } from "./utf8.js";
 
 const utf8 = new TextEncoder();
-const utf8Decode = new TextDecoder();
 
 // The ladder rung a token was coded on: a context order, the unigram, or a byte literal.
 export type Rung = "order3" | "order2" | "context" | "unigram" | "bytes";
@@ -94,7 +94,7 @@ export function readToken(dec: Decoder, stream: Stream, byteTable: Table, keys: 
     if (b === LIT_END) break;
     raw.push(b);
   }
-  const token = utf8Decode.decode(Uint8Array.from(raw));
+  const token = decodeUtf8(Uint8Array.from(raw));
   return [token, stream.contextFor(token)];
 }
 

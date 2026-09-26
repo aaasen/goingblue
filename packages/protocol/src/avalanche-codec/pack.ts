@@ -18,6 +18,7 @@
 import { KEY_BASE, Model, Stream, Vocab, type Counts, type Ids, type Level } from "./model.js";
 import { FIELDS, StructuredModel, type Field, type FieldName } from "./structured.js";
 import type { Models } from "./bulletin.js";
+import { decodeUtf8 } from "./utf8.js";
 
 const MAGIC = "GBAM";
 const FORMAT_VERSION = 1;
@@ -116,12 +117,12 @@ export function loadModels(file: Uint8Array): Models {
   assertLittleEndian();
   // Views need their element alignment; a buffer that starts off an 8-byte boundary is copied.
   const bytes = file.byteOffset % 8 === 0 ? file : file.slice();
-  if (new TextDecoder().decode(bytes.subarray(0, 4)) !== MAGIC) throw new Error("pack: not an avalanche model file");
+  if (decodeUtf8(bytes.subarray(0, 4)) !== MAGIC) throw new Error("pack: not an avalanche model file");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const version = view.getUint32(4, true);
   if (version !== FORMAT_VERSION) throw new Error(`pack: unsupported format version ${version}`);
   const length = view.getUint32(8, true);
-  const header = JSON.parse(new TextDecoder().decode(bytes.subarray(12, 12 + length))) as Header;
+  const header = JSON.parse(decodeUtf8(bytes.subarray(12, 12 + length))) as Header;
   const start = bytes.byteOffset + align8(12 + length);
   const get = ([type, offset, n]: Ref): Uint16Array | Uint32Array | Float64Array => {
     const at = start + offset;

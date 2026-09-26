@@ -1,21 +1,41 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  chunkLines, collectingChunks, decodeMessage, fillSlotsFor, maxFillSeq, mergeParts,
-  peekHeader, readParts, reassembleReply, WIRE_HEADER_CHARS,
-  type ForecastMessage, type ReplyOracles, type RequestContext, type Variable,
+  avalancheAnchor, chunkLines, collectingChunks, decodeAvalancheReply, decodeMessage, fillSlotsFor,
+  maxFillSeq, mergeParts, peekHeader, readParts, reassembleReply, WIRE_HEADER_CHARS,
+  type AvalancheForecast, type DeviceCode, type ForecastMessage, type Models, type ReplyOracles,
+  type RequestContext, type Variable,
 } from '@weather/protocol';
 
 // The response is slim (see the protocol's message-code scheme): it omits lat/lon/models/vars/
 // resolution and carries only a 7-bit `code`. We store each outgoing request's context under its
 // code, so an incoming response can be matched back and decoded. The store is a ring of CODE_SPACE
 // slots keyed by code — reusing a code (as the index cycles) evicts the old forecast in that slot.
+// Weather and avalanche requests share the ring: every request of either kind takes the next code.
 
 const STORE_KEY_PREFIX = 'forecast_store_v1:';
 const CODE_SPACE = 128; // 7-bit message code, 0..127
 
+// What an avalanche request stored so its reply can be decoded: the point, the request time
+// (`t:`) and the requested day (`y:`, null for the latest bulletin), which together give the
+// anchor the reply's issue time is counted from, and the route, which gives the alphabet.
+export interface AvalancheContext {
+  kind: 'avalanche';
+  lat: number;
+  lon: number;
+  start: number;
+  day: string | null;
+  device: DeviceCode;
+}
+
+export type SlotContext = RequestContext | AvalancheContext;
+
+export function isAvalancheContext(ctx: SlotContext): ctx is AvalancheContext {
+  return 'kind' in ctx && ctx.kind === 'avalanche';
+}
+
 export interface Slot {
   code: number;
-  context: RequestContext;
+  context: SlotContext;
   label: string;        // short request label captured at send time (e.g. location)
   requestedAt: number;
   encoded?: string;     // the response, once received
@@ -30,21 +50,31 @@ interface Store {
 // The persisted shape of a slot: JSON has no Set, so the context's vars travel as an array. A
 // stored slot that doesn't match (one written under a different context shape) fails isStoredSlot
 // and is dropped on load, the same expiry rule as a message that no longer decodes.
-type StoredContext = Omit<RequestContext, 'vars'> & { vars: string[] };
+type StoredContext = (Omit<RequestContext, 'vars'> & { vars: string[] }) | AvalancheContext;
 type StoredSlot = Omit<Slot, 'context'> & { context: StoredContext };
 
 function storedSlot(s: Slot): StoredSlot {
+  if (isAvalancheContext(s.context)) return { ...s, context: s.context };
   return { ...s, context: { ...s.context, vars: [...s.context.vars] } };
 }
 
 function revivedSlot(s: StoredSlot): Slot {
+  if ('kind' in s.context) return { ...s, context: s.context };
   return { ...s, context: { ...s.context, vars: new Set(s.context.vars as Variable[]) } };
 }
 
 // In-memory mirror of the persisted store. Decoding is synchronous and must resolve a code to its
 // context, so we keep the map in memory; callers load the store before decoding.
 const memos = new Map<string, Store>();
-const contextMaps = new Map<string, Map<number, RequestContext>>();
+const contextMaps = new Map<string, Map<number, SlotContext>>();
+
+// The avalanche model, handed in once it has loaded (see avalancheModel.ts). Until then an
+// avalanche reply can't be decoded, and the pruning below leaves avalanche slots alone.
+let avalancheModels: Models | null = null;
+
+export function setAvalancheModels(models: Models): void {
+  avalancheModels = models;
+}
 
 function storeKey(token: string): string {
   return `${STORE_KEY_PREFIX}${token}`;
@@ -52,9 +82,14 @@ function storeKey(token: string): string {
 
 function isStoredSlot(x: unknown): x is StoredSlot {
   const s = x as StoredSlot;
-  return !!s && typeof s.code === 'number' && typeof s.label === 'string'
-    && !!s.context && Array.isArray(s.context.vars)
-    && s.context.vars.every((v) => typeof v === 'string');
+  if (!s || typeof s.code !== 'number' || typeof s.label !== 'string' || !s.context) return false;
+  if ('kind' in s.context) {
+    const c = s.context;
+    return c.kind === 'avalanche' && typeof c.lat === 'number' && typeof c.lon === 'number'
+      && typeof c.start === 'number' && (c.day === null || typeof c.day === 'string')
+      && typeof c.device === 'string';
+  }
+  return Array.isArray(s.context.vars) && s.context.vars.every((v) => typeof v === 'string');
 }
 
 function rebuild(token: string, store: Store): void {
@@ -84,9 +119,17 @@ async function persist(token: string, store: Store): Promise<void> {
   try { await AsyncStorage.setItem(storeKey(token), JSON.stringify(stored)); } catch { /* ignore */ }
 }
 
-// Synchronous resolver passed to the codec. Load the store first (loadStore) so the map is warm.
-export function resolveContext(token: string, code: number): RequestContext | undefined {
+// The stored request under a code, of either kind. Load the store first (loadStore) so the map
+// is warm.
+export function resolveSlotContext(token: string, code: number): SlotContext | undefined {
   return contextMaps.get(token)?.get(code);
+}
+
+// Synchronous resolver passed to the weather codec: weather requests only, so an avalanche reply
+// given to it fails on its code rather than decoding as garbage.
+export function resolveContext(token: string, code: number): RequestContext | undefined {
+  const ctx = resolveSlotContext(token, code);
+  return ctx && !isAvalancheContext(ctx) ? ctx : undefined;
 }
 
 // Pasted text → the encoded message, whatever shape it arrived in: one message, or the numbered
@@ -131,8 +174,11 @@ function oraclesFor(token: string): ReplyOracles {
 function headOfStoredRequest(chunk: string, token: string): boolean {
   try {
     const { code, seq } = peekHeader(cleaned(chunk));
-    const ctx = resolveContext(token, code);
-    if (!ctx) return false;
+    const stored = resolveSlotContext(token, code);
+    if (!stored) return false;
+    // An avalanche header carries no sequence to bound.
+    if (isAvalancheContext(stored)) return true;
+    const ctx = stored;
     // A context stored without an offset can't compute the slot cap; accept the uncapped bound
     // (decode is the final arbiter — an over-tight bound here would trap a valid reply).
     const seqBound = ctx.utcOffsetHours == null
@@ -170,13 +216,47 @@ export function chunksCollected(encoded: string, token: string): number {
   return collectingChunks(text, oraclesFor(token)) ? chunkLines(text).length : 0;
 }
 
-export function decodeAny(encoded: string, token: string): ForecastMessage {
-  return decodeMessage(normalizeReply(encoded), (code) => resolveContext(token, code));
+export type Decoded =
+  | { kind: 'weather'; msg: ForecastMessage }
+  | { kind: 'avalanche'; code: number; forecast: AvalancheForecast };
+
+// Decodes a reply of either kind: the code in its header names the stored request, and the
+// request says which kind of reply it is. Both headers keep the code in the same place.
+export function decodeAny(encoded: string, token: string): Decoded {
+  const reply = normalizeReply(encoded);
+  const ctx = resolveSlotContext(token, peekHeader(reply).code);
+  if (ctx && isAvalancheContext(ctx)) {
+    if (!avalancheModels) throw new Error('The avalanche model has not loaded.');
+    const anchor = avalancheAnchor(ctx.day, ctx.start / 3600000);
+    const { code, forecast } = decodeAvalancheReply(avalancheModels, reply, anchor, ctx.device);
+    return { kind: 'avalanche', code, forecast };
+  }
+  return { kind: 'weather', msg: decodeMessage(reply, (code) => resolveContext(token, code)) };
+}
+
+// Which kind of request a reply answers, read off the header of its first message, or null when
+// the text doesn't start with a header of a request this device holds. Works on a reply still
+// being collected: any labelled part repeats the header.
+export function replyKind(encoded: string, token: string): 'weather' | 'avalanche' | null {
+  try {
+    const { total, parts, unlabelled } = readParts(cleaned(encoded));
+    const first = total > 0 ? parts.values().next().value : unlabelled.join('');
+    if (!first) return null;
+    const ctx = resolveSlotContext(token, peekHeader(first).code);
+    return ctx ? (isAvalancheContext(ctx) ? 'avalanche' : 'weather') : null;
+  } catch {
+    return null;
+  }
+}
+
+// The message code a decoded reply answers.
+export function decodedCode(d: Decoded): number {
+  return d.kind === 'weather' ? d.msg.code : d.code;
 }
 
 // Allocate the next message code, storing the request context under it (evicting whatever slot the
 // code currently holds — old forecasts drop as the index cycles). Returns the code to embed as `k:`.
-export async function allocCode(token: string, context: RequestContext, label: string): Promise<number> {
+export async function allocCode(token: string, context: SlotContext, label: string): Promise<number> {
   const store = await loadStore(token);
   const code = store.nextCode % CODE_SPACE;
   store.slots = store.slots.filter((s) => s.code !== code);
@@ -211,6 +291,7 @@ export async function prunePastForecasts(token: string): Promise<Slot[]> {
   const before = store.slots.length;
   store.slots = store.slots.filter((s) => {
     if (!s.encoded) return true;
+    if (isAvalancheContext(s.context) && !avalancheModels) return true;
     try { decodeAny(s.encoded, token); return true; }
     catch { return false; }
   });

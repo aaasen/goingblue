@@ -15,6 +15,8 @@
 import type { AvalancheForecast } from "../avalanche.js";
 import { putInt, takeInt } from "../bits.js";
 import { decode, decodeBodyAuto, encode, encodeBodyLE, encodeBodyWide, type Alphabet } from "../codec.js";
+import { foldSeptetSwap } from "../constants.js";
+import { DEVICE_TRANSPORT, type DeviceCode } from "../devices.js";
 import { VERSION_PREFIX_CHARS, encodeVersion, takeVersion } from "../version.js";
 import { WIRE_HEADER_BITS, WIRE_HEADER_CHARS, WIRE_VERSION } from "../wire.js";
 import { decodeBulletin, encodeBulletin, type Models } from "./bulletin.js";
@@ -67,4 +69,17 @@ export function decodeAvalancheMessage(
   const bytes = new Uint8Array(Math.ceil(bits.length / 8));
   bits.forEach((bit, i) => { if (bit) bytes[i >> 3] |= 1 << (i & 7); });
   return { code, forecast: decodeBulletin(models, bytes, issued) };
+}
+
+// A reply as a reader pasted it, decoded for the route its request left by. The inReach display
+// swap is undone the way decodeMessage undoes it for weather: always on the base-85 prefix, and
+// on the body unless the route is SMS, whose base-124 alphabet spends the swapped characters as
+// themselves.
+export function decodeAvalancheReply(
+  models: Models, s: string, anchor: number, device: DeviceCode | undefined,
+): { code: number; forecast: AvalancheForecast } {
+  const alphabet = device ? DEVICE_TRANSPORT[device].alphabet : undefined;
+  const prefix = foldSeptetSwap(s.slice(0, WIRE_HEADER_CHARS));
+  const body = s.slice(WIRE_HEADER_CHARS);
+  return decodeAvalancheMessage(models, prefix + (alphabet === "base124" ? body : foldSeptetSwap(body)), anchor, alphabet);
 }

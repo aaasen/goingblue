@@ -9,6 +9,8 @@ import * as Network from 'expo-network';
 import { pageInsets } from './insets';
 import AvalancheForecastView from './AvalancheScreen';
 import { pieceAt, pieceFeatures } from './avalancheDisplay';
+import { loadAvalancheModels } from './avalancheModel';
+import DayPicker, { isValidDay } from './components/DayPicker';
 import sampleAvalanche from './fixtures/avalanche/sea-to-sky-2026-03-01.json';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -31,8 +33,8 @@ import {
 import { ladderLabel } from './cloudBand';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import {
-  allocCode, attachResponse, chunksCollected, decodeAny, deleteResponses, loadStore, mergeReply,
-  normalizeReply, prunePastForecasts, replyParts, type Slot,
+  allocCode, attachResponse, chunksCollected, decodeAny, deleteResponses, isAvalancheContext, loadStore,
+  mergeReply, normalizeReply, prunePastForecasts, replyKind, replyParts, type Slot,
 } from './cache';
 import LocationMap from './LocationMap';
 import DeviceSelector from './components/DeviceSelector';
@@ -482,6 +484,20 @@ function buildMsg(token: string, coords: { lat: number; lon: number } | null, mo
 
 // The request context the client stores under the message code, mirroring how the server will
 // parse this request (so the recovered fields exactly match what the response was encoded with).
+// An avalanche request: the point, `f:a`, the route and platform, and the account, code and time
+// as a weather request carries them. `y:` names a day when one is chosen (as YYYY-MM-DD, sent
+// without the dashes); without it the server answers with the latest bulletin.
+function buildAvalancheMsg(token: string, coords: { lat: number; lon: number }, device: Device, code: number, startEpochHour: number, day: string): string {
+  const parts = [`v${WIRE_VERSION}`, `${coords.lat.toFixed(4)},${coords.lon.toFixed(4)}`, 'f:a'];
+  parts.push(`d:${deviceCode(device)}`);
+  parts.push(`o:${platformCode()}`);
+  parts.push(`u:${token}`);
+  parts.push(`k:${code}`);
+  parts.push(`t:${startEpochHour}`);
+  if (day) parts.push(`y:${day.replace(/-/g, '')}`);
+  return parts.join(' ');
+}
+
 function buildContext(coords: { lat: number; lon: number }, mode: number, model: string, vars: ReadonlySet<Variable>, startEpochHour: number, device: Device): RequestContext {
   return {
     mode,
@@ -563,7 +579,7 @@ interface InFlight {
 
 // A forecast's point as text. The wire carries it to about a kilometer, so lat/lon is written to
 // two decimals and UTM is rounded to 100 m. Past UTM's latitude limits it is lat/lon either way.
-function pointLabel(msg: ForecastMessage, coordFormat: CoordFormat): string {
+function pointLabel(msg: { lat: number; lon: number }, coordFormat: CoordFormat): string {
   const utm = coordFormat === 'utm' ? formatUtm(msg, 100) : null;
   if (utm != null) return utm;
   const latStr = `${Math.abs(msg.lat).toFixed(2)}°${msg.lat >= 0 ? 'N' : 'S'}`;
@@ -669,12 +685,10 @@ interface PastForecastGroup {
 }
 
 /** Group forecasts by their local start day while preserving newest-first order. */
-function groupPastForecasts(slots: Slot[], msgOf: (slot: Slot) => ForecastMessage | null): PastForecastGroup[] {
+function groupPastForecasts(slots: Slot[], startOf: (slot: Slot) => Date): PastForecastGroup[] {
   const groups: PastForecastGroup[] = [];
   for (const slot of slots) {
-    const msg = msgOf(slot);
-    // A slot that no longer decodes groups by its saved/request time instead.
-    const start = msg ? startDatetime(msg) : new Date(slot.savedAt ?? slot.requestedAt);
+    const start = startOf(slot);
     const day = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
     const group = groups.find((candidate) => candidate.day === day);
     if (group) group.slots.push(slot);
@@ -695,6 +709,49 @@ function dayLabel(day: number): string {
     weekday: 'long', month: 'short', day: 'numeric',
     ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
   });
+}
+
+type WeatherSlot = Slot & { context: RequestContext };
+
+function isWeatherSlot(slot: Slot): slot is WeatherSlot {
+  return !isAvalancheContext(slot.context);
+}
+
+// What a failed decode means for the paste area: a reply still being collected (the rest of its
+// messages are in the reader's inbox), or an error to show and flash.
+function decodeFailure(msg: string, text: string, token: string): { collecting: Collecting | null; error: string | null; failed: boolean } {
+  const parts = replyParts(text);
+  if (msg.includes('Missing message') && parts.total > 0) {
+    // Not an error: the rest of a multi-message reply is still in the reader's messages,
+    // and the boxes say which. Anything else about the paste is wrong and stays an error.
+    return { collecting: parts, error: null, failed: false };
+  }
+  // The same in-progress state for a reply nothing labelled, which is what the reader has
+  // when the transport did the splitting. There is no error to distinguish here — an
+  // incomplete body fails to decode exactly the way corrupt text does — so what makes this
+  // a collection rather than a failure is that it starts with the header of a forecast this
+  // device asked for, and that is what chunksCollected checks.
+  const held = chunksCollected(text, token);
+  if (held > 0) {
+    return { collecting: { total: 0, have: Array.from({ length: held }, (_, i) => i + 1) }, error: null, failed: false };
+  }
+  if (msg.includes('different forecast') || msg.includes('pasted twice')) {
+    // Reassembly failures that name the message at fault are the reader's to fix, so they go
+    // through as written. Stray text mixed into a paste is NOT one of them: the protocol's
+    // wording tells the reader to paste each message on its own, which is advice about a
+    // text field this screen doesn't have — a paste like that is just an invalid forecast.
+    return { collecting: null, error: msg.replace(/^Error:\s*/, ''), failed: true };
+  }
+  if (msg.includes('Unknown forecast code')) {
+    return { collecting: null, error: "This forecast doesn't match a request from this device. It may have been sent elsewhere or expired. Request a new forecast.", failed: true };
+  }
+  // Everything else is one message, on purpose. A version the codec doesn't know reads as
+  // a retired or future protocol, but a message's first character IS its version tag, so
+  // any text that isn't a reply lands there too — and the version-specific advice was
+  // wrong in both directions: the cache is pruned of undecodable forecasts on every load,
+  // so a stale saved forecast never reaches here, and a reader in the field can neither
+  // need an app update (the request carries the version they encoded with) nor get one.
+  return { collecting: null, error: 'Invalid forecast. Request a new forecast and paste the reply from your device.', failed: true };
 }
 
 // ── Multi-message collection ───────────────────────────────────────────────
@@ -858,17 +915,36 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const outcomeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [cache, setCache] = useState<Slot[]>([]);
+  // The store holds both kinds of request; each tab lists and compares only its own.
+  const weatherCache = useMemo(() => cache.filter(isWeatherSlot), [cache]);
+  const avalancheCache = useMemo(() => cache.filter((s) => isAvalancheContext(s.context)), [cache]);
   // Every cached forecast decoded once per cache change. The past-forecast list needs each
   // slot's message three times per render (its day, its label, its variable icons), and a
   // decode of a full-fill message runs a few milliseconds; decoding in render made every
   // HomeScreen render pay for the whole list.
   const slotMessages = useMemo(() => {
     const decoded = new Map<Slot, ForecastMessage | null>();
-    for (const slot of cache) {
-      try { decoded.set(slot, decodeAny(slot.encoded!, token)); } catch { decoded.set(slot, null); }
+    for (const slot of weatherCache) {
+      try {
+        const d = decodeAny(slot.encoded!, token);
+        decoded.set(slot, d.kind === 'weather' ? d.msg : null);
+      } catch { decoded.set(slot, null); }
     }
     return decoded;
-  }, [cache, token]);
+  }, [weatherCache, token]);
+
+  // ── Avalanche state ──────────────────────────────────────────────────────
+  // The Avalanche tab's own reply text and what it decodes to, alongside the weather tab's
+  // (forecastData): a bulletin loaded under one tab leaves the other tab's forecast in place.
+  const [avalancheData, setAvalancheData] = useState('');
+  const [avalanche, setAvalanche] = useState<AvalancheForecast | null>(null);
+  const [avalancheError, setAvalancheError] = useState<string | null>(null);
+  const [avalancheCollecting, setAvalancheCollecting] = useState<Collecting | null>(null);
+  // The requested day as YYYY-MM-DD, or '' for the latest bulletin.
+  const [avalancheDay, setAvalancheDay] = useState('');
+  const suppressNextAvalancheCache = useRef(false);
+  // The model decodes avalanche replies and is loaded on first need (avalancheModel.ts).
+  const [modelReady, setModelReady] = useState(false);
   const slotMessage = useCallback((slot: Slot) => slotMessages.get(slot) ?? null, [slotMessages]);
   // When true, the next decode came from loading a cached entry — don't re-attach it.
   const suppressNextCache = useRef(false);
@@ -1212,7 +1288,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // requestCurrentLocation, which has already raised its own alert and notice. The other route to
   // null — a pinned point with unparseable coordinates — greys out the action button, so it never
   // gets this far.
-  async function prepareMessage(): Promise<string | null> {
+  async function prepareMessage(kind: 'weather' | 'avalanche' = 'weather'): Promise<string | null> {
     let coords = resolvedCoords;
     // A stale fix takes the same on-demand path as a missing one: a send is the moment the
     // location has to be right, and refreshing through requestCurrentLocation means a failed
@@ -1223,12 +1299,20 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return null;
     const startHour = alignedStartEpochHour();
+    if (kind === 'avalanche') {
+      const context = {
+        kind: 'avalanche' as const, lat: coords.lat, lon: coords.lon, start: startHour * 3600000,
+        day: avalancheDay || null, device: deviceCode(device),
+      };
+      const code = await allocCode(token, context, 'Avalanche');
+      return buildAvalancheMsg(token, coords, device, code, startHour, avalancheDay);
+    }
     const code = await allocCode(token, buildContext(coords, mode, model, vars, startHour, device), `${modeName} · ${model.toUpperCase()}`);
     return buildMsg(token, coords, mode, model, vars, device, messages, code, startHour);
   }
 
-  async function handleCopy() {
-    const msg = await prepareMessage();
+  async function handleCopy(kind: 'weather' | 'avalanche' = 'weather') {
+    const msg = await prepareMessage(kind);
     if (msg == null) return;
     await Clipboard.setStringAsync(msg);
     setMessageCopied(true);
@@ -1237,8 +1321,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
   // Hands the request to the phone's Messages app, addressed and prefilled. Only useful on a phone
   // with cell service — over a satellite messenger the message is copied across instead.
-  async function handleSendSms() {
-    const msg = await prepareMessage();
+  async function handleSendSms(kind: 'weather' | 'avalanche' = 'weather') {
+    const msg = await prepareMessage(kind);
     if (msg == null) return;
     try {
       await Linking.openURL(smsUrl(msg));
@@ -1268,8 +1352,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     });
   }
 
-  async function handleFetch() {
-    const msg = await prepareMessage();
+  async function handleFetch(kind: 'weather' | 'avalanche' = 'weather') {
+    const [current, setText] = kind === 'avalanche' ? [avalancheData, setAvalancheData] : [forecastData, onForecastDataChange];
+    const msg = await prepareMessage(kind);
     if (msg == null) return;
     setFetching(true);
     // An abort we raised ourselves is indistinguishable from any other in the catch, so both the
@@ -1291,14 +1376,14 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       // A reply that landed in the gap between the abort and this line answers a request the user
       // has already walked away from — hand it on and it draws a forecast for a route they left.
       if (req.cancelled) return;
-      if (encoded === forecastData) {
+      if (encoded === current) {
         // The reply is the text already on screen, so nothing will re-decode — there is no
         // settling to wait for. Just bring the forecast back into view.
         pendingScroll.current = true;
         scrollToForecast();
       } else {
         fetchDecoding.current = true;
-        onForecastDataChange(encoded);
+        setText(encoded);
       }
     } catch (e) {
       if (req.cancelled) return;
@@ -1317,9 +1402,20 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
   // ── Decoding ─────────────────────────────────────────────────────────────
 
+  // Pruned again once the avalanche model loads: until then avalanche slots are kept unchecked.
   useEffect(() => {
     prunePastForecasts(token).then(setCache);
-  }, [token]);
+  }, [token, modelReady]);
+
+  const needsModel = tab === 'avalanche' || avalancheCache.length > 0;
+  useEffect(() => {
+    if (!needsModel || modelReady) return;
+    let live = true;
+    loadAvalancheModels()
+      .then(() => { if (live) setModelReady(true); })
+      .catch((e) => console.warn(`avalanche model unavailable: ${e}`));
+    return () => { live = false; };
+  }, [needsModel, modelReady]);
 
   useEffect(() => () => { if (outcomeTimer.current) clearTimeout(outcomeTimer.current); }, []);
 
@@ -1350,7 +1446,16 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         // The store maps the message code → request context; load it before the (sync) decode.
         await loadStore(token);
         if (cancelled) return;
-        const msg = pre ?? decodeAny(forecastData, token);
+        // A bulletin pasted or fetched here belongs to the Avalanche tab, which takes it over.
+        if (!pre && replyKind(forecastData, token) === 'avalanche') {
+          setAvalancheData(forecastData);
+          setTab('avalanche');
+          onForecastDataChange('');
+          return;
+        }
+        const decodedReply = pre ? null : decodeAny(forecastData, token);
+        if (decodedReply && decodedReply.kind !== 'weather') throw new Error('Invalid forecast');
+        const msg = pre ?? decodedReply!.msg;
         // A cached entry loaded by loadPast is already on screen, its scroll already settled.
         if (!pre) {
           setDecoded(msg);
@@ -1370,45 +1475,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       } catch (e) {
         suppressNextCache.current = false;
         setDecoded(null);
-        setCollecting(null);
-        const msg = String(e);
-        const parts = replyParts(forecastData);
-        if (msg.includes('Missing message') && parts.total > 0) {
-          // Not an error: the rest of a multi-message reply is still in the reader's messages,
-          // and the boxes say which. Anything else about the paste is wrong and stays an error.
-          setError(null);
-          setCollecting(parts);
-          return;
-        }
-        // The same in-progress state for a reply nothing labelled, which is what the reader has
-        // when the transport did the splitting. There is no error to distinguish here — an
-        // incomplete body fails to decode exactly the way corrupt text does — so what makes this
-        // a collection rather than a failure is that it starts with the header of a forecast this
-        // device asked for, and that is what chunksCollected checks.
-        const held = chunksCollected(forecastData, token);
-        if (held > 0) {
-          setError(null);
-          setCollecting({ total: 0, have: Array.from({ length: held }, (_, i) => i + 1) });
-          return;
-        }
-        flash(FAILED_LABEL, true);
-        if (msg.includes('different forecast') || msg.includes('pasted twice')) {
-          // Reassembly failures that name the message at fault are the reader's to fix, so they go
-          // through as written. Stray text mixed into a paste is NOT one of them: the protocol's
-          // wording tells the reader to paste each message on its own, which is advice about a
-          // text field this screen doesn't have — a paste like that is just an invalid forecast.
-          setError(msg.replace(/^Error:\s*/, ''));
-        } else if (msg.includes('Unknown forecast code')) {
-          setError("This forecast doesn't match a request from this device. It may have been sent elsewhere or expired. Request a new forecast.");
-        } else {
-          // Everything else is one message, on purpose. A version the codec doesn't know reads as
-          // a retired or future protocol, but a message's first character IS its version tag, so
-          // any text that isn't a reply lands there too — and the version-specific advice was
-          // wrong in both directions: the cache is pruned of undecodable forecasts on every load,
-          // so a stale saved forecast never reaches here, and a reader in the field can neither
-          // need an app update (the request carries the version they encoded with) nor get one.
-          setError('Invalid forecast. Request a new forecast and paste the reply from your device.');
-        }
+        const failure = decodeFailure(String(e), forecastData, token);
+        setCollecting(failure.collecting);
+        setError(failure.error);
+        if (failure.failed) flash(FAILED_LABEL, true);
       } finally {
         // The reply this decode settled came off the wire — stop the spinner it was holding.
         // Batched with the setDecoded/setError above, so the spinner leaves in the very commit
@@ -1421,7 +1491,57 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       }
     })();
     return () => { cancelled = true; };
-  }, [forecastData, token, flash]);
+  }, [forecastData, token, flash, onForecastDataChange]);
+
+  // The Avalanche tab's decode, the same steps as the weather one above: a reply that answers a
+  // weather request goes to the Weather tab, a bulletin waits for the model and goes on screen.
+  useEffect(() => {
+    let cancelled = false;
+    if (!avalancheData.trim()) {
+      setAvalanche(null);
+      setAvalancheError(null);
+      setAvalancheCollecting(null);
+      suppressNextAvalancheCache.current = false;
+      return;
+    }
+    (async () => {
+      try {
+        await loadStore(token);
+        if (cancelled) return;
+        if (replyKind(avalancheData, token) === 'weather') {
+          onForecastDataChange(avalancheData);
+          setTab('weather');
+          setAvalancheData('');
+          return;
+        }
+        await loadAvalancheModels();
+        if (cancelled) return;
+        const d = decodeAny(avalancheData, token);
+        if (d.kind !== 'avalanche') throw new Error('Invalid forecast');
+        setAvalanche(d.forecast);
+        setAvalancheError(null);
+        setAvalancheCollecting(null);
+        if (suppressNextAvalancheCache.current) {
+          suppressNextAvalancheCache.current = false;
+        } else {
+          attachResponse(token, d.code, avalancheData).then((slots) => { if (!cancelled) setCache(slots); });
+        }
+      } catch (e) {
+        suppressNextAvalancheCache.current = false;
+        setAvalanche(null);
+        const failure = decodeFailure(String(e), avalancheData, token);
+        setAvalancheCollecting(failure.collecting);
+        setAvalancheError(failure.error);
+        if (failure.failed) flash(FAILED_LABEL, true);
+      } finally {
+        if (fetchDecoding.current) {
+          fetchDecoding.current = false;
+          setFetching(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [avalancheData, token, flash, onForecastDataChange]);
 
   // A reply that arrived as two messages is pasted as two messages, so a paste folds into what
   // is already here when — and only when — it is another part of the same reply (see mergeReply).
@@ -1431,7 +1551,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // at all — a re-pasted message merges to what is already loaded, and a segment that leaves the
   // reply incomplete draws no forecast. Without a label for those, a press that did nothing and a
   // press that collected a message look identical.
-  const pasteFromClipboard = useCallback(async () => {
+  const pasteInto = useCallback(async (current: string, setText: (text: string) => void) => {
     try {
       const text = await Clipboard.getStringAsync();
       // An empty clipboard (or one holding an image, which reads back as '') still gets an
@@ -1444,12 +1564,16 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       // made, so the store has to be warm before either — it is loaded on mount, but a paste is
       // the first thing a reader does and needn't lose that race.
       await loadStore(token);
-      const merged = mergeReply(forecastData, text, token);
+      // Merging and the check below decode, and a bulletin can't decode before its model loads.
+      if (replyKind(text, token) === 'avalanche' || replyKind(current, token) === 'avalanche') {
+        await loadAvalancheModels().catch(() => {});
+      }
+      const merged = mergeReply(current, text, token);
       const incoming = replyParts(text);
       // Messages of an unlabelled reply are counted, not numbered: the reply says nothing about
       // which one this was, only the reader's paste order does. Zero once it decodes.
       const held = chunksCollected(merged, token);
-      onForecastDataChange(merged);
+      setText(merged);
       // The labels below confirm the press, so they must not outrun the decoder: text that will
       // neither decode nor stand as a collection gets the failure label here rather than a green
       // beat the decode effect flips to red a moment later. Checked on the merged text whether or
@@ -1470,7 +1594,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         return;
       }
       flash(
-        merged.trim() === forecastData.trim() ? (held ? 'Already added' : 'Already loaded')
+        merged.trim() === current.trim() ? (held ? 'Already added' : 'Already loaded')
           : held ? `Added message ${held}`
             : incoming.have.length === 1 ? `Loaded part ${incoming.have[0]}/${incoming.total}`
               : 'Loaded forecast',
@@ -1479,7 +1603,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       setError('Could not read the clipboard.');
       flash(FAILED_LABEL, true);
     }
-  }, [forecastData, onForecastDataChange, flash, token]);
+  }, [flash, token]);
 
   // Drops whatever is held. Nothing decoded is lost — a forecast that decoded is in the cache and
   // a tap away in Saved forecasts — but a half-collected reply is, which is the point: it is the
@@ -1491,13 +1615,19 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     onForecastDataChange('');
   }, [onForecastDataChange]);
 
+  const clearAvalanche = useCallback(() => {
+    if (outcomeTimer.current) clearTimeout(outcomeTimer.current);
+    setOutcome(null);
+    setAvalancheData('');
+  }, []);
+
   const loadPast = useCallback((encoded: string) => {
     suppressNextCache.current = true;
     // A cached entry is decoded already (slotMessages), so it goes on screen in the render that
     // takes its text rather than a decode effect and a second commit later. The pill index, the
     // meta line and the meteogram then change in one commit and one layout pass. The decode
     // effect still runs for the entry and finds it settled (predecoded).
-    const slot = cache.find((s) => s.encoded === encoded);
+    const slot = weatherCache.find((s) => s.encoded === encoded);
     const msg = slot ? slotMessages.get(slot) : null;
     if (msg) {
       predecoded.current = { data: encoded, msg };
@@ -1508,20 +1638,26 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       setCollecting(null);
     }
     onForecastDataChange(encoded);
-  }, [cache, slotMessages, onForecastDataChange]);
+  }, [weatherCache, slotMessages, onForecastDataChange]);
+
+  const loadAvalanchePast = useCallback((encoded: string) => {
+    suppressNextAvalancheCache.current = true;
+    setAvalancheData(encoded);
+  }, []);
 
   // Asks first: the list is the only copy the app holds. Deleting the forecast on screen takes it
   // off the screen too, so nothing is shown that the list no longer has. onDeleted runs only on
   // confirmation, so a cancelled delete leaves the list as it was.
   const deletePast = useStableHandler((slots: Slot[], onDeleted: () => void) => {
+    const [current, clear] = tab === 'avalanche' ? [avalancheData, clearAvalanche] : [forecastData, clearForecast];
     const noun = slots.length === 1 ? 'saved forecast' : 'saved forecasts';
     Alert.alert(`Delete ${slots.length} ${noun}?`, undefined, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
         onPress: () => {
-          const loaded = normalizedForecastData(forecastData);
-          if (slots.some((s) => normalizedForecastData(s.encoded!) === loaded)) clearForecast();
+          const loaded = normalizedForecastData(current);
+          if (slots.some((s) => normalizedForecastData(s.encoded!) === loaded)) clear();
           deleteResponses(token, slots.map((s) => s.code)).then(setCache);
           onDeleted();
         },
@@ -1542,14 +1678,25 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // sends the request, and what has to be true before it can. Only the internet route needs a
   // connection, and only it can sit in a fetch, so only it is greyed out by either.
   const ACTIONS: Record<Device, { onPress: () => void; disabled: boolean; busy: boolean }> = {
-    internet: { onPress: handleFetch, disabled: fetchDisabled, busy: fetching || locating },
-    sms: { onPress: handleSendSms, disabled: sendDisabled, busy: locating },
-    inreach: { onPress: handleCopy, disabled: sendDisabled, busy: locating },
-    zoleo: { onPress: handleCopy, disabled: sendDisabled, busy: locating },
+    internet: { onPress: () => handleFetch(), disabled: fetchDisabled, busy: fetching || locating },
+    sms: { onPress: () => handleSendSms(), disabled: sendDisabled, busy: locating },
+    inreach: { onPress: () => handleCopy(), disabled: sendDisabled, busy: locating },
+    zoleo: { onPress: () => handleCopy(), disabled: sendDisabled, busy: locating },
     // iPhone hands off to Messages exactly as SMS does — same text, same recipient. What differs
     // is the reply, which comes back in the wide alphabet so it lands in a single bubble.
-    iphone: { onPress: handleSendSms, disabled: sendDisabled, busy: locating },
+    iphone: { onPress: () => handleSendSms(), disabled: sendDisabled, busy: locating },
   };
+  // The Avalanche tab's button: the same handlers, sending an avalanche request, and greyed while
+  // the point is outside every forecast zone or the day field holds no date.
+  const avalancheBlocked = !zonePiece || !isValidDay(avalancheDay);
+  const AVALANCHE_ACTIONS: Record<Device, { onPress: () => void; disabled: boolean; busy: boolean }> = {
+    internet: { onPress: () => handleFetch('avalanche'), disabled: fetchDisabled || avalancheBlocked, busy: fetching || locating },
+    sms: { onPress: () => handleSendSms('avalanche'), disabled: sendDisabled || avalancheBlocked, busy: locating },
+    inreach: { onPress: () => handleCopy('avalanche'), disabled: sendDisabled || avalancheBlocked, busy: locating },
+    zoleo: { onPress: () => handleCopy('avalanche'), disabled: sendDisabled || avalancheBlocked, busy: locating },
+    iphone: { onPress: () => handleSendSms('avalanche'), disabled: sendDisabled || avalancheBlocked, busy: locating },
+  };
+  const avalancheAction = AVALANCHE_ACTIONS[device];
   const deviceSpec = DEVICES.find((d) => d.value === device)!;
   const action = ACTIONS[device];
   // Copy is the only action with something to confirm — the others hand off to another app,
@@ -1641,7 +1788,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const onCancelAction = useStableHandler(cancelAction);
   // pasteFromClipboard is keyed on the forecast text, so it changes on every load; the parent's
   // multi-message callback is whatever App passed this render.
-  const onPaste = useStableHandler(pasteFromClipboard);
+  const onPaste = useStableHandler(() => pasteInto(forecastData, onForecastDataChange));
+  const onAvalanchePaste = useStableHandler(() => pasteInto(avalancheData, setAvalancheData));
   const onTwoMessages = useStableHandler(onTwoMessagesChange);
 
   // Distance is offered only while there is a fix to measure from. A list shown on a distance
@@ -1658,9 +1806,27 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     [favorites, shownFavoritesSort, gpsCoords, favoritesSortReversed],
   );
 
-  const pastGroups = useMemo(() => groupPastForecasts(cache, slotMessage), [cache, slotMessage]);
+  const pastGroups = useMemo(() => groupPastForecasts(weatherCache, (slot) => {
+    const msg = slotMessage(slot);
+    // A slot that no longer decodes groups by its saved/request time instead.
+    return msg ? startDatetime(msg) : new Date(slot.savedAt ?? slot.requestedAt);
+  }), [weatherCache, slotMessage]);
+  const describeWeather = useCallback((slot: Slot): PastRowText => {
+    const msg = slotMessage(slot);
+    return { label: pastMetaLabel(slot, msg, favorites, coordFormat), tags: cacheVariableTags(msg) };
+  }, [slotMessage, favorites, coordFormat]);
+  // A bulletin is listed under the day it was requested for: the chosen day, or the day it was
+  // requested when it asked for the latest.
+  const avalancheGroups = useMemo(() => groupPastForecasts(avalancheCache, (slot) => {
+    const day = isAvalancheContext(slot.context) ? slot.context.day : null;
+    return day ? new Date(`${day}T12:00:00`) : new Date(slot.requestedAt);
+  }), [avalancheCache]);
+  const describeAvalanche = useCallback((slot: Slot): PastRowText => ({
+    label: `${requestTimeLabel(slot.requestedAt)} · ${findFavorite(favorites, slot.context)?.name ?? pointLabel(slot.context, coordFormat)}`,
+    tags: [],
+  }), [favorites, coordFormat]);
   const pastPoints = useMemo(() => pastForecastPoints(cache.map((s) => s.context), favorites), [cache, favorites]);
-  const loadedSlot = cache.find((slot) =>
+  const loadedSlot = weatherCache.find((slot) =>
     normalizedForecastData(slot.encoded!) === normalizedForecastData(forecastData),
   );
 
@@ -1685,7 +1851,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     // built the comparison in — which stays put however the selection moves (`order` is the
     // label's earliest request, so a newer response re-winning a label doesn't reseat it).
     const byLabel = new Map<string, { label: string; order: number; slot: Slot }>();
-    for (const s of cache) {
+    for (const s of weatherCache) {
       if (!s.encoded) continue;
       if (Math.abs(s.context.start - compareRef.start) > 3600_000) continue;
       if (kmApart(s.context, compareRef) > 1) continue;
@@ -1708,6 +1874,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // The past list takes only stable inputs (see PastForecasts), so a HomeScreen render that
   // changes nothing about it, a layout measurement or the minute tick, leaves it alone.
   const loadedKey = normalizedForecastData(forecastData);
+  const loadedAvalancheKey = normalizedForecastData(avalancheData);
 
   return (
     <Animated.ScrollView
@@ -1882,8 +2049,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         </View>
       )}
 
-      <PastForecasts groups={pastGroups} loadedKey={loadedKey} slotMessage={slotMessage} units={units} favorites={favorites}
-        coordFormat={coordFormat} onLoad={loadPast} onDelete={deletePast} />
+      <PastForecasts groups={pastGroups} loadedKey={loadedKey} describe={describeWeather}
+        onLoad={loadPast} onDelete={deletePast} />
 
       {/* Open-Meteo's data is CC BY 4.0, which asks for credit where the data is shown —
           the Settings footer alone doesn't satisfy that. Same wording as there. */}
@@ -1897,34 +2064,41 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       )}
       </View>
 
-      {/* An archived bulletin stands in for a decoded one until there is a wire format. */}
+      {/* The Avalanche tab: the device and day to request for, the send and paste steps, the
+          bulletin (an archived one stands in until a reply is decoded), and the saved bulletins. */}
       {tab === 'avalanche' && (
         <>
-          {/* The weather builder's device selector and buttons, without the multi-message switch.
-              The buttons are placeholders until bulletins have a wire format. The send button is
-              greyed while the location is outside every forecast zone. */}
           <View style={styles.builderPad}>
             <DeviceSelector device={device} onDevice={onDevice} setDeviceInfo={setDeviceInfo} />
+            <DayPicker day={avalancheDay} onDay={setAvalancheDay} />
             <View style={styles.buttons}>
               <ActionButton
-                icon={deviceSpec.icon}
-                label={deviceSpec.action}
-                onPress={noop}
-                onCancel={noop}
-                disabled={!zonePiece}
-                busy={false}
-                variant="primary"
+                icon={copied ? 'check' : deviceSpec.icon}
+                label={copied ? 'Copied' : deviceSpec.action}
+                onPress={avalancheAction.onPress}
+                onCancel={onCancelAction}
+                disabled={avalancheAction.disabled}
+                busy={avalancheAction.busy}
+                variant={copied ? 'success' : 'primary'}
               />
             </View>
             {!zonePiece && <Text style={styles.actionNote}>Select a location inside the forecast area</Text>}
             <View style={styles.sectionEnd} />
             <View style={styles.pasteArea}>
               <View style={styles.pasteRow}>
-                <PasteButton outcome={null} onPress={noop} />
+                <PasteButton outcome={outcome} onPress={onAvalanchePaste} />
               </View>
+              {avalancheCollecting && <CollectingBox {...avalancheCollecting} onClear={clearAvalanche} />}
+              {avalancheError && (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorText}>{avalancheError}</Text>
+                </View>
+              )}
             </View>
           </View>
-          <AvalancheForecastView forecast={SAMPLE_AVALANCHE} timeFormat={timeFormat} />
+          <AvalancheForecastView forecast={avalanche ?? SAMPLE_AVALANCHE} timeFormat={timeFormat} />
+          <PastForecasts groups={avalancheGroups} loadedKey={loadedAvalancheKey} describe={describeAvalanche}
+            onLoad={loadAvalanchePast} onDelete={deletePast} />
         </>
       )}
 
@@ -2205,12 +2379,17 @@ const FavoritesModal = memo(function FavoritesModal({
 
 // One cached forecast in the past list. Memoized on its own so a switch, which changes only which
 // row is loaded, re-renders the two rows whose highlight flips and no others.
-const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, last, editing, selected, units, favorites, coordFormat, onLoad, onToggle }: {
-  slot: Slot; msg: ForecastMessage | null; isLoaded: boolean; last: boolean; editing: boolean; selected: boolean;
-  units: UnitPrefs; favorites: readonly Favorite[]; coordFormat: CoordFormat;
+// What a saved-forecast row says: its one-line label and any variable tags.
+interface PastRowText {
+  label: string;
+  tags: { tag: string; label: string }[];
+}
+
+const PastForecastRow = memo(function PastForecastRow({ slot, text, isLoaded, last, editing, selected, onLoad, onToggle }: {
+  slot: Slot; text: PastRowText; isLoaded: boolean; last: boolean; editing: boolean; selected: boolean;
   onLoad: (encoded: string) => void; onToggle: (code: number) => void;
 }) {
-  const variableTags = cacheVariableTags(msg);
+  const variableTags = text.tags;
   // A tap views the forecast, or while editing selects it. The row on screen has nothing to view.
   return (
     <Pressable
@@ -2229,7 +2408,7 @@ const PastForecastRow = memo(function PastForecastRow({ slot, msg, isLoaded, las
           : isLoaded && <Ionicons name="checkmark" size={20} color={palette.link} />}
       </View>
       <View style={styles.pastDetails}>
-        <Text style={styles.pastMeta} numberOfLines={2}>{pastMetaLabel(slot, msg, favorites, coordFormat)}</Text>
+        <Text style={styles.pastMeta} numberOfLines={2}>{text.label}</Text>
         {variableTags.length > 0 && (
           <View style={styles.variableRow}>
             <Text style={styles.variableLabel}>Variables:</Text>
@@ -2265,10 +2444,9 @@ function SelectMark({ selected, color }: { selected: boolean; color: string }) {
 // normalized (a string, so it compares by value), and the lookup and load handler are memoized
 // callbacks. A layout measurement or the minute tick then re-renders HomeScreen without
 // walking this subtree, which on a long history is the taller half of the screen.
-const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessage, units, favorites, coordFormat, onLoad, onDelete }: {
-  groups: PastForecastGroup[]; loadedKey: string; slotMessage: (slot: Slot) => ForecastMessage | null;
-  units: UnitPrefs; favorites: readonly Favorite[]; coordFormat: CoordFormat; onLoad: (encoded: string) => void;
-  onDelete: (slots: Slot[], onDeleted: () => void) => void;
+const PastForecasts = memo(function PastForecasts({ groups, loadedKey, describe, onLoad, onDelete }: {
+  groups: PastForecastGroup[]; loadedKey: string; describe: (slot: Slot) => PastRowText;
+  onLoad: (encoded: string) => void; onDelete: (slots: Slot[], onDeleted: () => void) => void;
 }) {
   // Editing turns a row's tap from viewing to selecting, and the header's Edit into Delete and
   // Done. It ends with a delete, and with the list, so the next forecast saved after the last one
@@ -2343,10 +2521,9 @@ const PastForecasts = memo(function PastForecasts({ groups, loadedKey, slotMessa
             </View>
             <View style={styles.pastCard}>
               {group.slots.map((slot, idx) => (
-                <PastForecastRow key={slot.code} slot={slot} msg={slotMessage(slot)}
+                <PastForecastRow key={slot.code} slot={slot} text={describe(slot)}
                   isLoaded={normalizedForecastData(slot.encoded!) === loadedKey} last={idx === group.slots.length - 1}
-                  editing={editing} selected={selected.has(slot.code)} units={units} favorites={favorites}
-                  coordFormat={coordFormat} onLoad={onLoad} onToggle={toggle} />
+                  editing={editing} selected={selected.has(slot.code)} onLoad={onLoad} onToggle={toggle} />
               ))}
             </View>
           </View>

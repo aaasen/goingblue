@@ -86,8 +86,9 @@ describe('screenshot seed', () => {
     const expected = fixtures.reduce((n, f) => n + f.requests.length, 0);
     expect(store.slots).toHaveLength(expected);
     for (const slot of store.slots) {
-      const msg = decodeAny(slot.encoded!, SEED_TOKEN);
-      expect(msg.periods.length).toBeGreaterThan(0);
+      const decoded = decodeAny(slot.encoded!, SEED_TOKEN);
+      if (decoded.kind !== 'weather') throw new Error('seeded a non-weather forecast');
+      expect(decoded.msg.periods.length).toBeGreaterThan(0);
       // Recorded dates, not today's: the start is the hour-aligned request time of its recording.
       expect(slot.context.start % 3600000).toBe(0);
       expect(slot.context.start).toBeLessThanOrEqual(recordedLatest);

@@ -6,6 +6,7 @@ import {
   withPlaceholders, type Alphabet, type AvalancheForecast,
 } from "../src/index.js";
 import { buildTable, Decoder, encode as ransEncode, type Decision } from "../src/avalanche-codec/rans.js";
+import { decodeUtf8 } from "../src/avalanche-codec/utf8.js";
 import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.json";
 
 const MODELS = loadModels(gunzipSync(readFileSync(new URL("../assets/avcan-model.bin.gz", import.meta.url))));
@@ -69,5 +70,15 @@ describe("avalanche rANS", () => {
       for (const [t, sym] of plan) expect(dec.get(t)).toBe(sym);
     }
     expect(trimmed).toBeGreaterThan(0);
+  });
+});
+
+describe("decodeUtf8", () => {
+  it("matches TextDecoder on well-formed and malformed input", () => {
+    const text = "Québec: crête d'été ’quoted’ −12 °C ⚠️ 𝔸 end";
+    expect(decodeUtf8(new TextEncoder().encode(text))).toBe(text);
+    for (const bad of [[0xff], [0xc3], [0xe2, 0x82], [0xed, 0xa0, 0x80], [0xc0, 0xaf], [0x41, 0x80, 0x42]]) {
+      expect(decodeUtf8(Uint8Array.from(bad)), JSON.stringify(bad)).toBe(new TextDecoder().decode(Uint8Array.from(bad)));
+    }
   });
 });

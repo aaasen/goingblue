@@ -19,8 +19,9 @@ config.watchFolders = [workspaceRoot];
 const escapedRoot = workspaceRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 config.resolver.blockList = [new RegExp(`^${escapedRoot}/data/`)];
 
-// The bundled basemap archives and the glyph bundle (assets/basemap) ship as binary assets.
-config.resolver.assetExts.push('pmtiles', 'zip');
+// The bundled basemap archives, the glyph bundle (assets/basemap), and the avalanche model
+// (protocol/assets) ship as binary assets.
+config.resolver.assetExts.push('pmtiles', 'zip', 'gz');
 
 // Resolve node_modules from both the app root and the workspace root,
 // so pnpm-hoisted packages (react, react-native, etc.) are found correctly
