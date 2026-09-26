@@ -5,6 +5,7 @@ import {
   type AvalancheForecast, type DeviceCode, type ForecastMessage, type Models, type ReplyOracles,
   type RequestContext, type Variable,
 } from '@weather/protocol';
+import { bulletinTimezone } from './avalancheDisplay';
 
 // The response is slim (see the protocol's message-code scheme): it omits lat/lon/models/vars/
 // resolution and carries only a 7-bit `code`. We store each outgoing request's context under its
@@ -229,7 +230,8 @@ export function decodeAny(encoded: string, token: string): Decoded {
     if (!avalancheModels) throw new Error('The avalanche model has not loaded.');
     const anchor = avalancheAnchor(ctx.day, ctx.start / 3600000);
     const { code, forecast } = decodeAvalancheReply(avalancheModels, reply, anchor, ctx.device);
-    return { kind: 'avalanche', code, forecast };
+    // The wire leaves the zone out; the point's center says which one the bulletin is stamped in.
+    return { kind: 'avalanche', code, forecast: { ...forecast, timezone: bulletinTimezone(ctx.lat, ctx.lon) } };
   }
   return { kind: 'weather', msg: decodeMessage(reply, (code) => resolveContext(token, code)) };
 }

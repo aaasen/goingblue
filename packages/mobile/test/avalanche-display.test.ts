@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { AVALANCHE_PIECES } from '@weather/protocol';
 import {
-  dangerCell, dayLabel, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
+  bulletinTimezone, dangerCell, dayLabel, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -83,3 +83,16 @@ describe('pieces', () => {
     expect(pieceFeatures(pieces).features[2]).toMatchObject({ properties: { id: 2 }, geometry: { type: 'MultiPolygon' } });
   });
 });
+
+describe('bulletinTimezone', () => {
+  it("stamps a bulletin in its center's zone rather than the point's own", () => {
+    expect(bulletinTimezone(50.1163, -122.9574)).toBe('America/Vancouver'); // Sea to Sky
+    expect(bulletinTimezone(51.1784, -115.5708)).toBe('America/Edmonton'); // Banff
+    // Kootenay Pass sits on Creston's clock, which keeps no daylight time; Avalanche Canada
+    // stamps the region on Pacific time.
+    expect(bulletinTimezone(49.058, -117.04)).toBe('America/Vancouver');
+    expect(bulletinTimezone(49.53, -57.8)).toBe('America/St_Johns'); // Gros Morne
+    expect(bulletinTimezone(48.95, -66.1)).toBe('America/New_York'); // Chic-Chocs
+  });
+});
+

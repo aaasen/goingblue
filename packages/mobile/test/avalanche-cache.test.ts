@@ -68,7 +68,7 @@ describe('avalanche requests in the forecast store', () => {
     expect(swapped).not.toBe(reply);
     expect(replyKind(swapped, token)).toBe('avalanche');
     const decoded = decodeAny(swapped, token);
-    expect(decoded).toEqual({ kind: 'avalanche', code, forecast: withPlaceholders(FORECAST) });
+    expect(decoded).toEqual({ kind: 'avalanche', code, forecast: { ...withPlaceholders(FORECAST), timezone: 'America/Vancouver' } });
     const slots = await attachResponse(token, code, reply);
     expect(slots).toHaveLength(1);
     expect(await prunePastForecasts(token)).toHaveLength(1);
@@ -85,7 +85,7 @@ describe('avalanche requests in the forecast store', () => {
     let held = '';
     for (const part of [...parts].reverse()) held = mergeReply(held, part, token);
     const decoded = decodeAny(held, token);
-    expect(decoded.kind === 'avalanche' && decoded.forecast).toEqual(withPlaceholders(FORECAST));
+    expect(decoded.kind === 'avalanche' && decoded.forecast).toEqual({ ...withPlaceholders(FORECAST), timezone: 'America/Vancouver' });
   });
 
   it('know nothing about text that is not a reply', async () => {

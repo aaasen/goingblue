@@ -1,6 +1,7 @@
 // What the avalanche view says and colors, kept apart from the drawing so it can be tested.
+import tzlookup from 'tz-lookup';
 import {
-  DANGER_LEVELS, LIKELIHOODS,
+  AVALANCHE_PIECES, DANGER_LEVELS, LIKELIHOODS,
   type AvalanchePiece, type DangerRating, type Elevation, type Likelihood, type ProblemType,
 } from '@weather/protocol';
 import type { DangerIcon } from './dangerIcons';
@@ -117,6 +118,25 @@ export const CONFIDENCE_NAMES: Record<string, string> = {
 // The weekday of an instant in the forecast's zone.
 export function dayLabel(ms: number, timezone: string): string {
   return new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: timezone }).format(new Date(ms));
+}
+
+// The zone each center stamps its bulletins in, as the archive's bulletins declare it: Avalanche
+// Canada and Glacier National Park on Pacific time wherever the region, the Rockies parks and
+// Kananaskis on Mountain, Avalanche Québec on Eastern. The one exception is Avalanche Canada's
+// Newfoundland region, stamped on Newfoundland time.
+const CENTER_ZONES: Record<string, string> = {
+  'avalanche-canada': 'America/Vancouver', 'parks-glacier': 'America/Vancouver',
+  'parks-byk': 'America/Edmonton', 'parks-jasper': 'America/Edmonton', 'parks-waterton': 'America/Edmonton',
+  kananaskis: 'America/Edmonton', 'avalanche-quebec': 'America/New_York',
+};
+
+// The zone a bulletin for a point is stamped in, found from the center whose piece holds the point.
+// The wire doesn't carry it. A point outside every piece gets its own zone.
+export function bulletinTimezone(lat: number, lon: number): string {
+  const local = tzlookup(lat, lon);
+  if (local === 'America/St_Johns') return local;
+  const piece = pieceAt(lat, lon, AVALANCHE_PIECES);
+  return (piece && CENTER_ZONES[piece.center]) ?? local;
 }
 
 // The generic abbreviations of the zones bulletins come in. Intl's shortGeneric names some of
