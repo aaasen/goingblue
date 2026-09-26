@@ -5,10 +5,11 @@
  *
  * Usage: pnpm avalanche-explore [--test-frac 0.2] [--top 30] [--word-order 2|3]
  */
-import { tokenCosts, type TokenCost } from "./codec.ts";
+import { sectionsOf } from "@weather/protocol";
+import { tokenCosts, type TokenCost } from "@weather/protocol/avalanche-codec/codec";
 import { WORD_ORDER } from "./model.ts";
-import { loadBulletins, split, arg } from "./benchmark.ts";
-import { sectionsOf, train as trainModels } from "./bulletin.ts";
+import { arg, loadBulletins, split } from "./corpus.ts";
+import { train as trainModels } from "./train.ts";
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;

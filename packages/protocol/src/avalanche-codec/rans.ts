@@ -1,7 +1,7 @@
 /**
  * Static-table rANS entropy coder for text symbols.
  *
- * The protocol package's coder (packages/protocol/src/rans.ts) uses 12-bit frequency precision
+ * The weather coder (../rans.ts) uses 12-bit frequency precision
  * and a linear symbol scan, sized for alphabets of a few dozen symbols. Word vocabularies run to
  * tens of thousands, so this coder uses 16-bit precision and binary search over the cumulative
  * table. Everything stays in plain JS numbers below 2^31 with no bitwise operators on the

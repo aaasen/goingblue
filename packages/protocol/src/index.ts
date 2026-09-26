@@ -15,3 +15,4 @@ export * from "./wire.js";
 export * from "./registry.js";
 export * from "./avalanche.js";
 export * from "./avalanche-pieces.gen.js";
+export * from "./avalanche-codec/index.js";

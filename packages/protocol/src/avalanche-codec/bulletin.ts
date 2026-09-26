@@ -18,12 +18,11 @@
 import type {
   AvalancheForecast, AvalancheProblem, Aspect, Confidence, DangerRating, Elevation, Likelihood,
   ProblemType,
-} from "@weather/protocol";
-import { frame, planSections, readHeader, readSections } from "./codec.ts";
-import { Model } from "./model.ts";
-import { Decoder } from "./rans.ts";
-import type { Section } from "./text.ts";
-import { StructuredModel, structuredOf, type Structured } from "./structured.ts";
+} from "../avalanche.js";
+import { frame, planSections, readHeader, readSections } from "./codec.js";
+import type { Model, Section } from "./model.js";
+import { Decoder } from "./rans.js";
+import { structuredOf, type Structured, type StructuredModel } from "./structured.js";
 
 export const SECTION_KINDS = [
   "highlights", "problem", "advice", "avalanche-summary", "snowpack-summary", "weather-summary",
@@ -98,18 +97,6 @@ function forecastOf(s: Structured, sections: Section[]): AvalancheForecast {
 export interface Models {
   prose: Model;
   structured: StructuredModel;
-}
-
-export function train(forecasts: Iterable<AvalancheForecast>, wordOrder?: number, minCount = 1): Models {
-  const prose = new Model(wordOrder);
-  const structured = new StructuredModel();
-  for (const f of forecasts) {
-    for (const s of sectionsOf(f)) prose.observe(s);
-    structured.observe(structuredOf(f));
-  }
-  prose.finalize(minCount);
-  structured.finalize();
-  return { prose, structured };
 }
 
 export function encodeBulletin({ prose, structured }: Models, f: AvalancheForecast): Uint8Array {

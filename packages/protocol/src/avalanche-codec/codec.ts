@@ -19,10 +19,10 @@
  * ESC read from the rung above, and the symbols of every context rung escaped from are
  * excluded from the context rungs below.
  */
-import { BOS, ESC, LIT_END, chainedKeys, type Model, type Stream } from "./model.ts";
-import { Decoder, costBits, encode as ransEncode, type Decision, type Table } from "./rans.ts";
-import type { Section } from "./text.ts";
-import { detokenize, tokenize } from "./tokenizer.ts";
+import { BOS, ESC, LIT_END, chainedKeys, type Model, type Stream } from "./model.js";
+import { Decoder, costBits, encode as ransEncode, type Decision, type Table } from "./rans.js";
+import type { Section } from "./model.js";
+import { detokenize, tokenize } from "./tokenizer.js";
 
 const utf8 = new TextEncoder();
 const utf8Decode = new TextDecoder();

@@ -3,12 +3,6 @@
  * text, and htmlToText is the one place HTML is turned into the strings that get compressed.
  */
 
-export interface Section {
-  kind: string;   // see SECTION_KINDS in bulletin.ts
-  text: string;
-  context?: string;   // problem type for a problem comment; the word model starts from it
-}
-
 const ENTITIES: Record<string, string> = {
   amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ",
   deg: "°", ndash: "–", mdash: "—", rsquo: "’", lsquo: "‘",

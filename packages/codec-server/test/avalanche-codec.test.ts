@@ -1,12 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { tokenize, detokenize } from "../scripts/avalanche/tokenizer.ts";
-import { Model } from "../scripts/avalanche/model.ts";
-import { encode, decode, sectionBits, tokenCosts } from "../scripts/avalanche/codec.ts";
-import { buildTable, normalize, encode as ransEncode, Decoder, SCALE } from "../scripts/avalanche/rans.ts";
-import { htmlToText, type Section } from "../scripts/avalanche/text.ts";
-import { structuredOf } from "../scripts/avalanche/structured.ts";
-import { UNENCODED, decodeBulletin, encodeBulletin, train, withPlaceholders } from "../scripts/avalanche/bulletin.ts";
-import type { AvalancheForecast, AvalancheProblem } from "@weather/protocol";
+import { tokenize, detokenize } from "@weather/protocol/avalanche-codec/tokenizer";
+import type { Model, Section } from "@weather/protocol/avalanche-codec/model";
+import { encode, decode, sectionBits, tokenCosts } from "@weather/protocol/avalanche-codec/codec";
+import { buildTable, normalize, encode as ransEncode, Decoder, SCALE } from "@weather/protocol/avalanche-codec/rans";
+import { structuredOf } from "@weather/protocol/avalanche-codec/structured";
+import {
+  UNENCODED, decodeBulletin, encodeBulletin, loadModels, packModels, withPlaceholders,
+  type AvalancheForecast, type AvalancheProblem,
+} from "@weather/protocol";
+import { ModelBuilder } from "../scripts/avalanche/model.ts";
+import { htmlToText } from "../scripts/avalanche/text.ts";
+import { train } from "../scripts/avalanche/train.ts";
 import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.json";
 
 const TRAIN: Section[] = [
@@ -17,10 +21,9 @@ const TRAIN: Section[] = [
 ];
 
 function trained(): Model {
-  const m = new Model();
-  for (const s of TRAIN) m.observe(s);
-  m.finalize();
-  return m;
+  const b = new ModelBuilder();
+  for (const s of TRAIN) b.observe(s);
+  return b.build();
 }
 
 describe("tokenizer", () => {
@@ -214,6 +217,21 @@ describe("bulletin", () => {
     expect(m.structured.bits(byteTable, structuredOf(unseen))).toBeGreaterThan(30);
   });
 
+  it("encodes identically after packing and loading", () => {
+    const m = models();
+    const loaded = loadModels(packModels(m));
+    for (const f of [forecast(), QUIET]) {
+      const bytes = encodeBulletin(m, f);
+      expect(encodeBulletin(loaded, f)).toEqual(bytes);
+      expect(decodeBulletin(loaded, bytes)).toEqual(withPlaceholders(f));
+    }
+    // A file that starts off an 8-byte boundary still loads.
+    const packed = packModels(m);
+    const shifted = new Uint8Array(packed.length + 1).subarray(1);
+    shifted.set(packed);
+    expect(encodeBulletin(loadModels(shifted), forecast())).toEqual(encodeBulletin(m, forecast()));
+  });
+
   it("round-trips the Sea to Sky forecast", () => {
     const f = SEA_TO_SKY as AvalancheForecast;
     const m = train([f]);
@@ -223,11 +241,11 @@ describe("bulletin", () => {
 
 describe("section context", () => {
   it("starts a problem description from its type and round-trips through the bulletin", () => {
-    const m = new Model();
+    const builder = new ModelBuilder();
     const a = { kind: "problem", text: "Wind slabs remain reactive near ridge crests.", context: "windSlab" };
     const b = { kind: "problem", text: "Persistent slabs remain a concern on shaded aspects.", context: "persistentSlab" };
-    for (const s of [a, b, TRAIN[2]]) m.observe(s);
-    m.finalize();
+    for (const s of [a, b, TRAIN[2]]) builder.observe(s);
+    const m = builder.build();
     // The same first word costs less under its own type than under the other.
     const asWind = sectionBits(m, { kind: "problem", text: "Wind", context: "windSlab" });
     const asPersistent = sectionBits(m, { kind: "problem", text: "Wind", context: "persistentSlab" });

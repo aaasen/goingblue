@@ -8,6 +8,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./avalanche-codec/*": {
+      "import": "./dist/avalanche-codec/*.js",
+      "types": "./dist/avalanche-codec/*.d.ts"
     }
   },
   "scripts": {

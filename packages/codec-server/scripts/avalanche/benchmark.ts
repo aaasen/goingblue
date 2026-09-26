@@ -7,57 +7,16 @@
  *
  * Usage: pnpm avalanche-benchmark [--test-frac 0.2] [--min-count 1] [--word-order 2|3]
  */
-import type { AvalancheForecast } from "@weather/protocol";
-import { encode, decode, sectionBits } from "./codec.ts";
-import { decodeBulletin, encodeBulletin, sectionsOf, train as trainModels, withPlaceholders } from "./bulletin.ts";
-import { openDb } from "./db.ts";
-import { isForecast, toForecast, type RawProduct } from "./forecast.ts";
+import { decodeBulletin, encodeBulletin, loadModels, packModels, sectionsOf, withPlaceholders } from "@weather/protocol";
+import { encode, decode, sectionBits } from "@weather/protocol/avalanche-codec/codec";
+import { structuredOf } from "@weather/protocol/avalanche-codec/structured";
+import { tokenize } from "@weather/protocol/avalanche-codec/tokenizer";
+import { arg, loadBulletins, split } from "./corpus.ts";
 import { WORD_ORDER } from "./model.ts";
-import { structuredOf } from "./structured.ts";
-import { tokenize } from "./tokenizer.ts";
+import { train as trainModels } from "./train.ts";
 
 // Compressed bytes that fit one satellite message on the tightest multi-message route.
 const MESSAGE_BYTES = 140;
-
-export function arg(name: string, fallback: number): number {
-  const i = process.argv.indexOf(name);
-  return i === -1 ? fallback : Number(process.argv[i + 1]);
-}
-
-export interface Doc {
-  id: string;
-  dateIssued: string;
-  forecast: AvalancheForecast;
-}
-
-// Every archived product with a danger rating and some prose, as the app's forecast.
-export function loadBulletins(): Doc[] {
-  const db = openDb();
-  const rows = db.prepare("SELECT json FROM products ORDER BY date_issued, id").all() as { json: string }[];
-  db.close();
-  const out: Doc[] = [];
-  for (const { json } of rows) {
-    const p = JSON.parse(json) as RawProduct;
-    if (!isForecast(p)) continue;
-    const forecast = toForecast(p);
-    if (sectionsOf(forecast).some((s) => s.text)) out.push({ id: p.id, dateIssued: p.report.dateIssued, forecast });
-  }
-  return out;
-}
-
-// FNV-1a over the id, mapped to [0, 1).
-function unitHash(id: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
-  return (h >>> 0) / 4294967296;
-}
-
-export function split(docs: Doc[], testFrac: number): { train: Doc[]; test: Doc[] } {
-  return {
-    train: docs.filter((d) => unitHash(d.id) >= testFrac),
-    test: docs.filter((d) => unitHash(d.id) < testFrac),
-  };
-}
 
 const utf8 = new TextEncoder();
 const fmt = (n: number) => n.toLocaleString("en-US");
@@ -77,7 +36,8 @@ function main(): void {
   const t0 = Date.now();
   const wordOrder = arg("--word-order", WORD_ORDER);
   console.log(`  word order ${wordOrder}`);
-  const models = trainModels(train.map((d) => d.forecast), wordOrder, minCount);
+  // Round-tripped through the file format, so every bulletin below also checks the packing.
+  const models = loadModels(packModels(trainModels(train.map((d) => d.forecast), wordOrder, minCount)));
   const { prose: model, structured } = models;
   const st = model.stats();
   console.log(`\ntrained in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${st.streams} word streams, vocab ${fmt(st.wordVocab)}, ` + st.entries.map((n, k) => `order ${k + 1}: ${fmt(n)} entries over ${fmt(st.contexts[k])} contexts`).join(", "));
