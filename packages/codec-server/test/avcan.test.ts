@@ -42,6 +42,7 @@ describe("dayStart", () => {
 
 const RAW: RawProduct = {
   id: "x",
+  area: { id: "a" },
   owner: { value: "avalanche-canada" },
   report: {
     title: "Somewhere",
@@ -75,7 +76,7 @@ const RAW: RawProduct = {
 
 describe("toForecast", () => {
   it("maps the feed onto the protocol's scales", () => {
-    const f = toForecast(RAW);
+    const f = toForecast(RAW, []);
     expect(f.center).toBe("avalanche-canada");
     expect(f.danger).toEqual([{ date: Date.parse("2026-03-01T08:00:00Z"), btl: "noRating", tln: "moderate", alp: "considerable" }]);
     expect(f.problems).toEqual([{
@@ -91,12 +92,12 @@ describe("toForecast", () => {
   it("reduces advice HTML to text", () => {
     const raw = structuredClone(RAW);
     raw.report.terrainAndTravelAdvice = ["Avoid <strong>steep</strong> slopes &amp; cornices."];
-    expect(toForecast(raw).advice).toEqual(["Avoid steep slopes & cornices."]);
+    expect(toForecast(raw, []).advice).toEqual(["Avoid steep slopes & cornices."]);
   });
 
   it("refuses a value outside the scales", () => {
     const bad = structuredClone(RAW);
     bad.report.problems![0].type.value = "glacier";
-    expect(() => toForecast(bad)).toThrow(/problem type/);
+    expect(() => toForecast(bad, [])).toThrow(/problem type/);
   });
 });

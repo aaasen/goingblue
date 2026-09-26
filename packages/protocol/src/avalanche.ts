@@ -63,6 +63,8 @@ export interface AvalancheForecast {
   // Who prepared the bulletin, as the center credits it: "Avalanche Canada", "Parks Canada".
   issuedBy: string;
   region: string;
+  // The pieces (AVALANCHE_PIECES ids, ascending) the forecast area covers; empty when unknown.
+  pieces: number[];
   // ms epoch.
   issued: number;
   expires: number;

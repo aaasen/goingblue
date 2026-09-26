@@ -10,15 +10,21 @@ import { toForecast, type RawProduct } from "../src/avcan.ts";
 import { parseRequest } from "../src/forecast.ts";
 
 // Recorded from the point endpoint: the Sea to Sky bulletin valid 2026-03-01, and what the API
-// answers for a point no center forecasts.
-const SEA_TO_SKY = JSON.parse(readFileSync(new URL("fixtures/avcan-point-sea-to-sky-2026-03-01.json", import.meta.url), "utf8")) as RawProduct;
-const EMPTY = JSON.parse(readFileSync(new URL("fixtures/avcan-point-empty.json", import.meta.url), "utf8")) as unknown;
+// answers for a point no center forecasts. The areas response is cut down to the Sea to Sky area.
+const fixture = (name: string) => JSON.parse(readFileSync(new URL(`fixtures/${name}`, import.meta.url), "utf8")) as unknown;
+const SEA_TO_SKY = fixture("avcan-point-sea-to-sky-2026-03-01.json") as RawProduct;
+const EMPTY = fixture("avcan-point-empty.json");
+const AREAS = fixture("avcan-areas-sea-to-sky-2026-03-01.json");
+const SEA_TO_SKY_PIECES = [6, 27, 32, 67, 72, 76];
 
 const MODELS = loadModels(gunzipSync(readFileSync(new URL("../../protocol/assets/avcan-model.bin.gz", import.meta.url))));
 const ISSUED_HOUR = Date.parse(SEA_TO_SKY.report.dateIssued) / 3600000;
 
-function answer(body: unknown, status = 200) {
-  const fetch = vi.fn(async (_url: URL) => new Response(JSON.stringify(body), { status }));
+// The point endpoint answers with `body`; the areas endpoint with `areas`.
+function answer(body: unknown, status = 200, areas: { body: unknown; status: number } = { body: AREAS, status: 200 }) {
+  const fetch = vi.fn(async (url: URL) => url.pathname.endsWith("/areas")
+    ? new Response(JSON.stringify(areas.body), { status: areas.status })
+    : new Response(JSON.stringify(body), { status }));
   vi.stubGlobal("fetch", fetch);
   return fetch;
 }
@@ -43,7 +49,8 @@ describe("serveAvalanche", () => {
     expect(headerFromString(result.replies[0]).code).toBe(42);
     const { code, forecast } = decodeAvalancheMessage(MODELS, result.replies[0], Date.parse("2026-03-01T19:00:00Z"), "base94");
     expect(code).toBe(42);
-    expect(forecast).toEqual(withPlaceholders(toForecast(SEA_TO_SKY)));
+    expect(forecast).toEqual(withPlaceholders(toForecast(SEA_TO_SKY, SEA_TO_SKY_PIECES)));
+    expect(forecast.pieces).toEqual(SEA_TO_SKY_PIECES);
     expect(forecast.issued).toBe(Date.parse("2026-03-01T00:00:00Z"));
     expect(forecast.expires).toBe(Date.parse("2026-03-02T00:00:00Z"));
   });
@@ -57,7 +64,7 @@ describe("serveAvalanche", () => {
     if (device === "i") expect(result.replies.length).toBeGreaterThan(1);
     if (result.replies.length === 1 && device !== "s") expect(whole.length).toBeLessThanOrEqual(maxChars);
     const { forecast } = decodeAvalancheMessage(MODELS, whole, Date.parse("2026-03-01T19:00:00Z"), alphabet);
-    expect(forecast).toEqual(withPlaceholders(toForecast(SEA_TO_SKY)));
+    expect(forecast).toEqual(withPlaceholders(toForecast(SEA_TO_SKY, SEA_TO_SKY_PIECES)));
   });
 
   it("asks for the current bulletin when no day is given, anchored to the request time", async () => {
@@ -78,5 +85,25 @@ describe("serveAvalanche", () => {
   it("fails when the API does", async () => {
     answer({}, 500);
     await expect(serveAvalanche(request("d:s"))).rejects.toThrow(/HTTP 500/);
+  });
+
+  // Each case uses an area no earlier test has cached.
+  it("fetches the areas in force on the requested day and remembers what an area covers", async () => {
+    const product = { ...SEA_TO_SKY, area: { id: "cached-area" } };
+    const areas = { type: "FeatureCollection", features: [{ ...(AREAS as { features: object[] }).features[0], id: "cached-area" }] };
+    const fetch = answer(product, 200, { body: areas, status: 200 });
+    await serveAvalanche(request("d:s y:20260301"));
+    const areasUrl = fetch.mock.calls[1][0];
+    expect(areasUrl.pathname).toBe("/forecasts/en/areas");
+    expect(areasUrl.searchParams.get("date")).toBe("2026-03-01T19:00:00.000Z");
+    await serveAvalanche(request("d:s y:20260301"));
+    expect(fetch.mock.calls.filter(([url]) => url.pathname.endsWith("/areas"))).toHaveLength(1);
+  });
+
+  it("fails when the areas endpoint does or lacks the product's area", async () => {
+    answer({ ...SEA_TO_SKY, area: { id: "failing-area" } }, 200, { body: {}, status: 503 });
+    await expect(serveAvalanche(request("d:s"))).rejects.toThrow(/areas: HTTP 503/);
+    answer({ ...SEA_TO_SKY, area: { id: "missing-area" } });
+    await expect(serveAvalanche(request("d:s"))).rejects.toThrow(/no area missing-area/);
   });
 });

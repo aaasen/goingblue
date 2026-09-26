@@ -2,6 +2,14 @@
   "center": "avalanche-canada",
   "issuedBy": "Avalanche Canada",
   "region": "Brandywine-Garibaldi-Homathko-Sky Pilot-Spearhead-Tantalus",
+  "pieces": [
+    6,
+    27,
+    32,
+    67,
+    72,
+    76
+  ],
   "issued": 1772323200000,
   "expires": 1772409600000,
   "timezone": "America/Vancouver",

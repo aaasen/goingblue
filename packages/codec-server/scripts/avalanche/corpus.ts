@@ -2,7 +2,7 @@
  * The archive as training and test documents: every product with a danger rating, as the
  * app's forecast, split into train and test by a hash of the product id.
  */
-import { sectionsOf, type AvalancheForecast } from "@weather/protocol";
+import { piecesInArea, sectionsOf, type AvalancheForecast } from "@weather/protocol";
 import { openDb } from "./db.ts";
 import { isForecast, toForecast, type RawProduct } from "../../src/avcan.ts";
 
@@ -17,16 +17,34 @@ export interface Doc {
   forecast: AvalancheForecast;
 }
 
+// The pieces a product's area covers, from the geometry pieces.ts cached; empty for the areas
+// it never fetched (those of seasons before the piece layout).
+export function productPieces(db: ReturnType<typeof openDb>): (p: RawProduct) => number[] {
+  const geometry = new Map((db.prepare("SELECT id, geometry FROM areas").all() as { id: string; geometry: string }[])
+    .map((r) => [r.id, r.geometry]));
+  const memo = new Map<string, number[]>();
+  return (p) => {
+    const key = `${p.area.id}|${p.owner.value}`;
+    let pieces = memo.get(key);
+    if (!pieces) {
+      const g = geometry.get(p.area.id);
+      memo.set(key, (pieces = g ? piecesInArea(JSON.parse(g), p.owner.value) : []));
+    }
+    return pieces;
+  };
+}
+
 // Every archived product with a danger rating and some prose, as the app's forecast.
 export function loadBulletins(): Doc[] {
   const db = openDb();
   const rows = db.prepare("SELECT json FROM products ORDER BY date_issued, id").all() as { json: string }[];
+  const piecesOf = productPieces(db);
   db.close();
   const out: Doc[] = [];
   for (const { json } of rows) {
     const p = JSON.parse(json) as RawProduct;
     if (!isForecast(p)) continue;
-    const forecast = toForecast(p);
+    const forecast = toForecast(p, piecesOf(p));
     if (sectionsOf(forecast).some((s) => s.text)) out.push({ id: p.id, dateIssued: p.report.dateIssued, forecast });
   }
   return out;

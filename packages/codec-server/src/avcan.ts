@@ -1,12 +1,12 @@
 /**
- * Avalanche Canada bulletins: fetching the product for a point, and mapping a product onto the
- * app's AvalancheForecast. The feed's enumerations map onto the protocol's scales, every HTML
+ * Avalanche Canada bulletins: fetching the product for a point and the pieces its area covers,
+ * and mapping a product onto the app's AvalancheForecast. The feed's enumerations map onto the protocol's scales, every HTML
  * field is reduced to text, and the weather summary is split into its per-period headings.
  * Unknown enumeration values throw rather than pass through, so an unmapped product fails
  * loudly instead of reaching a reader.
  */
 import {
-  ASPECTS, ELEVATIONS,
+  ASPECTS, ELEVATIONS, piecesInArea,
   type Aspect, type AvalancheForecast, type AvalancheProblem, type Confidence, type DangerRating,
   type Elevation, type Likelihood, type ProblemType, type WeatherPeriod,
 } from "@weather/protocol";
@@ -14,6 +14,7 @@ import { htmlToText } from "./html-text.js";
 
 export interface RawProduct {
   id: string;
+  area: { id: string };
   owner: { value: string; display: string };
   report: {
     title: string;
@@ -146,7 +147,8 @@ export function isForecast(p: RawProduct): boolean {
   );
 }
 
-export function toForecast(raw: RawProduct): AvalancheForecast {
+// `pieces` is what the product's area covers (fetchAreaPieces).
+export function toForecast(raw: RawProduct, pieces: number[]): AvalancheForecast {
   const r = raw.report;
   const tz = r.timezone ?? "UTC";
   const summary = (kind: string) => htmlToText(r.summaries?.find((s) => s.type.value === kind)?.content);
@@ -154,6 +156,7 @@ export function toForecast(raw: RawProduct): AvalancheForecast {
     center: raw.owner.value,
     issuedBy: r.forecaster ?? raw.owner.display,
     region: r.title,
+    pieces,
     issued: Date.parse(r.dateIssued),
     expires: Date.parse(r.validUntil),
     timezone: tz,
@@ -194,4 +197,25 @@ export async function fetchPointProduct(lat: number, lon: number, at: number | n
   if (!res.ok) throw new Error(`avcan: HTTP ${res.status}`);
   const product = (await res.json()) as RawProduct | null;
   return product && product.id ? product : null;
+}
+
+// Area ids are hashes of the area, so what an id covers never changes.
+const areaPieces = new Map<string, number[]>();
+
+// The pieces a product's area covers. On a miss, fetches every area in force at the product's
+// instant (`at` as passed to fetchPointProduct) and remembers them all.
+export async function fetchAreaPieces(product: RawProduct, at: number | null): Promise<number[]> {
+  const key = `${product.area.id}|${product.owner.value}`;
+  const known = areaPieces.get(key);
+  if (known) return known;
+  const url = new URL("/forecasts/en/areas", API);
+  if (at !== null) url.searchParams.set("date", new Date(at).toISOString());
+  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`avcan areas: HTTP ${res.status}`);
+  const body = (await res.json()) as { features: { id: string; geometry: { type: string; coordinates: unknown } }[] };
+  const feature = body.features.find((f) => f.id === product.area.id);
+  if (!feature) throw new Error(`avcan areas: no area ${product.area.id}`);
+  const pieces = piecesInArea(feature.geometry, product.owner.value);
+  areaPieces.set(key, pieces);
+  return pieces;
 }

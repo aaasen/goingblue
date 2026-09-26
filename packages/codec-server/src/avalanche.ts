@@ -1,11 +1,11 @@
 // Avalanche requests (`f:a`): fetch the bulletin covering the request's point from Avalanche
-// Canada, encode it whole, and split it over as many messages as it takes. Unlike a weather
+// Canada with the pieces its area covers, encode it whole, and split it over as many messages as it takes. Unlike a weather
 // reply, which fills the budget the reader chose, a bulletin is never cut to fit: a partial
 // bulletin could leave out the one problem or advice line that matters.
 import { readFile } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
 import { avalancheAnchor, encodeAvalancheMessage, loadModels, WIRE_HEADER_CHARS, type Models } from "@weather/protocol";
-import { fetchPointProduct, toForecast } from "./avcan.js";
+import { fetchAreaPieces, fetchPointProduct, toForecast } from "./avcan.js";
 import { splitReplyFor, type ForecastParams } from "./forecast.js";
 
 // Part labels ("i/N ") are budgeted at one digit each side.
@@ -30,16 +30,15 @@ export type AvalancheResult =
 
 export async function serveAvalanche(params: ForecastParams): Promise<AvalancheResult> {
   const anchor = avalancheAnchor(params.day, params.startEpochHour);
+  const at = params.day ? anchor : null;
   const fetchStart = Date.now();
-  const [product, m] = await Promise.all([
-    fetchPointProduct(params.lat!, params.lon!, params.day ? anchor : null),
-    avalancheModels(),
-  ]);
-  const fetchMs = Date.now() - fetchStart;
+  const [product, m] = await Promise.all([fetchPointProduct(params.lat!, params.lon!, at), avalancheModels()]);
   if (!product) return { kind: "no_forecast" };
+  const pieces = await fetchAreaPieces(product, at);
+  const fetchMs = Date.now() - fetchStart;
 
   const encodeStart = Date.now();
-  const encoded = encodeAvalancheMessage(m, params.code, anchor, toForecast(product), params.alphabet);
+  const encoded = encodeAvalancheMessage(m, params.code, anchor, toForecast(product, pieces), params.alphabet);
   const replies = splitReplyFor(params, encoded, WIRE_HEADER_CHARS);
   if (replies.length > MAX_PARTS) throw new Error(`avalanche: bulletin ${product.id} needs ${replies.length} parts`);
   return { kind: "ok", replies, fetchMs, encodeMs: Date.now() - encodeStart };

@@ -2,3 +2,4 @@ export { SECTION_KINDS, UNENCODED, decodeBulletin, encodeBulletin, sectionsOf, w
 export { loadModels, packModels } from "./pack.js";
 export { quantizeIssued } from "./time.js";
 export { ANCHOR_HOUR, avalancheAnchor, decodeAvalancheMessage, decodeAvalancheReply, encodeAvalancheMessage } from "./wire.js";
+export { NO_PIECES, inPolygons, piecesInArea } from "./region.js";

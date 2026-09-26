@@ -1,7 +1,7 @@
 /**
- * A whole forecast on the wire: the prose header, then one rANS stream holding the structured
- * fields followed by the prose sections. The structured part comes first so the problem
- * sections can start from their problem's type.
+ * A whole forecast on the wire: the prose header, then one rANS stream holding the piece set
+ * (region.ts), the structured fields, and the prose sections. The structured part comes before
+ * the prose so the problem sections can start from their problem's type.
  *
  * Prose sections, in order:
  *   highlights          the bottom line, when not empty
@@ -23,6 +23,7 @@ import type {
 import { frame, planSections, readHeader, readSections } from "./codec.js";
 import type { Model, Section } from "./model.js";
 import { Decoder } from "./rans.js";
+import { planRegion, readRegion } from "./region.js";
 import { structuredOf, type Structured, type StructuredModel } from "./structured.js";
 import { quantizeIssued } from "./time.js";
 
@@ -62,7 +63,7 @@ export function sectionsOf(f: AvalancheForecast): Section[] {
   return out;
 }
 
-function forecastOf(s: Structured, sections: Section[], issued: number): AvalancheForecast {
+function forecastOf(pieces: number[], s: Structured, sections: Section[], issued: number): AvalancheForecast {
   const texts = (kind: string) => sections.filter((x) => x.kind === kind).map((x) => x.text);
   const descriptions = texts("problem");
   const problems: AvalancheProblem[] = s.problems.map((p, i) => {
@@ -80,6 +81,7 @@ function forecastOf(s: Structured, sections: Section[], issued: number): Avalanc
     center: UNENCODED.center,
     issuedBy: UNENCODED.issuedBy,
     region: UNENCODED.region,
+    pieces,
     issued,
     expires: s.validity === "" ? NaN : issued + Number(s.validity) * 60000,
     timezone: UNENCODED.timezone,
@@ -110,6 +112,7 @@ export interface Models {
 export function encodeBulletin({ prose, structured }: Models, f: AvalancheForecast): Uint8Array {
   const { header, plan } = planSections(prose, sectionsOf(f));
   const all = [] as typeof plan;
+  planRegion(all, f.pieces);
   structured.plan(all, prose.byteTable(), structuredOf(f));
   all.push(...plan);
   return frame(header, all);
@@ -119,7 +122,8 @@ export function encodeBulletin({ prose, structured }: Models, f: AvalancheForeca
 export function decodeBulletin({ prose, structured }: Models, blob: Uint8Array, issued: number): AvalancheForecast {
   const { wordCounts, pos } = readHeader(blob);
   const dec = new Decoder(blob, pos);
+  const pieces = readRegion(dec);
   const s = structured.read(dec, prose.byteTable());
   const contextFor = (kind: string, index: number) => (kind === "problem" ? s.problems[index]?.type : undefined);
-  return forecastOf(s, readSections(prose, dec, wordCounts, contextFor), issued);
+  return forecastOf(pieces, s, readSections(prose, dec, wordCounts, contextFor), issued);
 }

@@ -149,7 +149,7 @@ describe("htmlToText", () => {
 // A forecast with every coded field set, for the bulletin tests to vary.
 function forecast(over: Partial<AvalancheForecast> = {}): AvalancheForecast {
   return {
-    center: "avalanche-canada", issuedBy: "Avalanche Canada", region: "Sea to Sky",
+    center: "avalanche-canada", issuedBy: "Avalanche Canada", region: "Sea to Sky", pieces: [6, 27, 72],
     issued: Date.parse("2026-02-28T23:00:00Z"), expires: Date.parse("2026-03-01T23:00:00Z"),
     timezone: "America/Vancouver",
     bottomLine: "Storm slabs will build with 20-30 cm of new snow.",
