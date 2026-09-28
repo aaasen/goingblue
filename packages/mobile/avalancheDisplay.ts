@@ -292,13 +292,13 @@ export const CONFIDENCE_NAMES: Record<string, string> = {
   low: 'Low', moderate: 'Moderate', high: 'High', noRating: 'No Rating',
 };
 
-// The weekday of an instant in the forecast's zone.
-export function dayLabel(ms: number, timezone: string): string {
-  return new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: timezone }).format(new Date(ms));
+// The weekday of a "YYYY-MM-DD" calendar date.
+export function dayLabel(date: string): string {
+  return new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(new Date(Date.parse(date)));
 }
 
 export interface DangerTableSpec {
-  key: number;
+  key: string;
   label: string;
   day: DangerDay;
 }
@@ -311,15 +311,15 @@ export function dangerTables(
   forecast: Pick<AvalancheForecast, 'danger' | 'expires' | 'timezone'>, now: number = Date.now(),
 ): DangerTableSpec[] {
   const { danger, expires, timezone } = forecast;
-  const localDate = (ms: number) => new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date(ms));
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date(now));
   const seasonOver = danger.length > 0 && Number.isFinite(expires)
     && danger.every((d) => SEASON_OVER.has(d.alp) && SEASON_OVER.has(d.tln) && SEASON_OVER.has(d.btl))
-    && localDate(now) > localDate(danger[danger.length - 1].date);
+    && today > danger[danger.length - 1].date;
   if (seasonOver) {
     const until = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', timeZone: timezone }).format(new Date(expires));
     return [{ key: danger[0].date, label: `Until ${until}`, day: danger[0] }];
   }
-  return danger.map((day) => ({ key: day.date, label: dayLabel(day.date, timezone), day }));
+  return danger.map((day) => ({ key: day.date, label: dayLabel(day.date), day }));
 }
 
 // The zone each center stamps its bulletins in, as the archive's bulletins declare it: Avalanche

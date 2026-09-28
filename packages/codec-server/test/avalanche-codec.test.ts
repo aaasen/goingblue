@@ -154,9 +154,9 @@ function forecast(over: Partial<AvalancheForecast> = {}): AvalancheForecast {
     timezone: "America/Vancouver",
     bottomLine: "Storm slabs will build with 20-30 cm of new snow.",
     danger: [
-      { date: 1, alp: "considerable", tln: "moderate", btl: "low" },
-      { date: 2, alp: "considerable", tln: "moderate", btl: "low" },
-      { date: 3, alp: "high", tln: "considerable", btl: "moderate" },
+      { date: "2026-03-01", alp: "considerable", tln: "moderate", btl: "low" },
+      { date: "2026-03-02", alp: "considerable", tln: "moderate", btl: "low" },
+      { date: "2026-03-03", alp: "high", tln: "considerable", btl: "moderate" },
     ],
     advice: ["Avoid freshly wind-loaded features.", "Make conservative terrain choices."],
     problems: [{
@@ -176,7 +176,7 @@ function forecast(over: Partial<AvalancheForecast> = {}): AvalancheForecast {
 }
 
 const QUIET = forecast({
-  danger: [{ date: 1, alp: "low", tln: "low", btl: "low" }, { date: 2, alp: "moderate", tln: "low", btl: "low" }],
+  danger: [{ date: "2026-03-01", alp: "low", tln: "low", btl: "low" }, { date: "2026-03-02", alp: "moderate", tln: "low", btl: "low" }],
   confidence: { rating: "high", statements: [] },
   problems: [],
 });
@@ -189,14 +189,14 @@ describe("bulletin", () => {
     for (const f of [forecast(), QUIET]) expect(decodeBulletin(m, encodeBulletin(m, f), quantizeIssued(f.issued))).toEqual(withPlaceholders(f));
     const back = decodeBulletin(m, encodeBulletin(m, forecast()), quantizeIssued(forecast().issued));
     expect(back).toMatchObject(UNENCODED);
-    expect(back.danger.map((d) => d.date)).toEqual([0, 86400000, 172800000]);
+    expect(back.danger.map((d) => d.date)).toEqual(["2026-03-01", "2026-03-02", "2026-03-03"]);
   });
 
-  it("round-trips unseen values, empty prose, and unlabeled weather periods", () => {
+  it("round-trips unseen values and dates, empty prose, and unlabeled weather periods", () => {
     const m = models();
     const novel = forecast({
       bottomLine: "",
-      danger: [{ date: 1, alp: "extreme", tln: "spring", btl: "noRating" }],
+      danger: [{ date: "2026-03-06", alp: "extreme", tln: "spring", btl: "noRating" }],
       advice: ["", "Novel Zymoetz advice."],
       problems: [
         { type: "cornice", elevations: ["alp"], aspects: [], likelihood: "veryLikely-certain", size: { min: 3, max: 4.5 }, description: "" },

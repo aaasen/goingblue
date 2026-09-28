@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dayStart, toForecast, weatherPeriods, type RawProduct } from "../src/avcan.ts";
+import { displayedDate, toForecast, weatherPeriods, type RawProduct } from "../src/avcan.ts";
 
 describe("weatherPeriods", () => {
   it("splits bold headings inside one paragraph and drops the trailing link", () => {
@@ -26,17 +26,16 @@ describe("weatherPeriods", () => {
   });
 });
 
-describe("dayStart", () => {
-  it("finds local midnight in a zone west of UTC", () => {
+describe("displayedDate", () => {
+  it("dates a day by its displayed weekday, not the UTC date of its instant", () => {
     // 2026-03-02T00:00Z is Sunday March 1 at 16:00 in Vancouver.
-    expect(dayStart(Date.parse("2026-03-02T00:00:00Z"), "America/Vancouver")).toBe(Date.parse("2026-03-01T08:00:00Z"));
+    expect(displayedDate("2026-03-02T00:00:00Z", "Sunday")).toBe("2026-03-01");
+    expect(displayedDate("2026-03-01T23:00:00Z", "Sunday")).toBe("2026-03-01");
+    expect(displayedDate("2026-03-02T00:00:00Z", "Monday")).toBe("2026-03-02");
   });
 
-  it("holds on the day the clocks change", () => {
-    // Vancouver springs forward at 02:00 on 2026-03-08; midnight is still at UTC-8.
-    expect(dayStart(Date.parse("2026-03-09T00:00:00Z"), "America/Vancouver")).toBe(Date.parse("2026-03-08T08:00:00Z"));
-    // Halifax falls back on 2025-11-02; midnight is at UTC-3, the evening at UTC-4.
-    expect(dayStart(Date.parse("2025-11-02T22:00:00Z"), "America/Halifax")).toBe(Date.parse("2025-11-02T03:00:00Z"));
+  it("rejects a display that is not a weekday", () => {
+    expect(() => displayedDate("2026-03-02T00:00:00Z", "Someday")).toThrow(/unknown danger day/);
   });
 });
 
@@ -57,7 +56,7 @@ const RAW: RawProduct = {
       { type: { value: "weather-summary" }, content: "<p><strong>Sunday</strong><br>Sunny.</p>" },
     ],
     dangerRatings: [{
-      date: { value: "2026-03-02T00:00:00Z" },
+      date: { value: "2026-03-02T00:00:00Z", display: "Sunday" },
       ratings: { alp: { rating: { value: "considerable" } }, tln: { rating: { value: "moderate" } }, btl: { rating: { value: "norating" } } },
     }],
     problems: [{
@@ -78,7 +77,7 @@ describe("toForecast", () => {
   it("maps the feed onto the protocol's scales", () => {
     const f = toForecast(RAW, []);
     expect(f.center).toBe("avalanche-canada");
-    expect(f.danger).toEqual([{ date: Date.parse("2026-03-01T08:00:00Z"), btl: "noRating", tln: "moderate", alp: "considerable" }]);
+    expect(f.danger).toEqual([{ date: "2026-03-01", btl: "noRating", tln: "moderate", alp: "considerable" }]);
     expect(f.problems).toEqual([{
       type: "windSlab", elevations: ["tln", "alp"], aspects: ["n", "e", "nw"],
       likelihood: "possible-likely", size: { min: 1, max: 2.5 }, description: "Reactive.",

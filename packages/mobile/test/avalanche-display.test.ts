@@ -81,7 +81,7 @@ describe('problem scales', () => {
 describe('zoned labels', () => {
   const issued = Date.parse('2026-03-01T00:00:00Z');
   it('names days and stamps times in the forecast zone', () => {
-    expect(dayLabel(Date.parse('2026-03-01T08:00:00Z'), 'America/Vancouver')).toBe('Sunday');
+    expect(dayLabel('2026-03-01')).toBe('Sunday');
     expect(stampLabel(issued, 'America/Vancouver', '12h')).toBe('Sat, February 28, 2026 at 4:00 PM PT');
     expect(stampLabel(issued, 'America/Vancouver', '24h')).toBe('Sat, February 28, 2026 at 16:00 PT');
     const morning = Date.parse('2026-03-01T08:05:00Z');
@@ -93,19 +93,19 @@ describe('zoned labels', () => {
 
 describe('dangerTables', () => {
   const tz = 'America/Vancouver';
-  const day = (iso: string, r: 'offSeason' | 'spring' | 'low') => ({ date: Date.parse(iso), alp: r, tln: r, btl: r });
+  const day = (iso: string, r: 'offSeason' | 'spring' | 'low') => ({ date: iso, alp: r, tln: r, btl: r });
   const expires = Date.parse('2026-10-01T23:00:00Z');
   const now = Date.parse('2026-09-28T19:00:00Z');
   it('collapses a spring or summer bulletin into one table until it expires once its days are past', () => {
-    const danger = [day('2026-07-01T07:00:00Z', 'offSeason'), day('2026-07-02T07:00:00Z', 'spring'), day('2026-07-03T07:00:00Z', 'offSeason')];
+    const danger = [day('2026-07-01', 'offSeason'), day('2026-07-02', 'spring'), day('2026-07-03', 'offSeason')];
     expect(dangerTables({ danger, expires, timezone: tz }, now)).toEqual([{ key: danger[0].date, label: 'Until October 1', day: danger[0] }]);
   });
   it('keeps one table per day while the last day is today or later', () => {
-    const danger = [day('2026-09-27T07:00:00Z', 'spring'), day('2026-09-28T07:00:00Z', 'spring')];
+    const danger = [day('2026-09-27', 'spring'), day('2026-09-28', 'spring')];
     expect(dangerTables({ danger, expires, timezone: tz }, now).map((t) => t.label)).toEqual(['Sunday', 'Monday']);
   });
   it('keeps one table per day when any band has another rating', () => {
-    const danger = [day('2026-03-01T08:00:00Z', 'low'), day('2026-03-02T08:00:00Z', 'offSeason')];
+    const danger = [day('2026-03-01', 'low'), day('2026-03-02', 'offSeason')];
     expect(dangerTables({ danger, expires, timezone: tz }, now).map((t) => t.label)).toEqual(['Sunday', 'Monday']);
   });
 });

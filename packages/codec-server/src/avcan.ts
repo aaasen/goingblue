@@ -26,7 +26,7 @@ export interface RawProduct {
     highlights?: string | null;
     confidence?: { rating?: { value: string } | null; statements?: string[] | null } | null;
     summaries?: { type: { value: string }; content: string | null }[];
-    dangerRatings?: { date: { value: string }; ratings: Record<string, { rating: { value: string } }> }[];
+    dangerRatings?: { date: { value: string; display: string }; ratings: Record<string, { rating: { value: string } }> }[];
     problems?: {
       type: { value: string };
       comment?: string | null;
@@ -73,25 +73,19 @@ function member<T extends string>(scale: readonly T[], value: string, what: stri
   return value as T;
 }
 
-// The instant's calendar date in `tz` and the ms of that date's midnight there. The clock read
-// off Intl gives the local date; the offset is then measured at the midnight guess itself, so a
-// DST change between midnight and the instant does not skew it.
-export function dayStart(ms: number, tz: string): number {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
-  });
-  const clock = (t: number): number[] => {
-    const parts = fmt.formatToParts(new Date(t));
-    const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
-    return [get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second")];
-  };
-  const [y, m, d] = clock(ms);
-  const midnight = Date.UTC(y, m, d);
-  const asUtc = (t: number) => { const c = clock(t); return Date.UTC(c[0], c[1], c[2], c[3], c[4], c[5]); };
-  let guess = midnight - (asUtc(midnight) - midnight);
-  guess -= asUtc(guess) - midnight;
-  return guess;
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// The calendar date the feed labels a danger day with, "YYYY-MM-DD". `value` is an instant inside
+// the day and `display` is the day's weekday in the bulletin's zone, which most bulletins do not
+// name, so the date is the one nearest `value`'s UTC date that falls on `display`.
+export function displayedDate(value: string, display: string): string {
+  const utc = Date.parse(value.slice(0, 10));
+  for (const k of [0, -1, 1, -2, 2, -3, 3]) {
+    const day = new Date(utc + k * DAY_MS);
+    if (WEEKDAYS[day.getUTCDay()] === display) return day.toISOString().slice(0, 10);
+  }
+  throw new Error(`unknown danger day: ${JSON.stringify(display)}`);
 }
 
 const BOILERPLATE = /^More details can be found in the .*Weather Forecast\.?$/i;
@@ -163,7 +157,7 @@ export function toForecast(raw: RawProduct, pieces: number[]): AvalancheForecast
     timezone: tz,
     bottomLine: htmlToText(r.highlights),
     danger: (r.dangerRatings ?? []).map((d) => ({
-      date: dayStart(Date.parse(d.date.value), tz),
+      date: displayedDate(d.date.value, d.date.display),
       btl: lookup(RATINGS, d.ratings.btl?.rating.value, "danger rating"),
       tln: lookup(RATINGS, d.ratings.tln?.rating.value, "danger rating"),
       alp: lookup(RATINGS, d.ratings.alp?.rating.value, "danger rating"),

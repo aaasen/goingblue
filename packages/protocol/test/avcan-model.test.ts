@@ -10,7 +10,7 @@ import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.js
 // model decodes to garbage under another. The digest is over the unpacked bytes, so a zlib
 // upgrade that changes the gzip stream does not trip it. Rewritten by `pnpm avalanche-model`,
 // which prints the new digest.
-const FROZEN_MODEL_DIGEST = "e7f1f48ad19bcc53";
+const FROZEN_MODEL_DIGEST = "9a3b24f7e5db76e2";
 // The same for the piece-set model, rewritten by `pnpm avalanche-region`.
 const FROZEN_REGION_DIGEST = "fa6f7cbedf8599e7";
 

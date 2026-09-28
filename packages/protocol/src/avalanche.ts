@@ -34,8 +34,8 @@ export const CONFIDENCES = ['low', 'moderate', 'high'] as const;
 export type Confidence = (typeof CONFIDENCES)[number];
 
 export interface DangerDay {
-  // ms epoch of the day's start in the forecast's time zone.
-  date: number;
+  // The calendar date the center labels the day with, "YYYY-MM-DD".
+  date: string;
   btl: DangerRating;
   tln: DangerRating;
   alp: DangerRating;

@@ -16,19 +16,19 @@
   "bottomLine": "Warm temps, sun, and persistent weak layers are creating tricky conditions\n\nChoose conservative low-angle terrain with no overhead hazard.\n\nCheck out this forecaster blog on conditions.",
   "danger": [
     {
-      "date": 1772352000000,
+      "date": "2026-03-01",
       "btl": "moderate",
       "tln": "moderate",
       "alp": "considerable"
     },
     {
-      "date": 1772438400000,
+      "date": "2026-03-02",
       "btl": "low",
       "tln": "moderate",
       "alp": "moderate"
     },
     {
-      "date": 1772524800000,
+      "date": "2026-03-03",
       "btl": "moderate",
       "tln": "considerable",
       "alp": "considerable"

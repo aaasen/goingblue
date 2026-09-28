@@ -23,7 +23,7 @@ export class StructuredBuilder {
   readonly fields = new Map<FieldName, FieldBuilder>(FIELDS.map((f) => [f, new FieldBuilder()]));
 
   observe(s: Structured): void {
-    walk(s, (field, context, token) => {
+    walk(s, s.issueHour, (field, context, token) => {
       this.fields.get(field)!.observe(token!, context);
       return token!;
     });
