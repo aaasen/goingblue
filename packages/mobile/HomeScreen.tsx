@@ -643,6 +643,11 @@ function loadedMetaLabel(slot: Slot, msg: ForecastMessage | null, units: UnitPre
   return `${requestDateTimeLabel(slot.requestedAt)} · ${placeLabel(slot, msg, favorites, coordFormat)}${elevStr}`;
 }
 
+/** The loaded avalanche bulletin's meta row: when it was requested and where it is for. */
+function avalancheMetaLabel(slot: Slot, favorites: readonly Favorite[], coordFormat: CoordFormat): string {
+  return `${requestDateTimeLabel(slot.requestedAt)} · ${findFavorite(favorites, slot.context)?.name ?? pointLabel(slot.context, coordFormat)}`;
+}
+
 /**
  * One line per entry in the past-forecast list: request time · model · priority ·
  * location, naming the priority only when it isn't the Auto default.
@@ -1021,8 +1026,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     scrollRef.current?.scrollTo({ y: Math.max(bodyY + metaY.current - topInset - 8, 0), animated: true });
   }
   useEffect(() => { if (decoded) scrollToForecast(); }, [decoded]);
-  // The Avalanche tab's counterpart: a decoded bulletin scrolls to its map, which sits directly in
-  // the scroll content, so its measured y is already a scroll offset.
+  // The Avalanche tab's counterpart: a decoded bulletin scrolls to its meta row, which sits directly
+  // in the scroll content, so its measured y is already a scroll offset.
   const avalancheY = useRef<number | null>(null);
   const pendingAvalancheScroll = useRef(false);
   function scrollToAvalanche() {
@@ -1898,6 +1903,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // changes nothing about it, a layout measurement or the minute tick, leaves it alone.
   const loadedKey = normalizedForecastData(forecastData);
   const loadedAvalancheKey = normalizedForecastData(avalancheData);
+  const loadedAvalancheSlot = avalancheCache.find((slot) => normalizedForecastData(slot.encoded!) === loadedAvalancheKey);
 
   return (
     <Animated.ScrollView
@@ -2121,11 +2127,20 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           {/* Where the bulletin applies, as the Weather tab maps its forecast: the requested point
               pinned, the region filled in its first day's highest danger. Keyed on the bulletin so
               a new one recenters the map. */}
+          {/* Meta, as the Weather tab has it less the elevation. Its layout position is the scroll
+              target that brings a fresh decode on screen. */}
           {avalanche && (
             <View
-              style={styles.avalancheMap}
+              style={styles.metaRow}
               onLayout={(e) => { avalancheY.current = e.nativeEvent.layout.y; scrollToAvalanche(); }}
             >
+              <Text style={styles.metaText} numberOfLines={3}>
+                {loadedAvalancheSlot ? avalancheMetaLabel(loadedAvalancheSlot, favorites, coordFormat) : ''}
+              </Text>
+            </View>
+          )}
+          {avalanche && (
+            <View style={styles.avalancheMap}>
               <LocationMap
                 key={`${avalanche.lat},${avalanche.lon},${avalanche.forecast.issued},${avalanche.forecast.pieces.join('-')}`}
                 coord={{ lat: avalanche.lat, lon: avalanche.lon }}
@@ -3030,7 +3045,7 @@ const styles = StyleSheet.create({
 
   // The parked map must draw over what scrolls up beneath it once it stops.
   mapFloat: { zIndex: 1 },
-  avalancheMap: { marginTop: 24, marginBottom: 16 },
+  avalancheMap: { marginBottom: 16 },
 
   // Forecast meta and the past-forecast list, full-bleed siblings of the meteogram — they carry
   // their own margins.
