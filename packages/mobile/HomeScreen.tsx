@@ -1915,22 +1915,20 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       {/* The tab bar (see Tab): equal-width labels under the title row, the active one underlined
           in the brand color. A hairline parts it from the title row, and the title rule closes it
           the way it closes the title row alone. */}
-      {__DEV__ && (
-        <View style={styles.tabRow} accessibilityRole="tablist">
-          {TABS.map((t, i) => (
-            <TouchableOpacity
-              key={t.key}
-              style={[styles.tab, i > 0 && styles.tabDivided, t.key === tab && styles.tabActive]}
-              onPress={() => setTab(t.key)}
-              activeOpacity={0.7}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: t.key === tab }}
-            >
-              <Text style={[styles.tabText, t.key === tab && styles.tabTextActive]}>{t.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
+      <View style={styles.tabRow} accessibilityRole="tablist">
+        {TABS.map((t, i) => (
+          <TouchableOpacity
+            key={t.key}
+            style={[styles.tab, i > 0 && styles.tabDivided, t.key === tab && styles.tabActive]}
+            onPress={() => setTab(t.key)}
+            activeOpacity={0.7}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: t.key === tab }}
+          >
+            <Text style={[styles.tabText, t.key === tab && styles.tabTextActive]}>{t.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <View style={styles.titleRule} />
 
       {/* The location map, one instance under both tabs so its pin, zoom and pan carry across:
