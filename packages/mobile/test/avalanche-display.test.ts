@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { AVALANCHE_PIECES } from '@weather/protocol';
 import {
-  bulletinTimezone, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
+  bulletinCenter, bulletinTimezone, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -135,6 +135,15 @@ describe('pieces', () => {
 
   it('turns pieces into MultiPolygon features', () => {
     expect(pieceFeatures(pieces).features[2]).toMatchObject({ properties: { id: 2 }, geometry: { type: 'MultiPolygon' } });
+  });
+});
+
+describe('bulletinCenter', () => {
+  it('names the center from the first piece when the bulletin leaves it out', () => {
+    expect(bulletinCenter({ center: '', pieces: [88, 89] })).toBe('parks-byk');
+    expect(bulletinCenter({ center: '', pieces: [6] })).toBe(AVALANCHE_PIECES[6].center);
+    expect(bulletinCenter({ center: 'kananaskis', pieces: [88] })).toBe('kananaskis');
+    expect(bulletinCenter({ center: '', pieces: [] })).toBe('');
   });
 });
 

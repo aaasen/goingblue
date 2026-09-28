@@ -133,6 +133,15 @@ export function sizeScale(size: { min: number; max: number }): Scale {
   };
 }
 
+// Parks Canada's, verbatim, shared by its four centers.
+const PARKS_CANADA_DISCLAIMER = [
+  'USE AT YOUR OWN RISK',
+  'The authorized use of this information is limited to personal and recreational purposes only, and is NOT for operational or commercial purposes.',
+  'THIS FORECAST IS PROVIDED "AS IS" AND IN NO EVENT SHALL THE PROVIDERS, PARKS CANADA AGENCY, BE LIABLE FOR ANY DAMAGES, INCLUDING, WITHOUT LIMITATION, DAMAGES RESULTING FROM DISCOMFORT, INJURY, OR DEATH, CLAIMS BY THIRD PARTIES OR FOR OTHER SIMILAR COSTS, OR ANY SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, ARISING OUT OF THE USE OF THE INFORMATION.',
+  'The user acknowledges that it is impossible to accurately predict natural events such as avalanches and weather, and uses the information in this bulletin with this always foremost in mind. Backcountry travel, by its very nature, is potentially hazardous. The accuracy or reliability of the information is not guaranteed or warranted in any way and the Parks Canada Agency disclaim liability of any kind whatsoever, including, without limitation, liability for quality, performance, merchantability and fitness for a particular purpose arising out of the use, or inability to use the information. The public avalanche bulletin provided by Parks Canada Agency is not intended to be a replacement for the user’s decision making process, judgement, experience, and knowledge. The onus is on the individual to verify information and accept that this information can not be guaranteed and may quickly change. The information provided is of a general nature, and this information can be inapplicable to the micro conditions encountered in one particular site. Variations in the time, location and conditions will adversely affect the accuracy of the information.',
+  'Seek additional information from Parks Canada personal. It is recommended that you receive training from a reputable school, travel with experienced partners, carry an avalanche transceiver, probe, shovel, bivouac sac, emergency communication, and have an emergency plan.',
+];
+
 // Each center's bulletin disclaimer, by paragraph, as its forecast page words it. A center
 // without one here shows none.
 export const DISCLAIMERS: Record<string, string[]> = {
@@ -142,7 +151,30 @@ export const DISCLAIMERS: Record<string, string[]> = {
     'THIS INFORMATION IS PROVIDED "AS IS" AND IN NO EVENT SHALL THE PROVIDERS BE LIABLE FOR ANY DAMAGES, INCLUDING, WITHOUT LIMITATION, DAMAGES RESULTING FROM DISCOMFORT, INJURY, OR DEATH, CLAIMS BY THIRD PARTIES OR FOR OTHER SIMILAR COSTS, OR ANY SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, ARISING OUT OF THE USE OF THE INFORMATION.',
     'The user acknowledges that it is impossible to accurately predict natural events such as avalanches in every instance, and uses the data in this bulletin with this always foremost in mind. The accuracy or reliability of the data is not guaranteed or warranted in any way and the Providers disclaim liability of any kind whatsoever, including, without limitation, liability for quality, performance, merchantability and fitness for a particular purpose arising out of the use, or inability to use the data.',
   ],
+  kananaskis: [
+    'USE AT YOUR OWN RISK',
+    'The Kananaskis Region Public Avalanche Bulletin and associated products are intended for personal and recreational purposes only and NOT intended for operational or commercial PURPOSES.',
+    'THIS INFORMATION IS PROVIDED "AS IS" AND IN NO EVENT SHALL THE PROVIDERS BE LIABLE FOR ANY DAMAGES, INCLUDING, WITHOUT LIMITATION, DAMAGES RESULTING FROM DISCOMFORT, INJURY, OR DEATH, CLAIMS BY THIRD PARTIES OR FOR OTHER SIMILAR COSTS, OR ANY SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, ARISING OUT OF THE USE OF THE INFORMATION.',
+    'The user acknowledges that it is impossible to accurately predict natural events such as avalanches in every instance, and uses the data in this bulletin with this always foremost in mind. The accuracy or reliability of the data is not guaranteed or warranted in any way and the Providers disclaim liability of any kind whatsoever, including, without limitation, liability for quality, performance, merchantability and fitness for a particular purpose arising out of the use, or inability to use the data.',
+    'It is recommended that you receive training from a reputable school, travel with experienced partners, carry an avalanche transceiver, probe, shovel, bivouac sac, emergency communication, and have an emergency plan.',
+  ],
+  'avalanche-quebec': [
+    'USE AT YOUR OWN RISK',
+    'The authorized use of the information contained in this avalanche bulletin is limited to personal and recreational purposes. To the fullest extent permitted by law, the information is provided “as is” without any representation, condition or warranty of any kind, express or implied, including, without limitation, any implied warranty of merchantability, fitness for a particular purpose or non-infringement. In no event shall Avalanche Quebec and its suppliers be liable for damages arising out of the use of the information or an inability to use it, including, without limitation, damages resulting from discomfort, injury or death, claims of third parties or other similar costs, or any damages (direct, indirect, consequential, special, exemplary, punitive or otherwise) of any kind.',
+    'Natural phenomena such as avalanches and weather conditions cannot be accurately predicted. This should be kept in mind at all times when using the information contained in this bulletin. Backcountry travel is a high-risk activity and the use of the information contained in this bulletin does not replace the experience, knowledge and equipment required, nor does it replace the services of a mountain guide.',
+  ],
+  'parks-byk': PARKS_CANADA_DISCLAIMER,
+  'parks-glacier': PARKS_CANADA_DISCLAIMER,
+  'parks-jasper': PARKS_CANADA_DISCLAIMER,
+  'parks-waterton': PARKS_CANADA_DISCLAIMER,
 };
+
+// The center that issued a bulletin. The wire leaves it out, but every piece of the area belongs
+// to one center, so the first piece names it.
+export function bulletinCenter(forecast: Pick<AvalancheForecast, 'center' | 'pieces'>): string {
+  if (forecast.center) return forecast.center;
+  return forecast.pieces.length > 0 ? AVALANCHE_PIECES[forecast.pieces[0]].center : '';
+}
 
 export const CONFIDENCE_NAMES: Record<string, string> = {
   low: 'Low', moderate: 'Moderate', high: 'High', noRating: 'No Rating',

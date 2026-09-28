@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { SkiaPictureView, Skia, matchFont, type SkCanvas, type SkFont, type SkPicture, type SkSVG } from '@shopify/react-native-skia';
 import { ASPECTS, type AvalancheForecast, type AvalancheProblem, type DangerDay, type Elevation } from '@weather/protocol';
@@ -8,7 +8,7 @@ import { drawText, fillPaint, strokePaint, textWidth } from './skiaPaint';
 import { palette } from './palette';
 import type { TimeFormat } from './settings';
 import {
-  CONFIDENCE_NAMES, DISCLAIMERS, ELEVATION_NAMES, PROBLEM_NAMES, ROSE_ELEVATION_NAMES, dangerCell, dangerTables, likelihoodScale,
+  CONFIDENCE_NAMES, DISCLAIMERS, bulletinCenter, ELEVATION_NAMES, PROBLEM_NAMES, ROSE_ELEVATION_NAMES, dangerCell, dangerTables, likelihoodScale,
   sizeScale, stampLabel,
   type Scale,
 } from './avalancheDisplay';
@@ -294,6 +294,26 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+// A Section whose label opens and closes it. Starts closed.
+function CollapsibleSection({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={styles.section}>
+      <TouchableOpacity
+        style={[styles.sectionToggle, open && styles.sectionToggleOpen]}
+        onPress={() => setOpen((o) => !o)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+      >
+        <Text style={[styles.sectionLabel, styles.sectionLabelToggle]}>{label}</Text>
+        <MaterialCommunityIcons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={palette.pageLabel} />
+      </TouchableOpacity>
+      {open && children}
+    </View>
+  );
+}
+
 function Card({ children }: { children: ReactNode }) {
   return <View style={styles.card}>{children}</View>;
 }
@@ -329,6 +349,7 @@ export default function AvalancheForecastView({ forecast, timeFormat }: { foreca
   const [pageW, setPageW] = useState(0);
   const graphicW = pageW - 2 * PAD - 2 * CARD_PAD;
   const stamp = (ms: number) => stampLabel(ms, forecast.timezone, timeFormat);
+  const disclaimer = DISCLAIMERS[bulletinCenter(forecast)];
   return (
     <View style={styles.page} onLayout={(e) => setPageW(e.nativeEvent.layout.width)}>
       {forecast.expires < Date.now() && (
@@ -394,14 +415,14 @@ export default function AvalancheForecastView({ forecast, timeFormat }: { foreca
         </Card>
       </Section>
 
-      {DISCLAIMERS[forecast.center] && (
-        <Section label="Forecast Disclaimer">
+      {disclaimer && (
+        <CollapsibleSection label="Forecast Disclaimer">
           <Card>
-            {DISCLAIMERS[forecast.center].map((p, i, all) => (
+            {disclaimer.map((p, i, all) => (
               <Text key={i} style={[styles.prose, i < all.length - 1 && styles.proseGap]}>{p}</Text>
             ))}
           </Card>
-        </Section>
+        </CollapsibleSection>
       )}
 
       <Text style={styles.attribution}>Avalanche forecast provided by Avalanche Canada.</Text>
@@ -422,6 +443,9 @@ const styles = StyleSheet.create({
   stampLabel: { fontSize: 12, fontWeight: '700', color: palette.brand, textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 2 },
   stampValue: { fontSize: 12, fontWeight: '600', color: palette.pageTextSecondary, textTransform: 'uppercase', letterSpacing: 0.3, lineHeight: 17 },
   section: { marginBottom: 20 },
+  sectionToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sectionToggleOpen: { marginBottom: 8 },
+  sectionLabelToggle: { marginBottom: 0 },
   sectionLabel: { fontSize: 12, fontWeight: '600', color: palette.pageLabel, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   card: { backgroundColor: palette.card, borderRadius: 12, padding: CARD_PAD },
   prose: { fontSize: 15, color: palette.textBody, lineHeight: 22 },
