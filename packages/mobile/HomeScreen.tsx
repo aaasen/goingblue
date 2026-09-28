@@ -1021,6 +1021,16 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     scrollRef.current?.scrollTo({ y: Math.max(bodyY + metaY.current - topInset - 8, 0), animated: true });
   }
   useEffect(() => { if (decoded) scrollToForecast(); }, [decoded]);
+  // The Avalanche tab's counterpart: a decoded bulletin scrolls to its map, which sits directly in
+  // the scroll content, so its measured y is already a scroll offset.
+  const avalancheY = useRef<number | null>(null);
+  const pendingAvalancheScroll = useRef(false);
+  function scrollToAvalanche() {
+    if (!pendingAvalancheScroll.current || avalancheY.current == null) return;
+    pendingAvalancheScroll.current = false;
+    scrollRef.current?.scrollTo({ y: Math.max(avalancheY.current - topInset - 8, 0), animated: true });
+  }
+  useEffect(() => { if (avalanche) scrollToAvalanche(); }, [avalanche]);
 
   // The forecast fetch currently on the wire, so something other than its own timeout can call it
   // off. Only the internet route has one — the other devices hand the request to another app and
@@ -1386,8 +1396,13 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       if (encoded === current) {
         // The reply is the text already on screen, so nothing will re-decode — there is no
         // settling to wait for. Just bring the forecast back into view.
-        pendingScroll.current = true;
-        scrollToForecast();
+        if (kind === 'avalanche') {
+          pendingAvalancheScroll.current = true;
+          scrollToAvalanche();
+        } else {
+          pendingScroll.current = true;
+          scrollToForecast();
+        }
       } else {
         fetchDecoding.current = true;
         setText(encoded);
@@ -1526,6 +1541,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         const d = decodeAny(avalancheData, token);
         if (d.kind !== 'avalanche') throw new Error('Invalid forecast');
         setAvalanche({ forecast: d.forecast, lat: d.lat, lon: d.lon });
+        pendingAvalancheScroll.current = true;
         setAvalancheError(null);
         setAvalancheCollecting(null);
         if (suppressNextAvalancheCache.current) {
@@ -2106,7 +2122,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               pinned, the region filled in its first day's highest danger. Keyed on the bulletin so
               a new one recenters the map. */}
           {avalanche && (
-            <View style={styles.avalancheMap}>
+            <View
+              style={styles.avalancheMap}
+              onLayout={(e) => { avalancheY.current = e.nativeEvent.layout.y; scrollToAvalanche(); }}
+            >
               <LocationMap
                 key={`${avalanche.lat},${avalanche.lon},${avalanche.forecast.issued},${avalanche.forecast.pieces.join('-')}`}
                 coord={{ lat: avalanche.lat, lon: avalanche.lon }}
