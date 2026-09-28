@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { AVALANCHE_PIECES } from '@weather/protocol';
 import {
-  bulletinCenter, bulletinTimezone, preparedBy, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel, zoneLabel,
+  bulletinCenter, bulletinTimezone, preparedBy, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel, zoneLabel, zoneNames,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -164,6 +164,7 @@ describe('zoneLabel', () => {
     expect(zoneLabel({ center: 'avalanche-canada', names: ['White Pass East'] })).toBe('Avalanche Canada: White Pass East');
     expect(zoneLabel(AVALANCHE_PIECES[87])).toBe('Kananaskis MRP: Bow Valley');
     expect(zoneLabel(AVALANCHE_PIECES[88])).toBe('Parks Canada: Banff');
+    expect(zoneNames(AVALANCHE_PIECES[88])).toBe('Banff');
   });
 });
 

@@ -271,12 +271,17 @@ const MERGED_NAMES: [string[], string][] = [
   [['Banff', 'East Side 93N', 'LLSA'], 'Banff'],
 ];
 
-export function zoneLabel(piece: Pick<AvalanchePiece, 'center' | 'names'>): string {
+// A piece's subregions as the app names them.
+export function zoneNames(piece: Pick<AvalanchePiece, 'names'>): string {
   let names = piece.names;
   for (const [parts, merged] of MERGED_NAMES) {
     if (parts.every((n) => names.includes(n))) names = [...names.filter((n) => !parts.includes(n)), merged].sort();
   }
-  return `${ZONE_CENTERS[piece.center] ?? piece.center}: ${names.join(', ')}`;
+  return names.join(', ');
+}
+
+export function zoneLabel(piece: Pick<AvalanchePiece, 'center' | 'names'>): string {
+  return `${ZONE_CENTERS[piece.center] ?? piece.center}: ${zoneNames(piece)}`;
 }
 
 export function preparedBy(forecast: Pick<AvalancheForecast, 'center' | 'pieces' | 'issuedBy'>): string {

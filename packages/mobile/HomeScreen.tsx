@@ -8,7 +8,7 @@ import * as Location from 'expo-location';
 import * as Network from 'expo-network';
 import { pageInsets } from './insets';
 import AvalancheForecastView from './AvalancheScreen';
-import { forecastRegion, pieceAt, pieceFeatures, zoneLabel } from './avalancheDisplay';
+import { forecastRegion, pieceAt, pieceFeatures, zoneLabel, zoneNames } from './avalancheDisplay';
 import { loadAvalancheModels } from './avalancheModel';
 import DayRow from './components/DayRow';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -22,7 +22,7 @@ import {
   predictCenter, estimatedLastFullRunMs, fillSlotsFor, multiMessageOffered, startDatetime,
   MODELS as MODEL_SPECS,
   AVALANCHE_PIECES,
-  type RequestContext, type Center, type ForecastMessage, type ModelSpec, type AvalancheForecast, type AvalanchePiece,
+  type RequestContext, type Center, type ForecastMessage, type ModelSpec, type AvalancheForecast, type AvalanchePiece, type DangerDay,
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import {
@@ -40,6 +40,7 @@ import DeviceSelector from './components/DeviceSelector';
 import Section from './components/Section';
 import ActionButton from './components/ActionButton';
 import PasteButton, { type Outcome } from './components/PasteButton';
+import DangerMountain from './components/DangerMountain';
 import InfoModal from './components/InfoModal';
 import EmptyForecast from './components/EmptyForecast';
 import FavoriteSheet from './FavoriteSheet';
@@ -949,6 +950,18 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // The model decodes avalanche replies and is loaded on first need (avalancheModel.ts).
   const [modelReady, setModelReady] = useState(false);
   const slotMessage = useCallback((slot: Slot) => slotMessages.get(slot) ?? null, [slotMessages]);
+  // Each saved bulletin's first day, for its row's danger icon; decoded once the model is in.
+  const slotDangerDays = useMemo(() => {
+    const days = new Map<Slot, DangerDay | null>();
+    if (!modelReady) return days;
+    for (const slot of avalancheCache) {
+      try {
+        const d = decodeAny(slot.encoded!, token);
+        days.set(slot, d.kind === 'avalanche' ? d.forecast.danger[0] ?? null : null);
+      } catch { days.set(slot, null); }
+    }
+    return days;
+  }, [avalancheCache, token, modelReady]);
   // When true, the next decode came from loading a cached entry — don't re-attach it.
   const suppressNextCache = useRef(false);
   // A cached entry put on screen by loadPast ahead of the decode effect, with the text it was
@@ -1845,10 +1858,15 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     const day = isAvalancheContext(slot.context) ? slot.context.day : null;
     return day ? new Date(`${day}T12:00:00`) : new Date(slot.requestedAt);
   }), [avalancheCache]);
-  const describeAvalanche = useCallback((slot: Slot): PastRowText => ({
-    label: `${requestTimeLabel(slot.requestedAt)} · ${findFavorite(favorites, slot.context)?.name ?? pointLabel(slot.context, coordFormat)}`,
-    tags: [],
-  }), [favorites, coordFormat]);
+  // A bulletin row names only where it is for: the favorite, else the region, else the point.
+  const describeAvalanche = useCallback((slot: Slot): PastRowText => {
+    const piece = pieceAt(slot.context.lat, slot.context.lon, AVALANCHE_PIECES);
+    return {
+      label: findFavorite(favorites, slot.context)?.name ?? (piece ? zoneNames(piece) : pointLabel(slot.context, coordFormat)),
+      tags: [],
+      danger: slotDangerDays.get(slot) ?? null,
+    };
+  }, [favorites, coordFormat, slotDangerDays]);
   const pastPoints = useMemo(() => pastForecastPoints(cache.map((s) => s.context), favorites), [cache, favorites]);
   const loadedSlot = weatherCache.find((slot) =>
     normalizedForecastData(slot.encoded!) === normalizedForecastData(forecastData),
@@ -2432,6 +2450,9 @@ const FavoritesModal = memo(function FavoritesModal({
 interface PastRowText {
   label: string;
   tags: { tag: string; label: string }[];
+  // A bulletin's first day, drawn at the row's start; null while it can't be decoded. Absent on
+  // weather rows.
+  danger?: DangerDay | null;
 }
 
 const PastForecastRow = memo(function PastForecastRow({ slot, text, isLoaded, last, editing, selected, onLoad, onToggle }: {
@@ -2448,14 +2469,9 @@ const PastForecastRow = memo(function PastForecastRow({ slot, text, isLoaded, la
       accessibilityRole={editing ? 'checkbox' : 'button'}
       accessibilityState={editing ? { checked: selected } : { selected: isLoaded }}
     >
-      {/* Laid out like the favorites list: a leading slot that holds the check on the loaded
-          forecast, or the selection mark while editing. The slot is always there so labels line
-          up and wrap the same in both modes. */}
-      <View style={styles.pastMark}>
-        {editing
-          ? <SelectMark selected={selected} color={palette.textFaint} />
-          : isLoaded && <Ionicons name="checkmark" size={20} color={palette.link} />}
-      </View>
+      {text.danger !== undefined && (
+        <View style={styles.pastMark}>{text.danger && <DangerMountain day={text.danger} />}</View>
+      )}
       <View style={styles.pastDetails}>
         <Text style={styles.pastMeta} numberOfLines={2}>{text.label}</Text>
         {variableTags.length > 0 && (
@@ -2472,6 +2488,13 @@ const PastForecastRow = memo(function PastForecastRow({ slot, text, isLoaded, la
             ))}
           </View>
         )}
+      </View>
+      {/* A trailing slot that holds the check on the loaded forecast, or the selection mark while
+          editing. The slot is always there so labels wrap the same in both modes. */}
+      <View style={styles.pastMark}>
+        {editing
+          ? <SelectMark selected={selected} color={palette.textFaint} />
+          : isLoaded && <Ionicons name="checkmark" size={20} color={palette.link} />}
       </View>
     </Pressable>
   );
