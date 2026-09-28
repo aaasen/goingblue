@@ -378,7 +378,10 @@ function Bullets({ items }: { items: string[] }) {
   );
 }
 
-export default function AvalancheForecastView({ forecast, timeFormat }: { forecast: AvalancheForecast; timeFormat: TimeFormat }) {
+// `region` names where the bulletin was requested for.
+export default function AvalancheForecastView({ forecast, region, timeFormat }: {
+  forecast: AvalancheForecast; region: string; timeFormat: TimeFormat;
+}) {
   const fonts = useFonts();
   // The page's width, measured on layout; the pictures draw to what is left inside a card.
   const [pageW, setPageW] = useState(0);
@@ -401,7 +404,7 @@ export default function AvalancheForecastView({ forecast, timeFormat }: { foreca
       </View>
       <View style={[styles.stamps, styles.stampsLast]}>
         <Stamp label="Prepared by" value={preparedBy(forecast)} />
-        <View style={styles.stampColumn} />
+        {region ? <Stamp label="Region" value={region} /> : <View style={styles.stampColumn} />}
       </View>
 
       {forecast.bottomLine ? (

@@ -1858,6 +1858,12 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     const day = isAvalancheContext(slot.context) ? slot.context.day : null;
     return day ? new Date(`${day}T12:00:00`) : new Date(slot.requestedAt);
   }), [avalancheCache]);
+  // The region the loaded bulletin was requested in, named as its saved row names it.
+  const avalancheZoneName = useMemo(() => {
+    if (!avalanche) return '';
+    const piece = pieceAt(avalanche.lat, avalanche.lon, AVALANCHE_PIECES);
+    return piece ? zoneNames(piece) : '';
+  }, [avalanche]);
   // A bulletin row names only where it is for: the favorite, else the region, else the point.
   const describeAvalanche = useCallback((slot: Slot): PastRowText => {
     const piece = pieceAt(slot.context.lat, slot.context.lon, AVALANCHE_PIECES);
@@ -2162,7 +2168,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               />
             </View>
           )}
-          {avalanche && <AvalancheForecastView forecast={avalanche.forecast} timeFormat={timeFormat} />}
+          {avalanche && <AvalancheForecastView forecast={avalanche.forecast} region={avalancheZoneName} timeFormat={timeFormat} />}
           {!avalanche && !avalancheCollecting && !avalancheError && <EmptyForecast />}
           <PastForecasts groups={avalancheGroups} loadedKey={loadedAvalancheKey} describe={describeAvalanche}
             onLoad={loadAvalanchePast} onDelete={deletePast} />
