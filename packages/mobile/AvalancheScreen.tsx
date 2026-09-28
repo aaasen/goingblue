@@ -6,9 +6,11 @@ import { ASPECTS, type AvalancheForecast, type AvalancheProblem, type DangerDay,
 import { DANGER_ICONS, DANGER_ICON_HEIGHT, type DangerIcon } from './dangerIcons';
 import { drawText, fillPaint, strokePaint, textWidth } from './skiaPaint';
 import { palette } from './palette';
+import InfoModal from './components/InfoModal';
+import Section from './components/Section';
 import type { TimeFormat } from './settings';
 import {
-  CONFIDENCE_NAMES, DISCLAIMERS, bulletinCenter, preparedBy, ELEVATION_NAMES, PROBLEM_NAMES, ROSE_ELEVATION_NAMES, dangerCell, dangerTables, likelihoodScale,
+  CONFIDENCE_NAMES, DANGER_SCALE, DANGER_SCALE_INTRO, DISCLAIMERS, bulletinCenter, preparedBy, ELEVATION_NAMES, PROBLEM_NAMES, ROSE_ELEVATION_NAMES, dangerCell, dangerTables, likelihoodScale,
   sizeScale, stampLabel,
   type Scale,
 } from './avalancheDisplay';
@@ -49,8 +51,10 @@ const BANDS: { key: keyof Pick<DangerDay, 'alp' | 'tln' | 'btl'>; fill: string }
 ];
 const DAY_HEAD = '#141729';
 const ICON_H = 26;
+const SCALE_ICON_H = 40;
 // Wide enough for the widest icon, so the ratings' text lines up whatever the level.
-const ICON_SLOT = ICON_H * Math.max(...Object.values(DANGER_ICONS).map((i) => i.width)) / DANGER_ICON_HEIGHT;
+const iconSlot = (height: number) => height * Math.max(...Object.values(DANGER_ICONS).map((i) => i.width)) / DANGER_ICON_HEIGHT;
+const ICON_SLOT = iconSlot(ICON_H);
 
 const iconSvgs = new Map<DangerIcon, SkSVG>();
 function iconSvg(icon: DangerIcon): SkSVG {
@@ -64,20 +68,22 @@ function iconSvg(icon: DangerIcon): SkSVG {
   return svg;
 }
 
-// The SVGs size themselves in viewBox units, so the canvas scales them to ICON_H, centered in the
-// slot so each icon has the same room on either side.
-const iconPictures = new Map<DangerIcon, SkPicture>();
-function iconPicture(icon: DangerIcon): SkPicture {
-  let picture = iconPictures.get(icon);
+// The SVGs size themselves in viewBox units, so the canvas scales them to the height, centered in
+// the slot so each icon has the same room on either side.
+const iconPictures = new Map<string, SkPicture>();
+function iconPicture(icon: DangerIcon, height = ICON_H): SkPicture {
+  const key = `${icon}:${height}`;
+  let picture = iconPictures.get(key);
   if (!picture) {
+    const slot = iconSlot(height);
     const recorder = Skia.PictureRecorder();
-    const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, ICON_SLOT, ICON_H));
-    const scale = ICON_H / DANGER_ICON_HEIGHT;
-    canvas.translate((ICON_SLOT - DANGER_ICONS[icon].width * scale) / 2, 0);
+    const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, slot, height));
+    const scale = height / DANGER_ICON_HEIGHT;
+    canvas.translate((slot - DANGER_ICONS[icon].width * scale) / 2, 0);
     canvas.scale(scale, scale);
     canvas.drawSvg(iconSvg(icon));
     picture = recorder.finishRecordingAsPicture();
-    iconPictures.set(icon, picture);
+    iconPictures.set(key, picture);
   }
   return picture;
 }
@@ -103,6 +109,44 @@ function DangerTable({ day, label }: { day: DangerDay; label: string }) {
         );
       })}
     </View>
+  );
+}
+
+// The scale behind the ratings' ⓘ: a row per level or status, led by a stripe in its color.
+function DangerScale() {
+  return (
+    <>
+      <Text style={[styles.prose, styles.scaleIntro]}>{DANGER_SCALE_INTRO}</Text>
+      {DANGER_SCALE.map((entry) => {
+        const cell = dangerCell(entry.rating);
+        return (
+          <View key={entry.rating} style={styles.scaleRow}>
+            <View style={[styles.scaleStripe, { backgroundColor: cell.fill }]} />
+            <View style={styles.scaleBody}>
+              <View style={styles.scaleHead}>
+                <SkiaPictureView style={styles.scaleIcon} picture={iconPicture(cell.icon, SCALE_ICON_H)} />
+                <Text style={styles.scaleName}>{cell.number ? `${cell.number} – ${cell.name}` : cell.name}</Text>
+              </View>
+              {'description' in entry ? (
+                <Text style={styles.prose}>{entry.description}</Text>
+              ) : (
+                <>
+                  <Text style={[styles.prose, styles.scaleGapSmall]}>
+                    <Text style={styles.bold}>{entry.lead}</Text> {entry.advice}
+                  </Text>
+                  <Text style={[styles.prose, styles.scaleGapSmall]}>
+                    <Text style={styles.bold}>Likelihood:</Text> {entry.likelihood}
+                  </Text>
+                  <Text style={styles.prose}>
+                    <Text style={styles.bold}>Size and distribution:</Text> {entry.size}
+                  </Text>
+                </>
+              )}
+            </View>
+          </View>
+        );
+      })}
+    </>
   );
 }
 
@@ -285,15 +329,6 @@ function Stamp({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Section({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionLabel}>{label}</Text>
-      {children}
-    </View>
-  );
-}
-
 // A Section whose label opens and closes it. Starts closed.
 function CollapsibleSection({ label, children }: { label: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -347,6 +382,7 @@ export default function AvalancheForecastView({ forecast, timeFormat }: { foreca
   const fonts = useFonts();
   // The page's width, measured on layout; the pictures draw to what is left inside a card.
   const [pageW, setPageW] = useState(0);
+  const [scaleInfo, setScaleInfo] = useState(false);
   const graphicW = pageW - 2 * PAD - 2 * CARD_PAD;
   const stamp = (ms: number) => stampLabel(ms, forecast.timezone, timeFormat);
   const disclaimer = DISCLAIMERS[bulletinCenter(forecast)];
@@ -372,9 +408,12 @@ export default function AvalancheForecastView({ forecast, timeFormat }: { foreca
         <View style={styles.section}><Card><Prose text={forecast.bottomLine} lead /></Card></View>
       ) : null}
 
-      <Section label="Danger Ratings">
+      <Section label="Danger Ratings" info={() => setScaleInfo(true)}>
         {dangerTables(forecast).map((t) => <DangerTable key={t.key} day={t.day} label={t.label} />)}
       </Section>
+      <InfoModal visible={scaleInfo} title="Avalanche Danger Scale" onClose={() => setScaleInfo(false)}>
+        <DangerScale />
+      </InfoModal>
 
       {forecast.advice.length > 0 && (
         <Section label="Terrain and Travel Advice"><Card><Bullets items={forecast.advice} /></Card></Section>
@@ -473,5 +512,18 @@ const styles = StyleSheet.create({
   dangerRating: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, gap: 8 },
   dangerIcon: { width: ICON_SLOT, height: ICON_H },
   dangerRatingText: { flex: 1, fontSize: 15, fontWeight: '700' },
+  bold: { fontWeight: '700', color: palette.text },
+  scaleIntro: { marginBottom: 16 },
+  scaleRow: {
+    flexDirection: 'row', paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.cardRule,
+  },
+  // White statuses need an edge to show against the sheet.
+  scaleStripe: { width: 8, marginRight: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: palette.cardRule },
+  scaleBody: { flex: 1 },
+  scaleHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  scaleIcon: { width: iconSlot(SCALE_ICON_H), height: SCALE_ICON_H },
+  scaleName: { flex: 1, fontSize: 17, fontWeight: '700', color: palette.text },
+  scaleGapSmall: { marginBottom: 6 },
   attribution: { fontSize: 12, color: palette.textTertiary, textAlign: 'center', marginTop: 4, marginBottom: 8 },
 });

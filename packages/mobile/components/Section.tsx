@@ -1,7 +1,7 @@
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { palette } from '../palette';
 
-// A labeled section of the request builder, with an optional ⓘ that opens its explainer.
+// A labeled section, with an optional ⓘ that opens its explainer.
 export default function Section({ label, info, children }: { label: string; info?: () => void; children: React.ReactNode }) {
   return (
     <View style={styles.section}>

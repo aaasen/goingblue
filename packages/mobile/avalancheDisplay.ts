@@ -78,6 +78,81 @@ export function forecastRegion(
   };
 }
 
+// The North American Public Avalanche Danger Scale, highest level first, then Avalanche Canada's
+// statuses. Levels split their travel advice into the bold lead and the rest.
+export const DANGER_SCALE_INTRO =
+  'Avalanche danger is determined by the likelihood, size, and distribution of avalanches. Safe ' +
+  'backcountry travel requires training and experience. You control your risk by choosing when, ' +
+  'where, and how you travel.';
+
+export type DangerScaleEntry =
+  | { rating: DangerRating; lead: string; advice: string; likelihood: string; size: string }
+  | { rating: DangerRating; description: string };
+
+export const DANGER_SCALE: DangerScaleEntry[] = [
+  {
+    rating: 'extreme',
+    lead: 'Extraordinarily dangerous avalanche conditions.',
+    advice: 'Avoid all avalanche terrain.',
+    likelihood: 'Natural and human-triggered avalanches certain.',
+    size: 'Very large avalanches in many areas.',
+  },
+  {
+    rating: 'high',
+    lead: 'Very dangerous avalanche conditions.',
+    advice: 'Travel in avalanche terrain not recommended.',
+    likelihood: 'Natural avalanches likely; human-triggered avalanches very likely.',
+    size: 'Large avalanches in many areas; or very large avalanches in specific areas.',
+  },
+  {
+    rating: 'considerable',
+    lead: 'Dangerous avalanche conditions.',
+    advice: 'Careful snowpack evaluation, cautious route-finding, and conservative decision-making essential.',
+    likelihood: 'Natural avalanches possible; human-triggered avalanches likely.',
+    size: 'Small avalanches in many areas; or large avalanches in specific areas; or very large avalanches in isolated areas.',
+  },
+  {
+    rating: 'moderate',
+    lead: 'Heightened avalanche conditions on specific terrain features.',
+    advice: 'Evaluate snow and terrain carefully; identify features of concern.',
+    likelihood: 'Natural avalanches unlikely; human-triggered avalanches possible.',
+    size: 'Small avalanches in specific areas; or large avalanches in isolated areas.',
+  },
+  {
+    rating: 'low',
+    lead: 'Generally safe avalanche conditions.',
+    advice: 'Watch for unstable snow on isolated terrain features.',
+    likelihood: 'Natural and human-triggered avalanches unlikely.',
+    size: 'Small avalanches in isolated areas or extreme terrain.',
+  },
+  {
+    rating: 'noRating',
+    description:
+      'This elevation band does not exist in the region, or there’s not yet enough snow at this elevation band to produce avalanches.',
+  },
+  {
+    rating: 'earlySeason',
+    description:
+      'Insufficient observations exist to reliably rate the avalanche danger. Expect shallow snow cover with buried rocks, ' +
+      'trees, and stumps hidden just beneath the surface. Avalanche danger will be most likely in gullies and other areas ' +
+      'where wind has deposited snow and created slabs that are often poorly bonded to a weak base.',
+  },
+  {
+    rating: 'spring',
+    description:
+      'Melt-freeze conditions are common. Expect danger to be lower late at night and in the morning, followed by higher ' +
+      'danger in the afternoon and evening. Danger is low when surface snow is frozen, but can rapidly increase to high as ' +
+      'temperatures rise and the surface crust breaks down.',
+  },
+  {
+    rating: 'offSeason',
+    description:
+      'Avalanches may still occur in snow-covered high alpine or glaciated terrain in summer. Hot weather, strong sun, or ' +
+      'rain can trigger wet snow or cornice avalanches. Summer snowstorms may also form wind slabs on leeward slopes. Be ' +
+      'sure to assess conditions at high elevations and consider carrying avalanche safety gear when hazard is present.',
+  },
+];
+
 export const PROBLEM_NAMES: Record<ProblemType, string> = {
   stormSlab: 'Storm slab', windSlab: 'Wind slab', persistentSlab: 'Persistent slab',
   deepPersistentSlab: 'Deep persistent slab', wetSlab: 'Wet slab', wetLoose: 'Wet loose',
