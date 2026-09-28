@@ -108,6 +108,7 @@ export async function migrate(): Promise<void> {
       messages    int,
       device      text,
       platform    text,
+      kind        text,
       periods     jsonb,
       codec_ms    int,
       fetch_ms    int,
@@ -150,6 +151,15 @@ export async function migrate(): Promise<void> {
       add column if not exists messages int,
       add column if not exists device text,
       add column if not exists platform text
+  `);
+  // The forecast kind the codec served, 'weather' or 'avalanche'. Rows written before the
+  // column are all weather, and every served weather row has a mode, so the backfill marks
+  // exactly those; failures stay null.
+  await query(`
+    alter table requests add column if not exists kind text
+  `);
+  await query(`
+    update requests set kind = 'weather' where kind is null and mode is not null
   `);
   // Named locations were never requested: every stored value was 'current' or null.
   await query(`

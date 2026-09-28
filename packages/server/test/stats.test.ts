@@ -15,7 +15,7 @@ const cell = (day: string, requests: number, grp: string | null = ""): DailyRow 
 // One raw request row with every column a served default-forecast reply carries; tests override
 // what they exercise.
 const row = (over: Partial<RequestRow> = {}): RequestRow => ({
-  id: 1, time: "8/30 14:11", account: 29, device: "i", platform: "i", version: 3, outcome: "ok",
+  id: 1, time: "8/30 14:11", account: 29, kind: "weather", device: "i", platform: "i", version: 3, outcome: "ok",
   lat: "63.06", lon: "-151.08", mode: "auto", model: "best", messages: 1,
   vars: ["temp", "wind", "snow", "gust", "rain"],
   periods: null, codecMs: null, fetchMs: null, encodeMs: null, ...over,
@@ -232,6 +232,22 @@ describe("renderStats — grouped chart", () => {
     expect(html).toContain("<td>?</td><td>1</td><td>1</td>");
   });
 
+  it("labels the type grouping by forecast kind", () => {
+    const html = renderStats(data([cell("2026-08-07", 5)], {
+      filters: { group: "kind" },
+      groups: [
+        { grp: "weather", requests: 3, users: 2 },
+        { grp: "avalanche", requests: 1, users: 1 },
+        { grp: null, requests: 1, users: 1 },
+      ],
+    }));
+    expect(html).toContain("By type");
+    expect(html).toContain("<td>Weather</td><td>3</td><td>2</td>");
+    expect(html).toContain("<td>Avalanche</td><td>1</td><td>1</td>");
+    expect(html).toContain("<td>?</td><td>1</td><td>1</td>");
+    expect(html).toContain(`<option value="kind" selected>Type</option>`);
+  });
+
   it("shows no group table when the chart is ungrouped", () => {
     const html = renderStats(data([cell("2026-08-07", 12)], {
       groups: [{ grp: "", requests: 12, users: 3 }],
@@ -296,7 +312,7 @@ describe("renderStats — recent requests", () => {
     // row is matched around it.
     expect(html).toContain("<td>55</td><td>8/30 14:11</td><td>29<form");
     expect(html).toContain(
-      "<td>3</td><td>iOS</td><td>iPhone</td>" +
+      "<td>3</td><td>Weather</td><td>iOS</td><td>iPhone</td>" +
       `<td><a href="/stats?from=2026-08-07&to=2026-08-07&lat=63.07&lon=-151.00#map">` +
       "63.07, -151.00</a></td>" +
       "<td>auto</td><td>best</td><td>2</td>" +
@@ -306,10 +322,20 @@ describe("renderStats — recent requests", () => {
     // Coordinates link to their own point, and all-default vars leave the cell empty, as do the periods/timing columns the row predates.
     expect(html).toContain("<td>54</td><td>8/29 09:02</td><td>12<form");
     expect(html).toContain(
-      "<td>2</td><td>Android</td><td>SMS</td>" +
+      "<td>2</td><td>Weather</td><td>Android</td><td>SMS</td>" +
       `<td><a href="/stats?from=2026-08-07&to=2026-08-07&lat=47.62&lon=-122.29#map">` +
       "47.62, -122.29</a></td>" +
       "<td>detail</td><td>eu</td><td></td><td></td><td></td><td class=tags></td>");
+  });
+
+  // An avalanche reply has no weather options, so those cells are empty.
+  it("lists an avalanche request with its weather cells empty", () => {
+    const html = renderStats(data([cell("2026-08-07", 1)], {
+      requests: [row({ kind: "avalanche", mode: null, model: null, messages: 3, vars: [],
+                       lat: "50.12", lon: "-122.95" })],
+    }));
+    expect(html).toContain("<td>3</td><td>Avalanche</td><td>iOS</td><td>iPhone</td>");
+    expect(html).toContain("</a></td><td></td><td></td><td>3</td>");
   });
 
   // The link is the same selection a click on the map makes, so both ways into a point land on
@@ -329,8 +355,8 @@ describe("renderStats — recent requests", () => {
     const html = renderStats(data([cell("2026-08-07", 1)], {
       requests: [row({ lat: null, lon: null })],
     }));
-    // Version, platform, device, then an empty location.
-    expect(html).toContain("<td>3</td><td>iOS</td><td>iPhone</td><td></td>");
+    // Version, type, platform, device, then an empty location.
+    expect(html).toContain("<td>3</td><td>Weather</td><td>iOS</td><td>iPhone</td><td></td>");
     expect(html).not.toContain("<a href=\"/stats?from=2026-08-07&to=2026-08-07&lat=");
   });
 
@@ -344,12 +370,13 @@ describe("renderStats — recent requests", () => {
   // A failure has no shape: every codec-reported cell is empty, and the outcome says why.
   it("renders a failed request's shape cells empty and its outcome loud", () => {
     const html = renderStats(data([cell("2026-08-07", 1)], {
-      requests: [row({ device: null, platform: null, lat: null, lon: null, mode: null,
+      requests: [row({ kind: null, device: null, platform: null, lat: null, lon: null, mode: null,
                        model: null, messages: null, vars: [], outcome: "unsupported_version" })],
     }));
     expect(html).toContain("<td>unsupported_version</td>");
     expect(html).not.toContain("<td>iPhone</td>");
     expect(html).not.toContain("<td>iOS</td>");
+    expect(html).not.toContain("<td>Weather</td>");
   });
 
   it("says when nothing has been recorded rather than dropping the sections", () => {

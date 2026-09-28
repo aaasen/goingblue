@@ -101,7 +101,7 @@ describe("dispatchForecast", () => {
 
     expect(await dispatchForecast("v1 p:d", RID, null)).toEqual({
       kind: "ok", encoded: "ENCODED", codecMs: expect.any(Number),
-      shape: { lat: 63.06, lon: -151.08, mode: "detail",
+      shape: { kind: null, lat: 63.06, lon: -151.08, mode: "detail",
                model: "best", vars: ["temp"], maxChars: 160, messages: 1, device: null, platform: null,
                periods: null, fetchMs: null, encodeMs: null },
     });
@@ -148,14 +148,22 @@ describe("parseShapeHeader", () => {
   });
 
   it("keeps exactly the fields we store", () => {
-    expect(parseShapeHeader(shape({ device: "i", platform: "a", periods: { "3": 5, "12": 2 }, fetchMs: 480, encodeMs: 12 }))).toEqual({
-      lat: 63.06, lon: -151.08, mode: "detail",
+    expect(parseShapeHeader(shape({ kind: "weather", device: "i", platform: "a", periods: { "3": 5, "12": 2 }, fetchMs: 480, encodeMs: 12 }))).toEqual({
+      kind: "weather", lat: 63.06, lon: -151.08, mode: "detail",
       model: "best", vars: ["temp", "wind"], maxChars: 160, messages: 2, device: "i", platform: "a",
       periods: { "3": 5, "12": 2 }, fetchMs: 480, encodeMs: 12,
     });
     // Absent from containers frozen before the codec reported them.
     expect(parseShapeHeader(shape())).toMatchObject({
-      device: null, platform: null, periods: null, fetchMs: null, encodeMs: null,
+      kind: null, device: null, platform: null, periods: null, fetchMs: null, encodeMs: null,
+    });
+  });
+
+  // An avalanche request carries no weather options, so those fields read as not reported.
+  it("keeps the kind of an avalanche request", () => {
+    const header = JSON.stringify({ lat: 50.12, lon: -122.95, kind: "avalanche", messages: 3, device: "i" });
+    expect(parseShapeHeader(header)).toMatchObject({
+      kind: "avalanche", mode: null, model: null, vars: [], messages: 3, device: "i",
     });
   });
 
@@ -176,7 +184,7 @@ describe("parseShapeHeader", () => {
 
   it("nulls individual fields of the wrong type or range", () => {
     expect(parseShapeHeader(shape({ lat: "63.06", lon: 999, mode: 7, maxChars: 1.5, messages: "2" }))).toEqual({
-      lat: null, lon: null, mode: null,
+      kind: null, lat: null, lon: null, mode: null,
       model: "best", vars: ["temp", "wind"], maxChars: null, messages: null, device: null, platform: null,
       periods: null, fetchMs: null, encodeMs: null,
     });

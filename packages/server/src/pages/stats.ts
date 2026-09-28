@@ -30,7 +30,7 @@ const MAX_RANGE_DAYS = 732;
 // several groups and the chart's quantity becomes variable requests rather than requests — the
 // renderer relabels the tooltip accordingly.
 export type GroupKey =
-  | "account" | "device" | "platform" | "outcome" | "mode" | "model" | "messages" | "variable"
+  | "account" | "kind" | "device" | "platform" | "outcome" | "mode" | "model" | "messages" | "variable"
   | "version";
 // `outcome` groups every row, since its point is showing the failures; everything else counts
 // served forecasts only, so a failure's all-null shape columns never surface as a "?" series.
@@ -44,6 +44,7 @@ const NOT_HIDDEN = `r.account_id not in (select account_id from stats_hidden_acc
 const notHidden = (f: StatsFilters): string => (f.includeHidden ? "" : `\n     and ${NOT_HIDDEN}`);
 const GROUP_EXPRS: Record<Exclude<GroupKey, "variable">, string> = {
   account: "r.account_id::text",
+  kind: "r.kind",
   device: "r.device",
   platform: "r.platform",
   outcome: "coalesce(r.outcome, 'ok')",
@@ -140,7 +141,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // URL params to a validated filter set. Anything malformed falls back to its default rather than
 // erroring: the URL is hand-editable, and the page should always render.
 const GROUP_KEYS: readonly GroupKey[] = [
-  "account", "device", "platform", "outcome", "mode", "model", "messages", "variable", "version",
+  "account", "kind", "device", "platform", "outcome", "mode", "model", "messages", "variable", "version",
 ];
 
 // A coordinate as the map hands it back: a decimal within the earth's range. Anything else is
@@ -213,6 +214,7 @@ export type RequestRow = {
   id: number;
   time: string;
   account: number | null;
+  kind: string | null;
   device: string | null;
   platform: string | null;
   version: number | null;
@@ -342,7 +344,7 @@ const groupTotalsSql = (where: string, g: ReturnType<typeof groupSql>) => `
 export const REQUESTS_LIMIT = 20;
 const REQUEST_COLUMNS = `
          r.id, to_char(r.created_at at time zone $1, 'FMMM/FMDD HH24:MI') as time,
-         r.account_id, r.device, r.platform, r.version, r.outcome,
+         r.account_id, r.kind, r.device, r.platform, r.version, r.outcome,
          r.lat::text as lat, r.lon::text as lon, r.mode, r.model, r.messages, r.vars,
          r.periods, r.codec_ms, r.fetch_ms, r.encode_ms`;
 const requestRowsSql = (where: string) => `
@@ -445,6 +447,7 @@ const toRequestRow = (r: Record<string, unknown>): RequestRow => ({
   id: num(r["id"]),
   time: String(r["time"]),
   account: r["account_id"] == null ? null : num(r["account_id"]),
+  kind: r["kind"] == null ? null : String(r["kind"]),
   device: r["device"] == null ? null : String(r["device"]),
   platform: r["platform"] == null ? null : String(r["platform"]),
   version: r["version"] == null ? null : num(r["version"]),
@@ -687,6 +690,7 @@ function enumerateDays(from: string, to: string): string[] {
 // whose name is an initialism.
 function groupLabel(group: GroupKey, grp: string | null): string {
   if (grp === null) return "?";
+  if (group === "kind") return KIND_LABELS[grp] ?? grp;
   if (group === "device") return DEVICE_LABELS[grp] ?? grp;
   if (group === "platform") return PLATFORM_LABELS[grp] ?? grp;
   if (group === "version") return `v${grp}`;
@@ -806,6 +810,12 @@ const DEVICE_LABELS: Record<string, string> = {
 const PLATFORM_LABELS: Record<string, string> = {
   i: "iOS",
   a: "Android",
+};
+
+// The forecast kinds the codec reports.
+const KIND_LABELS: Record<string, string> = {
+  weather: "Weather",
+  avalanche: "Avalanche",
 };
 
 // The numbers and dates on this page are formatted by this module and need no escaping. The
@@ -928,6 +938,7 @@ function requestTable(
       return (
         `<tr><td>${r.id}</td><td>${r.time}</td><td>${account}</td>` +
         `<td>${r.version ?? ""}</td>` +
+        `<td>${r.kind === null ? "" : KIND_LABELS[r.kind] ?? esc(r.kind)}</td>` +
         `<td>${r.platform === null ? "" : PLATFORM_LABELS[r.platform] ?? esc(r.platform)}</td>` +
         `<td>${r.device === null ? "" : DEVICE_LABELS[r.device] ?? esc(r.device)}</td>` +
         `<td>${place}</td>` +
@@ -941,7 +952,7 @@ function requestTable(
     .join("");
   return `<div class=tablewrap>
 <table>
-<thead><tr><th>Id</th><th>Time</th><th>Account</th><th>Version</th><th>Platform</th><th>Device</th>
+<thead><tr><th>Id</th><th>Time</th><th>Account</th><th>Version</th><th>Type</th><th>Platform</th><th>Device</th>
 <th>Location</th><th>Priority</th><th>Model</th><th>Messages</th>
 <th>Periods</th><th>Codec ms</th><th>Variables</th><th>Outcome</th></tr></thead>
 <tbody>${body}</tbody>
@@ -1172,7 +1183,7 @@ export function renderStats(data: StatsData): string {
   // list — a series the chart folded into "Other" still gets its own row here. Absent entirely
   // when the chart is ungrouped: the summary tiles already carry the window total.
   const GROUP_NAMES: Record<GroupKey, string> = {
-    account: "Account", device: "Device", platform: "Platform", outcome: "Outcome",
+    account: "Account", kind: "Type", device: "Device", platform: "Platform", outcome: "Outcome",
     mode: "Priority", model: "Model", messages: "Messages", variable: "Variable",
     version: "Version",
   };
@@ -1272,7 +1283,7 @@ ${requestTable(
 
 <h2>Requests per day</h2>
 ${groupBar("group", "requests", group, [
-  ["", "None"], ["account", "Account"], ["device", "Device"], ["platform", "Platform"],
+  ["", "None"], ["account", "Account"], ["kind", "Type"], ["device", "Device"], ["platform", "Platform"],
   ["outcome", "Outcome"],
   ["mode", "Priority"], ["model", "Model"], ["messages", "Messages"], ["variable", "Variable"],
   ["version", "Version"],

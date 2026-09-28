@@ -154,7 +154,7 @@ export async function recordEncoded(id: string, r: EncodedRecord): Promise<boole
           set token = $2, account_id = $3, chars = $4, version = $5, outcome = $6, codec_ms = $7,
               lat = $8, lon = $9, mode = $10, model = $11, vars = $12, max_chars = $13,
               messages = $14, device = $15, platform = $16, periods = $17, fetch_ms = $18,
-              encode_ms = $19,
+              encode_ms = $19, kind = $22,
               twilio_received_at = coalesce(twilio_received_at, $20),
               encoded_at = now(),
               no_reply_at = case when $21 then now() else no_reply_at end
@@ -163,7 +163,7 @@ export async function recordEncoded(id: string, r: EncodedRecord): Promise<boole
        s?.lat ?? null, s?.lon ?? null, s?.mode ?? null, s?.model ?? null,
        s?.vars ?? null, s?.maxChars ?? null, s?.messages ?? null, s?.device ?? null,
        s?.platform ?? null, s?.periods ?? null, s?.fetchMs ?? null, s?.encodeMs ?? null,
-       r.twilioReceivedAt, r.replies.length === 0],
+       r.twilioReceivedAt, r.replies.length === 0, s?.kind ?? null],
     );
     if ((updated.rowCount ?? 0) === 0) return false;
     for (const [i, body] of r.replies.entries()) {

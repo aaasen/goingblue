@@ -13,6 +13,9 @@ import { log } from "./log.js";
 // grammar itself, because the grammar is version-specific and only the codec for that version
 // knows what a mask or a token means (VERSIONING.md).
 export interface RequestShape {
+  // What kind of forecast was served: "weather" or "avalanche". Null from containers frozen
+  // before the codec reported it, all of which served weather only.
+  kind: string | null;
   lat: number | null;
   lon: number | null;
   mode: string | null;
@@ -150,6 +153,7 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
   const shapeInt = (v: unknown): number | null =>
     typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= SHAPE_INT_MAX ? v : null;
   return {
+    kind: shapeString(o["kind"]),
     lat: coord(o["lat"], 90),
     lon: coord(o["lon"], 180),
     mode: shapeString(o["mode"]),
