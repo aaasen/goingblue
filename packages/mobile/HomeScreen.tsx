@@ -8,7 +8,7 @@ import * as Location from 'expo-location';
 import * as Network from 'expo-network';
 import { pageInsets } from './insets';
 import AvalancheForecastView from './AvalancheScreen';
-import { forecastRegion, pieceAt, pieceFeatures } from './avalancheDisplay';
+import { forecastRegion, pieceAt, pieceFeatures, zoneLabel } from './avalancheDisplay';
 import { loadAvalancheModels } from './avalancheModel';
 import DayRow from './components/DayRow';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -2686,7 +2686,7 @@ const LocationPicker = memo(function LocationPicker({
       </View>
       {zone !== undefined && (
         <Text style={styles.zoneHint}>
-          {zone ? `Avalanche Canada: ${zone.names.join(', ')}` : 'Avalanche forecasts not available for this location'}
+          {zone ? zoneLabel(zone) : 'Avalanche forecasts not available for this location'}
         </Text>
       )}
     </>

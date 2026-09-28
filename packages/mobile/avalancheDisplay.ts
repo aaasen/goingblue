@@ -262,6 +262,23 @@ const PREPARED_BY: Record<string, string> = {
   'parks-waterton': 'Parks Canada',
 };
 
+// The line naming the piece a point is in: its center, then its subregions.
+const ZONE_CENTERS: Record<string, string> = { ...PREPARED_BY, kananaskis: 'Kananaskis MRP' };
+// Subregions forecast together that the line calls by one name.
+const MERGED_NAMES: [string[], string][] = [
+  [['White Pass East', 'White Pass West'], 'White Pass'],
+  [['Bow Valley', 'Highwood Pass', 'North 40', 'Spray - KLakes'], 'Bow Valley'],
+  [['Banff', 'East Side 93N', 'LLSA'], 'Banff'],
+];
+
+export function zoneLabel(piece: Pick<AvalanchePiece, 'center' | 'names'>): string {
+  let names = piece.names;
+  for (const [parts, merged] of MERGED_NAMES) {
+    if (parts.every((n) => names.includes(n))) names = [...names.filter((n) => !parts.includes(n)), merged].sort();
+  }
+  return `${ZONE_CENTERS[piece.center] ?? piece.center}: ${names.join(', ')}`;
+}
+
 export function preparedBy(forecast: Pick<AvalancheForecast, 'center' | 'pieces' | 'issuedBy'>): string {
   return PREPARED_BY[bulletinCenter(forecast)] ?? forecast.issuedBy;
 }

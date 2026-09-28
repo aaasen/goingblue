@@ -12,7 +12,7 @@ import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.js
 // which prints the new digest.
 const FROZEN_MODEL_DIGEST = "e7f1f48ad19bcc53";
 // The same for the piece-set model, rewritten by `pnpm avalanche-region`.
-const FROZEN_REGION_DIGEST = "c230bb3259f0a4ae";
+const FROZEN_REGION_DIGEST = "fa6f7cbedf8599e7";
 
 const packed = gunzipSync(readFileSync(new URL("../assets/avcan-model.bin.gz", import.meta.url)));
 

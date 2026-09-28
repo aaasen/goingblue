@@ -142,12 +142,14 @@ function clean(geom: MultiPoly): MultiPoly {
   return geom.filter((poly) => polyKm2(poly) >= MIN_PIECE_KM2);
 }
 
+// Only areas some bulletin titled: an untitled one gives its pieces no names, so a boundary it
+// alone draws would split a piece into halves nothing tells apart.
 function loadAreas(db: ReturnType<typeof openDb>): Area[] {
   const rows = db.prepare(`
     SELECT a.id, a.geometry, p.owner, p.title FROM areas a
     JOIN products p ON p.area_id = a.id
     JOIN walk_products wp ON wp.product_id = p.id
-    WHERE wp.walk_date >= ?
+    WHERE wp.walk_date >= ? AND p.title != ''
     GROUP BY a.id, p.title`).all(FIRST_WALK) as { id: string; geometry: string; owner: string; title: string }[];
   const areas = new Map<string, Area>();
   for (const r of rows) {
@@ -197,12 +199,10 @@ async function main(): Promise<void> {
   const byId = new Map(areas.map((a) => [a.id, a]));
   const pieces = overlay(areas);
 
-  // A piece is what every area covering it has in common, so the names are the intersection,
-  // taken over the areas whose bulletins had a title (a few Parks Canada ones are blank).
+  // A piece is what every area covering it has in common, so the names are the intersection.
   const out = pieces.map((p) => {
     const covering = [...p.areas].map((id) => byId.get(id)!);
-    const named = covering.filter((a) => a.names.size > 0);
-    const names = named.length === 0 ? [] : [...named[0].names].filter((n) => named.every((a) => a.names.has(n))).sort();
+    const names = [...covering[0].names].filter((n) => covering.every((a) => a.names.has(n))).sort();
     const centers = new Set(covering.map((a) => a.center));
     if (centers.size > 1) console.warn(`piece ${names.join(", ")} spans centers ${[...centers].join(", ")}`);
     if (names.length === 0) console.warn(`piece in ${covering.map((a) => a.id.slice(0, 8)).join(", ")} has no common name`);

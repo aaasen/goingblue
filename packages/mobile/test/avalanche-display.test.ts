@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { AVALANCHE_PIECES } from '@weather/protocol';
 import {
-  bulletinCenter, bulletinTimezone, preparedBy, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
+  bulletinCenter, bulletinTimezone, preparedBy, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel, zoneLabel,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -152,6 +152,18 @@ describe('preparedBy', () => {
     expect(preparedBy({ center: '', pieces: [88], issuedBy: '' })).toBe('Parks Canada');
     expect(preparedBy({ center: 'kananaskis', pieces: [], issuedBy: 'Kananaskis' })).toBe('Kananaskis Mountain Rescue Program');
     expect(preparedBy({ center: '', pieces: [], issuedBy: '' })).toBe('');
+  });
+});
+
+describe('zoneLabel', () => {
+  it('names the center and the subregions, with the short names this line uses', () => {
+    expect(zoneLabel({ center: 'avalanche-canada', names: ['Akamina'] })).toBe('Avalanche Canada: Akamina');
+    expect(zoneLabel({ center: 'kananaskis', names: ['Bow Valley'] })).toBe('Kananaskis MRP: Bow Valley');
+    expect(zoneLabel({ center: 'avalanche-canada', names: ['Tutshi', 'Wheaton', 'White Pass East', 'White Pass West'] }))
+      .toBe('Avalanche Canada: Tutshi, Wheaton, White Pass');
+    expect(zoneLabel({ center: 'avalanche-canada', names: ['White Pass East'] })).toBe('Avalanche Canada: White Pass East');
+    expect(zoneLabel(AVALANCHE_PIECES[87])).toBe('Kananaskis MRP: Bow Valley');
+    expect(zoneLabel(AVALANCHE_PIECES[88])).toBe('Parks Canada: Banff');
   });
 });
 
