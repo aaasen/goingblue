@@ -232,6 +232,21 @@ describe("bulletin", () => {
     expect(encodeBulletin(loadModels(shifted), forecast())).toEqual(encodeBulletin(m, forecast()));
   });
 
+  it("rejects bytes the model did not write", () => {
+    const m = models();
+    const f = forecast();
+    const issued = quantizeIssued(f.issued);
+    const bytes = encodeBulletin(m, f);
+    for (let k = 0; k < bytes.length; k++) {
+      const flipped = bytes.slice();
+      flipped[k] ^= 0x10;
+      expect(() => decodeBulletin(m, flipped, issued)).toThrow();
+    }
+    expect(() => decodeBulletin(m, encodeBulletin(train([QUIET, forecast({ bottomLine: "Other." })]), f), issued)).toThrow();
+    expect(() => decodeBulletin(m, bytes.subarray(0, bytes.length - 3), issued)).toThrow();
+    expect(() => decodeBulletin(m, new Uint8Array([0xff, 0xff]), issued)).toThrow(/runs past the end/);
+  });
+
   it("round-trips the Sea to Sky forecast", () => {
     const f = SEA_TO_SKY as AvalancheForecast;
     const m = train([f]);

@@ -44,6 +44,7 @@ function getVarint(buf: Uint8Array, pos: number): [number, number] {
   let n = 0;
   let mul = 1;
   for (;;) {
+    if (pos >= buf.length) throw new Error("avalanche: header runs past the end of the message");
     const b = buf[pos++];
     n += (b % 128) * mul;
     if (b < 128) return [n, pos];
@@ -206,7 +207,10 @@ export function decode(
   model: Model, blob: Uint8Array, contextFor?: (kind: string, index: number) => string | undefined,
 ): Section[] {
   const { wordCounts, pos } = readHeader(blob);
-  return readSections(model, new Decoder(blob, pos), wordCounts, contextFor);
+  const dec = new Decoder(blob, pos);
+  const sections = readSections(model, dec, wordCounts, contextFor);
+  dec.finish();
+  return sections;
 }
 
 // What each token of a section cost. Re-walks the real encoder path, so these are the bits the

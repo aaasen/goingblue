@@ -13,7 +13,10 @@
  *   3. rANS is LIFO: the encoder walks its symbols backwards and reverses the output so the
  *      decoder reads forward in the original order.
  *   4. Reads past the end of the buffer are zeros, so a transport that drops trailing zero
- *      bytes (the wire's body codecs do) loses nothing.
+ *      bytes (the wire's body codecs do) loses nothing. More than OVERRUN_LIMIT of them means
+ *      the bytes are not a stream this model wrote.
+ *   5. A stream decoded to its end leaves the state at RANS_L, where the encoder started, with
+ *      every byte consumed. Bytes from another model, or none at all, fail this (finish).
  */
 
 export const SCALE_BITS = 16;
@@ -22,6 +25,7 @@ const RANS_L = 8388608; // 2^23
 const BYTE = 256;
 const STATE_MAX = RANS_L * BYTE; // 2^31
 const SYM_LIMIT_MUL = STATE_MAX / SCALE; // 2^15
+const OVERRUN_LIMIT = 8;
 
 export interface Table {
   symbols: number[];
@@ -121,7 +125,16 @@ export class Decoder {
   }
 
   private next(): number {
+    if (this.pos >= this.buf.length + OVERRUN_LIMIT) throw new Error("rans: read past the end of the stream");
     return this.pos < this.buf.length ? this.buf[this.pos++] : (this.pos++, 0);
+  }
+
+  // Throws unless the decode ended exactly where the encoder began (invariant 5).
+  finish(): void {
+    if (this.x !== RANS_L) throw new Error("rans: stream did not end cleanly");
+    for (let k = this.pos; k < this.buf.length; k++) {
+      if (this.buf[k] !== 0) throw new Error("rans: bytes left over after the stream");
+    }
   }
 
   get(table: Table): number {

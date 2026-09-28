@@ -76,6 +76,20 @@ describe('avalanche requests in the forecast store', () => {
     expect(await prunePastForecasts(token)).toHaveLength(1);
   });
 
+  it('drop a saved reply that no longer decodes', async () => {
+    const token = `${TOKEN}-prune`;
+    const ctx = avalancheContext('g');
+    const good = await allocCode(token, ctx, 'Avalanche');
+    const bad = await allocCode(token, ctx, 'Avalanche');
+    await attachResponse(token, good, encodeAvalancheMessage(MODELS, good, anchorOf(ctx), FORECAST, 'base85'));
+    const reply = encodeAvalancheMessage(MODELS, bad, anchorOf(ctx), FORECAST, 'base85');
+    const k = [...reply].findIndex((c, i) => i > WIRE_HEADER_CHARS && c !== reply[i + 1]);
+    const corrupted = reply.slice(0, k) + reply[k + 1] + reply[k] + reply.slice(k + 2);
+    await attachResponse(token, bad, corrupted);
+    expect(() => decodeAny(corrupted, token)).toThrow();
+    expect((await prunePastForecasts(token)).map((s) => s.code)).toEqual([good]);
+  });
+
   it('collect a multi-part reply one message at a time', async () => {
     const token = `${TOKEN}-parts`;
     const ctx = avalancheContext('i');

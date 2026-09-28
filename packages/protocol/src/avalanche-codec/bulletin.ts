@@ -128,5 +128,7 @@ export function decodeBulletin({ prose, structured }: Models, blob: Uint8Array, 
   const pieces = readRegion(dec);
   const s = structured.read(dec, prose.byteTable(), new Date(issued).getUTCHours());
   const contextFor = (kind: string, index: number) => (kind === "problem" ? s.problems[index]?.type : undefined);
-  return forecastOf(pieces, s, readSections(prose, dec, wordCounts, contextFor), issued);
+  const sections = readSections(prose, dec, wordCounts, contextFor);
+  dec.finish();
+  return forecastOf(pieces, s, sections, issued);
 }
