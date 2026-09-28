@@ -41,6 +41,7 @@ import Section from './components/Section';
 import ActionButton from './components/ActionButton';
 import PasteButton, { type Outcome } from './components/PasteButton';
 import InfoModal from './components/InfoModal';
+import EmptyForecast from './components/EmptyForecast';
 import FavoriteSheet from './FavoriteSheet';
 import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
 import HelpScreen from './HelpScreen';
@@ -2065,12 +2066,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
       {/* Where the forecast will be. Not shown while a collection or an error is under the paste
           button, which already say what to do next. */}
-      {!decoded && !collecting && !error && (
-        <View style={styles.emptyForecast}>
-          <Text style={styles.emptyTitle}>No forecast loaded</Text>
-          <Text style={styles.emptyHint}>Paste an encoded forecast reply to visualize it</Text>
-        </View>
-      )}
+      {!decoded && !collecting && !error && <EmptyForecast />}
 
       <PastForecasts groups={pastGroups} loadedKey={loadedKey} describe={describeWeather}
         onLoad={loadPast} onDelete={deletePast} />
@@ -2149,12 +2145,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             </View>
           )}
           {avalanche && <AvalancheForecastView forecast={avalanche.forecast} timeFormat={timeFormat} />}
-          {!avalanche && !avalancheCollecting && !avalancheError && (
-            <View style={styles.emptyForecast}>
-              <Text style={styles.emptyTitle}>No forecast loaded</Text>
-              <Text style={styles.emptyHint}>Paste an encoded forecast reply to visualize it</Text>
-            </View>
-          )}
+          {!avalanche && !avalancheCollecting && !avalancheError && <EmptyForecast />}
           <PastForecasts groups={avalancheGroups} loadedKey={loadedAvalancheKey} describe={describeAvalanche}
             onLoad={loadAvalanchePast} onDelete={deletePast} />
         </>
@@ -3050,14 +3041,6 @@ const styles = StyleSheet.create({
 
   // Forecast meta and the past-forecast list, full-bleed siblings of the meteogram — they carry
   // their own margins.
-  // A dashed outline the size of a short meteogram, so the page holds its shape before and after.
-  emptyForecast: {
-    marginHorizontal: 16, marginBottom: 8, paddingVertical: 28, paddingHorizontal: 16,
-    alignItems: 'center', gap: 4,
-    borderWidth: 1, borderStyle: 'dashed', borderColor: palette.pageChipBorder, borderRadius: 12,
-  },
-  emptyTitle: { fontSize: 15, fontWeight: '600', color: palette.pageTextSecondary },
-  emptyHint: { fontSize: 13, color: palette.pageTextTertiary, textAlign: 'center' },
   metaRow: {
     margin: 16,
     marginBottom: 8,
