@@ -11,7 +11,6 @@ import AvalancheForecastView from './AvalancheScreen';
 import { forecastRegion, pieceAt, pieceFeatures } from './avalancheDisplay';
 import { loadAvalancheModels } from './avalancheModel';
 import DayRow from './components/DayRow';
-import sampleAvalanche from './fixtures/avalanche/sea-to-sky-2026-03-01.json';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
@@ -852,9 +851,6 @@ interface Props {
   onOpenSettings: () => void;
 }
 
-// The Avalanche tab's stand-in bulletin (see AvalancheForecastView). The JSON's enumerations
-// come in as plain strings; the export wrote them from the protocol's scales.
-const SAMPLE_AVALANCHE = sampleAvalanche as AvalancheForecast;
 // Every forecast piece's outline, for the avalanche map; the pieces ship with the app.
 const AVALANCHE_ZONES = pieceFeatures(AVALANCHE_PIECES);
 
@@ -1115,8 +1111,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     () => (mapCoord ? pieceAt(mapCoord.lat, mapCoord.lon, AVALANCHE_PIECES) : null),
     [mapCoord?.lat, mapCoord?.lon],
   );
-  // Where the decoded bulletin applies, in its first day's highest danger. The sample shown before
-  // any reply has no map.
+  // Where the decoded bulletin applies, in its first day's highest danger.
   const avalancheRegion = useMemo(
     () => (avalanche ? forecastRegion(avalanche.forecast.pieces, avalanche.forecast.danger) : null),
     [avalanche],
@@ -2093,7 +2088,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       </View>
 
       {/* The Avalanche tab: the date and device to request for, the send and paste steps, the
-          bulletin (an archived one stands in until a reply is decoded), and the saved bulletins. */}
+          bulletin, and the saved bulletins. */}
       {tab === 'avalanche' && (
         <>
           <View style={styles.builderPad}>
@@ -2153,7 +2148,13 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               />
             </View>
           )}
-          <AvalancheForecastView forecast={avalanche?.forecast ?? SAMPLE_AVALANCHE} timeFormat={timeFormat} />
+          {avalanche && <AvalancheForecastView forecast={avalanche.forecast} timeFormat={timeFormat} />}
+          {!avalanche && !avalancheCollecting && !avalancheError && (
+            <View style={styles.emptyForecast}>
+              <Text style={styles.emptyTitle}>No forecast loaded</Text>
+              <Text style={styles.emptyHint}>Paste an encoded forecast reply to visualize it</Text>
+            </View>
+          )}
           <PastForecasts groups={avalancheGroups} loadedKey={loadedAvalancheKey} describe={describeAvalanche}
             onLoad={loadAvalanchePast} onDelete={deletePast} />
         </>
