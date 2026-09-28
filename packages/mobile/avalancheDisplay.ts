@@ -2,7 +2,7 @@
 import tzlookup from 'tz-lookup';
 import {
   AVALANCHE_PIECES, DANGER_LEVELS, LIKELIHOODS,
-  type AvalanchePiece, type DangerRating, type Elevation, type Likelihood, type ProblemType,
+  type AvalancheForecast, type AvalanchePiece, type DangerDay, type DangerRating, type Elevation, type Likelihood, type ProblemType,
 } from '@weather/protocol';
 import type { DangerIcon } from './dangerIcons';
 import type { TimeFormat } from './settings';
@@ -14,8 +14,13 @@ const LEVEL_FILL: Record<(typeof DANGER_LEVELS)[number], string> = {
 const LEVEL_NAME: Record<(typeof DANGER_LEVELS)[number], string> = {
   low: 'Low', moderate: 'Moderate', considerable: 'Considerable', high: 'High', extreme: 'Extreme',
 };
-const STATUS_NAME: Record<Exclude<DangerRating, (typeof DANGER_LEVELS)[number]>, string> = {
-  noRating: 'No Rating', spring: 'Spring', earlySeason: 'Early Season', offSeason: 'Off Season', noForecast: 'No Forecast',
+// A band without a level, as Avalanche Canada shows it.
+const STATUS_CELL: Record<Exclude<DangerRating, (typeof DANGER_LEVELS)[number]>, { name: string; fill: string; text: string; icon: DangerIcon }> = {
+  noRating: { name: 'No Rating', fill: '#ffffff', text: '#000000', icon: 'blank' },
+  noForecast: { name: 'No Forecast', fill: '#ffffff', text: '#000000', icon: 'noForecast' },
+  offSeason: { name: 'Summer Conditions', fill: '#ffffff', text: '#000000', icon: 'blank' },
+  spring: { name: 'Spring Conditions', fill: '#0072c6', text: '#ffffff', icon: 'spring' },
+  earlySeason: { name: 'Early Season', fill: '#0072c6', text: '#ffffff', icon: 'info' },
 };
 
 export interface DangerCell {
@@ -32,7 +37,7 @@ export interface DangerCell {
 export function dangerCell(rating: DangerRating): DangerCell {
   const level = (DANGER_LEVELS as readonly string[]).indexOf(rating);
   if (level === -1) {
-    return { fill: '#e5e5ea', text: '#636366', number: '', name: STATUS_NAME[rating as keyof typeof STATUS_NAME], icon: 'noRating' };
+    return { number: '', ...STATUS_CELL[rating as keyof typeof STATUS_CELL] };
   }
   const key = DANGER_LEVELS[level];
   return {
@@ -146,6 +151,31 @@ export const CONFIDENCE_NAMES: Record<string, string> = {
 // The weekday of an instant in the forecast's zone.
 export function dayLabel(ms: number, timezone: string): string {
   return new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: timezone }).format(new Date(ms));
+}
+
+export interface DangerTableSpec {
+  key: number;
+  label: string;
+  day: DangerDay;
+}
+
+const SEASON_OVER = new Set<DangerRating>(['spring', 'offSeason']);
+
+// One table per day, except Avalanche Canada's single table that runs until the bulletin expires:
+// every band of every day is spring or summer conditions, and the last day is already past.
+export function dangerTables(
+  forecast: Pick<AvalancheForecast, 'danger' | 'expires' | 'timezone'>, now: number = Date.now(),
+): DangerTableSpec[] {
+  const { danger, expires, timezone } = forecast;
+  const localDate = (ms: number) => new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date(ms));
+  const seasonOver = danger.length > 0 && Number.isFinite(expires)
+    && danger.every((d) => SEASON_OVER.has(d.alp) && SEASON_OVER.has(d.tln) && SEASON_OVER.has(d.btl))
+    && localDate(now) > localDate(danger[danger.length - 1].date);
+  if (seasonOver) {
+    const until = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', timeZone: timezone }).format(new Date(expires));
+    return [{ key: danger[0].date, label: `Until ${until}`, day: danger[0] }];
+  }
+  return danger.map((day) => ({ key: day.date, label: dayLabel(day.date, timezone), day }));
 }
 
 // The zone each center stamps its bulletins in, as the archive's bulletins declare it: Avalanche

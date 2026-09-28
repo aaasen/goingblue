@@ -7,7 +7,7 @@ import { drawText, fillPaint, strokePaint, textWidth } from './skiaPaint';
 import { palette } from './palette';
 import type { TimeFormat } from './settings';
 import {
-  CONFIDENCE_NAMES, DISCLAIMERS, ELEVATION_NAMES, PROBLEM_NAMES, ROSE_ELEVATION_NAMES, dangerCell, dayLabel, likelihoodScale,
+  CONFIDENCE_NAMES, DISCLAIMERS, ELEVATION_NAMES, PROBLEM_NAMES, ROSE_ELEVATION_NAMES, dangerCell, dangerTables, likelihoodScale,
   sizeScale, stampLabel,
   type Scale,
 } from './avalancheDisplay';
@@ -47,7 +47,7 @@ const BANDS: { key: keyof Pick<DangerDay, 'alp' | 'tln' | 'btl'>; fill: string }
   { key: 'btl', fill: '#639a5e' },
 ];
 const DAY_HEAD = '#141729';
-const ICON_H = 30;
+const ICON_H = 26;
 // Wide enough for the widest icon, so the ratings' text lines up whatever the level.
 const ICON_SLOT = ICON_H * Math.max(...Object.values(DANGER_ICONS).map((i) => i.width)) / DANGER_ICON_HEIGHT;
 
@@ -63,14 +63,17 @@ function iconSvg(icon: DangerIcon): SkSVG {
   return svg;
 }
 
-// The SVGs size themselves in viewBox units, so the canvas scales them to ICON_H.
+// The SVGs size themselves in viewBox units, so the canvas scales them to ICON_H, centered in the
+// slot so each icon has the same room on either side.
 const iconPictures = new Map<DangerIcon, SkPicture>();
 function iconPicture(icon: DangerIcon): SkPicture {
   let picture = iconPictures.get(icon);
   if (!picture) {
     const recorder = Skia.PictureRecorder();
     const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, ICON_SLOT, ICON_H));
-    canvas.scale(ICON_H / DANGER_ICON_HEIGHT, ICON_H / DANGER_ICON_HEIGHT);
+    const scale = ICON_H / DANGER_ICON_HEIGHT;
+    canvas.translate((ICON_SLOT - DANGER_ICONS[icon].width * scale) / 2, 0);
+    canvas.scale(scale, scale);
     canvas.drawSvg(iconSvg(icon));
     picture = recorder.finishRecordingAsPicture();
     iconPictures.set(icon, picture);
@@ -78,10 +81,10 @@ function iconPicture(icon: DangerIcon): SkPicture {
   return picture;
 }
 
-function DangerTable({ day, timezone }: { day: DangerDay; timezone: string }) {
+function DangerTable({ day, label }: { day: DangerDay; label: string }) {
   return (
     <View style={styles.dangerDay}>
-      <Text style={styles.dangerDayLabel}>{dayLabel(day.date, timezone)}</Text>
+      <Text style={styles.dangerDayLabel}>{label}</Text>
       {BANDS.map((band) => {
         const cell = dangerCell(day[band.key]);
         return (
@@ -342,7 +345,7 @@ export default function AvalancheForecastView({ forecast, timeFormat }: { foreca
       ) : null}
 
       <Section label="Danger Ratings">
-        {forecast.danger.map((d) => <DangerTable key={d.date} day={d} timezone={forecast.timezone} />)}
+        {dangerTables(forecast).map((t) => <DangerTable key={t.key} day={t.day} label={t.label} />)}
       </Section>
 
       {forecast.advice.length > 0 && (
@@ -429,9 +432,10 @@ const styles = StyleSheet.create({
   dangerDay: { borderRadius: 12, overflow: 'hidden', marginBottom: 10, backgroundColor: '#ffffff' },
   dangerDayLabel: { backgroundColor: DAY_HEAD, color: '#ffffff', fontSize: 17, fontWeight: '600', paddingHorizontal: 14, paddingVertical: 12 },
   dangerRow: { flexDirection: 'row', minHeight: 46, marginTop: 2 },
-  dangerBand: { flex: 2, justifyContent: 'center', paddingHorizontal: 14, marginRight: 2 },
+  // Room for "Below Treeline" and no more, so the longest status fits the rating cell on one line.
+  dangerBand: { width: 136, justifyContent: 'center', paddingHorizontal: 14, marginRight: 2 },
   dangerBandText: { fontSize: 15, color: '#1c1c1e' },
-  dangerRating: { flex: 3, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, gap: 8 },
+  dangerRating: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, gap: 8 },
   dangerIcon: { width: ICON_SLOT, height: ICON_H },
   dangerRatingText: { flex: 1, fontSize: 15, fontWeight: '700' },
   attribution: { fontSize: 12, color: palette.textTertiary, textAlign: 'center', marginTop: 4, marginBottom: 8 },

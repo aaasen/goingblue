@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { AVALANCHE_PIECES } from '@weather/protocol';
 import {
-  bulletinTimezone, dangerCell, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
+  bulletinTimezone, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -13,7 +13,9 @@ describe('dangerCell', () => {
   });
 
   it('shows a band without a level as a gray named cell', () => {
-    expect(dangerCell('spring')).toEqual({ fill: '#e5e5ea', text: '#636366', number: '', name: 'Spring', icon: 'noRating' });
+    expect(dangerCell('spring')).toEqual({ fill: '#0072c6', text: '#ffffff', number: '', name: 'Spring Conditions', icon: 'spring' });
+    expect(dangerCell('earlySeason')).toMatchObject({ fill: '#0072c6', icon: 'info' });
+    expect(dangerCell('offSeason')).toMatchObject({ fill: '#ffffff', text: '#000000', name: 'Summer Conditions', icon: 'blank' });
     expect(dangerCell('noRating').name).toBe('No Rating');
   });
 });
@@ -39,10 +41,11 @@ describe('forecastRegion', () => {
     expect(region).toMatchObject({ fill: '#ed1c24', outline: '#ed1c24' });
   });
 
-  it('rings extreme in red and grays a day without a level', () => {
+  it('rings extreme in red and fills a day without a level in its status color', () => {
     expect(forecastRegion([6], [{ alp: 'extreme', tln: 'high', btl: 'high' }])).toMatchObject({ fill: '#231f20', outline: '#ed1c24' });
-    expect(forecastRegion([6], [{ alp: 'spring', tln: 'spring', btl: 'spring' }])?.fill).toBe('#e5e5ea');
-    expect(forecastRegion([6], [])?.fill).toBe('#e5e5ea');
+    expect(forecastRegion([6], [{ alp: 'earlySeason', tln: 'earlySeason', btl: 'earlySeason' }])?.fill).toBe('#0072c6');
+    expect(forecastRegion([6], [{ alp: 'offSeason', tln: 'offSeason', btl: 'offSeason' }])?.fill).toBe('#ffffff');
+    expect(forecastRegion([6], [])?.fill).toBe('#ffffff');
   });
 
   it('draws nothing for a forecast that does not say where it applies', () => {
@@ -85,6 +88,25 @@ describe('zoned labels', () => {
     expect(stampLabel(morning, 'America/Vancouver', '12h')).toBe('Sun, March 1, 2026 at 12:05 AM PT');
     expect(stampLabel(morning, 'America/Vancouver', '24h')).toBe('Sun, March 1, 2026 at 00:05 PT');
     expect(stampLabel(issued, 'Europe/Zurich', '24h')).toBe('Sun, March 1, 2026 at 01:00');
+  });
+});
+
+describe('dangerTables', () => {
+  const tz = 'America/Vancouver';
+  const day = (iso: string, r: 'offSeason' | 'spring' | 'low') => ({ date: Date.parse(iso), alp: r, tln: r, btl: r });
+  const expires = Date.parse('2026-10-01T23:00:00Z');
+  const now = Date.parse('2026-09-28T19:00:00Z');
+  it('collapses a spring or summer bulletin into one table until it expires once its days are past', () => {
+    const danger = [day('2026-07-01T07:00:00Z', 'offSeason'), day('2026-07-02T07:00:00Z', 'spring'), day('2026-07-03T07:00:00Z', 'offSeason')];
+    expect(dangerTables({ danger, expires, timezone: tz }, now)).toEqual([{ key: danger[0].date, label: 'Until October 1', day: danger[0] }]);
+  });
+  it('keeps one table per day while the last day is today or later', () => {
+    const danger = [day('2026-09-27T07:00:00Z', 'spring'), day('2026-09-28T07:00:00Z', 'spring')];
+    expect(dangerTables({ danger, expires, timezone: tz }, now).map((t) => t.label)).toEqual(['Sunday', 'Monday']);
+  });
+  it('keeps one table per day when any band has another rating', () => {
+    const danger = [day('2026-03-01T08:00:00Z', 'low'), day('2026-03-02T08:00:00Z', 'offSeason')];
+    expect(dangerTables({ danger, expires, timezone: tz }, now).map((t) => t.label)).toEqual(['Sunday', 'Monday']);
   });
 });
 
