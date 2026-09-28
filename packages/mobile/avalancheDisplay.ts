@@ -176,6 +176,21 @@ export function bulletinCenter(forecast: Pick<AvalancheForecast, 'center' | 'pie
   return forecast.pieces.length > 0 ? AVALANCHE_PIECES[forecast.pieces[0]].center : '';
 }
 
+// Who prepared a center's bulletins, as avalanche.ca names them.
+const PREPARED_BY: Record<string, string> = {
+  'avalanche-canada': 'Avalanche Canada',
+  'avalanche-quebec': 'Avalanche Québec',
+  kananaskis: 'Kananaskis Mountain Rescue Program',
+  'parks-byk': 'Parks Canada',
+  'parks-glacier': 'Parks Canada',
+  'parks-jasper': 'Parks Canada',
+  'parks-waterton': 'Parks Canada',
+};
+
+export function preparedBy(forecast: Pick<AvalancheForecast, 'center' | 'pieces' | 'issuedBy'>): string {
+  return PREPARED_BY[bulletinCenter(forecast)] ?? forecast.issuedBy;
+}
+
 export const CONFIDENCE_NAMES: Record<string, string> = {
   low: 'Low', moderate: 'Moderate', high: 'High', noRating: 'No Rating',
 };

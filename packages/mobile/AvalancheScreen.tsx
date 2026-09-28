@@ -8,7 +8,7 @@ import { drawText, fillPaint, strokePaint, textWidth } from './skiaPaint';
 import { palette } from './palette';
 import type { TimeFormat } from './settings';
 import {
-  CONFIDENCE_NAMES, DISCLAIMERS, bulletinCenter, ELEVATION_NAMES, PROBLEM_NAMES, ROSE_ELEVATION_NAMES, dangerCell, dangerTables, likelihoodScale,
+  CONFIDENCE_NAMES, DISCLAIMERS, bulletinCenter, preparedBy, ELEVATION_NAMES, PROBLEM_NAMES, ROSE_ELEVATION_NAMES, dangerCell, dangerTables, likelihoodScale,
   sizeScale, stampLabel,
   type Scale,
 } from './avalancheDisplay';
@@ -364,7 +364,7 @@ export default function AvalancheForecastView({ forecast, timeFormat }: { foreca
         <Stamp label="Valid until" value={stamp(forecast.expires)} />
       </View>
       <View style={[styles.stamps, styles.stampsLast]}>
-        <Stamp label="Prepared by" value={forecast.issuedBy} />
+        <Stamp label="Prepared by" value={preparedBy(forecast)} />
         <View style={styles.stampColumn} />
       </View>
 

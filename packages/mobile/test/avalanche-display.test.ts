@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { AVALANCHE_PIECES } from '@weather/protocol';
 import {
-  bulletinCenter, bulletinTimezone, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
+  bulletinCenter, bulletinTimezone, preparedBy, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -144,6 +144,14 @@ describe('bulletinCenter', () => {
     expect(bulletinCenter({ center: '', pieces: [6] })).toBe(AVALANCHE_PIECES[6].center);
     expect(bulletinCenter({ center: 'kananaskis', pieces: [88] })).toBe('kananaskis');
     expect(bulletinCenter({ center: '', pieces: [] })).toBe('');
+  });
+});
+
+describe('preparedBy', () => {
+  it('names the center as avalanche.ca does, from the pieces when the bulletin leaves it out', () => {
+    expect(preparedBy({ center: '', pieces: [88], issuedBy: '' })).toBe('Parks Canada');
+    expect(preparedBy({ center: 'kananaskis', pieces: [], issuedBy: 'Kananaskis' })).toBe('Kananaskis Mountain Rescue Program');
+    expect(preparedBy({ center: '', pieces: [], issuedBy: '' })).toBe('');
   });
 });
 
