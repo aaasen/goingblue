@@ -72,6 +72,9 @@ export interface Palette {
   successTint: string;
   danger: string;
   dangerTint: string;
+  // Stale content: an expired avalanche bulletin.
+  warning: string;
+  warningTint: string;
   // Destructive actions and invalid input.
   destructive: string;
   // The received-segment chips under a multi-message paste.
@@ -125,6 +128,8 @@ const system: Palette = {
   successTint: '#e8f5ec',
   danger: '#c03030',
   dangerTint: '#fde8e8',
+  warning: '#7a5600',
+  warningTint: '#fff4c2',
   destructive: '#cc2222',
   collectTint: '#e8f6ec',
   collectBorder: '#34a853',

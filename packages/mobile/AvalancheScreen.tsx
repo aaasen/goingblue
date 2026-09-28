@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { SkiaPictureView, Skia, matchFont, type SkCanvas, type SkFont, type SkPicture, type SkSVG } from '@shopify/react-native-skia';
 import { ASPECTS, type AvalancheForecast, type AvalancheProblem, type DangerDay, type Elevation } from '@weather/protocol';
 import { DANGER_ICONS, DANGER_ICON_HEIGHT, type DangerIcon } from './dangerIcons';
@@ -330,7 +331,13 @@ export default function AvalancheForecastView({ forecast, timeFormat }: { foreca
   const stamp = (ms: number) => stampLabel(ms, forecast.timezone, timeFormat);
   return (
     <View style={styles.page} onLayout={(e) => setPageW(e.nativeEvent.layout.width)}>
-      <Text style={styles.region}>{forecast.region}</Text>
+      {forecast.expires < Date.now() && (
+        <View style={styles.expired}>
+          <MaterialCommunityIcons name="alert" size={20} color={palette.warning} />
+          <Text style={styles.expiredText}>This forecast is no longer valid</Text>
+          <MaterialCommunityIcons name="alert" size={20} color={palette.warning} />
+        </View>
+      )}
       <View style={styles.stamps}>
         <Stamp label="Date issued" value={stamp(forecast.issued)} />
         <Stamp label="Valid until" value={stamp(forecast.expires)} />
@@ -404,7 +411,11 @@ export default function AvalancheForecastView({ forecast, timeFormat }: { foreca
 
 const styles = StyleSheet.create({
   page: { paddingHorizontal: PAD },
-  region: { fontSize: 22, fontWeight: '700', color: palette.pageTitle, marginBottom: 12 },
+  expired: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12,
+    padding: 12, backgroundColor: palette.warningTint, borderRadius: 10, borderWidth: 1, borderColor: palette.warning,
+  },
+  expiredText: { flex: 1, color: palette.warning, fontSize: 14, fontWeight: '600', lineHeight: 20, textAlign: 'center' },
   stamps: { flexDirection: 'row', gap: 16, marginBottom: 10 },
   stampsLast: { marginBottom: 20 },
   stampColumn: { flex: 1 },
