@@ -30,8 +30,6 @@ export interface DangerCell {
   number: string;
   name: string;
   icon: DangerIcon;
-  // Extreme's cell is black with the high-danger red around it.
-  border?: string;
 }
 
 export function dangerCell(rating: DangerRating): DangerCell {
@@ -46,7 +44,6 @@ export function dangerCell(rating: DangerRating): DangerCell {
     number: `${level + 1}`,
     name: LEVEL_NAME[key],
     icon: key,
-    ...(key === 'extreme' && { border: LEVEL_FILL.high }),
   };
 }
 
@@ -61,7 +58,6 @@ export function highestDanger(day: { alp: DangerRating; tln: DangerRating; btl: 
 export interface ForecastRegion {
   data: GeoJSON.FeatureCollection;
   fill: string;
-  outline: string;
 }
 
 // Where a decoded forecast applies, filled with its first day's highest danger for the map; null
@@ -70,11 +66,9 @@ export function forecastRegion(
   pieces: readonly number[], danger: readonly { alp: DangerRating; tln: DangerRating; btl: DangerRating }[],
 ): ForecastRegion | null {
   if (pieces.length === 0) return null;
-  const cell = dangerCell(danger.length ? highestDanger(danger[0]) : 'noRating');
   return {
     data: pieceFeatures(pieces.map((id) => AVALANCHE_PIECES[id])),
-    fill: cell.fill,
-    outline: cell.border ?? cell.fill,
+    fill: dangerCell(danger.length ? highestDanger(danger[0]) : 'noRating').fill,
   };
 }
 

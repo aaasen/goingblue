@@ -9,7 +9,7 @@ describe('dangerCell', () => {
     expect(dangerCell('low')).toMatchObject({ number: '1', name: 'Low', text: '#1c1c1e', icon: 'low' });
     expect(dangerCell('considerable')).toMatchObject({ number: '3', name: 'Considerable', text: '#1c1c1e' });
     expect(dangerCell('high')).toMatchObject({ number: '4', name: 'High', text: '#ffffff' });
-    expect(dangerCell('extreme')).toMatchObject({ number: '5', name: 'Extreme', border: '#ed1c24', icon: 'extreme' });
+    expect(dangerCell('extreme')).toMatchObject({ number: '5', name: 'Extreme', fill: '#231f20', icon: 'extreme' });
   });
 
   it('shows a band without a level as a gray named cell', () => {
@@ -38,11 +38,11 @@ describe('forecastRegion', () => {
       { alp: 'extreme', tln: 'extreme', btl: 'extreme' },
     ]);
     expect(region?.data.features.map((f) => f.properties?.id)).toEqual([6, 27]);
-    expect(region).toMatchObject({ fill: '#ed1c24', outline: '#ed1c24' });
+    expect(region).toMatchObject({ fill: '#ed1c24' });
   });
 
-  it('rings extreme in red and fills a day without a level in its status color', () => {
-    expect(forecastRegion([6], [{ alp: 'extreme', tln: 'high', btl: 'high' }])).toMatchObject({ fill: '#231f20', outline: '#ed1c24' });
+  it('fills extreme in black and a day without a level in its status color', () => {
+    expect(forecastRegion([6], [{ alp: 'extreme', tln: 'high', btl: 'high' }])).toMatchObject({ fill: '#231f20' });
     expect(forecastRegion([6], [{ alp: 'earlySeason', tln: 'earlySeason', btl: 'earlySeason' }])?.fill).toBe('#0072c6');
     expect(forecastRegion([6], [{ alp: 'offSeason', tln: 'offSeason', btl: 'offSeason' }])?.fill).toBe('#ffffff');
     expect(forecastRegion([6], [])?.fill).toBe('#ffffff');

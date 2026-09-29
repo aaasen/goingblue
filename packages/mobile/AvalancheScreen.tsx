@@ -99,7 +99,7 @@ function DangerTable({ day, label }: { day: DangerDay; label: string }) {
             <View style={[styles.dangerBand, { backgroundColor: band.fill }]}>
               <Text style={styles.dangerBandText}>{ELEVATION_NAMES[band.key]}</Text>
             </View>
-            <View style={[styles.dangerRating, { backgroundColor: cell.fill }, cell.border != null && { borderColor: cell.border, borderWidth: 2 }]}>
+            <View style={[styles.dangerRating, { backgroundColor: cell.fill }]}>
               <SkiaPictureView style={styles.dangerIcon} picture={iconPicture(cell.icon)} />
               <Text style={[styles.dangerRatingText, { color: cell.text }]}>
                 {cell.number ? `${cell.number} – ${cell.name}` : cell.name}

@@ -218,7 +218,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
               <Layer key={`fill-${before}`} id={`region-fills-${before}`} beforeId={before} type="fill"
                 paint={{ 'fill-color': region.fill, 'fill-opacity': REGION_FILL_OPACITY }} />,
               <Layer key={`line-${before}`} id={`region-outlines-${before}`} beforeId={before} type="line"
-                paint={{ 'line-color': region.outline, 'line-width': REGION_LINE_WIDTH }} />,
+                paint={{ 'line-color': region.fill, 'line-width': REGION_LINE_WIDTH }} />,
             ])}
           </GeoJSONSource>
         )}
