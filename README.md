@@ -1,6 +1,6 @@
 # Going Blue: Expedition Weather Forecasts via Satellite
 
-Going Blue is an expedition weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom codec to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, ZOLEO, or iPhone satellite messaging. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927). 
+Going Blue is an expedition weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom codec to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, ZOLEO, or iPhone satellite messaging. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
 
 <img src="packages/mobile/screenshots/readme.png" width="100%" alt="Four screenshots: a 13-day meteogram for Mont Blanc, the Builder tab's location, model and variable options, a Denali forecast with freezing level and pressure-level winds, and a forecast with air quality">
 
@@ -12,15 +12,16 @@ Going Blue is an expedition weather app designed specifically for satellite mess
 
 ## Features
 
-- **Satellite ready**: Get forecasts anywhere in the world, without cell reception. Works with Garmin inReach, ZOLEO, and iPhone satellite messaging. 
+- **Satellite ready**: Get forecasts anywhere in the world, without cell reception. Works with Garmin inReach, ZOLEO, and iPhone satellite messaging.
 - **Hundreds of data points per message**: Uses custom compression optimized for weather data to fit a detailed weather forecast into a single message.
 - **30+ weather models**: Forecasts from high-resolution models like HRRR (3km), HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for your location.
-- **Detailed cloud cover**: See up to 10 levels in the atmosphere to differentiate between high clouds, valley fog, and whiteout conditions. 
+- **Detailed cloud cover**: See up to 10 levels in the atmosphere to differentiate between high clouds, valley fog, and whiteout conditions.
 - **Mountain forecasts**: Pressure-level winds and freezing level for high-altitude mountaineering.
 - **Air quality**: Plan around wildfire smoke and other pollution with AQI forecasts.
-- **Model agreement**: See how well the forecast agrees with models from NOAA, ECMWF, ECCC, and DWD. 
+- **Model agreement**: See how well the forecast agrees with models from NOAA, ECMWF, ECCC, and DWD.
+- **Avalanche forecasts**: Full avalanche forecasts from Avalanche Canada.
 - **Works offline**: All forecasts are saved on your device for comparing multiple models and past forecasts while offline.
-- **Private**: Going Blue requires no account and does not store your name, email, or phone number. 
+- **Private**: Going Blue requires no account and does not store your name, email, or phone number.
 
 ## Architecture
 
@@ -39,7 +40,7 @@ The service is written in TypeScript. There are four packages:
 
 Going Blue uses a Markov model of weather combined with a [range Asymmetric Numeral Systems (rANS)](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) entropy coder. This is a similar entropy coder to what is used in modern compression codecs like [zstd](https://github.com/facebook/zstd) and [JPEG-XL](https://en.wikipedia.org/wiki/JPEG_XL).
 
-### Entropy 
+### Entropy
 
 First, we need to define an important concept: entropy. [Entropy](https://en.wikipedia.org/wiki/Entropy_(information_theory)) is a measure of the average level of uncertainty in a system. It is defined as the sum of the probability of each symbol multiplied by the logarithm of its probability:
 
@@ -51,7 +52,7 @@ Entropy depends on the probability distribution of symbols. For example, if we h
 
 $$H(\text{coin}) = -\left(\tfrac{1}{2} \log_2 \tfrac{1}{2} + \tfrac{1}{2} \log_2 \tfrac{1}{2}\right) = 1 \text{ bit}$$
 
-If we have a coin that has two heads, the entropy is 0 since there is no uncertainty. 
+If we have a coin that has two heads, the entropy is 0 since there is no uncertainty.
 
 $$H(\text{two-headed coin}) = -1 \log_2 1 = 0 \text{ bits}$$
 
@@ -81,7 +82,7 @@ The entropy conditioned on the previous code is only 0.83 bits/symbol, 5.8x smal
 
 ### Huffman Coding
 
-Now that we know the probability distribution and the entropy of the data, we can encode it. To start, we can use Huffman coding, which assigns codes to symbols based on their probability. More likely symbols get shorter codes, less likely symbols get longer ones, and the expected length of the code approaches the entropy of the data. 
+Now that we know the probability distribution and the entropy of the data, we can encode it. To start, we can use Huffman coding, which assigns codes to symbols based on their probability. More likely symbols get shorter codes, less likely symbols get longer ones, and the expected length of the code approaches the entropy of the data.
 
 | Weathercode | P | Bits | Huffman Code |
 |---|---|---|---|
@@ -92,15 +93,15 @@ Now that we know the probability distribution and the entropy of the data, we ca
 | 🌦️ light drizzle | 0.458% | 5 | `11110` |
 | … everything else | 0.192% combined | 6+ | `111110…` |
 
-In this example, the clear -> clear transition is very likely so it gets a 1-bit code: `0`. The clear -> light drizzle transition is unlikely, so it gets a 5-bit code: `11110`. The expected length of the encoded forecast is 1.25 bits/symbol, which is near the 0.83 bits/symbol entropy of the data. This is just the expected length, and the actual length can vary depending on the data. An all-clear forecast takes just 1 bit/symbol to encode while a forecast with rare weathercodes could take even more than 5 bits/symbol. 
+In this example, the clear -> clear transition is very likely so it gets a 1-bit code: `0`. The clear -> light drizzle transition is unlikely, so it gets a 5-bit code: `11110`. The expected length of the encoded forecast is 1.25 bits/symbol, which is near the 0.83 bits/symbol entropy of the data. This is just the expected length, and the actual length can vary depending on the data. An all-clear forecast takes just 1 bit/symbol to encode while a forecast with rare weathercodes could take even more than 5 bits/symbol.
 
 ### range Asymmetric Numeral Systems (rANS)
 
 Huffman coding gets us near the entropy of the data, but it has a major flaw: each code takes at least one bit. Even though the entropy of weathercode is 0.83 bits/symbol, we can only reach 1.25 bits/symbol because of the one-bit floor.
 
-To get around this limitation and get closer to the actual entropy of the data, Going Blue uses [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems#Range_variants_(rANS)_and_streaming). 
+To get around this limitation and get closer to the actual entropy of the data, Going Blue uses [rANS](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems#Range_variants_(rANS)_and_streaming).
 
-The basic idea of rANS is to encode the data in a single large integer. Each integer is mapped to a symbol based on its probability distribution. The mapping is set up so that encoding a likely symbol requires a small increase in the number and encoding a rare symbol requires a large increase. 
+The basic idea of rANS is to encode the data in a single large integer. Each integer is mapped to a symbol based on its probability distribution. The mapping is set up so that encoding a likely symbol requires a small increase in the number and encoding a rare symbol requires a large increase.
 
 Let's start with a simplified example. Say it is clear (`C`) 75% of the time and raining (`R`) 25% of the time. We can assign numbers to each state like this:
 
@@ -109,11 +110,11 @@ Let's start with a simplified example. Say it is clear (`C`) 75% of the time and
    C  C  C  R  C  C  C  R  C  C  C  R  C  C  C  R  C  C  C  R  ...
 ```
 
-When encoding a symbol from state `x`, we find the `x`th occurrence of that symbol. For example, if we start at state 1 with symbol `R`, we find the first occurrence of `R` which is 4. To encode `C` from state 4, we find the 4th occurrence of `C`, which is 5. If we encode another `R`, we find the 5th occurrence of `R`, which is 20. The message `RCR` can be represented as the number 20. 
+When encoding a symbol from state `x`, we find the `x`th occurrence of that symbol. For example, if we start at state 1 with symbol `R`, we find the first occurrence of `R` which is 4. To encode `C` from state 4, we find the 4th occurrence of `C`, which is 5. If we encode another `R`, we find the 5th occurrence of `R`, which is 20. The message `RCR` can be represented as the number 20.
 
 To decode, we walk the process in reverse. At state 20, the symbol is `R` and it is the 5th `R`, so the previous state was 5. At state 5, the symbol is `C` and it is the 4th `C` so the previous state was 4. At 4, the symbol is `R` and it is the 1st `R` so the state goes to 1, which is the end of the message.
 
-The reason rANS works is that encoding a symbol multiplies the state by roughly $1/p$. For symbol `R`, it multiplies the state by $1/(1/4) = 4$, which is about 2 bits. For `C`, it multiplies the state by $1/(3/4) = 4/3$, which is about 0.4 bits. 
+The reason rANS works is that encoding a symbol multiplies the state by roughly $1/p$. For symbol `R`, it multiplies the state by $1/(1/4) = 4$, which is about 2 bits. For `C`, it multiplies the state by $1/(3/4) = 4/3$, which is about 0.4 bits.
 
 rANS gets us very close to the actual entropy of the data. For a more detailed explanation of how rANS works, see this excellent [post](https://kedartatwawadi.github.io/post--ANS/).
 
@@ -218,26 +219,26 @@ Each device has a different character set and message length. Going Blue chooses
 
 Entropy coding requires having accurate statistics about the distribution of each symbol since sequences that aren't represented in the training data will be very expensive to encode. For example, if we trained the codebooks only on tropical weather forecasts, the encoder would assign very long symbols to snow and a forecast in the arctic would be very expensive.
 
-The encoder is trained on over 100k historical forecasts collected from the [Open-Meteo Historical Forecast API](https://open-meteo.com/en/docs/historical-forecast-api). These forecasts are sampled from 10,000 locations across the world. Forecast locations are not uniformly sampled across the globe since that would bias the forecasts strongly towards the ocean. Instead, the forecast points are allocated based on 30 Köppen climate classes in proportion to the square-root of the area of the climate class. This ensures that rare climate classes have enough training data while still allocating more share to more common climate types. 
+The encoder is trained on over 100k historical forecasts collected from the [Open-Meteo Historical Forecast API](https://open-meteo.com/en/docs/historical-forecast-api). These forecasts are sampled from 10,000 locations across the world. Forecast locations are not uniformly sampled across the globe since that would bias the forecasts strongly towards the ocean. Instead, the forecast points are allocated based on 30 Köppen climate classes in proportion to the square-root of the area of the climate class. This ensures that rare climate classes have enough training data while still allocating more share to more common climate types.
 
 Ocean locations are not included in Köppen but they are included in the training data with an 85/15 land/ocean split. This gives the ocean a similar weight to a high-level Köppen climate class (tropical, arid, temperate, continental, polar). Ocean locations are sampled from 6 30° latitude bands with the same `sqrt(area)` allocation as climate classes.
 
 <img src="docs/corpus-map.svg" alt="World map of the corpus sites, colored by Köppen climate group, with ocean sites in latitude bands and the original favorites highlighted">
-    
+
 Training data is pulled from the two year window July 2024 - July 2026. 12 14-day forecasts are collected for each location for an average of 1 forecast every 2 months. This ensures coverage of all seasons while also reducing forecast duplication.
 
 ### Evaluation
 
 1,500 forecast locations are held out for evaluation and never used to train the encoder. 137 of my Windy favorites are also used as an evaluation set since these are the places I actually want weather forecasts for. There is also a small set of 150 peaks used in evaluation to make sure that Going Blue works well in the mountains. There is a custom page for exploring the evaluation results at [going.blue/benchmark](https://going.blue/benchmark).
 
-Fill percentage is the main codec performance metric. 100% represents a forecast filled to maximum range and resolution (13 days, hourly data). Encoding improvements should increase this percentage. 
+Fill percentage is the main codec performance metric. 100% represents a forecast filled to maximum range and resolution (13 days, hourly data). Encoding improvements should increase this percentage.
 
 Some interesting findings from the evaluation:
 1. The median forecast with auto priority has a 13 day range with 2 days at hourly resolution, 5 days at 3h, 3 days at 6h, and the last 3 days at 12h. The 1st-percentile forecast still has 11 days of data with 1 day hourly, 4 days at 3h, and 6 days of 12h.
 1. Forecasts in polar climates (Köppen class E and ocean at 60°-90°N) are the cheapest to encode. Probably because of the polar high and lack of diurnal temperature swings.
 1. Forecasts in tropical climates (Köppen class A) are the most expensive to encode. Probably because of frequent afternoon precipitation, strong diurnal temperature swings, etc. There's a lot more weather happening in the tropics than there is in the arctic.
-1. Ocean forecasts are cheaper than every climate class except the arctic. There are no diurnal temperature swings over open water and winds are more consistent than they are on land. 
-1. Wind is the most expensive variable (steady, gust, direction combined) taking an average of 40.1% of the message. Temperature is the second most expensive at 24.6% followed by weathercode at 19%. Since snow and rain are sparse, they only take up an average of 10.8% combined. 
+1. Ocean forecasts are cheaper than every climate class except the arctic. There are no diurnal temperature swings over open water and winds are more consistent than they are on land.
+1. Wind is the most expensive variable (steady, gust, direction combined) taking an average of 40.1% of the message. Temperature is the second most expensive at 24.6% followed by weathercode at 19%. Since snow and rain are sparse, they only take up an average of 10.8% combined.
 1. A 1st-percentile forecast containing all optional variables (detailed clouds, high altitude winds, freezing level, and precip chance) still delivers 7 days of forecast data at 6h resolution for 3 days and 12h resolution for the next 4 days.
 
 ### Weather Data & Transformation
@@ -246,7 +247,7 @@ Going Blue uses [Open-Meteo](https://open-meteo.com/) for weather data with some
 
 #### Elevation Correction for Temperature and Precipitation
 
-Open-Meteo accepts an elevation parameter for forecasts and adjusts temperature from the model's grid cell elevation using temperature lapse rate. It does not adjust other variables like precipitation type. This can lead to contradictory forecasts in the mountains. For example, a forecast for the summit of Denali may show very low temperatures and rain if it is raining at the grid cell elevation (~3000m for GFS). 
+Open-Meteo accepts an elevation parameter for forecasts and adjusts temperature from the model's grid cell elevation using temperature lapse rate. It does not adjust other variables like precipitation type. This can lead to contradictory forecasts in the mountains. For example, a forecast for the summit of Denali may show very low temperatures and rain if it is raining at the grid cell elevation (~3000m for GFS).
 
 To fix this, rain is remapped to snow if the forecast elevation is above the freezing level. It is also remapped to snow if the temperature is below -2°C to handle inversions and forecast centers that do not support freezing level (GEM, ECMWF). Snow is never remapped to rain. Rain is translated to snow at a 7:1 SWE ratio for parity with Open-Meteo. More accurate snow:liquid mapping may be added in the future.
 
@@ -261,7 +262,7 @@ Freezing drizzle (56/57) and freezing rain (66/67) are not transformed.
 
 Open-Meteo provides cloud cover at various pressure levels. This is calculated based on the relative humidity compared to the critical relative humidity at each pressure level using Sundqvist's formula. The pressure-level cloud data drives the detailed cloud view in the meteogram, which shows clouds at 10 different levels in the atmosphere. This information can help determine what type of clouds are forecast: high cirrus overcast, a lenticular on the summit, or valley fog?
 
-There is a subtle problem with using clouds at each pressure level directly: the pressure-level variable only reports clouds that are exactly at that band. If there is a cloud at 20k but we only pull the 18k and 24k bands, we will miss that cloud entirely. This can lead to inconsistent forecasts where we report "cloudy" in the weathercode but the meteogram shows no clouds. 
+There is a subtle problem with using clouds at each pressure level directly: the pressure-level variable only reports clouds that are exactly at that band. If there is a cloud at 20k but we only pull the 18k and 24k bands, we will miss that cloud entirely. This can lead to inconsistent forecasts where we report "cloudy" in the weathercode but the meteogram shows no clouds.
 
 To fix this, Going Blue attributes low (<3km), mid (3-8km), and high (>8km) cloud cover to their respective pressure levels. The low, mid, and high cloud cover variables are derived from the tens to hundreds of pressure levels within each model, so there are no gaps.
 
@@ -270,11 +271,11 @@ First, each pressure level is associated with a band using geopotential heights.
  - Mid (3-8km): 700, 600, 500, 400 hPa
  - High (>8km): 300 hPa
 
-If the band reports clouds but none of its member levels do, the member levels are assigned clouds based on their relative humidity. Clouds from the low/mid/high band are split between the levels in the band whose humidity is furthest above critical relative humidity. 
+If the band reports clouds but none of its member levels do, the member levels are assigned clouds based on their relative humidity. Clouds from the low/mid/high band are split between the levels in the band whose humidity is furthest above critical relative humidity.
 
 #### Weathercode Summarization
 
-Open-Meteo is an hourly weather API but Going Blue forecast periods range from 1h to 12h. Going Blue summarizes the hourly weathercodes of a period in a single weathercode for the period. Showery codes are used to represent mixed conditions. For example, if it snows 3 hours in a 12h period and is sunny the remaining 9 hours, a "snow showers" code will be used. 
+Open-Meteo is an hourly weather API but Going Blue forecast periods range from 1h to 12h. Going Blue summarizes the hourly weathercodes of a period in a single weathercode for the period. Showery codes are used to represent mixed conditions. For example, if it snows 3 hours in a 12h period and is sunny the remaining 9 hours, a "snow showers" code will be used.
 
 Open-Meteo does not emit mixed rain/snow weathercodes. Going Blue uses a mixed code if the water equivalent of the lesser type of precipitation exceeds 25% of the total precipitation. For example, in a period with 1" of snow (~0.14" water equivalent) and 0.1" of rain, rain accounts for 42% of the precip so it gets a mixed code. With 1" of snow and 0.01" of rain, rain is just a trace at 7% of total precip and the snow code is used.
 
@@ -294,7 +295,7 @@ In practice, PM2.5 and ozone drive the headline AQI with PM10 a distant third. T
 
 Because of this, the headline AQI can be derived from other pollutants if they are already present in the message. If at least PM2.5 and ozone are present, just the residual between the estimated AQI and the actual AQI is sent. The residual is almost nothing (~0.036 bits/period) if PM2.5, ozone, and PM10 are already in the message. With PM2.5 and ozone, the headline AQI only costs 0.275 bits/period on the American scale and 0.653 bits/period on the European. This is significantly cheaper than encoding headline AQI without the constituent variables, which costs roughly 1 bit/period.
 
-Going Blue reports the headline AQI in addition to the dominant pollutant. It can also report the index of any individual pollutant with the exception of Carbon Monoxide, which is US-only and rarely a problem. 
+Going Blue reports the headline AQI in addition to the dominant pollutant. It can also report the index of any individual pollutant with the exception of Carbon Monoxide, which is US-only and rarely a problem.
 
 #### Model Agreement
 
@@ -303,7 +304,7 @@ Going Blue computes a model agreement score that indicates how well the current 
 An agreement score is calculated for each forecast center. The score has 4 levels from 0 (strong disagreement) to 3 (strong agreement). Agreement takes into account temperature, precipitation, and wind. For each variable, the agreement is calculated as a score between 0 (disagreement) and 1 (agreement) like this:
 1. **Temperature**: Absolute difference in °C. Identical temperatures score 1, with a linear scale to total disagreement at 5 °C difference.
 2. **Wind**: Speed is converted to a continuous Beaufort force. Less than 0.5 force difference is 1 with a linear scale to total disagreement at a 3 force difference. Direction is also used if both models report a force of at least 2, since direction means little at low wind speeds. For direction, agreement is a cosine scale from 0° to 180°. The minimum score of direction and speed is used as the total wind score.
-3. **Precipitation**: Precipitation is scored on total water equivalent, combining rain and snow. A period is considered wet if the amount of liquid exceeds a trace amount. If both models report dry, the score is 1. If both report wet, the amounts `a` and `b` are scored like `sqrt(min(a, b) / max(a, b))` so that equal amounts are scored as 1 and large differences approach 0. If one model reports wet and one reports dry, the agreement score ranges from 0.55 (one model dry, one model at trace precip) to 0 (one model dry, one model with significant precip). 
+3. **Precipitation**: Precipitation is scored on total water equivalent, combining rain and snow. A period is considered wet if the amount of liquid exceeds a trace amount. If both models report dry, the score is 1. If both report wet, the amounts `a` and `b` are scored like `sqrt(min(a, b) / max(a, b))` so that equal amounts are scored as 1 and large differences approach 0. If one model reports wet and one reports dry, the agreement score ranges from 0.55 (one model dry, one model at trace precip) to 0 (one model dry, one model with significant precip).
 
 The components are combined using a weighted soft min with precip at 60%, wind at 30%, and temperature at 10%.
 
@@ -317,6 +318,32 @@ Apparent or "feels like" temperature is calculated from temperature, sustained w
 1. **Wind chill**: The [Environment Canada wind chill index](https://en.wikipedia.org/wiki/Wind_chill#North_American_and_United_Kingdom_wind_chill_index) is used when the temperature is <= 10 °C and the wind is > 4.8 km/h.
 2. **Heat index**: The [Rothfusz regression](https://en.wikipedia.org/wiki/Heat_index#Formula) is used when the temperature is >= 27 °C and the humidity is >= 40%.
 3. **Air temperature**: Used when the other rules don't apply. Apparent temperature is the same as the actual temperature.
+
+## Avalanche Forecasts
+
+Going Blue can retrieve full avalanche forecasts, exactly as they appear in the avalanche report, in just 1-2 SMS messages. Forecasts are compressed using a lossless Prediction by Partial Matching (PPM) model fit on historical avalanche forecasts. Since forecasts are fairly formulaic, they compress extremely well, with compression ratios around 15x.
+
+### Compression
+
+An avalanche forecast contains structured data as well as prose. The structured fields are:
+ - Region: Avalanche Canada forecasts do not have fixed regions. The forecast area is broken down into pieces and each forecast covers a set of pieces.
+ - Danger ratings: 3 elevation bands, 3 days. The danger rating is conditioned on the band above it or the previous day's danger rating.
+ - Problem type: Conditioned on the previous problem's type.
+ - Problem elevation, aspect, likelihood, and size: Conditioned on the problem type.
+ - Confidence rating
+ - Validity period
+
+The structured data compresses very well and averages about 29 bits per forecast. Prose takes up the vast majority of the forecast.
+
+To encode the prose, it is first word-tokenized and split into two streams: words and space/punctuation. Splitting it into two streams allows a word to be predicted from the last word instead of the last separator token.
+
+Each section of the forecast (bottom line, problem description, snowpack summary, etc.) has its own word probability model. The model is derived from the historical forecast archive, which goes back to 2022 and contains about 13,000 forecasts. Words are predicted from the preceding 3 words. If a word has not been seen in the current context before, the encoder falls back to a shorter context (preceding 2 words, then previous word). If the word hasn't been seen in a shorter context, it is encoded as raw UTF-8 bytes.
+
+Separators are predicted from the two words surrounding them. The separator model is shared between sections.
+
+Forecasts are encoded using rANS, just like weather forecasts. The probability model is about 6.5MB gzipped and is bundled in the app.
+
+Compression ratios are around 15x, or about 0.5 bits per character. The average avalanche forecast takes 146 bytes. 52% of forecasts fit in 1 SMS and 96% fit in 2. The compression ratio is so high because forecasts use a lot of canned phrases. For example, travel advice and confidence can be compressed at a ratio of 60x because they pull from a set of phrases that the model already knows.
 
 ## Development
 
@@ -370,11 +397,11 @@ pnpm test
  - [`benchmark`](.agents/skills/benchmark/SKILL.md): Regenerate the public encoding benchmark at [going.blue/benchmark](https://going.blue/benchmark)
  - [`codec-version`](.agents/skills/codec-version/SKILL.md): Freeze the codec and bump the codec version.
  - [`database`](.agents/skills/database/SKILL.md): Read the CloudSQL database.
- - [`generate-codebook`](.agents/skills/generate-codebook/SKILL.md): Generate a codebook. 
+ - [`generate-codebook`](.agents/skills/generate-codebook/SKILL.md): Generate a codebook.
  - [`logs`](.agents/skills/logs/SKILL.md): Read gcloud logs.
  - [`trace`](.agents/skills/trace/SKILL.md): Trace a request through Twilio, service logs, and the database.
  - [`twilio`](.agents/skills/twilio/SKILL.md): Read Twilio logs and alerts.
- - [`screenshots`](.agents/skills/screenshots/SKILL.md): Take App Store screenshots. 
+ - [`screenshots`](.agents/skills/screenshots/SKILL.md): Take App Store screenshots.
 
 ### Codec Versioning
 
@@ -382,10 +409,10 @@ The Going Blue codec relies on the client and server having identical codebooks.
 
 #### Codec v2 (App version 1.1.0)
 
- - Added air quality variables: AQI, PM2.5, PM10, ozone, nitrogen dioxide, sulfur dioxide. Supports both American and European scales. 
+ - Added air quality variables: AQI, PM2.5, PM10, ozone, nitrogen dioxide, sulfur dioxide. Supports both American and European scales.
  - Added support for iPhone satellite messaging with multi-part messages.
  - Corrected precipitation type for elevation. Open-Meteo already adjusts temperature from grid cell elevation to forecast elevation using a temperature lapse rate formula. This change also remaps rain to snow when the forecast elevation is above the freezing level or the temperature is less than -2°C. Uses a 7:1 snow:liquid ratio. Weathercode is also remapped.
- - Improved weathercode aggregation to better summarize mixed conditions. 
+ - Improved weathercode aggregation to better summarize mixed conditions.
  - Added model attribution to the meteogram so that the switch between a high-resolution local model and a low-resolution global model is clear.
  - Expanded SMS alphabet from 85 to 124 characters by using almost all of GSM-7 instead of the intersection of GSM-7 and ASCII.
 
@@ -400,24 +427,25 @@ The Going Blue codec relies on the client and server having identical codebooks.
  - Split out rain, snow, and precip chance in the meteogram to improve legibility.
  - Added support for mixed rain/snow weathercodes when there is a substantial amount of each precip type.
  - Improved meteogram rendering speed.
- - Added offline maps with downloadable region packs. 
+ - Added offline maps with downloadable region packs.
  - Added more options to the unit selector.
  - Merged Builder and Decoder tabs into a single page.
 
 #### Codec v4 (App version 1.3.0)
 
  - Added the ICON model from DWD.
- - Added a model agreement score that shows how well the forecast agrees with forecasts from NOAA, ECCC, ECMWF, and DWD. 
- - Added a model comparison mode. To use it, pull forecasts for the same location from multiple models. A comparison switch will appear below the meteogram.  
+ - Added a model agreement score that shows how well the forecast agrees with forecasts from NOAA, ECCC, ECMWF, and DWD.
+ - Added a model comparison mode. To use it, pull forecasts for the same location from multiple models. A comparison switch will appear below the meteogram.
  - Improved meteogram rendering performance so that switching between forecasts feels instant.
  - Added humidity variables: dew point, relative humidity, and feels-like temperature.
- - Expanded detailed cloud cover from 8 to 10 levels, adding 250 and 200 hPa for high peaks. 
+ - Expanded detailed cloud cover from 8 to 10 levels, adding 250 and 200 hPa for high peaks.
 
 #### Codec v5 (App version 1.4.0)
 
- - Added favorite locations
- - Added coordinate input with UTM support
- - Added wet-bulb temperature (derived from temperature, dew point, and elevation)
+ - Added avalanche forecasts from Avalanche Canada.
+ - Added favorite locations.
+ - Added coordinate input with UTM support.
+ - Added wet-bulb temperature (derived from temperature, dew point, and elevation).
 
 ## License
 

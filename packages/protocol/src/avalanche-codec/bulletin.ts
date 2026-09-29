@@ -13,8 +13,10 @@
  *   confidence          one per confidence statement
  *
  * The issue time travels in the message header (wire.ts) and is handed to the decoder; the
- * expiry and the danger days' dates are coded relative to it. The issuing center, region, and time zone are not coded yet:
- * the decoder fills them with UNENCODED.
+ * expiry and the danger days' dates are coded relative to it. The issuing center, issuer,
+ * region, and time zone are not on the wire because the client derives them: the center and
+ * issuer from the decoded piece set, the region name and time zone from the forecast point. The
+ * decoder fills them with UNENCODED.
  */
 import type {
   AvalancheForecast, AvalancheProblem, Aspect, Confidence, DangerRating, Elevation, Likelihood,
@@ -32,7 +34,7 @@ export const SECTION_KINDS = [
   "confidence",
 ] as const;
 
-// Placeholders for the fields the wire does not carry yet.
+// Placeholders for the fields the client derives instead of reading off the wire.
 export const UNENCODED = {
   center: "",
   issuedBy: "",
