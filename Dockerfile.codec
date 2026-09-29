@@ -3,7 +3,7 @@
 # protocol + codec-server only — no Expo/Metro toolchain — so a frozen version stays cheap to
 # rebuild bit-identically when a base-image CVE or upstream change forces it (verify with
 # packages/codec-server: verify-container against the golden corpus).
-FROM node:26-slim
+FROM node:26-slim AS base
 WORKDIR /app
 # Node 26 no longer bundles corepack, so it is installed here; the pnpm version itself still
 # comes from the root package.json "packageManager" field.
@@ -12,16 +12,26 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/codec-server/package.json packages/codec-server/
 # Every workspace manifest must exist for the frozen-lockfile check, including packages this
-# image never builds; the --filter flags keep the actual install to protocol + codec-server.
+# image never builds; the filter keeps the install to codec-server and its workspace dependencies.
 COPY packages/server/package.json packages/server/
 COPY packages/mobile/package.json packages/mobile/
-RUN pnpm install --frozen-lockfile --filter @weather/protocol --filter @weather/codec-server
+
+FROM base AS build
+RUN pnpm install --frozen-lockfile --filter "@weather/codec-server..."
+COPY tsconfig.base.json ./
 COPY packages/protocol packages/protocol
 COPY packages/codec-server packages/codec-server
-COPY tsconfig.base.json ./
 # Models are not in git; this downloads the ones the checkout pins, so a codec-vN rebuild gets
 # exactly its own.
 RUN node packages/protocol/scripts/fetch-models.mjs
 RUN pnpm --filter @weather/protocol build \
  && pnpm --filter @weather/codec-server build
+
+FROM base
+ENV NODE_ENV=production
+RUN pnpm install --frozen-lockfile --prod --filter "@weather/codec-server..."
+COPY --from=build /app/packages/protocol/dist packages/protocol/dist
+COPY --from=build /app/packages/protocol/assets packages/protocol/assets
+COPY --from=build /app/packages/codec-server/dist packages/codec-server/dist
+USER node
 CMD ["node", "packages/codec-server/dist/index.js"]
