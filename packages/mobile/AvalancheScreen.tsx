@@ -507,7 +507,7 @@ const styles = StyleSheet.create({
   weatherLabel: { fontSize: 15, fontWeight: '700', color: palette.text, lineHeight: 22 },
   confidence: { fontWeight: '600', color: palette.text },
   dangerDay: { borderRadius: 12, overflow: 'hidden', marginBottom: 10, backgroundColor: '#ffffff' },
-  dangerDayLabel: { backgroundColor: DAY_HEAD, color: '#ffffff', fontSize: 17, fontWeight: '600', paddingHorizontal: 14, paddingVertical: 12 },
+  dangerDayLabel: { backgroundColor: DAY_HEAD, color: '#ffffff', fontSize: 17, fontWeight: '400', paddingHorizontal: 14, paddingVertical: 12 },
   dangerRow: { flexDirection: 'row', minHeight: 46, marginTop: 2 },
   // Room for "Below Treeline" and no more, so the longest status fits the rating cell on one line.
   dangerBand: { width: 136, justifyContent: 'center', paddingHorizontal: 14, marginRight: 2 },

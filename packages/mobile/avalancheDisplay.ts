@@ -40,7 +40,7 @@ export function dangerCell(rating: DangerRating): DangerCell {
   const key = DANGER_LEVELS[level];
   return {
     fill: LEVEL_FILL[key],
-    text: key === 'high' || key === 'extreme' ? '#ffffff' : '#1c1c1e',
+    text: key === 'extreme' ? '#ffffff' : '#1c1c1e',
     number: `${level + 1}`,
     name: LEVEL_NAME[key],
     icon: key,

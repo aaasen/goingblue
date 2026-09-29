@@ -8,7 +8,7 @@ describe('dangerCell', () => {
   it('numbers the five levels and colors them on the public scale', () => {
     expect(dangerCell('low')).toMatchObject({ number: '1', name: 'Low', text: '#1c1c1e', icon: 'low' });
     expect(dangerCell('considerable')).toMatchObject({ number: '3', name: 'Considerable', text: '#1c1c1e' });
-    expect(dangerCell('high')).toMatchObject({ number: '4', name: 'High', text: '#ffffff' });
+    expect(dangerCell('high')).toMatchObject({ number: '4', name: 'High', text: '#1c1c1e' });
     expect(dangerCell('extreme')).toMatchObject({ number: '5', name: 'Extreme', fill: '#231f20', icon: 'extreme' });
   });
 
