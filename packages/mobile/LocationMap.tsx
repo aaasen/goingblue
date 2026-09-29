@@ -62,7 +62,7 @@ interface Props {
   // A preview (no onPick) that still offers the fullscreen button; the fullscreen map pans and
   // zooms, though a tap picks nothing.
   expandable?: boolean;
-  // Where an avalanche forecast applies, filled in its danger color under the zone outlines.
+  // Where an avalanche forecast applies, filled in its danger color over the zones.
   region?: ForecastRegion | null;
 }
 
@@ -202,23 +202,23 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         {/* A style layer rather than a Marker: markers are native views over the GL surface, so a
             layer always sits under the pin, and a forecast on top of the phone's position keeps the
             pin in front. */}
-        {region && (
-          <GeoJSONSource id="region" data={region.data}>
-            {/* Before the zones, so their outlines draw over it under the same anchors. */}
-            {zoneAnchors.flatMap((before) => [
-              <Layer key={`fill-${before}`} id={`region-fills-${before}`} beforeId={before} type="fill"
-                paint={{ 'fill-color': region.fill, 'fill-opacity': REGION_FILL_OPACITY }} />,
-              <Layer key={`line-${before}`} id={`region-outlines-${before}`} beforeId={before} type="line"
-                paint={{ 'line-color': region.outline, 'line-width': REGION_LINE_WIDTH }} />,
-            ])}
-          </GeoJSONSource>
-        )}
         {zones && (
           <GeoJSONSource id="zones" data={zones}>
             {/* Under the basemap's labels, once per stack (see labelAnchors). */}
             {zoneAnchors.flatMap((before) => [
               <Layer key={`fill-${before}`} id={`zone-fills-${before}`} beforeId={before} type="fill" paint={ZONE_FILL_PAINT} />,
               <Layer key={`line-${before}`} id={`zone-outlines-${before}`} beforeId={before} type="line" paint={ZONE_LINE_PAINT} />,
+            ])}
+          </GeoJSONSource>
+        )}
+        {region && (
+          <GeoJSONSource id="region" data={region.data}>
+            {/* After the zones, so it draws over them under the same anchors. */}
+            {zoneAnchors.flatMap((before) => [
+              <Layer key={`fill-${before}`} id={`region-fills-${before}`} beforeId={before} type="fill"
+                paint={{ 'fill-color': region.fill, 'fill-opacity': REGION_FILL_OPACITY }} />,
+              <Layer key={`line-${before}`} id={`region-outlines-${before}`} beforeId={before} type="line"
+                paint={{ 'line-color': region.outline, 'line-width': REGION_LINE_WIDTH }} />,
             ])}
           </GeoJSONSource>
         )}
@@ -389,7 +389,8 @@ export default function LocationMap({ coord, onPick, height, active = true, user
 const PIN = '#d0433b';
 // The star's fill, on the button and in the map icon.
 const FAVORITE = '#f5b301';
-const ZONE_COLOR = '#1f3f73';
+// Gray, so the pieces don't read as a danger color.
+const ZONE_COLOR = '#6b6b6b';
 const ZONE_LINE_PAINT = { 'line-color': ZONE_COLOR, 'line-opacity': 0.7, 'line-width': 1.2 };
 // A faint tint so a point inside a piece reads as covered.
 const ZONE_FILL_PAINT = { 'fill-color': ZONE_COLOR, 'fill-opacity': 0.08 };

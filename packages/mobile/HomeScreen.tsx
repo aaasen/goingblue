@@ -2163,6 +2163,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                 userCoord={gpsCoords}
                 favorites={favorites}
                 pastPoints={pastPoints}
+                zones={AVALANCHE_ZONES}
                 region={avalancheRegion}
                 expandable
               />
