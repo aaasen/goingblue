@@ -32,6 +32,8 @@
     "avalanche-model": "tsx packages/codec-server/scripts/avalanche/write-model.ts",
     "avalanche-pieces": "tsx packages/codec-server/scripts/avalanche/pieces.ts",
     "avalanche-region": "tsx packages/codec-server/scripts/avalanche/region.ts",
+    "fetch-models": "node packages/protocol/scripts/fetch-models.mjs",
+    "upload-models": "node packages/protocol/scripts/upload-models.mjs",
     "generate": "pnpm --filter @weather/protocol build && tsx packages/codec-server/scripts/generate-codebooks.ts"
   },
   "devDependencies": {

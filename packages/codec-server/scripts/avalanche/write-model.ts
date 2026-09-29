@@ -3,20 +3,24 @@
  *
  * The shipped model is trained on every archived bulletin with a danger rating, with no
  * holdout: pnpm avalanche-benchmark measures the same training on a split. The file is wire
- * format, pinned by the digest in packages/protocol/test/avcan-model.test.ts.
+ * format, pinned by the digest in packages/protocol/test/avcan-model.test.ts. The file is not in
+ * git: this also repins it in packages/protocol/assets/models.json, and `pnpm upload-models`
+ * puts it on R2.
  *
  * Usage: pnpm avalanche-model
  */
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { encodeBulletin, loadModels, packModels } from "@weather/protocol";
+import { encodeBulletin, loadModels, packModels, WIRE_VERSION } from "@weather/protocol";
 import { loadBulletins } from "./corpus.ts";
 import { train } from "./train.ts";
 
-export const MODEL_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "protocol", "assets", "avcan-model.bin.gz");
+const ASSETS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "protocol", "assets");
+export const MODEL_PATH = join(ASSETS, "avcan-model.bin.gz");
+const MANIFEST_PATH = join(ASSETS, "models.json");
 
 function main(): void {
   const docs = loadBulletins();
@@ -35,9 +39,14 @@ function main(): void {
   }
 
   writeFileSync(MODEL_PATH, file);
+  const sha256 = createHash("sha256").update(file).digest("hex");
+  const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
+  manifest["avcan-model.bin.gz"] = { key: `models/avalanche-avcan-v${WIRE_VERSION}-${sha256.slice(0, 16)}.bin.gz`, sha256 };
+  writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n");
   const digest = createHash("sha256").update(packed).digest("hex").slice(0, 16);
   console.log(`wrote ${MODEL_PATH}`);
   console.log(`  ${(packed.length / 1e6).toFixed(1)} MB packed, ${(file.length / 1e6).toFixed(1)} MB gzipped, digest ${digest}`);
+  console.log(`repinned ${MANIFEST_PATH}; run pnpm upload-models before committing it`);
 }
 
 if (process.argv[1] && /write-model\.ts$/.test(process.argv[1])) main();

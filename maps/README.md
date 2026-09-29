@@ -72,7 +72,7 @@ Configure rclone: `rclone config`
 
 Upload to R2:
 ```bash
-rclone copy /data/work-z10 r2:basemap --include 'global-*.pmtiles' --include 'packs/**' --include catalog.json --progress
+rclone copy /data/work-z10 r2:goingblue --include 'global-*.pmtiles' --include 'packs/**' --include catalog.json --progress
 ```
 
 5. Update the basemap bundled in the app.

@@ -12,3 +12,4 @@ docs/private/
 deploy.env
 __pycache__/
 packages/mobile/assets/basemap/
+packages/protocol/assets/*.bin.gz

@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "vitest run"
+    "test": "node scripts/fetch-models.mjs && vitest run"
   },
   "dependencies": {
     "base32768": "^5.0.1"

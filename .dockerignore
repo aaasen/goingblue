@@ -39,3 +39,6 @@ packages/mobile/android/
 # Basemap tooling/outputs and the R2-fetched bundled archives — no image build reads either.
 maps/
 packages/mobile/assets/basemap/
+
+# Models come from R2 in Dockerfile.codec, pinned by packages/protocol/assets/models.json.
+packages/protocol/assets/*.bin.gz

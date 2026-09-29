@@ -10,6 +10,7 @@ data/
 /*.png
 maps/
 packages/mobile/assets/basemap/
+packages/protocol/assets/*.bin.gz
 .env
 deploy.env
 docs/private/

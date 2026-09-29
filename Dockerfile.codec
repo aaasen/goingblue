@@ -19,6 +19,9 @@ RUN pnpm install --frozen-lockfile --filter @weather/protocol --filter @weather/
 COPY packages/protocol packages/protocol
 COPY packages/codec-server packages/codec-server
 COPY tsconfig.base.json ./
+# Models are not in git; this downloads the ones the checkout pins, so a codec-vN rebuild gets
+# exactly its own.
+RUN node packages/protocol/scripts/fetch-models.mjs
 RUN pnpm --filter @weather/protocol build \
  && pnpm --filter @weather/codec-server build
 CMD ["node", "packages/codec-server/dist/index.js"]
