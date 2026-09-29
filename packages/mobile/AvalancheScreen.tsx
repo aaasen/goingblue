@@ -422,11 +422,11 @@ export default function AvalancheForecastView({ forecast, region, timeFormat }: 
         <Section label="Terrain and Travel Advice"><Card><Bullets items={forecast.advice} /></Card></Section>
       )}
 
-      {forecast.problems.length > 0 && (
-        <Section label="Avalanche Problems">
-          {forecast.problems.map((p, i) => <ProblemCard key={i} problem={p} index={i} width={graphicW} fonts={fonts} />)}
-        </Section>
-      )}
+      <Section label="Avalanche Problems">
+        {forecast.problems.length > 0
+          ? forecast.problems.map((p, i) => <ProblemCard key={i} problem={p} index={i} width={graphicW} fonts={fonts} />)
+          : <Card><Prose text="No problems identified." /></Card>}
+      </Section>
 
       {forecast.avalancheSummary ? (
         <Section label="Avalanche Summary"><Card><Prose text={forecast.avalancheSummary} /></Card></Section>
