@@ -88,7 +88,7 @@ const FORECAST_URL = `${API_BASE}/forecast`;
 // How long to wait on the forecast fetch before giving up. A connection the OS calls up but that
 // carries nothing — a captive portal, a bar of stalled signal — otherwise hangs on the platform's
 // own timeout, a minute of spinner with nothing to show for it.
-const FETCH_TIMEOUT_MS = 15000;
+const FETCH_TIMEOUT_MS = 20000;
 // Shown both under a greyed-out Get Forecast and when the fetch times out: the same fact either
 // way, and both times the answer is to take one of the other two routes — which now means changing
 // the device rather than reaching for a different button.

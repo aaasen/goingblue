@@ -176,9 +176,9 @@ export function toForecast(raw: RawProduct, pieces: number[]): AvalancheForecast
 
 // Overridable so tests can replay recorded responses.
 const API = process.env["AVCAN_BASE_URL"] ?? "https://api.avalanche.ca";
-// Inside the gateway's 15 s budget for the whole codec call. An archive query the API has not
+// Inside the gateway's 20 s budget for the whole codec call. An archive query the API has not
 // cached takes about 7 s; the gateway retries a timeout, by which time the API has it cached.
-const FETCH_TIMEOUT_MS = 10_000;
+const FETCH_TIMEOUT_MS = 15_000;
 
 // The product covering a point at an instant, or null when no center forecasts there then. The
 // API answers both of those with an empty product rather than an error. Without an instant it
