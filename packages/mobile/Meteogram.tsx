@@ -129,8 +129,7 @@ const ROW_H = {
 // 6 hours at 5 mm drew a fifth of it, and a drizzle and a downpour landed a few pixels apart.
 //
 // Full scale is stated for a SIX-HOUR period, at 20 of the wire's 64 sqrt-companded steps
-// (RAIN_K), and read off in the same companding the areas always used — sqrt(mm / 144) is exactly
-// level / 63, so this is that curve with its top moved down.
+// (RAIN_K).
 const PRECIP_FULL_SCALE_LEVELS = 20;
 const PRECIP_FULL_SCALE_6H = (PRECIP_FULL_SCALE_LEVELS / RAIN_K) ** 2; // ≈ 14.5 mm eq
 const PRECIP_REF_HOURS = 6;
@@ -149,7 +148,10 @@ const precipNorm = (mmEq: number, stepHours: number) =>
 // The window's own peak takes the top back over once it passes full scale, so a genuine storm is
 // never clipped — it just compresses everything under it, which is what a storm does to a row.
 const precipScaleOf = (peakNorm: number) => Math.max(1, peakNorm);
-const accumFrac = (norm: number, scale: number) => Math.min(1, Math.sqrt(norm / scale));
+// Height rises as the 0.75 power of the amount: steep enough that a trace stays a sliver and
+// amounts compare roughly in proportion, while light rain still clears the floor.
+const PRECIP_CURVE_POWER = 0.75;
+const accumFrac = (norm: number, scale: number) => Math.min(1, (norm / scale) ** PRECIP_CURVE_POWER);
 // Where a precip row's amount sits, from the row's top — the MIDDLE of the digits, which is what
 // centerText takes (it works the baseline out from the font). Down near the floor of the row, so
 // the number reads as a label lying on the area rather than as a value floating over it. The rail
