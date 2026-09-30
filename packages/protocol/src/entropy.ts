@@ -23,7 +23,7 @@ import {
   AGREEMENT_WEIGHTS_BY_LEAD,
 } from "./codebooks/index.gen.js";
 import {
-  AGREEMENT_CUTS, AGREEMENT_LEAD_EDGES, AGREEMENT_CENTERS,
+  AGREEMENT_PRECIP_RATE_CUTS, AGREEMENT_MATRIX, AGREEMENT_LEAD_EDGES, AGREEMENT_CENTERS,
 } from "./constants.js";
 import {
   buildRansTable, symCostBits, ransEncode, ransReader, quantizeFreqs,
@@ -811,12 +811,13 @@ export const WIRE_CODEBOOKS = {
   rans: { probBits: RANS_PROB_BITS, stateLow: RANS_L, wordBits: RANS_WORD_BITS },
   ...bundleOf(BASE_TABLES),
   airQuality: airQualityBundle,
-  // Model agreement: the geometry travels with the weights — the cuts give a level its meaning
-  // (like an AQI ladder), the lead edges key the tables, and the center order + horizons define
+  // Model agreement: the geometry travels with the weights — the rate cuts and matrix give a
+  // level its meaning (like an AQI ladder), the lead edges key the tables, and the center order + horizons define
   // which pair each series is and where its free clamp ends.
   agreement: {
     byLead: AGREEMENT_WEIGHTS_BY_LEAD.map((rows) => rows.map(qf)),
-    cuts: AGREEMENT_CUTS,
+    precipRateCuts: AGREEMENT_PRECIP_RATE_CUTS,
+    matrix: AGREEMENT_MATRIX,
     leadEdges: AGREEMENT_LEAD_EDGES,
     centers: AGREEMENT_CENTERS.map((c) => ({ bit: c.bit, horizonHours: c.horizonHours })),
     noData: AGREEMENT_NO_DATA,

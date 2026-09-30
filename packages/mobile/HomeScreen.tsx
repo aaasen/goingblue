@@ -303,8 +303,8 @@ const VAR_GROUPS: VarGroup[] = [
   },
   {
     value: 'agreement', code: 'g', label: 'Model Agreement', vars: [VAR_CODES.g],
-    desc: 'How well the other forecast centers agree with the precip, wind, and temperature '
-      + 'of this forecast.',
+    desc: 'How well the other forecast centers agree with the amount of precipitation in '
+      + 'this forecast.',
   },
   {
     value: 'aqi', code: 'a', label: 'AQI (Dominant pollutant)', vars: [VAR_CODES.a],

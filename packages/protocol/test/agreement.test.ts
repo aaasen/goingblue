@@ -3,7 +3,7 @@ import {
   messageToString, messageFromString, encodeBreakdown,
   WIRE_VERSION, MODE_RANGE, VAR, ALWAYS_VARS,
   AGREEMENT_CENTERS, agreementPairIdxs, agreementPeriodCount,
-  quantAgreement, AGREEMENT_CUTS, agreementLeadBucket,
+  agreementLeadBucket,
   type ForecastMessage, type Period, type RequestContext, type Variable,
 } from "../src/index.js";
 
@@ -88,8 +88,5 @@ describe("model agreement column", () => {
     expect(agreementLeadBucket(47)).toBe(0);
     expect(agreementLeadBucket(48)).toBe(1);
     expect(agreementLeadBucket(240)).toBe(3);
-    expect(quantAgreement(0)).toBe(0);
-    expect(quantAgreement(AGREEMENT_CUTS[0])).toBe(1);
-    expect(quantAgreement(1)).toBe(3);
   });
 });

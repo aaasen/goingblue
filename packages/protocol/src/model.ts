@@ -121,7 +121,7 @@ export interface Period {
   vis_km?: number;        // 0–15 km
 
   // Model agreement: one level (0 = strong disagreement .. 3 = strong agreement, see
-  // AGREEMENT_CUTS in constants.ts) per AGREEMENT_CENTERS entry, in that order. null where the
+  // AGREEMENT_MATRIX in constants.ts) per AGREEMENT_CENTERS entry, in that order. null where the
   // pair carries no reading: the center IS the served model, the period is past that center's
   // horizon clamp, or the center's data had a ragged edge (the wire's no-data symbol). Absent
   // altogether when the variable wasn't requested.

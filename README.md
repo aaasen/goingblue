@@ -299,16 +299,22 @@ Going Blue reports the headline AQI in addition to the dominant pollutant. It ca
 
 #### Model Agreement
 
-Going Blue computes a model agreement score that indicates how well the current forecast agrees with the American, Canadian, European, and German centers. This is useful for judging forecast confidence.
+Going Blue computes a model agreement score that indicates how well the forecast agrees with forecasts from the American, Canadian, European, and German centers. This is useful for judging forecast confidence and uncertainty in storm timing.
 
-An agreement score is calculated for each forecast center. The score has 4 levels from 0 (strong disagreement) to 3 (strong agreement). Agreement takes into account temperature, precipitation, and wind. For each variable, the agreement is calculated as a score between 0 (disagreement) and 1 (agreement) like this:
-1. **Temperature**: Absolute difference in °C. Identical temperatures score 1, with a linear scale to total disagreement at 5 °C difference.
-2. **Wind**: Speed is converted to a continuous Beaufort force. Less than 0.5 force difference is 1 with a linear scale to total disagreement at a 3 force difference. Direction is also used if both models report a force of at least 2, since direction means little at low wind speeds. For direction, agreement is a cosine scale from 0° to 180°. The minimum score of direction and speed is used as the total wind score.
-3. **Precipitation**: Precipitation is scored on total water equivalent, combining rain and snow. A period is considered wet if the amount of liquid exceeds a trace amount. If both models report dry, the score is 1. If both report wet, the amounts `a` and `b` are scored like `sqrt(min(a, b) / max(a, b))` so that equal amounts are scored as 1 and large differences approach 0. If one model reports wet and one reports dry, the agreement score ranges from 0.55 (one model dry, one model at trace precip) to 0 (one model dry, one model with significant precip).
+An agreement score is calculated for each forecast center. Agreement only considers precipitation. To calculate the score, take the forecast's average hourly precipitation (combined rain and snow water equivalent) over the period:
+ - None: 0 mm/h
+ - Trace: < 0.25 mm/h
+ - Light: 0.25-1 mm/h
+ - Heavy: >= 1 mm/h
 
-The components are combined using a weighted soft min with precip at 60%, wind at 30%, and temperature at 10%.
+Then the agreement is scored from 0 (strong disagreement) to 3 (strong agreement) by comparing the forecast precipitation level to the level forecast by each other forecast center:
 
-The combined agreement score (0 to 1) is then mapped to an agreement level: strong disagreement, weak disagreement, weak agreement, strong agreement. The thresholds are chosen to roughly align to quartiles of actual agreement scores calculated from live forecasts.
+|           | None | Trace | Light | Heavy |
+|-----------|------|-------|-------|-------|
+| **None**  | 3    | 1     | 0     | 0     |
+| **Trace** | 1    | 3     | 2     | 1     |
+| **Light** | 0    | 2     | 3     | 2     |
+| **Heavy** | 0    | 1     | 2     | 3     |
 
 #### Dew Point, Relative Humidity, and Apparent Temperature
 
@@ -446,6 +452,7 @@ The Going Blue codec relies on the client and server having identical codebooks.
  - Added favorite locations.
  - Added coordinate input with UTM support.
  - Added wet-bulb temperature (derived from temperature, dew point, and elevation).
+ - Simplified model agreement to consider only precip and make it easier to interpret.
 
 ## License
 

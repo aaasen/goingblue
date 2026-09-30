@@ -109,17 +109,20 @@ export const AGREEMENT_CENTERS = [
   { bit: 4, label: "DE", horizonHours: 180 }, // MODEL_BIT.DE — DWD ICON seamless
 ] as const;
 
-// The wire's four agreement levels (0 = strong disagreement .. 3 = strong agreement), cut from
-// the continuous 0..1 score at these thresholds. WIRE FORMAT (digest-pinned): the cuts give a
-// level its physical meaning, exactly like an AQI ladder — provisional quartiles of the
-// 2026-09-01 live multi-model snapshot, to be re-derived as snapshots accumulate.
+// The wire's four agreement levels (0 = strong disagreement .. 3 = strong agreement) are read
+// from AGREEMENT_MATRIX by each side's precip category: None when the period's rain and snow
+// both quantize to 0 on the wire, otherwise Trace / Light / Heavy by the mean hourly liquid-
+// equivalent rate cut at AGREEMENT_PRECIP_RATE_CUTS (mm/h). WIRE FORMAT (digest-pinned): the
+// cuts and matrix give a level its meaning, exactly like an AQI ladder.
 export const AGREEMENT_LEVELS = 4;
-export const AGREEMENT_CUTS = [0.45, 0.63, 0.88] as const;
-export function quantAgreement(score: number): number {
-  let lv = 0;
-  while (lv < AGREEMENT_CUTS.length && score >= AGREEMENT_CUTS[lv]) lv++;
-  return lv;
-}
+export const AGREEMENT_PRECIP_RATE_CUTS = [0.25, 1.0] as const;
+export const AGREEMENT_MATRIX = [
+  //  None Trace Light Heavy
+  [3, 1, 0, 0], // None
+  [1, 3, 2, 1], // Trace
+  [0, 2, 3, 2], // Light
+  [0, 1, 2, 3], // Heavy
+] as const;
 
 // Codebook lead-time axis: agreement decays with forecast lead, so the tables are keyed by the
 // period's start offset (hours from the first period's start) bucketed at these edges.
