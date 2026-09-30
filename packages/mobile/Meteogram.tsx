@@ -167,6 +167,18 @@ const PRECIP_PLOT_PAD = 4;
 // thinner one, which is exactly the softening wanted here.
 const PRECIP_EDGE_W = 0.75;
 
+// The temperature axis: the forecast's range with 1°C of headroom either side, widened about its
+// middle to at least TEMP_MIN_SPAN_C so a forecast that holds within a degree or two reads as flat
+// rather than as one-degree quantization steps blown up to the full height of the area.
+const TEMP_MIN_SPAN_C = 20;
+function tempDomain(lo: number, hi: number): { tMin: number; tMax: number } {
+  const tMin = lo - 1;
+  const tMax = hi + 1;
+  if (tMax - tMin >= TEMP_MIN_SPAN_C) return { tMin, tMax };
+  const mid = (tMin + tMax) / 2;
+  return { tMin: mid - TEMP_MIN_SPAN_C / 2, tMax: mid + TEMP_MIN_SPAN_C / 2 };
+}
+
 // The freezing-level row plots the 0°C isotherm over the full row height, with its per-column
 // altitudes centered on the row — the curve passes behind them. Like the temperature area, the plot
 // is normalized to this forecast's own range — but floored at a minimum span, since a level that
@@ -1565,8 +1577,9 @@ function recordStrip({ periods, zoned, steps, units, W, fonts, dayGroups }: {
   // glyph and high.
   const temps: number[] = [];
   periods.forEach((p) => { if (p.temp_c != null) temps.push(p.temp_c); });
-  const tMin = temps.length ? Math.min(...temps) - 1 : 0;
-  const tMax = temps.length ? Math.max(...temps) + 1 : 1;
+  const { tMin, tMax } = temps.length
+    ? tempDomain(Math.min(...temps), Math.max(...temps))
+    : { tMin: 0, tMax: 1 };
   const plottedTemps = periods.map((p) => p.temp_c);
   const silTop = graphTop + 2;
   const silBottom = graphTop + STRIP_TEMP_H;
@@ -2048,8 +2061,9 @@ function buildSceneStatics({ periods, rows, steps, elevation, units, fonts }: {
   periods.forEach((p) => { if (p.temp_c != null) temps.push(p.temp_c); });
   const dews = periods.map((p) => (p.temp_c == null || p.dewpoint_c == null ? null : Math.min(p.dewpoint_c, p.temp_c)));
   const dewsPresent = dews.filter((d): d is number => d != null);
-  const tMin = temps.length ? Math.min(...temps, ...dewsPresent) - 1 : 0;
-  const tMax = temps.length ? Math.max(...temps) + 1 : 1;
+  const { tMin, tMax } = temps.length
+    ? tempDomain(Math.min(...temps, ...dewsPresent), Math.max(...temps))
+    : { tMin: 0, tMax: 1 };
   let tempRowBottom = ROW_H.DATE;
   for (const row of rows) {
     tempRowBottom += row.height;
