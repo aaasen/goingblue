@@ -14,7 +14,7 @@ export interface ShotRequest {
   vars: readonly Variable[];
 }
 
-export interface Shot {
+export interface WeatherShot {
   name: string;
   lat: number;
   lon: number;
@@ -22,6 +22,27 @@ export interface Shot {
   device: DeviceCode;
   messages: number;
   requests: readonly ShotRequest[];
+}
+
+// One avalanche request: the bulletin for `day` ("YYYY-MM-DD", sent as `y:`) at the point.
+export interface AvalancheShot {
+  name: string;
+  lat: number;
+  lon: number;
+  device: DeviceCode;
+  day: string;
+  // Saved as a favorite at the shot's point under this name, so the app names the point with it.
+  favorite?: string;
+}
+
+export type Shot = WeatherShot | AvalancheShot;
+
+export function isAvalancheShot(shot: Shot): shot is AvalancheShot {
+  return 'day' in shot;
+}
+
+export function requestCount(shot: Shot): number {
+  return isAvalancheShot(shot) ? 1 : shot.requests.length;
 }
 
 // Internet: the uncapped route, so every shot carries the whole forecast at full resolution.
@@ -56,6 +77,11 @@ export const SHOTS: readonly Shot[] = [
     name: 'mont-blanc', lat: 45.8326, lon: 6.8652, mode: MODE_AUTO, ...INTERNET,
     requests: [{ model: 'best', vars: [VAR.dewpoint, VAR.freeze, VAR.clouds] }],
   },
+  {
+    // Rogers Pass, Glacier National Park.
+    name: 'glacier', lat: 51.30098, lon: -117.51949, device: INTERNET.device, day: '2026-02-27',
+    favorite: 'Rogers Pass',
+  },
 ];
 
 // A well-formed account token that no account was ever minted for. The codec server only checks
@@ -72,4 +98,5 @@ export const SEED_SETTINGS: Record<string, string> = {
   time_format: '12h',
   aqi_scale: 'us',
   builder_device: 'internet',
+  hide_expired_banner: 'true',
 };

@@ -10,10 +10,10 @@
 // keeps that date through the seed. Re-recording replaces only the named shots' files. Commit
 // the fixture afterward.
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { WIRE_VERSION, wireCodec } from '@weather/protocol';
-import { SHOTS } from '../screenshots/shots.mjs';
-import { FIXTURE_DIR, fixturePath, requestText, shotByName, upstreamKey, type FixtureRequest, type ShotFixture } from './shot-fixtures.mjs';
-import { fetchForecast, parseRequest, splitReplyFor } from '../../codec-server/src/forecast.js';
+import { WIRE_VERSION } from '@weather/protocol';
+import { SHOTS, isAvalancheShot, requestCount } from '../screenshots/shots.mjs';
+import { FIXTURE_DIR, encodeReply, fixturePath, requestText, shotByName, upstreamKey, type FixtureRequest, type ShotFixture } from './shot-fixtures.mjs';
+import { parseRequest } from '../../codec-server/src/forecast.js';
 
 const args = process.argv.slice(2);
 const shots = args.includes('--all') ? SHOTS : args.map(shotByName);
@@ -40,15 +40,18 @@ mkdirSync(FIXTURE_DIR, { recursive: true });
 
 for (const shot of shots) {
   const requests: FixtureRequest[] = [];
-  for (let i = 0; i < shot.requests.length; i++) {
-    const request = requestText(shot, i, startEpochHour);
+  for (let i = 0; i < requestCount(shot); i++) {
+    // An avalanche shot is requested on its bulletin's day, at the hour the codec anchors `y:` to,
+    // so the app dates it with the bulletin rather than with the recording.
+    const hour = isAvalancheShot(shot) ? Date.parse(`${shot.day}T19:00:00Z`) / 3600000 : startEpochHour;
+    const request = requestText(shot, i, hour);
     const params = parseRequest(request);
     if (params.errors.length) throw new Error(`${shot.name}: ${params.errors.join('; ')}\n  ${request}`);
     recording = {};
-    const { encoded } = await fetchForecast(params, wireCodec);
-    const parts = splitReplyFor(params, encoded, wireCodec.headerChars);
+    const parts = await encodeReply(params);
     requests.push({ request, responses: recording });
-    console.log(`${shot.name} m:${shot.requests[i].model}: ${parts.length} message(s), ${Object.keys(recording).length} upstream responses`);
+    const what = isAvalancheShot(shot) ? `y:${shot.day}` : `m:${shot.requests[i].model}`;
+    console.log(`${shot.name} ${what}: ${parts.length} message(s), ${Object.keys(recording).length} upstream responses`);
     await new Promise((r) => setTimeout(r, 500));
   }
   const fixture: ShotFixture = { shot: shot.name, recordedAt: new Date().toISOString(), protocolVersion: WIRE_VERSION, requests };

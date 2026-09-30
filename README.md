@@ -2,7 +2,7 @@
 
 Going Blue is an expedition weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom codec to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, ZOLEO, or iPhone satellite messaging. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
 
-<img src="packages/mobile/screenshots/readme.png" width="100%" alt="Four screenshots: a 13-day meteogram for Mont Blanc, the Builder tab's location, model and variable options, a Denali forecast with freezing level and pressure-level winds, and a forecast with air quality">
+<img src="packages/mobile/screenshots/readme.png" width="100%" alt="Five screenshots: a Mont Blanc meteogram with humidity, freezing level, and detailed clouds; Denali with freezing level and pressure-level winds; cloud cover on Jiehkkevarri; model agreement for Monte Fitz Roy; and the Avalanche Canada forecast for Rogers Pass">
 
 ## How it works
 

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { SkiaPictureView, Skia, matchFont, type SkCanvas, type SkFont, type SkPicture, type SkSVG } from '@shopify/react-native-skia';
@@ -8,7 +8,7 @@ import { drawText, fillPaint, strokePaint, textWidth } from './skiaPaint';
 import { palette } from './palette';
 import InfoModal from './components/InfoModal';
 import Section from './components/Section';
-import type { TimeFormat } from './settings';
+import { loadHideExpiredBanner, type TimeFormat } from './settings';
 import {
   CONFIDENCE_NAMES, DANGER_SCALE, DANGER_SCALE_INTRO, DISCLAIMERS, bulletinCenter, preparedBy, ELEVATION_NAMES, PROBLEM_NAMES, ROSE_ELEVATION_NAMES, dangerCell, dangerTables, likelihoodScale,
   sizeScale, stampLabel,
@@ -386,12 +386,14 @@ export default function AvalancheForecastView({ forecast, region, timeFormat }: 
   // The page's width, measured on layout; the pictures draw to what is left inside a card.
   const [pageW, setPageW] = useState(0);
   const [scaleInfo, setScaleInfo] = useState(false);
+  const [hideExpired, setHideExpired] = useState(false);
+  useEffect(() => { loadHideExpiredBanner().then(setHideExpired); }, []);
   const graphicW = pageW - 2 * PAD - 2 * CARD_PAD;
   const stamp = (ms: number) => stampLabel(ms, forecast.timezone, timeFormat);
   const disclaimer = DISCLAIMERS[bulletinCenter(forecast)];
   return (
     <View style={styles.page} onLayout={(e) => setPageW(e.nativeEvent.layout.width)}>
-      {forecast.expires < Date.now() && (
+      {forecast.expires < Date.now() && !hideExpired && (
         <View style={styles.expired}>
           <MaterialCommunityIcons name="alert" size={20} color={palette.warning} />
           <Text style={styles.expiredText}>This forecast is no longer valid</Text>

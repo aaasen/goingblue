@@ -44,6 +44,7 @@ CAPTIONS_LIST = [
     ("cloud", "Avoid whiteouts and flat light with detailed cloud cover"),
     ("aqi", "Plan around wildfire smoke with AQI forecasts"),
     ("agreement", "Compare forecasts from NOAA, ECMWF, GEM, and ICON models"),
+    ("avalanche", "Avalanche Canada forecasts for hut trips and ski traverses"),
 ]
 
 # The Google Play set uses the same shots in the same order; a caption here replaces the App
@@ -100,12 +101,12 @@ LINE_SPACING = 1.16
 # The variable system font; 'Bold' is the named instance matching RN's fontWeight 700.
 FONT_PATH = "/System/Library/Fonts/SFNS.ttf"
 
-# The README's one image: the first READERS_COMBO_N framed frames butted together. No gutter
+# The README's one image: the README_SHOTS frames, in this order, butted together. No gutter
 # between them — every frame carries the same vertical sky ramp, so the seams fall on identical
 # colour at every row and disappear, and the devices are already held apart by their own side
 # margins. Written at 2x the width GitHub renders a README at, which is where the phone UI stops
 # being legible below.
-README_COMBO_N = 5
+README_SHOTS = ["overview", "altitude", "cloud", "agreement", "avalanche"]
 README_COMBO_W = 2560
 
 HERE = Path(__file__).resolve().parent
@@ -266,26 +267,29 @@ def main() -> None:
     caption_zone_h = max(len(w) for w in wrapped) * int(font.size * LINE_SPACING)
 
     written = set()
-    combo: list[Image.Image] = []
+    combo: dict[str, Image.Image] = {}
     for i, ((name, _), lines) in enumerate(zip(CAPTIONS_LIST, wrapped)):
         src = src_dir / f"{name}.png"
         out = out_dir / f"{i + 1:02d}-{name}.png"
         img = frame(src, lines, font, caption_zone_h, (canvas_w, canvas_h), platform["radius_ratio"])
         img.save(out)
         written.add(out.name)
-        if len(combo) < README_COMBO_N:
-            combo.append(img)
+        if name in README_SHOTS:
+            combo[name] = img
         print(f"{out.name}  {img.width}x{img.height}  ({len(lines)} lines @ {font.size}px)")
 
     # The README shows the App Store set only.
     if args.out is None and not args.android and combo:
+        missing = [name for name in README_SHOTS if name not in combo]
+        if missing:
+            sys.exit("README_SHOTS not in CAPTIONS_LIST: " + ", ".join(missing))
         readme_combo = src_dir / "readme.png"
-        strip = Image.new("RGB", (canvas_w * len(combo), canvas_h))
-        for i, img in enumerate(combo):
-            strip.paste(img, (i * canvas_w, 0))
+        strip = Image.new("RGB", (canvas_w * len(README_SHOTS), canvas_h))
+        for i, name in enumerate(README_SHOTS):
+            strip.paste(combo[name], (i * canvas_w, 0))
         h = round(README_COMBO_W * strip.height / strip.width)
         strip.resize((README_COMBO_W, h), Image.LANCZOS).save(readme_combo)
-        print(f"{readme_combo.name}  {README_COMBO_W}x{h}  (frames 1-{len(combo)})")
+        print(f"{readme_combo.name}  {README_COMBO_W}x{h}  ({', '.join(README_SHOTS)})")
 
     # Reordering CAPTIONS_LIST or benching an entry leaves its framed output behind under the old
     # number, and a stale frame sitting next to the real ones is a plausible thing to upload by

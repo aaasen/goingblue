@@ -13,9 +13,12 @@ import {
   MODEL_BIT, MODE_AUTO, MODE_DETAIL, MODE_NAMES, MODE_RANGE, WIRE_HEADER_CHARS, WIRE_VERSION,
   reassembleReply, varGroupCodesFor, windLevelsToken, wireCodec, type RequestContext,
 } from '@weather/protocol';
+import { serveAvalanche } from '../../codec-server/src/avalanche.js';
 import { fetchForecast, parseRequest, splitReplyFor, type ForecastParams } from '../../codec-server/src/forecast.js';
+import type { AvalancheContext } from '../cache';
+import type { Favorite } from '../favorites';
 import { offsetHoursAt } from '../timezone';
-import { SEED_SETTINGS, SEED_TOKEN, SHOTS, type Shot } from '../screenshots/shots.mjs';
+import { SEED_SETTINGS, SEED_TOKEN, SHOTS, isAvalancheShot, requestCount, type Shot } from '../screenshots/shots.mjs';
 
 export const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'screenshots', 'fixtures');
 
@@ -54,7 +57,7 @@ export function requestCode(shot: Shot, index: number): number {
   let code = 0;
   for (const s of SHOTS) {
     if (s === shot) return code + index;
-    code += s.requests.length;
+    code += requestCount(s);
   }
   throw new Error(`shot "${shot.name}" is not in SHOTS`);
 }
@@ -62,6 +65,12 @@ export function requestCode(shot: Shot, index: number): number {
 // Mirrors HomeScreen's buildMsg token for token; the server parses this back into the context
 // the app would have stored, which is what seedSlot recovers.
 export function requestText(shot: Shot, index: number, startEpochHour: number): string {
+  if (isAvalancheShot(shot)) {
+    return [
+      `v${WIRE_VERSION}`, `${shot.lat.toFixed(4)},${shot.lon.toFixed(4)}`, 'f:a', `d:${shot.device}`,
+      `u:${SEED_TOKEN}`, `k:${requestCode(shot, index)}`, `t:${startEpochHour}`, `y:${shot.day.replace(/-/g, '')}`,
+    ].join(' ');
+  }
   const { model, vars } = shot.requests[index];
   const allVars = new Set(vars);
   const parts = [`v${WIRE_VERSION}`, `${shot.lat.toFixed(4)},${shot.lon.toFixed(4)}`];
@@ -93,6 +102,18 @@ export function loadFixtures(): ShotFixture[] {
     .map((f) => JSON.parse(readFileSync(join(FIXTURE_DIR, f), 'utf8')) as ShotFixture);
 }
 
+// A parsed request through the codec server, as the reply's messages. The upstream fetches go
+// through globalThis.fetch, which the caller records or stubs.
+export async function encodeReply(params: ForecastParams): Promise<string[]> {
+  if (params.kind === 'avalanche') {
+    const result = await serveAvalanche(params);
+    if (result.kind !== 'ok') throw new Error(`no avalanche forecast at ${params.lat},${params.lon} for ${params.day}`);
+    return result.replies;
+  }
+  const { encoded } = await fetchForecast(params, wireCodec);
+  return splitReplyFor(params, encoded, wireCodec.headerChars);
+}
+
 // One request through the pipeline with fetch serving the recorded bytes. A URL the current
 // codec asks for that the recording lacks is the one legitimate reason to re-record a shot, so
 // it fails by name instead of falling through to a live fetch.
@@ -107,8 +128,7 @@ export async function replay(fixture: ShotFixture, entry: FixtureRequest): Promi
     return new Response(Buffer.from(body, 'base64'), { status: 200 });
   }) as typeof fetch;
   try {
-    const { encoded } = await fetchForecast(params, wireCodec);
-    return { params, wire: splitReplyFor(params, encoded, wireCodec.headerChars).join('\n') };
+    return { params, wire: (await encodeReply(params)).join('\n') };
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -117,7 +137,7 @@ export async function replay(fixture: ShotFixture, entry: FixtureRequest): Promi
 // The persisted shape of a cache.ts Slot: vars as an array, everything else as stored.
 export interface SeedSlot {
   code: number;
-  context: Omit<RequestContext, 'vars'> & { vars: string[] };
+  context: (Omit<RequestContext, 'vars'> & { vars: string[] }) | AvalancheContext;
   label: string;
   requestedAt: number;
   encoded: string;
@@ -128,11 +148,28 @@ export interface SeedSlot {
 // attachResponse does (reassembled, not split). Dates are the recorded ones: the forecast reads
 // as it did on the day it was recorded, and the app's now marker falls outside it once that day
 // has passed.
-export function seedSlot(params: ForecastParams, wire: string): SeedSlot {
+// The point is the shot's own, at full precision, as the app stores it; the request text carries
+// it to four places.
+export function seedSlot(params: ForecastParams, wire: string, shot: Shot): SeedSlot {
+  const start = params.startEpochHour * 3600000;
+  const times = {
+    // Minutes after the hour by code, so the past list (newest first) orders the slots the way
+    // the table does rather than by a tie.
+    requestedAt: start + (5 + params.code) * 60000,
+    encoded: reassembleReply(wire, () => WIRE_HEADER_CHARS),
+    savedAt: start + (10 + params.code) * 60000,
+  };
+  if (params.kind === 'avalanche') {
+    return {
+      code: params.code,
+      context: { kind: 'avalanche', lat: shot.lat, lon: shot.lon, start, day: params.day, device: params.device! },
+      label: 'Avalanche',
+      ...times,
+    };
+  }
   const mask = params.modelsMask;
   const model = Math.log2(mask & -mask);
   const modelName = Object.keys(MODEL_BIT).find((k) => MODEL_BIT[k] === model) ?? 'BEST';
-  const start = params.startEpochHour * 3600000;
   return {
     code: params.code,
     context: {
@@ -140,24 +177,22 @@ export function seedSlot(params: ForecastParams, wire: string): SeedSlot {
       utcOffsetHours: params.utcOffsetHours,
       model,
       vars: [...params.vars],
-      lat: params.lat!,
-      lon: params.lon!,
+      lat: shot.lat,
+      lon: shot.lon,
       start,
       device: params.device,
     },
     label: `${MODE_NAMES[params.mode]} · ${modelName}`,
-    // Minutes after the hour by code, so the past list (newest first) orders the slots the way
-    // the table does rather than by a tie.
-    requestedAt: start + (5 + params.code) * 60000,
-    encoded: reassembleReply(wire, () => WIRE_HEADER_CHARS),
-    savedAt: start + (10 + params.code) * 60000,
+    ...times,
   };
 }
 
 export const STORE_KEY = `forecast_store_v1:${SEED_TOKEN}`;
+// favorites.ts's key; test/shot-fixtures.test.ts reads it back through loadFavorites.
+const FAVORITES_KEY = 'favorite_locations';
 
 // Every AsyncStorage key → value for a seeded install.
-export function seedEntries(slots: SeedSlot[]): Record<string, string> {
+export function seedEntries(slots: SeedSlot[], favorites: Favorite[] = []): Record<string, string> {
   const codes = new Set<number>();
   for (const s of slots) {
     if (codes.has(s.code)) throw new Error(`two seeded requests share message code ${s.code}`);
@@ -167,6 +202,7 @@ export function seedEntries(slots: SeedSlot[]): Record<string, string> {
     user_token: SEED_TOKEN,
     ...SEED_SETTINGS,
     [STORE_KEY]: JSON.stringify({ nextCode: (Math.max(-1, ...codes) + 1) % 128, slots }),
+    ...(favorites.length ? { [FAVORITES_KEY]: JSON.stringify(favorites) } : {}),
   };
 }
 
@@ -193,13 +229,18 @@ export function storageFiles(entries: Record<string, string>): Map<string, strin
 // Fixtures → every AsyncStorage key and value, end to end.
 export async function buildSeedEntries(fixtures: ShotFixture[]): Promise<Record<string, string>> {
   const slots: SeedSlot[] = [];
+  const favorites: Favorite[] = [];
   for (const fixture of fixtures) {
+    const shot = shotByName(fixture.shot);
     for (const entry of fixture.requests) {
       const { params, wire } = await replay(fixture, entry);
-      slots.push(seedSlot(params, wire));
+      slots.push(seedSlot(params, wire, shot));
+    }
+    if ('favorite' in shot && shot.favorite) {
+      favorites.push({ name: shot.favorite, lat: shot.lat, lon: shot.lon, usedAt: Date.parse(fixture.recordedAt) });
     }
   }
-  return seedEntries(slots);
+  return seedEntries(slots, favorites);
 }
 
 // Fixtures → the iOS files.

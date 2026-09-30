@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isValidToken } from '@weather/protocol';
+import { gunzipSync } from 'node:zlib';
+import { isValidToken, loadModels } from '@weather/protocol';
 
 // The seed's files, read the way the native store reads them: inline manifest values directly,
 // null entries from the overflow file named by the key's MD5.
@@ -28,9 +29,10 @@ vi.mock('expo-constants', () => ({ default: { expoConfig: null } }));
 vi.hoisted(() => { (globalThis as { __DEV__?: boolean }).__DEV__ = false; });
 
 import { loadToken } from '../account';
-import { decodeAny, loadStore } from '../cache';
-import { loadAqiScale, loadDevice, loadTimeFormat, loadTwoMessages, loadUnits } from '../settings';
-import { SEED_SETTINGS, SEED_TOKEN, SHOTS } from '../screenshots/shots.mjs';
+import { decodeAny, isAvalancheContext, loadStore, setAvalancheModels } from '../cache';
+import { findFavorite, loadFavorites } from '../favorites';
+import { loadAqiScale, loadDevice, loadHideExpiredBanner, loadTimeFormat, loadTwoMessages, loadUnits } from '../settings';
+import { SEED_SETTINGS, SEED_TOKEN, SHOTS, requestCount } from '../screenshots/shots.mjs';
 import { buildSeed, loadFixtures, requestCode, seedEntries, storageFiles, storageSql } from '../scripts/shot-fixtures.mjs';
 
 describe('screenshot seed', () => {
@@ -39,7 +41,7 @@ describe('screenshot seed', () => {
   });
 
   it('message codes are unique across the table', () => {
-    const codes = SHOTS.flatMap((s) => s.requests.map((_, i) => requestCode(s, i)));
+    const codes = SHOTS.flatMap((s) => Array.from({ length: requestCount(s) }, (_, i) => requestCode(s, i)));
     expect(new Set(codes).size).toBe(codes.length);
     expect(Math.max(...codes)).toBeLessThan(128);
   });
@@ -81,14 +83,20 @@ describe('screenshot seed', () => {
     expect(await loadAqiScale()).toBe(SEED_SETTINGS.aqi_scale);
     expect(await loadDevice()).toBe(SEED_SETTINGS.builder_device);
     expect(await loadTwoMessages()).toBe(true);
+    expect(await loadHideExpiredBanner()).toBe(true);
+    const favorites = await loadFavorites();
 
     const store = await loadStore(SEED_TOKEN);
     const expected = fixtures.reduce((n, f) => n + f.requests.length, 0);
     expect(store.slots).toHaveLength(expected);
+    setAvalancheModels(loadModels(gunzipSync(readFileSync(new URL('../../protocol/assets/avcan-model.bin.gz', import.meta.url)))));
     for (const slot of store.slots) {
       const decoded = decodeAny(slot.encoded!, SEED_TOKEN);
-      if (decoded.kind !== 'weather') throw new Error('seeded a non-weather forecast');
-      expect(decoded.msg.periods.length).toBeGreaterThan(0);
+      expect(decoded.kind).toBe(isAvalancheContext(slot.context) ? 'avalanche' : 'weather');
+      const shot = SHOTS.find((s) => s.lat === slot.context.lat && s.lon === slot.context.lon)!;
+      expect(findFavorite(favorites, slot.context)?.name).toBe('favorite' in shot ? shot.favorite : undefined);
+      if (decoded.kind === 'weather') expect(decoded.msg.periods.length).toBeGreaterThan(0);
+      else expect(decoded.forecast.danger.length).toBeGreaterThan(0);
       // Recorded dates, not today's: the start is the hour-aligned request time of its recording.
       expect(slot.context.start % 3600000).toBe(0);
       expect(slot.context.start).toBeLessThanOrEqual(recordedLatest);

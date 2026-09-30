@@ -211,12 +211,12 @@ satellite messaging.</p>
       alt="Avoid whiteouts and flat light with detailed cloud cover">
   </figure>
   <figure>
-    <img src="${img("shot-aqi.jpg")}" width=750 height=1630 loading=lazy
-      alt="Plan around wildfire smoke with AQI forecasts">
-  </figure>
-  <figure>
     <img src="${img("shot-agreement.jpg")}" width=750 height=1630 loading=lazy
       alt="Compare forecasts from NOAA, ECMWF, GEM, and ICON models">
+  </figure>
+  <figure>
+    <img src="${img("shot-avalanche.jpg")}" width=750 height=1630 loading=lazy
+      alt="Avalanche Canada forecasts for hut trips and ski traverses">
   </figure>
 </div>
 
@@ -268,6 +268,7 @@ satellite messaging.</p>
   forecasts.</li>
   <li><strong>Model agreement</strong>: See how well the forecast agrees with models from NOAA,
   ECMWF, ECCC, and DWD.</li>
+  <li><strong>Avalanche forecasts</strong>: Full avalanche forecasts from Avalanche Canada.</li>
   <li><strong>Works offline</strong>: All forecasts are saved on your device for comparing
   multiple models and past forecasts while offline.</li>
   <li><strong>Private</strong>: ${BRAND} requires no account and does not store your name, email,

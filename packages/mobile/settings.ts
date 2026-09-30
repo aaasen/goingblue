@@ -138,6 +138,8 @@ const TWO_MESSAGES_KEY = 'builder_two_messages';
 const PINNED_COORDS_KEY = 'pinned_coords';
 const FAVORITES_SORT_KEY = 'favorites_sort';
 const FAVORITES_SORT_REVERSED_KEY = 'favorites_sort_reversed';
+// Written only by the screenshot seed (scripts/seed-shots.mts); no setting in the app sets it.
+const HIDE_EXPIRED_BANNER_KEY = 'hide_expired_banner';
 const DEFAULT_TWO_MESSAGES = true;
 const DEFAULT_SYSTEM: Units = 'imperial';
 const DEFAULT_TIME_FORMAT: TimeFormat = '12h';
@@ -302,11 +304,22 @@ export async function saveFavoritesSortReversed(reversed: boolean): Promise<void
 
 // Forget every stored preference, the pre-per-quantity master switch included. Part of account
 // deletion: the next launch starts from the defaults as a fresh install would.
+// Hides the avalanche view's expired-forecast banner, so a seeded past bulletin screenshots as a
+// current one.
+export async function loadHideExpiredBanner(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(HIDE_EXPIRED_BANNER_KEY)) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export async function clearSettings(): Promise<void> {
   try {
     await AsyncStorage.multiRemove([
       LEGACY_UNITS_KEY, UNIT_PREFS_KEY, TIME_FORMAT_KEY, COORD_FORMAT_KEY, AQI_SCALE_KEY, DEVICE_KEY,
       TWO_MESSAGES_KEY, PINNED_COORDS_KEY, FAVORITES_KEY, FAVORITES_SORT_KEY, FAVORITES_SORT_REVERSED_KEY,
+      HIDE_EXPIRED_BANNER_KEY,
     ]);
   } catch { /* ignore */ }
 }

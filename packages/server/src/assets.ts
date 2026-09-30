@@ -36,7 +36,7 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   // and iOS rounds the corners itself — unlike favicon.ico, which has to bring its own.
   "icon-512.jpg": { file: "../public/icon-512.jpg", type: "image/jpeg" },
   // The landing page's screenshot strip, listed here in the order the strip draws them, which is
-  // the App Store listing's order. These are the App Store frames themselves — sky, device and
+  // the README's set and order (README_SHOTS in frame-screenshots.py). These are the App Store frames themselves — sky, device and
   // baked-in caption — resized from packages/mobile/screenshots/framed (the 1320x2868 output of
   // mobile's scripts/frame-screenshots.py, already sRGB with no EXIF, so a plain Pillow resize +
   // `save(out, "JPEG", quality=78, optimize=True, progressive=True)` is the whole job whenever
@@ -53,8 +53,8 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   "shot-overview.jpg": { file: "../public/shot-overview.jpg", type: "image/jpeg" },
   "shot-altitude.jpg": { file: "../public/shot-altitude.jpg", type: "image/jpeg" },
   "shot-cloud.jpg": { file: "../public/shot-cloud.jpg", type: "image/jpeg" },
-  "shot-aqi.jpg": { file: "../public/shot-aqi.jpg", type: "image/jpeg" },
   "shot-agreement.jpg": { file: "../public/shot-agreement.jpg", type: "image/jpeg" },
+  "shot-avalanche.jpg": { file: "../public/shot-avalanche.jpg", type: "image/jpeg" },
   // The landing page's "How it works" strip, one frame per step in step order: hand-cropped phone
   // captures composed as a stack of rounded cards on white, 750px wide like the shots. The step
   // captions are page text in landing.ts, not part of the frame. These are made by hand from

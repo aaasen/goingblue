@@ -62,6 +62,14 @@ Variables: Humidity, model agreement
 Window start: Tuesday the 8th, 8am
 Filename: agreement
 
+## Avalanche
+
+Caption: "Avalanche Canada forecasts for hut trips and ski traverses"
+Location: Rogers Pass, Glacier National Park (51.30098,-117.51949), seeded as a favorite
+Forecast: Glacier, requested for February 27, 2026
+Open the Avalanche tab and tap the Rogers Pass entry under "Saved forecasts". The seed hides the "This forecast is no longer valid" banner.
+Filename: avalanche
+
 # Tips
 
 1. How to scrub: Tap the mini meteogram at the target day to jump the window there, then drag the table horizontally to align the first column. Drag slowly and hold at the end, otherwise it flings.
