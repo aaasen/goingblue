@@ -1,18 +1,19 @@
 /**
  * Verifies a running codec container is bit-identical to the golden corpus — the green light
  * for swapping in a REBUILT frozen image (base-image CVE, dependency patch, upstream shape
- * fix; see VERSIONING.md). Serves the recorded Open-Meteo responses from a local fixture
+ * fix; see VERSIONING.md). Serves the recorded upstream responses from a local fixture
  * server, POSTs every golden request to the container's /encode, and diffs the exact bytes.
  *
  *   pnpm exec tsx scripts/verify-container.ts --codec-url http://localhost:9090 [--port 8199]
  *
- * Start the container under test with BOTH upstreams pointed at this script — air quality comes
- * from a second Open-Meteo API, and a container that still has the live one configured would
- * fetch real air quality and encode something the goldens can't match:
+ * Start the container under test with EVERY upstream pointed at this script (weather and air
+ * quality from Open-Meteo, avalanche bulletins from Avalanche Canada); a container that still has
+ * a live one configured would fetch real data and encode something the goldens can't match:
  *   docker run -p 9090:8081 \
  *     -e OPEN_METEO_BASE_URL=http://host.docker.internal:8199 \
- *     -e AIR_QUALITY_BASE_URL=http://host.docker.internal:8199 codec:v1
- * The fixture server keys on path+query, so both APIs share it without collision.
+ *     -e AIR_QUALITY_BASE_URL=http://host.docker.internal:8199 \
+ *     -e AVCAN_BASE_URL=http://host.docker.internal:8199 codec:v1
+ * The fixture server keys on path+query, so all three APIs share it without collision.
  */
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -40,8 +41,8 @@ const goldens = JSON.parse(readFileSync(GOLDEN_PATH, "utf8")) as {
 
 // One merged fixture map: a given path+query always carries the same recorded body (all cases
 // were recorded at one instant), so collisions across cases are identical by construction. Bodies
-// are the raw FlatBuffers response bytes (base64 in the golden file), served verbatim so the
-// container's SDK transport decodes exactly what was recorded.
+// are the raw response bytes (base64 in the golden file), served verbatim so the container
+// decodes exactly what was recorded.
 const fixtures = new Map<string, Buffer>();
 for (const c of goldens.cases) {
   for (const [key, body] of Object.entries(c.responses)) fixtures.set(key, Buffer.from(body, "base64"));

@@ -1,12 +1,12 @@
 /**
- * Records the golden corpus: for each representative request, the exact Open-Meteo responses
- * and the exact encoded output, written to test/golden/goldens.json. Run this at SHIP time —
+ * Records the golden corpus: for each representative request, the exact upstream responses
+ * (Open-Meteo for weather, Avalanche Canada for avalanche) and the exact encoded output, written to test/golden/goldens.json. Run this at SHIP time —
  * the moment the current protocol version reaches real clients — and commit the result; from
  * then on golden.test.ts fails any change that moves a bit of this version's output, which is
  * exactly a change that would break deployed clients (see VERSIONING.md).
  *
- * Hits the live Open-Meteo API once per case (the EU center twice: split surface/pressure
- * sources). Re-recording is only legitimate alongside a deliberate protocol version bump.
+ * Hits the live Open-Meteo API once per weather case (the EU center twice: split surface/pressure
+ * sources) and the live Avalanche Canada API once or twice per avalanche case. Re-recording is only legitimate alongside a deliberate protocol version bump.
  *
  *   pnpm --filter @weather/protocol build
  *   pnpm exec tsx scripts/record-goldens.ts               # from packages/codec-server
@@ -15,6 +15,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { wireCodec, WIRE_VERSION } from "@weather/protocol";
+import { serveAvalanche } from "../src/avalanche.ts";
 import { fetchForecast, parseRequest, splitReplyFor } from "../src/forecast.ts";
 
 const OUT_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "golden", "goldens.json");
@@ -59,10 +60,32 @@ const VARIANTS = [
   { name: "auto-us-s2-pf", tokens: "p:a m:us d:s n:2 v:pf" },
 ];
 
+// Avalanche requests: every forecasting center's zone style, every device route, and the
+// danger scales a season passes through. Archived days (`y:`) pin a bulletin that won't change
+// underneath a re-record; the `latest` case pins the no-`y:` path, whatever is in force.
+const AVALANCHE_CASES = [
+  // Avalanche Canada, midwinter, plain SMS.
+  { name: "sea-to-sky/2026-01-15-s", loc: "50.1163,-122.9574", tokens: "d:s y:20260115" },
+  // Parks Canada (Glacier), iPhone satellite.
+  { name: "rogers-pass/2026-02-20-i", loc: "51.3000,-117.5200", tokens: "d:i y:20260220" },
+  // Parks Canada (Banff, Yoho, Kootenay), inReach.
+  { name: "lake-louise/2026-02-12-g", loc: "51.4200,-116.1800", tokens: "d:g y:20260212" },
+  // Kananaskis Country, ZOLEO.
+  { name: "kananaskis/2026-02-05-z", loc: "50.8000,-115.2000", tokens: "d:z y:20260205" },
+  // Avalanche Quebec, internet.
+  { name: "chic-chocs/2026-02-12-d", loc: "48.9500,-66.0000", tokens: "d:d y:20260212" },
+  // Spring conditions placeholder.
+  { name: "rogers-pass/2026-04-28-i", loc: "51.3000,-117.5200", tokens: "d:i y:20260428" },
+  // Early season placeholder.
+  { name: "rogers-pass/2025-11-05-s", loc: "51.3000,-117.5200", tokens: "d:s y:20251105" },
+  // No `y:`: the bulletin in force at the request time.
+  { name: "sea-to-sky/latest-i", loc: "50.1163,-122.9574", tokens: "d:i" },
+];
+
 interface GoldenCase {
   name: string;
   request: string;
-  // Open-Meteo FlatBuffers responses, base64-encoded, keyed by request path+query (origin
+  // Upstream responses (Open-Meteo FlatBuffers, Avalanche Canada JSON), base64-encoded, keyed by request path+query (origin
   // stripped, so replay is independent of OPEN_METEO_BASE_URL). The SDK transport is binary, so
   // the recorded body is the raw response bytes rather than parsed JSON.
   responses: Record<string, string>;
@@ -118,6 +141,20 @@ for (const site of SITES) {
     console.log(`${site.name}/${variant.name}: ${encoded.length} chars in ${parts.length} message(s), ${Object.keys(recording).length} upstream responses`);
     await new Promise((r) => setTimeout(r, 500)); // be polite to the live API
   }
+}
+
+for (const av of AVALANCHE_CASES) {
+  const request = `v${version} ${av.loc} f:a ${av.tokens} u:${ACCOUNT_TOKEN} k:${k} t:${startEpochHour}`;
+  k = (k + 1) % 128;
+  recording = {};
+  const params = parseRequest(request);
+  if (params.errors.length > 0) throw new Error(`${av.name}: ${params.errors.join("; ")}`);
+  const result = await serveAvalanche(params);
+  if (result.kind !== "ok") throw new Error(`${av.name}: no avalanche forecast covers ${av.loc}`);
+  const encoded = result.replies.join("\n");
+  cases.push({ name: `avalanche/${av.name}`, request, responses: recording, encoded });
+  console.log(`avalanche/${av.name}: ${encoded.length} chars in ${result.replies.length} message(s), ${Object.keys(recording).length} upstream responses`);
+  await new Promise((r) => setTimeout(r, 500));
 }
 
 mkdirSync(dirname(OUT_PATH), { recursive: true });

@@ -2,10 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { wireCodec, WIRE_VERSION } from "@weather/protocol";
+import { serveAvalanche } from "../src/avalanche.js";
 import { fetchForecast, parseRequest, splitReplyFor } from "../src/forecast.js";
 
-// Bit-exactness guard for the CURRENT protocol version: replays the recorded Open-Meteo
-// responses through the full pipeline (parse → aggregate → fill search → encode) and asserts
+// Bit-exactness guard for the CURRENT protocol version: replays the recorded upstream
+// responses through the full pipeline (weather: parse → aggregate → fill search → encode;
+// avalanche: parse → fetch bulletin → encode) and asserts
 // byte-identical output. Once this version has deployed clients, a failure here means the
 // change would break phones in the field — it belongs to the next protocol version, not this
 // one (VERSIONING.md). Record with scripts/record-goldens.ts at ship time; the file is absent
@@ -16,7 +18,7 @@ const GOLDEN_PATH = fileURLToPath(new URL("./golden/goldens.json", import.meta.u
 interface GoldenCase {
   name: string;
   request: string;
-  responses: Record<string, string>; // base64 FlatBuffers bodies, keyed by path+query
+  responses: Record<string, string>; // base64 upstream bodies, keyed by path+query
   encoded: string; // the wire reply as /encode returns it: splitReplyFor(...).join("\n")
 }
 
@@ -43,6 +45,12 @@ describe.skipIf(!goldens)("golden corpus (bit-exact encode)", () => {
       expect(params.errors).toEqual([]);
       expect(goldens!.protocolVersion).toBe(WIRE_VERSION);
       expect(params.decoderVersion).toBe(goldens!.protocolVersion);
+      if (params.kind === "avalanche") {
+        const result = await serveAvalanche(params);
+        expect(result.kind).toBe("ok");
+        if (result.kind === "ok") expect(result.replies.join("\n")).toBe(c.encoded);
+        return;
+      }
       // Compare the WIRE text — post-split, newline-joined, the same construction the codec
       // server's /encode returns and verify-container diffs — so the split boundaries and part
       // labels are bit-frozen along with the encoding.
