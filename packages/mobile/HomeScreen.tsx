@@ -25,6 +25,7 @@ import {
   type RequestContext, type Center, type ForecastMessage, type ModelSpec, type AvalancheForecast, type AvalanchePiece, type DangerDay,
 } from '@weather/protocol';
 import { API_BASE } from './account';
+import { fetchText, FetchTimeoutError } from './network';
 import {
   type AqiScale, type CoordFormat, type TimeFormat, type UnitPrefs, loadFavoritesSort, loadFavoritesSortReversed, loadPinnedCoords,
   saveFavoritesSort, saveFavoritesSortReversed, savePinnedCoords,
@@ -86,12 +87,6 @@ const FORECAST_NUMBER = '(425) 434-5858';
 const FORECAST_NUMBER_E164 = '+14254345858';
 const DEFAULT_MESSAGES = 1;
 const FORECAST_URL = `${API_BASE}/forecast`;
-// How long to wait on the forecast fetch before giving up. A connection the OS calls up but that
-// carries nothing — a captive portal, a bar of stalled signal — otherwise hangs on the platform's
-// own timeout, a minute of spinner with nothing to show for it.
-const FETCH_TIMEOUT_MS = 20000;
-// On a carrier satellite link every round trip is slow, and the connection setup alone takes several.
-const SATELLITE_FETCH_TIMEOUT_MS = 60000;
 // Shown both under a greyed-out Get Forecast and when the fetch times out: the same fact either
 // way, and both times the answer is to take one of the other two routes — which now means changing
 // the device rather than reaching for a different button.
@@ -1394,22 +1389,19 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     const msg = await prepareMessage(kind);
     if (msg == null) return;
     setFetching(true);
-    // An abort we raised ourselves is indistinguishable from any other in the catch, so both the
-    // timer and cancelFetch record that they fired. AbortController rather than
-    // AbortSignal.timeout, which React Native's fetch polyfill doesn't carry.
+    // A cancel's abort is indistinguishable from any other in the catch, so cancelFetch records
+    // that it fired; the timeout arrives as FetchTimeoutError.
     const req: InFlight = { controller: new AbortController(), cancelled: false };
     inFlight.current = req;
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; req.controller.abort(); }, ultraConstrained ? SATELLITE_FETCH_TIMEOUT_MS : FETCH_TIMEOUT_MS);
     try {
-      const resp = await fetch(FORECAST_URL, {
+      const resp = await fetchText(FORECAST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: msg,
         signal: req.controller.signal,
       });
-      if (!resp.ok) throw new Error(await resp.text());
-      const encoded = await resp.text();
+      if (!resp.ok) throw new Error(resp.text);
+      const encoded = resp.text;
       // A reply that landed in the gap between the abort and this line answers a request the user
       // has already walked away from — hand it on and it draws a forecast for a route they left.
       if (req.cancelled) return;
@@ -1429,10 +1421,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       }
     } catch (e) {
       if (req.cancelled) return;
-      if (timedOut) Alert.alert('No connection', OFFLINE_MESSAGE);
+      if (e instanceof FetchTimeoutError) Alert.alert('No connection', OFFLINE_MESSAGE);
       else Alert.alert('Error', String(e));
     } finally {
-      clearTimeout(timer);
       // A cancel has already cleared the slot and stopped the spinner, and may have put a newer
       // request in this one's place — either way this reply is no longer the one on screen.
       if (inFlight.current === req) {

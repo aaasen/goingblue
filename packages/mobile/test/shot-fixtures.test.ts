@@ -26,6 +26,8 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 vi.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
 // account.ts reads the dev-server host off expo-constants, which drags in expo-modules-core.
 vi.mock('expo-constants', () => ({ default: { expoConfig: null } }));
+// account.ts reads the satellite state for its timeouts, and the native module imports expo.
+vi.mock('../modules/ultra-constrained', () => ({ isUltraConstrained: () => false }));
 vi.hoisted(() => { (globalThis as { __DEV__?: boolean }).__DEV__ = false; });
 
 import { loadToken } from '../account';

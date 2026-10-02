@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { appUserAgent, isValidToken, normalizeToken } from '@weather/protocol';
+import { fetchText, FetchTimeoutError, type TextResponse } from './network';
 
 // In a dev build on a physical device, `localhost` resolves to the phone itself, not the dev
 // machine, so the API is unreachable. Constants.expoConfig.hostUri carries the Metro dev-server
@@ -11,14 +12,22 @@ function devNativeApiBase(): string {
   return `http://${host ?? 'localhost'}:8080`;
 }
 
-// Base URL for the API. Account provisioning runs over normal internet during app setup (never
-// over satellite), so it can talk to the server directly. In dev, EXPO_PUBLIC_API_BASE wins when
+// Base URL for the API. In dev, EXPO_PUBLIC_API_BASE wins when
 // set (dev.sh tunnel mode, where Metro's host is an ngrok hostname with no gateway behind it);
 // otherwise derive the dev machine's host from Metro (see devNativeApiBase). In production,
 // target the deployed server.
 export const API_BASE = __DEV__
   ? (process.env.EXPO_PUBLIC_API_BASE ?? devNativeApiBase())
   : 'https://going.blue';
+
+// fetchText with the timeout reported as `timeoutMessage`.
+async function accountRequest(url: string, init: RequestInit, timeoutMessage: string): Promise<TextResponse> {
+  try {
+    return await fetchText(url, init);
+  } catch (e) {
+    throw e instanceof FetchTimeoutError ? new Error(timeoutMessage) : e;
+  }
+}
 
 const TOKEN_KEY = 'user_token';
 
@@ -49,11 +58,11 @@ export async function clearToken(): Promise<void> {
 // failure — the server reports deleted:false and we treat the account as gone, which is the
 // state the caller wanted.
 export async function deleteAccount(token: string): Promise<void> {
-  const resp = await fetch(`${API_BASE}/account/delete`, {
+  const resp = await accountRequest(`${API_BASE}/account/delete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token: normalizeToken(token) }),
-  });
+  }, 'Account deletion timed out');
   if (!resp.ok) throw new Error(`Account deletion failed (${resp.status})`);
 }
 
@@ -61,12 +70,12 @@ export async function deleteAccount(token: string): Promise<void> {
 // identifies the user for usage limits; messaging opt-in is consumer-initiated (the user opts
 // in by texting a forecast request to the number), so creating an account records no consent.
 export async function createAccount(): Promise<string> {
-  const resp = await fetch(`${API_BASE}/account`, {
+  const resp = await accountRequest(`${API_BASE}/account`, {
     method: 'POST',
     headers: { 'User-Agent': appUserAgent(Constants.expoConfig?.version ?? '0') },
-  });
+  }, 'Account creation timed out');
   if (!resp.ok) throw new Error(`Account creation failed (${resp.status})`);
-  const { token } = await resp.json();
+  const { token } = JSON.parse(resp.text);
   if (typeof token !== 'string' || !isValidToken(token)) {
     throw new Error('Server returned an invalid token');
   }

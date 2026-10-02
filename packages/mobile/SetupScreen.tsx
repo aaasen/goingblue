@@ -25,7 +25,7 @@ interface Props {
 }
 
 // First-run gate. The account token identifies the user for usage limits and is created once,
-// here, over normal internet — not over satellite.
+// here.
 export default function SetupScreen({
   onReady, units, onUnitsChange, timeFormat, onTimeFormatChange, coordFormat, onCoordFormatChange,
   aqiScale, onAqiScaleChange,
