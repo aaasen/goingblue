@@ -11,6 +11,12 @@
       "bundleIdentifier": "com.laneaasen.weather",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.developer.networking.carrier-constrained.appcategory": [
+          "weather-8005",
+          "hiking-adventure-8003"
+        ]
       }
     },
     "android": {
