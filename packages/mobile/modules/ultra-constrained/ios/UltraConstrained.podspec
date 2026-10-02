@@ -9,8 +9,9 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
+  s.dependency 'React-Core'
 
-  s.source_files = '**/*.swift'
+  s.source_files = '**/*.{m,swift}'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'SWIFT_COMPILATION_MODE' => 'wholemodule'
