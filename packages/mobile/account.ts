@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { appUserAgent, isValidToken, normalizeToken } from '@weather/protocol';
-import { fetchText, FetchTimeoutError, type TextResponse } from './network';
+import { fetchText } from './network';
 
 // In a dev build on a physical device, `localhost` resolves to the phone itself, not the dev
 // machine, so the API is unreachable. Constants.expoConfig.hostUri carries the Metro dev-server
@@ -20,14 +20,6 @@ export const API_BASE = __DEV__
   ? (process.env.EXPO_PUBLIC_API_BASE ?? devNativeApiBase())
   : 'https://going.blue';
 
-// fetchText with the timeout reported as `timeoutMessage`.
-async function accountRequest(url: string, init: RequestInit, timeoutMessage: string): Promise<TextResponse> {
-  try {
-    return await fetchText(url, init);
-  } catch (e) {
-    throw e instanceof FetchTimeoutError ? new Error(timeoutMessage) : e;
-  }
-}
 
 const TOKEN_KEY = 'user_token';
 
@@ -58,23 +50,24 @@ export async function clearToken(): Promise<void> {
 // failure — the server reports deleted:false and we treat the account as gone, which is the
 // state the caller wanted.
 export async function deleteAccount(token: string): Promise<void> {
-  const resp = await accountRequest(`${API_BASE}/account/delete`, {
+  const resp = await fetchText(`${API_BASE}/account/delete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token: normalizeToken(token) }),
-  }, 'Account deletion timed out');
-  if (!resp.ok) throw new Error(`Account deletion failed (${resp.status})`);
+  });
+  if (!resp.ok) throw new Error(resp.text);
 }
 
 // Mint a new account on the server and persist the returned token. The account token only
 // identifies the user for usage limits; messaging opt-in is consumer-initiated (the user opts
 // in by texting a forecast request to the number), so creating an account records no consent.
 export async function createAccount(): Promise<string> {
-  const resp = await accountRequest(`${API_BASE}/account`, {
+  const resp = await fetchText(`${API_BASE}/account`, {
     method: 'POST',
     headers: { 'User-Agent': appUserAgent(Constants.expoConfig?.version ?? '0') },
-  }, 'Account creation timed out');
-  if (!resp.ok) throw new Error(`Account creation failed (${resp.status})`);
+  });
+  // The body of an error status is the server's own message, shown as the alert's text.
+  if (!resp.ok) throw new Error(resp.text);
   const { token } = JSON.parse(resp.text);
   if (typeof token !== 'string' || !isValidToken(token)) {
     throw new Error('Server returned an invalid token');

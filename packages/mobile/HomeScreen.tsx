@@ -25,7 +25,7 @@ import {
   type RequestContext, type Center, type ForecastMessage, type ModelSpec, type AvalancheForecast, type AvalanchePiece, type DangerDay,
 } from '@weather/protocol';
 import { API_BASE } from './account';
-import { fetchText, FetchTimeoutError } from './network';
+import { fetchText, requestErrorMessage } from './network';
 import {
   type AqiScale, type CoordFormat, type TimeFormat, type UnitPrefs, loadFavoritesSort, loadFavoritesSortReversed, loadPinnedCoords,
   saveFavoritesSort, saveFavoritesSortReversed, savePinnedCoords,
@@ -87,10 +87,6 @@ const FORECAST_NUMBER = '(425) 434-5858';
 const FORECAST_NUMBER_E164 = '+14254345858';
 const DEFAULT_MESSAGES = 1;
 const FORECAST_URL = `${API_BASE}/forecast`;
-// Shown both under Get Forecast while the OS reports no connection and when the fetch times out:
-// the same fact either way, and both times the answer is to take one of the other two routes — which now means changing
-// the device rather than reaching for a different button.
-const OFFLINE_MESSAGE = 'Not connected to the internet. Choose SMS or inReach to send your request instead.';
 // Shown under Get Forecast while the internet route is riding a carrier satellite link.
 const SATELLITE_MESSAGE = 'Using a satellite connection. Forecasts may take longer than usual.';
 
@@ -902,9 +898,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const [help, setHelp] = useState(false);
   // Only `isConnected` is portable: iOS reports `isInternetReachable` as a copy of it rather than
   // verifying anything, so treating them as two signals would promise more than the OS gives. It's
-  // undefined until the first reading lands, which isn't yet grounds to call the user offline —
-  // hence the explicit `=== false`. It never disables Get Forecast: whether the OS calls a satellite
-  // link connected is unverified, and the fetch's own timeout reports a dead connection anyway.
+  // undefined until the first reading lands. Shown for field testing only: it never disables Get
+  // Forecast or warns, since it read true in airplane mode, and a failed fetch says so itself.
   const connected = Network.useNetworkState().isConnected;
   const ultraConstrained = useUltraConstrained();
 
@@ -1422,8 +1417,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       }
     } catch (e) {
       if (req.cancelled) return;
-      if (e instanceof FetchTimeoutError) Alert.alert('No connection', OFFLINE_MESSAGE);
-      else Alert.alert('Error', String(e));
+      Alert.alert('Failed to get forecast', requestErrorMessage(e));
     } finally {
       // A cancel has already cleared the slot and stopped the spinner, and may have put a newer
       // request in this one's place — either way this reply is no longer the one on screen.
@@ -2863,15 +2857,10 @@ const RequestBuilder = memo(function RequestBuilder({
         />
       </View>
 
-      {/* Says the OS reports no connection, so it's shown only when Get Forecast is the button on
-          screen. */}
-      {device === 'internet' && connected === false && <Text style={styles.actionNote}>{OFFLINE_MESSAGE}</Text>}
       {device === 'internet' && ultraConstrained && <Text style={styles.actionNote}>{SATELLITE_MESSAGE}</Text>}
       <NetworkDebug connected={connected} ultraConstrained={ultraConstrained} />
-      {/* The location half of that: a pinned point with nothing usable in the field greys every
-          device's button, and the input sits a few sections up by the time the button is on
-          screen. Both notes can show at once — offline and no location are separate problems,
-          each with its own fix. */}
+      {/* A pinned point with nothing usable in the field greys every device's button, and the
+          input sits a few sections up by the time the button is on screen. */}
       {!following && !coordsValid && (
         <Text style={styles.actionNote}>{NO_LOCATION_MESSAGE}</Text>
       )}

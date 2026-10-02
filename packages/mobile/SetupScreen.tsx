@@ -3,6 +3,7 @@ import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Linking, Image,
 } from 'react-native';
 import { createAccount } from './account';
+import { requestErrorMessage } from './network';
 import GettingStarted from './GettingStarted';
 import PreferenceRows from './PreferenceRows';
 import type { AqiScale, CoordFormat, TimeFormat, UnitPrefs } from './settings';
@@ -38,7 +39,7 @@ export default function SetupScreen({
       const token = await createAccount();
       onReady(token);
     } catch (e) {
-      Alert.alert('Could not start', String(e));
+      Alert.alert('Failed to create account', requestErrorMessage(e));
     } finally {
       setBusy(false);
     }

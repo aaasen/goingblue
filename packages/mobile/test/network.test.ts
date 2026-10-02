@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const satellite = vi.hoisted(() => ({ on: false }));
 vi.mock('../modules/ultra-constrained', () => ({ isUltraConstrained: () => satellite.on }));
 
-import { fetchText, FetchTimeoutError } from '../network';
+import { fetchText, FetchNetworkError, FetchTimeoutError, requestErrorMessage } from '../network';
 
 // A fetch that never answers until its signal aborts, as on a stalled link.
 function hangingFetch() {
@@ -48,5 +48,30 @@ describe('fetchText', () => {
     const e = await result;
     expect(e).not.toBeInstanceOf(FetchTimeoutError);
     expect(e.name).toBe('AbortError');
+  });
+});
+
+describe('fetchText failures', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('wraps a failed connection in FetchNetworkError', async () => {
+    const native = new TypeError('fetch failed: UnexpectedException: The internet connection appears to be offline');
+    vi.stubGlobal('fetch', vi.fn(async () => { throw native; }));
+    const e = await fetchText('https://x').catch((err) => err);
+    expect(e).toBeInstanceOf(FetchNetworkError);
+    expect(e.cause).toBe(native);
+  });
+
+  it('returns an error status instead of throwing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('bad request', { status: 400 })));
+    await expect(fetchText('https://x')).resolves.toEqual({ ok: false, status: 400, text: 'bad request' });
+  });
+});
+
+describe('requestErrorMessage', () => {
+  it('names each way a request fails and passes a server message through', () => {
+    expect(requestErrorMessage(new FetchNetworkError(new TypeError('native')))).toBe('Not connected to the internet.');
+    expect(requestErrorMessage(new FetchTimeoutError())).toBe('Request timed out.');
+    expect(requestErrorMessage(new Error('Could not create account'))).toBe('Could not create account');
   });
 });
