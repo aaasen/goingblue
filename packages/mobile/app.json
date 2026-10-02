@@ -16,7 +16,8 @@
         "com.apple.developer.networking.carrier-constrained.appcategory": [
           "weather-8005",
           "hiking-adventure-8003"
-        ]
+        ],
+        "com.apple.developer.networking.carrier-constrained.app-optimized": true
       }
     },
     "android": {
