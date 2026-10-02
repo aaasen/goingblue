@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import {
   Alert, Animated, AppState, Image, Linking, Platform, Pressable,
   ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions,
@@ -48,6 +48,7 @@ import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
 import HelpScreen from './HelpScreen';
 import { MODELS, modelLabelFromMask } from './models';
 import { DEVICES, deviceCode, platformCode, type Device } from './devices';
+import { useUltraConstrained } from './modules/ultra-constrained';
 import { formatCoords, formatLatLon, type LatLon, parseLatLon } from './coords';
 import { formatUtm } from './utm';
 import {
@@ -89,10 +90,14 @@ const FORECAST_URL = `${API_BASE}/forecast`;
 // carries nothing — a captive portal, a bar of stalled signal — otherwise hangs on the platform's
 // own timeout, a minute of spinner with nothing to show for it.
 const FETCH_TIMEOUT_MS = 20000;
+// On a carrier satellite link every round trip is slow, and the connection setup alone takes several.
+const SATELLITE_FETCH_TIMEOUT_MS = 60000;
 // Shown both under a greyed-out Get Forecast and when the fetch times out: the same fact either
 // way, and both times the answer is to take one of the other two routes — which now means changing
 // the device rather than reaching for a different button.
 const OFFLINE_MESSAGE = 'Not connected to the internet. Choose SMS or inReach to send your request instead.';
+// Shown under Get Forecast while the internet route is riding a carrier satellite link.
+const SATELLITE_MESSAGE = 'Using a satellite connection. Forecasts may take longer than usual.';
 
 // Every way current location can fail ends at the same fallback: pick the spot yourself. Current
 // location is a convenience — nothing in the app needs it — so these say what went wrong and then
@@ -905,6 +910,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // undefined until the first reading lands, which isn't yet grounds to call the user offline —
   // hence the explicit `=== false`, so the button doesn't flicker disabled on mount.
   const offline = Network.useNetworkState().isConnected === false;
+  const ultraConstrained = useUltraConstrained();
 
   // ── Forecast state ───────────────────────────────────────────────────────
   // The page's scroll offset, native-driven, handed to the meteogram so each block can pin its
@@ -1394,7 +1400,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     const req: InFlight = { controller: new AbortController(), cancelled: false };
     inFlight.current = req;
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; req.controller.abort(); }, FETCH_TIMEOUT_MS);
+    const timer = setTimeout(() => { timedOut = true; req.controller.abort(); }, ultraConstrained ? SATELLITE_FETCH_TIMEOUT_MS : FETCH_TIMEOUT_MS);
     try {
       const resp = await fetch(FORECAST_URL, {
         method: 'POST',
@@ -1735,6 +1741,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   };
   const avalancheAction = AVALANCHE_ACTIONS[device];
   const deviceSpec = DEVICES.find((d) => d.value === device)!;
+  // The internet route's request travels over a carrier satellite link when that's the only path.
+  const actionIcon = device === 'internet' && ultraConstrained ? 'satellite-variant' : deviceSpec.icon;
   const action = ACTIONS[device];
   // Copy is the only action with something to confirm — the others hand off to another app,
   // which is its own confirmation.
@@ -2008,8 +2016,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         mode={mode} onMode={setMode} setPriorityInfo={setPriorityInfo}
         device={device} onDevice={onDevice} setDeviceInfo={setDeviceInfo}
         multiMessageShown={multiMessageShown} twoMessages={twoMessages} onTwoMessagesChange={onTwoMessages}
-        deviceSpec={deviceSpec} copied={copied} onAction={onAction} onCancelAction={onCancelAction}
-        actionDisabled={action.disabled} actionBusy={action.busy} offline={offline} coordsValid={coordsValid}
+        deviceSpec={deviceSpec} actionIcon={actionIcon} copied={copied} onAction={onAction} onCancelAction={onCancelAction}
+        actionDisabled={action.disabled} actionBusy={action.busy} offline={offline} ultraConstrained={ultraConstrained} coordsValid={coordsValid}
         setHelp={setHelp} outcome={outcome} onPaste={onPaste} onClearForecast={clearForecast}
         collecting={collecting} error={error}
       />
@@ -2116,7 +2124,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             <DeviceSelector device={device} onDevice={onDevice} setDeviceInfo={setDeviceInfo} />
             <View style={styles.buttons}>
               <ActionButton
-                icon={copied ? 'check' : deviceSpec.icon}
+                icon={copied ? 'check' : actionIcon}
                 label={copied ? 'Copied' : deviceSpec.action}
                 onPress={avalancheAction.onPress}
                 onCancel={onCancelAction}
@@ -2125,6 +2133,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                 variant={copied ? 'success' : 'primary'}
               />
             </View>
+            {device === 'internet' && ultraConstrained && <Text style={styles.actionNote}>{SATELLITE_MESSAGE}</Text>}
             {!zonePiece && <Text style={styles.actionNote}>Select a location inside the forecast area</Text>}
             <View style={styles.sectionEnd} />
             <View style={styles.pasteArea}>
@@ -2729,7 +2738,7 @@ const RequestBuilder = memo(function RequestBuilder({
   varRows, unavail, openSubgroups, activeValues, groups, units, onToggleGroup, onToggleSubgroup, setVarsInfo,
   mode, onMode, setPriorityInfo,
   device, onDevice, setDeviceInfo, multiMessageShown, twoMessages, onTwoMessagesChange,
-  deviceSpec, copied, onAction, onCancelAction, actionDisabled, actionBusy, offline, coordsValid, setHelp,
+  deviceSpec, actionIcon, copied, onAction, onCancelAction, actionDisabled, actionBusy, offline, ultraConstrained, coordsValid, setHelp,
   outcome, onPaste, onClearForecast, collecting, error,
 }: {
   following: boolean;
@@ -2740,8 +2749,8 @@ const RequestBuilder = memo(function RequestBuilder({
   mode: number; onMode: (mode: number) => void; setPriorityInfo: (open: boolean) => void;
   device: Device; onDevice: (device: Device) => void; setDeviceInfo: (open: boolean) => void;
   multiMessageShown: boolean; twoMessages: boolean; onTwoMessagesChange: (on: boolean) => void;
-  deviceSpec: (typeof DEVICES)[number]; copied: boolean; onAction: () => void; onCancelAction: () => void;
-  actionDisabled: boolean; actionBusy: boolean; offline: boolean; coordsValid: boolean; setHelp: (open: boolean) => void;
+  deviceSpec: (typeof DEVICES)[number]; actionIcon: ComponentProps<typeof ActionButton>['icon']; copied: boolean; onAction: () => void; onCancelAction: () => void;
+  actionDisabled: boolean; actionBusy: boolean; offline: boolean; ultraConstrained: boolean; coordsValid: boolean; setHelp: (open: boolean) => void;
   outcome: Outcome | null; onPaste: () => void; onClearForecast: () => void; collecting: Collecting | null; error: string | null;
 }) {
   return (
@@ -2846,7 +2855,7 @@ const RequestBuilder = memo(function RequestBuilder({
 
       <View style={styles.buttons}>
         <ActionButton
-          icon={copied ? 'check' : deviceSpec.icon}
+          icon={copied ? 'check' : actionIcon}
           label={copied ? 'Copied' : deviceSpec.action}
           onPress={onAction}
           onCancel={onCancelAction}
@@ -2860,6 +2869,7 @@ const RequestBuilder = memo(function RequestBuilder({
           Keyed on `offline` alone, not on fetchDisabled — a button greyed for want of a location is
           a different problem with a different fix. */}
       {device === 'internet' && offline && <Text style={styles.actionNote}>{OFFLINE_MESSAGE}</Text>}
+      {device === 'internet' && ultraConstrained && <Text style={styles.actionNote}>{SATELLITE_MESSAGE}</Text>}
       {/* The location half of that: a pinned point with nothing usable in the field greys every
           device's button, and the input sits a few sections up by the time the button is on
           screen. Both notes can show at once — offline and no location are separate problems,
