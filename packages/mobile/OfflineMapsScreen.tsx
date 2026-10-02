@@ -10,7 +10,9 @@ import { findPack, formatBytes, formatTallyBytes, searchPacks, tally, type Pack 
 import { regionsAt } from './outlines';
 import { cancelDownload, downloadPack as storeDownloadPack, removePack as storeRemovePack, usePackState } from './packStore';
 import { clearTileCache, tileCacheSize, TILE_CACHE_EMPTY_BYTES } from './tileCache';
+import { useUltraConstrained } from './modules/ultra-constrained';
 import { palette } from './palette';
+import WarningBanner from './components/WarningBanner';
 
 interface Props {
   visible: boolean;
@@ -35,6 +37,7 @@ export default function OfflineMapsScreen({ visible, onClose }: Props) {
   // The pack store owns the set: ids appear once both archives are on disk, and the map's
   // style rebuilds off the same subscription.
   const { installed: downloaded } = usePackState();
+  const satellite = useUltraConstrained();
   const [here, setHere] = useState<Here>({ kind: 'locating' });
   const [query, setQuery] = useState('');
   // undefined = not read yet; null = couldn't be read.
@@ -107,7 +110,7 @@ export default function OfflineMapsScreen({ visible, onClose }: Props) {
 
   function onDownload(id: string) {
     const pack = findPack(id);
-    if (!pack) return;
+    if (!pack || satellite) return;
     storeDownloadPack(pack).catch(() => {
       Alert.alert(`Couldn’t download ${pack.name}`, 'Check your connection and try again.');
     });
@@ -140,12 +143,17 @@ export default function OfflineMapsScreen({ visible, onClose }: Props) {
   // In the suggestion and search lists the whole row acts and its icon is decoration — with the
   // keyboard up a tap on a non-touchable row body only dismisses the keyboard, and an icon with
   // its own press would fire the action twice.
-  const rowAction = (pack: Pack) => () =>
-    downloaded.has(pack.id) ? confirmRemovePack(pack, onRemove) : onDownload(pack.id);
+  // On a satellite link a pack is far too large to fetch, so a row that would download is inert.
+  const rowAction = (pack: Pack) => downloaded.has(pack.id)
+    ? () => confirmRemovePack(pack, onRemove)
+    : satellite ? undefined : () => onDownload(pack.id);
   // The skeleton of an emptied cache still has a file size; don't report it as content.
   const cacheEmpty = cacheBytes != null && cacheBytes <= TILE_CACHE_EMPTY_BYTES;
   const control = (pack: Pack, interactive = true) => (
-    <DownloadControl pack={pack} downloaded={downloaded} onDownload={onDownload} onRemove={(p) => confirmRemovePack(p, onRemove)} interactive={interactive} />
+    <DownloadControl
+      pack={pack} downloaded={downloaded} onDownload={onDownload} onRemove={(p) => confirmRemovePack(p, onRemove)}
+      interactive={interactive} downloadDisabled={satellite}
+    />
   );
   const results = searchPacks(query);
 
@@ -205,6 +213,9 @@ export default function OfflineMapsScreen({ visible, onClose }: Props) {
             </View>
 
             <Text style={[styles.heading, styles.headingGap]}>Download maps</Text>
+            {satellite && (
+              <WarningBanner>{'Satellite connection detected. Connect to Wi\u2011Fi or cellular data to download maps.'}</WarningBanner>
+            )}
             <View style={styles.card}>
               {here.kind === 'locating' && (
                 <Row title="Finding your location…" subtitle="" trailing={<ActivityIndicator color={palette.textTertiary} />} />
@@ -357,7 +368,7 @@ export function downloadedPacks(downloaded: ReadonlySet<string>): { packs: Pack[
 
 // The row's action: download (with its progress while running), or — once downloaded — a check
 // that offers removal. Shared with the Settings list, where every row is the second kind.
-export function DownloadControl({ pack, downloaded, onDownload, onRemove, interactive = true }: {
+export function DownloadControl({ pack, downloaded, onDownload, onRemove, interactive = true, downloadDisabled = false }: {
   pack: Pack;
   downloaded: ReadonlySet<string>;
   onDownload: (id: string) => void;
@@ -365,6 +376,8 @@ export function DownloadControl({ pack, downloaded, onDownload, onRemove, intera
   // false when the whole row is the button (suggestions, search results): the icon still shows
   // the state but doesn't press, so a tap on it can't fire the action twice.
   interactive?: boolean;
+  // Greys a not-yet-downloaded pack's icon and stops it pressing. Removal stays available.
+  downloadDisabled?: boolean;
 }) {
   const { progress } = usePackState();
   const running = progress.get(pack.id);
@@ -386,8 +399,13 @@ export function DownloadControl({ pack, downloaded, onDownload, onRemove, intera
     );
   }
   const on = downloaded.has(pack.id);
-  const icon = <MaterialCommunityIcons name={on ? 'check-circle' : 'download-circle-outline'} size={26} color={palette.link} />;
-  if (!interactive) return icon;
+  const blocked = !on && downloadDisabled;
+  const icon = (
+    <MaterialCommunityIcons
+      name={on ? 'check-circle' : 'download-circle-outline'} size={26} color={blocked ? palette.textFaint : palette.link}
+    />
+  );
+  if (!interactive || blocked) return icon;
   return (
     <TouchableOpacity
       onPress={() => (on ? onRemove(pack) : onDownload(pack.id))}

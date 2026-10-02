@@ -3,10 +3,9 @@ import { Directory, File, Paths } from 'expo-file-system';
 import { unzipSync } from 'fflate';
 
 // The map's glyphs (Noto Sans Regular / Medium / Italic as 256-codepoint pbf ranges), shipped in
-// the binary as one zip and unpacked once to Documents so labels render on a cold offline start —
-// hosted glyphs only cover ranges MapLibre happened to cache. The unpack re-runs when the shipped
-// zip changes (the asset hash is stamped next to the files); the style falls back to the hosted
-// set if it fails, which costs nothing but the offline cold-start coverage.
+// the binary as one zip and unpacked once to Documents, the only place the map loads glyphs from.
+// The unpack re-runs when the shipped zip changes (the asset hash is stamped next to the files); if
+// it fails, the style hides its labels.
 //
 // The directory names keep their spaces: MapLibre percent-encodes {fontstack} into the request
 // URL and the file loader decodes it back before touching the filesystem.

@@ -245,7 +245,7 @@ const MODEL_HINT_NO_LOCATION = 'Set a location to see which models will be used.
 // picks between them: the route a reader has left is usually the only one they have. Filtered
 // against DEVICES so a route the platform hides loses its help line with it.
 const DEVICE_INFO = [
-  { name: 'Internet', desc: 'Fetches the forecast over a WiFi or cellular data connection.' },
+  { name: 'Internet', desc: 'Fetches the forecast over a Wi\u2011Fi or cellular data connection. Also uses the phone\'s satellite internet connection if it is available.' },
   { name: 'SMS', desc: 'Sends the forecast over a text message for weak cell reception without data.' },
   { name: 'inReach', desc: 'Copies the message so that it can be pasted into the Garmin Earthmate or Messenger app and sent over inReach.' },
   { name: 'ZOLEO', desc: 'Copies the message so that it can be pasted into the ZOLEO app and sent over satellite.' },

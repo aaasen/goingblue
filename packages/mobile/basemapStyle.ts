@@ -15,9 +15,6 @@ import type {
 // The web twin of this stack is maps/preview/style.js; keep them in step.
 
 export const BASEMAP_URL = 'https://r2.going.blue';
-// Noto Sans Regular/Medium/Italic — the three faces the basemap uses; hosted glyphs for now
-// (bundling them comes with the offline packs).
-const GLYPHS = 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf';
 
 // Data ends at z10; overzoom keeps the map usable past it (~35 m/px at 63°N by 12.5).
 export const DATA_MAX_ZOOM = 10;
@@ -239,8 +236,14 @@ export interface PackArchives extends ArchivePair {
 // each installed pack over it, the online z10 archives on top. Every tier renders at all
 // zooms — a source overzooms past its data — so whichever upper tiers can't load (offline,
 // R2 unreachable) simply leave the finest available tier beneath showing: pack detail where a
-// pack is installed, bundled overview elsewhere.
-export function buildBasemapStyle(bundled?: ArchivePair, packs: PackArchives[] = [], glyphsBase?: string): StyleSpecification {
+// pack is installed, bundled overview elsewhere. On a carrier satellite link the online tier
+// draws from the ambient cache alone: MapLibre's URLSession keeps the default configuration, which
+// doesn't route over ultra-constrained paths. Glyphs only ever
+// come from the unpacked local set; without it the labels are hidden rather than dropped, since
+// their layers are the anchors overlays draw under (labelAnchors).
+export function buildBasemapStyle(
+  bundled?: ArchivePair, packs: PackArchives[] = [], glyphsBase?: string,
+): StyleSpecification {
   const sources: StyleSpecification['sources'] = {
     'online-base': {
       type: 'vector',
@@ -277,6 +280,12 @@ export function buildBasemapStyle(bundled?: ArchivePair, packs: PackArchives[] =
     }));
   }
   layers.push(...stack('o-', { base: 'online-base', hillshade: 'online-hs' }));
-  const glyphs = glyphsBase ? `${glyphsBase.replace(/\/$/, '')}/{fontstack}/{range}.pbf` : GLYPHS;
-  return { version: 8, glyphs, sources, layers };
+  if (!glyphsBase) {
+    return {
+      version: 8,
+      sources,
+      layers: layers.map((l) => (l.type === 'symbol' ? { ...l, layout: { ...l.layout, visibility: 'none' } } : l)),
+    };
+  }
+  return { version: 8, glyphs: `${glyphsBase.replace(/\/$/, '')}/{fontstack}/{range}.pbf`, sources, layers };
 }

@@ -23,7 +23,7 @@ const BUNDLED_HS = require('./assets/basemap/global-z6-hs.pmtiles');
 
 // undefined = not resolved yet; null = resolution failed, map runs online-only.
 let cachedBundled: ArchivePair | null | undefined;
-// undefined = not resolved yet; null = unpack failed, hosted glyphs.
+// undefined = not resolved yet; null = unpack failed, labels hidden.
 let cachedGlyphs: string | null | undefined;
 
 async function resolveBundled(): Promise<ArchivePair | null> {
@@ -63,7 +63,7 @@ export function useBasemapStyle(): StyleSpecification | null {
     if (cachedGlyphs === undefined) {
       ensureGlyphs()
         .catch((e) => {
-          console.warn(`glyphs unavailable locally, labels need the network once: ${e}`);
+          console.warn(`glyphs unavailable locally, map labels hidden: ${e}`);
           return null;
         })
         .then((base) => {

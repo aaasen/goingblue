@@ -7,6 +7,7 @@ import { DANGER_ICONS, DANGER_ICON_HEIGHT, type DangerIcon } from './dangerIcons
 import { drawText, fillPaint, strokePaint, textWidth } from './skiaPaint';
 import { palette } from './palette';
 import InfoModal from './components/InfoModal';
+import WarningBanner from './components/WarningBanner';
 import Section from './components/Section';
 import { loadHideExpiredBanner, type TimeFormat } from './settings';
 import {
@@ -394,11 +395,7 @@ export default function AvalancheForecastView({ forecast, region, timeFormat }: 
   return (
     <View style={styles.page} onLayout={(e) => setPageW(e.nativeEvent.layout.width)}>
       {forecast.expires < Date.now() && !hideExpired && (
-        <View style={styles.expired}>
-          <MaterialCommunityIcons name="alert" size={20} color={palette.warning} />
-          <Text style={styles.expiredText}>This forecast is no longer valid</Text>
-          <MaterialCommunityIcons name="alert" size={20} color={palette.warning} />
-        </View>
+        <WarningBanner>This forecast is no longer valid</WarningBanner>
       )}
       <View style={styles.stamps}>
         <Stamp label="Date issued" value={stamp(forecast.issued)} />
@@ -476,11 +473,6 @@ export default function AvalancheForecastView({ forecast, region, timeFormat }: 
 
 const styles = StyleSheet.create({
   page: { paddingHorizontal: PAD },
-  expired: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12,
-    padding: 12, backgroundColor: palette.warningTint, borderRadius: 10, borderWidth: 1, borderColor: palette.warning,
-  },
-  expiredText: { flex: 1, color: palette.warning, fontSize: 14, fontWeight: '600', lineHeight: 20, textAlign: 'center' },
   stamps: { flexDirection: 'row', gap: 16, marginBottom: 10 },
   stampsLast: { marginBottom: 20 },
   stampColumn: { flex: 1 },
