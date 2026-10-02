@@ -87,8 +87,8 @@ const FORECAST_NUMBER = '(425) 434-5858';
 const FORECAST_NUMBER_E164 = '+14254345858';
 const DEFAULT_MESSAGES = 1;
 const FORECAST_URL = `${API_BASE}/forecast`;
-// Shown both under a greyed-out Get Forecast and when the fetch times out: the same fact either
-// way, and both times the answer is to take one of the other two routes — which now means changing
+// Shown both under Get Forecast while the OS reports no connection and when the fetch times out:
+// the same fact either way, and both times the answer is to take one of the other two routes — which now means changing
 // the device rather than reaching for a different button.
 const OFFLINE_MESSAGE = 'Not connected to the internet. Choose SMS or inReach to send your request instead.';
 // Shown under Get Forecast while the internet route is riding a carrier satellite link.
@@ -903,8 +903,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // Only `isConnected` is portable: iOS reports `isInternetReachable` as a copy of it rather than
   // verifying anything, so treating them as two signals would promise more than the OS gives. It's
   // undefined until the first reading lands, which isn't yet grounds to call the user offline —
-  // hence the explicit `=== false`, so the button doesn't flicker disabled on mount.
-  const offline = Network.useNetworkState().isConnected === false;
+  // hence the explicit `=== false`. It never disables Get Forecast: whether the OS calls a satellite
+  // link connected is unverified, and the fetch's own timeout reports a dead connection anyway.
+  const connected = Network.useNetworkState().isConnected;
   const ultraConstrained = useUltraConstrained();
 
   // ── Forecast state ───────────────────────────────────────────────────────
@@ -1142,7 +1143,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     : null;
   // While following, the button stays tappable so it can request GPS on demand.
   const sendDisabled = locating || (!following && !coordsValid);
-  const fetchDisabled = sendDisabled || fetching || offline;
+  const fetchDisabled = sendDisabled || fetching;
 
   // Read the phone's position, assuming permission is already in hand. Null when no fix came back
   // — indoors, airplane mode, a cold start that timed out. Says nothing itself: its two callers
@@ -2008,7 +2009,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         device={device} onDevice={onDevice} setDeviceInfo={setDeviceInfo}
         multiMessageShown={multiMessageShown} twoMessages={twoMessages} onTwoMessagesChange={onTwoMessages}
         deviceSpec={deviceSpec} actionIcon={actionIcon} copied={copied} onAction={onAction} onCancelAction={onCancelAction}
-        actionDisabled={action.disabled} actionBusy={action.busy} offline={offline} ultraConstrained={ultraConstrained} coordsValid={coordsValid}
+        actionDisabled={action.disabled} actionBusy={action.busy} connected={connected} ultraConstrained={ultraConstrained} coordsValid={coordsValid}
         setHelp={setHelp} outcome={outcome} onPaste={onPaste} onClearForecast={clearForecast}
         collecting={collecting} error={error}
       />
@@ -2125,6 +2126,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               />
             </View>
             {device === 'internet' && ultraConstrained && <Text style={styles.actionNote}>{SATELLITE_MESSAGE}</Text>}
+            <NetworkDebug connected={connected} ultraConstrained={ultraConstrained} />
             {!zonePiece && <Text style={styles.actionNote}>Select a location inside the forecast area</Text>}
             <View style={styles.sectionEnd} />
             <View style={styles.pasteArea}>
@@ -2723,13 +2725,18 @@ const LocationPicker = memo(function LocationPicker({
   );
 });
 
+// What the OS reports about the network, for testing satellite in the field.
+function NetworkDebug({ connected, ultraConstrained }: { connected: boolean | undefined; ultraConstrained: boolean }) {
+  return <Text style={styles.actionNote}>{`connected: ${connected}, constrained: ${ultraConstrained}`}</Text>;
+}
+
 const RequestBuilder = memo(function RequestBuilder({
   following,
   model, modelStack, onModel, setModelInfo,
   varRows, unavail, openSubgroups, activeValues, groups, units, onToggleGroup, onToggleSubgroup, setVarsInfo,
   mode, onMode, setPriorityInfo,
   device, onDevice, setDeviceInfo, multiMessageShown, twoMessages, onTwoMessagesChange,
-  deviceSpec, actionIcon, copied, onAction, onCancelAction, actionDisabled, actionBusy, offline, ultraConstrained, coordsValid, setHelp,
+  deviceSpec, actionIcon, copied, onAction, onCancelAction, actionDisabled, actionBusy, connected, ultraConstrained, coordsValid, setHelp,
   outcome, onPaste, onClearForecast, collecting, error,
 }: {
   following: boolean;
@@ -2741,7 +2748,7 @@ const RequestBuilder = memo(function RequestBuilder({
   device: Device; onDevice: (device: Device) => void; setDeviceInfo: (open: boolean) => void;
   multiMessageShown: boolean; twoMessages: boolean; onTwoMessagesChange: (on: boolean) => void;
   deviceSpec: (typeof DEVICES)[number]; actionIcon: ComponentProps<typeof ActionButton>['icon']; copied: boolean; onAction: () => void; onCancelAction: () => void;
-  actionDisabled: boolean; actionBusy: boolean; offline: boolean; ultraConstrained: boolean; coordsValid: boolean; setHelp: (open: boolean) => void;
+  actionDisabled: boolean; actionBusy: boolean; connected: boolean | undefined; ultraConstrained: boolean; coordsValid: boolean; setHelp: (open: boolean) => void;
   outcome: Outcome | null; onPaste: () => void; onClearForecast: () => void; collecting: Collecting | null; error: string | null;
 }) {
   return (
@@ -2856,11 +2863,11 @@ const RequestBuilder = memo(function RequestBuilder({
         />
       </View>
 
-      {/* Says why Get Forecast is greyed out, so it's shown only when that's the button on screen.
-          Keyed on `offline` alone, not on fetchDisabled — a button greyed for want of a location is
-          a different problem with a different fix. */}
-      {device === 'internet' && offline && <Text style={styles.actionNote}>{OFFLINE_MESSAGE}</Text>}
+      {/* Says the OS reports no connection, so it's shown only when Get Forecast is the button on
+          screen. */}
+      {device === 'internet' && connected === false && <Text style={styles.actionNote}>{OFFLINE_MESSAGE}</Text>}
       {device === 'internet' && ultraConstrained && <Text style={styles.actionNote}>{SATELLITE_MESSAGE}</Text>}
+      <NetworkDebug connected={connected} ultraConstrained={ultraConstrained} />
       {/* The location half of that: a pinned point with nothing usable in the field greys every
           device's button, and the input sits a few sections up by the time the button is on
           screen. Both notes can show at once — offline and no location are separate problems,
