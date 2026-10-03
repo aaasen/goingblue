@@ -9,14 +9,15 @@ declare class UltraConstrainedModule extends NativeModule<Events> {
   isUltraConstrained(): boolean;
 }
 
-// Null on Android and in any build without the native module, which reads as never constrained.
+// Null in any build without the native module (tests, web), which reads as never constrained.
 const native = requireOptionalNativeModule<UltraConstrainedModule>('UltraConstrained');
 
 export function isUltraConstrained(): boolean {
   return native?.isUltraConstrained() ?? false;
 }
 
-// True while the default path is ultra-constrained (a carrier satellite link on iOS 26+).
+// True while the app's network is ultra-constrained: a carrier satellite link on iOS 26+ or
+// Android 16+.
 export function useUltraConstrained(): boolean {
   const [value, setValue] = useState(isUltraConstrained);
   useEffect(() => {

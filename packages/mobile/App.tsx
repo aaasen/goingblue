@@ -16,6 +16,7 @@ import {
 } from './settings';
 import { DEFAULT_DEVICE, type Device } from './devices';
 import { clearTileCache, configureTileCache } from './tileCache';
+import { useUpdateCheck } from './updates';
 import { palette } from './palette';
 
 // Hold the launch image until the first screen can be drawn as it will finally look. It otherwise
@@ -41,6 +42,7 @@ export default function App() {
   // Loaded alongside the device, and for the same reason: it changes the builder's request, so
   // arriving late would mean the first request of a session could go out under the wrong budget.
   const [twoMessages, setTwoMessagesState] = useState(true);
+  useUpdateCheck();
 
   // Settled together rather than one at a time: the token decides which screen comes up, and the
   // preferences decide how it reads. Applying them as they land would draw the first screen in

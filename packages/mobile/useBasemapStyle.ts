@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Asset } from 'expo-asset';
-import { LogManager, type StyleSpecification } from '@maplibre/maplibre-react-native';
+import { LogManager, NetworkManager, type StyleSpecification } from '@maplibre/maplibre-react-native';
 import { buildBasemapStyle, type ArchivePair } from './basemapStyle';
 import { ensureGlyphs } from './glyphs';
 import { installedPacks, usePackState } from './packStore';
+import { useUltraConstrained } from './modules/ultra-constrained';
 
 // A tile or archive fetch failing is normal operation for this map — offline (or with R2
 // unreachable) the layout is DESIGNED to fall back to the bundled tier — but MapLibre logs every
@@ -52,6 +53,13 @@ export function useBasemapStyle(): StyleSpecification | null {
   const [bundled, setBundled] = useState(cachedBundled);
   const [glyphs, setGlyphs] = useState(cachedGlyphs);
   const { installed } = usePackState();
+  // On a satellite link the map draws from the ambient cache and makes no requests. Android only:
+  // there the satellite opt-in covers the whole app, and the call is a no-op on iOS, where
+  // MapLibre's URLSession already stays off satellite.
+  const ultraConstrained = useUltraConstrained();
+  useEffect(() => {
+    NetworkManager.setConnected(!ultraConstrained);
+  }, [ultraConstrained]);
   useEffect(() => {
     let live = true;
     if (cachedBundled === undefined) {

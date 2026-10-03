@@ -901,10 +901,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // Only `isConnected` is portable: iOS reports `isInternetReachable` as a copy of it rather than
   // verifying anything, so treating them as two signals would promise more than the OS gives. It's
   // undefined until the first reading lands, which isn't yet grounds to call the user offline —
-  // hence the explicit `=== false`, so the button doesn't flicker disabled on mount. A carrier
-  // satellite link reads as connected.
-  const offline = Network.useNetworkState().isConnected === false;
+  // hence the explicit `=== false`, so the button doesn't flicker disabled on mount. A satellite
+  // link the module reports overrides it, in case the OS calls that network disconnected.
   const ultraConstrained = useUltraConstrained();
+  const offline = Network.useNetworkState().isConnected === false && !ultraConstrained;
 
   // ── Forecast state ───────────────────────────────────────────────────────
   // The page's scroll offset, native-driven, handed to the meteogram so each block can pin its

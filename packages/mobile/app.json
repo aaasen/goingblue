@@ -59,13 +59,15 @@
           "motionUsagePermission": "Used to improve the accuracy of your current location when fetching a forecast."
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "./modules/ultra-constrained/app.plugin.js"
     ],
     "runtimeVersion": {
       "policy": "fingerprint"
     },
     "updates": {
-      "url": "https://u.expo.dev/d7df179b-5e9e-4cce-8b42-27288a8f1298"
+      "url": "https://u.expo.dev/d7df179b-5e9e-4cce-8b42-27288a8f1298",
+      "checkAutomatically": "NEVER"
     }
   }
 }
