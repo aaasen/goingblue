@@ -89,6 +89,8 @@ const DEFAULT_MESSAGES = 1;
 const FORECAST_URL = `${API_BASE}/forecast`;
 // Shown under Get Forecast while the internet route is riding a carrier satellite link.
 const SATELLITE_MESSAGE = 'Using a satellite connection. Forecasts may take longer than usual.';
+// Shown under a greyed-out Get Forecast while the OS reports no connection.
+const OFFLINE_MESSAGE = 'Not connected to the internet';
 
 // Every way current location can fail ends at the same fallback: pick the spot yourself. Current
 // location is a convenience — nothing in the app needs it — so these say what went wrong and then
@@ -898,9 +900,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const [help, setHelp] = useState(false);
   // Only `isConnected` is portable: iOS reports `isInternetReachable` as a copy of it rather than
   // verifying anything, so treating them as two signals would promise more than the OS gives. It's
-  // undefined until the first reading lands. Shown for field testing only: it never disables Get
-  // Forecast or warns, since it read true in airplane mode, and a failed fetch says so itself.
-  const connected = Network.useNetworkState().isConnected;
+  // undefined until the first reading lands, which isn't yet grounds to call the user offline —
+  // hence the explicit `=== false`, so the button doesn't flicker disabled on mount. A carrier
+  // satellite link reads as connected.
+  const offline = Network.useNetworkState().isConnected === false;
   const ultraConstrained = useUltraConstrained();
 
   // ── Forecast state ───────────────────────────────────────────────────────
@@ -1138,7 +1141,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     : null;
   // While following, the button stays tappable so it can request GPS on demand.
   const sendDisabled = locating || (!following && !coordsValid);
-  const fetchDisabled = sendDisabled || fetching;
+  const fetchDisabled = sendDisabled || fetching || offline;
 
   // Read the phone's position, assuming permission is already in hand. Null when no fix came back
   // — indoors, airplane mode, a cold start that timed out. Says nothing itself: its two callers
@@ -2003,7 +2006,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         device={device} onDevice={onDevice} setDeviceInfo={setDeviceInfo}
         multiMessageShown={multiMessageShown} twoMessages={twoMessages} onTwoMessagesChange={onTwoMessages}
         deviceSpec={deviceSpec} actionIcon={actionIcon} copied={copied} onAction={onAction} onCancelAction={onCancelAction}
-        actionDisabled={action.disabled} actionBusy={action.busy} connected={connected} ultraConstrained={ultraConstrained} coordsValid={coordsValid}
+        actionDisabled={action.disabled} actionBusy={action.busy} offline={offline} ultraConstrained={ultraConstrained} coordsValid={coordsValid}
         setHelp={setHelp} outcome={outcome} onPaste={onPaste} onClearForecast={clearForecast}
         collecting={collecting} error={error}
       />
@@ -2119,9 +2122,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                 variant={copied ? 'success' : 'primary'}
               />
             </View>
-            {device === 'internet' && ultraConstrained && <Text style={styles.actionNote}>{SATELLITE_MESSAGE}</Text>}
-            <NetworkDebug connected={connected} ultraConstrained={ultraConstrained} />
-            {!zonePiece && <Text style={styles.actionNote}>Select a location inside the forecast area</Text>}
+            {/* One note at most, the first that applies (see RequestBuilder). */}
+            {!zonePiece ? <Text style={styles.actionNote}>Select a location inside the forecast area</Text>
+              : device !== 'internet' ? null
+              : offline ? <Text style={styles.actionNote}>{OFFLINE_MESSAGE}</Text>
+              : ultraConstrained && <Text style={styles.actionNote}>{SATELLITE_MESSAGE}</Text>}
             <View style={styles.sectionEnd} />
             <View style={styles.pasteArea}>
               <View style={styles.pasteRow}>
@@ -2719,18 +2724,13 @@ const LocationPicker = memo(function LocationPicker({
   );
 });
 
-// What the OS reports about the network, for testing satellite in the field.
-function NetworkDebug({ connected, ultraConstrained }: { connected: boolean | undefined; ultraConstrained: boolean }) {
-  return <Text style={styles.actionNote}>{`connected: ${connected}, constrained: ${ultraConstrained}`}</Text>;
-}
-
 const RequestBuilder = memo(function RequestBuilder({
   following,
   model, modelStack, onModel, setModelInfo,
   varRows, unavail, openSubgroups, activeValues, groups, units, onToggleGroup, onToggleSubgroup, setVarsInfo,
   mode, onMode, setPriorityInfo,
   device, onDevice, setDeviceInfo, multiMessageShown, twoMessages, onTwoMessagesChange,
-  deviceSpec, actionIcon, copied, onAction, onCancelAction, actionDisabled, actionBusy, connected, ultraConstrained, coordsValid, setHelp,
+  deviceSpec, actionIcon, copied, onAction, onCancelAction, actionDisabled, actionBusy, offline, ultraConstrained, coordsValid, setHelp,
   outcome, onPaste, onClearForecast, collecting, error,
 }: {
   following: boolean;
@@ -2742,7 +2742,7 @@ const RequestBuilder = memo(function RequestBuilder({
   device: Device; onDevice: (device: Device) => void; setDeviceInfo: (open: boolean) => void;
   multiMessageShown: boolean; twoMessages: boolean; onTwoMessagesChange: (on: boolean) => void;
   deviceSpec: (typeof DEVICES)[number]; actionIcon: ComponentProps<typeof ActionButton>['icon']; copied: boolean; onAction: () => void; onCancelAction: () => void;
-  actionDisabled: boolean; actionBusy: boolean; connected: boolean | undefined; ultraConstrained: boolean; coordsValid: boolean; setHelp: (open: boolean) => void;
+  actionDisabled: boolean; actionBusy: boolean; offline: boolean; ultraConstrained: boolean; coordsValid: boolean; setHelp: (open: boolean) => void;
   outcome: Outcome | null; onPaste: () => void; onClearForecast: () => void; collecting: Collecting | null; error: string | null;
 }) {
   return (
@@ -2857,13 +2857,14 @@ const RequestBuilder = memo(function RequestBuilder({
         />
       </View>
 
-      {device === 'internet' && ultraConstrained && <Text style={styles.actionNote}>{SATELLITE_MESSAGE}</Text>}
-      <NetworkDebug connected={connected} ultraConstrained={ultraConstrained} />
-      {/* A pinned point with nothing usable in the field greys every device's button, and the
-          input sits a few sections up by the time the button is on screen. */}
-      {!following && !coordsValid && (
-        <Text style={styles.actionNote}>{NO_LOCATION_MESSAGE}</Text>
-      )}
+      {/* One note at most, the first that applies: a location with nothing usable in the field
+          (it greys every device's button, and the input sits a few sections up by the time the
+          button is on screen), then no connection (it greys Get Forecast), then a satellite link,
+          which only slows the request. */}
+      {!following && !coordsValid ? <Text style={styles.actionNote}>{NO_LOCATION_MESSAGE}</Text>
+        : device !== 'internet' ? null
+        : offline ? <Text style={styles.actionNote}>{OFFLINE_MESSAGE}</Text>
+        : ultraConstrained && <Text style={styles.actionNote}>{SATELLITE_MESSAGE}</Text>}
 
       <TouchableOpacity
         style={styles.helpLink}
