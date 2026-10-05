@@ -12,6 +12,7 @@ import {
   aggregateRows,
   airQualityVarsFor,
   toFullPeriod,
+  weatherVarsFor,
   type Row,
 } from "../src/forecast.js";
 
@@ -259,6 +260,46 @@ describe("airQualityVarsFor", () => {
       "european_aqi_pm2_5", "european_aqi_ozone", "european_aqi_pm10",
       "european_aqi_nitrogen_dioxide", "european_aqi_sulphur_dioxide",
       "european_aqi",
+    ]);
+  });
+});
+
+describe("weatherVarsFor", () => {
+  const BASE = [
+    "temperature_2m", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m",
+    "weather_code", "freezing_level_height", "snowfall", "rain", "showers",
+  ];
+
+  it("fetches only the always-needed variables for the default selection", () => {
+    expect(weatherVarsFor(withAlways(...DEFAULT_VARS), "US")).toEqual({
+      surface: [
+        "temperature_2m", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m",
+        "precipitation_probability", "weather_code", "freezing_level_height",
+        "snowfall", "rain", "showers",
+      ],
+      pressure: [],
+    });
+  });
+
+  it("fetches the freezing level for the phase correction even when the column is off", () => {
+    expect(weatherVarsFor(withAlways(), "US").surface).toEqual(BASE);
+    expect(weatherVarsFor(withAlways(VAR.freeze), "CA").surface)
+      .toEqual(BASE.filter((v) => v !== "freezing_level_height"));
+  });
+
+  it("adds dewpoint and the cloud fields only when selected", () => {
+    expect(weatherVarsFor(withAlways(VAR.dewpoint), "US").surface).toContain("dew_point_2m");
+    const clouds = weatherVarsFor(withAlways(VAR.clouds), "US");
+    expect(clouds.surface).toEqual(
+      expect.arrayContaining(["cloud_cover_high", "cloud_cover_mid", "cloud_cover_low"]));
+    expect(clouds.pressure).toHaveLength(20);
+    expect(clouds.pressure).toContain("relative_humidity_700hPa");
+    expect(clouds.pressure).toContain("geopotential_height_700hPa");
+  });
+
+  it("fetches wind aloft only at the selected levels", () => {
+    expect(weatherVarsFor(withAlways(VAR.w500, VAR.w850), "BEST").pressure).toEqual([
+      "wind_speed_500hPa", "wind_speed_850hPa", "wind_direction_500hPa", "wind_direction_850hPa",
     ]);
   });
 });

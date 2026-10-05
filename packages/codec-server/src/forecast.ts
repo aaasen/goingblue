@@ -93,13 +93,11 @@ const SURFACE_VARS = [
   "snowfall",
   "rain",
   "showers",
-  "cloud_cover",
   "cloud_cover_high",
   "cloud_cover_mid",
   "cloud_cover_low",
 ];
-// Pressure-level wind at every WIND_LEVELS_HPA level, whichever the request selected — one
-// upstream call serves any selection, and the derive scripts read all seven.
+// Pressure-level wind, one speed and direction per WIND_LEVELS_HPA level.
 const WIND_ALOFT_SPEED_VARS = WIND_LEVELS_HPA.map((l) => `wind_speed_${l}hPa`);
 const WIND_ALOFT_DIR_VARS = WIND_LEVELS_HPA.map((l) => `wind_direction_${l}hPa`);
 // The cloud band's levels ride the pressure-level request (for Europe that's the 0.25° IFS,
@@ -340,6 +338,14 @@ function decodeResponse(
   return { hourly: hourly as unknown as HourlyData, elevation: resp.elevation() };
 }
 
+// One budget across fetchWeatherApi's retries, not per attempt. The retry arguments are the
+// library defaults.
+const OPEN_METEO_TIMEOUT_MS = 15_000;
+
+function fetchWithTimeout(url: string, params: Record<string, unknown>): Promise<WeatherApiResponse[]> {
+  return fetchWeatherApi(url, params, 3, 0.2, 2, { signal: AbortSignal.timeout(OPEN_METEO_TIMEOUT_MS) });
+}
+
 async function fetchOpenMeteo(
   source: string,
   hourlyVars: string[],
@@ -365,7 +371,7 @@ async function fetchOpenMeteo(
   const base = process.env["OPEN_METEO_BASE_URL"] ?? "https://api.open-meteo.com";
   const url = `${base}/v1/forecast`;
   log.info("openmeteo.request", { url, ...params });
-  const results = await fetchWeatherApi(url, params);
+  const results = await fetchWithTimeout(url, params);
   const resp = results[0];
   if (!resp) throw new Error("Open-Meteo returned no result");
   return decodeResponse(resp, hourlyVars);
@@ -651,7 +657,7 @@ export function airQualityVarsFor(vars: ReadonlySet<Variable>): string[] {
 const AIR_QUALITY_FORECAST_DAYS = 5;
 async function fetchAirQuality(
   hourlyVars: string[], lat: number, lon: number, tz: string, pastDays: number,
-): Promise<HourlyData | null> {
+): Promise<HourlyData> {
   const params: Record<string, unknown> = {
     latitude: lat,
     longitude: lon,
@@ -664,19 +670,42 @@ async function fetchAirQuality(
   const base = process.env["AIR_QUALITY_BASE_URL"] ?? "https://air-quality-api.open-meteo.com";
   const url = `${base}/v1/air-quality`;
   log.info("openmeteo.airquality.request", { url, ...params });
-  try {
-    const results = await fetchWeatherApi(url, params);
-    const resp = results[0];
-    if (!resp) throw new Error("Open-Meteo air quality returned no result");
-    return decodeResponse(resp, hourlyVars).hourly;
-  } catch (err) {
-    // Soft failure: air quality is an extra column, not the forecast. The weather still goes out;
-    // the AQ columns encode their no-data symbol, which the app draws as an empty cell. Logged at
-    // ERROR even so — the reader asked for air quality and didn't get it, which is worth seeing in
-    // Error Reporting rather than burying at INFO because the request itself survived.
-    log.error("openmeteo.airquality.failed", { err });
-    return null;
-  }
+  const results = await fetchWithTimeout(url, params);
+  const resp = results[0];
+  if (!resp) throw new Error("Open-Meteo air quality returned no result");
+  return decodeResponse(resp, hourlyVars).hourly;
+}
+
+// The Open-Meteo variables a selection reads. Open-Meteo bills by variable count, so anything the
+// selection doesn't put on the wire stays out of the request. Temperature, weather code and the
+// precipitation split are always fetched: the weathercode column and the phase correction read
+// them. The freezing level is fetched whenever the center has it, because the phase correction
+// reads it even when the column isn't selected.
+export function weatherVarsFor(
+  vars: ReadonlySet<Variable>, modelKey: string,
+): { surface: string[]; pressure: string[] } {
+  const center = CENTERS[modelKey];
+  const surface = SURFACE_VARS.filter((v) => {
+    switch (v) {
+      case "dew_point_2m": return vars.has(VAR.dewpoint);
+      case "wind_speed_10m":
+      case "wind_direction_10m": return vars.has(VAR.wind);
+      case "wind_gusts_10m": return vars.has(VAR.gust);
+      case "precipitation_probability": return vars.has(VAR.precip);
+      case "freezing_level_height": return center.freeze;
+      case "cloud_cover_high":
+      case "cloud_cover_mid":
+      case "cloud_cover_low": return vars.has(VAR.clouds);
+      default: return true;
+    }
+  });
+  const level = WIND_LEVEL_VARS.map((v) => vars.has(v));
+  const pressure = [
+    ...WIND_ALOFT_SPEED_VARS.filter((_, li) => level[li]),
+    ...WIND_ALOFT_DIR_VARS.filter((_, li) => level[li]),
+    ...(vars.has(VAR.clouds) ? CLOUD_BAND_FETCH_VARS : []),
+  ];
+  return { surface, pressure };
 }
 
 async function fetchHourly(
@@ -685,20 +714,13 @@ async function fetchHourly(
   lat: number,
   lon: number,
   tz: string,
+  vars: ReadonlySet<Variable>,
   elev_m?: number,
   pastDays = 0,
   airQualityVars: string[] = [],
 ): Promise<[HourlyData, string[], number]> {
   const center = CENTERS[modelKey];
-  const pressureVars = [
-    ...WIND_ALOFT_SPEED_VARS, ...WIND_ALOFT_DIR_VARS,
-    ...CLOUD_BAND_FETCH_VARS,
-  ];
-  // Drop freezing_level_height from the request for centers that don't provide it (GEM, ECMWF);
-  // toFullPeriod also drops freeze from the vars set so it never reaches the wire.
-  const surfaceVars = center.freeze
-    ? SURFACE_VARS
-    : SURFACE_VARS.filter((v) => v !== "freezing_level_height");
+  const { surface: surfaceVars, pressure: pressureVars } = weatherVarsFor(vars, modelKey);
 
   // Air quality is a separate API, so it goes out alongside the weather rather than with it, and
   // only when the request asked for it. Its horizon is shorter than the weather's, so the merge
@@ -709,7 +731,7 @@ async function fetchHourly(
   const withAirQuality = (h: HourlyData, aq: HourlyData | null): HourlyData =>
     aq ? mergeHourly(h, aq, airQualityVars) : h;
 
-  if (center.surface === center.pressure) {
+  if (center.surface === center.pressure || pressureVars.length === 0) {
     const [{ hourly, elevation }, aq] = await Promise.all([
       fetchOpenMeteo(center.surface, [...surfaceVars, ...pressureVars], nDays, lat, lon, tz, elev_m, pastDays),
       aqPromise,
@@ -780,7 +802,7 @@ export async function aggregateRows(
   const nDaysToFetch = Math.ceil(nPeriods / periodsPerDay) + 1;
   // All times are UTC; the forecast is anchored to the client-requested start (aligned to the
   // period boundary), not to "now", so delivery delay can't shift which periods come back.
-  const [h, times, elevation] = await fetchHourly(modelKey, nDaysToFetch, lat, lon, "UTC", elev_m);
+  const [h, times, elevation] = await fetchHourly(modelKey, nDaysToFetch, lat, lon, "UTC", new Set(VARIABLES), elev_m);
   return [aggregateHourly(h, times, nPeriods, resolutionIdx, startEpochHour), elevation];
 }
 
@@ -1587,7 +1609,8 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
   // unservable in buildLayoutMessage, and the seq search clamps to them.
   const fetchStart = Date.now();
   const [[h, times, elevation], agreement] = await Promise.all([
-    fetchHourly(modelKey, FILL_SLOTS + 2, lat, lon, "UTC", undefined, 1, airQualityVarsFor(params.vars)),
+    fetchHourly(
+      modelKey, FILL_SLOTS + 2, lat, lon, "UTC", params.vars, undefined, 1, airQualityVarsFor(params.vars)),
     params.vars.has(VAR.agreement)
       ? fetchAgreementHourly(modelKey, FILL_SLOTS + 2, lat, lon, "UTC", undefined, 1)
       : Promise.resolve(null),
