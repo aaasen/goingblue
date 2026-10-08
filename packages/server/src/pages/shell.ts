@@ -1,7 +1,7 @@
 import { img } from "../assets.js";
-import { BRAND, LAST_UPDATED } from "../constants.js";
+import { BRAND, LAST_UPDATED, SITE_URL } from "../constants.js";
 
-type PageOpts = { showUpdated?: boolean; updated?: string; header?: string; css?: string; head?: string };
+type PageOpts = { showUpdated?: boolean; updated?: string; header?: string; css?: string; head?: string; path?: string };
 
 // The shell every public page is served in: the document, the icons, the typographic defaults, the
 // centered wrap, and the footer that carries the operator's name and the links between the pages.
@@ -13,7 +13,8 @@ type PageOpts = { showUpdated?: boolean; updated?: string; header?: string; css?
 // which is what lets a page with its own layout — the landing page's hero and screenshot strip, the
 // stats dashboard's tables — share this shell instead of growing a second one. `head` is raw HTML
 // appended to <head>, for a page that needs more than styles there (the stats map's stylesheet
-// link).
+// link). `path` emits a canonical link to the page's own URL, so a copy reached with tracking
+// parameters in the query string is not indexed as a duplicate.
 //
 // Text pages carry a brand bar pinned to the top of the viewport, the app icon beside the name,
 // linking home, so a page reached from a store listing or a search result reads as Going Blue's
@@ -21,14 +22,14 @@ type PageOpts = { showUpdated?: boolean; updated?: string; header?: string; css?
 // scroll-padding keeps an in-page anchor from landing under it. The icon file is square, and the
 // radius is 22.4% of the width, Apple's own icon proportion. A page that brings its own `header`
 // (the landing masthead) replaces the bar along with the h1.
-export const PAGE = (title: string, body: string, { showUpdated = true, updated = LAST_UPDATED, header, css, head }: PageOpts = {}) => `<!doctype html>
+export const PAGE = (title: string, body: string, { showUpdated = true, updated = LAST_UPDATED, header, css, head, path }: PageOpts = {}) => `<!doctype html>
 <html lang=en>
 <head>
 <meta charset=utf-8>
 <meta name=viewport content="width=device-width, initial-scale=1">
 <link rel=icon href="/favicon.ico" sizes="16x16 32x32 48x48">
 <link rel=apple-touch-icon href="${img("icon-512.jpg")}">
-<title>${title === BRAND ? BRAND : `${title} — ${BRAND}`}</title>
+${path ? `<link rel=canonical href="${SITE_URL}${path}">\n` : ""}<title>${title === BRAND ? BRAND : `${title} — ${BRAND}`}</title>
 <style>
   html { scroll-padding-top: 64px; }
   body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #1a1a1a; line-height: 1.55;

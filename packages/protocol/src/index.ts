@@ -10,6 +10,7 @@ export * from "./token.js";
 export * from "./client.js";
 export * from "./model.js";
 export * from "./attribution.js";
+export * from "./model-info.js";
 export * from "./layout.js";
 export * from "./wire.js";
 export * from "./registry.js";

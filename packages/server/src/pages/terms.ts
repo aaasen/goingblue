@@ -78,5 +78,5 @@ most recent revision. Continued use of the Service constitutes acceptance of the
 `;
 
 export function terms(c: Context) {
-  return c.html(PAGE("Terms & Conditions", TERMS_BODY));
+  return c.html(PAGE("Terms & Conditions", TERMS_BODY, { path: "/terms" }));
 }

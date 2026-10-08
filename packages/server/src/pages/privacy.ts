@@ -2,9 +2,9 @@ import type { Context } from "hono";
 import { BRAND, CONTACT_EMAIL, PRIVACY_UPDATED } from "../constants.js";
 import { PAGE } from "./shell.js";
 
-// The deletion instructions, shared with the support page so the two never drift: the privacy
-// policy is the version the Play listing's delete-data link points at, and support answers the
-// same question in the same words.
+// The deletion instructions, shared with the FAQ so the two never drift: the privacy policy is
+// the version the Play listing's delete-data link points at, and the FAQ answers the same question
+// in the same words.
 export const DELETION_HTML = `<p>Steps:</p>
 <ol>
   <li>Open the ${BRAND} app.</li>
@@ -82,5 +82,5 @@ them.</p>
 `;
 
 export function privacy(c: Context) {
-  return c.html(PAGE("Privacy Policy", PRIVACY_BODY, { updated: PRIVACY_UPDATED }));
+  return c.html(PAGE("Privacy Policy", PRIVACY_BODY, { updated: PRIVACY_UPDATED, path: "/privacy" }));
 }

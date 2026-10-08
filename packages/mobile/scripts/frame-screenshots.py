@@ -39,7 +39,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 # alone as a feature name, and review guideline 2.3.7 polices trademarked terms in App Store
 # metadata specifically — which is exactly what a screenshot caption is.
 CAPTIONS_LIST = [
-    ("overview", "Expedition weather forecasts via inReach, ZOLEO, and iPhone satellite"),
+    ("overview", "Weather forecasts via satellite internet, inReach, iPhone satellite, and more"),
     ("altitude", "High-altitude winds and freezing level forecasts for mountaineering"),
     ("cloud", "Avoid whiteouts and flat light with detailed cloud cover"),
     ("aqi", "Plan around wildfire smoke with AQI forecasts"),
@@ -50,7 +50,7 @@ CAPTIONS_LIST = [
 # The Google Play set uses the same shots in the same order; a caption here replaces the App
 # Store one where it names the other platform.
 ANDROID_CAPTIONS = {
-    "overview": "Expedition weather forecasts via inReach, ZOLEO, and satellite messaging",
+    "overview": "Weather forecasts via satellite internet, inReach, SMS, and more",
 }
 
 # Canvas size, source directory and screen corner radius per store. The radius is a fraction of

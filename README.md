@@ -1,6 +1,6 @@
 # Going Blue: Expedition Weather Forecasts via Satellite
 
-Going Blue is an expedition weather app designed specifically for satellite messengers. It was built for a Denali ski expedition with one goal: to get you all the weather information you would have at home, wherever you are. Going Blue uses a custom codec to pack hundreds of forecast data points into a single message that can be sent over SMS, Garmin inReach, ZOLEO, or iPhone satellite messaging. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
+Going Blue is an expedition weather app designed specifically for low-bandwidth satellite connections. It is built for skiers, alpinists, backpackers, kayakers, sailors, hunters, and anyone else who needs detailed weather forecasts in remote places. Going Blue works with direct-to-cell satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
 
 <img src="packages/mobile/screenshots/readme.png" width="100%" alt="Five screenshots: a Mont Blanc meteogram with humidity, freezing level, and detailed clouds; Denali with freezing level and pressure-level winds; cloud cover on Jiehkkevarri; model agreement for Monte Fitz Roy; and the Avalanche Canada forecast for Rogers Pass">
 
@@ -12,7 +12,7 @@ Going Blue is an expedition weather app designed specifically for satellite mess
 
 ## Features
 
-- **Satellite ready**: Get forecasts anywhere in the world, without cell reception. Works with Garmin inReach, ZOLEO, and iPhone satellite messaging.
+- **Satellite ready**: Get forecasts anywhere in the world, without cell reception. Works with direct-to-cell satellite internet (Starlink Direct to Cell, T-Satellite), Garmin inReach, ZOLEO, and iPhone satellite messaging.
 - **Hundreds of data points per message**: Uses custom compression optimized for weather data to fit a detailed weather forecast into a single message.
 - **30+ weather models**: Forecasts from high-resolution models like HRRR (3km), HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for your location.
 - **Detailed cloud cover**: See up to 10 levels in the atmosphere to differentiate between high clouds, valley fog, and whiteout conditions.
@@ -210,7 +210,10 @@ Each device has a different character set and message length. Going Blue chooses
 | Garmin inReach | Iridium Short Burst Data | base-85 (GSM-7 basic ∩ printable ASCII) | 160 chars | ~1025 |
 | ZOLEO | Iridium Short Burst Data | base-85 (GSM-7 basic ∩ printable ASCII) | 240 chars | ~1538 |
 | iPhone satellite messaging | Globalstar | base-32768 | 50 chars[^2] | ~707 |
+| Ultra-constrained network | Starlink Direct to Cell, etc. | base-94 (printable ASCII) | — | — |
 | Internet | Internet | base-94 (printable ASCII) | — | — |
+
+Going Blue supports ultra-constrained networks on iOS and Android. This is mainly for Starlink Direct to Cell support, which is currently available through T-Mobile T-Satellite and other providers outside the US.
 
 [^1]: Space is not included in any alphabet.
 [^2]: iPhone satellite messages are capped at the minimum of 70 UTF-16 code units or 140 bytes of compressed UTF-8. In practice, the header is 5 ASCII characters and the remaining budget is 45 base-32768 characters (3 bytes each), which is 50 characters total.
@@ -453,6 +456,10 @@ The Going Blue codec relies on the client and server having identical codebooks.
  - Added coordinate input with UTM support.
  - Added wet-bulb temperature (derived from temperature, dew point, and elevation).
  - Simplified model agreement to consider only precip and make it easier to interpret.
+
+#### App version 1.5.0
+
+ - Added support for satellite internet on iOS and Android.
 
 ## License
 

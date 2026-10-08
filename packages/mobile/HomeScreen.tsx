@@ -20,9 +20,9 @@ import {
   WIND_LEVELS_HPA, WIND_LEVEL_VARS, varGroupCodesFor, windLevelsToken,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE, MODE_NAMES, DEFAULT_MODE,
   predictCenter, estimatedLastFullRunMs, fillSlotsFor, multiMessageOffered, startDatetime,
-  MODELS as MODEL_SPECS,
+  MODEL_INFO, OPEN_METEO_DOCS, horizonText,
   AVALANCHE_PIECES,
-  type RequestContext, type Center, type ForecastMessage, type ModelSpec, type AvalancheForecast, type AvalanchePiece, type DangerDay,
+  type RequestContext, type Center, type ForecastMessage, type AvalancheForecast, type AvalanchePiece, type DangerDay,
 } from '@weather/protocol';
 import { API_BASE } from './account';
 import { fetchText, requestErrorMessage } from './network';
@@ -148,61 +148,6 @@ const PRIORITIES = [
   { value: MODE_AUTO, token: 'a', label: 'Auto', hint: 'Balance of resolution and range' },
   { value: MODE_RANGE, token: 'r', label: 'Range', hint: 'Long-range forecasts with lower resolution' },
 ];
-
-// Model-selector help copy: the option's label, the center behind it, and the models it
-// serves, highest resolution first, which is the order they serve in, so the list reads as the
-// blend outward that Auto's line describes. Names and horizons come off the specs, keeping this
-// text saying what the meteogram's band labels say; only the region is written here.
-interface ModelInfoEntry { spec: ModelSpec; region: string }
-const M = MODEL_SPECS;
-const MODEL_INFO: Array<{ name: string; desc: string; models: ModelInfoEntry[] }> = [
-  {
-    name: 'Auto',
-    desc: 'Chooses the highest resolution model for your location from over 30 regional weather '
-      + 'models. Seamlessly blends to lower-resolution global models at longer time horizons.',
-    models: [],
-  },
-  {
-    name: 'NOAA',
-    desc: 'US National Oceanic and Atmospheric Administration',
-    models: [
-      { spec: M.gfs_hrrr, region: 'continental US' },
-      { spec: M.gfs_global, region: 'global' },
-    ],
-  },
-  {
-    name: 'GEM',
-    desc: 'Environment and Climate Change Canada',
-    models: [
-      { spec: M.gem_hrdps_continental, region: 'Canada and the northern US' },
-      { spec: M.gem_regional, region: 'North America' },
-      { spec: M.gem_global, region: 'global' },
-    ],
-  },
-  {
-    name: 'ECMWF',
-    desc: 'European Centre for Medium-Range Weather Forecasts',
-    models: [{ spec: M.ecmwf_ifs, region: 'global' }],
-  },
-  {
-    name: 'ICON',
-    desc: 'Deutscher Wetterdienst (Germany)',
-    models: [
-      { spec: M.icon_d2, region: 'central Europe' },
-      { spec: M.icon_eu, region: 'Europe' },
-      { spec: M.icon_global, region: 'global' },
-    ],
-  },
-];
-
-// A spec's horizon in the units the reader thinks in: hours while a run is short enough to plan
-// an outing around, days once it isn't. Halves survive the switch (ICON Global's 7.5 days).
-function horizonText(hours: number): string {
-  if (hours < 96) return `${hours} hours`;
-  const days = hours / 24;
-  return `${Number.isInteger(days) ? days : days.toFixed(1)} days`;
-}
-const OPEN_METEO_DOCS = 'https://open-meteo.com/en/docs#data_sources';
 
 // Compare-pill names by MODEL_BIT index, matching the selector.
 const COMPARE_MODEL_LABELS = MODELS.map((m) => m.label);

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { log } from "./log.js";
+import { SITE_URL } from "./constants.js";
 
 // GET /benchmark — the encoding benchmark dashboard, a single self-contained HTML file produced
 // by `pnpm benchmark` (packages/codec-server/scripts/benchmark.ts writes timestamped reports to
@@ -48,6 +49,8 @@ export async function benchmark(c: Context) {
     "ETag": asset.etag,
     // The response body differs by encoding, so caches must key on the request header.
     "Vary": "Accept-Encoding",
+    // The page is a generated file, so its canonical URL rides in a header rather than in <head>.
+    "Link": `<${SITE_URL}/benchmark>; rel="canonical"`,
   };
 
   if (c.req.header("If-None-Match") === asset.etag) return c.body(null, 304, headers);

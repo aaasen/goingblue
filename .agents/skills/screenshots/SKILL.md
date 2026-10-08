@@ -19,7 +19,7 @@ This is the process for taking screenshots. Run everything from `packages/mobile
 
 ## Overview
 
-Caption: "Expedition weather forecasts via inReach, ZOLEO, and iPhone satellite"
+Caption: "Weather forecasts via satellite internet, inReach, iPhone satellite, and more"
 Location: Mont Blanc
 Model: Auto
 Variables: Humidity, freezing level, detailed clouds

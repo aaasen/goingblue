@@ -26,5 +26,5 @@ feedback, please email <a href="mailto:${FEEDBACK_EMAIL}">${FEEDBACK_EMAIL}</a>.
 `;
 
 export function android(c: Context) {
-  return c.html(PAGE("Android Support", ANDROID_BODY, { showUpdated: false }));
+  return c.html(PAGE("Android Support", ANDROID_BODY, { showUpdated: false, path: "/android" }));
 }

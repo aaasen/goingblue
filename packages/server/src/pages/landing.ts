@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { img } from "../assets.js";
 import { APP_STORE_URL, BRAND, REPO_URL } from "../constants.js";
+import { FAQ_CSS, FAQ_HTML } from "./faq.js";
 import { PAGE } from "./shell.js";
 
 // The landing page is headed by a full-bleed photo of Sultana in a band of its own, with the
@@ -155,6 +156,7 @@ const SHOTS_CSS = `
   .shots img { display: block; width: 100%; height: auto; border-radius: 14px;
     box-shadow: 0 2px 10px rgba(6, 18, 36, 0.08); }
   @media (max-width: 600px) { .shots figure { flex: 0 0 230px; min-width: 0; } }
+  .intro { text-align: center; }
   .stripHead { text-align: center; font-size: 1.7em; margin-bottom: 0; }
   .howto figure { flex-basis: 340px; }
   .howto figure { display: flex; flex-direction: column; }
@@ -188,19 +190,18 @@ const HERO = `<header class=hero>
 // /android, both of which the masthead links to above everything here.
 //
 // The page is marketing only: the SMS consent language, the opt-out wording and the safety
-// disclaimer live on /support, /privacy and /terms, reached through the footer. If an A2P 10DLC
+// disclaimer live on /privacy and /terms, reached through the footer. If an A2P 10DLC
 // campaign review asks for consent language on the public site, it goes back here.
 const LANDING_BODY = `
-<p>${BRAND} is an expedition weather app designed specifically for satellite messengers. It was
-built for a Denali ski expedition with one goal: to get you all the weather information you would
-have at home, wherever you are. ${BRAND} uses a custom codec to pack hundreds of forecast data
-points into a single message that can be sent over SMS, Garmin inReach, ZOLEO, or iPhone
-satellite messaging.</p>
+<p class=intro>${BRAND} is an expedition weather app designed specifically for low-bandwidth satellite
+connections. It is built for skiers, alpinists, backpackers, kayakers, sailors, hunters, and anyone
+else who needs detailed weather forecasts in remote places. ${BRAND} works with direct-to-cell
+satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO.</p>
 
 <div class=shots>
   <figure>
     <img src="${img("shot-overview.jpg")}" width=750 height=1630 loading=lazy
-      alt="Expedition weather forecasts via inReach, ZOLEO, and iPhone satellite">
+      alt="Weather forecasts via satellite internet, inReach, iPhone satellite, and more">
   </figure>
   <figure>
     <img src="${img("shot-altitude.jpg")}" width=750 height=1630 loading=lazy
@@ -254,7 +255,8 @@ satellite messaging.</p>
 <h2>Features</h2>
 <ul>
   <li><strong>Satellite ready</strong>: Get forecasts anywhere in the world, without cell
-  reception. Works with Garmin inReach, ZOLEO, and iPhone satellite messaging.</li>
+  reception. Works with direct-to-cell satellite internet (Starlink Direct to Cell, T-Satellite),
+  Garmin inReach, ZOLEO, and iPhone satellite messaging.</li>
   <li><strong>Hundreds of data points per message</strong>: Uses custom compression optimized for
   weather data to fit a detailed weather forecast into a single message.</li>
   <li><strong>30+ weather models</strong>: Forecasts from high-resolution models like HRRR (3km),
@@ -276,14 +278,18 @@ satellite messaging.</p>
   <li><strong>Open source</strong>: View the source and a detailed explanation of the codec on
   <a href="${REPO_URL}">GitHub</a>.</li>
 </ul>
+
+<h2 id=faq>Frequently asked questions</h2>
+${FAQ_HTML}
 `;
 
 export function landing(c: Context) {
   return c.html(
     PAGE(BRAND, LANDING_BODY, {
       showUpdated: false,
+      path: "/",
       header: HERO,
-      css: HERO_CSS + SHOTS_CSS,
+      css: HERO_CSS + SHOTS_CSS + FAQ_CSS,
     }),
   );
 }
