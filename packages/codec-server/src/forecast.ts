@@ -342,8 +342,13 @@ function decodeResponse(
 // library defaults.
 const OPEN_METEO_TIMEOUT_MS = 15_000;
 
+// With a key set, requests go to Open-Meteo's commercial customer- hosts. The key is added here,
+// after the request is logged, so it never reaches the logs.
+const OPEN_METEO_API_KEY = process.env["OPEN_METEO_API_KEY"];
+
 function fetchWithTimeout(url: string, params: Record<string, unknown>): Promise<WeatherApiResponse[]> {
-  return fetchWeatherApi(url, params, 3, 0.2, 2, { signal: AbortSignal.timeout(OPEN_METEO_TIMEOUT_MS) });
+  const keyed = OPEN_METEO_API_KEY ? { ...params, apikey: OPEN_METEO_API_KEY } : params;
+  return fetchWeatherApi(url, keyed, 3, 0.2, 2, { signal: AbortSignal.timeout(OPEN_METEO_TIMEOUT_MS) });
 }
 
 async function fetchOpenMeteo(
@@ -368,7 +373,8 @@ async function fetchOpenMeteo(
   if (pastDays > 0) params.past_days = pastDays;
   // Overridable so golden-corpus tests and verify-container can replay recorded responses
   // from a local fixture server instead of hitting the live API.
-  const base = process.env["OPEN_METEO_BASE_URL"] ?? "https://api.open-meteo.com";
+  const base = process.env["OPEN_METEO_BASE_URL"]
+    ?? (OPEN_METEO_API_KEY ? "https://customer-api.open-meteo.com" : "https://api.open-meteo.com");
   const url = `${base}/v1/forecast`;
   log.info("openmeteo.request", { url, ...params });
   const results = await fetchWithTimeout(url, params);
@@ -667,7 +673,8 @@ async function fetchAirQuality(
     domains: "auto",
   };
   if (pastDays > 0) params.past_days = pastDays;
-  const base = process.env["AIR_QUALITY_BASE_URL"] ?? "https://air-quality-api.open-meteo.com";
+  const base = process.env["AIR_QUALITY_BASE_URL"]
+    ?? (OPEN_METEO_API_KEY ? "https://customer-air-quality-api.open-meteo.com" : "https://air-quality-api.open-meteo.com");
   const url = `${base}/v1/air-quality`;
   log.info("openmeteo.airquality.request", { url, ...params });
   const results = await fetchWithTimeout(url, params);

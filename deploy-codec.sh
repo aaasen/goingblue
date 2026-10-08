@@ -34,7 +34,8 @@ gcloud builds submit --project "$PROJECT" --config cloudbuild-codec.yaml \
 # it the codec's lines still carry their request id, they just don't nest under the request log.
 gcloud run deploy "$CODEC_SERVICE" --project "$PROJECT" --region "$REGION" \
   --image "$IMAGE" --platform managed --no-allow-unauthenticated \
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT"
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT" \
+  --set-secrets "OPEN_METEO_API_KEY=OPEN_METEO_API_KEY:latest"
 
 INVOKER_EMAIL="$(gcloud projects describe "$PROJECT" --format 'value(projectNumber)')-compute@developer.gserviceaccount.com"
 gcloud run services add-iam-policy-binding "$CODEC_SERVICE" --project "$PROJECT" --region "$REGION" \

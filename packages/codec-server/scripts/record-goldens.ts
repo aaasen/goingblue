@@ -97,8 +97,9 @@ interface GoldenCase {
 
 // Strip whichever origin the request went to (weather and air quality live on different
 // hosts), matching how golden.test.ts and verify-container key their lookups.
+// A recording made with OPEN_METEO_API_KEY set must not write the key into goldens.json.
 function keyOf(url: string): string {
-  return url.replace(/^https?:\/\/[^/]+/, "");
+  return url.replace(/^https?:\/\/[^/]+/, "").replace(/([?&])apikey=[^&]*(&|$)/, "$1").replace(/[?&]$/, "");
 }
 
 const version = WIRE_VERSION;

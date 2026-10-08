@@ -14,8 +14,8 @@ import { WINDOW_HOURS } from "./corpus-db.ts";
 // With OPEN_METEO_API_KEY set, requests go to Open-Meteo's dedicated customer servers. The
 // customer hosts are per-API `customer-` prefixes: the weather corpus comes from the Historical
 // Forecast API, so its dedicated host is customer-historical-forecast-api (the standard forecast
-// API's equivalent, customer-api.open-meteo.com, is not used here — and the production path
-// deliberately stays on the standard host, see src/forecast.ts).
+// API's equivalent, customer-api.open-meteo.com, is what the production path in src/forecast.ts
+// uses).
 //
 // Air quality is a SEPARATE API on its own host, with its own archive and its own model set
 // (CAMS — the `models` centers do not apply). It speaks the same FlatBuffers transport on the
