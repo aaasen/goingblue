@@ -457,7 +457,7 @@ The Going Blue codec relies on the client and server having identical codebooks.
  - Added wet-bulb temperature (derived from temperature, dew point, and elevation).
  - Simplified model agreement to consider only precip and make it easier to interpret.
 
-#### App version 1.5.0
+##### App version 1.4.1
 
  - Added support for satellite internet on iOS and Android.
 
