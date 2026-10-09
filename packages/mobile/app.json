@@ -60,6 +60,15 @@
         }
       ],
       "expo-status-bar",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ],
       "./modules/ultra-constrained/app.plugin.js"
     ],
     "runtimeVersion": {
