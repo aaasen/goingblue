@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { img } from "../assets.js";
-import { APP_STORE_URL, BRAND, REPO_URL } from "../constants.js";
+import { APP_STORE_URL, BRAND, PLAY_STORE_URL, REPO_URL } from "../constants.js";
 import { FAQ_CSS, FAQ_HTML } from "./faq.js";
 import { PAGE } from "./shell.js";
 
@@ -41,10 +41,6 @@ import { PAGE } from "./shell.js";
 // size rather than shrinking it to fit. The band's height is a minimum, not a fixed size, for the
 // same reason: the band grows to hold the stack rather than letting the lower badge run over the
 // photo credit, and the 40px padding keeps the credit's corner clear of it when the band does grow.
-//
-// The Google Play badge links to /android rather than to the Play listing: the app is in closed
-// testing, so the listing only opens for someone already enrolled, and /android is where the
-// enrollment steps are. Point it at the listing itself once the app is in production.
 const HERO_CSS = `
   .hero {
     position: relative;
@@ -177,7 +173,7 @@ const HERO = `<header class=hero>
     <div class=badges>
       <a class=appbtn href="${APP_STORE_URL}"><img src="${img("appstore-badge-black.svg")}" width=150
         height=50 alt="Download on the App Store"></a>
-      <a class=playbtn href="/android"><img src="${img("googleplay-badge.svg")}" width=169
+      <a class=playbtn href="${PLAY_STORE_URL}"><img src="${img("googleplay-badge.svg")}" width=169
         height=50 alt="Get it on Google Play"></a>
     </div>
   </div>
@@ -186,8 +182,8 @@ const HERO = `<header class=hero>
 
 // The marketing copy is kept in step with the App Store listing's description — the two are read
 // back to back by anyone deciding whether to install, so they should not tell different stories.
-// The companion app is distributed through the App Store and, while its closed test runs, through
-// /android, both of which the masthead links to above everything here.
+// The companion app is distributed through the App Store and Google Play, both of which the
+// masthead links to above everything here.
 //
 // The page is marketing only: the SMS consent language, the opt-out wording and the safety
 // disclaimer live on /privacy and /terms, reached through the footer. If an A2P 10DLC

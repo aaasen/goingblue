@@ -5,7 +5,6 @@ import { cors } from "hono/cors";
 import { forecast, sms, twilioSink, createAccountRoute, deleteAccountRoute } from "./routes.js";
 import { landing } from "./pages/landing.js";
 import { support } from "./pages/support.js";
-import { android } from "./pages/android.js";
 import { privacy } from "./pages/privacy.js";
 import { terms } from "./pages/terms.js";
 import { contactCard } from "./pages/contact-card.js";
@@ -23,7 +22,6 @@ const app = new Hono();
 
 app.get("/", landing);
 app.get("/support", support);
-app.get("/android", android);
 app.get("/privacy", privacy);
 app.get("/terms", terms);
 app.get("/contact.vcf", contactCard);

@@ -169,7 +169,7 @@ export function robots(c: Context): Response {
 
 // The public pages. Assets, the contact
 // card, and the API routes are not pages and are left out.
-const PAGES = ["/", "/support", "/android", "/privacy", "/terms", "/benchmark"];
+const PAGES = ["/", "/support", "/privacy", "/terms", "/benchmark"];
 const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${PAGES.map((path) => `  <url><loc>${SITE_URL}${path}</loc></url>`).join("\n")}

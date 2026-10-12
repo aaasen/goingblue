@@ -14,3 +14,4 @@ export const REPO_URL = "https://github.com/aaasen/goingblue";
 // own storefront, and the slug is regenerated from the app's name, so a rename would rot a link
 // that carried it. The numeric ID is the only part of an App Store URL that never changes.
 export const APP_STORE_URL = "https://apps.apple.com/app/id6798411927";
+export const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.laneaasen.weather";
