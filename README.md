@@ -1,6 +1,6 @@
 # Going Blue: Expedition Weather Forecasts via Satellite
 
-Going Blue is an expedition weather app designed specifically for low-bandwidth satellite connections. It is built for skiers, alpinists, backpackers, kayakers, sailors, hunters, and anyone else who needs detailed weather forecasts in remote places. Going Blue works with direct-to-cell satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927).
+Going Blue is an expedition weather app designed specifically for low-bandwidth satellite connections. It is built for skiers, alpinists, backpackers, kayakers, sailors, hunters, and anyone else who needs detailed weather forecasts in remote places. Going Blue works with direct-to-cell satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927) and the [Play Store](https://play.google.com/store/apps/details?id=com.laneaasen.weather).
 
 <img src="packages/mobile/screenshots/readme.png" width="100%" alt="Five screenshots: a Mont Blanc meteogram with humidity, freezing level, and detailed clouds; Denali with freezing level and pressure-level winds; cloud cover on Jiehkkevarri; model agreement for Monte Fitz Roy; and the Avalanche Canada forecast for Rogers Pass">
 
