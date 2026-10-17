@@ -258,9 +258,9 @@ describe("parseRequest", () => {
     // Internet is restricted by neither GSM-7 nor a length, so it takes every printable ASCII
     // character and runs until the upstream data does.
     expect(parseRequest("d:d")).toMatchObject({ alphabet: "base94", maxChars: UNCAPPED_MAX_CHARS });
-    expect(parseRequest("d:g")).toMatchObject({ alphabet: "base85", maxChars: SMS_MAX_CHARS });
-    // Same alphabet, different pipe: ZOLEO's gateway carries 240 bytes to a message, and base-85
-    // spends one of them per character.
+    // inReach drops the three characters Garmin counts twice, so 160 characters stay 160.
+    expect(parseRequest("d:g")).toMatchObject({ alphabet: "base82", maxChars: SMS_MAX_CHARS });
+    // ZOLEO's gateway carries 240 bytes to a message, and base-85 spends one of them per character.
     expect(parseRequest("d:z")).toMatchObject({ alphabet: "base85", maxChars: ZOLEO_MAX_CHARS });
   });
 

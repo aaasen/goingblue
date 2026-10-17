@@ -998,7 +998,7 @@ describe("corrupt character rejection", () => {
     for (const [ch] of CORRUPTIONS) {
       const damaged = encoded.slice(0, 2) + ch + encoded.slice(3);
       expect(() => messageFromString(damaged, () => ctxOf(m))).toThrow(
-        /is not a base-85 character/,
+        /is not a base-82 character/,
       );
     }
   });

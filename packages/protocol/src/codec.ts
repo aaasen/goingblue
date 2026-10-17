@@ -1,13 +1,13 @@
 import { encode as wideEncode, decode as wideDecode } from "base32768";
-import { ALPHABET, SMS_ALPHABET, HTTP_ALPHABET } from "./constants.js";
+import { ALPHABET, GARMIN_ALPHABET, SMS_ALPHABET, HTTP_ALPHABET } from "./constants.js";
 
-// The header's radix is the base-85 alphabet's size (see constants.ts). Bodies carry their own —
-// only the header is pinned to base-85.
-const BASE = ALPHABET.length;
+// The packed header's radix is base-82's (see constants.ts). Bodies carry their own.
+const BASE = GARMIN_ALPHABET.length;
 const BASE_BIG = BigInt(BASE);
 
 // Which character set a message body is written in. Each is the widest thing its route can carry,
 // and "widest" means something different on each one:
+//   base82     base-85 without the three characters Garmin counts twice, for inReach
 //   base85     the safe default, GSM-7 and ASCII at once, for any route that must be both
 //   base94     every printable ASCII character, for a route restricted by neither — over a
 //              byte-counted transport this is the DENSEST choice, not merely a safe one
@@ -15,15 +15,18 @@ const BASE_BIG = BigInt(BASE);
 //   base32768  15 bits a character, for the pipe that counts UTF-16 code units
 // constants.ts and devices.ts hold the reasoning and the field measurement behind each.
 //
-// The version tag and packed header are ALWAYS base-85, on every route — four ASCII header chars
-// cost 4 bytes where the same bits cost 6 in base32768, and keeping them ASCII lets version
-// dispatch read a message of any alphabet unchanged.
-export type TextAlphabet = "base85" | "base94" | "base124";
+// The version tag and packed header are the same on every route — four ASCII header chars
+// cost 4 bytes where the same bits cost 6 in base32768, and keeping them fixed lets version
+// dispatch and the header read a message of any alphabet unchanged. The packed header is base-82,
+// the one alphabet every route carries at one unit a character (inReach included); the version tag
+// is the base-85 index every version shares (see version.ts).
+export type TextAlphabet = "base82" | "base85" | "base94" | "base124";
 export type Alphabet = TextAlphabet | "base32768";
 
 // The character set behind each text alphabet. base32768 has none — it is a byte codec with its
 // own library, which is why it is not a TextAlphabet.
 export const ALPHABET_CHARS: Record<TextAlphabet, string> = {
+  base82: GARMIN_ALPHABET,
   base85: ALPHABET,
   base94: HTTP_ALPHABET,
   base124: SMS_ALPHABET,
@@ -46,18 +49,19 @@ function digitsOf(chars: string, name: string): Digits {
   };
 }
 
-const BASE85 = digitsOf(ALPHABET, "base-85");
+const BASE82 = digitsOf(GARMIN_ALPHABET, "base-82");
 
 // The digits a body written in `alphabet` is made of, one map per alphabet built once. base32768
 // cannot reach here — it is not a TextAlphabet.
 const TEXT_DIGITS: Record<TextAlphabet, Digits> = {
-  base85: BASE85,
+  base82: BASE82,
+  base85: digitsOf(ALPHABET, "base-85"),
   base94: digitsOf(HTTP_ALPHABET, "base-94"),
   base124: digitsOf(SMS_ALPHABET, "base-124"),
 };
 
 // A character the alphabet doesn't contain is a corrupt message, not something to read past.
-// Every base-85 decode below goes through this, because both of the ways of carrying on are
+// Every text decode below goes through this, because both of the ways of carrying on are
 // silent: skipping the character shifts every later digit down a place, and reading it as zero
 // rewrites one digit and leaves the length intact. Either way a damaged message yields a
 // plausible forecast instead of an error, and nothing downstream can tell.
@@ -92,7 +96,7 @@ export function encode(bits: number[]): string {
   for (const b of bits) value = (value << 1n) | BigInt(b);
   const chars: string[] = [];
   for (let i = 0; i < nChars; i++) {
-    chars.push(ALPHABET[Number(value % BASE_BIG)]);
+    chars.push(GARMIN_ALPHABET[Number(value % BASE_BIG)]);
     value /= BASE_BIG;
   }
   return chars.reverse().join("");
@@ -103,7 +107,7 @@ export function decode(s: string, nBits: number): number[] {
   let value = 0n;
   let i = 0;
   for (const c of s) {
-    value = value * BASE_BIG + BigInt(digitAt(BASE85, c, i++, "header"));
+    value = value * BASE_BIG + BigInt(digitAt(BASE82, c, i++, "header"));
   }
   const bits: number[] = new Array(nBits).fill(0);
   for (let i = nBits - 1; i >= 0; i--) {
@@ -117,11 +121,11 @@ export function decode(s: string, nBits: number): number[] {
 // fixed-width and MSB-first for the header. The body's bit length is NOT stored: the decoder
 // knows the body's structure and reads exactly the bits it needs, so the trailing high-order
 // zero padding can be dropped. `bits[0]` is the least-significant bit of the value, emitted
-// least-significant base-85 digit first. On decode, the returned array holds only the meaningful
+// least-significant digit first. On decode, the returned array holds only the meaningful
 // low bits; structural reads past its end resolve to 0 (the implicit padding) via takeInt.
-// `alphabet` selects the radix: base-85 everywhere by default, base-124 on the route that can
-// carry the rest of GSM-7 basic. Both are the same codec over a different character set — the
-// digits are wider, the body is shorter, nothing else changes.
+// `alphabet` selects the radix: base-85 by default, base-82 on inReach, base-94 over HTTP, base-124
+// on the route that can carry the rest of GSM-7 basic. All are the same codec over a different
+// character set — only the digit width and the body's length change.
 export function encodeBodyLE(bits: number[], alphabet: TextAlphabet = "base85"): string {
   const chars = ALPHABET_CHARS[alphabet];
   const radix = BigInt(chars.length);
@@ -186,11 +190,10 @@ export function decodeBodyWide(s: string): number[] {
 // this is a stored context from before the device was recorded — and such a context can only be
 // base-85 or base32768, the two this can tell apart with certainty.
 //
-// It is never asked about base-94 or base-124, which are the ones it COULDN'T answer: both are
-// supersets of base-85, so a body that happens to use none of the extra characters is
-// indistinguishable from a base-85 body of the same length while meaning something entirely
-// different. Every reply in either comes from a context that records the route, so the case
-// cannot arise.
+// It is never asked about base-82, base-94 or base-124, which are the ones it COULDN'T answer: each
+// is a subset or superset of base-85, so a body can be valid in both while meaning something
+// entirely different. Every reply in any of them comes from a context that records the route, so
+// the case cannot arise.
 export function bodyAlphabet(body: string): Alphabet {
   return body.length > 0 && body.codePointAt(0)! > 0x7f ? "base32768" : "base85";
 }

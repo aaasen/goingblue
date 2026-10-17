@@ -80,7 +80,10 @@ export const DEVICE_TRANSPORT: Record<DeviceCode, DeviceTransport> = {
   // carries 6.555 bits per byte where base32768 carries 5.011. Going wider here would make the
   // reply BIGGER; see constants.ts.
   d: { alphabet: "base94", maxChars: UNCAPPED_MAX_CHARS },
-  g: { alphabet: "base85", maxChars: SMS_MAX_CHARS },
+  // Garmin inReach. GSM-7 and ASCII like ZOLEO, but Garmin counts $ @ _ as two characters each
+  // and splits a message that runs over 160, so it spends base-82, the alphabet without them
+  // (see GARMIN_ALPHABET), and every reply is exactly as long on the device as it was sent.
+  g: { alphabet: "base82", maxChars: SMS_MAX_CHARS },
 };
 
 export function isDeviceCode(value: unknown): value is DeviceCode {
@@ -122,8 +125,8 @@ export function widePartBodyChars(headerChars: number): number {
 //
 // iPhone, because Apple's relay won't reassemble what it breaks — the bubble math above.
 //
-// inReach, because a Garmin message is one 160-character SMS and nothing has shown the device
-// reassembling a concatenated pair; labelled parts assume nothing about that. Each part spends
+// inReach, because a Garmin message holds 160 characters and the device shows each segment of a
+// longer SMS as a message of its own (measured), never reassembled. Each part spends
 // its label and a repeated header out of the same 160 — 151 body characters with the wire's header,
 // against 155 in a single unlabelled message — so one message is still the plain reply and the
 // split only starts when a reader asked for more than one.

@@ -73,7 +73,7 @@ describe("serveAvalanche", () => {
     expect(fetch.mock.calls[0][0].searchParams.has("date")).toBe(false);
     if (result.kind !== "ok") throw new Error(result.kind);
     const whole = reassembleReply(result.replies.join("\n"), () => WIRE_HEADER_CHARS);
-    const { forecast } = decodeAvalancheMessage(MODELS, whole, (ISSUED_HOUR + 3) * 3600000, "base85");
+    const { forecast } = decodeAvalancheMessage(MODELS, whole, (ISSUED_HOUR + 3) * 3600000, "base82");
     expect(forecast.issued).toBe(Date.parse("2026-03-01T00:00:00Z"));
   });
 

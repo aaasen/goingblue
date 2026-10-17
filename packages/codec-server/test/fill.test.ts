@@ -3,7 +3,7 @@ import {
   wireCodec, WIRE_VERSION, layoutFor, maxFillSeq, fillSlotsFor, FILL_SLOTS,
   MODE_DETAIL, MODE_AUTO, MODE_RANGE,
   decodeMessage, DEFAULT_VARS, VAR, type Variable, MODEL_BIT, IPHONE_MAX_CHARS,
-  WIRE_HEADER_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, maxCharsFor, reassembleReply,
+  WIRE_HEADER_CHARS, SMS_MAX_CHARS, ZOLEO_MAX_CHARS, maxCharsFor, reassembleReply, DEVICE_TRANSPORT,
   type RequestContext,
 } from "@weather/protocol";
 import {
@@ -235,12 +235,14 @@ describe("encodeFillSeq", () => {
   // reader who asked for two gets two labelled parts, each a whole message with the header
   // repeated, so nothing depends on the device reassembling concatenated segments.
   describe("an inReach reply over several messages", () => {
-    const one = params({ alphabet: "base85", device: "g", maxChars: SMS_MAX_CHARS });
+    const gCtx: RequestContext = { ...ctx, device: "g" };
+    const one = params({ alphabet: DEVICE_TRANSPORT.g.alphabet, device: "g", maxChars: SMS_MAX_CHARS });
     const single = fitFillToBudget(
       encodeSeq(one), (e) => e.length, maxFillSeq(MODE_AUTO), one.maxChars)!;
 
     it("keeps a single message unlabelled, right up to the full 160", () => {
       expect(single.length).toBeLessThanOrEqual(SMS_MAX_CHARS);
+      expect(single).not.toMatch(/[$@_]/);
       expect(splitReplyFor(one, single, WIRE_HEADER_CHARS)).toEqual([single]);
       const full = single.slice(0, WIRE_HEADER_CHARS) + "A".repeat(SMS_MAX_CHARS - WIRE_HEADER_CHARS);
       expect(splitReplyFor(one, full, WIRE_HEADER_CHARS)).toEqual([full]);
@@ -254,7 +256,7 @@ describe("encodeFillSeq", () => {
 
     describe("spread over two messages", () => {
       const p = params({
-        alphabet: "base85",
+        alphabet: DEVICE_TRANSPORT.g.alphabet,
         device: "g",
         messages: 2,
         maxChars: maxCharsFor("g", 2, WIRE_HEADER_CHARS),
@@ -267,6 +269,7 @@ describe("encodeFillSeq", () => {
         expect(encoded.length).toBeGreaterThan(SMS_MAX_CHARS);
         expect(parts).toHaveLength(2);
         for (const part of parts) expect(part.length).toBeLessThanOrEqual(SMS_MAX_CHARS);
+        for (const part of parts) expect(part).not.toMatch(/[$@_]/);
         expect(parts[0].startsWith("1/2 ")).toBe(true);
         expect(parts[1].startsWith("2/2 ")).toBe(true);
         const header = (s: string) => s.slice(4, 4 + WIRE_HEADER_CHARS);
@@ -276,11 +279,11 @@ describe("encodeFillSeq", () => {
       it("decodes to a fuller forecast than one message, in any paste order", () => {
         const whole = reassembleReply(parts.join("\n"), () => WIRE_HEADER_CHARS);
         expect(whole).toBe(encoded);
-        const decoded = decodeMessage(whole, () => ctx);
+        const decoded = decodeMessage(whole, () => gCtx);
         const reversed = reassembleReply([...parts].reverse().join(" "), () => WIRE_HEADER_CHARS);
-        expect(decodeMessage(reversed, () => ctx)).toEqual(decoded);
+        expect(decodeMessage(reversed, () => gCtx)).toEqual(decoded);
         expect(decoded.periodHours!.length)
-          .toBeGreaterThan(decodeMessage(single, () => ctx).periodHours!.length);
+          .toBeGreaterThan(decodeMessage(single, () => gCtx).periodHours!.length);
       });
     });
   });

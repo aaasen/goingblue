@@ -59,15 +59,13 @@ describe('avalanche requests in the forecast store', () => {
     expect(store.slots[0].context).toEqual(ctx);
   });
 
-  it('decode a reply by the kind of request its code names, undoing the inReach swap', async () => {
+  it('decode a reply by the kind of request its code names, in its route\'s alphabet', async () => {
     const token = `${TOKEN}-decode`;
     const ctx = avalancheContext('g');
     const code = await allocCode(token, ctx, 'Avalanche');
-    const reply = encodeAvalancheMessage(MODELS, code, anchorOf(ctx), FORECAST, 'base85');
-    const swapped = reply.replace(/\$/g, '¤').replace(/@/g, '¡').replace(/_/g, '§');
-    expect(swapped).not.toBe(reply);
-    expect(replyKind(swapped, token)).toBe('avalanche');
-    const decoded = decodeAny(swapped, token);
+    const reply = encodeAvalancheMessage(MODELS, code, anchorOf(ctx), FORECAST, 'base82');
+    expect(replyKind(reply, token)).toBe('avalanche');
+    const decoded = decodeAny(reply, token);
     expect(decoded).toEqual({
       kind: 'avalanche', code, forecast: { ...withPlaceholders(FORECAST), timezone: 'America/Vancouver' }, lat: 50.1163, lon: -122.9574,
     });
@@ -81,8 +79,8 @@ describe('avalanche requests in the forecast store', () => {
     const ctx = avalancheContext('g');
     const good = await allocCode(token, ctx, 'Avalanche');
     const bad = await allocCode(token, ctx, 'Avalanche');
-    await attachResponse(token, good, encodeAvalancheMessage(MODELS, good, anchorOf(ctx), FORECAST, 'base85'));
-    const reply = encodeAvalancheMessage(MODELS, bad, anchorOf(ctx), FORECAST, 'base85');
+    await attachResponse(token, good, encodeAvalancheMessage(MODELS, good, anchorOf(ctx), FORECAST, 'base82'));
+    const reply = encodeAvalancheMessage(MODELS, bad, anchorOf(ctx), FORECAST, 'base82');
     const k = [...reply].findIndex((c, i) => i > WIRE_HEADER_CHARS && c !== reply[i + 1]);
     const corrupted = reply.slice(0, k) + reply[k + 1] + reply[k] + reply.slice(k + 2);
     await attachResponse(token, bad, corrupted);

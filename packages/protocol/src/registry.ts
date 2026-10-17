@@ -4,8 +4,6 @@ import type {
   ForecastMessage, MessageHeader, VersionedCodec, ContextResolver,
 } from "./model.js";
 import type { Alphabet } from "./codec.js";
-import { foldSeptetSwap } from "./constants.js";
-import { DEVICE_TRANSPORT } from "./devices.js";
 
 // Main carries exactly one protocol version: wire.ts is the current message grammar, and
 // WIRE_VERSION names it. `decodeMessage` reads the version tag and rejects any other version
@@ -28,24 +26,7 @@ function codecForVersion(version: number): VersionedCodec {
 // fields the slim response omits, keyed by the message code (see RequestContext).
 export function decodeMessage(s: string, resolve: ContextResolver): ForecastMessage {
   const codec = codecFor(s);
-  return codec.decode(unswapReply(s, codec, resolve), resolve);
-}
-
-// Undoes the inReach display swap (SEPTET_SWAP) on a pasted reply before the codec reads it.
-//
-// The fixed prefix — version tag and packed header — is base-85 on every route, so it folds
-// unconditionally, and it has to fold FIRST: the message code that names the route lives inside
-// it. The body folds only once the stored request says the route wasn't SMS. Base-124 is the one
-// alphabet that spends ¤ ¡ § as themselves, so an SMS body is left exactly as pasted; every other
-// alphabet (base-85, base-94, base32768) contains none of the three, which makes the fold a no-op
-// on a clean paste and exact on a swapped one. An unknown code folds the body too — the decode is
-// about to fail on the code regardless, and the error should be that one.
-function unswapReply(s: string, codec: VersionedCodec, resolve: ContextResolver): string {
-  const prefix = foldSeptetSwap(s.slice(0, codec.headerChars));
-  const body = s.slice(codec.headerChars);
-  const device = resolve(codec.header(prefix).code)?.device;
-  const sms = device != null && DEVICE_TRANSPORT[device].alphabet === "base124";
-  return prefix + (sms ? body : foldSeptetSwap(body));
+  return codec.decode(s, resolve);
 }
 
 // Reads a message's fixed-width prefix — version tag and packed header — without its body, by the
@@ -54,7 +35,7 @@ function unswapReply(s: string, codec: VersionedCodec, resolve: ContextResolver)
 // only the first carries a header (see parts.ts).
 export function peekHeader(s: string): MessageHeader {
   const codec = codecFor(s);
-  return codec.header(foldSeptetSwap(s.slice(0, codec.headerChars)));
+  return codec.header(s.slice(0, codec.headerChars));
 }
 
 function codecFor(s: string): VersionedCodec {

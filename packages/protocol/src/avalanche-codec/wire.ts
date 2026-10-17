@@ -2,7 +2,7 @@
  * An avalanche reply on the wire: the shared version prefix, a packed header the same width as a
  * weather reply's, and the bulletin bytes (bulletin.ts) in the route's body alphabet.
  *
- * Packed header layout (22 bits, 4 base-85 characters):
+ * Packed header layout (22 bits, 4 base-82 characters):
  *   code:7 issue:15
  * The code sits exactly where the weather header keeps it, so a reader resolves the stored
  * request, and with it the reply's kind, before knowing anything else about the layout.
@@ -15,7 +15,6 @@
 import type { AvalancheForecast } from "../avalanche.js";
 import { putInt, takeInt } from "../bits.js";
 import { decode, decodeBodyAuto, encode, encodeBodyLE, encodeBodyWide, type Alphabet } from "../codec.js";
-import { foldSeptetSwap } from "../constants.js";
 import { DEVICE_TRANSPORT, type DeviceCode } from "../devices.js";
 import { VERSION_PREFIX_CHARS, encodeVersion, takeVersion } from "../version.js";
 import { WIRE_HEADER_BITS, WIRE_HEADER_CHARS, WIRE_VERSION } from "../wire.js";
@@ -71,15 +70,9 @@ export function decodeAvalancheMessage(
   return { code, forecast: decodeBulletin(models, bytes, issued) };
 }
 
-// A reply as a reader pasted it, decoded for the route its request left by. The inReach display
-// swap is undone the way decodeMessage undoes it for weather: always on the base-85 prefix, and
-// on the body unless the route is SMS, whose base-124 alphabet spends the swapped characters as
-// themselves.
+// A reply as a reader pasted it, decoded for the route its request left by.
 export function decodeAvalancheReply(
   models: Models, s: string, anchor: number, device: DeviceCode | undefined,
 ): { code: number; forecast: AvalancheForecast } {
-  const alphabet = device ? DEVICE_TRANSPORT[device].alphabet : undefined;
-  const prefix = foldSeptetSwap(s.slice(0, WIRE_HEADER_CHARS));
-  const body = s.slice(WIRE_HEADER_CHARS);
-  return decodeAvalancheMessage(models, prefix + (alphabet === "base124" ? body : foldSeptetSwap(body)), anchor, alphabet);
+  return decodeAvalancheMessage(models, s, anchor, device ? DEVICE_TRANSPORT[device].alphabet : undefined);
 }

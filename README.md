@@ -207,7 +207,7 @@ Each device has a different character set and message length. Going Blue chooses
 | Device | Network | Alphabet[^1] | Message length | Bits per message |
 |---|---|---|---|---|
 | SMS | Cellular | base-124 (GSM-7 basic) | 160 chars | ~1110 |
-| Garmin inReach | Iridium Short Burst Data | base-85 (GSM-7 basic ∩ printable ASCII) | 160 chars | ~1025 |
+| Garmin inReach | Iridium Short Burst Data | base-82 (GSM-7 basic ∩ printable ASCII - $@_) | 160 chars | ~1025 |
 | ZOLEO | Iridium Short Burst Data | base-85 (GSM-7 basic ∩ printable ASCII) | 240 chars | ~1538 |
 | iPhone satellite messaging | Globalstar | base-32768 | 50 chars[^2] | ~707 |
 | Ultra-constrained network | Starlink Direct to Cell, etc. | base-94 (printable ASCII) | — | — |
@@ -460,6 +460,10 @@ The Going Blue codec relies on the client and server having identical codebooks.
 ##### App version 1.4.1
 
  - Added support for satellite internet on iOS and Android.
+
+#### Codec v6
+
+ - Removed $, @, and _ from the Garmin alphabet to prevent message splitting.
 
 ## License
 

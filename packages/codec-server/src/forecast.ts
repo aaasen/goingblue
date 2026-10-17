@@ -1134,7 +1134,7 @@ export interface ForecastParams {
   vars: ReadonlySet<Variable>;
   maxChars: number;
   // Character set for the response body, from the request's `d:` device token. Absent means
-  // base-85, which is what every device but iPhone uses (see DEVICE_TRANSPORT).
+  // base-85 (see DEVICE_TRANSPORT).
   alphabet?: Alphabet;
   // The route itself (`d:`), for the routes whose reply is split into labelled messages —
   // see splitReplyFor. Absent when the request named none.

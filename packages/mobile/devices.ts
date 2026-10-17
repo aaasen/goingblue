@@ -16,7 +16,7 @@ import type { DeviceCode, PlatformCode } from '@weather/protocol';
 // basic (base-124) in the same 160 characters. HTTP counts bytes, where ASCII is the densest
 // thing UTF-8 carries, so internet spends every printable ASCII character (base-94) — and, having
 // no length limit at all, the whole forecast rather than a fixed budget of it. inReach must be
-// both GSM-7 and ASCII, so it keeps base-85. ZOLEO's gateway counts raw UTF-8 bytes — 240 to a
+// both GSM-7 and ASCII, and Garmin counts $ @ _ twice, so it spends base-82. ZOLEO's gateway counts raw UTF-8 bytes — 240 to a
 // message, measured — so it also keeps base-85 and spends the extra length instead. The
 // protocol's devices.ts holds the measurements.
 export type Device = 'internet' | 'sms' | 'inreach' | 'zoleo' | 'iphone';

@@ -44,7 +44,7 @@ const VARIANTS = [
   { name: "detail-us-i2-pcf", tokens: "p:d m:us d:i n:2 v:pcf" },
   // Internet: base94 with no length cap, so the fill binds on the upstream data horizon.
   { name: "range-eu-d-w0246-c", tokens: "p:r m:eu d:d w:0246 v:c" },
-  // inReach: base-85 labelled 2×151 parts, clouds + band.
+  // inReach: base-82 labelled 2×151 parts, clouds + band.
   { name: "auto-ca-g2-c", tokens: "p:a m:ca d:g n:2 v:c" },
   // ZOLEO: base-85 2×231 parts. Air quality pins the second upstream API's response shape
   // alongside the weather one, and `aso` is the selection where the US headline codes as a

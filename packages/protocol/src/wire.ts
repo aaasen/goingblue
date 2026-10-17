@@ -27,7 +27,7 @@ import {
   makeBitSink, makeBitSource, type CodeBook,
 } from "./entropy.js";
 
-export const WIRE_VERSION = 5;
+export const WIRE_VERSION = 6;
 
 // Duration-first fill: the user requests a duration in days and the server fills the message
 // budget by refining days from the front of the window (see layout.ts).
@@ -44,8 +44,7 @@ export const WIRE_VERSION = 5;
 // packed header. Packed header layout (22 bits):
 //   code:7 seq:8 elev:7
 // seq:8 stores (seq - 1), i.e. 1..256; the largest layout is seq = maxFillSeq(mode).
-// (A 3-bit codebook-class selector sat after elev until 2026-08-20, when the class machinery
-// was removed; 22 bits fill the same 4 base-85 header chars — 4 × log2(85) ≈ 25.6.)
+// 22 bits fill 4 base-82 header chars — 4 × log2(82) ≈ 25.4.
 // The body carries no length field — it is a single rANS stream (see rans.ts), serialized
 // little-endian and self-delimiting: the decoder knows the structure and consumes exactly the
 // symbols the encoder wrote (see encodeBodyLE/decodeBodyLE and SymSource.assertDone).
@@ -866,8 +865,8 @@ function buildHeader(msg: ForecastMessage): number[] {
   return headerBits;
 }
 
-// The version tag and packed header are always base-85; only the body follows `alphabet`. See
-// the Alphabet type in codec.ts for why the ASCII prefix is the cheaper choice even on the
+// The version tag and packed header are the same on every route; only the body follows `alphabet`.
+// See the Alphabet type in codec.ts for why the ASCII prefix is the cheaper choice even on the
 // route that wants a wide body.
 function encodeBodyIn(alphabet: Alphabet, bits: number[]): string {
   return alphabet === "base32768" ? encodeBodyWide(bits) : encodeBodyLE(bits, alphabet);

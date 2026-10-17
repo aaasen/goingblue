@@ -15,6 +15,17 @@ export const ELEV_BITS = 14; // 0..16383m
 export const ALPHABET =
   "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
 
+// ALPHABET without $ @ _, the three characters Garmin counts twice. Garmin shows them as ¤ ¡ §
+// (their GSM-7 septet positions read as Latin-1) and counts a message in the UTF-8 bytes of what
+// it shows, so each costs 2 of an inReach message's 160, and a message over 160 arrives split
+// into pieces labelled "i/N " exactly like our own parts (field-measured 2026-10-17: 160 of
+// these 82 arrived whole, 159 plus one $ arrived whole, 160 plus one of $ @ _ arrived split).
+// Without them every character costs 1, so a 160-character reply is a 160-character message.
+//
+// This is base-82: the inReach body alphabet, and the packed header's alphabet on every route
+// (see codec.ts), since the header is read before anything says which route a reply took.
+export const GARMIN_ALPHABET = ALPHABET.replace(/[$@_]/g, "");
+
 // The non-ASCII half of GSM-7 basic: 39 more characters, each still a single septet, so 160 of
 // them still fit one SMS segment. They are split by what they survive rather than listed in GSM
 // table order, because that split is the fallback (see SMS_ALPHABET).
@@ -25,21 +36,6 @@ export const ALPHABET =
 // (0x24 ¤ vs $, 0x40 ¡ vs @, 0x5F § vs _) and which a Latin-1 confusion would swap silently.
 export const GSM_LATIN1 = "£¥èéùìòÇØøÅåÆæßÉ¤¡ÄÖÑÜ§¿äöñüà";
 
-// The three of those the inReach leg turns base-85 INTO. A reply written in ALPHABET arrives in the
-// Garmin Messenger app with every $ @ _ shown as ¤ ¡ § — the septets are carried intact and
-// displayed by the GSM-7 table rather than ASCII (field-confirmed 2026-08-22: the swapped-back
-// paste decoded in the shipped app, and nothing else in the reply was touched). So in a reply
-// that never spent the GSM-7 half, the three can only mean their ASCII twins, and the decoder
-// folds them back (see foldSeptetSwap). The SMS route is the one exception, because there they
-// are their own characters — base-124 spends all three.
-export const SEPTET_SWAP: Record<string, string> = { "¤": "$", "¡": "@", "§": "_" };
-
-// Undoes the inReach display swap above on a string known to be base-85/ASCII — a version tag,
-// a packed header, or the body of any route but SMS. Never call it on a base-124 body.
-export function foldSeptetSwap(s: string): string {
-  return s.replace(/[¤¡§]/g, (c) => SEPTET_SWAP[c]);
-}
-
 // Greek: the ten GSM-7 basic characters with NO ISO-8859-1 equivalent, and so the ten with
 // somewhere to fall. A field test found a hop on the inbound SMS leg that transcodes through Latin-1
 // and turns exactly these into C1 controls, deterministically — septet position q arriving as
@@ -49,7 +45,7 @@ export function foldSeptetSwap(s: string): string {
 export const GSM_GREEK = "ΔΦΓΛΩΠΨΣΘΞ";
 
 // What the SMS route writes a body in: base-124, 6.954 bits a character against base-85's 6.409.
-// The version tag and packed header stay base-85 on every route (see codec.ts).
+// The version tag and packed header are the same on every route (see codec.ts).
 export const SMS_ALPHABET = ALPHABET + GSM_LATIN1 + GSM_GREEK;
 
 // Every printable ASCII character except space: U+0021..U+007E, 94 of them. Built from the range

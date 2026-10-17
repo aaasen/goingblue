@@ -114,7 +114,7 @@ describe("base-124 body codec", () => {
 });
 
 describe("the alphabet a reply is decoded in", () => {
-  const encodedFor = (alphabet: "base85" | "base124") => messageToString(d, alphabet);
+  const encodedFor = (alphabet: "base82" | "base85" | "base124") => messageToString(d, alphabet);
 
   it("comes from the request's route, not from inspecting the body", () => {
     const encoded = encodedFor("base124");
@@ -127,11 +127,11 @@ describe("the alphabet a reply is decoded in", () => {
     expect(encodedFor("base124").length).toBeLessThan(encodedFor("base85").length);
   });
 
-  it("still decodes base-85 for the routes that keep it", () => {
-    for (const code of ["z", "g"] as const) {
-      expect(DEVICE_TRANSPORT[code].alphabet).toBe("base85");
-      expect(wireCodec.decode(encodedFor("base85"), () => ctx(code))).toEqual(d);
-    }
+  it("decodes each ASCII route in its own alphabet", () => {
+    expect(DEVICE_TRANSPORT.z.alphabet).toBe("base85");
+    expect(wireCodec.decode(encodedFor("base85"), () => ctx("z"))).toEqual(d);
+    expect(DEVICE_TRANSPORT.g.alphabet).toBe("base82");
+    expect(wireCodec.decode(encodedFor("base82"), () => ctx("g"))).toEqual(d);
   });
 
   it("falls back to guessing when the context predates the device field", () => {

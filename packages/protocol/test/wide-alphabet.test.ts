@@ -139,15 +139,15 @@ describe("the iPhone one-bubble budget", () => {
   });
 
   it("gives every route the widest alphabet its own unit allows", () => {
-    // Four routes, four different answers, each from what the pipe counts: UTF-16 code units for
-    // Apple's relay, septets for SMS, bytes for HTTP, and the ASCII-and-GSM-7 intersection for the
-    // routes that must satisfy both. See sms-alphabet.test.ts and http-alphabet.test.ts.
+    // Each answer comes from what the pipe counts: UTF-16 code units for Apple's relay, septets
+    // for SMS, bytes for HTTP, the ASCII-and-GSM-7 intersection for ZOLEO, and that intersection
+    // without the three characters Garmin counts twice for inReach. See sms-alphabet.test.ts,
+    // http-alphabet.test.ts and garmin-alphabet.test.ts.
     expect(DEVICE_TRANSPORT.i).toEqual({ alphabet: "base32768", maxChars: IPHONE_MAX_CHARS });
     expect(DEVICE_TRANSPORT.s.alphabet).toBe("base124");
     expect(DEVICE_TRANSPORT.d.alphabet).toBe("base94");
-    for (const code of ["z", "g"] as const) {
-      expect(DEVICE_TRANSPORT[code].alphabet).toBe("base85");
-    }
+    expect(DEVICE_TRANSPORT.z.alphabet).toBe("base85");
+    expect(DEVICE_TRANSPORT.g.alphabet).toBe("base82");
     // The SMS-segment routes are a single 160-character segment — the alphabet changes what a
     // character carries, not how many there are. ZOLEO's gateway carries 240: its cap is raw
     // UTF-8 bytes (measured), which an ASCII alphabet spends one per character.

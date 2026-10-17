@@ -401,7 +401,7 @@ interface Args {
   // Which alphabet the body is written in, i.e. how many bits a reply character carries. It is a
   // route property in production (see DEVICE_TRANSPORT), but the benchmark takes it directly so a
   // run names what it measured rather than implying a device. Default base-85 keeps every earlier
-  // run comparable; it is still a real route's alphabet (internet and inReach both keep it).
+  // run comparable; it is still a real route's alphabet (ZOLEO keeps it).
   alphabet: Alphabet;
   verbose: boolean;
   includeIncomplete: boolean;
@@ -447,8 +447,8 @@ Report options
                             training, the default), train, or all; --location bypasses this
   --request-hour <h>        local hour the request is assumed to arrive at, 0-23 (default 7)
   --max-chars <n>           message budget in characters (default 160)
-  --alphabet <name>         body alphabet: base85 (default), base94 (internet), base124 (SMS),
-                            base32768 (iPhone)
+  --alphabet <name>         body alphabet: base85 (default), base82 (inReach), base94 (internet),
+                            base124 (SMS), base32768 (iPhone)
   --include-incomplete      keep forecasts with fully-null base series
   --no-open                 don't open the HTML report in the browser
 
@@ -497,8 +497,8 @@ function parseArgs(argv: string[]): Args {
       args.reportShard = { index: parseInt(argv[++i], 10), total: parseInt(argv[++i], 10), out: argv[++i] };
     else throw new Error(`Unknown argument: ${a} (--help lists the options)`);
   }
-  if (!["base85", "base94", "base124", "base32768"].includes(args.alphabet)) {
-    throw new Error(`--alphabet must be one of base85, base94, base124, base32768`);
+  if (!["base82", "base85", "base94", "base124", "base32768"].includes(args.alphabet)) {
+    throw new Error(`--alphabet must be one of base82, base85, base94, base124, base32768`);
   }
   if (!MODES.includes(args.mode)) {
     throw new Error(`--mode must be one of ${MODES.map(modeLabel).join(", ").toLowerCase()}`);
