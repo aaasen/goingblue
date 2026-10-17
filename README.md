@@ -461,7 +461,7 @@ The Going Blue codec relies on the client and server having identical codebooks.
 
  - Added support for satellite internet on iOS and Android.
 
-#### Codec v6
+#### Codec v6 (App version 1.6.0)
 
  - Removed $, @, and _ from the Garmin alphabet to prevent message splitting.
 
