@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   ActivityIndicator, Alert, Linking, Modal, ScrollView, StyleSheet, Text,
   TouchableOpacity, View,
@@ -17,7 +17,7 @@ const PRIVACY_URL = 'https://going.blue/privacy';
 
 // Settings, as a full-screen sheet off the header's gear — the same frame as HelpScreen.
 export default function SettingsScreen({
-  visible, onClose, onDeleteAccount, quota, onSubscribe, units, onUnitsChange, timeFormat, onTimeFormatChange,
+  visible, onClose, onDeleteAccount, quota, onSubscribe, children, units, onUnitsChange, timeFormat, onTimeFormatChange,
   coordFormat, onCoordFormatChange, aqiScale, onAqiScaleChange,
 }: {
   visible: boolean;
@@ -27,6 +27,9 @@ export default function SettingsScreen({
   // press.
   quota: StoredQuota | null;
   onSubscribe: () => void;
+  // The paywall sheet, mounted inside this modal while it is open: iOS presents one modal from
+  // a view at a time, so a sibling sheet would never appear over this one.
+  children?: ReactNode;
   units: UnitPrefs;
   onUnitsChange: (u: UnitPrefs) => void;
   timeFormat: TimeFormat;
@@ -162,6 +165,7 @@ export default function SettingsScreen({
               <Text style={styles.link} onPress={() => Linking.openURL(PRIVACY_URL)}>Privacy Policy</Text>
             </Text>
           </ScrollView>
+          {children}
         </SafeAreaView>
       </SafeAreaProvider>
     </Modal>

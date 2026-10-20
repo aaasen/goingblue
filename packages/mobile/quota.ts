@@ -44,17 +44,28 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
+// The quota the app shows: the server's last word, unless the store says the account is
+// subscribed, which the app can know before the server has heard of the purchase and while
+// offline. The server stays the one that enforces.
+export function effectiveQuota(stored: StoredQuota | null, entitled: boolean, now: Date): StoredQuota | null {
+  return entitled ? { state: { kind: 'none' }, month: utcMonth(now) } : stored;
+}
+
+// What every plan includes, and what the subscription adds.
+export const INCLUDED_BULLETS = [
+  'Unlimited weather forecasts over the internet, including satellite internet.',
+  'Unlimited SMS/satellite avalanche forecasts.',
+];
+export const EXPEDITION_BULLET = 'Unlimited SMS/satellite weather forecasts.';
+
 // The Subscription section of Settings: the plan's name, what it includes as bullets (the last
 // one being this month's standing on the free plan), and whether the reader can subscribe. Not
 // tied to a route, since the quota is one count across all of them.
 export function quotaStatus(stored: StoredQuota | null, now: Date): { name: string; bullets: string[]; subscribed: boolean } {
   const state = currentQuota(stored, now);
-  const included = [
-    'Unlimited weather forecasts over the internet, including satellite internet.',
-    'Unlimited SMS/satellite avalanche forecasts.',
-  ];
+  const included = INCLUDED_BULLETS;
   if (state.kind === 'none') {
-    return { name: 'Going Blue Expedition', bullets: [...included, 'Unlimited SMS/satellite weather forecasts.'], subscribed: true };
+    return { name: 'Going Blue Expedition', bullets: [...included, EXPEDITION_BULLET], subscribed: true };
   }
   const allowance = `${QUOTA_FREE_FORECASTS} free SMS/satellite weather forecasts per month.`;
   if (state.kind === 'over') {

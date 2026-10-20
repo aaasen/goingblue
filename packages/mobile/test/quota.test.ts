@@ -17,7 +17,9 @@ vi.mock('../modules/ultra-constrained', () => ({ isUltraConstrained: () => false
 vi.hoisted(() => { (globalThis as { __DEV__?: boolean }).__DEV__ = false; });
 
 import { fetchQuota } from '../account';
-import { currentQuota, isQuotaState, quotaLine, quotaStatus, storedQuota, utcMonth, type StoredQuota } from '../quota';
+import {
+  currentQuota, effectiveQuota, isQuotaState, quotaLine, quotaStatus, storedQuota, utcMonth, type StoredQuota,
+} from '../quota';
 import { clearSettings, loadQuota, saveQuota } from '../settings';
 
 const OCT = new Date('2026-10-20T23:30:00Z');
@@ -92,6 +94,18 @@ describe('quotaLine', () => {
 
   it('shows nothing for an account with no quota', () => {
     expect(quotaLine(stored({ kind: 'none' }), OCT, 'SMS')).toBeNull();
+  });
+});
+
+describe('effectiveQuota', () => {
+  it('shows the store\'s subscription over whatever the server last said', () => {
+    expect(effectiveQuota(stored({ kind: 'over' }), true, OCT)).toEqual({ state: { kind: 'none' }, month: '2026-10' });
+    expect(effectiveQuota(null, true, OCT)).toEqual({ state: { kind: 'none' }, month: '2026-10' });
+  });
+
+  it('otherwise shows the server\'s word', () => {
+    expect(effectiveQuota(stored({ kind: 'over' }), false, OCT)).toEqual(stored({ kind: 'over' }));
+    expect(effectiveQuota(null, false, OCT)).toBeNull();
   });
 });
 

@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { Alert, View, StyleSheet } from 'react-native';
+import type { CustomerInfo } from 'react-native-purchases';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import HomeScreen from './HomeScreen';
+import PaywallScreen from './PaywallScreen';
 import SettingsScreen from './SettingsScreen';
 import SetupScreen from './SetupScreen';
-import { loadToken, clearToken, deleteAccount } from './account';
+import { loadToken, clearToken, deleteAccount, fetchQuota } from './account';
+import { configurePurchases, isEntitled, logOutPurchases, purchasesAvailable, watchCustomerInfo } from './purchases';
 import { clearStore } from './cache';
 import { removeAllPacks } from './packStore';
 import {
@@ -14,7 +17,7 @@ import {
   saveAqiScale, saveCoordFormat, saveDevice, saveQuota, saveTimeFormat, saveTwoMessages, saveUnits, clearSettings,
   defaultUnitPrefs, type AqiScale, type CoordFormat, type TimeFormat, type UnitPrefs,
 } from './settings';
-import { storedQuota, type StoredQuota } from './quota';
+import { effectiveQuota, storedQuota, type StoredQuota } from './quota';
 import type { QuotaState } from '@weather/protocol';
 import { DEFAULT_DEVICE, type Device } from './devices';
 import { clearTileCache, configureTileCache } from './tileCache';
@@ -47,6 +50,10 @@ export default function App() {
   // The free-forecast quota as the server last stated it (quota.ts). Owned here because both the
   // builder and Settings show it; HomeScreen is where it is heard.
   const [quota, setQuotaState] = useState<StoredQuota | null>(null);
+  // The store's view of the subscription (purchases.ts), null until the SDK has answered. It
+  // overrides the server's quota for display, so a purchase shows at once and offline.
+  const [customerInfo, setCustomerInfo] = useState<CustomerInfo | null>(null);
+  const [paywallOpen, setPaywallOpen] = useState(false);
   useUpdateCheck();
 
   // Settled together rather than one at a time: the token decides which screen comes up, and the
@@ -121,8 +128,34 @@ export default function App() {
     saveQuota(stored);
   }, []);
 
-  // The Subscribe buttons' press. There is no subscription flow yet, so it does nothing.
-  const onSubscribe = useCallback(() => {}, []);
+  // The SDK follows the account: configured for the first token, logged in to any later one,
+  // and watched for entitlement changes while it is.
+  useEffect(() => {
+    if (typeof token !== 'string') return;
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    configurePurchases(token).then(() => {
+      if (!cancelled) stop = watchCustomerInfo(setCustomerInfo);
+    }, () => {});
+    return () => { cancelled = true; stop?.(); };
+  }, [token]);
+
+  // The Subscribe buttons' press: the paywall, or a word on why there is none in this build.
+  const onSubscribe = useCallback(() => {
+    if (!purchasesAvailable()) {
+      Alert.alert('Subscriptions unavailable', 'This build cannot make purchases.');
+      return;
+    }
+    setPaywallOpen(true);
+  }, []);
+
+  // A purchase or restore went through: show it now from the store's answer, and ask the server
+  // for its view, which lands once RevenueCat's webhook has.
+  const onPurchased = useCallback((info: CustomerInfo) => {
+    setCustomerInfo(info);
+    setPaywallOpen(false);
+    if (typeof token === 'string') fetchQuota(token).then((state) => heardQuota(state, new Date()), () => {});
+  }, [token, heardQuota]);
 
   // Erase the account server-side, then drop this device's local state: the saved forecasts for
   // that account, then the token itself. Setup mints a fresh account on the way back in.
@@ -141,6 +174,8 @@ export default function App() {
     await removeAllPacks();
     await clearTileCache().catch(() => {});
     await clearToken();
+    await logOutPurchases();
+    setCustomerInfo(null);
     setForecastData('');
     setUnitsState(defaultUnitPrefs('imperial'));
     setTimeFormatState('12h');
@@ -156,6 +191,16 @@ export default function App() {
 
   // Still reading storage. Render nothing and let the splash stand in — it stays up until one of
   // the branches below lays out.
+  const shownQuota = effectiveQuota(quota, isEntitled(customerInfo), new Date());
+  const paywall = (
+    <PaywallScreen
+      visible={paywallOpen}
+      onClose={() => setPaywallOpen(false)}
+      customerInfo={customerInfo}
+      onPurchased={onPurchased}
+    />
+  );
+
   if (token === undefined) return null;
 
   if (token === null) {
@@ -201,15 +246,18 @@ export default function App() {
           forecastData={forecastData}
           onForecastDataChange={setForecastData}
           onOpenSettings={() => setSettingsOpen(true)}
-          quota={quota}
+          quota={shownQuota}
           onQuotaHeard={heardQuota}
           onSubscribe={onSubscribe}
         />
+        {/* The paywall mounts under whichever sheet is up: beside the page from the builder's
+            button, inside Settings from its own, since iOS presents one modal per view. */}
+        {!settingsOpen && paywall}
         <SettingsScreen
           visible={settingsOpen}
           onClose={() => setSettingsOpen(false)}
           onDeleteAccount={handleDeleteAccount}
-          quota={quota}
+          quota={shownQuota}
           onSubscribe={onSubscribe}
           units={units}
           onUnitsChange={setUnits}
@@ -219,7 +267,9 @@ export default function App() {
           onCoordFormatChange={setCoordFormat}
           aqiScale={aqiScale}
           onAqiScaleChange={setAqiScale}
-        />
+        >
+          {paywall}
+        </SettingsScreen>
       </View>
     </SafeAreaProvider>
   );
