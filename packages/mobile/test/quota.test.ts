@@ -110,24 +110,24 @@ describe('effectiveQuota', () => {
 });
 
 describe('quotaStatus', () => {
-  const INCLUDED = [
-    'Unlimited weather forecasts over the internet, including satellite internet.',
-    'Unlimited SMS/satellite avalanche forecasts.',
+  const BULLETS = [
+    'Unlimited weather forecasts via the internet.',
+    'Unlimited avalanche forecasts.',
+    '5 free SMS and satellite weather forecasts per month.',
   ];
+  const FREE = 'You are not subscribed to Going Blue. The following features are available for free:';
 
-  it('describes the free plan with the month\'s standing last and offers to subscribe', () => {
+  it('describes the free plan, with the month\'s standing out of the bullets', () => {
     expect(quotaStatus(null, OCT)).toEqual({
-      name: 'Going Blue Free',
-      bullets: [...INCLUDED, '5 free SMS/satellite weather forecasts per month. 5 free forecasts remaining in October.'],
-      text: null,
+      name: 'Going Blue Free', bullets: BULLETS, text: FREE,
+      standing: 'You have 5 free weather forecasts remaining in October.',
       subscribed: false,
     });
-    expect(quotaStatus(stored({ kind: 'free', remaining: 1 }), OCT).bullets[2])
-      .toBe('5 free SMS/satellite weather forecasts per month. 1 free forecast remaining in October.');
+    expect(quotaStatus(stored({ kind: 'free', remaining: 1 }), OCT).standing)
+      .toBe('You have 1 free weather forecast remaining in October.');
     expect(quotaStatus(stored({ kind: 'over' }), OCT)).toEqual({
-      name: 'Going Blue Free',
-      bullets: [...INCLUDED, '5 free SMS/satellite weather forecasts per month. Limit exceeded. Limit resets November 1.'],
-      text: null,
+      name: 'Going Blue Free', bullets: BULLETS, text: FREE,
+      standing: 'You have used all of your free weather forecasts for October. The limit resets November 1.',
       subscribed: false,
     });
   });
@@ -138,6 +138,7 @@ describe('quotaStatus', () => {
       bullets: [],
       text: 'You are subscribed to the Going Blue Expedition plan. Enjoy unlimited weather and avalanche '
         + 'forecasts via satellite. Thank you for supporting Going Blue!',
+      standing: null,
       subscribed: true,
     });
   });

@@ -51,50 +51,48 @@ export function effectiveQuota(stored: StoredQuota | null, entitled: boolean, no
   return entitled ? { state: { kind: 'none' }, month: utcMonth(now) } : stored;
 }
 
-// What every plan includes, and what the subscription adds.
-export const INCLUDED_BULLETS = [
-  'Unlimited weather forecasts over the internet, including satellite internet.',
-  'Unlimited SMS/satellite avalanche forecasts.',
+// What the free plan includes before its monthly allowance.
+const INCLUDED_BULLETS = [
+  'Unlimited weather forecasts via the internet.',
+  'Unlimited avalanche forecasts.',
 ];
-export const EXPEDITION_BULLET = 'Unlimited SMS/satellite weather forecasts.';
 
-// The Subscription section of Settings: the plan's name and, on the free plan, what it includes
-// as bullets with this month's standing last, or, for a subscriber, a line of thanks. Not tied
-// to a route, since the quota is one count across all of them.
+// The Subscription section of Settings: the plan's name, a line of text, and on the free plan
+// what it includes as bullets under the text, with this month's standing last. Not tied to a
+// route, since the quota is one count across all of them.
 export const SUBSCRIBED_TEXT =
   'You are subscribed to the Going Blue Expedition plan. Enjoy unlimited weather and avalanche '
   + 'forecasts via satellite. Thank you for supporting Going Blue!';
+export const FREE_TEXT = 'You are not subscribed to Going Blue. The following features are available for free:';
 
+// `standing` is this month's count on the free plan, the line just before the subscribe note.
 export function quotaStatus(stored: StoredQuota | null, now: Date): {
-  name: string; bullets: string[]; text: string | null; subscribed: boolean;
+  name: string; bullets: string[]; text: string | null; standing: string | null; subscribed: boolean;
 } {
   const state = currentQuota(stored, now);
-  const included = INCLUDED_BULLETS;
   if (state.kind === 'none') {
-    return { name: 'Going Blue Expedition', bullets: [], text: SUBSCRIBED_TEXT, subscribed: true };
+    return { name: 'Going Blue Expedition', bullets: [], text: SUBSCRIBED_TEXT, standing: null, subscribed: true };
   }
-  const allowance = `${QUOTA_FREE_FORECASTS} free SMS/satellite weather forecasts per month.`;
+  const bullets = [...INCLUDED_BULLETS, `${QUOTA_FREE_FORECASTS} free SMS and satellite weather forecasts per month.`];
+  const month = MONTH_NAMES[now.getUTCMonth()];
   if (state.kind === 'over') {
     const next = MONTH_NAMES[(now.getUTCMonth() + 1) % 12];
     return {
-      name: 'Going Blue Free',
-      bullets: [...included, `${allowance} Limit exceeded. Limit resets ${next} 1.`],
-      text: null,
+      name: 'Going Blue Free', bullets, text: FREE_TEXT,
+      standing: `You have used all of your free weather forecasts for ${month}. The limit resets ${next} 1.`,
       subscribed: false,
     };
   }
-  const month = MONTH_NAMES[now.getUTCMonth()];
   const noun = state.remaining === 1 ? 'forecast' : 'forecasts';
   return {
-    name: 'Going Blue Free',
-    bullets: [...included, `${allowance} ${state.remaining} free ${noun} remaining in ${month}.`],
-    text: null,
+    name: 'Going Blue Free', bullets, text: FREE_TEXT,
+    standing: `You have ${state.remaining} free weather ${noun} remaining in ${month}.`,
     subscribed: false,
   };
 }
 
 // The line under the free plan's bullets, above the Subscribe button.
-export const SUBSCRIBE_CTA = 'Subscribe for unlimited SMS/satellite weather forecasts.';
+export const SUBSCRIBE_CTA = 'Subscribe to Going Blue Expedition for unlimited SMS and satellite weather forecasts.';
 
 // The line under the action button while a messaging route is selected, naming the route
 // (`device` is its label, "SMS" or "inReach"), or null when the account has no quota. The quota

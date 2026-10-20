@@ -4,7 +4,6 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { CustomerInfo, PurchasesPackage } from 'react-native-purchases';
-import { EXPEDITION_BULLET, INCLUDED_BULLETS } from './quota';
 import { activeEntitlement, loadPlans, purchasePlan, restorePurchases, type Plans } from './purchases';
 import { requestErrorMessage } from './network';
 import { palette } from './palette';
@@ -95,12 +94,11 @@ export default function PaywallScreen({ visible, onClose, onPurchased }: {
           <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
             <View style={styles.card}>
               <Text style={styles.planName}>Going Blue Expedition</Text>
-              {[...INCLUDED_BULLETS, EXPEDITION_BULLET].map((bullet) => (
-                <View key={bullet} style={styles.bullet}>
-                  <Text style={styles.bulletDot}>{'•'}</Text>
-                  <Text style={styles.bulletText}>{bullet}</Text>
-                </View>
-              ))}
+              <Text style={styles.pitch}>
+                Subscribe to Going Blue Expedition for{' '}
+                <Text style={styles.pitchBold}>unlimited SMS and satellite weather forecasts</Text>.
+                Get the annual plan for the price of just two months to keep using Going Blue throughout the year.
+              </Text>
             </View>
 
             {plans === null && loadError === null && <ActivityIndicator style={styles.loading} color={palette.pageTextTertiary} />}
@@ -154,10 +152,10 @@ const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 72 },
   // The plan card, as the Subscription section of Settings draws it.
   card: { backgroundColor: palette.card, borderRadius: 12, padding: 14, marginBottom: 16 },
-  planName: { fontSize: 15, fontWeight: '600', color: palette.text, marginBottom: 8 },
-  bullet: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  bulletDot: { fontSize: 13, lineHeight: 19, color: palette.textSecondary },
-  bulletText: { flex: 1, fontSize: 13, lineHeight: 19, color: palette.textSecondary },
+  planName: { fontSize: 17, fontWeight: '600', color: palette.text, marginBottom: 8 },
+  // The size and color of a Settings row title ("Manage downloads").
+  pitch: { fontSize: 15, lineHeight: 21, color: palette.text },
+  pitchBold: { fontWeight: '600' },
   loading: { marginVertical: 24 },
   note: { fontSize: 13, color: palette.pageNote, lineHeight: 19, marginBottom: 12 },
   // The same shape as the Subscribe button in Settings, one per plan.

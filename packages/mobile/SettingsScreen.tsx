@@ -100,14 +100,16 @@ export default function SettingsScreen({
             <Text style={styles.heading}>Subscription</Text>
             <View style={styles.card}>
               <Text style={styles.planName}>{subscription.name}</Text>
+              {subscription.text !== null && <Text style={styles.bulletText}>{subscription.text}</Text>}
               {subscription.bullets.map((bullet) => (
                 <View key={bullet} style={styles.bullet}>
                   <Text style={styles.bulletDot}>{'•'}</Text>
                   <Text style={styles.bulletText}>{bullet}</Text>
                 </View>
               ))}
-              {subscription.text !== null && <Text style={styles.bulletText}>{subscription.text}</Text>}
-              {!subscription.subscribed && <Text style={styles.subscribeNote}>{SUBSCRIBE_CTA}</Text>}
+              {!subscription.subscribed && (
+                <Text style={styles.subscribeNote}>{subscription.standing} {SUBSCRIBE_CTA}</Text>
+              )}
             </View>
             {subscription.subscribed ? (
               <>
@@ -223,11 +225,12 @@ const styles = StyleSheet.create({
   listTitle: { fontSize: 15, color: palette.text },
   listSubtitle: { fontSize: 13, color: palette.textTertiary, marginTop: 2 },
   // The plan card: its name, then what it includes as a bulleted list.
-  planName: { fontSize: 15, fontWeight: '600', color: palette.text, marginBottom: 8 },
+  // The same type as the subscription sheet's plan card.
+  planName: { fontSize: 17, fontWeight: '600', color: palette.text, marginBottom: 8 },
   bullet: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  bulletDot: { fontSize: 13, lineHeight: 19, color: palette.textSecondary },
-  bulletText: { flex: 1, fontSize: 13, lineHeight: 19, color: palette.textSecondary },
-  subscribeNote: { fontSize: 13, lineHeight: 19, color: palette.textSecondary, marginTop: 12 },
+  bulletDot: { fontSize: 15, lineHeight: 21, color: palette.text },
+  bulletText: { flex: 1, fontSize: 15, lineHeight: 21, color: palette.text },
+  subscribeNote: { fontSize: 15, lineHeight: 21, color: palette.text, marginTop: 12 },
   // Full-width button under the plan card, the same height and radius as the delete button at
   // the bottom of the page.
   subscribeBtn: { backgroundColor: palette.primary, borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center' },
