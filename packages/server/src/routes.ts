@@ -11,6 +11,7 @@ import {
   replyChars, resolveForecast,
 } from "./forecast.js";
 import { quotaExceededReply, quotaNow, quotaStatus } from "./quota.js";
+import { authorizedWebhook, parseSubscriptionEvent, recordSubscriptionEvent } from "./subscriptions.js";
 import { isAppUserAgent, isValidToken, normalizeToken } from "@weather/protocol";
 import { fetchMessage, isMessageSid, twiml, validateTwilioJsonSignature, validateTwilioSignature } from "./twilio.js";
 import { FORECAST_NUMBER } from "./constants.js";
@@ -336,6 +337,32 @@ export async function quotaRoute(c: Context) {
   } catch (e) {
     log.error("account.quota_failed", { err: e });
     return c.text("Quota unavailable", 503);
+  }
+}
+
+// POST /revenuecat — RevenueCat's webhook, one event per request (subscriptions.ts). RevenueCat
+// sends the Authorization header it was configured with, which has to equal
+// REVENUECAT_WEBHOOK_AUTH exactly; with the secret unset the route refuses everything, since an
+// unchecked event here would grant paid access. A 503 makes RevenueCat retry the event later.
+export async function revenuecatWebhook(c: Context) {
+  const expected = process.env["REVENUECAT_WEBHOOK_AUTH"];
+  if (!expected) {
+    log.error("revenuecat.unconfigured");
+    return c.text("Webhook not configured", 503);
+  }
+  if (!authorizedWebhook(c.req.header("Authorization"), expected)) {
+    log.warn("revenuecat.unauthorized");
+    return c.text("Unauthorized", 403);
+  }
+  const event = parseSubscriptionEvent(await c.req.json().catch(() => null));
+  if (event === null) return c.text("Bad event", 400);
+  try {
+    const outcome = await recordSubscriptionEvent(event);
+    log.info("revenuecat.event", { type: event.type, outcome });
+    return c.text("ok");
+  } catch (e) {
+    log.error("revenuecat.failed", { type: event.type, err: e });
+    return c.text("Unavailable", 503);
   }
 }
 

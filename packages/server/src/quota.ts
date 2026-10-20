@@ -25,6 +25,8 @@ export interface QuotaStatus {
   hard: number;
   // Whether the cut-off reply has already been sent this month.
   notified: boolean;
+  // Whether a linked subscription is live (subscriptions.ts), which means no quota at all.
+  subscribed: boolean;
 }
 
 // The first instant of the UTC month `months` after the one containing `now`.
@@ -36,27 +38,35 @@ export function hardLimit(prevMonthServed: number): number {
   return prevMonthServed > QUOTA_SOFT ? QUOTA_SOFT : QUOTA_HARD;
 }
 
-// The account's standing this month, from the requests table. Rows are counted by account id,
-// which survives the token being cleared on deletion, over the messaging routes only
-// (`message_sid` is set on exactly those rows).
+// The account's standing this month, from the requests table, and whether it is subscribed at
+// all. Rows are counted by account id, which survives the token being cleared on deletion, over
+// the messaging routes only (`message_sid` is set on exactly those rows).
 export async function quotaStatus(token: string, now = new Date()): Promise<QuotaStatus> {
   const thisMonth = monthStartUtc(now);
   const lastMonth = monthStartUtc(now, -1);
-  const { rows } = await query<{ served: string; prev: string; notified: string }>(
+  const { rows } = await query<{ served: string; prev: string; notified: string; subscribed: boolean }>(
     `select count(*) filter (where r.created_at >= $2 and coalesce(r.outcome, 'ok') = 'ok') as served,
             count(*) filter (where r.created_at < $2 and coalesce(r.outcome, 'ok') = 'ok') as prev,
-            count(*) filter (where r.created_at >= $2 and r.outcome = 'quota_exceeded') as notified
+            count(*) filter (where r.created_at >= $2 and r.outcome = 'quota_exceeded') as notified,
+            exists (select 1
+                      from accounts sa
+                      join account_subscriptions l on l.account_id = sa.id
+                      join subscriptions s on s.id = l.subscription_id
+                     where sa.token = $1 and s.expires_at > now()) as subscribed
        from requests r join accounts a on a.id = r.account_id
       where a.token = $1 and r.message_sid is not null and r.kind = 'weather' and r.created_at >= $3`,
     [token, thisMonth, lastMonth],
   );
   const row = rows[0]!;
-  return { served: Number(row.served), hard: hardLimit(Number(row.prev)), notified: Number(row.notified) > 0 };
+  return {
+    served: Number(row.served), hard: hardLimit(Number(row.prev)), notified: Number(row.notified) > 0,
+    subscribed: row.subscribed === true,
+  };
 }
 
-// Whether this request is past the hard limit.
+// Whether this request is past the hard limit. A subscriber never is.
 export function overHard(status: QuotaStatus): boolean {
-  return status.served >= status.hard;
+  return !status.subscribed && status.served >= status.hard;
 }
 
 // The quota as the app shows it, from a served count: the free forecasts left, or used up. The
@@ -67,13 +77,14 @@ function stateAfter(served: number): QuotaState {
 
 // The account's standing now, for the app to read when it is online (POST /account/quota).
 export function quotaNow(status: QuotaStatus): QuotaState {
-  return stateAfter(status.served);
+  return status.subscribed ? { kind: "none" } : stateAfter(status.served);
 }
 
 // The `X-Quota` header for the codec: the quota as the reply should report it if this request
 // is a weather forecast and gets served (codec-server/src/quota.ts). The codec ignores it for
 // an avalanche reply.
 export function quotaHeader(status: QuotaStatus): string {
+  if (status.subscribed) return "none";
   const after = stateAfter(status.served + 1);
   return after.kind === "free" ? `free:${after.remaining}` : "over";
 }

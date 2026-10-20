@@ -1,5 +1,4 @@
-import type pg from "pg";
-import { getPool, query } from "./db.js";
+import { query, transaction } from "./db.js";
 import type { RequestShape } from "./dispatch.js";
 
 // The delivery store: the `requests` row of a messaging request and its `replies`, read and
@@ -124,21 +123,6 @@ export async function loadDelivery(messageSid: string): Promise<DeliveryRequest 
 
 export async function countAttempt(id: string): Promise<void> {
   await query("update requests set attempts = attempts + 1 where id = $1", [id]);
-}
-
-async function transaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
-  const client = await getPool().connect();
-  try {
-    await client.query("begin");
-    const out = await fn(client);
-    await client.query("commit");
-    return out;
-  } catch (e) {
-    await client.query("rollback").catch(() => {});
-    throw e;
-  } finally {
-    client.release();
-  }
 }
 
 // Write the outcome and shape of the encode step and create its reply rows, in one transaction.

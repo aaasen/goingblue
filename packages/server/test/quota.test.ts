@@ -32,41 +32,51 @@ describe("hardLimit", () => {
 
 describe("quotaHeader", () => {
   it("counts the free forecasts left after this one", () => {
-    expect(quotaHeader({ served: 0, hard: QUOTA_HARD, notified: false })).toBe(`free:${QUOTA_SOFT - 1}`);
-    expect(quotaHeader({ served: QUOTA_SOFT - 1, hard: QUOTA_HARD, notified: false })).toBe("free:0");
+    expect(quotaHeader({ served: 0, hard: QUOTA_HARD, notified: false, subscribed: false })).toBe(`free:${QUOTA_SOFT - 1}`);
+    expect(quotaHeader({ served: QUOTA_SOFT - 1, hard: QUOTA_HARD, notified: false, subscribed: false })).toBe("free:0");
   });
 
   it("is over from the first forecast past the stated quota", () => {
-    expect(quotaHeader({ served: QUOTA_SOFT, hard: QUOTA_HARD, notified: false })).toBe("over");
-    expect(quotaHeader({ served: QUOTA_HARD, hard: QUOTA_HARD, notified: false })).toBe("over");
+    expect(quotaHeader({ served: QUOTA_SOFT, hard: QUOTA_HARD, notified: false, subscribed: false })).toBe("over");
+    expect(quotaHeader({ served: QUOTA_HARD, hard: QUOTA_HARD, notified: false, subscribed: false })).toBe("over");
   });
 });
 
 describe("quotaNow", () => {
   it("is the free forecasts left this month, down to zero", () => {
-    expect(quotaNow({ served: 0, hard: QUOTA_HARD, notified: false })).toEqual({ kind: "free", remaining: QUOTA_SOFT });
-    expect(quotaNow({ served: QUOTA_SOFT, hard: QUOTA_HARD, notified: false })).toEqual({ kind: "free", remaining: 0 });
+    expect(quotaNow({ served: 0, hard: QUOTA_HARD, notified: false, subscribed: false })).toEqual({ kind: "free", remaining: QUOTA_SOFT });
+    expect(quotaNow({ served: QUOTA_SOFT, hard: QUOTA_HARD, notified: false, subscribed: false })).toEqual({ kind: "free", remaining: 0 });
   });
 
   it("is over past the stated quota, whatever the hard limit", () => {
-    expect(quotaNow({ served: QUOTA_SOFT + 1, hard: QUOTA_HARD, notified: false })).toEqual({ kind: "over" });
-    expect(quotaNow({ served: QUOTA_HARD + 5, hard: QUOTA_SOFT, notified: true })).toEqual({ kind: "over" });
+    expect(quotaNow({ served: QUOTA_SOFT + 1, hard: QUOTA_HARD, notified: false, subscribed: false })).toEqual({ kind: "over" });
+    expect(quotaNow({ served: QUOTA_HARD + 5, hard: QUOTA_SOFT, notified: true, subscribed: false })).toEqual({ kind: "over" });
   });
 
   it("is one forecast ahead of the header", () => {
     for (let served = 0; served <= QUOTA_HARD; served++) {
-      const now = quotaNow({ served: served + 1, hard: QUOTA_HARD, notified: false });
-      const header = quotaHeader({ served, hard: QUOTA_HARD, notified: false });
+      const now = quotaNow({ served: served + 1, hard: QUOTA_HARD, notified: false, subscribed: false });
+      const header = quotaHeader({ served, hard: QUOTA_HARD, notified: false, subscribed: false });
       expect(header).toBe(now.kind === "free" ? `free:${now.remaining}` : "over");
     }
   });
 });
 
+describe("a subscriber", () => {
+  const sub = { served: QUOTA_HARD + 5, hard: QUOTA_SOFT, notified: true, subscribed: true };
+
+  it("has no quota, is never over the hard limit, and the codec is told none", () => {
+    expect(quotaNow(sub)).toEqual({ kind: "none" });
+    expect(overHard(sub)).toBe(false);
+    expect(quotaHeader(sub)).toBe("none");
+  });
+});
+
 describe("overHard", () => {
   it("is reached when this month's served count meets the hard limit", () => {
-    expect(overHard({ served: QUOTA_HARD - 1, hard: QUOTA_HARD, notified: false })).toBe(false);
-    expect(overHard({ served: QUOTA_HARD, hard: QUOTA_HARD, notified: false })).toBe(true);
-    expect(overHard({ served: QUOTA_SOFT, hard: QUOTA_SOFT, notified: false })).toBe(true);
+    expect(overHard({ served: QUOTA_HARD - 1, hard: QUOTA_HARD, notified: false, subscribed: false })).toBe(false);
+    expect(overHard({ served: QUOTA_HARD, hard: QUOTA_HARD, notified: false, subscribed: false })).toBe(true);
+    expect(overHard({ served: QUOTA_SOFT, hard: QUOTA_SOFT, notified: false, subscribed: false })).toBe(true);
   });
 });
 

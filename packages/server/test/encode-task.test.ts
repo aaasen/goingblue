@@ -158,7 +158,7 @@ beforeEach(() => {
   codec = () => new Response("ENCODED", { status: 200 });
   vi.mocked(accountExists).mockResolvedValue(true);
   vi.mocked(quotaStatus).mockReset();
-  vi.mocked(quotaStatus).mockResolvedValue({ served: 0, hard: QUOTA_HARD, notified: false });
+  vi.mocked(quotaStatus).mockResolvedValue({ served: 0, hard: QUOTA_HARD, notified: false, subscribed: false });
   stubFetch();
 });
 
@@ -475,8 +475,8 @@ describe("quota", () => {
     quotaHeaders.push((init?.headers as Record<string, string>)["X-Quota"] ?? null);
     return new Response("ENCODED", { status: 200, headers: { "X-Request-Shape": JSON.stringify({ kind }) } });
   };
-  const status = (over: Partial<{ served: number; hard: number; notified: boolean }>) =>
-    vi.mocked(quotaStatus).mockResolvedValue({ served: 0, hard: QUOTA_HARD, notified: false, ...over });
+  const status = (over: Partial<{ served: number; hard: number; notified: boolean; subscribed: boolean }>) =>
+    vi.mocked(quotaStatus).mockResolvedValue({ served: 0, hard: QUOTA_HARD, notified: false, subscribed: false, ...over });
 
   beforeEach(() => {
     inbound = message({ body: V7_BODY });
@@ -537,6 +537,15 @@ describe("quota", () => {
     const row = receive();
     expect(await run()).toBe("done");
     expect(row.outcome).toBe("quota_exceeded");
+  });
+
+  it("never limits a subscriber, and tells the codec there is no quota", async () => {
+    status({ served: QUOTA_HARD + 3, hard: QUOTA_SOFT, notified: true, subscribed: true });
+    const row = receive();
+    expect(await run()).toBe("done");
+    expect(row.outcome).toBe("ok");
+    expect(quotaHeaders).toEqual(["none"]);
+    expect(sentBodies).toEqual(["ENCODED"]);
   });
 
   it("never limits an avalanche forecast", async () => {

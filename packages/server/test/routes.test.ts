@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import { appUserAgent, generateToken } from "@weather/protocol";
-import { createAccountRoute, forecast, quotaRoute, sms, twilioSink } from "../src/routes.js";
+import { createAccountRoute, forecast, quotaRoute, revenuecatWebhook, sms, twilioSink } from "../src/routes.js";
 import { fetchMessage } from "../src/twilio.js";
 import { FORECAST_NUMBER } from "../src/constants.js";
 import { accountExists, createAccount, recordRequest } from "../src/accounts.js";
@@ -10,6 +10,7 @@ import { markQueued, receiveMessage, recordReplyDelivery } from "../src/delivery
 import { runEncodeTask } from "../src/encode-task.js";
 import { enqueueEncode, tasksConfigured } from "../src/tasks.js";
 import { quotaStatus } from "../src/quota.js";
+import { recordSubscriptionEvent } from "../src/subscriptions.js";
 import { log } from "../src/log.js";
 
 // The account gate: a request whose token names no account is rejected before dispatch. The
@@ -39,6 +40,10 @@ vi.mock("../src/tasks.js", () => ({
 vi.mock("../src/quota.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/quota.js")>()),
   quotaStatus: vi.fn(),
+}));
+vi.mock("../src/subscriptions.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/subscriptions.js")>()),
+  recordSubscriptionEvent: vi.fn(async () => "recorded"),
 }));
 // The sink reads the message back from Twilio before writing anything; only that call is mocked.
 vi.mock("../src/twilio.js", async (importOriginal) => ({
@@ -493,11 +498,16 @@ describe("account quota", () => {
     accounts.request("/account/quota", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-  const status = (served: number, over: Partial<{ hard: number; notified: boolean }> = {}) =>
-    vi.mocked(quotaStatus).mockResolvedValue({ served, hard: 10, notified: false, ...over });
+  const status = (served: number, over: Partial<{ hard: number; notified: boolean; subscribed: boolean }> = {}) =>
+    vi.mocked(quotaStatus).mockResolvedValue({ served, hard: 10, notified: false, subscribed: false, ...over });
 
   beforeEach(() => {
     vi.mocked(quotaStatus).mockReset();
+  });
+
+  it("reports no quota for a subscriber, whatever the counts say", async () => {
+    status(12, { hard: 5, notified: true, subscribed: true });
+    expect(await (await ask({ token: TOKEN })).json()).toEqual({ kind: "none" });
   });
 
   it("reports the free forecasts left this month", async () => {
@@ -555,6 +565,67 @@ describe("account quota", () => {
     vi.mocked(accountExists).mockRejectedValue(new Error("db down"));
     expect((await ask({ token: TOKEN })).status).toBe(503);
     expect(error).toHaveBeenCalledWith("account.quota_failed", expect.anything());
+    error.mockRestore();
+  });
+});
+
+// RevenueCat's webhook: refused without its configured header, otherwise parsed and recorded.
+describe("revenuecat webhook", () => {
+  const hooks = new Hono();
+  hooks.post("/revenuecat", revenuecatWebhook);
+  const AUTH = "Bearer webhook-secret";
+  const EVENT = { api_version: "1.0", event: {
+    type: "RENEWAL", app_user_id: TOKEN, product_id: "expedition_annual", store: "APP_STORE",
+    original_transaction_id: "1000000123", expiration_at_ms: 1_800_000_000_000, event_timestamp_ms: 1_770_000_000_000,
+  } };
+  const deliver = (body: unknown, auth: string | null = AUTH) =>
+    hooks.request("/revenuecat", {
+      method: "POST", body: typeof body === "string" ? body : JSON.stringify(body),
+      headers: { "Content-Type": "application/json", ...(auth === null ? {} : { Authorization: auth }) },
+    });
+
+  beforeEach(() => {
+    process.env["REVENUECAT_WEBHOOK_AUTH"] = AUTH;
+    vi.mocked(recordSubscriptionEvent).mockClear();
+    vi.mocked(recordSubscriptionEvent).mockResolvedValue("recorded");
+  });
+  afterEach(() => { delete process.env["REVENUECAT_WEBHOOK_AUTH"]; });
+
+  it("records an authorized event", async () => {
+    const resp = await deliver(EVENT);
+    expect(resp.status).toBe(200);
+    expect(vi.mocked(recordSubscriptionEvent)).toHaveBeenCalledWith(expect.objectContaining({
+      type: "RENEWAL", appUserIds: [TOKEN], transactionId: "1000000123", product: "expedition_annual",
+      expiresAt: new Date(1_800_000_000_000),
+    }));
+  });
+
+  it("refuses a missing or wrong header before reading the event", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    expect((await deliver(EVENT, null)).status).toBe(403);
+    expect((await deliver(EVENT, "Bearer other")).status).toBe(403);
+    expect(vi.mocked(recordSubscriptionEvent)).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("refuses everything while the secret is unset", async () => {
+    const error = vi.spyOn(log, "error").mockImplementation(() => {});
+    delete process.env["REVENUECAT_WEBHOOK_AUTH"];
+    expect((await deliver(EVENT)).status).toBe(503);
+    expect(vi.mocked(recordSubscriptionEvent)).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("is a 400 for a body that is not an event", async () => {
+    expect((await deliver("nope")).status).toBe(400);
+    expect((await deliver({ hello: 1 })).status).toBe(400);
+    expect(vi.mocked(recordSubscriptionEvent)).not.toHaveBeenCalled();
+  });
+
+  it("asks for the event again when the database cannot take it", async () => {
+    const error = vi.spyOn(log, "error").mockImplementation(() => {});
+    vi.mocked(recordSubscriptionEvent).mockRejectedValue(new Error("db down"));
+    expect((await deliver(EVENT)).status).toBe(503);
     error.mockRestore();
   });
 });

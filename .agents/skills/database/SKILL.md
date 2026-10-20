@@ -3,11 +3,13 @@ name: database
 description: Read the going.blue Postgres database through a read-only role
 ---
 
-The gateway keeps one Postgres database on Cloud SQL. The schema is defined in `migrate()` in `packages/server/src/db.ts` and has four tables:
+The gateway keeps one Postgres database on Cloud SQL. The schema is defined in `migrate()` in `packages/server/src/db.ts` and has six tables:
 1. `accounts`: one row per app account. `token` is the primary key, `id` is a surrogate number, `created_at` is when the app minted it. A token maps to no name, number, or address anywhere.
 2. `requests`: one row per inbound message on every route, written when the message arrives and updated as it is answered. This is the table almost every question is about.
 3. `replies`: one row per outbound message of a reply on the messaging routes, with the SID Twilio assigned on send, its segment count, and how the send ended.
 4. `stats_hidden_accounts`: the operator's own accounts, which the `/stats` dashboard leaves out of every count.
+5. `subscriptions`: one row per store subscription as RevenueCat reported it (`packages/server/src/subscriptions.ts`), keyed by the store's original transaction id: `store`, `product`, `expires_at` (when access ends), `event_at` (the newest RevenueCat event applied), `updated_at`.
+6. `account_subscriptions`: which accounts each subscription serves, `(account_id, subscription_id)`. An account is subscribed, and has no quota, while a linked subscription has `expires_at > now()`.
 
 No phone number is stored in any form. The sender's number and the message text live only at Twilio. The join to the service logs is `requests.request_id`, the same value the gateway and codec log lines carry as `request_id`. `requests.message_sid` is the inbound Twilio SID and `replies.sid` the reply's, so a Twilio message and its row match by SID. Rows written before September 15, 2026 have neither and match by time.
 

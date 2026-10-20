@@ -43,6 +43,22 @@ export function getPool(): pg.Pool {
   return pool;
 }
 
+// Several statements as one unit: committed together, or rolled back together on any failure.
+export async function transaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    const out = await fn(client);
+    await client.query("commit");
+    return out;
+  } catch (e) {
+    await client.query("rollback").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
   text: string,
   params?: unknown[],
@@ -300,6 +316,27 @@ export async function migrate(): Promise<void> {
     create table if not exists stats_hidden_accounts (
       account_id  bigint primary key,
       created_at  timestamptz not null default now()
+    )
+  `);
+  // Subscriptions as RevenueCat reports them (subscriptions.ts), keyed on the store's original
+  // transaction id, and the accounts each one serves. An account is subscribed while a linked
+  // subscription has not expired; the quota (quota.ts) reads nothing else from these.
+  await query(`
+    create table if not exists subscriptions (
+      id          text primary key,
+      store       text,
+      product     text,
+      expires_at  timestamptz not null,
+      event_at    timestamptz not null,
+      updated_at  timestamptz not null default now()
+    )
+  `);
+  await query(`
+    create table if not exists account_subscriptions (
+      account_id       bigint not null,
+      subscription_id  text not null references subscriptions(id),
+      created_at       timestamptz not null default now(),
+      primary key (account_id, subscription_id)
     )
   `);
   // Fold the retired request_shapes table into the shape columns above, then drop it. The two
