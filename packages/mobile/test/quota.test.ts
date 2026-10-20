@@ -17,7 +17,7 @@ vi.mock('../modules/ultra-constrained', () => ({ isUltraConstrained: () => false
 vi.hoisted(() => { (globalThis as { __DEV__?: boolean }).__DEV__ = false; });
 
 import { fetchQuota } from '../account';
-import { currentQuota, isQuotaState, quotaLine, storedQuota, utcMonth, type StoredQuota } from '../quota';
+import { currentQuota, isQuotaState, quotaLine, quotaStatus, storedQuota, utcMonth, type StoredQuota } from '../quota';
 import { clearSettings, loadQuota, saveQuota } from '../settings';
 
 const OCT = new Date('2026-10-20T23:30:00Z');
@@ -92,6 +92,36 @@ describe('quotaLine', () => {
 
   it('shows nothing for an account with no quota', () => {
     expect(quotaLine(stored({ kind: 'none' }), OCT, 'SMS')).toBeNull();
+  });
+});
+
+describe('quotaStatus', () => {
+  const INCLUDED = [
+    'Unlimited weather forecasts over the internet, including satellite internet.',
+    'Unlimited SMS/satellite avalanche forecasts.',
+  ];
+
+  it('describes the free plan with the month\'s standing last and offers to subscribe', () => {
+    expect(quotaStatus(null, OCT)).toEqual({
+      name: 'Going Blue Free',
+      bullets: [...INCLUDED, '5 free SMS/satellite weather forecasts per month. 5 free forecasts remaining in October.'],
+      subscribed: false,
+    });
+    expect(quotaStatus(stored({ kind: 'free', remaining: 1 }), OCT).bullets[2])
+      .toBe('5 free SMS/satellite weather forecasts per month. 1 free forecast remaining in October.');
+    expect(quotaStatus(stored({ kind: 'over' }), OCT)).toEqual({
+      name: 'Going Blue Free',
+      bullets: [...INCLUDED, '5 free SMS/satellite weather forecasts per month. Limit exceeded. Limit resets November 1.'],
+      subscribed: false,
+    });
+  });
+
+  it('describes the subscription with nothing to buy', () => {
+    expect(quotaStatus(stored({ kind: 'none' }), OCT)).toEqual({
+      name: 'Going Blue Expedition',
+      bullets: [...INCLUDED, 'Unlimited SMS/satellite weather forecasts.'],
+      subscribed: true,
+    });
   });
 });
 

@@ -44,6 +44,39 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
+// The Subscription section of Settings: the plan's name, what it includes as bullets (the last
+// one being this month's standing on the free plan), and whether the reader can subscribe. Not
+// tied to a route, since the quota is one count across all of them.
+export function quotaStatus(stored: StoredQuota | null, now: Date): { name: string; bullets: string[]; subscribed: boolean } {
+  const state = currentQuota(stored, now);
+  const included = [
+    'Unlimited weather forecasts over the internet, including satellite internet.',
+    'Unlimited SMS/satellite avalanche forecasts.',
+  ];
+  if (state.kind === 'none') {
+    return { name: 'Going Blue Expedition', bullets: [...included, 'Unlimited SMS/satellite weather forecasts.'], subscribed: true };
+  }
+  const allowance = `${QUOTA_FREE_FORECASTS} free SMS/satellite weather forecasts per month.`;
+  if (state.kind === 'over') {
+    const next = MONTH_NAMES[(now.getUTCMonth() + 1) % 12];
+    return {
+      name: 'Going Blue Free',
+      bullets: [...included, `${allowance} Limit exceeded. Limit resets ${next} 1.`],
+      subscribed: false,
+    };
+  }
+  const month = MONTH_NAMES[now.getUTCMonth()];
+  const noun = state.remaining === 1 ? 'forecast' : 'forecasts';
+  return {
+    name: 'Going Blue Free',
+    bullets: [...included, `${allowance} ${state.remaining} free ${noun} remaining in ${month}.`],
+    subscribed: false,
+  };
+}
+
+// The line under the free plan's bullets, above the Subscribe button.
+export const SUBSCRIBE_CTA = 'Subscribe for unlimited SMS/satellite weather forecasts.';
+
 // The line under the action button while a messaging route is selected, naming the route
 // (`device` is its label, "SMS" or "inReach"), or null when the account has no quota. The quota
 // is one count across every messaging route; the line names the one the reader is about to

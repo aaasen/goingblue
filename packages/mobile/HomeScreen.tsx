@@ -29,9 +29,9 @@ import { API_BASE, fetchQuota } from './account';
 import { fetchText, requestErrorMessage } from './network';
 import {
   type AqiScale, type CoordFormat, type TimeFormat, type UnitPrefs, loadFavoritesSort, loadFavoritesSortReversed, loadPinnedCoords,
-  loadQuota, saveFavoritesSort, saveFavoritesSortReversed, savePinnedCoords, saveQuota,
+  saveFavoritesSort, saveFavoritesSortReversed, savePinnedCoords,
 } from './settings';
-import { quotaLine, storedQuota, type StoredQuota } from './quota';
+import { quotaLine, type StoredQuota } from './quota';
 import { ladderLabel } from './cloudBand';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import {
@@ -797,6 +797,12 @@ interface Props {
   onForecastDataChange: (v: string) => void;
   // Opens the Settings sheet, which App owns — it outlives this screen's scroll position.
   onOpenSettings: () => void;
+  // The free-forecast quota (quota.ts), owned by App because Settings shows it too. This screen
+  // is where it is heard: off every weather reply pasted in, and from the server when online.
+  quota: StoredQuota | null;
+  onQuotaHeard: (state: QuotaState, at: Date) => void;
+  // The quota box's Subscribe button.
+  onSubscribe: () => void;
 }
 
 // Every forecast piece's outline, for the avalanche map; the pieces ship with the app.
@@ -812,7 +818,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'avalanche', label: 'Avalanche' },
 ];
 
-export default function HomeScreen({ token, device, onDeviceChange, twoMessages, onTwoMessagesChange, aqiScale, units, timeFormat, coordFormat, forecastData, onForecastDataChange, onOpenSettings }: Props) {
+export default function HomeScreen({ token, device, onDeviceChange, twoMessages, onTwoMessagesChange, aqiScale, units, timeFormat, coordFormat, forecastData, onForecastDataChange, onOpenSettings, quota, onQuotaHeard, onSubscribe }: Props) {
   // ── Builder state ────────────────────────────────────────────────────────
   // Whether the pin rides the phone's position. Following resolves the location from the last fix
   // and re-fixes at send; pinned takes whatever is in the coordinates field. A fresh install starts
@@ -1239,29 +1245,16 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     loadFavoritesSortReversed().then(setFavoritesSortReversed);
   }, []);
 
-  // The free-forecast quota as the server last stated it (quota.ts): heard off every weather
-  // reply pasted in, and asked for over the internet each time the app comes to the foreground,
-  // so the line under the device selector is current whenever the phone has a connection and as
-  // current as the last reply when it does not. The stored copy only fills in until something
-  // fresher is heard.
-  const [quota, setQuota] = useState<StoredQuota | null>(null);
-  useEffect(() => {
-    loadQuota().then((stored) => setQuota((current) => current ?? stored));
-  }, []);
-  const heardQuota = useCallback((state: QuotaState, at: Date) => {
-    const stored = storedQuota(state, at);
-    setQuota(stored);
-    saveQuota(stored);
-  }, []);
+  // The quota is asked of the server each time the app comes to the foreground, so the line
+  // under the button is current whenever the phone has a connection, and as current as the last
+  // pasted reply (the decode effect below) when it does not.
   useEffect(() => {
     if (!foreground) return;
     let cancelled = false;
     // Best effort: offline, or an account the server no longer knows, leaves the last state.
-    fetchQuota(token).then((state) => { if (!cancelled) heardQuota(state, new Date()); }, () => {});
+    fetchQuota(token).then((state) => { if (!cancelled) onQuotaHeard(state, new Date()); }, () => {});
     return () => { cancelled = true; };
-  }, [foreground, token, heardQuota]);
-  // The Subscribe button's press. There is no subscription flow yet, so it does nothing.
-  const onSubscribe = useCallback(() => {}, []);
+  }, [foreground, token, onQuotaHeard]);
 
   // A newly chosen order starts in its own direction: the reversal belongs to the order it was
   // made on.
@@ -1464,7 +1457,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         // was true when it arrived.
         if (!pre && !fetchDecoding.current && msg.quota) {
           const start = resolveContext(token, msg.code)?.start;
-          heardQuota(msg.quota, start === undefined ? new Date() : new Date(start));
+          onQuotaHeard(msg.quota, start === undefined ? new Date() : new Date(start));
         }
         // A cached entry loaded by loadPast is already on screen, its scroll already settled.
         if (!pre) {
@@ -1501,7 +1494,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       }
     })();
     return () => { cancelled = true; };
-  }, [forecastData, token, flash, onForecastDataChange, heardQuota]);
+  }, [forecastData, token, flash, onForecastDataChange, onQuotaHeard]);
 
   // The Avalanche tab's decode, the same steps as the weather one above: a reply that answers a
   // weather request goes to the Weather tab, a bulletin waits for the model and goes on screen.

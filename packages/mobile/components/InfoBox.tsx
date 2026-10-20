@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import PillButton from './PillButton';
 import { palette } from '../palette';
 
 // A blue box: the message on the left and, when there is one, a button on the right. The quiet
@@ -11,15 +12,7 @@ export default function InfoBox({ children, action, style }: {
   return (
     <View style={[styles.box, style]}>
       <Text style={styles.text}>{children}</Text>
-      {action && (
-        <Pressable
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-          onPress={action.onPress}
-          accessibilityRole="button"
-        >
-          <Text style={styles.buttonText}>{action.label}</Text>
-        </Pressable>
-      )}
+      {action && <PillButton label={action.label} onPress={action.onPress} />}
     </View>
   );
 }
@@ -30,7 +23,4 @@ const styles = StyleSheet.create({
     padding: 12, backgroundColor: palette.linkTint, borderRadius: 10, borderWidth: 1, borderColor: palette.link,
   },
   text: { flex: 1, color: palette.link, fontSize: 14, lineHeight: 20 },
-  button: { backgroundColor: palette.primary, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 7 },
-  buttonPressed: { opacity: 0.7 },
-  buttonText: { color: palette.onPrimary, fontSize: 14, fontWeight: '600' },
 });

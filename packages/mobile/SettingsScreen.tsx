@@ -9,6 +9,7 @@ import PreferenceRows from './PreferenceRows';
 import OfflineMapsScreen, { downloadedPacks } from './OfflineMapsScreen';
 import { usePackState } from './packStore';
 import type { AqiScale, CoordFormat, TimeFormat, UnitPrefs } from './settings';
+import { SUBSCRIBE_CTA, quotaStatus, type StoredQuota } from './quota';
 import { palette } from './palette';
 
 const TERMS_URL = 'https://going.blue/terms';
@@ -16,12 +17,16 @@ const PRIVACY_URL = 'https://going.blue/privacy';
 
 // Settings, as a full-screen sheet off the header's gear — the same frame as HelpScreen.
 export default function SettingsScreen({
-  visible, onClose, onDeleteAccount, units, onUnitsChange, timeFormat, onTimeFormatChange,
+  visible, onClose, onDeleteAccount, quota, onSubscribe, units, onUnitsChange, timeFormat, onTimeFormatChange,
   coordFormat, onCoordFormatChange, aqiScale, onAqiScaleChange,
 }: {
   visible: boolean;
   onClose: () => void;
   onDeleteAccount: () => Promise<void>;
+  // The free-forecast quota as the server last stated it (quota.ts), and the Subscribe button's
+  // press.
+  quota: StoredQuota | null;
+  onSubscribe: () => void;
   units: UnitPrefs;
   onUnitsChange: (u: UnitPrefs) => void;
   timeFormat: TimeFormat;
@@ -34,6 +39,7 @@ export default function SettingsScreen({
   const [deleting, setDeleting] = useState(false);
   const [offlineMaps, setOfflineMaps] = useState(false);
   const held = downloadedPacks(usePackState().installed);
+  const subscription = quotaStatus(quota, new Date());
 
   const DELETE_MESSAGE = 'This erases your data from the server and removes your saved forecasts, settings, and offline maps from this phone. Deletion is permanent.';
 
@@ -81,8 +87,27 @@ export default function SettingsScreen({
           </View>
 
           <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+            {/* Subscription: the plan, what it includes (the last bullet being this month's
+                standing on the free plan), and the way to subscribe. */}
+            <Text style={styles.heading}>Subscription</Text>
+            <View style={styles.card}>
+              <Text style={styles.planName}>{subscription.name}</Text>
+              {subscription.bullets.map((bullet) => (
+                <View key={bullet} style={styles.bullet}>
+                  <Text style={styles.bulletDot}>{'•'}</Text>
+                  <Text style={styles.bulletText}>{bullet}</Text>
+                </View>
+              ))}
+              {!subscription.subscribed && <Text style={styles.subscribeNote}>{SUBSCRIBE_CTA}</Text>}
+            </View>
+            {!subscription.subscribed && (
+              <TouchableOpacity style={styles.subscribeBtn} onPress={onSubscribe} activeOpacity={0.7} accessibilityRole="button">
+                <Text style={styles.subscribeBtnText}>Subscribe</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Preferences */}
-            <Text style={styles.heading}>Preferences</Text>
+            <Text style={[styles.heading, { marginTop: 28 }]}>Preferences</Text>
             <View style={styles.card}>
               <PreferenceRows
                 units={units}
@@ -168,6 +193,16 @@ const styles = StyleSheet.create({
   listText: { flex: 1 },
   listTitle: { fontSize: 15, color: palette.text },
   listSubtitle: { fontSize: 13, color: palette.textTertiary, marginTop: 2 },
+  // The plan card: its name, then what it includes as a bulleted list.
+  planName: { fontSize: 15, fontWeight: '600', color: palette.text, marginBottom: 8 },
+  bullet: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  bulletDot: { fontSize: 13, lineHeight: 19, color: palette.textSecondary },
+  bulletText: { flex: 1, fontSize: 13, lineHeight: 19, color: palette.textSecondary },
+  subscribeNote: { fontSize: 13, lineHeight: 19, color: palette.textSecondary, marginTop: 12 },
+  // Full-width button under the plan card, the same height and radius as the delete button at
+  // the bottom of the page.
+  subscribeBtn: { backgroundColor: palette.primary, borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center' },
+  subscribeBtnText: { color: palette.onPrimary, fontSize: 15, fontWeight: '600' },
   // Full-width destructive action, sitting on its own under the account note. Height is fixed so
   // swapping the label for a spinner mid-delete doesn't make the row jump.
   resetBtn: { backgroundColor: palette.card, borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center', marginTop: 4 },

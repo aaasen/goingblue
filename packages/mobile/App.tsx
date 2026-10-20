@@ -10,10 +10,12 @@ import { loadToken, clearToken, deleteAccount } from './account';
 import { clearStore } from './cache';
 import { removeAllPacks } from './packStore';
 import {
-  loadAqiScale, loadCoordFormat, loadDevice, loadTimeFormat, loadTwoMessages, loadUnits,
-  saveAqiScale, saveCoordFormat, saveDevice, saveTimeFormat, saveTwoMessages, saveUnits, clearSettings,
+  loadAqiScale, loadCoordFormat, loadDevice, loadQuota, loadTimeFormat, loadTwoMessages, loadUnits,
+  saveAqiScale, saveCoordFormat, saveDevice, saveQuota, saveTimeFormat, saveTwoMessages, saveUnits, clearSettings,
   defaultUnitPrefs, type AqiScale, type CoordFormat, type TimeFormat, type UnitPrefs,
 } from './settings';
+import { storedQuota, type StoredQuota } from './quota';
+import type { QuotaState } from '@weather/protocol';
 import { DEFAULT_DEVICE, type Device } from './devices';
 import { clearTileCache, configureTileCache } from './tileCache';
 import { useUpdateCheck } from './updates';
@@ -42,6 +44,9 @@ export default function App() {
   // Loaded alongside the device, and for the same reason: it changes the builder's request, so
   // arriving late would mean the first request of a session could go out under the wrong budget.
   const [twoMessages, setTwoMessagesState] = useState(true);
+  // The free-forecast quota as the server last stated it (quota.ts). Owned here because both the
+  // builder and Settings show it; HomeScreen is where it is heard.
+  const [quota, setQuotaState] = useState<StoredQuota | null>(null);
   useUpdateCheck();
 
   // Settled together rather than one at a time: the token decides which screen comes up, and the
@@ -52,14 +57,17 @@ export default function App() {
     configureTileCache();
     Promise.all([
       loadToken(), loadUnits(), loadTimeFormat(), loadCoordFormat(), loadAqiScale(), loadDevice(), loadTwoMessages(),
+      loadQuota(),
     ])
-      .then(([t, u, f, c, a, d, m]) => {
+      .then(([t, u, f, c, a, d, m, q]) => {
         setUnitsState(u);
         setTimeFormatState(f);
         setCoordFormatState(c);
         setAqiScaleState(a);
         setDeviceState(d);
         setTwoMessagesState(m);
+        // The stored quota only fills in until the screen hears something fresher.
+        setQuotaState((current) => current ?? q);
         setToken(t);
       })
       // All of them swallow their own storage errors, so this should be unreachable — but the
@@ -106,6 +114,16 @@ export default function App() {
     saveTwoMessages(on);
   }
 
+  // A quota state the server stated, at the time it was stated for (quota.ts, storedQuota).
+  const heardQuota = useCallback((state: QuotaState, at: Date) => {
+    const stored = storedQuota(state, at);
+    setQuotaState(stored);
+    saveQuota(stored);
+  }, []);
+
+  // The Subscribe buttons' press. There is no subscription flow yet, so it does nothing.
+  const onSubscribe = useCallback(() => {}, []);
+
   // Erase the account server-side, then drop this device's local state: the saved forecasts for
   // that account, then the token itself. Setup mints a fresh account on the way back in.
   //
@@ -130,6 +148,7 @@ export default function App() {
     setAqiScaleState('us');
     setDeviceState(DEFAULT_DEVICE);
     setTwoMessagesState(true);
+    setQuotaState(null);
     // The delete lives inside the Settings sheet; close it so Setup isn't hiding under it.
     setSettingsOpen(false);
     setToken(null);
@@ -182,11 +201,16 @@ export default function App() {
           forecastData={forecastData}
           onForecastDataChange={setForecastData}
           onOpenSettings={() => setSettingsOpen(true)}
+          quota={quota}
+          onQuotaHeard={heardQuota}
+          onSubscribe={onSubscribe}
         />
         <SettingsScreen
           visible={settingsOpen}
           onClose={() => setSettingsOpen(false)}
           onDeleteAccount={handleDeleteAccount}
+          quota={quota}
+          onSubscribe={onSubscribe}
           units={units}
           onUnitsChange={setUnits}
           timeFormat={timeFormat}
