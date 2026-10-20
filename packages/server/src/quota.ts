@@ -1,4 +1,4 @@
-import { QUOTA_FREE_FORECASTS } from "@weather/protocol";
+import { QUOTA_FREE_FORECASTS, type QuotaState } from "@weather/protocol";
 import { query } from "./db.js";
 
 // Free weather forecasts over the messaging routes, per account and UTC calendar month. The
@@ -59,12 +59,23 @@ export function overHard(status: QuotaStatus): boolean {
   return status.served >= status.hard;
 }
 
+// The quota as the app shows it, from a served count: the free forecasts left, or used up. The
+// hard limit is not part of it.
+function stateAfter(served: number): QuotaState {
+  return served <= QUOTA_SOFT ? { kind: "free", remaining: QUOTA_SOFT - served } : { kind: "over" };
+}
+
+// The account's standing now, for the app to read when it is online (POST /account/quota).
+export function quotaNow(status: QuotaStatus): QuotaState {
+  return stateAfter(status.served);
+}
+
 // The `X-Quota` header for the codec: the quota as the reply should report it if this request
 // is a weather forecast and gets served (codec-server/src/quota.ts). The codec ignores it for
 // an avalanche reply.
 export function quotaHeader(status: QuotaStatus): string {
-  const after = status.served + 1;
-  return after <= QUOTA_SOFT ? `free:${QUOTA_SOFT - after}` : "over";
+  const after = stateAfter(status.served + 1);
+  return after.kind === "free" ? `free:${after.remaining}` : "over";
 }
 
 // The one reply a request past the hard limit gets. Must fit a single GSM-7 segment.

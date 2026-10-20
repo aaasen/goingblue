@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import { appUserAgent, generateToken } from "@weather/protocol";
-import { createAccountRoute, forecast, sms, twilioSink } from "../src/routes.js";
+import { createAccountRoute, forecast, quotaRoute, sms, twilioSink } from "../src/routes.js";
 import { fetchMessage } from "../src/twilio.js";
 import { FORECAST_NUMBER } from "../src/constants.js";
 import { accountExists, createAccount, recordRequest } from "../src/accounts.js";
@@ -483,6 +483,81 @@ describe("trace propagation", () => {
   });
 });
 
+
+// The app's online view of its quota: the header's state as JSON, with the hard limit and the
+// counts behind it never in the body.
+describe("account quota", () => {
+  const accounts = new Hono();
+  accounts.post("/account/quota", quotaRoute);
+  const ask = (body: unknown) =>
+    accounts.request("/account/quota", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+  const status = (served: number, over: Partial<{ hard: number; notified: boolean }> = {}) =>
+    vi.mocked(quotaStatus).mockResolvedValue({ served, hard: 10, notified: false, ...over });
+
+  beforeEach(() => {
+    vi.mocked(quotaStatus).mockReset();
+  });
+
+  it("reports the free forecasts left this month", async () => {
+    status(2);
+    const resp = await ask({ token: TOKEN });
+    expect(resp.status).toBe(200);
+    expect(await resp.json()).toEqual({ kind: "free", remaining: 3 });
+    expect(vi.mocked(quotaStatus)).toHaveBeenCalledWith(TOKEN);
+  });
+
+  it("reports zero left at the stated quota and over past it", async () => {
+    status(5);
+    expect(await (await ask({ token: TOKEN })).json()).toEqual({ kind: "free", remaining: 0 });
+    status(6);
+    expect(await (await ask({ token: TOKEN })).json()).toEqual({ kind: "over" });
+  });
+
+  it("never discloses the hard limit or the counts behind the state", async () => {
+    status(12, { hard: 5, notified: true });
+    const body = await (await ask({ token: TOKEN })).json();
+    expect(body).toEqual({ kind: "over" });
+  });
+
+  it("normalizes the token the way the request grammar does", async () => {
+    status(0);
+    const resp = await ask({ token: TOKEN.toLowerCase() });
+    expect(resp.status).toBe(200);
+    expect(vi.mocked(accountExists)).toHaveBeenCalledWith(TOKEN);
+  });
+
+  it("is a 404 for a token that names no account", async () => {
+    vi.mocked(accountExists).mockResolvedValue(false);
+    const resp = await ask({ token: TOKEN });
+    expect(resp.status).toBe(404);
+    expect(vi.mocked(quotaStatus)).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a malformed token", { token: "notatoken" }],
+    ["no token", {}],
+    ["a body that is not JSON", "nope"],
+  ])("is a 404 for %s, without touching the database", async (_name, body) => {
+    const resp = typeof body === "string"
+      ? await accounts.request("/account/quota", { method: "POST", body })
+      : await ask(body);
+    expect(resp.status).toBe(404);
+    expect(vi.mocked(accountExists)).not.toHaveBeenCalled();
+    expect(vi.mocked(quotaStatus)).not.toHaveBeenCalled();
+  });
+
+  it("is a 503 when the database cannot answer", async () => {
+    const error = vi.spyOn(log, "error").mockImplementation(() => {});
+    vi.mocked(quotaStatus).mockRejectedValue(new Error("db down"));
+    expect((await ask({ token: TOKEN })).status).toBe(503);
+    vi.mocked(accountExists).mockRejectedValue(new Error("db down"));
+    expect((await ask({ token: TOKEN })).status).toBe(503);
+    expect(error).toHaveBeenCalledWith("account.quota_failed", expect.anything());
+    error.mockRestore();
+  });
+});
 
 // Only the app may mint an account: the user agent decides, and a refused caller writes no row.
 describe("account creation client", () => {

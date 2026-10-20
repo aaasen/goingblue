@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  QUOTA_HARD, QUOTA_SOFT, hardLimit, monthStartUtc, overHard, quotaExceededReply, quotaHeader,
+  QUOTA_HARD, QUOTA_SOFT, hardLimit, monthStartUtc, overHard, quotaExceededReply, quotaHeader, quotaNow,
 } from "../src/quota.js";
 
 // The rules on top of the monthly count. The count itself is one SQL query (quotaStatus) and is
@@ -39,6 +39,26 @@ describe("quotaHeader", () => {
   it("is over from the first forecast past the stated quota", () => {
     expect(quotaHeader({ served: QUOTA_SOFT, hard: QUOTA_HARD, notified: false })).toBe("over");
     expect(quotaHeader({ served: QUOTA_HARD, hard: QUOTA_HARD, notified: false })).toBe("over");
+  });
+});
+
+describe("quotaNow", () => {
+  it("is the free forecasts left this month, down to zero", () => {
+    expect(quotaNow({ served: 0, hard: QUOTA_HARD, notified: false })).toEqual({ kind: "free", remaining: QUOTA_SOFT });
+    expect(quotaNow({ served: QUOTA_SOFT, hard: QUOTA_HARD, notified: false })).toEqual({ kind: "free", remaining: 0 });
+  });
+
+  it("is over past the stated quota, whatever the hard limit", () => {
+    expect(quotaNow({ served: QUOTA_SOFT + 1, hard: QUOTA_HARD, notified: false })).toEqual({ kind: "over" });
+    expect(quotaNow({ served: QUOTA_HARD + 5, hard: QUOTA_SOFT, notified: true })).toEqual({ kind: "over" });
+  });
+
+  it("is one forecast ahead of the header", () => {
+    for (let served = 0; served <= QUOTA_HARD; served++) {
+      const now = quotaNow({ served: served + 1, hard: QUOTA_HARD, notified: false });
+      const header = quotaHeader({ served, hard: QUOTA_HARD, notified: false });
+      expect(header).toBe(now.kind === "free" ? `free:${now.remaining}` : "over");
+    }
   });
 });
 

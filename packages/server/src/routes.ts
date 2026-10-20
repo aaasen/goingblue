@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { extractUserToken, extractVersion } from "./dispatch.js";
-import { createAccount, deleteAccount, recordRequest } from "./accounts.js";
+import { accountExists, createAccount, deleteAccount, recordRequest } from "./accounts.js";
 import { markQueued, receiveMessage, recordReplyDelivery, type DeliveryOutcome } from "./delivery.js";
 import { runEncodeTask } from "./encode-task.js";
 import { enqueueEncode, tasksConfigured } from "./tasks.js";
@@ -10,7 +10,7 @@ import {
   REPLY_FUTURE, REPLY_MALFORMED, REPLY_NO_FORECAST, REPLY_STALE, REPLY_UNAVAILABLE, REPLY_UNSUPPORTED,
   replyChars, resolveForecast,
 } from "./forecast.js";
-import { quotaExceededReply } from "./quota.js";
+import { quotaExceededReply, quotaNow, quotaStatus } from "./quota.js";
 import { isAppUserAgent, isValidToken, normalizeToken } from "@weather/protocol";
 import { fetchMessage, isMessageSid, twiml, validateTwilioJsonSignature, validateTwilioSignature } from "./twilio.js";
 import { FORECAST_NUMBER } from "./constants.js";
@@ -316,6 +316,29 @@ export async function createAccountRoute(c: Context) {
 // is "this account no longer exists," which is already true, and 200 lets the app finish clearing
 // its local state. A DB error is a 503 so the app keeps the token and can retry — silently
 // dropping it locally would strand a live account with no way to reach it.
+// POST /account/quota { token } — the account's free-forecast quota as the app shows it
+// (quota.ts, quotaNow), for refreshing the quota line while the phone is online. The body is
+// exactly the state the weather reply header carries and nothing about the hard limit. The
+// token travels in the body, never the URL, since Cloud Run logs every request URL.
+//
+// A malformed or unknown token is a 404: the account does not exist, which the app treats
+// like any other missing account. A DB error is a 503 so the app keeps what it last knew.
+export async function quotaRoute(c: Context) {
+  const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+  const raw = typeof body?.token === "string" ? body.token : "";
+  if (!isValidToken(raw)) return c.text("Unknown account", 404);
+  const token = normalizeToken(raw);
+  try {
+    if (!(await accountExists(token))) return c.text("Unknown account", 404);
+    const status = await quotaStatus(token);
+    log.info("account.quota", { served: status.served, hard: status.hard });
+    return c.json(quotaNow(status));
+  } catch (e) {
+    log.error("account.quota_failed", { err: e });
+    return c.text("Quota unavailable", 503);
+  }
+}
+
 export async function deleteAccountRoute(c: Context) {
   const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
   const raw = typeof body?.token === "string" ? body.token : "";
