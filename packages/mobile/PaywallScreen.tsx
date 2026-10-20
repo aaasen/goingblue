@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Linking, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  ActivityIndicator, Alert, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { CustomerInfo, PurchasesPackage } from 'react-native-purchases';
@@ -10,6 +10,8 @@ import { palette } from './palette';
 
 const TERMS_URL = 'https://going.blue/terms';
 const PRIVACY_URL = 'https://going.blue/privacy';
+// Whose account the store charges: the one store this build sells through.
+const STORE_ACCOUNT = Platform.OS === 'ios' ? 'Apple' : 'Google';
 
 // The subscription sheet, off the Subscribe buttons in the builder and in Settings: the plan,
 // what it includes, the two ways to buy it, and Restore Purchases. Only a reader without a
@@ -54,7 +56,7 @@ export default function PaywallScreen({ visible, onClose, onPurchased }: {
     try {
       const info = await restorePurchases();
       onPurchased(info);
-      if (!activeEntitlement(info)) Alert.alert('Nothing to restore', 'No subscription was found for this Apple or Google account.');
+      if (!activeEntitlement(info)) Alert.alert('Nothing to restore', `No subscription was found for this ${STORE_ACCOUNT} account.`);
     } catch (e) {
       Alert.alert('Restore failed', requestErrorMessage(e));
     } finally {
@@ -123,7 +125,7 @@ export default function PaywallScreen({ visible, onClose, onPurchased }: {
             )}
 
             <Text style={styles.legal}>
-              Payment is charged to your Apple or Google account. The subscription renews automatically
+              Payment is charged to your {STORE_ACCOUNT} account. The subscription renews automatically
               until cancelled at least 24 hours before the end of the current period. Manage or cancel it
               in your account settings.
             </Text>
@@ -164,7 +166,7 @@ const styles = StyleSheet.create({
   secondary: { height: 44, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { color: palette.pageLink, fontSize: 15, fontWeight: '600' },
   disabled: { opacity: 0.6 },
-  legal: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 20 },
+  legal: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 20, textAlign: 'center' },
   legalLinks: { fontSize: 13, color: palette.pageTextTertiary, marginTop: 12, lineHeight: 19, textAlign: 'center' },
   link: { color: palette.pageLink, textDecorationLine: 'underline' },
 });
