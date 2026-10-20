@@ -17,16 +17,21 @@ const PRIVACY_URL = 'https://going.blue/privacy';
 
 // Settings, as a full-screen sheet off the header's gear — the same frame as HelpScreen.
 export default function SettingsScreen({
-  visible, onClose, onDeleteAccount, quota, onSubscribe, children, units, onUnitsChange, timeFormat, onTimeFormatChange,
-  coordFormat, onCoordFormatChange, aqiScale, onAqiScaleChange,
+  visible, onClose, onDeleteAccount, quota, onSubscribe, onManageSubscription, annualSwitch, children, units, onUnitsChange,
+  timeFormat, onTimeFormatChange, coordFormat, onCoordFormatChange, aqiScale, onAqiScaleChange,
 }: {
   visible: boolean;
   onClose: () => void;
   onDeleteAccount: () => Promise<void>;
-  // The free-forecast quota as the server last stated it (quota.ts), and the Subscribe button's
-  // press.
+  // The free-forecast quota as the server last stated it (quota.ts). Subscribe opens the
+  // subscription sheet; Manage Subscription, shown to a subscriber instead, opens the store's
+  // own management page.
   quota: StoredQuota | null;
   onSubscribe: () => void;
+  onManageSubscription: () => void;
+  // For a monthly subscriber: the annual plan's price and the press that buys it in place of the
+  // monthly. Null for anyone else.
+  annualSwitch: { price: string; busy: boolean; onPress: () => void } | null;
   // The paywall sheet, mounted inside this modal while it is open: iOS presents one modal from
   // a view at a time, so a sibling sheet would never appear over this one.
   children?: ReactNode;
@@ -101,9 +106,29 @@ export default function SettingsScreen({
                   <Text style={styles.bulletText}>{bullet}</Text>
                 </View>
               ))}
+              {subscription.text !== null && <Text style={styles.bulletText}>{subscription.text}</Text>}
               {!subscription.subscribed && <Text style={styles.subscribeNote}>{SUBSCRIBE_CTA}</Text>}
             </View>
-            {!subscription.subscribed && (
+            {subscription.subscribed ? (
+              <>
+                {annualSwitch && (
+                  <TouchableOpacity
+                    style={[styles.subscribeBtn, styles.switchBtn, annualSwitch.busy && styles.resetBtnDisabled]}
+                    onPress={annualSwitch.onPress}
+                    disabled={annualSwitch.busy}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                  >
+                    {annualSwitch.busy
+                      ? <ActivityIndicator color={palette.onPrimary} />
+                      : <Text style={styles.subscribeBtnText}>Switch to Annual  {annualSwitch.price}/year</Text>}
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={styles.manageBtn} onPress={onManageSubscription} activeOpacity={0.7} accessibilityRole="button">
+                  <Text style={styles.manageBtnText}>Manage Subscription</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
               <TouchableOpacity style={styles.subscribeBtn} onPress={onSubscribe} activeOpacity={0.7} accessibilityRole="button">
                 <Text style={styles.subscribeBtnText}>Subscribe</Text>
               </TouchableOpacity>
@@ -207,6 +232,10 @@ const styles = StyleSheet.create({
   // the bottom of the page.
   subscribeBtn: { backgroundColor: palette.primary, borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center' },
   subscribeBtnText: { color: palette.onPrimary, fontSize: 15, fontWeight: '600' },
+  // The subscriber's counterpart: the same shape on a card, since there is nothing to sell.
+  manageBtn: { backgroundColor: palette.card, borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center' },
+  manageBtnText: { color: palette.pageLink, fontSize: 15, fontWeight: '600' },
+  switchBtn: { marginBottom: 12 },
   // Full-width destructive action, sitting on its own under the account note. Height is fixed so
   // swapping the label for a spinner mid-delete doesn't make the row jump.
   resetBtn: { backgroundColor: palette.card, borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center', marginTop: 4 },

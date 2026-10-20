@@ -25,7 +25,7 @@ vi.hoisted(() => { (globalThis as { __DEV__?: boolean }).__DEV__ = true; });
 
 import type { CustomerInfo, PurchasesPackage } from 'react-native-purchases';
 import {
-  ENTITLEMENT, activeEntitlement, configurePurchases, isEntitled, loadPlans, logOutPurchases, purchasePlan,
+  ENTITLEMENT, activeEntitlement, configurePurchases, isEntitled, loadPlans, logOutPurchases, onMonthlyPlan, purchasePlan,
   purchasesAvailable, watchCustomerInfo,
 } from '../purchases';
 
@@ -99,20 +99,34 @@ describe('plans and purchases', () => {
     const annual = pkg('ANNUAL', 'expedition_annual');
     const bought = info({ [ENTITLEMENT]: { productIdentifier: 'expedition_annual' } });
     sdk.purchasePackage.mockResolvedValue({ customerInfo: bought, productIdentifier: 'expedition_annual' });
-    expect(await purchasePlan(annual, null)).toBe(bought);
+    expect(await purchasePlan(annual)).toBe(bought);
+    expect(sdk.purchasePackage).toHaveBeenLastCalledWith(annual);
     sdk.purchasePackage.mockRejectedValue({ userCancelled: true, message: 'cancelled' });
-    expect(await purchasePlan(annual, null)).toBeNull();
+    expect(await purchasePlan(annual)).toBeNull();
     sdk.purchasePackage.mockRejectedValue(Object.assign(new Error('store down'), { userCancelled: false }));
-    await expect(purchasePlan(annual, null)).rejects.toThrow('store down');
+    await expect(purchasePlan(annual)).rejects.toThrow('store down');
   });
 
-  it('names the product being replaced on Android only', async () => {
+  it('names the subscription being replaced on Android only', async () => {
     const annual = pkg('ANNUAL', 'expedition_annual');
     sdk.purchasePackage.mockResolvedValue({ customerInfo: info({}), productIdentifier: 'expedition_annual' });
     await purchasePlan(annual, 'expedition_monthly');
-    expect(sdk.purchasePackage).toHaveBeenLastCalledWith(annual, null, null);
+    expect(sdk.purchasePackage).toHaveBeenLastCalledWith(annual);
     platform.OS = 'android';
     await purchasePlan(annual, 'expedition_monthly');
     expect(sdk.purchasePackage).toHaveBeenLastCalledWith(annual, null, { oldProductIdentifier: 'expedition_monthly' });
+  });
+
+  it('knows a monthly subscriber, base plan included', () => {
+    const plans = { monthly: pkg('MONTHLY', 'expedition_monthly'), annual: pkg('ANNUAL', 'expedition_annual') };
+    const sub = (productIdentifier: string, productPlanIdentifier: string | null = null) =>
+      ({ entitlements: { active: { [ENTITLEMENT]: { productIdentifier, productPlanIdentifier } } } } as unknown as CustomerInfo);
+    expect(onMonthlyPlan(sub('expedition_monthly'), plans)).toBe(true);
+    expect(onMonthlyPlan(sub('expedition_annual'), plans)).toBe(false);
+    expect(onMonthlyPlan(info({}), plans)).toBe(false);
+    expect(onMonthlyPlan(null, plans)).toBe(false);
+    const play = { monthly: pkg('MONTHLY', 'expedition:monthly'), annual: pkg('ANNUAL', 'expedition:annual') };
+    expect(onMonthlyPlan(sub('expedition', 'monthly'), play)).toBe(true);
+    expect(onMonthlyPlan(sub('expedition', 'annual'), play)).toBe(false);
   });
 });

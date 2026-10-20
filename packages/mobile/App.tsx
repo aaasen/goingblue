@@ -9,7 +9,11 @@ import PaywallScreen from './PaywallScreen';
 import SettingsScreen from './SettingsScreen';
 import SetupScreen from './SetupScreen';
 import { loadToken, clearToken, deleteAccount, fetchQuota } from './account';
-import { configurePurchases, isEntitled, logOutPurchases, purchasesAvailable, watchCustomerInfo } from './purchases';
+import {
+  configurePurchases, isEntitled, loadPlans, logOutPurchases, manageSubscription, onMonthlyPlan, purchasePlan,
+  purchasesAvailable, watchCustomerInfo, type Plans,
+} from './purchases';
+import { requestErrorMessage } from './network';
 import { clearStore } from './cache';
 import { removeAllPacks } from './packStore';
 import {
@@ -54,6 +58,10 @@ export default function App() {
   // overrides the server's quota for display, so a purchase shows at once and offline.
   const [customerInfo, setCustomerInfo] = useState<CustomerInfo | null>(null);
   const [paywallOpen, setPaywallOpen] = useState(false);
+  // The two plans, for Settings' Switch to Annual: which product the monthly is, and the price
+  // of the annual. Loaded once the SDK is configured.
+  const [plans, setPlans] = useState<Plans | null>(null);
+  const [switching, setSwitching] = useState(false);
   useUpdateCheck();
 
   // Settled together rather than one at a time: the token decides which screen comes up, and the
@@ -135,7 +143,9 @@ export default function App() {
     let stop: (() => void) | null = null;
     let cancelled = false;
     configurePurchases(token).then(() => {
-      if (!cancelled) stop = watchCustomerInfo(setCustomerInfo);
+      if (cancelled) return;
+      stop = watchCustomerInfo(setCustomerInfo);
+      if (purchasesAvailable()) loadPlans().then((p) => { if (!cancelled) setPlans(p); }, () => {});
     }, () => {});
     return () => { cancelled = true; stop?.(); };
   }, [token]);
@@ -156,6 +166,20 @@ export default function App() {
     setPaywallOpen(false);
     if (typeof token === 'string') fetchQuota(token).then((state) => heardQuota(state, new Date()), () => {});
   }, [token, heardQuota]);
+
+  // A monthly subscriber moving to the annual plan, straight into the store's purchase sheet.
+  const onSwitchToAnnual = useCallback(async () => {
+    if (!plans?.annual || !plans.monthly) return;
+    setSwitching(true);
+    try {
+      const info = await purchasePlan(plans.annual, plans.monthly.product.identifier);
+      if (info) onPurchased(info);
+    } catch (e) {
+      Alert.alert('Switch failed', requestErrorMessage(e));
+    } finally {
+      setSwitching(false);
+    }
+  }, [plans, onPurchased]);
 
   // Erase the account server-side, then drop this device's local state: the saved forecasts for
   // that account, then the token itself. Setup mints a fresh account on the way back in.
@@ -196,7 +220,6 @@ export default function App() {
     <PaywallScreen
       visible={paywallOpen}
       onClose={() => setPaywallOpen(false)}
-      customerInfo={customerInfo}
       onPurchased={onPurchased}
     />
   );
@@ -259,6 +282,10 @@ export default function App() {
           onDeleteAccount={handleDeleteAccount}
           quota={shownQuota}
           onSubscribe={onSubscribe}
+          onManageSubscription={() => { manageSubscription().catch(() => {}); }}
+          annualSwitch={onMonthlyPlan(customerInfo, plans) && plans?.annual
+            ? { price: plans.annual.product.priceString, busy: switching, onPress: onSwitchToAnnual }
+            : null}
           units={units}
           onUnitsChange={setUnits}
           timeFormat={timeFormat}

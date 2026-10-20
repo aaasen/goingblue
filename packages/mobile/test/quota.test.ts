@@ -119,6 +119,7 @@ describe('quotaStatus', () => {
     expect(quotaStatus(null, OCT)).toEqual({
       name: 'Going Blue Free',
       bullets: [...INCLUDED, '5 free SMS/satellite weather forecasts per month. 5 free forecasts remaining in October.'],
+      text: null,
       subscribed: false,
     });
     expect(quotaStatus(stored({ kind: 'free', remaining: 1 }), OCT).bullets[2])
@@ -126,14 +127,17 @@ describe('quotaStatus', () => {
     expect(quotaStatus(stored({ kind: 'over' }), OCT)).toEqual({
       name: 'Going Blue Free',
       bullets: [...INCLUDED, '5 free SMS/satellite weather forecasts per month. Limit exceeded. Limit resets November 1.'],
+      text: null,
       subscribed: false,
     });
   });
 
-  it('describes the subscription with nothing to buy', () => {
+  it('thanks a subscriber, with nothing to buy', () => {
     expect(quotaStatus(stored({ kind: 'none' }), OCT)).toEqual({
       name: 'Going Blue Expedition',
-      bullets: [...INCLUDED, 'Unlimited SMS/satellite weather forecasts.'],
+      bullets: [],
+      text: 'You are subscribed to the Going Blue Expedition plan. Enjoy unlimited weather and avalanche '
+        + 'forecasts via satellite. Thank you for supporting Going Blue!',
       subscribed: true,
     });
   });

@@ -5,9 +5,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { CustomerInfo, PurchasesPackage } from 'react-native-purchases';
 import { EXPEDITION_BULLET, INCLUDED_BULLETS } from './quota';
-import {
-  activeEntitlement, loadPlans, manageSubscription, purchasePlan, restorePurchases, type Plans,
-} from './purchases';
+import { activeEntitlement, loadPlans, purchasePlan, restorePurchases, type Plans } from './purchases';
 import { requestErrorMessage } from './network';
 import { palette } from './palette';
 
@@ -15,15 +13,13 @@ const TERMS_URL = 'https://going.blue/terms';
 const PRIVACY_URL = 'https://going.blue/privacy';
 
 // The subscription sheet, off the Subscribe buttons in the builder and in Settings: the plan,
-// what it includes, the two ways to buy it, and Restore Purchases. A monthly subscriber is
-// offered the switch to annual instead, which both stores apply at the next renewal since the
-// two plans share one subscription group; an annual subscriber is sent to the store's own
-// management page. Same frame as SettingsScreen.
-export default function PaywallScreen({ visible, onClose, customerInfo, onPurchased }: {
+// what it includes, the two ways to buy it, and Restore Purchases. Only a reader without a
+// subscription gets here; a subscriber's Settings button goes straight to the store's own
+// management page, which is where plan changes and cancellation happen. Same frame as
+// SettingsScreen.
+export default function PaywallScreen({ visible, onClose, onPurchased }: {
   visible: boolean;
   onClose: () => void;
-  // The SDK's view of the account, or null before it has answered.
-  customerInfo: CustomerInfo | null;
   // A purchase or restore went through; the caller refreshes what it shows.
   onPurchased: (info: CustomerInfo) => void;
 }) {
@@ -42,15 +38,10 @@ export default function PaywallScreen({ visible, onClose, customerInfo, onPurcha
     return () => { cancelled = true; };
   }, [visible]);
 
-  const entitlement = customerInfo ? activeEntitlement(customerInfo) : null;
-  const current = entitlement?.productIdentifier ?? null;
-  const onMonthly = plans?.monthly !== null && plans?.monthly !== undefined && current === plans.monthly.product.identifier;
-  const onAnnual = plans?.annual !== null && plans?.annual !== undefined && current === plans.annual.product.identifier;
-
   async function buy(which: 'monthly' | 'annual', pkg: PurchasesPackage) {
     setBusy(which);
     try {
-      const info = await purchasePlan(pkg, current);
+      const info = await purchasePlan(pkg);
       if (info) onPurchased(info);
     } catch (e) {
       Alert.alert('Purchase failed', requestErrorMessage(e));
@@ -115,24 +106,7 @@ export default function PaywallScreen({ visible, onClose, customerInfo, onPurcha
             {plans === null && loadError === null && <ActivityIndicator style={styles.loading} color={palette.pageTextTertiary} />}
             {loadError !== null && <Text style={styles.note}>Plans are not available right now. {loadError}</Text>}
 
-            {plans !== null && onAnnual && (
-              <>
-                <Text style={styles.note}>You are subscribed annually.</Text>
-                <TouchableOpacity style={styles.secondary} onPress={() => manageSubscription().catch(() => {})} activeOpacity={0.7} accessibilityRole="button">
-                  <Text style={styles.secondaryText}>Manage subscription</Text>
-                </TouchableOpacity>
-              </>
-            )}
-            {plans !== null && onMonthly && (
-              <>
-                <Text style={styles.note}>You are subscribed monthly. Switch to annual and pay for two months a year.</Text>
-                {planButton('annual', plans.annual, 'Switch to annual', '/year')}
-                <TouchableOpacity style={styles.secondary} onPress={() => manageSubscription().catch(() => {})} activeOpacity={0.7} accessibilityRole="button">
-                  <Text style={styles.secondaryText}>Manage subscription</Text>
-                </TouchableOpacity>
-              </>
-            )}
-            {plans !== null && !onMonthly && !onAnnual && (
+            {plans !== null && (
               <>
                 {planButton('annual', plans.annual, 'Subscribe annually', '/year')}
                 {planButton('monthly', plans.monthly, 'Subscribe monthly', '/month')}
@@ -193,6 +167,6 @@ const styles = StyleSheet.create({
   secondaryText: { color: palette.pageLink, fontSize: 15, fontWeight: '600' },
   disabled: { opacity: 0.6 },
   legal: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 20 },
-  legalLinks: { fontSize: 13, color: palette.pageTextTertiary, marginTop: 12, lineHeight: 19 },
+  legalLinks: { fontSize: 13, color: palette.pageTextTertiary, marginTop: 12, lineHeight: 19, textAlign: 'center' },
   link: { color: palette.pageLink, textDecorationLine: 'underline' },
 });

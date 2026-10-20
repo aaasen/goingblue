@@ -58,14 +58,20 @@ export const INCLUDED_BULLETS = [
 ];
 export const EXPEDITION_BULLET = 'Unlimited SMS/satellite weather forecasts.';
 
-// The Subscription section of Settings: the plan's name, what it includes as bullets (the last
-// one being this month's standing on the free plan), and whether the reader can subscribe. Not
-// tied to a route, since the quota is one count across all of them.
-export function quotaStatus(stored: StoredQuota | null, now: Date): { name: string; bullets: string[]; subscribed: boolean } {
+// The Subscription section of Settings: the plan's name and, on the free plan, what it includes
+// as bullets with this month's standing last, or, for a subscriber, a line of thanks. Not tied
+// to a route, since the quota is one count across all of them.
+export const SUBSCRIBED_TEXT =
+  'You are subscribed to the Going Blue Expedition plan. Enjoy unlimited weather and avalanche '
+  + 'forecasts via satellite. Thank you for supporting Going Blue!';
+
+export function quotaStatus(stored: StoredQuota | null, now: Date): {
+  name: string; bullets: string[]; text: string | null; subscribed: boolean;
+} {
   const state = currentQuota(stored, now);
   const included = INCLUDED_BULLETS;
   if (state.kind === 'none') {
-    return { name: 'Going Blue Expedition', bullets: [...included, EXPEDITION_BULLET], subscribed: true };
+    return { name: 'Going Blue Expedition', bullets: [], text: SUBSCRIBED_TEXT, subscribed: true };
   }
   const allowance = `${QUOTA_FREE_FORECASTS} free SMS/satellite weather forecasts per month.`;
   if (state.kind === 'over') {
@@ -73,6 +79,7 @@ export function quotaStatus(stored: StoredQuota | null, now: Date): { name: stri
     return {
       name: 'Going Blue Free',
       bullets: [...included, `${allowance} Limit exceeded. Limit resets ${next} 1.`],
+      text: null,
       subscribed: false,
     };
   }
@@ -81,6 +88,7 @@ export function quotaStatus(stored: StoredQuota | null, now: Date): { name: stri
   return {
     name: 'Going Blue Free',
     bullets: [...included, `${allowance} ${state.remaining} free ${noun} remaining in ${month}.`],
+    text: null,
     subscribed: false,
   };
 }

@@ -15,7 +15,8 @@ import Purchases, {
 const IOS_KEY = '';
 const ANDROID_KEY = '';
 
-export const ENTITLEMENT = 'expedition';
+// The entitlement's identifier in the RevenueCat dashboard, which cannot be renamed there.
+export const ENTITLEMENT = 'going_blue_expedition';
 
 function apiKey(): string | null {
   if (__DEV__) return process.env.EXPO_PUBLIC_REVENUECAT_TEST_KEY || null;
@@ -84,14 +85,31 @@ export async function loadPlans(): Promise<Plans> {
   };
 }
 
-// Buy a plan. `from` is the product the reader already has when this is a plan change: both
-// plans are in one subscription group, so Apple handles the switch itself, while Google needs
-// to be told which product is being replaced. Resolves to the customer info on success and
-// null when the reader cancelled; any other failure throws with the store's message.
-export async function purchasePlan(pkg: PurchasesPackage, from: string | null): Promise<CustomerInfo | null> {
+// The store product id of a package as an entitlement names it. Play folds the base plan into
+// the package's id ("subscription:base-plan") but reports the two apart on the entitlement.
+function entitlementProductId(info: CustomerInfo): string | null {
+  const e = activeEntitlement(info);
+  if (!e) return null;
+  return e.productPlanIdentifier ? `${e.productIdentifier}:${e.productPlanIdentifier}` : e.productIdentifier;
+}
+
+// Whether the account's subscription is the monthly plan, the one that can switch to annual.
+export function onMonthlyPlan(info: CustomerInfo | null, plans: Plans | null): boolean {
+  if (!info || !plans?.monthly) return false;
+  return entitlementProductId(info) === plans.monthly.product.identifier;
+}
+
+// Buy a plan. `replacing` is the product the subscriber has now, for a switch between the two
+// plans: Apple handles that itself, since both are in one subscription group, while Google has
+// to be told which subscription the new one replaces or it bills both. Resolves to the customer
+// info on success and null when the reader cancelled; any other failure throws with the store's
+// message.
+export async function purchasePlan(pkg: PurchasesPackage, replacing: string | null = null): Promise<CustomerInfo | null> {
   try {
-    const change = from !== null && Platform.OS === 'android' ? { oldProductIdentifier: from } : null;
-    const { customerInfo } = await Purchases.purchasePackage(pkg, null, change);
+    const change = replacing !== null && Platform.OS === 'android' ? { oldProductIdentifier: replacing } : null;
+    const { customerInfo } = change
+      ? await Purchases.purchasePackage(pkg, null, change)
+      : await Purchases.purchasePackage(pkg);
     return customerInfo;
   } catch (e) {
     if (typeof e === 'object' && e !== null && (e as { userCancelled?: boolean | null }).userCancelled) return null;
@@ -103,7 +121,7 @@ export function restorePurchases(): Promise<CustomerInfo> {
   return Purchases.restorePurchases();
 }
 
-// The store's own subscription management page, for a subscriber who wants to cancel.
+// The store's own subscription management page, where a subscriber changes plan or cancels.
 export function manageSubscription(): Promise<void> {
   return Purchases.showManageSubscriptions();
 }
