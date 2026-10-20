@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { BRAND, CONTACT_EMAIL } from "../constants.js";
+import { BRAND, CONTACT_EMAIL, TERMS_UPDATED } from "../constants.js";
 import { PAGE } from "./shell.js";
 
 const TERMS_BODY = `
@@ -17,10 +17,30 @@ of satellite messaging.</p>
 
 <h2>Accounts</h2>
 <p>The app creates an anonymous account token for you, which identifies your requests for the
-purpose of usage limits. Keep it to yourself: anyone holding your token can make requests counted
-against you. You may delete your account at any time from within the app. We may limit request
+purpose of usage limits and links your account to a subscription. Keep it to yourself: anyone
+holding your token can make requests counted against you. You may delete your account at any time from within the app. We may limit request
 volume, or suspend or terminate access, where necessary to keep the Service running for
 everyone.</p>
+
+<h2>Plans and subscriptions</h2>
+<p>${BRAND} is free to use with limits. The free plan includes unlimited forecasts over the
+internet, unlimited avalanche forecasts, and a monthly allowance of SMS and satellite weather
+forecasts. Requests beyond the allowance may not be answered until the allowance resets on the
+first day of the next month (UTC).</p>
+<p>${BRAND} Expedition is a paid subscription that removes the monthly limit on SMS and satellite
+weather forecasts. It is sold as a monthly or annual subscription through the Apple App Store or
+Google Play, which handle payment. Prices are shown in the app before purchase.</p>
+<p>Subscriptions renew automatically at the end of each period unless cancelled at least 24 hours
+before the period ends. You can manage or cancel a subscription in your Apple or Google account
+settings, or from Settings in the app. Cancelling stops future renewals; access continues until
+the end of the current period. Refunds are handled by Apple or Google under their own
+policies.</p>
+<p>A subscription belongs to your Apple or Google account, not to your ${BRAND} account. Deleting
+your data in the app does not cancel a subscription. Use Restore Purchases to apply an existing
+subscription after reinstalling the app.</p>
+<p>If you downloaded the app from the Apple App Store, Apple's
+<a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/">Standard End User
+License Agreement</a> also applies.</p>
 
 <h2>Acceptable use</h2>
 <p>Do not use the Service to break the law, and do not attempt to disrupt, overload, or gain
@@ -54,6 +74,7 @@ forecast information.</p>
 
 <h2>Data sources</h2>
 <p>Weather forecasts are derived from data provided by <a href="https://open-meteo.com">Open-Meteo</a>.
+Avalanche forecasts are provided by <a href="https://avalanche.ca">Avalanche Canada</a>.
 Maps are built from data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>
 contributors (via <a href="https://protomaps.com">Protomaps</a>), the
 <a href="https://overturemaps.org">Overture Maps Foundation</a>,
@@ -78,5 +99,5 @@ most recent revision. Continued use of the Service constitutes acceptance of the
 `;
 
 export function terms(c: Context) {
-  return c.html(PAGE("Terms & Conditions", TERMS_BODY, { path: "/terms" }));
+  return c.html(PAGE("Terms & Conditions", TERMS_BODY, { updated: TERMS_UPDATED, path: "/terms" }));
 }

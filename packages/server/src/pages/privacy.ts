@@ -31,18 +31,24 @@ ${BRAND} uses no analytics, ads, or tracking.</p>
 <h2>Account Token</h2>
 <p>${BRAND} does not require an account. Instead, it uses an anonymous token that is created on
 first launch. The token is a random value that is not tied to a name, phone number, email, or
-device identifier. The account token is only used to count requests against usage limits.</p>
+device identifier. The account token is used to count requests against usage limits and to link
+a subscription to your account. It is shared with RevenueCat for that purpose.</p>
 
 <h2>Data Retention</h2>
 <p>The server stores one record per request including time of the request, location rounded to
 1 km, forecast options, reply size, timing information, and account token. Phone numbers are not
 stored. This data is stored for as long as the service runs. It is used for usage tracking and
 may be used for training the encoder on real-world usage.</p>
+<p>For subscribers, the server stores the store's subscription identifier, the plan, the store,
+the expiration date, and which account it applies to.</p>
 <p>${BRAND} stores a token, previously decoded forecasts, settings, and downloaded offline maps
 on your phone.</p>
 
 <h2 id="deletion">Data Deletion</h2>
 ${DELETION_HTML}
+<p>Deleting your data removes the link between your account and a subscription, but does not
+cancel the subscription itself. Cancel it in your Apple or Google account settings. RevenueCat
+retains purchase history under its own policy.</p>
 
 <h2>App Permissions</h2>
 <p>${BRAND} asks for location permission when requesting a forecast. It never uses your location
@@ -62,6 +68,11 @@ the service:</p>
   days.</li>
   <li>Cloudflare: Serves maps.</li>
   <li>Expo: App update delivery.</li>
+  <li>RevenueCat: Manages subscriptions. Receives your account token, your purchase and
+  subscription status from Apple or Google, and basic app and device information such as app
+  version, operating system, and country.</li>
+  <li>Apple and Google: Process subscription payments. ${BRAND} never sees your payment
+  details.</li>
   <li>Carriers: Mobile carriers and satellite networks see your phone number and retain messages
   according to their own policies.</li>
   <li>Law enforcement: Only where required by law.</li>

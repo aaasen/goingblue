@@ -1,5 +1,5 @@
 import { img } from "../assets.js";
-import { BRAND, LAST_UPDATED, SITE_URL } from "../constants.js";
+import { BRAND, SITE_URL } from "../constants.js";
 
 type PageOpts = { showUpdated?: boolean; updated?: string; header?: string; css?: string; head?: string; path?: string };
 
@@ -22,7 +22,7 @@ type PageOpts = { showUpdated?: boolean; updated?: string; header?: string; css?
 // scroll-padding keeps an in-page anchor from landing under it. The icon file is square, and the
 // radius is 22.4% of the width, Apple's own icon proportion. A page that brings its own `header`
 // (the landing masthead) replaces the bar along with the h1.
-export const PAGE = (title: string, body: string, { showUpdated = true, updated = LAST_UPDATED, header, css, head, path }: PageOpts = {}) => `<!doctype html>
+export const PAGE = (title: string, body: string, { showUpdated = true, updated, header, css, head, path }: PageOpts = {}) => `<!doctype html>
 <html lang=en>
 <head>
 <meta charset=utf-8>
@@ -53,7 +53,7 @@ ${head ?? ""}</head>
 ${header ?? `<header class=bar><a class=brand href="/"><img src="${img("icon-512.jpg")}" width=32 height=32 alt="">${BRAND}</a></header>`}
 <div class=wrap>
 ${header ? "" : `<h1>${title}</h1>`}
-${showUpdated ? `<p class=updated>Last updated: ${updated}</p>` : ""}
+${showUpdated && updated ? `<p class=updated>Last updated: ${updated}</p>` : ""}
 ${body}
 </div>
 <footer><div class=inner>
