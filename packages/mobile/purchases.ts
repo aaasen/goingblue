@@ -12,7 +12,7 @@ import Purchases, {
 // which simulates purchases with no store setup and renews a monthly every five minutes. The
 // SDK refuses a Test Store key in a release build, so release builds use the store keys below.
 // Both are public SDK keys, not secrets.
-const IOS_KEY = '';
+const IOS_KEY = 'appl_OCUSDfNYrCbDeNfzuEhvRzVdINn';
 const ANDROID_KEY = '';
 
 // The entitlement's identifier in the RevenueCat dashboard, which cannot be renamed there.
