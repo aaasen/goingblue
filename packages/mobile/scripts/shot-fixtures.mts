@@ -94,6 +94,28 @@ export function upstreamKey(url: string): string {
   return url.replace(/^https?:\/\/[^/]+/, '');
 }
 
+// The recorded response that serves a request. An exact key first; otherwise a recording of the
+// same request whose `hourly` list is a superset of the one asked for, since the codec reads
+// response columns by name and a recording made under a longer variable list still has every
+// column a shorter one needs. Anything else is a genuine miss.
+export function recordedResponse(responses: Record<string, string>, key: string): string | undefined {
+  if (responses[key] !== undefined) return responses[key];
+  const want = new URL(key, 'http://x');
+  const wantVars = new Set(want.searchParams.get('hourly')?.split(',') ?? []);
+  const sameRequest = (a: URLSearchParams, b: URLSearchParams) => {
+    const keys = new Set([...a.keys(), ...b.keys()]);
+    keys.delete('hourly');
+    return [...keys].every((k) => a.get(k) === b.get(k));
+  };
+  for (const [recorded, body] of Object.entries(responses)) {
+    const have = new URL(recorded, 'http://x');
+    if (have.pathname !== want.pathname || !sameRequest(have.searchParams, want.searchParams)) continue;
+    const haveVars = new Set(have.searchParams.get('hourly')?.split(',') ?? []);
+    if ([...wantVars].every((v) => haveVars.has(v))) return body;
+  }
+  return undefined;
+}
+
 export function loadFixtures(): ShotFixture[] {
   if (!existsSync(FIXTURE_DIR)) return [];
   return readdirSync(FIXTURE_DIR)
@@ -115,15 +137,15 @@ export async function encodeReply(params: ForecastParams): Promise<string[]> {
 }
 
 // One request through the pipeline with fetch serving the recorded bytes. A URL the current
-// codec asks for that the recording lacks is the one legitimate reason to re-record a shot, so
-// it fails by name instead of falling through to a live fetch.
+// codec asks for that no recording can serve (recordedResponse) is the one legitimate reason to
+// re-record a shot, so it fails by name instead of falling through to a live fetch.
 export async function replay(fixture: ShotFixture, entry: FixtureRequest): Promise<{ params: ForecastParams; wire: string }> {
   const params = parseRequest(entry.request);
   if (params.errors.length) throw new Error(`${fixture.shot}: request rejected: ${params.errors.join('; ')}`);
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request) => {
     const key = upstreamKey(String(input));
-    const body = entry.responses[key];
+    const body = recordedResponse(entry.responses, key);
     if (body === undefined) throw new Error(`${fixture.shot}: unrecorded upstream request ${key} (re-record this shot)`);
     return new Response(Buffer.from(body, 'base64'), { status: 200 });
   }) as typeof fetch;
