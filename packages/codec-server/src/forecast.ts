@@ -19,6 +19,7 @@ import {
   MODE_RANGE,
   type Period,
   type ForecastMessage,
+  type QuotaState,
   type VersionedCodec,
   type Alphabet,
   type DeviceCode,
@@ -1604,7 +1605,11 @@ export function requestWindow(startEpochHour: number, nowMs = Date.now()): Reque
   return "ok";
 }
 
-export async function fetchForecast(params: ForecastParams, codec: VersionedCodec): Promise<ForecastResult> {
+// `quota` is the account's free-forecast state for the reply header (see quota.ts); it comes
+// from the gateway, not the request text, and absent means none.
+export async function fetchForecast(
+  params: ForecastParams, codec: VersionedCodec, quota?: QuotaState,
+): Promise<ForecastResult> {
   const { lat, lon } = resolveLocation(params);
   const modelKey = firstModelKey(params.modelsMask);
 
@@ -1632,7 +1637,7 @@ export async function fetchForecast(params: ForecastParams, codec: VersionedCode
       const msg = buildFillMessage(h, times, params, seq, lat, lon, elevation, modelKey, agreement);
       return msg === null
         ? null
-        : { encoded: codec.encode(msg, params.alphabet), periodHours: msg.periodHours };
+        : { encoded: codec.encode({ ...msg, quota }, params.alphabet), periodHours: msg.periodHours };
     },
     (c) => c.encoded.length,
     maxFillSeq(params.mode, fillSlotsFor(MODEL_BIT[modelKey], params.startEpochHour, params.utcOffsetHours)),

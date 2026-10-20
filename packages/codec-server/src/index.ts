@@ -4,6 +4,7 @@ import { wireCodec, WIRE_VERSION } from "@weather/protocol";
 import { serveAvalanche } from "./avalanche.js";
 import { describeRequest, fetchForecast, parseRequest, requestWindow, splitReplyFor, type ForecastParams } from "./forecast.js";
 import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
+import { QUOTA_HEADER, parseQuotaHeader } from "./quota.js";
 
 // The codec server: one container per shipped protocol version, frozen at that version's git
 // tag and kept running for as long as clients in the field may still speak it. It is
@@ -29,7 +30,9 @@ import { log, traceIdFrom, withRequestId, withTrace } from "./log.js";
 //          is retryable as sent; the gateway decides what, if anything, to reply.
 //     503  upstream data unavailable — the gateway replies with its retry text
 //   The request may carry X-Request-Id and X-Cloud-Trace-Context headers, both logged and
-//   never interpreted.
+//   never interpreted, and X-Quota, the account's free-forecast state for the weather reply's
+//   header (see quota.ts). All three are optional; a container frozen before one existed
+//   ignores it.
 const app = new Hono();
 
 // The gateway's id for the message being served, tagging every line this request logs so its
@@ -70,7 +73,8 @@ async function encode(c: Context) {
   }
 
   try {
-    const { encoded, periods, fetchMs, encodeMs } = await fetchForecast(params, wireCodec);
+    const quota = parseQuotaHeader(c.req.header(QUOTA_HEADER));
+    const { encoded, periods, fetchMs, encodeMs } = await fetchForecast(params, wireCodec, quota);
     // The shape rides on a header rather than in the body so the body stays exactly the
     // encoded message lines: they are what a phone in the field decodes, and they are
     // bit-frozen. What the request asked for (describeRequest) travels next to what the reply
