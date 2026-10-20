@@ -275,8 +275,62 @@ satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO.<
   <a href="${REPO_URL}">GitHub</a>.</li>
 </ul>
 
+<h2 id=subscriptions>Subscriptions</h2>
+<table class=plans>
+  <thead>
+    <tr>
+      <td></td>
+      <th scope=col>${BRAND} Free</th>
+      <th scope=col class=paid>${BRAND} Expedition</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th scope=row>SMS and satellite weather forecasts</th>
+      <td>5 per month</td>
+      <td class=paid><strong>Unlimited</strong></td>
+    </tr>
+    <tr>
+      <th scope=row>Internet weather forecasts</th>
+      <td>Unlimited</td>
+      <td class=paid>Unlimited</td>
+    </tr>
+    <tr>
+      <th scope=row>Avalanche forecasts</th>
+      <td>Unlimited</td>
+      <td class=paid>Unlimited</td>
+    </tr>
+    <tr>
+      <th scope=row>Price</th>
+      <td>Free</td>
+      <td class=paid>$9.99/month<br>or $19.99/year</td>
+    </tr>
+  </tbody>
+</table>
+
 <h2 id=faq>Frequently asked questions</h2>
 ${FAQ_HTML}
+`;
+
+// The plans as a comparison table: a row per feature, read across the plans. The plan names sit
+// in the sky blue behind the framed screenshots, and the paid column takes the page's
+// call-to-action tint. `table-layout: fixed` keeps the two plan columns equal whatever their
+// values say.
+const PLANS_CSS = `
+  .plans { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0;
+    border: 1px solid #c9d3de; border-radius: 8px; overflow: hidden; }
+  .plans th, .plans td { padding: 10px 14px; text-align: center; vertical-align: middle;
+    border-right: 1px solid #c9d3de; border-bottom: 1px solid #c9d3de; }
+  .plans tr > :last-child { border-right: 0; }
+  .plans tbody tr:last-child > * { border-bottom: 0; }
+  .plans thead td { width: 34%; background: #fff; }
+  .plans thead th { background: #2382e4; color: #fff; font-size: 1.05em;
+    border-bottom-color: #2382e4; }
+  .plans thead th:not(:last-child) { border-right-color: rgba(255, 255, 255, 0.4); }
+  .plans tbody th { text-align: left; font-weight: normal; background: #fff; }
+  .plans tbody td { background: #f3f4f6; }
+  .plans td.paid { background: #f0f6fc; }
+  @media (max-width: 600px) { .plans th, .plans td { padding: 8px 8px; } }
 `;
 
 export function landing(c: Context) {
@@ -285,7 +339,7 @@ export function landing(c: Context) {
       showUpdated: false,
       path: "/",
       header: HERO,
-      css: HERO_CSS + SHOTS_CSS + FAQ_CSS,
+      css: HERO_CSS + SHOTS_CSS + PLANS_CSS + FAQ_CSS,
     }),
   );
 }
