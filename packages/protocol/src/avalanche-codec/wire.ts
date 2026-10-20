@@ -2,10 +2,12 @@
  * An avalanche reply on the wire: the shared version prefix, a packed header the same width as a
  * weather reply's, and the bulletin bytes (bulletin.ts) in the route's body alphabet.
  *
- * Packed header layout (22 bits, 4 base-82 characters):
- *   code:7 issue:15
+ * Packed header layout (25 bits, 4 base-82 characters):
+ *   code:7 issue:15 pad:3
  * The code sits exactly where the weather header keeps it, so a reader resolves the stored
- * request, and with it the reply's kind, before knowing anything else about the layout.
+ * request, and with it the reply's kind, before knowing anything else about the layout. The
+ * header is read MSB-first at the weather header's width, so the pad keeps the code in place;
+ * it is always zero, since an avalanche reply carries no quota.
  * `issue` is the bulletin's issue time in 15-minute steps before the anchor, offset by
  * ISSUE_AFTER_STEPS so a bulletin issued up to two days after the anchor still fits: about 339
  * days back, which covers the seasonal placeholders that stay current for months. The anchor is
@@ -22,7 +24,8 @@ import { decodeBulletin, encodeBulletin, type Models } from "./bulletin.js";
 import { ISSUE_STEP_MS, quantizeIssued } from "./time.js";
 
 const CODE_BITS = 7;
-const ISSUE_BITS = WIRE_HEADER_BITS - CODE_BITS; // 15
+const ISSUE_BITS = 15;
+const PAD_BITS = WIRE_HEADER_BITS - CODE_BITS - ISSUE_BITS; // 3
 export const ISSUE_AFTER_STEPS = (48 * 60 * 60 * 1000) / ISSUE_STEP_MS;
 const ISSUE_MAX = (1 << ISSUE_BITS) - 1;
 
@@ -46,6 +49,7 @@ export function encodeAvalancheMessage(
   const header: number[] = [];
   putInt(header, code, CODE_BITS);
   putInt(header, field, ISSUE_BITS);
+  putInt(header, 0, PAD_BITS);
   const bytes = encodeBulletin(models, forecast);
   const bits: number[] = [];
   for (const b of bytes) for (let i = 0; i < 8; i++) bits.push((b >> i) & 1);

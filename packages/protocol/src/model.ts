@@ -192,6 +192,8 @@ export interface ForecastMessage {
   // recovers it via ContextResolver). Never on the wire, but the encoder needs it too: the
   // temp-delta codebooks are keyed by each period's local time-of-day (see tempTodBucket).
   utcOffsetHours: number;
+  // The account's free-forecast quota, carried in the header. Absent means none.
+  quota?: QuotaState;
 }
 
 // The request fields the client recovers from its own storage by message code, rather than
@@ -227,6 +229,18 @@ export interface RequestContext {
 // is unknown (e.g. cycled out of the client's store), in which case decode throws.
 export type ContextResolver = (code: number) => RequestContext | undefined;
 
+// The free-forecast quota as a weather reply reports it: the account has none (a subscriber,
+// or a route the quota doesn't apply to), `remaining` free forecasts are left this month after
+// this one (0..QUOTA_FREE_FORECASTS), or the month's free forecasts are used up.
+export type QuotaState =
+  | { kind: "none" }
+  | { kind: "free"; remaining: number }
+  | { kind: "over" };
+
+// Free weather forecasts per month over the messaging routes. The header's quota field counts
+// down from it.
+export const QUOTA_FREE_FORECASTS = 5;
+
 // What a message's fixed-width prefix says about it, before the body is read — or, on a reply
 // still arriving in pieces, before the body is all there. Every version carries at least these:
 // the code identifying the request, and enough structural detail to tell a real message prefix
@@ -236,6 +250,7 @@ export interface MessageHeader {
   code: number;
   seq: number;
   elevation: number;
+  quota: QuotaState;
 }
 
 // A codec for a single protocol version. The header format is version-specific, so the

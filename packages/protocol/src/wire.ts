@@ -10,8 +10,8 @@ import {
 } from "./codec.js";
 import { encodeVersion, takeVersion, VERSION_PREFIX_CHARS } from "./version.js";
 import { DEVICE_TRANSPORT } from "./devices.js";
-import { WMO2IDX, type Period } from "./model.js";
-import type { ForecastMessage, MessageHeader, VersionedCodec, ContextResolver } from "./model.js";
+import { WMO2IDX, QUOTA_FREE_FORECASTS, type Period } from "./model.js";
+import type { ForecastMessage, MessageHeader, VersionedCodec, ContextResolver, QuotaState } from "./model.js";
 import {
   WEATHERCODE_CLASS, BOOKS, type Books,
   encodeWindSpeedDelta, decodeWindSpeedDelta, quantWind, beaufortMidKph, CALM_MAX_FORCE,
@@ -41,10 +41,12 @@ export const WIRE_VERSION = 7;
 // codebooks were derived across resolutions for exactly this reason, see entropy.ts).
 //
 // The 7-bit version field lives in the shared, self-describing prefix (see version.ts), not in this
-// packed header. Packed header layout (22 bits):
-//   code:7 seq:8 elev:7
+// packed header. Packed header layout (25 bits):
+//   code:7 seq:8 elev:7 quota:3
 // seq:8 stores (seq - 1), i.e. 1..256; the largest layout is seq = maxFillSeq(mode).
-// 22 bits fill 4 base-82 header chars — 4 × log2(82) ≈ 25.4.
+// quota:3 is the account's free-forecast quota (QuotaState): 0 none, 1..6 free with 5..0
+// remaining, 7 over.
+// 25 bits fill 4 base-82 header chars — 4 × log2(82) ≈ 25.4.
 // The body carries no length field — it is a single rANS stream (see rans.ts), serialized
 // little-endian and self-delimiting: the decoder knows the structure and consumes exactly the
 // symbols the encoder wrote (see encodeBodyLE/decodeBodyLE and SymSource.assertDone).
@@ -63,7 +65,24 @@ const ELEV_STEP_M = 100;
 // and decoder derive different structure from the same message.
 const quantElevM = (m: number): number =>
   Math.min(Math.max(Math.round(m / ELEV_STEP_M), 0), (1 << ELEV_BITS) - 1) * ELEV_STEP_M;
-export const WIRE_HEADER_BITS = CODE_BITS + WIRE_SEQ_BITS + ELEV_BITS; // 22
+const QUOTA_BITS = 3;
+const QUOTA_NONE = 0;
+const QUOTA_OVER = (1 << QUOTA_BITS) - 1;
+export const WIRE_HEADER_BITS = CODE_BITS + WIRE_SEQ_BITS + ELEV_BITS + QUOTA_BITS; // 25
+
+function quotaField(q: QuotaState | undefined): number {
+  if (!q || q.kind === "none") return QUOTA_NONE;
+  if (q.kind === "over") return QUOTA_OVER;
+  if (!Number.isInteger(q.remaining) || q.remaining < 0 || q.remaining > QUOTA_FREE_FORECASTS)
+    throw new Error(`quota remaining ${q.remaining} is outside 0..${QUOTA_FREE_FORECASTS}`);
+  return QUOTA_FREE_FORECASTS + 1 - q.remaining;
+}
+
+function quotaFromField(field: number): QuotaState {
+  if (field === QUOTA_NONE) return { kind: "none" };
+  if (field === QUOTA_OVER) return { kind: "over" };
+  return { kind: "free", remaining: QUOTA_FREE_FORECASTS + 1 - field };
+}
 // Total chars before the body: the shared version prefix plus this version's packed header.
 export const WIRE_HEADER_CHARS = VERSION_PREFIX_CHARS + nCharsForBits(WIRE_HEADER_BITS); // 1 + 4 = 5
 const HEADER_CHARS = nCharsForBits(WIRE_HEADER_BITS); // packed-header chars (excludes version prefix)
@@ -862,6 +881,7 @@ function buildHeader(msg: ForecastMessage): number[] {
   putInt(headerBits, msg.code, CODE_BITS);
   putInt(headerBits, seq - 1, WIRE_SEQ_BITS);
   putInt(headerBits, quantElevM(msg.elevation) / ELEV_STEP_M, ELEV_BITS);
+  putInt(headerBits, quotaField(msg.quota), QUOTA_BITS);
   return headerBits;
 }
 
@@ -929,12 +949,13 @@ export function headerFromString(s: string): MessageHeader {
   const code = hr.int(CODE_BITS);
   const seq = hr.int(WIRE_SEQ_BITS) + 1;
   const elevation = hr.int(ELEV_BITS) * ELEV_STEP_M;
+  const quota = quotaFromField(hr.int(QUOTA_BITS));
 
-  return { version, code, seq, elevation };
+  return { version, code, seq, elevation, quota };
 }
 
 export function messageFromString(s: string, resolve: ContextResolver): ForecastMessage {
-  const { version, code, seq, elevation } = headerFromString(s);
+  const { version, code, seq, elevation, quota } = headerFromString(s);
   const rest = s.slice(VERSION_PREFIX_CHARS);
 
   // Recover the request-echo fields the slim header omits.
@@ -991,6 +1012,7 @@ export function messageFromString(s: string, resolve: ContextResolver): Forecast
     mode,
     periodHours: layout.periodHours,
     utcOffsetHours,
+    quota,
   };
 }
 
