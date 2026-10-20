@@ -1,7 +1,8 @@
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { appUserAgent, isValidToken, normalizeToken } from '@weather/protocol';
+import { appUserAgent, isValidToken, normalizeToken, type QuotaState } from '@weather/protocol';
 import { fetchText } from './network';
+import { isQuotaState } from './quota';
 
 // In a dev build on a physical device, `localhost` resolves to the phone itself, not the dev
 // machine, so the API is unreachable. Constants.expoConfig.hostUri carries the Metro dev-server
@@ -56,6 +57,21 @@ export async function deleteAccount(token: string): Promise<void> {
     body: JSON.stringify({ token: normalizeToken(token) }),
   });
   if (!resp.ok) throw new Error(resp.text);
+}
+
+// The account's free-forecast quota as the server has it now (quota.ts), the same state a
+// weather reply's header carries. Throws when the server can't be reached or answers with an
+// error, a 404 for an account that no longer exists included; the caller keeps what it last knew.
+export async function fetchQuota(token: string): Promise<QuotaState> {
+  const resp = await fetchText(`${API_BASE}/account/quota`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: normalizeToken(token) }),
+  });
+  if (!resp.ok) throw new Error(resp.text);
+  const state: unknown = JSON.parse(resp.text);
+  if (!isQuotaState(state)) throw new Error('Server returned an invalid quota');
+  return state;
 }
 
 // Mint a new account on the server and persist the returned token. The account token only

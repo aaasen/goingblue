@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DEFAULT_DEVICE, isDevice, type Device } from './devices';
 import { FAVORITES_KEY, isFavoriteSort, type FavoriteSort } from './favorites';
+import { isQuotaState, type StoredQuota } from './quota';
 
 // Units for displaying decoded forecasts: one master switch and one unit per quantity the app
 // draws. The master switch is the quick path — US or metric sets every quantity to that system's
@@ -138,6 +139,7 @@ const TWO_MESSAGES_KEY = 'builder_two_messages';
 const PINNED_COORDS_KEY = 'pinned_coords';
 const FAVORITES_SORT_KEY = 'favorites_sort';
 const FAVORITES_SORT_REVERSED_KEY = 'favorites_sort_reversed';
+const QUOTA_KEY = 'quota';
 // Written only by the screenshot seed (scripts/seed-shots.mts); no setting in the app sets it.
 const HIDE_EXPIRED_BANNER_KEY = 'hide_expired_banner';
 const DEFAULT_TWO_MESSAGES = true;
@@ -302,6 +304,23 @@ export async function saveFavoritesSortReversed(reversed: boolean): Promise<void
   try { await AsyncStorage.setItem(FAVORITES_SORT_REVERSED_KEY, reversed ? '1' : '0'); } catch { /* ignore */ }
 }
 
+// The free-forecast quota as the server last stated it, with the UTC month it was heard in
+// (quota.ts). Null until the server has said anything, which the builder reads as a fresh month.
+export async function loadQuota(): Promise<StoredQuota | null> {
+  try {
+    const raw = await AsyncStorage.getItem(QUOTA_KEY);
+    if (raw == null) return null;
+    const v: Record<string, unknown> = JSON.parse(raw);
+    return isQuotaState(v.state) && typeof v.month === 'string' ? { state: v.state, month: v.month } : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveQuota(quota: StoredQuota): Promise<void> {
+  try { await AsyncStorage.setItem(QUOTA_KEY, JSON.stringify(quota)); } catch { /* ignore */ }
+}
+
 // Forget every stored preference, the pre-per-quantity master switch included. Part of account
 // deletion: the next launch starts from the defaults as a fresh install would.
 // Hides the avalanche view's expired-forecast banner, so a seeded past bulletin screenshots as a
@@ -319,7 +338,7 @@ export async function clearSettings(): Promise<void> {
     await AsyncStorage.multiRemove([
       LEGACY_UNITS_KEY, UNIT_PREFS_KEY, TIME_FORMAT_KEY, COORD_FORMAT_KEY, AQI_SCALE_KEY, DEVICE_KEY,
       TWO_MESSAGES_KEY, PINNED_COORDS_KEY, FAVORITES_KEY, FAVORITES_SORT_KEY, FAVORITES_SORT_REVERSED_KEY,
-      HIDE_EXPIRED_BANNER_KEY,
+      HIDE_EXPIRED_BANNER_KEY, QUOTA_KEY,
     ]);
   } catch { /* ignore */ }
 }

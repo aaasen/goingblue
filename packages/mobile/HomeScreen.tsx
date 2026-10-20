@@ -23,18 +23,20 @@ import {
   MODEL_INFO, OPEN_METEO_DOCS, horizonText,
   AVALANCHE_PIECES,
   type RequestContext, type Center, type ForecastMessage, type AvalancheForecast, type AvalanchePiece, type DangerDay,
+  type QuotaState,
 } from '@weather/protocol';
-import { API_BASE } from './account';
+import { API_BASE, fetchQuota } from './account';
 import { fetchText, requestErrorMessage } from './network';
 import {
   type AqiScale, type CoordFormat, type TimeFormat, type UnitPrefs, loadFavoritesSort, loadFavoritesSortReversed, loadPinnedCoords,
-  saveFavoritesSort, saveFavoritesSortReversed, savePinnedCoords,
+  loadQuota, saveFavoritesSort, saveFavoritesSortReversed, savePinnedCoords, saveQuota,
 } from './settings';
+import { quotaLine, storedQuota, type StoredQuota } from './quota';
 import { ladderLabel } from './cloudBand';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import {
   allocCode, attachResponse, chunksCollected, decodeAny, deleteResponses, isAvalancheContext, loadStore,
-  mergeReply, normalizeReply, prunePastForecasts, replyKind, replyParts, type Slot,
+  mergeReply, normalizeReply, prunePastForecasts, replyKind, replyParts, resolveContext, type Slot,
 } from './cache';
 import LocationMap from './LocationMap';
 import DeviceSelector from './components/DeviceSelector';
@@ -43,6 +45,7 @@ import ActionButton from './components/ActionButton';
 import PasteButton, { type Outcome } from './components/PasteButton';
 import DangerMountain from './components/DangerMountain';
 import InfoModal from './components/InfoModal';
+import InfoBox from './components/InfoBox';
 import EmptyForecast from './components/EmptyForecast';
 import FavoriteSheet from './FavoriteSheet';
 import Meteogram, { PINNED_STACK_H, type PageScroll } from './Meteogram';
@@ -1236,6 +1239,30 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     loadFavoritesSortReversed().then(setFavoritesSortReversed);
   }, []);
 
+  // The free-forecast quota as the server last stated it (quota.ts): heard off every weather
+  // reply pasted in, and asked for over the internet each time the app comes to the foreground,
+  // so the line under the device selector is current whenever the phone has a connection and as
+  // current as the last reply when it does not. The stored copy only fills in until something
+  // fresher is heard.
+  const [quota, setQuota] = useState<StoredQuota | null>(null);
+  useEffect(() => {
+    loadQuota().then((stored) => setQuota((current) => current ?? stored));
+  }, []);
+  const heardQuota = useCallback((state: QuotaState, at: Date) => {
+    const stored = storedQuota(state, at);
+    setQuota(stored);
+    saveQuota(stored);
+  }, []);
+  useEffect(() => {
+    if (!foreground) return;
+    let cancelled = false;
+    // Best effort: offline, or an account the server no longer knows, leaves the last state.
+    fetchQuota(token).then((state) => { if (!cancelled) heardQuota(state, new Date()); }, () => {});
+    return () => { cancelled = true; };
+  }, [foreground, token, heardQuota]);
+  // The Subscribe button's press. There is no subscription flow yet, so it does nothing.
+  const onSubscribe = useCallback(() => {}, []);
+
   // A newly chosen order starts in its own direction: the reversal belongs to the order it was
   // made on.
   function chooseFavoritesSort(sort: FavoriteSort) {
@@ -1432,6 +1459,13 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         const decodedReply = pre ? null : decodeAny(forecastData, token);
         if (decodedReply && decodedReply.kind !== 'weather') throw new Error('Invalid forecast');
         const msg = pre ?? decodedReply!.msg;
+        // A pasted reply came over a messaging route, so its header states the quota, for the
+        // month its request was made in. A fetched one did not, and a cached one states what
+        // was true when it arrived.
+        if (!pre && !fetchDecoding.current && msg.quota) {
+          const start = resolveContext(token, msg.code)?.start;
+          heardQuota(msg.quota, start === undefined ? new Date() : new Date(start));
+        }
         // A cached entry loaded by loadPast is already on screen, its scroll already settled.
         if (!pre) {
           setDecoded(msg);
@@ -1467,7 +1501,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       }
     })();
     return () => { cancelled = true; };
-  }, [forecastData, token, flash, onForecastDataChange]);
+  }, [forecastData, token, flash, onForecastDataChange, heardQuota]);
 
   // The Avalanche tab's decode, the same steps as the weather one above: a reply that answers a
   // weather request goes to the Weather tab, a bulletin waits for the model and goes on screen.
@@ -1950,6 +1984,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         mode={mode} onMode={setMode} setPriorityInfo={setPriorityInfo}
         device={device} onDevice={onDevice} setDeviceInfo={setDeviceInfo}
         multiMessageShown={multiMessageShown} twoMessages={twoMessages} onTwoMessagesChange={onTwoMessages}
+        quotaNote={quotaLine(quota, new Date(), deviceSpec.label)} onSubscribe={onSubscribe}
         deviceSpec={deviceSpec} actionIcon={actionIcon} copied={copied} onAction={onAction} onCancelAction={onCancelAction}
         actionDisabled={action.disabled} actionBusy={action.busy} offline={offline} ultraConstrained={ultraConstrained} coordsValid={coordsValid}
         setHelp={setHelp} outcome={outcome} onPaste={onPaste} onClearForecast={clearForecast}
@@ -2674,7 +2709,7 @@ const RequestBuilder = memo(function RequestBuilder({
   model, modelStack, onModel, setModelInfo,
   varRows, unavail, openSubgroups, activeValues, groups, units, onToggleGroup, onToggleSubgroup, setVarsInfo,
   mode, onMode, setPriorityInfo,
-  device, onDevice, setDeviceInfo, multiMessageShown, twoMessages, onTwoMessagesChange,
+  device, onDevice, setDeviceInfo, multiMessageShown, twoMessages, onTwoMessagesChange, quotaNote, onSubscribe,
   deviceSpec, actionIcon, copied, onAction, onCancelAction, actionDisabled, actionBusy, offline, ultraConstrained, coordsValid, setHelp,
   outcome, onPaste, onClearForecast, collecting, error,
 }: {
@@ -2686,6 +2721,9 @@ const RequestBuilder = memo(function RequestBuilder({
   mode: number; onMode: (mode: number) => void; setPriorityInfo: (open: boolean) => void;
   device: Device; onDevice: (device: Device) => void; setDeviceInfo: (open: boolean) => void;
   multiMessageShown: boolean; twoMessages: boolean; onTwoMessagesChange: (on: boolean) => void;
+  // The quota line (quota.ts), shown under the action button on the messaging routes only, with
+  // the button that starts a subscription.
+  quotaNote: string | null; onSubscribe: () => void;
   deviceSpec: (typeof DEVICES)[number]; actionIcon: ComponentProps<typeof ActionButton>['icon']; copied: boolean; onAction: () => void; onCancelAction: () => void;
   actionDisabled: boolean; actionBusy: boolean; offline: boolean; ultraConstrained: boolean; coordsValid: boolean; setHelp: (open: boolean) => void;
   outcome: Outcome | null; onPaste: () => void; onClearForecast: () => void; collecting: Collecting | null; error: string | null;
@@ -2801,6 +2839,12 @@ const RequestBuilder = memo(function RequestBuilder({
           variant={copied ? 'success' : 'primary'}
         />
       </View>
+
+      {/* The free-forecast quota, under the button it limits. The internet route is never
+          limited, so it shows none. */}
+      {device !== 'internet' && quotaNote && (
+        <InfoBox style={styles.quotaBox} action={{ label: 'Subscribe', onPress: onSubscribe }}>{quotaNote}</InfoBox>
+      )}
 
       {/* One note at most, the first that applies: a location with nothing usable in the field
           (it greys every device's button, and the input sits a few sections up by the time the
@@ -2977,6 +3021,7 @@ const styles = StyleSheet.create({
   zoneHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 8, paddingHorizontal: CONTENT_PAD },
 
   buttons: { marginTop: 4 },
+  quotaBox: { marginTop: 12 },
 
   actionNote: { fontSize: 13, color: palette.pageNote, lineHeight: 19, textAlign: 'center', marginTop: 10 },
 
