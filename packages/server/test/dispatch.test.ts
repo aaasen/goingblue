@@ -28,6 +28,29 @@ describe("extractVersion", () => {
   });
 });
 
+describe("the quota header", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env["CODEC_URL_V7"];
+  });
+
+  const sentHeaders = () => (vi.mocked(fetch).mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+
+  it("goes to the codec when given", async () => {
+    process.env["CODEC_URL_V7"] = "http://codec-v7";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("ENCODED", { status: 200 })));
+    expect((await dispatchForecast("v7 p:a", "rid", null, false, "free:3")).kind).toBe("ok");
+    expect(sentHeaders()["X-Quota"]).toBe("free:3");
+  });
+
+  it("is left off when there is none", async () => {
+    process.env["CODEC_URL_V7"] = "http://codec-v7";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("ENCODED", { status: 200 })));
+    await dispatchForecast("v7 p:a", "rid", null);
+    expect(sentHeaders()).not.toHaveProperty("X-Quota");
+  });
+});
+
 describe("extractUserToken", () => {
   it("returns the normalized token from a u: word", () => {
     expect(extractUserToken(`v1 u:${TOKEN.toLowerCase()} p:a`)).toBe(TOKEN);

@@ -9,6 +9,7 @@ import { accountExists, createAccount, recordRequest } from "../src/accounts.js"
 import { markQueued, receiveMessage, recordReplyDelivery } from "../src/delivery.js";
 import { runEncodeTask } from "../src/encode-task.js";
 import { enqueueEncode, tasksConfigured } from "../src/tasks.js";
+import { quotaStatus } from "../src/quota.js";
 import { log } from "../src/log.js";
 
 // The account gate: a request whose token names no account is rejected before dispatch. The
@@ -34,6 +35,10 @@ vi.mock("../src/encode-task.js", () => ({
 vi.mock("../src/tasks.js", () => ({
   tasksConfigured: vi.fn(() => false),
   enqueueEncode: vi.fn(async () => "queued"),
+}));
+vi.mock("../src/quota.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/quota.js")>()),
+  quotaStatus: vi.fn(),
 }));
 // The sink reads the message back from Twilio before writing anything; only that call is mocked.
 vi.mock("../src/twilio.js", async (importOriginal) => ({
@@ -400,6 +405,21 @@ describe("account gate", () => {
     const resp = await post(BODY);
     expect(resp.status).toBe(200);
     expect(await resp.text()).toBe("ENCODED");
+  });
+});
+
+// Internet requests cost nothing to answer, so the quota never applies: no lookup, no header to
+// the codec, whatever the account has used over messaging.
+describe("quota over the internet", () => {
+  it("is neither read nor sent to the codec", async () => {
+    process.env["CODEC_URL_V7"] = "http://codec-v7";
+    vi.mocked(quotaStatus).mockClear();
+    const resp = await post(`v7 p:a u:${TOKEN}`);
+    expect(resp.status).toBe(200);
+    expect(vi.mocked(quotaStatus)).not.toHaveBeenCalled();
+    const headers = (vi.mocked(fetch).mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+    expect(headers).not.toHaveProperty("X-Quota");
+    delete process.env["CODEC_URL_V7"];
   });
 });
 

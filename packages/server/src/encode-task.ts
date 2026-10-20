@@ -77,7 +77,7 @@ async function runAttempt(row: DeliveryRequest, opts: TaskOptions): Promise<Task
     // a failure at the right level.
     const deadline = (row.queuedAt ?? row.createdAt).getTime() + opts.retryWindowMs;
     const willRetry = Date.now() < deadline;
-    const result = await resolveForecast(body, row.requestId, opts.traceId, willRetry);
+    const result = await resolveForecast(body, row.requestId, opts.traceId, willRetry, "messaging");
     if (result.kind === "unavailable") {
       if (willRetry) {
         log.info("encode.retry", { sid: row.messageSid, attempt });
@@ -91,7 +91,7 @@ async function runAttempt(row: DeliveryRequest, opts: TaskOptions): Promise<Task
       version: extractVersion(body),
       outcome: result.kind,
       codecMs: "codecMs" in result ? result.codecMs : null,
-      shape: result.kind === "ok" ? result.shape : null,
+      shape: "shape" in result ? result.shape : null,
       twilioReceivedAt: message.dateCreated,
       replies: replyParts(result),
     });

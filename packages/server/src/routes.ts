@@ -10,6 +10,7 @@ import {
   REPLY_FUTURE, REPLY_MALFORMED, REPLY_NO_FORECAST, REPLY_STALE, REPLY_UNAVAILABLE, REPLY_UNSUPPORTED,
   replyChars, resolveForecast,
 } from "./forecast.js";
+import { quotaExceededReply } from "./quota.js";
 import { isAppUserAgent, isValidToken, normalizeToken } from "@weather/protocol";
 import { fetchMessage, isMessageSid, twiml, validateTwilioJsonSignature, validateTwilioSignature } from "./twilio.js";
 import { FORECAST_NUMBER } from "./constants.js";
@@ -59,6 +60,8 @@ export async function forecast(c: Context) {
     case "stale": return c.text(REPLY_STALE, 422);
     case "future": return c.text(REPLY_FUTURE, 422);
     case "no_forecast": return c.text(REPLY_NO_FORECAST, 422);
+    // Not reached: the internet route is never limited. Named so the switch stays exhaustive.
+    case "quota_exceeded": return c.text(quotaExceededReply(result.resetsAt), 429);
   }
 }
 

@@ -179,11 +179,16 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
 // caller will try again and as an error when this was the last chance: the encode task retries
 // inside its window and the internet route cannot retry at all. Alerts fire on errors, so a
 // blip the next attempt fixes never pages anyone; the attempt that gives up does.
+//
+// `quota` is the account's free-forecast state for the reply header, as quota.ts phrases it, or
+// null when there is none to send. The codec writes it into the header; the gateway never reads
+// the header back.
 export async function dispatchForecast(
   body: string,
   requestId: string,
   traceId: string | null,
   willRetry = false,
+  quota: string | null = null,
 ): Promise<DispatchResult> {
   const version = extractVersion(body);
   if (version === null) return { kind: "missing_version" };
@@ -196,6 +201,7 @@ export async function dispatchForecast(
   const start = Date.now();
   const headers: Record<string, string> = { "X-Request-Id": requestId };
   if (traceId !== null) headers["X-Cloud-Trace-Context"] = traceId;
+  if (quota !== null) headers["X-Quota"] = quota;
   // The codec services admit only IAM-authorized callers (identity.ts). A token that cannot be
   // minted is a gateway-side outage, reported like an unreachable codec.
   if (codecAuthConfigured()) {

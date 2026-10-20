@@ -1,6 +1,9 @@
-import { dispatchForecast, extractUserToken, extractVersion, type DispatchResult } from "./dispatch.js";
+import { dispatchForecast, extractUserToken, extractVersion, type DispatchResult, type RequestShape } from "./dispatch.js";
 import { accountExists } from "./accounts.js";
 import { log } from "./log.js";
+import {
+  QUOTA_MIN_VERSION, monthStartUtc, overHard, quotaExceededReply, quotaHeader, quotaStatus, type QuotaStatus,
+} from "./quota.js";
 
 // Turning a request body into a result and a result into reply text, shared by the internet
 // route (routes.ts) and the encode task (encode-task.ts).
@@ -28,10 +31,19 @@ export const REPLY_FUTURE = "Request is from the future. Build a new request and
 // unlike a stale request, the reader is waiting for an answer.
 export const REPLY_NO_FORECAST = "No avalanche forecast available";
 
-// What a request can come to: a dispatch result, or the gateway's own rejection of a token
-// that names no account. The codec validates that a token is present and well-formed; whether
-// it maps to a real account only the gateway can know, since only the gateway has the database.
-export type RequestResult = DispatchResult | { kind: "unknown_token" };
+// What a request can come to: a dispatch result, or one of the gateway's own verdicts, which
+// only it can reach since only it has the database. A token can name no account. A weather
+// forecast the codec served can be past the account's hard quota limit (quota.ts): the encoded
+// reply is dropped, its shape kept for the record, and the sender gets the cut-off reply the
+// first time this month and nothing after.
+export type RequestResult =
+  | DispatchResult
+  | { kind: "unknown_token" }
+  | { kind: "quota_exceeded"; codecMs: number; shape: RequestShape | null; notified: boolean; resetsAt: Date };
+
+// Which way a request came in. Only messaging requests cost money to answer, so only they
+// are counted against and limited by the quota.
+export type RequestRoute = "internet" | "messaging";
 
 // The outbound messages a result is answered with, in order; empty when nothing is owed. A codec
 // returns its reply as one message per line, the gateway's whole knowledge of the format:
@@ -52,6 +64,7 @@ export function replyParts(result: RequestResult): string[] {
     case "stale": return [];
     case "future": return [];
     case "no_forecast": return [REPLY_NO_FORECAST];
+    case "quota_exceeded": return result.notified ? [] : [quotaExceededReply(result.resetsAt)];
   }
 }
 
@@ -66,15 +79,27 @@ async function tokenKnown(token: string): Promise<boolean> {
   }
 }
 
-// Gate a request on its account and dispatch it to its version's codec. Nothing is recorded
-// here: the internet route and the encode task each record the result their own way.
-// `willRetry` says whether an unavailable codec will be tried again by the caller, which sets
-// how loudly dispatch logs it.
+// The account's quota, erring toward none: like the account check, a database outage must not
+// become a forecast outage.
+async function quotaOrNone(token: string, now: Date): Promise<QuotaStatus | null> {
+  try {
+    return await quotaStatus(token, now);
+  } catch (e) {
+    log.error("quota.check_failed", { err: e });
+    return null;
+  }
+}
+
+// Gate a request on its account and its quota and dispatch it to its version's codec. Nothing
+// is recorded here: the internet route and the encode task each record the result their own
+// way. `willRetry` says whether an unavailable codec will be tried again by the caller, which
+// sets how loudly dispatch logs it.
 export async function resolveForecast(
   body: string,
   requestId: string,
   traceId: string | null,
   willRetry: boolean,
+  route: RequestRoute = "internet",
 ): Promise<RequestResult> {
   const version = extractVersion(body);
   const token = extractUserToken(body);
@@ -85,11 +110,22 @@ export async function resolveForecast(
     log.info("forecast.dispatch", { version, kind: "unknown_token" });
     return { kind: "unknown_token" };
   }
-  const result = await dispatchForecast(body, requestId, traceId, willRetry);
+  // The quota is read before the call so the codec can write it into the reply header, and
+  // applied after, because only the codec's reported shape says whether the request was a
+  // weather forecast. An avalanche forecast is never limited.
+  const now = new Date();
+  const limited = route === "messaging" && token !== null && version !== null && version >= QUOTA_MIN_VERSION;
+  const quota = limited ? await quotaOrNone(token, now) : null;
+  const result = await dispatchForecast(body, requestId, traceId, willRetry, quota && quotaHeader(quota));
+  if (result.kind === "ok" && quota !== null && result.shape?.kind === "weather" && overHard(quota)) {
+    log.info("forecast.dispatch", { version, kind: "quota_exceeded", served: quota.served, hard: quota.hard, notified: quota.notified });
+    return { kind: "quota_exceeded", codecMs: result.codecMs, shape: result.shape, notified: quota.notified, resetsAt: monthStartUtc(now, 1) };
+  }
   log.info("forecast.dispatch", {
     version,
     kind: result.kind,
     chars: result.kind === "ok" ? result.encoded.length : undefined,
+    quota: quota ? { served: quota.served, hard: quota.hard } : undefined,
   });
   return result;
 }

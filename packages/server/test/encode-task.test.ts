@@ -5,6 +5,7 @@ import { FORECAST_NUMBER } from "../src/constants.js";
 import { Hono } from "hono";
 import { ENCODE_RETRY_WINDOW_MS, encodeTaskRoute, runEncodeTask } from "../src/encode-task.js";
 import { accountExists } from "../src/accounts.js";
+import { QUOTA_HARD, QUOTA_SOFT, quotaStatus } from "../src/quota.js";
 import { log } from "../src/log.js";
 import type { DeliveryRequest, EncodedRecord, Reply } from "../src/delivery.js";
 
@@ -13,6 +14,12 @@ import type { DeliveryRequest, EncodedRecord, Reply } from "../src/delivery.js";
 
 vi.mock("../src/accounts.js", () => ({
   accountExists: vi.fn(async () => true),
+}));
+
+// The quota's database read is mocked; the rules on top of it are real (quota.ts).
+vi.mock("../src/quota.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/quota.js")>()),
+  quotaStatus: vi.fn(),
 }));
 
 interface Row extends DeliveryRequest {
@@ -105,7 +112,7 @@ type Send = { status: number; body?: Record<string, unknown> } | "unreachable";
 
 let inbound: Inbound;
 let sends: Send[];
-let codec: () => Response;
+let codec: (init?: RequestInit) => Response;
 let sentBodies: string[];
 
 function message(over: Record<string, unknown> = {}): Inbound {
@@ -123,7 +130,7 @@ function json(status: number, body: Record<string, unknown> = {}): Response {
 let sendCount = 0;
 function stubFetch() {
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.startsWith("http://codec-v1/")) return codec();
+    if (url.startsWith("http://codec-v1/")) return codec(init);
     if (url.includes("/Messages.json") && init?.method === "POST") {
       const n = sendCount++;
       const answer = sends[Math.min(n, sends.length - 1)]!;
@@ -141,6 +148,7 @@ const run = (retryWindowMs = ENCODE_RETRY_WINDOW_MS) => runEncodeTask(SID, { ret
 beforeEach(() => {
   rows.clear();
   process.env["CODEC_URL_V1"] = "http://codec-v1";
+  process.env["CODEC_URL_V7"] = "http://codec-v1";
   process.env["TWILIO_ACCOUNT_SID"] = "ACtest";
   process.env["TWILIO_AUTH_TOKEN"] = "token";
   inbound = message();
@@ -149,12 +157,15 @@ beforeEach(() => {
   sentBodies = [];
   codec = () => new Response("ENCODED", { status: 200 });
   vi.mocked(accountExists).mockResolvedValue(true);
+  vi.mocked(quotaStatus).mockReset();
+  vi.mocked(quotaStatus).mockResolvedValue({ served: 0, hard: QUOTA_HARD, notified: false });
   stubFetch();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env["CODEC_URL_V1"];
+  delete process.env["CODEC_URL_V7"];
   delete process.env["TWILIO_ACCOUNT_SID"];
   delete process.env["TWILIO_AUTH_TOKEN"];
 });
@@ -451,5 +462,125 @@ describe("POST /encode", () => {
     const row = receive({ createdAt: new Date(Date.now() - ENCODE_RETRY_WINDOW_MS + 60_000) });
     expect((await post(SID)).status).toBe(503);
     expect(row.outcome).toBeNull();
+  });
+});
+
+// The free-forecast quota (quota.ts) on the messaging route: the state goes to the codec as the
+// X-Quota header, and a weather forecast past the hard limit is dropped after the codec served
+// it, since only the codec's reported shape says it was weather.
+describe("quota", () => {
+  const V7_BODY = `v7 p:a u:${TOKEN}`;
+  const quotaHeaders: (string | null)[] = [];
+  const served = (kind: string) => (init?: RequestInit) => {
+    quotaHeaders.push((init?.headers as Record<string, string>)["X-Quota"] ?? null);
+    return new Response("ENCODED", { status: 200, headers: { "X-Request-Shape": JSON.stringify({ kind }) } });
+  };
+  const status = (over: Partial<{ served: number; hard: number; notified: boolean }>) =>
+    vi.mocked(quotaStatus).mockResolvedValue({ served: 0, hard: QUOTA_HARD, notified: false, ...over });
+
+  beforeEach(() => {
+    inbound = message({ body: V7_BODY });
+    quotaHeaders.length = 0;
+    codec = served("weather");
+  });
+
+  it("tells the codec how many free forecasts remain after this one", async () => {
+    status({ served: 0 });
+    const row = receive();
+    expect(await run()).toBe("done");
+    expect(row.outcome).toBe("ok");
+    expect(quotaHeaders).toEqual([`free:${QUOTA_SOFT - 1}`]);
+    expect(vi.mocked(quotaStatus)).toHaveBeenCalledWith(TOKEN, expect.any(Date));
+  });
+
+  it("counts down to zero on the last free forecast", async () => {
+    status({ served: QUOTA_SOFT - 1 });
+    receive();
+    expect(await run()).toBe("done");
+    expect(quotaHeaders).toEqual(["free:0"]);
+  });
+
+  it("still serves between the stated quota and the hard limit, saying the quota is used up", async () => {
+    status({ served: QUOTA_SOFT });
+    const row = receive();
+    expect(await run()).toBe("done");
+    expect(row.outcome).toBe("ok");
+    expect(quotaHeaders).toEqual(["over"]);
+    expect(sentBodies).toEqual(["ENCODED"]);
+  });
+
+  it("drops the forecast at the hard limit and sends the cut-off reply once", async () => {
+    status({ served: QUOTA_HARD, notified: false });
+    const row = receive();
+    expect(await run()).toBe("done");
+    expect(row.outcome).toBe("quota_exceeded");
+    expect(row.chars).toBeNull();
+    expect(sentBodies).toHaveLength(1);
+    expect(sentBodies[0]).toContain("Free weather forecast limit exceeded.");
+    expect(sentBodies[0]).toContain("Going Blue will stop responding until then.");
+    expect(sentBodies[0]).not.toContain("ENCODED");
+    expect(row.sentAt).not.toBeNull();
+  });
+
+  it("sends nothing at all once the cut-off reply has gone out this month", async () => {
+    status({ served: QUOTA_HARD + 3, notified: true });
+    const row = receive();
+    expect(await run()).toBe("done");
+    expect(row.outcome).toBe("quota_exceeded");
+    expect(row.replies).toEqual([]);
+    expect(row.noReplyAt).not.toBeNull();
+    expect(sentBodies).toEqual([]);
+  });
+
+  it("stops at the stated quota in the month after the account went over it", async () => {
+    status({ served: QUOTA_SOFT, hard: QUOTA_SOFT });
+    const row = receive();
+    expect(await run()).toBe("done");
+    expect(row.outcome).toBe("quota_exceeded");
+  });
+
+  it("never limits an avalanche forecast", async () => {
+    status({ served: QUOTA_HARD + 3, notified: true });
+    codec = served("avalanche");
+    const row = receive();
+    expect(await run()).toBe("done");
+    expect(row.outcome).toBe("ok");
+    expect(sentBodies).toEqual(["ENCODED"]);
+  });
+
+  it("serves a forecast whose shape the codec did not report", async () => {
+    status({ served: QUOTA_HARD + 3 });
+    codec = () => new Response("ENCODED", { status: 200 });
+    const row = receive();
+    expect(await run()).toBe("done");
+    expect(row.outcome).toBe("ok");
+  });
+
+  it("leaves versions before v7 alone", async () => {
+    status({ served: QUOTA_HARD + 3 });
+    inbound = message();
+    const row = receive();
+    expect(await run()).toBe("done");
+    expect(row.outcome).toBe("ok");
+    expect(vi.mocked(quotaStatus)).not.toHaveBeenCalled();
+    expect(quotaHeaders).toEqual([null]);
+  });
+
+  it("looks up no quota for a request it rejects before dispatch", async () => {
+    vi.mocked(accountExists).mockResolvedValue(false);
+    receive();
+    expect(await run()).toBe("done");
+    expect(vi.mocked(quotaStatus)).not.toHaveBeenCalled();
+  });
+
+  it("fails open when the quota cannot be read", async () => {
+    vi.mocked(quotaStatus).mockRejectedValue(new Error("db down"));
+    const error = vi.spyOn(log, "error").mockImplementation(() => {});
+    const row = receive();
+    expect(await run()).toBe("done");
+    expect(row.outcome).toBe("ok");
+    expect(quotaHeaders).toEqual([null]);
+    expect(error).toHaveBeenCalledWith("quota.check_failed", expect.anything());
+    error.mockRestore();
   });
 });
