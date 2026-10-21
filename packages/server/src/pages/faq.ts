@@ -85,6 +85,42 @@ export const FAQ_HTML = `
   </div>
 </details>
 <details>
+  <summary>How much does ${BRAND} cost?</summary>
+  <div class=answer>
+    <p>${BRAND} is free to use, within limits. Forecasts over the internet and avalanche forecasts
+    are always free. SMS and satellite weather forecasts (inReach, ZOLEO, and iPhone satellite
+    messaging) are limited to 5 free forecasts per month. Subscribe to the
+    <a href="/#subscriptions">${BRAND} Expedition plan</a> for unlimited forecasts.</p>
+  </div>
+</details>
+<details>
+  <summary>How do I subscribe?</summary>
+  <div class=answer>
+    <p>In the app, open Settings and tap Subscribe. Subscriptions are managed through the App Store
+    or Google Play. Subscribing requires an internet connection, so subscribe before your trip
+    starts.</p>
+  </div>
+</details>
+<details>
+  <summary>How do I cancel my subscription?</summary>
+  <div class=answer>
+    <p>In the app, open Settings and tap Manage Subscription. You can also cancel directly from the
+    <a href="https://apps.apple.com/account/subscriptions">App Store</a> or
+    <a href="https://play.google.com/store/account/subscriptions?package=com.laneaasen.weather">Google
+    Play</a>. After you cancel, your plan will stay active until the end of the current billing
+    period. Deleting the app or deleting your ${BRAND} data will not automatically cancel your
+    subscription.</p>
+  </div>
+</details>
+<details>
+  <summary>I reinstalled the app. How can I get my subscription back?</summary>
+  <div class=answer>
+    <p>Your subscription is linked to your Apple or Google account. To get it back, open Settings,
+    tap Subscribe, and then Restore Purchases. Use the same Apple or Google account that you
+    originally subscribed with.</p>
+  </div>
+</details>
+<details>
   <summary>How can I delete my data?</summary>
   <div class=answer>
     ${DELETION_HTML}
