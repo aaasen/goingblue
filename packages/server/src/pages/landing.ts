@@ -276,6 +276,14 @@ satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO.<
 </ul>
 
 <h2 id=subscriptions>Subscriptions</h2>
+<p>${BRAND} is free to use, with an optional subscription that covers the costs of running the
+service. Forecasts over the internet (including satellite internet) are free, since they don't cost
+me anything per forecast. Every text message costs money, so SMS and satellite weather forecasts
+(SMS, inReach, ZOLEO, and iPhone satellite messaging) are limited to 5 free forecasts per month.
+Avalanche forecasts are free and unlimited on every device to promote public safety.</p>
+<p>If you are planning to use ${BRAND} on an expedition, subscribe to the ${BRAND} Expedition plan
+before you head out for unlimited SMS and satellite weather forecasts. The annual plan costs the
+same as two months, so you can keep using ${BRAND} for shorter trips in the off-season.</p>
 <table class=plans>
   <thead>
     <tr>
@@ -307,6 +315,8 @@ satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO.<
     </tr>
   </tbody>
 </table>
+<p>You can subscribe to ${BRAND} in the app, through the App Store or Google Play. All prices are
+in USD. Thank you for supporting ${BRAND}!</p>
 
 <h2 id=faq>Frequently asked questions</h2>
 ${FAQ_HTML}
