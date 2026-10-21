@@ -140,6 +140,7 @@ const PINNED_COORDS_KEY = 'pinned_coords';
 const FAVORITES_SORT_KEY = 'favorites_sort';
 const FAVORITES_SORT_REVERSED_KEY = 'favorites_sort_reversed';
 const QUOTA_KEY = 'quota';
+const PENDING_ANNUAL_KEY = 'pending_annual_switch';
 // Written only by the screenshot seed (scripts/seed-shots.mts); no setting in the app sets it.
 const HIDE_EXPIRED_BANNER_KEY = 'hide_expired_banner';
 const DEFAULT_TWO_MESSAGES = true;
@@ -321,6 +322,27 @@ export async function saveQuota(quota: StoredQuota): Promise<void> {
   try { await AsyncStorage.setItem(QUOTA_KEY, JSON.stringify(quota)); } catch { /* ignore */ }
 }
 
+// When a monthly subscriber's switch to annual takes effect, as an ISO date. Apple applies the
+// switch at the next renewal and neither the store nor RevenueCat reports it as pending until
+// then, so the app keeps the date itself (purchases.ts, pendingAnnualSwitch). Null when no switch
+// is waiting.
+export async function loadPendingAnnualSwitch(): Promise<Date | null> {
+  try {
+    const raw = await AsyncStorage.getItem(PENDING_ANNUAL_KEY);
+    const at = raw ? new Date(raw) : null;
+    return at && !Number.isNaN(at.getTime()) ? at : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function savePendingAnnualSwitch(at: Date | null): Promise<void> {
+  try {
+    if (at) await AsyncStorage.setItem(PENDING_ANNUAL_KEY, at.toISOString());
+    else await AsyncStorage.removeItem(PENDING_ANNUAL_KEY);
+  } catch { /* ignore */ }
+}
+
 // Forget every stored preference, the pre-per-quantity master switch included. Part of account
 // deletion: the next launch starts from the defaults as a fresh install would.
 // Hides the avalanche view's expired-forecast banner, so a seeded past bulletin screenshots as a
@@ -338,7 +360,7 @@ export async function clearSettings(): Promise<void> {
     await AsyncStorage.multiRemove([
       LEGACY_UNITS_KEY, UNIT_PREFS_KEY, TIME_FORMAT_KEY, COORD_FORMAT_KEY, AQI_SCALE_KEY, DEVICE_KEY,
       TWO_MESSAGES_KEY, PINNED_COORDS_KEY, FAVORITES_KEY, FAVORITES_SORT_KEY, FAVORITES_SORT_REVERSED_KEY,
-      HIDE_EXPIRED_BANNER_KEY, QUOTA_KEY,
+      HIDE_EXPIRED_BANNER_KEY, QUOTA_KEY, PENDING_ANNUAL_KEY,
     ]);
   } catch { /* ignore */ }
 }

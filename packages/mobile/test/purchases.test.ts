@@ -27,7 +27,7 @@ vi.hoisted(() => { (globalThis as { __DEV__?: boolean }).__DEV__ = true; });
 import type { CustomerInfo, PurchasesPackage } from 'react-native-purchases';
 import {
   ENTITLEMENT, activeEntitlement, configurePurchases, currentPlan, isEntitled, loadPlans, logOutPurchases, manageSubscription, onMonthlyPlan, purchasePlan,
-  subscriptionPeriod,
+  pendingAnnualSwitch, subscriptionPeriod,
   purchasesAvailable, watchCustomerInfo,
 } from '../purchases';
 
@@ -174,5 +174,24 @@ describe('the current subscription', () => {
     expect(subscriptionPeriod(sub({ expirationDate: null }))).toBeNull();
     expect(subscriptionPeriod(info({}))).toBeNull();
     expect(subscriptionPeriod(null)).toBeNull();
+  });
+});
+
+describe('a switch to annual waiting for the renewal', () => {
+  const plans = { monthly: pkg('MONTHLY', 'expedition_monthly'), annual: pkg('ANNUAL', 'expedition_annual') };
+  const on = (productIdentifier: string) =>
+    ({ entitlements: { active: { [ENTITLEMENT]: { productIdentifier, productPlanIdentifier: null } } } } as unknown as CustomerInfo);
+  const at = new Date('2026-10-22T15:00:00Z');
+
+  it('is pending while the monthly plan runs out', () => {
+    expect(pendingAnnualSwitch(on('expedition_monthly'), plans, at, new Date('2026-10-21T12:00:00Z'))).toBe(at);
+    // A renewal that lands a little late still counts as waiting.
+    expect(pendingAnnualSwitch(on('expedition_monthly'), plans, at, new Date('2026-10-23T12:00:00Z'))).toBe(at);
+  });
+
+  it('is over once the annual plan is in effect, the date is long past, or nothing was recorded', () => {
+    expect(pendingAnnualSwitch(on('expedition_annual'), plans, at, new Date('2026-10-21T12:00:00Z'))).toBeNull();
+    expect(pendingAnnualSwitch(on('expedition_monthly'), plans, at, new Date('2026-10-24T12:00:00Z'))).toBeNull();
+    expect(pendingAnnualSwitch(on('expedition_monthly'), plans, null, new Date('2026-10-21T12:00:00Z'))).toBeNull();
   });
 });

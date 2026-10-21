@@ -108,6 +108,16 @@ export function onMonthlyPlan(info: CustomerInfo | null, plans: Plans | null): b
   return currentPlan(info, plans) === 'monthly';
 }
 
+// Whether a switch to annual is still waiting: the subscriber is on the monthly plan and the
+// switch's date, which the app recorded when the switch was bought (settings.ts), has not come.
+// A day of slack covers the renewal landing a little after the recorded period end.
+export function pendingAnnualSwitch(
+  info: CustomerInfo | null, plans: Plans | null, at: Date | null, now: Date,
+): Date | null {
+  if (!at || currentPlan(info, plans) !== 'monthly') return null;
+  return now.getTime() < at.getTime() + 24 * 3600_000 ? at : null;
+}
+
 // The subscription's current period as the store reports it: when it ends, and whether it renews
 // then. Null without an active entitlement or a date.
 export function subscriptionPeriod(info: CustomerInfo | null): { ends: Date; renews: boolean } | null {

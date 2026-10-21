@@ -6,6 +6,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   default: {
     getItem: async (k: string) => store.get(k) ?? null,
     setItem: async (k: string, v: string) => { store.set(k, v); },
+    removeItem: async (k: string) => { store.delete(k); },
     multiRemove: async (ks: string[]) => { for (const k of ks) store.delete(k); },
   },
 }));
@@ -20,7 +21,7 @@ import { fetchQuota } from '../account';
 import {
   currentQuota, effectiveQuota, isQuotaState, quotaLine, quotaStatus, storedQuota, subscriptionLine, utcMonth, type StoredQuota,
 } from '../quota';
-import { clearSettings, loadQuota, saveQuota } from '../settings';
+import { clearSettings, loadPendingAnnualSwitch, loadQuota, savePendingAnnualSwitch, saveQuota } from '../settings';
 
 const OCT = new Date('2026-10-20T23:30:00Z');
 const FRESH = { kind: 'free', remaining: QUOTA_FREE_FORECASTS } as const;
@@ -155,6 +156,18 @@ describe('stored quota', () => {
     expect(await loadQuota()).toBeNull();
   });
 
+  it('keeps a pending switch to annual until it is cleared or the settings are', async () => {
+    const at = new Date('2026-10-22T15:00:00Z');
+    expect(await loadPendingAnnualSwitch()).toBeNull();
+    await savePendingAnnualSwitch(at);
+    expect(await loadPendingAnnualSwitch()).toEqual(at);
+    await savePendingAnnualSwitch(null);
+    expect(await loadPendingAnnualSwitch()).toBeNull();
+    await savePendingAnnualSwitch(at);
+    await clearSettings();
+    expect(await loadPendingAnnualSwitch()).toBeNull();
+  });
+
   it('drops a stored value it cannot read', async () => {
     store.set('quota', JSON.stringify({ state: { kind: 'free', remaining: 9 }, month: '2026-10' }));
     expect(await loadQuota()).toBeNull();
@@ -198,6 +211,11 @@ describe('subscriptionLine', () => {
   it('says when a cancelled subscription ends', () => {
     expect(subscriptionLine('annual', { ends, renews: false }))
       .toBe('You are on the annual plan. Your subscription will end on November 21, 2026.');
+  });
+
+  it('says when a scheduled switch to annual takes effect, in place of the renewal', () => {
+    expect(subscriptionLine('monthly', { ends, renews: true }, new Date('2026-10-22T15:00:00Z')))
+      .toBe('You are on the monthly plan. Your subscription will switch to the annual plan on October 22, 2026.');
   });
 
   it('leaves out what it does not know', () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, View, StyleSheet } from 'react-native';
+import { Alert, Platform, View, StyleSheet } from 'react-native';
 import type { CustomerInfo } from 'react-native-purchases';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -11,14 +11,14 @@ import SetupScreen from './SetupScreen';
 import { loadToken, clearToken, deleteAccount, fetchQuota } from './account';
 import {
   configurePurchases, currentPlan, isEntitled, loadPlans, logOutPurchases, manageSubscription, onMonthlyPlan,
-  purchasePlan, purchasesAvailable, subscriptionPeriod, watchCustomerInfo, type Plans,
+  pendingAnnualSwitch, purchasePlan, purchasesAvailable, subscriptionPeriod, watchCustomerInfo, type Plans,
 } from './purchases';
 import { requestErrorMessage } from './network';
 import { clearStore } from './cache';
 import { removeAllPacks } from './packStore';
 import {
-  loadAqiScale, loadCoordFormat, loadDevice, loadQuota, loadTimeFormat, loadTwoMessages, loadUnits,
-  saveAqiScale, saveCoordFormat, saveDevice, saveQuota, saveTimeFormat, saveTwoMessages, saveUnits, clearSettings,
+  loadAqiScale, loadCoordFormat, loadDevice, loadPendingAnnualSwitch, loadQuota, loadTimeFormat, loadTwoMessages, loadUnits,
+  saveAqiScale, saveCoordFormat, saveDevice, savePendingAnnualSwitch, saveQuota, saveTimeFormat, saveTwoMessages, saveUnits, clearSettings,
   defaultUnitPrefs, type AqiScale, type CoordFormat, type TimeFormat, type UnitPrefs,
 } from './settings';
 import { effectiveQuota, storedQuota, subscriptionLine, type StoredQuota } from './quota';
@@ -62,6 +62,8 @@ export default function App() {
   // of the annual. Loaded once the SDK is configured.
   const [plans, setPlans] = useState<Plans | null>(null);
   const [switching, setSwitching] = useState(false);
+  // When a switch to annual bought on iOS takes effect (settings.ts, loadPendingAnnualSwitch).
+  const [annualSwitchAt, setAnnualSwitchAt] = useState<Date | null>(null);
   useUpdateCheck();
 
   // Settled together rather than one at a time: the token decides which screen comes up, and the
@@ -72,9 +74,10 @@ export default function App() {
     configureTileCache();
     Promise.all([
       loadToken(), loadUnits(), loadTimeFormat(), loadCoordFormat(), loadAqiScale(), loadDevice(), loadTwoMessages(),
-      loadQuota(),
+      loadQuota(), loadPendingAnnualSwitch(),
     ])
-      .then(([t, u, f, c, a, d, m, q]) => {
+      .then(([t, u, f, c, a, d, m, q, s]) => {
+        setAnnualSwitchAt(s);
         setUnitsState(u);
         setTimeFormatState(f);
         setCoordFormatState(c);
@@ -173,7 +176,16 @@ export default function App() {
     setSwitching(true);
     try {
       const info = await purchasePlan(plans.annual, plans.monthly.product.identifier);
-      if (info) onPurchased(info);
+      if (info) {
+        // Apple applies the switch at the next renewal, so the app notes when; on Android it is
+        // already in effect.
+        const period = subscriptionPeriod(info);
+        if (Platform.OS === 'ios' && period) {
+          setAnnualSwitchAt(period.ends);
+          savePendingAnnualSwitch(period.ends);
+        }
+        onPurchased(info);
+      }
     } catch (e) {
       Alert.alert('Switch failed', requestErrorMessage(e));
     } finally {
@@ -208,6 +220,7 @@ export default function App() {
     setDeviceState(DEFAULT_DEVICE);
     setTwoMessagesState(true);
     setQuotaState(null);
+    setAnnualSwitchAt(null);
     // The delete lives inside the Settings sheet; close it so Setup isn't hiding under it.
     setSettingsOpen(false);
     setToken(null);
@@ -216,6 +229,7 @@ export default function App() {
   // Still reading storage. Render nothing and let the splash stand in — it stays up until one of
   // the branches below lays out.
   const shownQuota = effectiveQuota(quota, isEntitled(customerInfo), new Date());
+  const pendingSwitch = pendingAnnualSwitch(customerInfo, plans, annualSwitchAt, new Date());
   const paywall = (
     <PaywallScreen
       visible={paywallOpen}
@@ -285,10 +299,10 @@ export default function App() {
           onManageSubscription={() => {
             manageSubscription(customerInfo).catch((e) => Alert.alert('Could not open subscriptions', requestErrorMessage(e)));
           }}
-          annualSwitch={onMonthlyPlan(customerInfo, plans) && plans?.annual
+          annualSwitch={onMonthlyPlan(customerInfo, plans) && !pendingSwitch && plans?.annual
             ? { price: plans.annual.product.priceString, busy: switching, onPress: onSwitchToAnnual }
             : null}
-          subscriptionDetail={subscriptionLine(currentPlan(customerInfo, plans), subscriptionPeriod(customerInfo))}
+          subscriptionDetail={subscriptionLine(currentPlan(customerInfo, plans), subscriptionPeriod(customerInfo), pendingSwitch)}
           units={units}
           onUnitsChange={setUnits}
           timeFormat={timeFormat}

@@ -93,14 +93,19 @@ export function quotaStatus(stored: StoredQuota | null, now: Date): {
 
 // The subscriber's plan and period, under the thank-you text in Settings. The plan sentence is
 // left out when the plan is not known, the date sentence when the store has given no period.
+// `switchesToAnnualOn` is the date a scheduled switch from monthly takes effect, which replaces
+// the renewal sentence until then.
 export function subscriptionLine(
   plan: 'monthly' | 'annual' | null, period: { ends: Date; renews: boolean } | null,
+  switchesToAnnualOn: Date | null = null,
 ): string | null {
+  const day = (d: Date) => d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const parts: string[] = [];
   if (plan) parts.push(`You are on the ${plan} plan.`);
-  if (period) {
-    const date = period.ends.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-    parts.push(`Your subscription will ${period.renews ? 'renew' : 'end'} on ${date}.`);
+  if (switchesToAnnualOn) {
+    parts.push(`Your subscription will switch to the annual plan on ${day(switchesToAnnualOn)}.`);
+  } else if (period) {
+    parts.push(`Your subscription will ${period.renews ? 'renew' : 'end'} on ${day(period.ends)}.`);
   }
   return parts.length ? parts.join(' ') : null;
 }
