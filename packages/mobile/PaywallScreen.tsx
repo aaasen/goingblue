@@ -105,6 +105,9 @@ export default function PaywallScreen({ visible, onClose, onPurchased }: {
 
             {plans === null && loadError === null && <ActivityIndicator style={styles.loading} color={palette.pageTextTertiary} />}
             {loadError !== null && <Text style={styles.note}>Plans are not available right now. {loadError}</Text>}
+            {plans !== null && !plans.monthly && !plans.annual && (
+              <Text style={styles.note}>Plans are not available right now. Try again later.</Text>
+            )}
 
             {plans !== null && (
               <>

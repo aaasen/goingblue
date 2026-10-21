@@ -20,12 +20,13 @@ vi.mock('react-native-purchases', () => ({
   PACKAGE_TYPE: { MONTHLY: 'MONTHLY', ANNUAL: 'ANNUAL' },
 }));
 const platform = vi.hoisted(() => ({ OS: 'ios' as string }));
-vi.mock('react-native', () => ({ Platform: platform }));
+const linking = vi.hoisted(() => ({ openURL: vi.fn(async () => true) }));
+vi.mock('react-native', () => ({ Platform: platform, Linking: linking }));
 vi.hoisted(() => { (globalThis as { __DEV__?: boolean }).__DEV__ = true; });
 
 import type { CustomerInfo, PurchasesPackage } from 'react-native-purchases';
 import {
-  ENTITLEMENT, activeEntitlement, configurePurchases, isEntitled, loadPlans, logOutPurchases, onMonthlyPlan, purchasePlan,
+  ENTITLEMENT, activeEntitlement, configurePurchases, isEntitled, loadPlans, logOutPurchases, manageSubscription, onMonthlyPlan, purchasePlan,
   purchasesAvailable, watchCustomerInfo,
 } from '../purchases';
 
@@ -128,5 +129,26 @@ describe('plans and purchases', () => {
     const play = { monthly: pkg('MONTHLY', 'expedition:monthly'), annual: pkg('ANNUAL', 'expedition:annual') };
     expect(onMonthlyPlan(sub('expedition', 'monthly'), play)).toBe(true);
     expect(onMonthlyPlan(sub('expedition', 'annual'), play)).toBe(false);
+  });
+});
+
+describe('managing a subscription', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('presents the App Store sheet on iOS', async () => {
+    platform.OS = 'ios';
+    await manageSubscription(null);
+    expect(sdk.showManageSubscriptions).toHaveBeenCalledTimes(1);
+    expect(linking.openURL).not.toHaveBeenCalled();
+  });
+
+  it('opens the Play management link on Android, or the app page when RevenueCat has none', async () => {
+    platform.OS = 'android';
+    const url = 'https://play.google.com/store/account/subscriptions?sku=expedition&package=com.laneaasen.weather';
+    await manageSubscription({ managementURL: url } as unknown as CustomerInfo);
+    expect(linking.openURL).toHaveBeenLastCalledWith(url);
+    await manageSubscription(null);
+    expect(linking.openURL).toHaveBeenLastCalledWith('https://play.google.com/store/account/subscriptions?package=com.laneaasen.weather');
+    expect(sdk.showManageSubscriptions).not.toHaveBeenCalled();
   });
 });

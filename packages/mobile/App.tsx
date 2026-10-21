@@ -282,7 +282,9 @@ export default function App() {
           onDeleteAccount={handleDeleteAccount}
           quota={shownQuota}
           onSubscribe={onSubscribe}
-          onManageSubscription={() => { manageSubscription().catch(() => {}); }}
+          onManageSubscription={() => {
+            manageSubscription(customerInfo).catch((e) => Alert.alert('Could not open subscriptions', requestErrorMessage(e)));
+          }}
           annualSwitch={onMonthlyPlan(customerInfo, plans) && plans?.annual
             ? { price: plans.annual.product.priceString, busy: switching, onPress: onSwitchToAnnual }
             : null}

@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import Purchases, {
   LOG_LEVEL, PACKAGE_TYPE, type CustomerInfo, type PurchasesPackage,
 } from 'react-native-purchases';
@@ -121,7 +121,13 @@ export function restorePurchases(): Promise<CustomerInfo> {
   return Purchases.restorePurchases();
 }
 
-// The store's own subscription management page, where a subscriber changes plan or cancels.
-export function manageSubscription(): Promise<void> {
-  return Purchases.showManageSubscriptions();
+// Play's subscriptions page for this app, when RevenueCat has no management URL to give.
+const PLAY_SUBSCRIPTIONS_URL = 'https://play.google.com/store/account/subscriptions?package=com.laneaasen.weather';
+
+// The store's own subscription management page, where a subscriber changes plan or cancels. The
+// SDK's sheet is iOS only; on Android the page is a Play Store link, which RevenueCat reports as
+// the customer's management URL.
+export async function manageSubscription(info: CustomerInfo | null): Promise<void> {
+  if (Platform.OS === 'ios') return Purchases.showManageSubscriptions();
+  await Linking.openURL(info?.managementURL ?? PLAY_SUBSCRIPTIONS_URL);
 }
