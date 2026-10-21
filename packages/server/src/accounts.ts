@@ -42,9 +42,9 @@ export async function accountExists(token: string): Promise<boolean> {
 // the rows for the same reason. The locations on those rows lose their identity the same way:
 // with the token gone they belong to an opaque id that maps to nobody.
 //
-// Both statements run in one transaction so a failure can't leave requests pointing at a deleted
-// account (the foreign key would reject that anyway) or orphan the rows from an account that
-// still exists.
+// The statements run in one transaction so a failure can't leave requests pointing at a deleted
+// account (the foreign key would reject that anyway), orphan the rows from an account that still
+// exists, or leave a subscription linked to an account that no longer does.
 //
 // Returns false when the token names no account, so a repeat delete reports honestly instead of
 // claiming a fresh success.
@@ -53,6 +53,10 @@ export async function deleteAccount(token: string): Promise<boolean> {
   try {
     await client.query("begin");
     await client.query("update requests set token = null where token = $1", [token]);
+    // The subscription itself belongs to the Apple or Google account and stays, so Restore
+    // Purchases can link it to a new account; only this account's link to it goes.
+    await client.query(
+      "delete from account_subscriptions where account_id = (select id from accounts where token = $1)", [token]);
     const r = await client.query("delete from accounts where token = $1", [token]);
     await client.query("commit");
     return (r.rowCount ?? 0) > 0;

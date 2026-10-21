@@ -339,6 +339,12 @@ export async function migrate(): Promise<void> {
       primary key (account_id, subscription_id)
     )
   `);
+  // Account deletion removes an account's links (accounts.ts, deleteAccount). Links left by
+  // accounts deleted before it did are removed here.
+  await query(`
+    delete from account_subscriptions l
+     where not exists (select 1 from accounts a where a.id = l.account_id)
+  `);
   // Fold the retired request_shapes table into the shape columns above, then drop it. The two
   // tables shared no key — that was the earlier design's point — so the fold re-derives the
   // pairing the split withheld: a shape matches the served request from the same Pacific day

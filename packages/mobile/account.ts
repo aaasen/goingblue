@@ -74,6 +74,22 @@ export async function fetchQuota(token: string): Promise<QuotaState> {
   return state;
 }
 
+// Ask the server to bring the account's subscription up to date from RevenueCat, then answer with
+// the quota as fetchQuota does. Called after a purchase or a restore: the store answers the phone
+// at once, while the webhook that tells the server can lag, or for a restore onto a new account
+// never come.
+export async function syncSubscription(token: string): Promise<QuotaState> {
+  const resp = await fetchText(`${API_BASE}/account/subscription/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: normalizeToken(token) }),
+  });
+  if (!resp.ok) throw new Error(resp.text);
+  const state: unknown = JSON.parse(resp.text);
+  if (!isQuotaState(state)) throw new Error('Server returned an invalid quota');
+  return state;
+}
+
 // Mint a new account on the server and persist the returned token. The account token only
 // identifies the user for usage limits; messaging opt-in is consumer-initiated (the user opts
 // in by texting a forecast request to the number), so creating an account records no consent.

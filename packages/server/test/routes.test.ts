@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import { appUserAgent, generateToken } from "@weather/protocol";
-import { createAccountRoute, forecast, quotaRoute, revenuecatWebhook, sms, twilioSink } from "../src/routes.js";
+import { createAccountRoute, forecast, quotaRoute, revenuecatWebhook, sms, subscriptionSyncRoute, twilioSink } from "../src/routes.js";
 import { fetchMessage } from "../src/twilio.js";
 import { FORECAST_NUMBER } from "../src/constants.js";
 import { accountExists, createAccount, recordRequest } from "../src/accounts.js";
@@ -10,7 +10,7 @@ import { markQueued, receiveMessage, recordReplyDelivery } from "../src/delivery
 import { runEncodeTask } from "../src/encode-task.js";
 import { enqueueEncode, tasksConfigured } from "../src/tasks.js";
 import { quotaStatus } from "../src/quota.js";
-import { recordSubscriptionEvent } from "../src/subscriptions.js";
+import { fetchEntitlementEnd, recordEntitlementSync, recordSubscriptionEvent } from "../src/subscriptions.js";
 import { log } from "../src/log.js";
 
 // The account gate: a request whose token names no account is rejected before dispatch. The
@@ -44,6 +44,8 @@ vi.mock("../src/quota.js", async (importOriginal) => ({
 vi.mock("../src/subscriptions.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/subscriptions.js")>()),
   recordSubscriptionEvent: vi.fn(async () => "recorded"),
+  fetchEntitlementEnd: vi.fn(),
+  recordEntitlementSync: vi.fn(async () => {}),
 }));
 // The sink reads the message back from Twilio before writing anything; only that call is mocked.
 vi.mock("../src/twilio.js", async (importOriginal) => ({
@@ -565,6 +567,59 @@ describe("account quota", () => {
     vi.mocked(accountExists).mockRejectedValue(new Error("db down"));
     expect((await ask({ token: TOKEN })).status).toBe(503);
     expect(error).toHaveBeenCalledWith("account.quota_failed", expect.anything());
+    error.mockRestore();
+  });
+});
+
+// The app's request to bring its subscription up to date from RevenueCat, answered with the quota.
+describe("subscription sync", () => {
+  const syncs = new Hono();
+  syncs.post("/account/subscription/sync", subscriptionSyncRoute);
+  const ask = (body: unknown) => syncs.request("/account/subscription/sync", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const ENDS = new Date(Date.now() + 86_400_000);
+
+  beforeEach(() => {
+    process.env["REVENUECAT_API_KEY"] = "sk_test";
+    process.env["REVENUECAT_PROJECT_ID"] = "proj123";
+    process.env["REVENUECAT_ENTITLEMENT_ID"] = "entl1";
+    vi.mocked(accountExists).mockResolvedValue(true);
+    vi.mocked(fetchEntitlementEnd).mockReset();
+    vi.mocked(fetchEntitlementEnd).mockResolvedValue(ENDS);
+    vi.mocked(recordEntitlementSync).mockClear();
+    vi.mocked(quotaStatus).mockReset();
+    vi.mocked(quotaStatus).mockResolvedValue({ served: 0, hard: 10, notified: false, subscribed: true });
+  });
+  afterEach(() => {
+    delete process.env["REVENUECAT_API_KEY"];
+    delete process.env["REVENUECAT_PROJECT_ID"];
+    delete process.env["REVENUECAT_ENTITLEMENT_ID"];
+  });
+
+  it("records what RevenueCat says and answers with the quota", async () => {
+    const resp = await ask({ token: TOKEN.toLowerCase() });
+    expect(resp.status).toBe(200);
+    expect(await resp.json()).toEqual({ kind: "none" });
+    expect(vi.mocked(fetchEntitlementEnd)).toHaveBeenCalledWith(TOKEN);
+    expect(vi.mocked(recordEntitlementSync)).toHaveBeenCalledWith(TOKEN, ENDS);
+  });
+
+  it("is a 404 for a malformed or unknown token, asking RevenueCat nothing", async () => {
+    expect((await ask({ token: "nope" })).status).toBe(404);
+    vi.mocked(accountExists).mockResolvedValue(false);
+    expect((await ask({ token: TOKEN })).status).toBe(404);
+    expect(vi.mocked(fetchEntitlementEnd)).not.toHaveBeenCalled();
+  });
+
+  it("is a 503 when unconfigured or when RevenueCat fails, recording nothing", async () => {
+    const error = vi.spyOn(log, "error").mockImplementation(() => {});
+    delete process.env["REVENUECAT_API_KEY"];
+    expect((await ask({ token: TOKEN })).status).toBe(503);
+    process.env["REVENUECAT_API_KEY"] = "sk_test";
+    vi.mocked(fetchEntitlementEnd).mockRejectedValue(new Error("HTTP 500"));
+    expect((await ask({ token: TOKEN })).status).toBe(503);
+    expect(vi.mocked(recordEntitlementSync)).not.toHaveBeenCalled();
     error.mockRestore();
   });
 });

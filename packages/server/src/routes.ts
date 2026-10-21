@@ -11,7 +11,10 @@ import {
   replyChars, resolveForecast,
 } from "./forecast.js";
 import { quotaExceededReply, quotaNow, quotaStatus } from "./quota.js";
-import { authorizedWebhook, parseSubscriptionEvent, recordSubscriptionEvent } from "./subscriptions.js";
+import {
+  authorizedWebhook, fetchEntitlementEnd, parseSubscriptionEvent, recordEntitlementSync, recordSubscriptionEvent,
+  syncConfigured,
+} from "./subscriptions.js";
 import { isAppUserAgent, isValidToken, normalizeToken } from "@weather/protocol";
 import { fetchMessage, isMessageSid, twiml, validateTwilioJsonSignature, validateTwilioSignature } from "./twilio.js";
 import { FORECAST_NUMBER } from "./constants.js";
@@ -337,6 +340,30 @@ export async function quotaRoute(c: Context) {
   } catch (e) {
     log.error("account.quota_failed", { err: e });
     return c.text("Quota unavailable", 503);
+  }
+}
+
+// POST /account/subscription/sync { token } — bring the account's subscription up to date from
+// RevenueCat itself (subscriptions.ts, fetchEntitlementEnd), then answer as POST /account/quota
+// does. The app calls it after a purchase or a restore, when a webhook may be late or, for a
+// restore onto a new account, never come. A malformed or unknown token is a 404; RevenueCat or
+// the database failing is a 503, and the app keeps what it showed.
+export async function subscriptionSyncRoute(c: Context) {
+  const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+  const raw = typeof body?.token === "string" ? body.token : "";
+  if (!isValidToken(raw)) return c.text("Unknown account", 404);
+  const token = normalizeToken(raw);
+  if (!syncConfigured()) {
+    log.error("subscription.sync_unconfigured");
+    return c.text("Sync unavailable", 503);
+  }
+  try {
+    if (!(await accountExists(token))) return c.text("Unknown account", 404);
+    await recordEntitlementSync(token, await fetchEntitlementEnd(token));
+    return c.json(quotaNow(await quotaStatus(token)));
+  } catch (e) {
+    log.error("subscription.sync_failed", { err: e });
+    return c.text("Sync unavailable", 503);
   }
 }
 

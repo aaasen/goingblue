@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import { cors } from "hono/cors";
-import { forecast, sms, twilioSink, createAccountRoute, deleteAccountRoute, quotaRoute, revenuecatWebhook } from "./routes.js";
+import { forecast, sms, twilioSink, createAccountRoute, deleteAccountRoute, quotaRoute, revenuecatWebhook, subscriptionSyncRoute } from "./routes.js";
 import { landing } from "./pages/landing.js";
 import { support } from "./pages/support.js";
 import { privacy } from "./pages/privacy.js";
@@ -50,6 +50,8 @@ app.use("/account/delete", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"]
 app.post("/account/delete", deleteAccountRoute);
 app.use("/account/quota", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
 app.post("/account/quota", quotaRoute);
+app.use("/account/subscription/sync", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
+app.post("/account/subscription/sync", subscriptionSyncRoute);
 // Server to server, behind its configured Authorization header (routes.ts).
 app.post("/revenuecat", revenuecatWebhook);
 

@@ -123,3 +123,63 @@ export function authorizedWebhook(header: string | undefined, expected: string):
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+// Asking RevenueCat directly, for the times no webhook will say what happened: above all a
+// Restore Purchases onto a new account after the old one was deleted, where the transfer event
+// names no subscription and the old account's links are gone. The app calls it after every
+// purchase and restore (POST /account/subscription/sync, routes.ts).
+//
+// RevenueCat's v2 API reports the customer's active entitlements but not the store's original
+// transaction id the webhook rows are keyed on, so what it says is kept as a row of its own: one
+// per account, keyed `entitlement:<account id>`, ending when the entitlement does. The account is
+// subscribed while that row or any webhook row is live (quota.ts). The key is a secret v2 key
+// with only `customer_information:customers:read`.
+const REVENUECAT_API = "https://api.revenuecat.com/v2";
+const SYNC_TIMEOUT_MS = 10_000;
+
+export function syncConfigured(): boolean {
+  return Boolean(process.env["REVENUECAT_API_KEY"] && process.env["REVENUECAT_PROJECT_ID"]
+    && process.env["REVENUECAT_ENTITLEMENT_ID"]);
+}
+
+// When the account's Expedition entitlement ends according to RevenueCat: a date, the far future
+// for one with no end, or null for none (including a customer RevenueCat has never seen). Throws
+// when RevenueCat can't be asked.
+export async function fetchEntitlementEnd(token: string): Promise<Date | null> {
+  const key = process.env["REVENUECAT_API_KEY"]!;
+  const project = process.env["REVENUECAT_PROJECT_ID"]!;
+  const entitlement = process.env["REVENUECAT_ENTITLEMENT_ID"]!;
+  const resp = await fetch(`${REVENUECAT_API}/projects/${encodeURIComponent(project)}/customers/${encodeURIComponent(token)}`, {
+    headers: { Authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(SYNC_TIMEOUT_MS),
+  });
+  if (resp.status === 404) return null;
+  if (!resp.ok) throw new Error(`RevenueCat customer lookup: HTTP ${resp.status}`);
+  const body = (await resp.json()) as { active_entitlements?: { items?: { entitlement_id?: unknown; expires_at?: unknown }[] } };
+  const item = body.active_entitlements?.items?.find((i) => i.entitlement_id === entitlement);
+  if (!item) return null;
+  if (item.expires_at === null || item.expires_at === undefined) return new Date(Date.UTC(9999, 0, 1));
+  return typeof item.expires_at === "number" ? new Date(item.expires_at) : null;
+}
+
+// Record what RevenueCat said for the account: its entitlement row ends when the entitlement
+// does, or now when there is none, which leaves the webhook rows to speak for themselves.
+export async function recordEntitlementSync(token: string, endsAt: Date | null): Promise<void> {
+  await transaction(async (client) => {
+    const account = (await client.query<{ id: string }>("select id from accounts where token = $1", [token])).rows[0];
+    if (!account) return;
+    const id = `entitlement:${account.id}`;
+    await client.query(
+      `insert into subscriptions (id, store, product, expires_at, event_at)
+       values ($1, 'revenuecat', $2, coalesce($3, now()), now())
+       on conflict (id) do update
+         set product = excluded.product, expires_at = excluded.expires_at, event_at = now(), updated_at = now()`,
+      [id, process.env["REVENUECAT_ENTITLEMENT_ID"] ?? null, endsAt],
+    );
+    await client.query(
+      `insert into account_subscriptions (account_id, subscription_id) values ($1, $2) on conflict do nothing`,
+      [account.id, id],
+    );
+  });
+  log.info("subscription.sync", { active: endsAt !== null && endsAt > new Date() });
+}

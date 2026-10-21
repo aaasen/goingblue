@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, View, StyleSheet } from 'react-native';
 import type { CustomerInfo } from 'react-native-purchases';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -8,7 +8,7 @@ import HomeScreen from './HomeScreen';
 import PaywallScreen from './PaywallScreen';
 import SettingsScreen from './SettingsScreen';
 import SetupScreen from './SetupScreen';
-import { loadToken, clearToken, deleteAccount, fetchQuota } from './account';
+import { loadToken, clearToken, deleteAccount, fetchQuota, syncSubscription } from './account';
 import {
   configurePurchases, currentPlan, isEntitled, loadPlans, logOutPurchases, manageSubscription, onMonthlyPlan,
   pendingAnnualSwitch, purchasePlan, purchasesAvailable, subscriptionPeriod, watchCustomerInfo, type Plans,
@@ -162,13 +162,32 @@ export default function App() {
     setPaywallOpen(true);
   }, []);
 
-  // A purchase or restore went through: show it now from the store's answer, and ask the server
-  // for its view, which lands once RevenueCat's webhook has.
+  // Bring the server up to date from RevenueCat and take its answer, falling back to its plain
+  // view if the sync can't run. Best effort either way: the store's answer is already on screen.
+  const syncWithServer = useCallback(() => {
+    if (typeof token !== 'string') return;
+    syncSubscription(token)
+      .catch(() => fetchQuota(token))
+      .then((state) => heardQuota(state, new Date()), () => {});
+  }, [token, heardQuota]);
+
+  // A purchase or restore went through: show it now from the store's answer, and make sure the
+  // server, which decides what a request over SMS or satellite gets, knows it too.
   const onPurchased = useCallback((info: CustomerInfo) => {
     setCustomerInfo(info);
     setPaywallOpen(false);
-    if (typeof token === 'string') fetchQuota(token).then((state) => heardQuota(state, new Date()), () => {});
-  }, [token, heardQuota]);
+    syncWithServer();
+  }, [syncWithServer]);
+
+  // The store says subscribed but the server's last word doesn't: a webhook that never came, as
+  // after a restore onto a new account. Synced once per launch, so a sync that can't fix it (the
+  // server unreachable) doesn't repeat on every render.
+  const syncedThisLaunch = useRef(false);
+  useEffect(() => {
+    if (syncedThisLaunch.current || !isEntitled(customerInfo) || quota?.state.kind === 'none') return;
+    syncedThisLaunch.current = true;
+    syncWithServer();
+  }, [customerInfo, quota, syncWithServer]);
 
   // A monthly subscriber moving to the annual plan, straight into the store's purchase sheet.
   const onSwitchToAnnual = useCallback(async () => {

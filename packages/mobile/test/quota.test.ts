@@ -17,7 +17,7 @@ vi.mock('expo-constants', () => ({ default: { expoConfig: null } }));
 vi.mock('../modules/ultra-constrained', () => ({ isUltraConstrained: () => false }));
 vi.hoisted(() => { (globalThis as { __DEV__?: boolean }).__DEV__ = false; });
 
-import { fetchQuota } from '../account';
+import { fetchQuota, syncSubscription } from '../account';
 import {
   currentQuota, effectiveQuota, isQuotaState, quotaLine, quotaStatus, storedQuota, subscriptionLine, utcMonth, type StoredQuota,
 } from '../quota';
@@ -222,5 +222,24 @@ describe('subscriptionLine', () => {
     expect(subscriptionLine(null, { ends, renews: true })).toBe('Your subscription will renew on November 21, 2026.');
     expect(subscriptionLine('monthly', null)).toBe('You are on the monthly plan.');
     expect(subscriptionLine(null, null)).toBeNull();
+  });
+});
+
+describe('syncSubscription', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const TOKEN = 'ABCDEFGHJKMNPQRS';
+
+  it('posts the token to the sync route and returns the quota it answers with', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ kind: 'none' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    expect(await syncSubscription(TOKEN.toLowerCase())).toEqual({ kind: 'none' });
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/account\/subscription\/sync$/);
+    expect(JSON.parse(init.body as string)).toEqual({ token: TOKEN });
+  });
+
+  it('throws on an error status, so the caller can fall back', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('Sync unavailable', { status: 503 })));
+    await expect(syncSubscription(TOKEN)).rejects.toThrow('Sync unavailable');
   });
 });
