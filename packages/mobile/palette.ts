@@ -14,6 +14,8 @@ export interface Palette {
   // Page ground and what sits on it directly.
   page: string;
   brand: string;
+  // "Expedition" after the wordmark, for a subscriber.
+  brandPaid: string;
   // Screen titles and the bold run inside page copy.
   pageTitle: string;
   pageHeading: string;
@@ -89,6 +91,7 @@ const system: Palette = {
   statusBar: 'dark',
   page: '#f2f2f7',
   brand: '#3a8ee3',
+  brandPaid: '#d4a017',
   pageTitle: '#1c1c1e',
   pageHeading: '#6e6e73',
   pageText: '#3a3a3c',

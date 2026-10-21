@@ -1912,7 +1912,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       <View style={styles.titleRow}>
         <View style={styles.titleBrand}>
           <Image source={require('./assets/icon.png')} style={styles.titleIcon} />
-          <Text style={styles.titleText}>Going Blue</Text>
+          <Text style={styles.titleText}>
+            Going Blue{quota?.state.kind === 'none' && <Text style={styles.titlePaid}> Expedition</Text>}
+          </Text>
         </View>
         <TouchableOpacity
           onPress={onOpenSettings}
@@ -2919,6 +2921,8 @@ const styles = StyleSheet.create({
   titleIcon: { width: 26, height: 26, borderRadius: 6 },
   // The splash wordmark's blue (see SetupScreen's brand), small.
   titleText: { fontSize: 20, fontWeight: '700', color: palette.brand },
+  // A subscriber's plan after the wordmark.
+  titlePaid: { color: palette.brandPaid },
   // No top padding: the map opens the builder flush against the title rule.
   builderPad: { padding: CONTENT_PAD, paddingTop: 0 },
 
