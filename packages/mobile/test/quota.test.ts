@@ -18,7 +18,7 @@ vi.hoisted(() => { (globalThis as { __DEV__?: boolean }).__DEV__ = false; });
 
 import { fetchQuota } from '../account';
 import {
-  currentQuota, effectiveQuota, isQuotaState, quotaLine, quotaStatus, storedQuota, utcMonth, type StoredQuota,
+  currentQuota, effectiveQuota, isQuotaState, quotaLine, quotaStatus, storedQuota, subscriptionLine, utcMonth, type StoredQuota,
 } from '../quota';
 import { clearSettings, loadQuota, saveQuota } from '../settings';
 
@@ -182,5 +182,27 @@ describe('fetchQuota', () => {
     await expect(fetchQuota(TOKEN)).rejects.toThrow('Unknown account');
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ kind: 'free' }), { status: 200 })));
     await expect(fetchQuota(TOKEN)).rejects.toThrow('invalid quota');
+  });
+});
+
+describe('subscriptionLine', () => {
+  const ends = new Date('2026-11-21T15:00:00Z');
+
+  it('names the plan and when it renews', () => {
+    expect(subscriptionLine('annual', { ends, renews: true }))
+      .toBe('You are on the annual plan. Your subscription will renew on November 21, 2026.');
+    expect(subscriptionLine('monthly', { ends, renews: true }))
+      .toBe('You are on the monthly plan. Your subscription will renew on November 21, 2026.');
+  });
+
+  it('says when a cancelled subscription ends', () => {
+    expect(subscriptionLine('annual', { ends, renews: false }))
+      .toBe('You are on the annual plan. Your subscription will end on November 21, 2026.');
+  });
+
+  it('leaves out what it does not know', () => {
+    expect(subscriptionLine(null, { ends, renews: true })).toBe('Your subscription will renew on November 21, 2026.');
+    expect(subscriptionLine('monthly', null)).toBe('You are on the monthly plan.');
+    expect(subscriptionLine(null, null)).toBeNull();
   });
 });

@@ -93,10 +93,28 @@ function entitlementProductId(info: CustomerInfo): string | null {
   return e.productPlanIdentifier ? `${e.productIdentifier}:${e.productPlanIdentifier}` : e.productIdentifier;
 }
 
+// Which of the two plans the account's subscription is, or null when it matches neither (no
+// subscription, the plans not loaded yet, or a product since replaced in the offering).
+export function currentPlan(info: CustomerInfo | null, plans: Plans | null): 'monthly' | 'annual' | null {
+  const id = info ? entitlementProductId(info) : null;
+  if (id === null || !plans) return null;
+  if (plans.monthly && id === plans.monthly.product.identifier) return 'monthly';
+  if (plans.annual && id === plans.annual.product.identifier) return 'annual';
+  return null;
+}
+
 // Whether the account's subscription is the monthly plan, the one that can switch to annual.
 export function onMonthlyPlan(info: CustomerInfo | null, plans: Plans | null): boolean {
-  if (!info || !plans?.monthly) return false;
-  return entitlementProductId(info) === plans.monthly.product.identifier;
+  return currentPlan(info, plans) === 'monthly';
+}
+
+// The subscription's current period as the store reports it: when it ends, and whether it renews
+// then. Null without an active entitlement or a date.
+export function subscriptionPeriod(info: CustomerInfo | null): { ends: Date; renews: boolean } | null {
+  const e = info ? activeEntitlement(info) : null;
+  if (!e?.expirationDate) return null;
+  const ends = new Date(e.expirationDate);
+  return Number.isNaN(ends.getTime()) ? null : { ends, renews: e.willRenew };
 }
 
 // Buy a plan. `replacing` is the product the subscriber has now, for a switch between the two

@@ -26,7 +26,8 @@ vi.hoisted(() => { (globalThis as { __DEV__?: boolean }).__DEV__ = true; });
 
 import type { CustomerInfo, PurchasesPackage } from 'react-native-purchases';
 import {
-  ENTITLEMENT, activeEntitlement, configurePurchases, isEntitled, loadPlans, logOutPurchases, manageSubscription, onMonthlyPlan, purchasePlan,
+  ENTITLEMENT, activeEntitlement, configurePurchases, currentPlan, isEntitled, loadPlans, logOutPurchases, manageSubscription, onMonthlyPlan, purchasePlan,
+  subscriptionPeriod,
   purchasesAvailable, watchCustomerInfo,
 } from '../purchases';
 
@@ -150,5 +151,28 @@ describe('managing a subscription', () => {
     await manageSubscription(null);
     expect(linking.openURL).toHaveBeenLastCalledWith('https://play.google.com/store/account/subscriptions?package=com.laneaasen.weather');
     expect(sdk.showManageSubscriptions).not.toHaveBeenCalled();
+  });
+});
+
+describe('the current subscription', () => {
+  const plans = { monthly: pkg('MONTHLY', 'expedition:monthly'), annual: pkg('ANNUAL', 'expedition:annual') };
+  const sub = (over: Record<string, unknown>) =>
+    ({ entitlements: { active: { [ENTITLEMENT]: { productIdentifier: 'expedition', productPlanIdentifier: 'annual',
+      expirationDate: '2026-11-21T15:00:00Z', willRenew: true, ...over } } } } as unknown as CustomerInfo);
+
+  it('names the plan, or nothing when it matches neither', () => {
+    expect(currentPlan(sub({}), plans)).toBe('annual');
+    expect(currentPlan(sub({ productPlanIdentifier: 'monthly' }), plans)).toBe('monthly');
+    expect(currentPlan(sub({ productIdentifier: 'old_product', productPlanIdentifier: null }), plans)).toBeNull();
+    expect(currentPlan(sub({}), null)).toBeNull();
+    expect(currentPlan(info({}), plans)).toBeNull();
+  });
+
+  it('reads the period end and whether it renews', () => {
+    expect(subscriptionPeriod(sub({}))).toEqual({ ends: new Date('2026-11-21T15:00:00Z'), renews: true });
+    expect(subscriptionPeriod(sub({ willRenew: false }))?.renews).toBe(false);
+    expect(subscriptionPeriod(sub({ expirationDate: null }))).toBeNull();
+    expect(subscriptionPeriod(info({}))).toBeNull();
+    expect(subscriptionPeriod(null)).toBeNull();
   });
 });

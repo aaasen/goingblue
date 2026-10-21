@@ -10,8 +10,8 @@ import SettingsScreen from './SettingsScreen';
 import SetupScreen from './SetupScreen';
 import { loadToken, clearToken, deleteAccount, fetchQuota } from './account';
 import {
-  configurePurchases, isEntitled, loadPlans, logOutPurchases, manageSubscription, onMonthlyPlan, purchasePlan,
-  purchasesAvailable, watchCustomerInfo, type Plans,
+  configurePurchases, currentPlan, isEntitled, loadPlans, logOutPurchases, manageSubscription, onMonthlyPlan,
+  purchasePlan, purchasesAvailable, subscriptionPeriod, watchCustomerInfo, type Plans,
 } from './purchases';
 import { requestErrorMessage } from './network';
 import { clearStore } from './cache';
@@ -21,7 +21,7 @@ import {
   saveAqiScale, saveCoordFormat, saveDevice, saveQuota, saveTimeFormat, saveTwoMessages, saveUnits, clearSettings,
   defaultUnitPrefs, type AqiScale, type CoordFormat, type TimeFormat, type UnitPrefs,
 } from './settings';
-import { effectiveQuota, storedQuota, type StoredQuota } from './quota';
+import { effectiveQuota, storedQuota, subscriptionLine, type StoredQuota } from './quota';
 import type { QuotaState } from '@weather/protocol';
 import { DEFAULT_DEVICE, type Device } from './devices';
 import { clearTileCache, configureTileCache } from './tileCache';
@@ -288,6 +288,7 @@ export default function App() {
           annualSwitch={onMonthlyPlan(customerInfo, plans) && plans?.annual
             ? { price: plans.annual.product.priceString, busy: switching, onPress: onSwitchToAnnual }
             : null}
+          subscriptionDetail={subscriptionLine(currentPlan(customerInfo, plans), subscriptionPeriod(customerInfo))}
           units={units}
           onUnitsChange={setUnits}
           timeFormat={timeFormat}

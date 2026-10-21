@@ -91,6 +91,20 @@ export function quotaStatus(stored: StoredQuota | null, now: Date): {
   };
 }
 
+// The subscriber's plan and period, under the thank-you text in Settings. The plan sentence is
+// left out when the plan is not known, the date sentence when the store has given no period.
+export function subscriptionLine(
+  plan: 'monthly' | 'annual' | null, period: { ends: Date; renews: boolean } | null,
+): string | null {
+  const parts: string[] = [];
+  if (plan) parts.push(`You are on the ${plan} plan.`);
+  if (period) {
+    const date = period.ends.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    parts.push(`Your subscription will ${period.renews ? 'renew' : 'end'} on ${date}.`);
+  }
+  return parts.length ? parts.join(' ') : null;
+}
+
 // The line under the free plan's bullets, above the Subscribe button.
 export const SUBSCRIBE_CTA = 'Subscribe to Going Blue Expedition for unlimited SMS and satellite weather forecasts.';
 

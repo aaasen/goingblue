@@ -17,7 +17,8 @@ const PRIVACY_URL = 'https://going.blue/privacy';
 
 // Settings, as a full-screen sheet off the header's gear — the same frame as HelpScreen.
 export default function SettingsScreen({
-  visible, onClose, onDeleteAccount, quota, onSubscribe, onManageSubscription, annualSwitch, children, units, onUnitsChange,
+  visible, onClose, onDeleteAccount, quota, onSubscribe, onManageSubscription, annualSwitch, subscriptionDetail, children,
+  units, onUnitsChange,
   timeFormat, onTimeFormatChange, coordFormat, onCoordFormatChange, aqiScale, onAqiScaleChange,
 }: {
   visible: boolean;
@@ -32,6 +33,8 @@ export default function SettingsScreen({
   // For a monthly subscriber: the annual plan's price and the press that buys it in place of the
   // monthly. Null for anyone else.
   annualSwitch: { price: string; busy: boolean; onPress: () => void } | null;
+  // For a subscriber: the plan and when its period renews or ends (quota.ts, subscriptionLine).
+  subscriptionDetail: string | null;
   // The paywall sheet, mounted inside this modal while it is open: iOS presents one modal from
   // a view at a time, so a sibling sheet would never appear over this one.
   children?: ReactNode;
@@ -101,6 +104,9 @@ export default function SettingsScreen({
             <View style={styles.card}>
               <Text style={styles.planName}>{subscription.name}</Text>
               {subscription.text !== null && <Text style={styles.bulletText}>{subscription.text}</Text>}
+              {subscription.subscribed && subscriptionDetail && (
+                <Text style={styles.subscribeNote}>{subscriptionDetail}</Text>
+              )}
               {subscription.bullets.map((bullet) => (
                 <View key={bullet} style={styles.bullet}>
                   <Text style={styles.bulletDot}>{'•'}</Text>
