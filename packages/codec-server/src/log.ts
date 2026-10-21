@@ -52,8 +52,30 @@ export function traceIdFrom(header: string | null | undefined): string | null {
   return /^[0-9a-f]{32}$/i.test(id) ? id : null;
 }
 
-// Errors are unwrapped in place: the value becomes the message so it reads in the log summary,
-// and the stack is hoisted to top-level `stack_trace` — the key Cloud Error Reporting looks for.
+// An error's message followed by its `cause` chain. undici's `fetch failed` says nothing on its
+// own; the reason (ECONNRESET, ENOTFOUND, UND_ERR_CONNECT_TIMEOUT) is in the cause.
+export function describeError(err: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = err;
+  for (let depth = 0; current !== undefined && current !== null && depth < 5; depth++) {
+    if (current instanceof Error) {
+      const code = (current as { code?: unknown }).code;
+      const message = current.message || current.name;
+      parts.push(typeof code === "string" && !message.includes(code) ? `${code} ${message}` : message);
+      if (current instanceof AggregateError && current.errors.length > 0) {
+        parts.push(current.errors.map((e) => describeError(e)).join(", "));
+      }
+      current = current.cause;
+    } else {
+      parts.push(String(current));
+      break;
+    }
+  }
+  return parts.join(": ");
+}
+
+// Errors are unwrapped in place: the value becomes the message and its cause chain so it reads in
+// the log summary, and the stack is hoisted to top-level `stack_trace` — the key Cloud Error Reporting looks for.
 // JSON.stringify escapes the stack's newlines, so the entry stays a single line either way.
 function emit(severity: Severity, event: string, fields?: Fields): void {
   const entry: Fields = { severity, message: event, event };
@@ -65,7 +87,7 @@ function emit(severity: Severity, event: string, fields?: Fields): void {
   for (const [key, value] of Object.entries(fields ?? {})) {
     if (value === undefined) continue;
     if (value instanceof Error) {
-      entry[key] = value.message || String(value);
+      entry[key] = describeError(value);
       stack ??= value.stack;
     } else {
       entry[key] = value;

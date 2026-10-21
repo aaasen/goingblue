@@ -43,7 +43,7 @@ import { fetchWeatherApi } from "openmeteo";
 import { Variable as OmVariable } from "@openmeteo/sdk/variable.js";
 import type { VariableWithValues } from "@openmeteo/sdk/variable-with-values.js";
 import type { WeatherApiResponse } from "@openmeteo/sdk/weather-api-response.js";
-import { log } from "./log.js";
+import { describeError, log } from "./log.js";
 import { aggregateWeathercode } from "./weathercode.js";
 import { AGREEMENT_FETCH_VARS, computeAgreementLevels } from "./agreement.js";
 
@@ -339,17 +339,35 @@ function decodeResponse(
   return { hourly: hourly as unknown as HourlyData, elevation: resp.elevation() };
 }
 
-// One budget across fetchWeatherApi's retries, not per attempt. The retry arguments are the
-// library defaults.
+// One budget across every attempt, not per attempt. fetchWeatherApi retries HTTP 500/502/504
+// itself (library default arguments); a connection that fails before any response throws, and
+// that is retried here.
 const OPEN_METEO_TIMEOUT_MS = 15_000;
+const NETWORK_RETRIES = 2;
+const NETWORK_RETRY_BASE_MS = 250;
 
 // With a key set, requests go to Open-Meteo's commercial customer- hosts. The key is added here,
 // after the request is logged, so it never reaches the logs.
 const OPEN_METEO_API_KEY = process.env["OPEN_METEO_API_KEY"];
 
-function fetchWithTimeout(url: string, params: Record<string, unknown>): Promise<WeatherApiResponse[]> {
+// undici rejects with `TypeError: fetch failed` when no response arrived (DNS, reset, TLS,
+// connect timeout); HTTP and API errors from the library are plain Errors.
+function isNetworkError(err: unknown): boolean {
+  return err instanceof TypeError && err.message === "fetch failed";
+}
+
+async function fetchWithTimeout(url: string, params: Record<string, unknown>): Promise<WeatherApiResponse[]> {
   const keyed = OPEN_METEO_API_KEY ? { ...params, apikey: OPEN_METEO_API_KEY } : params;
-  return fetchWeatherApi(url, keyed, 3, 0.2, 2, { signal: AbortSignal.timeout(OPEN_METEO_TIMEOUT_MS) });
+  const signal = AbortSignal.timeout(OPEN_METEO_TIMEOUT_MS);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetchWeatherApi(url, keyed, 3, 0.2, 2, { signal });
+    } catch (err) {
+      if (attempt >= NETWORK_RETRIES || signal.aborted || !isNetworkError(err)) throw err;
+      log.info("openmeteo.retry", { url, attempt: attempt + 1, error: describeError(err) });
+      await new Promise((resolve) => setTimeout(resolve, NETWORK_RETRY_BASE_MS * 2 ** attempt));
+    }
+  }
 }
 
 async function fetchOpenMeteo(
@@ -788,8 +806,8 @@ export async function fetchAgreementHourly(
       const adjusted = adjustPrecipPhase(hourly, elevation);
       return { h: adjusted, times: adjusted.time };
     } catch (err) {
-      log.info("agreement.fetch_failed", { center: key, error: String(err) });
-      throw new Error(`agreement fetch failed for ${key}: ${String(err)}`);
+      log.info("agreement.fetch_failed", { center: key, error: describeError(err) });
+      throw new Error(`agreement fetch failed for ${key}`, { cause: err });
     }
   }));
 }
