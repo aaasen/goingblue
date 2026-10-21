@@ -35,6 +35,9 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   // stays a square of the icon alone: it is rendered as a home-screen tile, not just as a picture,
   // and iOS rounds the corners itself — unlike favicon.ico, which has to bring its own.
   "icon-512.jpg": { file: "../public/icon-512.jpg", type: "image/jpeg" },
+  // The link-preview card every page names as its og:image, rendered by scripts/og-card.py from
+  // the hero photo, the icon and the Denali capture. Rerun the script when any of those change.
+  "og-card.jpg": { file: "../public/og-card.jpg", type: "image/jpeg" },
   // The landing page's screenshot strip, listed here in the order the strip draws them, which is
   // the README's set and order (README_SHOTS in frame-screenshots.py). These are the App Store frames themselves — sky, device and
   // baked-in caption — resized from packages/mobile/screenshots/framed (the 1320x2868 output of

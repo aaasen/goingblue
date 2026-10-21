@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { img } from "../assets.js";
-import { APP_STORE_URL, BRAND, PLAY_STORE_URL, REPO_URL } from "../constants.js";
+import { APP_STORE_URL, BRAND, PLAY_STORE_URL, REPO_URL, TAGLINE } from "../constants.js";
 import { FAQ_CSS, FAQ_HTML } from "./faq.js";
 import { PAGE } from "./shell.js";
 
@@ -169,7 +169,7 @@ const HERO = `<header class=hero>
   <div>
     <img class=appicon src="${img("icon-512.jpg")}" width=116 height=116 alt="">
     <h1>${BRAND}</h1>
-    <p class=subtitle>Expedition weather forecasts via satellite</p>
+    <p class=subtitle>${TAGLINE}</p>
     <div class=badges>
       <a class=appbtn href="${APP_STORE_URL}"><img src="${img("appstore-badge-black.svg")}" width=150
         height=50 alt="Download on the App Store"></a>

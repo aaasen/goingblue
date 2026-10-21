@@ -1,5 +1,5 @@
 import { img } from "../assets.js";
-import { BRAND, SITE_URL } from "../constants.js";
+import { BRAND, SITE_URL, TAGLINE } from "../constants.js";
 
 type PageOpts = { showUpdated?: boolean; updated?: string; header?: string; css?: string; head?: string; path?: string };
 
@@ -22,14 +22,30 @@ type PageOpts = { showUpdated?: boolean; updated?: string; header?: string; css?
 // scroll-padding keeps an in-page anchor from landing under it. The icon file is square, and the
 // radius is 22.4% of the width, Apple's own icon proportion. A page that brings its own `header`
 // (the landing masthead) replaces the bar along with the h1.
-export const PAGE = (title: string, body: string, { showUpdated = true, updated, header, css, head, path }: PageOpts = {}) => `<!doctype html>
+//
+// Every page also carries the Open Graph and Twitter tags that link previews read: the one
+// og-card.jpg image, absolute because scrapers do not resolve relative URLs, and the tagline as
+// the description.
+export const PAGE = (title: string, body: string, { showUpdated = true, updated, header, css, head, path }: PageOpts = {}) => {
+  const fullTitle = title === BRAND ? BRAND : `${title} — ${BRAND}`;
+  return `<!doctype html>
 <html lang=en>
 <head>
 <meta charset=utf-8>
 <meta name=viewport content="width=device-width, initial-scale=1">
 <link rel=icon href="/favicon.ico" sizes="16x16 32x32 48x48">
 <link rel=apple-touch-icon href="${img("icon-512.jpg")}">
-${path ? `<link rel=canonical href="${SITE_URL}${path}">\n` : ""}<title>${title === BRAND ? BRAND : `${title} — ${BRAND}`}</title>
+${path ? `<link rel=canonical href="${SITE_URL}${path}">\n<meta property="og:url" content="${SITE_URL}${path}">\n` : ""}<title>${fullTitle}</title>
+<meta name=description content="${TAGLINE}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="${BRAND}">
+<meta property="og:title" content="${fullTitle}">
+<meta property="og:description" content="${TAGLINE}">
+<meta property="og:image" content="${SITE_URL}${img("og-card.jpg")}">
+<meta property="og:image:width" content="2400">
+<meta property="og:image:height" content="1260">
+<meta property="og:image:alt" content="${BRAND}: ${TAGLINE}">
+<meta name="twitter:card" content="summary_large_image">
 <style>
   html { scroll-padding-top: 64px; }
   body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #1a1a1a; line-height: 1.55;
@@ -61,4 +77,5 @@ ${body}
   <span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms &amp; Conditions</a></span>
 </div></footer>
 </body>
-</html>`;
+</html>`
+};
