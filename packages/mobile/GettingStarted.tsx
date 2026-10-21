@@ -1,34 +1,36 @@
 import { StyleSheet, Text, View } from 'react-native';
-import DeviceSetup from './DeviceSetup';
+import DeviceSteps, { ContactCard } from './DeviceSetup';
 import { palette } from './palette';
 
-// The getting-started explanation: what the three-step loop is, then the per-device instructions
-// for carrying it out. Shared by the first-run Setup screen and the help sheet, so
-// the answer to "how do I get a forecast?" is the same one either way.
+// The getting-started explanation: the loop of steps from adding the contact to viewing the
+// forecast, with the device-specific part of sending folded into the send step. Shared by the
+// first-run Setup screen and the help sheet, so the answer to "how do I get a forecast?" is the
+// same one either way.
 export default function GettingStarted() {
   return (
     <>
       <Text style={styles.heading}>How it works</Text>
 
-      <Step n={1} title="Build a forecast request">
+      <Step n={1} title="Add Going Blue as a contact">
+        <ContactCard onPage />
+        <View style={styles.gap} />
+      </Step>
+      <Step n={2} title="Build a forecast request">
         <Text style={styles.para}>
           Set the location, weather model, and variables for your forecast.
         </Text>
       </Step>
-      <Step n={2} title="Send the request to Going Blue">
-        <Text style={styles.para}>
-          Send the request via internet, text message, or satellite messenger.
-        </Text>
+      <Step n={3} title="Send the request to Going Blue">
+        <Text style={styles.para}>Send the request via the internet, SMS, or satellite messenger.</Text>
+        <DeviceSteps />
+        <View style={styles.gap} />
       </Step>
-      <Step n={3} title="View the forecast">
+      <Step n={4} title="View the forecast">
         <Text style={styles.para}>
           Copy the reply, then return to Going Blue and tap <Bold>Paste Forecast</Bold> to
           visualize the forecast.
         </Text>
       </Step>
-
-      <Text style={[styles.heading, styles.headingTop]}>Setup</Text>
-      <DeviceSetup />
     </>
   );
 }
@@ -55,7 +57,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 
 const styles = StyleSheet.create({
   heading: { fontSize: 13, fontWeight: '700', color: palette.pageLabelLight, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 },
-  headingTop: { marginTop: 12 },
+  gap: { height: 12 },
   para: { fontSize: 14, color: palette.pageText, lineHeight: 21, marginBottom: 12 },
   bold: { fontWeight: '700', color: palette.pageTitle },
   step: { flexDirection: 'row', gap: 12, marginBottom: 4 },

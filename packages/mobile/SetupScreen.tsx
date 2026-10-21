@@ -49,7 +49,7 @@ export default function SetupScreen({
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
       <Image source={require('./assets/icon.png')} style={styles.icon} />
       <Text style={styles.brand}>Going Blue</Text>
-      <Text style={styles.tagline}>Weather forecasts over satellite and SMS</Text>
+      <Text style={styles.tagline}>Expedition weather forecasts via satellite</Text>
 
       {/* The same explanation the help sheet shows, so first run gets it without
           hunting for the help link. */}
