@@ -13,7 +13,7 @@ import Purchases, {
 // SDK refuses a Test Store key in a release build, so release builds use the store keys below.
 // Both are public SDK keys, not secrets.
 const IOS_KEY = 'appl_OCUSDfNYrCbDeNfzuEhvRzVdINn';
-const ANDROID_KEY = '';
+const ANDROID_KEY = 'goog_CKjVtvoSkJuTdKTALJrWDNiKMBz';
 
 // The entitlement's identifier in the RevenueCat dashboard, which cannot be renamed there.
 export const ENTITLEMENT = 'going_blue_expedition';
