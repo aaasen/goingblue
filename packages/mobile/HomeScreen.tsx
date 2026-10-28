@@ -186,11 +186,11 @@ const MODEL_HINT_NO_LOCATION = 'Set a location to see which models will be used.
 // picks between them: the route a reader has left is usually the only one they have. Filtered
 // against DEVICES so a route the platform hides loses its help line with it.
 const DEVICE_INFO = [
-  { name: 'Internet', desc: 'Fetches the forecast over a Wi\u2011Fi or cellular data connection. Also uses the phone\'s satellite internet connection if it is available.' },
+  { name: 'Internet', desc: 'Fetches the forecast over Wi\u2011Fi, cellular data, or a direct\u2011to\u2011cell satellite connection if one is available.' },
   { name: 'SMS', desc: 'Sends the forecast over a text message for weak cell reception without data.' },
   { name: 'inReach', desc: 'Copies the message so that it can be pasted into the Garmin Earthmate or Messenger app and sent over inReach.' },
   { name: 'ZOLEO', desc: 'Copies the message so that it can be pasted into the ZOLEO app and sent over satellite.' },
-  { name: 'iPhone', desc: 'Sends the forecast over a text message, and asks for the reply in a form that fits a single message over satellite. Choose this on an iPhone that can text without cell service.' },
+  { name: 'iPhone', desc: 'Sends the forecast over a text message through Apple\'s satellite network. Choose this option if you have a supported iPhone model and don\'t have cell reception. Make sure to connect to the satellite before sending your message and stay connected until the forecast arrives.' },
 ].filter((info) => DEVICES.some((d) => d.label === info.name));
 
 // Id of the subgroup the air-quality toggles fold under — stable across a change of scale, which

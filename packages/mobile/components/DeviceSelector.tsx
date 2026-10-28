@@ -21,6 +21,13 @@ const DeviceSelector = memo(function DeviceSelector({
         selectedIndex={DEVICES.findIndex((d) => d.value === device)}
         onChange={(e) => onDevice(DEVICES[e.nativeEvent.selectedSegmentIndex].value)}
       />
+      {device === 'iphone' && (
+        <Text style={styles.deviceNote}>
+          Use iPhone satellite messaging only when you don&apos;t have cell service. If you do have
+          service, use SMS instead. Make sure to connect to the satellite before sending your message
+          and remain connected until you receive the forecast.
+        </Text>
+      )}
       {/* A switch rather than an On/Off segment: this is one setting being turned on, not a
           choice between two things, and it is read far more often than it is changed. */}
       {multiMessageShown && (
@@ -46,6 +53,7 @@ const DeviceSelector = memo(function DeviceSelector({
 export default DeviceSelector;
 
 const styles = StyleSheet.create({
+  deviceNote: { fontSize: 13, color: palette.pageNote, lineHeight: 19, marginTop: 12 },
   // A settings row: label left, switch right, the switch's own height setting the row's.
   switchRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
