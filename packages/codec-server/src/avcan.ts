@@ -166,6 +166,7 @@ export function toForecast(raw: RawProduct, pieces: number[]): AvalancheForecast
     problems: (r.problems ?? []).map(problem),
     avalancheSummary: summary("avalanche-summary"),
     snowpackSummary: summary("snowpack-summary"),
+    hazardDiscussion: "",
     weather: weatherPeriods(r.summaries?.find((s) => s.type.value === "weather-summary")?.content),
     confidence: {
       rating: lookup(CONFIDENCES, r.confidence?.rating?.value ?? "noRating", "confidence"),

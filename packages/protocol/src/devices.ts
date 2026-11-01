@@ -116,8 +116,8 @@ export const MAX_MESSAGES = 4;
 // Body characters that fit in ONE labelled part: the bubble's bytes, less the "i/N " label and the
 // repeated header, divided among three-byte characters. With the wire's 5-character header that is 43,
 // so a part is 52 code units — well inside the 70-unit cap, which never binds here.
-export function widePartBodyChars(headerChars: number): number {
-  return Math.floor((BUBBLE_BYTES - PART_LABEL_CHARS - headerChars) / WIDE_CHAR_BYTES);
+export function widePartBodyChars(headerChars: number, labelChars: number = PART_LABEL_CHARS): number {
+  return Math.floor((BUBBLE_BYTES - labelChars - headerChars) / WIDE_CHAR_BYTES);
 }
 
 // Body characters that fit in ONE labelled part on a route that splits a long reply into separate
@@ -137,10 +137,10 @@ export function widePartBodyChars(headerChars: number): number {
 //
 // SMS is deliberately NOT here: its reply leaves as one string and its transport concatenates
 // the segments (measured — Messages reassembles), which costs no label and no repeated header.
-export function partBodyChars(code: DeviceCode, headerChars: number): number | null {
+export function partBodyChars(code: DeviceCode, headerChars: number, labelChars: number = PART_LABEL_CHARS): number | null {
   const transport = DEVICE_TRANSPORT[code];
-  if (transport.alphabet === "base32768") return widePartBodyChars(headerChars);
-  if (code === "g" || code === "z") return transport.maxChars - PART_LABEL_CHARS - headerChars;
+  if (transport.alphabet === "base32768") return widePartBodyChars(headerChars, labelChars);
+  if (code === "g" || code === "z") return transport.maxChars - labelChars - headerChars;
   return null;
 }
 

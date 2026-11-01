@@ -166,6 +166,7 @@ function forecast(over: Partial<AvalancheForecast> = {}): AvalancheForecast {
     }],
     avalancheSummary: "Several size 1 wind slabs were reported.",
     snowpackSummary: "The snowpack is generally well settled below treeline.",
+    hazardDiscussion: "",
     weather: [
       { label: "Saturday Night", text: "Clear skies. 20 km/h northwest ridgetop wind." },
       { label: "Sunday", text: "Sunny.\n\nTreeline temperature -5 °C." },
@@ -207,6 +208,21 @@ describe("bulletin", () => {
       confidence: { rating: "noRating", statements: ["First.", "Second statement."] },
     });
     expect(decodeBulletin(m, encodeBulletin(m, novel), quantizeIssued(novel.issued))).toEqual(withPlaceholders(novel));
+  });
+
+  it("round-trips a hazard discussion and a problem's exact cells", () => {
+    const nwac = forecast({
+      advice: [], avalancheSummary: "", snowpackSummary: "", weather: [],
+      hazardDiscussion: "Novel discussion of the crust.",
+      confidence: { rating: "noRating", statements: [] },
+      problems: [{
+        type: "wetLoose", elevations: ["tln", "alp"], aspects: ["n", "ne", "s"],
+        cells: [{ aspect: "s", elevation: "tln" }, { aspect: "n", elevation: "alp" }, { aspect: "ne", elevation: "alp" }, { aspect: "s", elevation: "alp" }],
+        likelihood: "possible", size: { min: 1, max: 2 }, description: "Novel wet loose text.",
+      }],
+    });
+    const m = train([forecast(), nwac]);
+    expect(decodeBulletin(m, encodeBulletin(m, nwac), quantizeIssued(nwac.issued))).toEqual(withPlaceholders(nwac));
   });
 
   it("charges seen structure a few bits and unseen values many", () => {

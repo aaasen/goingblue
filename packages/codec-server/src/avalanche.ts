@@ -8,8 +8,8 @@ import { avalancheAnchor, encodeAvalancheMessage, loadModels, WIRE_HEADER_CHARS,
 import { fetchAreaPieces, fetchPointProduct, toForecast } from "./avcan.js";
 import { splitReplyFor, type ForecastParams } from "./forecast.js";
 
-// Part labels ("i/N ") are budgeted at one digit each side.
-const MAX_PARTS = 9;
+// Part labels ("i/N ") are budgeted at two digits each side at most.
+const MAX_PARTS = 99;
 
 // The model ships in the protocol package, beside this one in the workspace and in the image
 // (Dockerfile.codec copies both); src/ and dist/ sit at the same depth.

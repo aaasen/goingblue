@@ -8,7 +8,8 @@
  * problem's elevations, aspects, likelihood, and size follow from its type.
  *
  * Tokens are the protocol's scale values (avalanche.ts); elevations and aspects are joined in
- * scale order and size is "min-max".
+ * scale order and size is "min-max". A problem with exact cells codes no elevations, and its
+ * aspects token joins the cells as "aspect@elevation".
  *
  * Coding order:
  *   validity (minutes from the issue time, as the wire carries it, to the expiry)
@@ -20,7 +21,7 @@
  *   problem count, then per problem: type | previous type, elevations | type,
  *   aspects | type, likelihood | type, size | type
  */
-import type { AvalancheForecast } from "../avalanche.js";
+import type { Aspect, AvalancheForecast, Elevation, ProblemCell } from "../avalanche.js";
 import { daysBetween, quantizeIssued, utcDate } from "./time.js";
 import { BOS, UNK, type Stream, type Vocab } from "./model.js";
 import { planToken, readToken } from "./codec.js";
@@ -54,12 +55,21 @@ export function structuredOf(f: AvalancheForecast): Structured {
     confidence: f.confidence.rating,
     problems: f.problems.map((p) => ({
       type: p.type,
-      elevations: [...p.elevations],
-      aspects: [...p.aspects],
+      elevations: p.cells ? [] : [...p.elevations],
+      aspects: p.cells ? p.cells.map((c) => `${c.aspect}@${c.elevation}`) : [...p.aspects],
       likelihood: p.likelihood,
       size: `${p.size.min}-${p.size.max}`,
     })),
   };
+}
+
+// The exact cells an aspects token carries, or null when it holds plain aspects.
+export function cellsOf(aspects: string[]): ProblemCell[] | null {
+  if (!aspects.some((a) => a.includes("@"))) return null;
+  return aspects.map((a) => {
+    const [aspect, elevation] = a.split("@");
+    return { aspect: aspect as Aspect, elevation: elevation as Elevation };
+  });
 }
 
 export const FIELDS = ["validity", "dayCount", "date", "rating", "confidence", "problemCount", "type", "elevations", "aspects", "likelihood", "size"] as const;

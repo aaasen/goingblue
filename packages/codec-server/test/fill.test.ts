@@ -487,3 +487,24 @@ describe("fitFillToBudget", () => {
     });
   });
 });
+
+describe("splitReplyFor a reply over nine parts", () => {
+  const encoded = "AbCdE" + "x".repeat(151 * 9);
+  const over = encoded + "x";
+  const inReach = { device: "g" } as ForecastParams;
+
+  it("keeps one-digit labels and their budget through nine parts", () => {
+    const parts = splitReplyFor(inReach, encoded, WIRE_HEADER_CHARS);
+    expect(parts).toHaveLength(9);
+    expect(parts[8].startsWith("9/9 ")).toBe(true);
+    expect(parts[0].length).toBe(160);
+  });
+
+  it("budgets two-digit labels past nine, keeping every part inside the message", () => {
+    const parts = splitReplyFor(inReach, over, WIRE_HEADER_CHARS);
+    expect(parts).toHaveLength(10);
+    expect(parts[9].startsWith("10/10 ")).toBe(true);
+    for (const part of parts) expect(part.length).toBeLessThanOrEqual(160);
+    expect(reassembleReply([...parts].reverse().join("\n"), () => WIRE_HEADER_CHARS)).toBe(over);
+  });
+});

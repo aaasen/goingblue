@@ -9,7 +9,8 @@
  *   advice              one per advice item
  *   avalanche-summary   when not empty
  *   snowpack-summary    when not empty
- *   weather-summary     one per weather period, as "label\ntext" (the label is "" when absent)
+ *   hazard-discussion   when not empty
+ *   weather-summary    one per weather period, as "label\ntext" (the label is "" when absent)
  *   confidence          one per confidence statement
  *
  * The issue time travels in the message header (wire.ts) and is handed to the decoder; the
@@ -18,20 +19,21 @@
  * issuer from the decoded piece set, the region name and time zone from the forecast point. The
  * decoder fills them with UNENCODED.
  */
-import type {
-  AvalancheForecast, AvalancheProblem, Aspect, Confidence, DangerRating, Elevation, Likelihood,
-  ProblemType,
+import {
+  ASPECTS, ELEVATIONS,
+  type AvalancheForecast, type AvalancheProblem, type Aspect, type Confidence, type DangerRating,
+  type Elevation, type Likelihood, type ProblemCell, type ProblemType,
 } from "../avalanche.js";
 import { frame, planSections, readHeader, readSections } from "./codec.js";
 import type { Model, Section } from "./model.js";
 import { Decoder } from "./rans.js";
 import { planRegion, readRegion } from "./region.js";
-import { structuredOf, type Structured, type StructuredModel } from "./structured.js";
+import { cellsOf, structuredOf, type Structured, type StructuredModel } from "./structured.js";
 import { addDays, quantizeIssued, utcDate } from "./time.js";
 
 export const SECTION_KINDS = [
-  "highlights", "problem", "advice", "avalanche-summary", "snowpack-summary", "weather-summary",
-  "confidence",
+  "highlights", "problem", "advice", "avalanche-summary", "snowpack-summary", "hazard-discussion",
+  "weather-summary", "confidence",
 ] as const;
 
 // Placeholders for the fields the client derives instead of reading off the wire.
@@ -57,6 +59,7 @@ export function sectionsOf(f: AvalancheForecast): Section[] {
   for (const a of f.advice) out.push({ kind: "advice", text: a });
   if (f.avalancheSummary) out.push({ kind: "avalanche-summary", text: f.avalancheSummary });
   if (f.snowpackSummary) out.push({ kind: "snowpack-summary", text: f.snowpackSummary });
+  if (f.hazardDiscussion) out.push({ kind: "hazard-discussion", text: f.hazardDiscussion });
   for (const w of f.weather) out.push({ kind: "weather-summary", text: `${w.label}\n${w.text}` });
   for (const s of f.confidence.statements) out.push({ kind: "confidence", text: s });
   return out;
@@ -73,10 +76,12 @@ function forecastOf(pieces: number[], s: Structured, sections: Section[], issued
   const descriptions = texts("problem");
   const problems: AvalancheProblem[] = s.problems.map((p, i) => {
     const [min, max] = p.size.split("-").map(Number);
+    const cells = cellsOf(p.aspects);
     return {
       type: p.type as ProblemType,
-      elevations: p.elevations as Elevation[],
-      aspects: p.aspects as Aspect[],
+      elevations: cells ? ELEVATIONS.filter((e) => cells.some((c) => c.elevation === e)) : p.elevations as Elevation[],
+      aspects: cells ? ASPECTS.filter((a) => cells.some((c) => c.aspect === a)) : p.aspects as Aspect[],
+      ...(cells ? { cells } : {}),
       likelihood: p.likelihood as Likelihood,
       size: { min, max },
       description: descriptions[i] ?? "",
@@ -101,6 +106,7 @@ function forecastOf(pieces: number[], s: Structured, sections: Section[], issued
     problems,
     avalancheSummary: texts("avalanche-summary")[0] ?? "",
     snowpackSummary: texts("snowpack-summary")[0] ?? "",
+    hazardDiscussion: texts("hazard-discussion")[0] ?? "",
     weather: texts("weather-summary").map((t) => {
       const cut = t.indexOf("\n");
       return { label: t.slice(0, cut), text: t.slice(cut + 1) };

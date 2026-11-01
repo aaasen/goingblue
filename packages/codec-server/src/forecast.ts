@@ -30,8 +30,10 @@ import {
   isPlatformCode,
   maxCharsFor,
   UNCAPPED_MAX_CHARS,
+  MAX_NARROW_PARTS,
   partBodyChars,
   splitReply,
+  WIDE_PART_LABEL_CHARS,
   WIRE_HEADER_CHARS,
   CLOUD_BAND_LEVELS_HPA, cloudBandLevelRange,
   WIND_LEVELS_HPA, WIND_LEVEL_VARS, windLevelVar,
@@ -1575,7 +1577,10 @@ export function splitReplyFor(params: ForecastParams, encoded: string, headerCha
   // 2026-08-17). This is also what lets a multi-message request whose content ran short collapse
   // back to one plain message.
   if (encoded.length <= DEVICE_TRANSPORT[params.device!].maxChars) return [encoded];
-  return splitReply(encoded, headerChars, partBody);
+  const parts = splitReply(encoded, headerChars, partBody);
+  if (parts.length <= MAX_NARROW_PARTS) return parts;
+  // Two-digit labels leave less room for the body, so only a reply that needs them pays for them.
+  return splitReply(encoded, headerChars, partBodyChars(params.device!, headerChars, WIDE_PART_LABEL_CHARS)!);
 }
 
 // buildFillMessage + encode, for the request path (see fetchForecast).

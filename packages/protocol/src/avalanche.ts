@@ -41,14 +41,28 @@ export interface DangerDay {
   alp: DangerRating;
 }
 
+export interface ProblemCell {
+  aspect: Aspect;
+  elevation: Elevation;
+}
+
 export interface AvalancheProblem {
   type: ProblemType;
   elevations: Elevation[];
   aspects: Aspect[];
+  // The exact cells, elevation then aspect in scale order, when they are not every combination of
+  // `elevations` and `aspects`. Those two are then the bands and aspects the cells touch.
+  cells?: ProblemCell[];
   likelihood: Likelihood;
   // Destructive size, D1 to D5 in half steps; min equals max for a single size.
   size: { min: number; max: number };
   description: string;
+}
+
+// Whether a problem sits at an aspect and elevation band.
+export function coversCell(p: Pick<AvalancheProblem, 'elevations' | 'aspects' | 'cells'>, aspect: Aspect, elevation: Elevation): boolean {
+  if (p.cells) return p.cells.some((c) => c.aspect === aspect && c.elevation === elevation);
+  return p.elevations.includes(elevation) && p.aspects.includes(aspect);
 }
 
 export interface WeatherPeriod {
@@ -76,6 +90,8 @@ export interface AvalancheForecast {
   problems: AvalancheProblem[];
   avalancheSummary: string;
   snowpackSummary: string;
+  // A center's one discussion covering what avalanche and snowpack summaries split apart.
+  hazardDiscussion: string;
   weather: WeatherPeriod[];
   confidence: { rating: Confidence | 'noRating'; statements: string[] };
 }

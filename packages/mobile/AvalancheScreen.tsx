@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { SkiaPictureView, Skia, matchFont, type SkCanvas, type SkFont, type SkPicture, type SkSVG } from '@shopify/react-native-skia';
-import { ASPECTS, type AvalancheForecast, type AvalancheProblem, type DangerDay, type Elevation } from '@weather/protocol';
+import { ASPECTS, coversCell, type AvalancheForecast, type AvalancheProblem, type DangerDay, type Elevation } from '@weather/protocol';
 import { DANGER_ICONS, DANGER_ICON_HEIGHT, type DangerIcon } from './dangerIcons';
 import { drawText, fillPaint, strokePaint, textWidth } from './skiaPaint';
 import { palette } from './palette';
@@ -193,9 +193,8 @@ function recordRose(problem: AvalancheProblem, W: number, fonts: Fonts): SkPictu
   const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, W, height));
   const fill = fillPaint(PROBLEM_FILL);
   for (const [band, r0, r1] of RINGS) {
-    if (!problem.elevations.includes(band)) continue;
     ASPECTS.forEach((aspect, i) => {
-      if (!problem.aspects.includes(aspect)) return;
+      if (!coversCell(problem, aspect, band)) return;
       const a0 = i * 45 - 22.5, a1 = i * 45 + 22.5;
       const path = Skia.Path.Make();
       path.moveTo(...polar(cx, cy, R * r1, a0));

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  splitReply, reassembleReply, mergeParts, partLabel, PART_LABEL_CHARS,
+  splitReply, reassembleReply, mergeParts, partLabel, PART_LABEL_CHARS, WIDE_PART_LABEL_CHARS,
   chunkLines, collectingChunks, type ReplyOracles,
 } from "../src/parts.js";
 import { maxCharsFor, partBodyChars, widePartBodyChars, MAX_MESSAGES, SMS_CONCAT_SEGMENT_CHARS, UNCAPPED_MAX_CHARS } from "../src/devices.js";
@@ -43,6 +43,20 @@ describe("splitting a reply", () => {
   it("spends exactly PART_LABEL_CHARS on the label", () => {
     expect(partLabel(1, 2).length).toBe(PART_LABEL_CHARS);
     expect(partLabel(9, 9).length).toBe(PART_LABEL_CHARS);
+  });
+
+  it("round-trips a reply over nine parts, in any order", () => {
+    const parts = splitReply(encoded, H, 1);
+    expect(parts).toHaveLength(10);
+    expect(parts[9]).toBe("10/10 AbCdE9");
+    expect(partLabel(10, 10).length).toBe(WIDE_PART_LABEL_CHARS);
+    expect(round([...parts].reverse())).toBe(encoded);
+  });
+
+  it("budgets a wide label on the routes that split", () => {
+    expect(partBodyChars("g", H, WIDE_PART_LABEL_CHARS)).toBe(160 - WIDE_PART_LABEL_CHARS - H);
+    expect(partBodyChars("z", H, WIDE_PART_LABEL_CHARS)).toBe(240 - WIDE_PART_LABEL_CHARS - H);
+    expect(WIDE_PART_LABEL_CHARS + H + partBodyChars("i", H, WIDE_PART_LABEL_CHARS)! * 3).toBeLessThanOrEqual(140);
   });
 });
 

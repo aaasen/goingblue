@@ -12,6 +12,10 @@
  * pieces to packages/protocol/src/avalanche-pieces.gen.ts, sorted by center and names so
  * reruns over the same archive number them the same way.
  *
+ * avalanche.org centers forecast fixed zones, so each zone in the map layer the collector saved
+ * is one piece. They follow the overlaid pieces, so adding a center never renumbers those, and a
+ * point on a shared border belongs to the earlier piece.
+ *
  * Usage: pnpm avalanche-pieces
  */
 import { writeFileSync } from "node:fs";
@@ -191,6 +195,19 @@ function overlay(areas: Area[]): Piece[] {
 const round = (geom: MultiPoly): MultiPoly =>
   geom.map((poly) => poly.map((ring) => ring.map(([x, y]) => [Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4])));
 
+// One piece per zone of an avalanche.org center, by name, from its latest saved map layer.
+function nacZones(db: ReturnType<typeof openDb>, center: string) {
+  const row = db.prepare(`SELECT body FROM nac_responses WHERE center = ? AND url LIKE '%/products/map-layer/%' ORDER BY fetched_at DESC LIMIT 1`).get(center) as { body: string } | undefined;
+  if (!row) throw new Error(`pieces: no map layer for ${center}; run pnpm avalanche-collect --source ${center.toLowerCase()}`);
+  const layer = JSON.parse(row.body) as { features: { properties: { name: string }; geometry: { type: string; coordinates: unknown } }[] };
+  return layer.features
+    .map((f) => {
+      const polygons = round((f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates) as MultiPoly);
+      return { center: center.toLowerCase(), names: [f.properties.name], bbox: bboxOf(polygons), polygons };
+    })
+    .sort((a, b) => a.names[0].localeCompare(b.names[0]));
+}
+
 async function main(): Promise<void> {
   const db = openDb();
   await fillCache(db);
@@ -210,6 +227,7 @@ async function main(): Promise<void> {
     return { center: covering[0].center, names, bbox: bboxOf(polygons), polygons };
   });
   out.sort((a, b) => a.center.localeCompare(b.center) || a.names.join(",").localeCompare(b.names.join(",")));
+  out.push(...nacZones(db, "NWAC"));
 
   const lines = out.map((p, id) => `  ${JSON.stringify({ id, ...p })},`);
   const vertices = out.reduce((n, p) => n + p.polygons.flat(2).length, 0);

@@ -22,6 +22,9 @@
 
 // "i/N " — the two digits, the slash, and the space that separates the label from the payload.
 export const PART_LABEL_CHARS = 4;
+// The label budget of a reply over MAX_NARROW_PARTS parts, the widest being "10/12 ".
+export const WIDE_PART_LABEL_CHARS = 6;
+export const MAX_NARROW_PARTS = 9;
 
 // A whole token that is exactly "i/N". Matched against whitespace-delimited tokens rather than
 // searched for, so a payload can never be mistaken for a label.

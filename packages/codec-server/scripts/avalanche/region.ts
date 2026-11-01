@@ -2,8 +2,8 @@
  * Trains the model a bulletin's piece set is coded with (protocol avalanche-codec/region.ts).
  *
  * Each archived area is mapped to the pieces it covers through one interior point per piece.
- * Every product on every walk day since FIRST_WALK is one observation of its area's set. The
- * anchor (the set's lowest piece) is counted; for each anchor, the higher pieces of its center
+ * Every product on every walk day since FIRST_WALK is one observation of its area's set, and every
+ * NWAC forecast since then one observation of its zone's piece. The anchor (the set's lowest piece) is counted; for each anchor, the higher pieces of its center
  * are ordered by how often they join it, and each takes as its link whichever piece before it
  * (the anchor included) best predicts it over the anchor's observations, by smoothed in-sample
  * cost. The weights are the smoothed chances of the piece being in, given the link out or in.
@@ -72,10 +72,22 @@ function observations(interiors: [number, number][]): { obs: Obs[]; areaPieces: 
   const rows = db.prepare(`
     SELECT wp.walk_date AS day, p.area_id AS area, p.owner AS center FROM walk_products wp
     JOIN products p ON p.id = wp.product_id WHERE wp.walk_date >= ?`).all(FIRST_WALK) as { day: string; area: string; center: string }[];
+  const nac = db.prepare(`
+    SELECT published_time AS day, json_extract(body, '$.forecast_zone[0].name') AS zone FROM nac_products
+    WHERE center = 'NWAC' AND product_type = 'forecast' AND updated_at != '' AND published_time >= ?`).all(FIRST_WALK) as { day: string; zone: string }[];
   db.close();
   const sets = new Map<string, number[]>();
   const centers = new Map<string, string>();
   const out: Obs[] = [];
+  const season = (day: string) => {
+    const [y, m] = day.split("-").map(Number);
+    return m >= 8 ? y : y - 1;
+  };
+  for (const r of nac) {
+    const piece = AVALANCHE_PIECES.find((p) => p.center === "nwac" && p.names[0] === r.zone);
+    if (!piece) throw new Error(`region: no piece for NWAC zone ${r.zone}`);
+    out.push({ season: season(r.day), set: [piece.id] });
+  }
   let missing = 0, empty = 0;
   for (const r of rows) {
     const area = areas.get(r.area);
@@ -86,8 +98,7 @@ function observations(interiors: [number, number][]): { obs: Obs[]; areaPieces: 
     let set = sets.get(r.area);
     if (!set) sets.set(r.area, (set = piecesInArea(JSON.parse(area.geometry), r.center, interiors)));
     if (set.length === 0) { empty++; continue; }
-    const [y, m] = r.day.split("-").map(Number);
-    out.push({ season: m >= 8 ? y : y - 1, set });
+    out.push({ season: season(r.day), set });
   }
   console.log(`${out.length} product-days over ${sets.size} areas; skipped ${missing} without geometry, ${empty} covering no piece`);
   return { obs: out, areaPieces: sets };
