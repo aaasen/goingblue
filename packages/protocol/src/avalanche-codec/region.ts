@@ -8,7 +8,7 @@
  * already known (the anchor itself or an earlier link) through that link's two weights.
  * Pieces of other centers and pieces below the anchor cannot be in the set.
  */
-import { AVALANCHE_PIECES } from "../avalanche-pieces.gen.js";
+import { AVALANCHE_PIECES, type AvalanchePiece } from "../avalanche-pieces.gen.js";
 import { PIECE_INTERIORS, REGION_ANCHOR_COUNTS, REGION_CHAINS } from "../avalanche-region.gen.js";
 import { buildTable, SCALE, type Decision, type Decoder, type Table } from "./rans.js";
 
@@ -64,6 +64,24 @@ function inRing(lon: number, lat: number, ring: readonly [number, number][]): bo
 // Whether [lon, lat] lies in MultiPolygon coordinates.
 export function inPolygons(lon: number, lat: number, polygons: readonly (readonly [number, number][])[][]): boolean {
   return polygons.some(([outer, ...holes]) => inRing(lon, lat, outer) && !holes.some((h) => inRing(lon, lat, h)));
+}
+
+// The piece a point falls in, or null outside every forecast piece. A point on a shared border
+// belongs to the lower id.
+export function pieceAt(lat: number, lon: number, pieces: readonly AvalanchePiece[] = AVALANCHE_PIECES): AvalanchePiece | null {
+  for (const p of pieces) {
+    const [w, s, e, n] = p.bbox;
+    if (lon < w || lon > e || lat < s || lat > n) continue;
+    if (inPolygons(lon, lat, p.polygons)) return p;
+  }
+  return null;
+}
+
+// The model file a forecast for a point is coded with. The server and the reader both choose it
+// from the request's point and nothing else, because a forecast decodes to garbage under any other
+// model. Avalanche Canada's API answers for any other point, including outside every piece.
+export function avalancheModelFile(lat: number, lon: number): string {
+  return pieceAt(lat, lon)?.center === "nwac" ? "nwac-model.bin.gz" : "avcan-model.bin.gz";
 }
 
 // The pieces of `center` a forecast area (GeoJSON Polygon or MultiPolygon) covers, found by the

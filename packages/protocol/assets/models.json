@@ -2,5 +2,9 @@
   "avcan-model.bin.gz": {
     "key": "models/avalanche-avcan-v5-18bdf336f1378447.bin.gz",
     "sha256": "18bdf336f137844720dbb610ec0930ff119fea397e3a8c645c0506355317a430"
+  },
+  "nwac-model.bin.gz": {
+    "key": "models/avalanche-nwac-v8-c3c3d66f01abd579.bin.gz",
+    "sha256": "c3c3d66f01abd579bce9e0acf3557645a00e2b522a5d8f7e33f593ae38c2d78d"
   }
 }

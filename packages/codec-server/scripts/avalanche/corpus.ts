@@ -2,9 +2,10 @@
  * The archive as training and test documents: every product with a danger rating, as the
  * app's forecast, split into train and test by a hash of the product id.
  */
-import { piecesInArea, sectionsOf, type AvalancheForecast } from "@weather/protocol";
+import { AVALANCHE_PIECES, piecesInArea, sectionsOf, type AvalancheForecast } from "@weather/protocol";
 import { openDb } from "./db.ts";
 import { isForecast, toForecast, type RawProduct } from "../../src/avcan.ts";
+import { isRated, NWAC_CENTER, toForecast as toNacForecast, type NacProduct } from "../../src/nac.ts";
 
 export function arg(name: string, fallback: number): number {
   const i = process.argv.indexOf(name);
@@ -46,6 +47,28 @@ export function loadBulletins(): Doc[] {
     if (!isForecast(p)) continue;
     const forecast = toForecast(p, piecesOf(p));
     if (sectionsOf(forecast).some((s) => s.text)) out.push({ id: p.id, dateIssued: p.report.dateIssued, forecast });
+  }
+  return out;
+}
+
+// Every archived NWAC forecast with a danger rating and some prose, latest version of each. A
+// product covering several zones counts once, under its first.
+export function loadNwacBulletins(): Doc[] {
+  const db = openDb();
+  const rows = db.prepare(
+    `SELECT id, body, MAX(updated_at) FROM nac_products WHERE center = 'NWAC' AND product_type = 'forecast' AND updated_at != ''
+     GROUP BY id ORDER BY published_time, id`,
+  ).all() as { id: number; body: string }[];
+  db.close();
+  const pieces = AVALANCHE_PIECES.filter((p) => p.center === NWAC_CENTER);
+  const out: Doc[] = [];
+  for (const { id, body } of rows) {
+    const p = JSON.parse(body) as NacProduct;
+    if (!isRated(p)) continue;
+    const piece = pieces.find((x) => x.names[0] === p.forecast_zone![0].name);
+    if (!piece) throw new Error(`no piece for NWAC zone ${p.forecast_zone![0].name}`);
+    const forecast = toNacForecast(p, piece);
+    if (sectionsOf(forecast).some((s) => s.text)) out.push({ id: String(id), dateIssued: p.published_time, forecast });
   }
   return out;
 }

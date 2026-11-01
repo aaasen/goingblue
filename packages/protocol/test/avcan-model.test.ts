@@ -14,7 +14,11 @@ const FROZEN_MODEL_DIGEST = "9a3b24f7e5db76e2";
 // The same for the piece-set model, rewritten by `pnpm avalanche-region`.
 const FROZEN_REGION_DIGEST = "d4ccfcf8810d21a0";
 
+// The same for NWAC's model, rewritten by `pnpm avalanche-model --source nwac`.
+const FROZEN_NWAC_MODEL_DIGEST = "d6d958eb3f91a4e5";
+
 const packed = gunzipSync(readFileSync(new URL("../assets/avcan-model.bin.gz", import.meta.url)));
+const packedNwac = gunzipSync(readFileSync(new URL("../assets/nwac-model.bin.gz", import.meta.url)));
 
 describe("avalanche model", () => {
   it("matches the frozen digest", () => {
@@ -22,6 +26,13 @@ describe("avalanche model", () => {
     expect(digest,
       `avalanche model changed without a protocol version bump; if intended, set FROZEN_MODEL_DIGEST to "${digest}"`,
     ).toBe(FROZEN_MODEL_DIGEST);
+  });
+
+  it("matches the frozen NWAC digest", () => {
+    const digest = createHash("sha256").update(packedNwac).digest("hex").slice(0, 16);
+    expect(digest,
+      `NWAC model changed without a protocol version bump; if intended, set FROZEN_NWAC_MODEL_DIGEST to "${digest}"`,
+    ).toBe(FROZEN_NWAC_MODEL_DIGEST);
   });
 
   it("matches the frozen region digest", () => {

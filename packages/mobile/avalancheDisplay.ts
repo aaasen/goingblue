@@ -1,7 +1,7 @@
 // What the avalanche view says and colors, kept apart from the drawing so it can be tested.
 import tzlookup from 'tz-lookup';
 import {
-  AVALANCHE_PIECES, DANGER_LEVELS, LIKELIHOODS,
+  AVALANCHE_PIECES, DANGER_LEVELS, LIKELIHOODS, pieceAt,
   type AvalancheForecast, type AvalanchePiece, type DangerDay, type DangerRating, type Elevation, type Likelihood, type ProblemType,
 } from '@weather/protocol';
 import type { DangerIcon } from './dangerIcons';
@@ -375,25 +375,4 @@ export function pieceFeatures(pieces: readonly AvalanchePiece[]): GeoJSON.Featur
   };
 }
 
-// Even-odd ray cast: a point is inside a ring when a ray east from it crosses the ring an odd
-// number of times.
-function inRing(lon: number, lat: number, ring: [number, number][]): boolean {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
-
-// The piece a point falls in, or null outside every forecast piece.
-export function pieceAt(lat: number, lon: number, pieces: readonly AvalanchePiece[]): AvalanchePiece | null {
-  for (const p of pieces) {
-    const [w, s, e, n] = p.bbox;
-    if (lon < w || lon > e || lat < s || lat > n) continue;
-    for (const [outer, ...holes] of p.polygons) {
-      if (inRing(lon, lat, outer) && !holes.some((h) => inRing(lon, lat, h))) return p;
-    }
-  }
-  return null;
-}
+export { pieceAt };
