@@ -2,7 +2,8 @@
  * The bulletin archive: SQLite (node:sqlite, no dependency) at data/avalanche.db, written by
  * collect.ts. `products` holds each bulletin's raw API JSON verbatim, keyed by product id.
  * `areas` caches each product area's GeoJSON geometry for pieces.ts, with the walk date it was
- * fetched for.
+ * fetched for. `nac_products` holds the exact response body of each avalanche.org product version,
+ * and `nac_responses` the exact bodies of its listing and center metadata requests.
  */
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -45,6 +46,24 @@ export function openDb(path: string = DB_PATH): DatabaseSync {
       id         TEXT PRIMARY KEY,
       walk_date  TEXT NOT NULL,
       geometry   TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS nac_products (
+      id             INTEGER NOT NULL,
+      updated_at     TEXT NOT NULL, -- as listed, '' for a stub
+      center         TEXT NOT NULL,
+      product_type   TEXT NOT NULL,
+      published_time TEXT NOT NULL,
+      fetched_at     TEXT NOT NULL,
+      body           TEXT NOT NULL,
+      PRIMARY KEY (id, updated_at)
+    );
+    CREATE INDEX IF NOT EXISTS nac_products_center_published ON nac_products (center, published_time);
+    CREATE TABLE IF NOT EXISTS nac_responses (
+      url        TEXT NOT NULL,
+      center     TEXT NOT NULL,
+      fetched_at TEXT NOT NULL,
+      body       TEXT NOT NULL,
+      PRIMARY KEY (url, fetched_at)
     );
   `);
   return db;
