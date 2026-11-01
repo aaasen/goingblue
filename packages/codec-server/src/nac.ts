@@ -138,7 +138,8 @@ export function isRated(p: NacProduct): boolean {
 export function toForecast(p: NacProduct, piece: Pick<AvalanchePiece, "id" | "names">): AvalancheForecast {
   return {
     center: NWAC_CENTER,
-    issuedBy: p.author ?? NWAC_NAME,
+    issuedBy: NWAC_NAME,
+    author: (p.author ?? "").trim(),
     region: piece.names[0],
     pieces: [piece.id],
     issued: Date.parse(p.published_time),

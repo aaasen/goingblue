@@ -18,12 +18,12 @@ import {
 
 // The page's side inset and the cards' own padding: the graphics are drawn to the width left
 // inside both, measured off the page.
-const PAD = 16;
-const CARD_PAD = 14;
+export const PAD = 16;
+export const CARD_PAD = 14;
 
-interface Fonts { scale: SkFont; scaleBold: SkFont; compass: SkFont }
+export interface Fonts { scale: SkFont; scaleBold: SkFont; compass: SkFont; small: SkFont }
 
-function useFonts(): Fonts {
+export function useFonts(): Fonts {
   return useMemo(() => {
     // Android's Skia font manager doesn't know "System" (see Meteogram's fonts).
     const font = (style: Parameters<typeof matchFont>[0]) =>
@@ -32,6 +32,7 @@ function useFonts(): Fonts {
       scale: font({ fontSize: 13, fontWeight: '400' }),
       scaleBold: font({ fontSize: 13, fontWeight: '700' }),
       compass: font({ fontSize: 14, fontWeight: '400' }),
+      small: font({ fontSize: 11, fontWeight: '400' }),
     };
   }, []);
 }
@@ -54,7 +55,7 @@ const DAY_HEAD = '#141729';
 const ICON_H = 26;
 const SCALE_ICON_H = 40;
 // Wide enough for the widest icon, so the ratings' text lines up whatever the level.
-const iconSlot = (height: number) => height * Math.max(...Object.values(DANGER_ICONS).map((i) => i.width)) / DANGER_ICON_HEIGHT;
+export const iconSlot = (height: number) => height * Math.max(...Object.values(DANGER_ICONS).map((i) => i.width)) / DANGER_ICON_HEIGHT;
 const ICON_SLOT = iconSlot(ICON_H);
 
 const iconSvgs = new Map<DangerIcon, SkSVG>();
@@ -72,7 +73,7 @@ function iconSvg(icon: DangerIcon): SkSVG {
 // The SVGs size themselves in viewBox units, so the canvas scales them to the height, centered in
 // the slot so each icon has the same room on either side.
 const iconPictures = new Map<string, SkPicture>();
-function iconPicture(icon: DangerIcon, height = ICON_H): SkPicture {
+export function iconPicture(icon: DangerIcon, height = ICON_H): SkPicture {
   const key = `${icon}:${height}`;
   let picture = iconPictures.get(key);
   if (!picture) {
@@ -114,7 +115,7 @@ function DangerTable({ day, label }: { day: DangerDay; label: string }) {
 }
 
 // The scale behind the ratings' ⓘ: a row per level or status, led by a stripe in its color.
-function DangerScale() {
+export function DangerScale() {
   return (
     <>
       <Text style={[styles.prose, styles.scaleIntro]}>{DANGER_SCALE_INTRO}</Text>
@@ -176,22 +177,33 @@ function roseRadius(W: number): number {
   return Math.min(W / 2 - 22, 64);
 }
 
-function roseLayout(W: number) {
+function roseLayout(W: number, left = false) {
   const R = roseRadius(W);
   const cy = 22 + R;
   const southY = cy + R + 14;
   const labelY = (i: number) => southY + 20 + i * LEADER_ROW_H;
-  return { R, cx: W / 2, cy, southY, labelY, height: labelY(RINGS.length - 1) + 6 };
+  return { R, cx: left ? R + 22 : W / 2, cy, southY, labelY, height: labelY(RINGS.length - 1) + 6 };
+}
+
+// How a center draws its rose: the covered cells' color, the bands' names, the font they're in, and
+// whether the rose sits left in its column to leave long names room.
+export interface RoseStyle { fill: string; labels: Record<Elevation, string>; font?: SkFont; left?: boolean }
+const STANDARD_ROSE: RoseStyle = { fill: PROBLEM_FILL, labels: ROSE_ELEVATION_NAMES };
+
+// Whether a left-set rose's longest band name still ends inside a column this wide.
+export function roseFitsBeside(W: number, labels: Record<Elevation, string>, fonts: Fonts): boolean {
+  const { cx } = roseLayout(W, true);
+  return cx + Math.max(...Object.values(labels).map((l) => textWidth(fonts.small, l))) <= W;
 }
 
 // Octagons with a flat side up, so each aspect is one wedge from the center to an edge and each
 // band one ring. A cell fills where the problem sits at that aspect and band. Leaders run from
 // each ring down to its band's name, stepping left so none crosses another's label.
-function recordRose(problem: AvalancheProblem, W: number, fonts: Fonts): SkPicture {
-  const { R, cx, cy, southY, labelY, height } = roseLayout(W);
+function recordRose(problem: AvalancheProblem, W: number, fonts: Fonts, style: RoseStyle): SkPicture {
+  const { R, cx, cy, southY, labelY, height } = roseLayout(W, style.left);
   const recorder = Skia.PictureRecorder();
   const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, W, height));
-  const fill = fillPaint(PROBLEM_FILL);
+  const fill = fillPaint(style.fill);
   for (const [band, r0, r1] of RINGS) {
     ASPECTS.forEach((aspect, i) => {
       if (!coversCell(problem, aspect, band)) return;
@@ -236,13 +248,13 @@ function recordRose(problem: AvalancheProblem, W: number, fonts: Fonts): SkPictu
     canvas.drawCircle(x, y, 1.75, dot);
     canvas.drawLine(x, y, x, elbow, leader);
     canvas.drawLine(x, elbow, x + 5, elbow, leader);
-    drawText(canvas, ROSE_ELEVATION_NAMES[band], x + 8, baseline, fonts.scale, ink);
+    drawText(canvas, style.labels[band], x + 8, baseline, style.font ?? fonts.scale, ink);
   });
   return recorder.finishRecordingAsPicture();
 }
 
-function Rose({ problem, width, fonts }: { problem: AvalancheProblem; width: number; fonts: Fonts }) {
-  const picture = useMemo(() => recordRose(problem, width, fonts), [problem, width, fonts]);
+export function Rose({ problem, width, fonts, style = STANDARD_ROSE }: { problem: AvalancheProblem; width: number; fonts: Fonts; style?: RoseStyle }) {
+  const picture = useMemo(() => recordRose(problem, width, fonts, style), [problem, width, fonts, style]);
   return <SkiaPictureView style={{ width, height: roseLayout(width).height }} picture={picture} />;
 }
 
@@ -257,7 +269,11 @@ function scaleHeight(scale: Scale): number {
   return 2 * SCALE_PAD + (scale.rows.length - 1) * SCALE_ROW_H;
 }
 
-function recordScale(scale: Scale, W: number, fonts: Fonts): SkPicture {
+// How a center draws its scales: the bar's color, its outline, and the color of uncovered rows.
+export interface ScaleStyle { fill: string; stroke?: string; muted?: string }
+const STANDARD_SCALE: ScaleStyle = { fill: PROBLEM_FILL };
+
+function recordScale(scale: Scale, W: number, fonts: Fonts, style: ScaleStyle): SkPicture {
   const recorder = Skia.PictureRecorder();
   const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, W, scaleHeight(scale)));
   const y = (row: number) => SCALE_PAD + row * SCALE_ROW_H;
@@ -265,16 +281,18 @@ function recordScale(scale: Scale, W: number, fonts: Fonts): SkPicture {
   canvas.drawLine(RULER_X, y(0), RULER_X, y(scale.rows.length - 1), line);
   scale.rows.forEach((_, r) => canvas.drawLine(RULER_X - 4, y(r), RULER_X + 4, y(r), line));
   const [top, bottom] = scale.bar;
-  canvas.drawRect(Skia.XYWHRect(RULER_X - 4, y(top), 8, y(bottom) - y(top)), fillPaint(PROBLEM_FILL));
+  const bar = Skia.XYWHRect(RULER_X - 4, y(top), 8, y(bottom) - y(top));
+  canvas.drawRect(bar, fillPaint(style.fill));
+  if (style.stroke) canvas.drawRect(bar, strokePaint(style.stroke, 1));
   const font = (bold: boolean) => (bold ? fonts.scaleBold : fonts.scale);
-  scale.rows.forEach((row, r) => drawText(canvas, row.label, SCALE_TEXT_X, y(r) + 4.5, font(row.bold), palette.text));
+  scale.rows.forEach((row, r) => drawText(canvas, row.label, SCALE_TEXT_X, y(r) + 4.5, font(row.bold), row.bold ? palette.text : style.muted ?? palette.text));
   const noteX = SCALE_TEXT_X + Math.max(...scale.rows.map((row) => textWidth(fonts.scaleBold, row.label))) + 5;
   for (const note of scale.notes) drawText(canvas, note.label, noteX, y(note.at) + 4.5, font(note.bold), palette.text);
   return recorder.finishRecordingAsPicture();
 }
 
-function ScaleView({ scale, width, fonts }: { scale: Scale; width: number; fonts: Fonts }) {
-  const picture = useMemo(() => recordScale(scale, width, fonts), [scale, width, fonts]);
+export function ScaleView({ scale, width, fonts, style = STANDARD_SCALE }: { scale: Scale; width: number; fonts: Fonts; style?: ScaleStyle }) {
+  const picture = useMemo(() => recordScale(scale, width, fonts, style), [scale, width, fonts, style]);
   return <SkiaPictureView style={{ width, height: scaleHeight(scale) }} picture={picture} />;
 }
 
@@ -354,7 +372,7 @@ function Card({ children }: { children: ReactNode }) {
 }
 
 // Paragraphs are blank-line separated; single line breaks stay inside a paragraph.
-function Prose({ text, lead = false }: { text: string; lead?: boolean }) {
+export function Prose({ text, lead = false }: { text: string; lead?: boolean }) {
   const paragraphs = text.split(/\n\n+/).filter(Boolean);
   return (
     <>
@@ -431,9 +449,6 @@ export default function AvalancheForecastView({ forecast, region, timeFormat }: 
       ) : null}
       {forecast.snowpackSummary ? (
         <Section label="Snowpack Summary"><Card><Prose text={forecast.snowpackSummary} /></Card></Section>
-      ) : null}
-      {forecast.hazardDiscussion ? (
-        <Section label="Forecast Discussion"><Card><Prose text={forecast.hazardDiscussion} /></Card></Section>
       ) : null}
 
       {forecast.weather.length > 0 && (

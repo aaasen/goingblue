@@ -150,6 +150,7 @@ export function toForecast(raw: RawProduct, pieces: number[]): AvalancheForecast
   return {
     center: raw.owner.value,
     issuedBy: r.forecaster ?? raw.owner.display,
+    author: "",
     region: r.title,
     pieces,
     issued: Date.parse(r.dateIssued),

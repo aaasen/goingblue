@@ -202,6 +202,72 @@ export function sizeScale(size: { min: number; max: number }): Scale {
   };
 }
 
+// ── NWAC ─────────────────────────────────────────────────────────────────────
+
+// Each zone's elevation ranges by band, as the center's configuration on avalanche.org gives them.
+const NWAC_BAND_RANGES: Record<string, Record<Elevation, string>> = {
+  'East Slopes Central': { alp: '7500-6000ft', tln: '6000-5000ft', btl: '5000-2500ft' },
+  'East Slopes North': { alp: '8000-6500ft', tln: '6500-5000ft', btl: '5000-3000ft' },
+  'East Slopes South': { alp: '7500-6000ft', tln: '6000-5000ft', btl: '5000-3000ft' },
+  'Mt Hood': { alp: '8500-6500ft', tln: '6500-5500ft', btl: '5500-3500ft' },
+  Olympics: { alp: '6500-5500ft', tln: '5500-4500ft', btl: '4500-3000ft' },
+  'Snoqualmie Pass': { alp: '6500-5500ft', tln: '5500-4000ft', btl: '4000-2500ft' },
+  'Stevens Pass': { alp: '7000-6000ft', tln: '6000-5000ft', btl: '5000-3000ft' },
+  'West Slopes Central': { alp: '7500-5500ft', tln: '5500-4500ft', btl: '4500-2500ft' },
+  'West Slopes North': { alp: '7500-5500ft', tln: '5500-4500ft', btl: '4500-2500ft' },
+  'West Slopes South': { alp: '8000-6500ft', tln: '6500-5500ft', btl: '5500-3500ft' },
+};
+const NWAC_BAND_NAMES: Record<Elevation, string> = { alp: 'Upper Elevations', tln: 'Middle Elevations', btl: 'Lower Elevations' };
+
+export function nwacBandLabel(zone: string, band: Elevation): { name: string; range: string } {
+  return { name: NWAC_BAND_NAMES[band], range: NWAC_BAND_RANGES[zone]?.[band] ?? '' };
+}
+
+// The zone a forecast covers, from its one piece.
+export function nwacZone(forecast: Pick<AvalancheForecast, 'pieces'>): string {
+  return forecast.pieces.length > 0 ? AVALANCHE_PIECES[forecast.pieces[0]].names[0] : '';
+}
+
+export const nwacProblemNames: Record<ProblemType, string> = {
+  stormSlab: 'Storm Slab', windSlab: 'Wind Slab', persistentSlab: 'Persistent Slab',
+  deepPersistentSlab: 'Deep Persistent Slab', wetSlab: 'Wet Slab', wetLoose: 'Wet Loose',
+  dryLoose: 'Dry Loose', cornice: 'Cornice Fall', glide: 'Glide Avalanches',
+};
+
+// "Wednesday, March 11, 2026", for a "YYYY-MM-DD" calendar date.
+export function nwacDayLabel(date: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+  }).format(new Date(Date.parse(date)));
+}
+
+// "Tuesday, March 10, 2026 - 6:30PM", in the reader's clock format.
+export function nwacStamp(ms: number, timezone: string, timeFormat: TimeFormat): string {
+  const d = new Date(ms);
+  const date = new Intl.DateTimeFormat('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: timezone,
+  }).format(d);
+  const { hour, minute } = stampClock(d, timezone);
+  const clock = timeFormat === '24h'
+    ? `${`${hour}`.padStart(2, '0')}:${minute}`
+    : `${hour % 12 || 12}:${minute}${hour < 12 ? 'AM' : 'PM'}`;
+  return `${date} - ${clock}`;
+}
+
+// Historic on top, as the center draws it: sizes 4 and 5 share a row. A half size ends the bar
+// between two rows and bolds the larger, the same rounding as sizeScale.
+export function nwacSizeScale(size: { min: number; max: number }): Scale {
+  const row = (s: number) => Math.max(0, 4 - s);
+  const lo = Math.round(size.min), hi = Math.round(size.max);
+  const reach = (s: number) => (Number.isInteger(s) || size.min === size.max ? BAR_REACH : 0);
+  const labels: [string, number][] = [['Historic (D4-5)', 4], ['Very Large (D3)', 3], ['Large (D2)', 2], ['Small (D1)', 1]];
+  return {
+    rows: labels.map(([label, s]) => ({ label, bold: s === 4 ? hi >= 4 : s >= lo && s <= hi })),
+    notes: [],
+    bar: [row(size.max) - reach(size.max), row(size.min) + reach(size.min)],
+  };
+}
+
 // Parks Canada's, verbatim, shared by its four centers.
 const PARKS_CANADA_DISCLAIMER = [
   'USE AT YOUR OWN RISK',
@@ -254,10 +320,11 @@ const PREPARED_BY: Record<string, string> = {
   'parks-glacier': 'Parks Canada',
   'parks-jasper': 'Parks Canada',
   'parks-waterton': 'Parks Canada',
+  nwac: 'Northwest Avalanche Center',
 };
 
 // The line naming the piece a point is in: its center, then its subregions.
-const ZONE_CENTERS: Record<string, string> = { ...PREPARED_BY, kananaskis: 'Kananaskis MRP' };
+const ZONE_CENTERS: Record<string, string> = { ...PREPARED_BY, kananaskis: 'Kananaskis MRP', nwac: 'NWAC' };
 // Subregions forecast together that the line calls by one name.
 const MERGED_NAMES: [string[], string][] = [
   [['White Pass East', 'White Pass West'], 'White Pass'],
@@ -341,21 +408,30 @@ const ZONE_ABBREVIATIONS: Record<string, string> = {
   'America/Vancouver': 'PT', 'America/Los_Angeles': 'PT', 'America/Edmonton': 'MT', 'America/New_York': 'ET', 'America/St_Johns': 'NT', UTC: 'UTC',
 };
 
+// The hour and minute of an instant in a zone. Hermes's Intl can follow the device's 12/24-hour
+// setting over the options and leaves the hour and minute out of formatToParts, so each field is
+// formatted alone.
+function stampClock(d: Date, timezone: string): { hour: number; minute: string } {
+  const format = (options: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat('en-US', { ...options, timeZone: timezone }).format(d);
+  // "16", or "4 PM" from an engine that ignores hourCycle.
+  const hourText = format({ hour: 'numeric', hourCycle: 'h23' });
+  const pm = /PM/i.test(hourText), am = /AM/i.test(hourText);
+  const raw = parseInt(hourText, 10);
+  return {
+    hour: pm || am ? (raw % 12) + (pm ? 12 : 0) : raw % 24,
+    minute: `${parseInt(format({ minute: 'numeric' }), 10)}`.padStart(2, '0'),
+  };
+}
+
 // "Sat, February 28, 2026 at 16:00 PT", as Avalanche Canada stamps a bulletin, in the reader's
-// clock format. Hermes's Intl can follow the device's 12/24-hour setting over the options and
-// leaves the hour and minute out of formatToParts, so each field is formatted alone and the clock
-// is built here, the way Meteogram's clockLabel builds it.
+// clock format. The clock is built here, the way Meteogram's clockLabel builds it.
 export function stampLabel(ms: number, timezone: string, timeFormat: TimeFormat): string {
   const d = new Date(ms);
   const format = (options: Intl.DateTimeFormatOptions) =>
     new Intl.DateTimeFormat('en-US', { ...options, timeZone: timezone }).format(d);
   const date = format({ weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' });
-  // "16", or "4 PM" from an engine that ignores hourCycle.
-  const hourText = format({ hour: 'numeric', hourCycle: 'h23' });
-  const pm = /PM/i.test(hourText), am = /AM/i.test(hourText);
-  const raw = parseInt(hourText, 10);
-  const hour = pm || am ? (raw % 12) + (pm ? 12 : 0) : raw % 24;
-  const minute = `${parseInt(format({ minute: 'numeric' }), 10)}`.padStart(2, '0');
+  const { hour, minute } = stampClock(d, timezone);
   const clock = timeFormat === '24h'
     ? `${`${hour}`.padStart(2, '0')}:${minute}`
     : `${hour % 12 || 12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`;

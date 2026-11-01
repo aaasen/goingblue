@@ -8,7 +8,8 @@ import * as Location from 'expo-location';
 import * as Network from 'expo-network';
 import { pageInsets } from './insets';
 import AvalancheForecastView from './AvalancheScreen';
-import { forecastRegion, pieceAt, pieceFeatures, zoneLabel, zoneNames } from './avalancheDisplay';
+import NwacForecastView from './NwacForecast';
+import { bulletinCenter, forecastRegion, pieceAt, pieceFeatures, zoneLabel, zoneNames } from './avalancheDisplay';
 import { loadAvalancheModel, loadModelsForReplies } from './avalancheModel';
 import DayRow from './components/DayRow';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -2146,7 +2147,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               />
             </View>
           )}
-          {avalanche && <AvalancheForecastView forecast={avalanche.forecast} region={avalancheZoneName} timeFormat={timeFormat} />}
+          {avalanche && bulletinCenter(avalanche.forecast) === 'nwac' && <NwacForecastView forecast={avalanche.forecast} timeFormat={timeFormat} />}
+          {avalanche && bulletinCenter(avalanche.forecast) !== 'nwac' && <AvalancheForecastView forecast={avalanche.forecast} region={avalancheZoneName} timeFormat={timeFormat} />}
           {!avalanche && !avalancheCollecting && !avalancheError && <EmptyForecast />}
           <PastForecasts groups={avalancheGroups} loadedKey={loadedAvalancheKey} describe={describeAvalanche}
             onLoad={loadAvalanchePast} onDelete={deletePast} />

@@ -15,7 +15,7 @@ const FROZEN_MODEL_DIGEST = "9a3b24f7e5db76e2";
 const FROZEN_REGION_DIGEST = "d4ccfcf8810d21a0";
 
 // The same for NWAC's model, rewritten by `pnpm avalanche-model --source nwac`.
-const FROZEN_NWAC_MODEL_DIGEST = "d6d958eb3f91a4e5";
+const FROZEN_NWAC_MODEL_DIGEST = "5e70df8c03e415ce";
 
 const packed = gunzipSync(readFileSync(new URL("../assets/avcan-model.bin.gz", import.meta.url)));
 const packedNwac = gunzipSync(readFileSync(new URL("../assets/nwac-model.bin.gz", import.meta.url)));

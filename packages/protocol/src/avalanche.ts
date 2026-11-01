@@ -76,6 +76,8 @@ export interface AvalancheForecast {
   center: string;
   // Who prepared the bulletin, as the center credits it: "Avalanche Canada", "Parks Canada".
   issuedBy: string;
+  // The forecaster who wrote it, where the center names one.
+  author: string;
   region: string;
   // The pieces (AVALANCHE_PIECES ids, ascending) the forecast area covers; empty when unknown.
   pieces: number[];

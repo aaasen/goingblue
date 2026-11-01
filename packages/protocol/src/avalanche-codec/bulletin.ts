@@ -12,6 +12,7 @@
  *   hazard-discussion   when not empty
  *   weather-summary    one per weather period, as "label\ntext" (the label is "" when absent)
  *   confidence          one per confidence statement
+ *   author              when not empty
  *
  * The issue time travels in the message header (wire.ts) and is handed to the decoder; the
  * expiry and the danger days' dates are coded relative to it. The issuing center, issuer,
@@ -33,7 +34,7 @@ import { addDays, quantizeIssued, utcDate } from "./time.js";
 
 export const SECTION_KINDS = [
   "highlights", "problem", "advice", "avalanche-summary", "snowpack-summary", "hazard-discussion",
-  "weather-summary", "confidence",
+  "weather-summary", "confidence", "author",
 ] as const;
 
 // Placeholders for the fields the client derives instead of reading off the wire.
@@ -62,6 +63,7 @@ export function sectionsOf(f: AvalancheForecast): Section[] {
   if (f.hazardDiscussion) out.push({ kind: "hazard-discussion", text: f.hazardDiscussion });
   for (const w of f.weather) out.push({ kind: "weather-summary", text: `${w.label}\n${w.text}` });
   for (const s of f.confidence.statements) out.push({ kind: "confidence", text: s });
+  if (f.author) out.push({ kind: "author", text: f.author });
   return out;
 }
 
@@ -90,6 +92,7 @@ function forecastOf(pieces: number[], s: Structured, sections: Section[], issued
   return {
     center: UNENCODED.center,
     issuedBy: UNENCODED.issuedBy,
+    author: texts("author")[0] ?? "",
     region: UNENCODED.region,
     pieces,
     issued,

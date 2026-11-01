@@ -62,7 +62,7 @@ describe("toForecast", () => {
     expect(f.bottomLine).toMatch(/^Expect very dangerous conditions/);
     expect(f.hazardDiscussion).toMatch(/^Thursday will be another blustery/);
     expect(f.hazardDiscussion).not.toMatch(/<|&\w+;/);
-    expect(f).toMatchObject({ center: "nwac", region: "Stevens Pass", pieces: [STEVENS_PIECE.id], advice: [], weather: [], snowpackSummary: "" });
+    expect(f).toMatchObject({ center: "nwac", author: "Josh Hirshberg", region: "Stevens Pass", pieces: [STEVENS_PIECE.id], advice: [], weather: [], snowpackSummary: "" });
     expect(f.confidence).toEqual({ rating: "noRating", statements: [] });
   });
 
