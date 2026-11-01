@@ -323,7 +323,7 @@ export function dangerTables(
 const CENTER_ZONES: Record<string, string> = {
   'avalanche-canada': 'America/Vancouver', 'parks-glacier': 'America/Vancouver',
   'parks-byk': 'America/Edmonton', 'parks-jasper': 'America/Edmonton', 'parks-waterton': 'America/Edmonton',
-  kananaskis: 'America/Edmonton', 'avalanche-quebec': 'America/New_York',
+  kananaskis: 'America/Edmonton', 'avalanche-quebec': 'America/New_York', nwac: 'America/Los_Angeles',
 };
 
 // The zone a bulletin for a point is stamped in, found from the center whose piece holds the point.
@@ -338,7 +338,7 @@ export function bulletinTimezone(lat: number, lon: number): string {
 // The generic abbreviations of the zones bulletins come in. Intl's shortGeneric names some of
 // these by city ("St. John's Time") and Hermes may lack it, so the table is explicit.
 const ZONE_ABBREVIATIONS: Record<string, string> = {
-  'America/Vancouver': 'PT', 'America/Edmonton': 'MT', 'America/New_York': 'ET', 'America/St_Johns': 'NT', UTC: 'UTC',
+  'America/Vancouver': 'PT', 'America/Los_Angeles': 'PT', 'America/Edmonton': 'MT', 'America/New_York': 'ET', 'America/St_Johns': 'NT', UTC: 'UTC',
 };
 
 // "Sat, February 28, 2026 at 16:00 PT", as Avalanche Canada stamps a bulletin, in the reader's

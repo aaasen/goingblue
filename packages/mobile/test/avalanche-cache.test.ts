@@ -16,8 +16,8 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 import {
-  allocCode, attachResponse, decodeAny, loadStore, mergeReply, prunePastForecasts, replyKind,
-  resolveContext, setAvalancheModels, type AvalancheContext,
+  allocCode, attachResponse, chunksCollected, decodeAny, loadStore, mergeReply, prunePastForecasts, replyKind,
+  replyModelFile, resolveContext, setAvalancheModels, type AvalancheContext,
 } from '../cache';
 import SEA_TO_SKY from '../fixtures/avalanche/sea-to-sky-2026-03-01.json';
 
@@ -106,5 +106,51 @@ describe('avalanche requests in the forecast store', () => {
     await allocCode(TOKEN, avalancheContext('s'), 'Avalanche');
     expect(replyKind('No avalanche forecast available', TOKEN)).toBeNull();
     expect(() => decodeAny('No avalanche forecast available', TOKEN)).toThrow();
+  });
+});
+
+describe('an NWAC reply', () => {
+  const NWAC_MODELS = loadModels(gunzipSync(readFileSync(new URL('../../protocol/assets/nwac-model.bin.gz', import.meta.url))));
+  const STEVENS = { lat: 47.75, lon: -121.09 };
+  const nwacForecast: AvalancheForecast = {
+    ...FORECAST, center: 'nwac', pieces: [107], advice: [], avalancheSummary: '', snowpackSummary: '', weather: [],
+    bottomLine: 'Avoid steep wind-loaded slopes today.', hazardDiscussion: 'New snow fell on the old crust.',
+    confidence: { rating: 'noRating', statements: [] }, problems: [],
+  };
+  const nwacContext: AvalancheContext = { kind: 'avalanche', ...STEVENS, start: 490000 * 3600000, day: '2026-03-01', device: 'd' };
+
+  async function stored(token: string) {
+    const code = await allocCode(token, nwacContext, 'Avalanche');
+    return encodeAvalancheMessage(NWAC_MODELS, code, anchorOf(nwacContext), nwacForecast, 'base94');
+  }
+
+  it('names its own model, and Avalanche Canada replies keep theirs', async () => {
+    const token = `${TOKEN}-nwac-file`;
+    const reply = await stored(token);
+    expect(replyModelFile(reply, token)).toBe('nwac-model.bin.gz');
+    const code = await allocCode(token, avalancheContext('d'), 'Avalanche');
+    const avcan = encodeAvalancheMessage(MODELS, code, anchorOf(avalancheContext('d')), FORECAST, 'base94');
+    expect(replyModelFile(avcan, token)).toBe('avcan-model.bin.gz');
+  });
+
+  // Before anything below hands in the NWAC model, which stays set for the rest of the file.
+  it('keeps a saved reply while its model has not loaded', async () => {
+    const token = `${TOKEN}-nwac-prune`;
+    const reply = await stored(token);
+    await attachResponse(token, 0, reply);
+    expect(() => decodeAny(reply, token)).toThrow(/has not loaded/);
+    expect((await prunePastForecasts(token)).map((slot) => slot.encoded)).toEqual([reply]);
+  });
+
+  it('is not mistaken for a reply in progress once its model has loaded', async () => {
+    const token = `${TOKEN}-nwac-decode`;
+    const reply = await stored(token);
+    setAvalancheModels(NWAC_MODELS, 'nwac-model.bin.gz');
+    const d = decodeAny(reply, token);
+    if (d.kind !== 'avalanche') throw new Error(d.kind);
+    expect(d.forecast.hazardDiscussion).toBe('New snow fell on the old crust.');
+    expect(d.forecast.pieces).toEqual([107]);
+    expect(d.forecast.timezone).toBe('America/Los_Angeles');
+    expect(chunksCollected(reply, token)).toBe(0);
   });
 });

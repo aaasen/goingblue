@@ -9,7 +9,7 @@ import * as Network from 'expo-network';
 import { pageInsets } from './insets';
 import AvalancheForecastView from './AvalancheScreen';
 import { forecastRegion, pieceAt, pieceFeatures, zoneLabel, zoneNames } from './avalancheDisplay';
-import { loadAvalancheModels } from './avalancheModel';
+import { loadAvalancheModel, loadModelsForReplies } from './avalancheModel';
 import DayRow from './components/DayRow';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -36,7 +36,7 @@ import { ladderLabel } from './cloudBand';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import {
   allocCode, attachResponse, chunksCollected, decodeAny, deleteResponses, isAvalancheContext, loadStore,
-  mergeReply, normalizeReply, prunePastForecasts, replyKind, replyParts, resolveContext, type Slot,
+  mergeReply, normalizeReply, prunePastForecasts, replyKind, replyParts, resolveContext, slotModelFile, type Slot,
 } from './cache';
 import LocationMap from './LocationMap';
 import DeviceSelector from './components/DeviceSelector';
@@ -901,13 +901,13 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // The requested day as YYYY-MM-DD, or '' for the latest bulletin.
   const [avalancheDay, setAvalancheDay] = useState('');
   const suppressNextAvalancheCache = useRef(false);
-  // The model decodes avalanche replies and is loaded on first need (avalancheModel.ts).
-  const [modelReady, setModelReady] = useState(false);
+  // The models decode avalanche replies and are loaded on first need (avalancheModel.ts). Counts
+  // the loads of the saved bulletins' models, so what decodes them runs again after each.
+  const [modelsLoaded, setModelsLoaded] = useState(0);
   const slotMessage = useCallback((slot: Slot) => slotMessages.get(slot) ?? null, [slotMessages]);
-  // Each saved bulletin's first day, for its row's danger icon; decoded once the model is in.
+  // Each saved bulletin's first day, for its row's danger icon; decoded once its model is in.
   const slotDangerDays = useMemo(() => {
     const days = new Map<Slot, DangerDay | null>();
-    if (!modelReady) return days;
     for (const slot of avalancheCache) {
       try {
         const d = decodeAny(slot.encoded!, token);
@@ -915,7 +915,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       } catch { days.set(slot, null); }
     }
     return days;
-  }, [avalancheCache, token, modelReady]);
+  }, [avalancheCache, token, modelsLoaded]);
   // When true, the next decode came from loading a cached entry — don't re-attach it.
   const suppressNextCache = useRef(false);
   // A cached entry put on screen by loadPast ahead of the decode effect, with the text it was
@@ -1398,20 +1398,23 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
 
   // ── Decoding ─────────────────────────────────────────────────────────────
 
-  // Pruned again once the avalanche model loads: until then avalanche slots are kept unchecked.
+  // Pruned again as avalanche models load: until then their slots are kept unchecked.
   useEffect(() => {
     prunePastForecasts(token).then(setCache);
-  }, [token, modelReady]);
+  }, [token, modelsLoaded]);
 
-  const needsModel = tab === 'avalanche' || avalancheCache.length > 0;
+  const savedModelFiles = useMemo(
+    () => [...new Set(avalancheCache.map(slotModelFile))].filter((f) => f !== null).sort().join(' '),
+    [avalancheCache],
+  );
   useEffect(() => {
-    if (!needsModel || modelReady) return;
+    if (!savedModelFiles) return;
     let live = true;
-    loadAvalancheModels()
-      .then(() => { if (live) setModelReady(true); })
+    Promise.all(savedModelFiles.split(' ').map(loadAvalancheModel))
+      .then(() => { if (live) setModelsLoaded((n) => n + 1); })
       .catch((e) => console.warn(`avalanche model unavailable: ${e}`));
     return () => { live = false; };
-  }, [needsModel, modelReady]);
+  }, [savedModelFiles]);
 
   useEffect(() => () => { if (outcomeTimer.current) clearTimeout(outcomeTimer.current); }, []);
 
@@ -1517,7 +1520,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           setAvalancheData('');
           return;
         }
-        await loadAvalancheModels();
+        await loadModelsForReplies(token, avalancheData);
         if (cancelled) return;
         const d = decodeAny(avalancheData, token);
         if (d.kind !== 'avalanche') throw new Error('Invalid forecast');
@@ -1569,9 +1572,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       // the first thing a reader does and needn't lose that race.
       await loadStore(token);
       // Merging and the check below decode, and a bulletin can't decode before its model loads.
-      if (replyKind(text, token) === 'avalanche' || replyKind(current, token) === 'avalanche') {
-        await loadAvalancheModels().catch(() => {});
-      }
+      await loadModelsForReplies(token, text, current).catch(() => {});
       const merged = mergeReply(current, text, token);
       const incoming = replyParts(text);
       // Messages of an unlabelled reply are counted, not numbered: the reply says nothing about

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  avalancheAnchor, chunkLines, collectingChunks, decodeAvalancheReply, decodeMessage, fillSlotsFor,
+  avalancheAnchor, avalancheModelFile, chunkLines, collectingChunks, decodeAvalancheReply, decodeMessage, fillSlotsFor,
   maxFillSeq, mergeParts, peekHeader, readParts, reassembleReply, WIRE_HEADER_CHARS,
   type AvalancheForecast, type DeviceCode, type ForecastMessage, type Models, type ReplyOracles,
   type RequestContext, type Variable,
@@ -69,13 +69,15 @@ function revivedSlot(s: StoredSlot): Slot {
 const memos = new Map<string, Store>();
 const contextMaps = new Map<string, Map<number, SlotContext>>();
 
-// The avalanche model, handed in once it has loaded (see avalancheModel.ts). Until then an
-// avalanche reply can't be decoded, and the pruning below leaves avalanche slots alone.
-let avalancheModels: Models | null = null;
+// The avalanche models by file, each handed in once it has loaded (see avalancheModel.ts). Until
+// then a reply coded with it can't be decoded, and the pruning below leaves its slots alone.
+const avalancheModels = new Map<string, Models>();
 
-export function setAvalancheModels(models: Models): void {
-  avalancheModels = models;
+export function setAvalancheModels(models: Models, file: string = 'avcan-model.bin.gz'): void {
+  avalancheModels.set(file, models);
 }
+
+const modelFileOf = (ctx: AvalancheContext) => avalancheModelFile(ctx.lat, ctx.lon);
 
 function storeKey(token: string): string {
   return `${STORE_KEY_PREFIX}${token}`;
@@ -228,9 +230,10 @@ export function decodeAny(encoded: string, token: string): Decoded {
   const reply = normalizeReply(encoded);
   const ctx = resolveSlotContext(token, peekHeader(reply).code);
   if (ctx && isAvalancheContext(ctx)) {
-    if (!avalancheModels) throw new Error('The avalanche model has not loaded.');
+    const models = avalancheModels.get(modelFileOf(ctx));
+    if (!models) throw new Error('The avalanche model has not loaded.');
     const anchor = avalancheAnchor(ctx.day, ctx.start / 3600000);
-    const { code, forecast } = decodeAvalancheReply(avalancheModels, reply, anchor, ctx.device);
+    const { code, forecast } = decodeAvalancheReply(models, reply, anchor, ctx.device);
     // The wire leaves the zone out; the point's center says which one the bulletin is stamped in.
     return {
       kind: 'avalanche', code, forecast: { ...forecast, timezone: bulletinTimezone(ctx.lat, ctx.lon) }, lat: ctx.lat, lon: ctx.lon,
@@ -243,15 +246,29 @@ export function decodeAny(encoded: string, token: string): Decoded {
 // the text doesn't start with a header of a request this device holds. Works on a reply still
 // being collected: any labelled part repeats the header.
 export function replyKind(encoded: string, token: string): 'weather' | 'avalanche' | null {
+  const ctx = replyContext(encoded, token);
+  return ctx ? (isAvalancheContext(ctx) ? 'avalanche' : 'weather') : null;
+}
+
+function replyContext(encoded: string, token: string): SlotContext | undefined {
   try {
     const { total, parts, unlabelled } = readParts(cleaned(encoded));
     const first = total > 0 ? parts.values().next().value : unlabelled.join('');
-    if (!first) return null;
-    const ctx = resolveSlotContext(token, peekHeader(first).code);
-    return ctx ? (isAvalancheContext(ctx) ? 'avalanche' : 'weather') : null;
+    return first ? resolveSlotContext(token, peekHeader(first).code) : undefined;
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+// The model file a reply needs, or null when it isn't an avalanche reply this device asked for.
+export function replyModelFile(encoded: string, token: string): string | null {
+  const ctx = replyContext(encoded, token);
+  return ctx && isAvalancheContext(ctx) ? modelFileOf(ctx) : null;
+}
+
+// The model file a saved avalanche forecast needs, or null for a weather one.
+export function slotModelFile(slot: Slot): string | null {
+  return isAvalancheContext(slot.context) ? modelFileOf(slot.context) : null;
 }
 
 // The message code a decoded reply answers.
@@ -296,7 +313,7 @@ export async function prunePastForecasts(token: string): Promise<Slot[]> {
   const before = store.slots.length;
   store.slots = store.slots.filter((s) => {
     if (!s.encoded) return true;
-    if (isAvalancheContext(s.context) && !avalancheModels) return true;
+    if (isAvalancheContext(s.context) && !avalancheModels.has(modelFileOf(s.context))) return true;
     try { decodeAny(s.encoded, token); return true; }
     catch { return false; }
   });

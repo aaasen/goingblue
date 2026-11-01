@@ -432,6 +432,9 @@ export default function AvalancheForecastView({ forecast, region, timeFormat }: 
       {forecast.snowpackSummary ? (
         <Section label="Snowpack Summary"><Card><Prose text={forecast.snowpackSummary} /></Card></Section>
       ) : null}
+      {forecast.hazardDiscussion ? (
+        <Section label="Forecast Discussion"><Card><Prose text={forecast.hazardDiscussion} /></Card></Section>
+      ) : null}
 
       {forecast.weather.length > 0 && (
         <Section label="Weather Summary">
