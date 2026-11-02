@@ -14,13 +14,15 @@
  * fields and prose happens in a separate script.
  *
  * avalanche.org: lists every product in the range, then fetches each one by id, because the listing
- * leaves out the prose. Response bodies are stored as received, stubs included. A rerun fetches only
- * products whose listed updated_at is new, and keeps the earlier versions. Sends no Origin header.
+ * leaves out the prose. Response bodies are stored as received. A stub, marked by a null updated_at,
+ * holds nothing beyond its listing row and is not fetched. A rerun fetches only products whose listed
+ * updated_at is new, and keeps the earlier versions. Requests name no site: no Origin header, and
+ * fetch's own User-Agent.
  *
  * Usage: pnpm avalanche-collect [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--all-months] [--refetch]
  *   Defaults: 2022-11-01 through today, June through October skipped.
- *        pnpm avalanche-collect --source nwac [--from YYYY-MM-DD] [--to YYYY-MM-DD]
- *   Defaults: 2018-01-01 through today, all months.
+ *        pnpm avalanche-collect --source nac|<center id> [--from YYYY-MM-DD] [--to YYYY-MM-DD]
+ *   nac is every center. Defaults: 1990-01-01 through today, all months.
  */
 import { openDb } from "./db.ts";
 
@@ -34,9 +36,16 @@ const RETRIES = 4;
 const DELAY_MS = 500;
 
 const NAC_API = "https://api.avalanche.org/v2/public";
-const NAC_CENTERS: Record<string, string> = { nwac: "NWAC" };
-const NAC_DEFAULT_FROM = "2018-01-01";
+// The map layer's centers, and CBAC, which forecasts on the platform without being on it.
+const NAC_CENTERS = [
+  "BAC", "BTAC", "CAAC", "CAC", "CAIC", "CBAC", "CNFAIC", "COAA", "EARAC", "ESAC", "EWYAIX", "FAC", "GNFAC", "HAC",
+  "HPAC", "IPAC", "KPAC", "MSAC", "MWAC", "NWAC", "NYSAC", "PAC", "SAC", "SNFAC", "SOAIX", "TAC", "UAC", "VAC", "WAC",
+  "WCMAC",
+];
+const NAC_DEFAULT_FROM = "1990-01-01";
 const NAC_DELAY_MS = 250;
+// A center's whole listing can run past 100 MB.
+const NAC_LISTING_TIMEOUT_MS = 600_000;
 
 interface NacListing {
   id: number;
@@ -105,9 +114,9 @@ async function fetchDay(date: string): Promise<Product[]> {
 }
 
 // Fatal decoding with the BOM kept, so the stored text is the body's exact UTF-8.
-async function fetchExact(url: string, isValid: (body: unknown) => boolean): Promise<string> {
+async function fetchExact(url: string, isValid: (body: unknown) => boolean, timeoutMs = REQUEST_TIMEOUT_MS): Promise<string> {
   return withRetries(url, async () => {
-    const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await res.arrayBuffer());
     if (!isValid(JSON.parse(text))) throw new Error("unexpected response shape");
@@ -115,7 +124,8 @@ async function fetchExact(url: string, isValid: (body: unknown) => boolean): Pro
   });
 }
 
-async function collectNac(center: string): Promise<void> {
+// Returns how many products could not be fetched.
+async function collectNac(center: string): Promise<number> {
   const from = arg("--from") ?? NAC_DEFAULT_FROM;
   const to = arg("--to") ?? isoDate(new Date());
 
@@ -127,8 +137,8 @@ async function collectNac(center: string): Promise<void> {
     `INSERT INTO nac_products (id, updated_at, center, product_type, published_time, fetched_at, body)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
-  const saveResponse = async (url: string, isValid: (body: unknown) => boolean): Promise<string> => {
-    const body = await fetchExact(url, isValid);
+  const saveResponse = async (url: string, isValid: (body: unknown) => boolean, timeoutMs?: number): Promise<string> => {
+    const body = await fetchExact(url, isValid, timeoutMs);
     insertResponse.run(url, center, new Date().toISOString(), body);
     return body;
   };
@@ -143,6 +153,7 @@ async function collectNac(center: string): Promise<void> {
     await saveResponse(
       `${NAC_API}/products?avalanche_center_id=${center}&date_start=${from}&date_end=${isoDate(end)}`,
       Array.isArray,
+      NAC_LISTING_TIMEOUT_MS,
     ),
   ) as NacListing[];
 
@@ -153,7 +164,7 @@ async function collectNac(center: string): Promise<void> {
     }[]).map((r) => `${r.id}|${r.updated_at}`),
   );
   const missing = listing
-    .filter((p) => !stored.has(`${p.id}|${p.updated_at ?? ""}`))
+    .filter((p) => p.updated_at !== null && !stored.has(`${p.id}|${p.updated_at}`))
     .sort((a, b) => a.published_time.localeCompare(b.published_time));
   console.log(`${center}: ${listing.length} products listed (${from} to ${to}), ${missing.length} to fetch`);
 
@@ -162,7 +173,7 @@ async function collectNac(center: string): Promise<void> {
     try {
       const body = await fetchExact(`${NAC_API}/product/${p.id}`, (b) => (b as { id?: number } | null)?.id === p.id);
       insertProduct.run(
-        p.id, p.updated_at ?? "", center, p.product_type, p.published_time, new Date().toISOString(), body,
+        p.id, p.updated_at!, center, p.product_type, p.published_time, new Date().toISOString(), body,
       );
     } catch (err) {
       failed++;
@@ -177,15 +188,26 @@ async function collectNac(center: string): Promise<void> {
   const total = (db.prepare("SELECT COUNT(*) AS n FROM nac_products WHERE center = ?").get(center) as { n: number }).n;
   console.log(`done: ${missing.length - failed} fetched this run, ${failed} failed, ${total} stored for ${center}`);
   db.close();
-  if (failed > 0) process.exitCode = 1;
+  return failed;
 }
 
 async function main(): Promise<void> {
   const source = arg("--source");
   if (source !== undefined) {
-    const center = NAC_CENTERS[source];
-    if (!center) throw new Error(`unknown --source ${source}; expected ${Object.keys(NAC_CENTERS).join(", ")}`);
-    return collectNac(center);
+    const centers = source === "nac" ? NAC_CENTERS : NAC_CENTERS.filter((c) => c === source.toUpperCase());
+    if (centers.length === 0) throw new Error(`unknown --source ${source}; expected nac or one of ${NAC_CENTERS.join(", ")}`);
+    let failed = 0;
+    for (const center of centers) {
+      try {
+        failed += await collectNac(center);
+      } catch (err) {
+        failed++;
+        console.error(`${center}: gave up (${(err as Error).message})`);
+      }
+    }
+    console.log(`all centers done: ${failed} failures; rerun to retry them`);
+    if (failed > 0) process.exitCode = 1;
+    return;
   }
 
   const from = arg("--from") ?? DEFAULT_FROM;
