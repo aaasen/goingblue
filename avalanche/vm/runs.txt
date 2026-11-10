@@ -1,0 +1,3 @@
+q06 teacher.py --model Qwen/Qwen3-0.6B-Base --epochs 2
+synth synth.py --teacher q06 --samples 2
+s384c rwkv.py --vocab 8000 --tok v2cs --dim 384 --layers 6 --epochs 2 --dropout 0.1

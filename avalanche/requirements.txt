@@ -1,0 +1,6 @@
+# rwkv.py, teacher.py, quant.py and synth.py convert/train. synth.py generate runs in a separate
+# vLLM environment (vllm 0.11.0 with transformers 4.57.6).
+numpy
+torch
+sentencepiece
+transformers>=4.51,<5
