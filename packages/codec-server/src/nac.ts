@@ -1,15 +1,15 @@
 /**
  * National Avalanche Center (avalanche.org) forecasts: fetching a zone's product and mapping it onto
- * the app's AvalancheForecast. Unknown enumeration values throw rather than pass through, so an
+ * the app's AvalancheForecast, for the centers in NAC_CENTERS (avalanche-nac.gen.ts). Unknown enumeration values throw rather than pass through, so an
  * unmapped product fails loudly instead of reaching a reader.
  *
  * A `summary` is what a center publishes outside its forecast season: prose with no danger and no
  * problems, which maps onto a forecast with neither.
  */
 import {
-  ASPECTS, ELEVATIONS, avalancheAnchor,
+  ASPECTS, ELEVATIONS, NAC_CENTERS, avalancheAnchor,
   type Aspect, type AvalancheForecast, type AvalancheProblem, type AvalanchePiece, type DangerDay,
-  type DangerRating, type Elevation, type Likelihood, type ProblemType,
+  type DangerRating, type Elevation, type Likelihood, type NacCenter, type ProblemType,
 } from "@weather/protocol";
 import { htmlToText } from "./html-text.js";
 
@@ -33,18 +33,6 @@ export interface NacProduct {
     discussion?: string | null;
   }[];
 }
-
-export const NWAC_CENTER = "nwac";
-const NWAC_ID = "NWAC";
-const NWAC_NAME = "Northwest Avalanche Center";
-const NWAC_TIMEZONE = "America/Los_Angeles";
-
-// The API's id for each zone, by the name its piece carries.
-export const NWAC_ZONE_IDS: Record<string, number> = {
-  "East Slopes Central": 3030, "East Slopes North": 3029, "East Slopes South": 3031, "Mt Hood": 3032,
-  "Olympics": 3020, "Snoqualmie Pass": 3028, "Stevens Pass": 3024, "West Slopes Central": 3022,
-  "West Slopes North": 3021, "West Slopes South": 3023,
-};
 
 const TYPES: Record<string, ProblemType> = {
   "Storm Slab": "stormSlab", "Wind Slab": "windSlab", "Persistent Slab": "persistentSlab",
@@ -78,7 +66,7 @@ const addDays = (date: string, days: number) => new Date(Date.parse(date) + days
 
 // The day a product applies to, as the center's site dates it: one published at or after local noon
 // is for the following day.
-export function validDate(publishedTime: string, timezone: string = NWAC_TIMEZONE): string {
+export function validDate(publishedTime: string, timezone: string): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23",
   }).formatToParts(new Date(publishedTime));
@@ -91,9 +79,9 @@ function rating(value: number | null): DangerRating {
   return value === null ? "noRating" : lookup(RATINGS, String(value), "danger rating");
 }
 
-function danger(p: NacProduct): DangerDay[] {
+function danger(p: NacProduct, timezone: string): DangerDay[] {
   const offsets: Record<string, number> = { current: 0, tomorrow: 1 };
-  const first = validDate(p.published_time);
+  const first = validDate(p.published_time, timezone);
   return (p.danger ?? [])
     .map((d) => ({ offset: lookup(offsets, d.valid_day, "valid day"), d }))
     .sort((a, b) => a.offset - b.offset)
@@ -135,18 +123,26 @@ export function isRated(p: NacProduct): boolean {
   return (p.danger ?? []).some((d) => [d.upper, d.middle, d.lower].some((v) => v !== null && v >= 1));
 }
 
-export function toForecast(p: NacProduct, piece: Pick<AvalanchePiece, "id" | "names">): AvalancheForecast {
+// The pieces of the zones a product covers. A zone the center no longer has (one with no piece and
+// no successor) is left out.
+function productPieces(p: NacProduct, center: Pick<NacCenter, "zones">): number[] {
+  const ids = new Set((p.forecast_zone ?? []).map((z) => z.id));
+  return center.zones.filter((z) => ids.has(z.zoneId) || z.formerIds.some((id) => ids.has(id))).map((z) => z.piece);
+}
+
+export function toForecast(p: NacProduct, center: NacCenter): AvalancheForecast {
+  const pieces = productPieces(p, center);
   return {
-    center: NWAC_CENTER,
-    issuedBy: NWAC_NAME,
+    center: center.id.toLowerCase(),
+    issuedBy: center.name,
     author: (p.author ?? "").trim(),
-    region: piece.names[0],
-    pieces: [piece.id],
+    region: (p.forecast_zone ?? []).map((z) => z.name).join(", "),
+    pieces,
     issued: Date.parse(p.published_time),
     expires: Date.parse(p.expires_time),
-    timezone: NWAC_TIMEZONE,
+    timezone: center.timezone,
     bottomLine: htmlToText(p.bottom_line),
-    danger: danger(p),
+    danger: danger(p, center.timezone),
     advice: [],
     problems: [...(p.forecast_avalanche_problems ?? [])].sort((a, b) => a.rank - b.rank).map(problem),
     avalancheSummary: "",
@@ -173,40 +169,43 @@ async function getJson(path: string): Promise<unknown> {
 
 // The latest product for a zone. The API answers an empty object of nulls when there is none, and a
 // null updated_at marks a stub that holds no forecast.
-async function latestProduct(zoneId: number): Promise<NacProduct | null> {
-  const product = await getJson(`/v2/public/product?type=forecast&center_id=${NWAC_ID}&zone_id=${zoneId}`) as NacProduct;
+async function latestProduct(center: NacCenter, zoneId: number): Promise<NacProduct | null> {
+  const product = await getJson(`/v2/public/product?type=forecast&center_id=${center.id}&zone_id=${zoneId}`) as NacProduct;
   if (product.updated_at === null || product.id === undefined) return null;
   if (!SERVED_TYPES.has(product.product_type)) throw new Error(`nac: unexpected product type ${product.product_type}`);
   return product;
 }
 
 // A zone's served products published from `from` up to but not including `until`, latest first, from
-// the listing, whose rows leave out the prose. The listing filters on UTC publish dates.
-async function listProducts(zoneId: number, from: string, until: string): Promise<NacProduct[]> {
+// the listing, whose rows leave out the prose. The listing filters on UTC publish dates. A zone's
+// products include those of the retired zones its ground was part of.
+async function listProducts(center: NacCenter, zoneIds: number[], from: string, until: string): Promise<NacProduct[]> {
   const rows = await getJson(
-    `/v2/public/products?avalanche_center_id=${NWAC_ID}&date_start=${from}&date_end=${until}`,
+    `/v2/public/products?avalanche_center_id=${center.id}&date_start=${from}&date_end=${until}`,
   ) as (NacProduct & { forecast_zone: { id: number }[] })[];
   return rows
-    .filter((r) => SERVED_TYPES.has(r.product_type) && r.updated_at !== null && r.forecast_zone.some((z) => z.id === zoneId))
+    .filter((r) => SERVED_TYPES.has(r.product_type) && r.updated_at !== null && r.forecast_zone.some((z) => zoneIds.includes(z.id)))
     .sort((a, b) => b.published_time.localeCompare(a.published_time));
 }
 
 // The product a zone's forecast for `day` ("YYYY-MM-DD") shows: the latest published for that day, or
 // else what was still in force that day, such as a summary published weeks before. The API has no
 // dated lookup, so this finds it in the listing and fetches it by id.
-async function datedProduct(zoneId: number, day: string): Promise<NacProduct | null> {
-  const near = await listProducts(zoneId, addDays(day, -1), addDays(day, 1));
-  let found = near.find((p) => validDate(p.published_time) === day);
+async function datedProduct(center: NacCenter, zoneIds: number[], day: string): Promise<NacProduct | null> {
+  const near = await listProducts(center, zoneIds, addDays(day, -1), addDays(day, 1));
+  let found = near.find((p) => validDate(p.published_time, center.timezone) === day);
   if (!found) {
     const at = avalancheAnchor(day, 0);
-    const back = await listProducts(zoneId, addDays(day, -MAX_DAYS_BACK), addDays(day, 1));
+    const back = await listProducts(center, zoneIds, addDays(day, -MAX_DAYS_BACK), addDays(day, 1));
     found = back.find((p) => Date.parse(p.published_time) <= at && at < Date.parse(p.expires_time));
   }
   return found ? await getJson(`/v2/public/product/${found.id}`) as NacProduct : null;
 }
 
 // The product for a piece's zone on `day`, or the latest when `day` is null. Null when there is none.
-export function fetchZoneProduct(piece: Pick<AvalanchePiece, "names">, day: string | null): Promise<NacProduct | null> {
-  const zoneId = lookup(NWAC_ZONE_IDS, piece.names[0], "zone");
-  return day ? datedProduct(zoneId, day) : latestProduct(zoneId);
+export function fetchZoneProduct(piece: Pick<AvalanchePiece, "id" | "center">, day: string | null): Promise<NacProduct | null> {
+  const center = lookup(NAC_CENTERS, piece.center, "center");
+  const zone = center.zones.find((z) => z.piece === piece.id);
+  if (!zone) throw new Error(`nac: piece ${piece.id} is not a ${center.id} zone`);
+  return day ? datedProduct(center, [zone.zoneId, ...zone.formerIds], day) : latestProduct(center, zone.zoneId);
 }

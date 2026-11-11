@@ -7,6 +7,7 @@
  * structured fields and the issue time. A marker the model does not know is dropped on both
  * sides, so a new value costs prediction quality, never a decode.
  */
+import { NAC_CENTERS } from "../avalanche-nac.gen.js";
 import { AVALANCHE_PIECES } from "../avalanche-pieces.gen.js";
 import { ASPECTS, ELEVATIONS } from "../avalanche.js";
 import { kindsOf } from "./sections.js";
@@ -29,14 +30,12 @@ export interface ProseCoder {
   decode(bytes: Uint8Array, layout: ProseDoc): Promise<string[]>;
 }
 
-// The model knows NAC centers by their ids.
-const MODEL_CENTER: Record<string, string> = { nwac: "NWAC" };
 
 // The doc for a bulletin, with the section texts when given (encoding) and without (decoding).
 export function proseDoc(pieces: readonly number[], s: Structured, issued: number, texts?: readonly string[]): ProseDoc {
   const markers: string[] = [];
   const center = pieces.length ? AVALANCHE_PIECES[pieces[0]]?.center : undefined;
-  if (center) markers.push(`center:${MODEL_CENTER[center] ?? center}`);
+  if (center) markers.push(`center:${NAC_CENTERS[center]?.id ?? center}`);   // avalanche.org centers by their API ids
   markers.push(`month:${new Date(issued).toISOString().slice(5, 7)}`);
   s.ratings.slice(0, 3).forEach((d, i) => {
     for (const band of ["alp", "tln", "btl"] as const) markers.push(`d${i}${band}:${d[band]}`);

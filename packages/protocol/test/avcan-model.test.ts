@@ -11,20 +11,20 @@ import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.js
 // The avalanche models are wire format like the entropy codebooks: a bulletin encoded under one
 // model decodes to garbage under another. The structured digests are over the unpacked bytes, so
 // a zlib upgrade that changes the gzip stream does not trip them. Rewritten by
-// `pnpm avalanche-model [--source nwac]`, which prints the new digest.
+// `pnpm avalanche-model [--source nac]`, which prints the new digest.
 const FROZEN_MODEL_DIGEST = "9e96b36f5b5810b9";
-const FROZEN_NWAC_MODEL_DIGEST = "3ab8293e3f33a228";
+const FROZEN_NAC_MODEL_DIGEST = "f3ec54062432899c";
 // The shared prose model (native/avalanche), pinned in models.json.
 const FROZEN_PROSE_DIGEST = "3698902a0d9f8f04";
 // The same for the piece-set model, rewritten by `pnpm avalanche-region`.
-const FROZEN_REGION_DIGEST = "d4ccfcf8810d21a0";
+const FROZEN_REGION_DIGEST = "5cff2b2b89d1ca08";
 
 const digestOf = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex").slice(0, 16);
 
 describe("avalanche model", () => {
   it.each([
     ["avcan-structured.bin.gz", FROZEN_MODEL_DIGEST],
-    ["nwac-structured.bin.gz", FROZEN_NWAC_MODEL_DIGEST],
+    ["nac-structured.bin.gz", FROZEN_NAC_MODEL_DIGEST],
   ])("matches the frozen digest of %s", (file, frozen) => {
     const digest = digestOf(gunzipSync(asset(file)));
     expect(digest, `${file} changed without a protocol version bump; if intended, set its digest to "${digest}"`).toBe(frozen);

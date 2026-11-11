@@ -1,22 +1,27 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import {
-  AVALANCHE_PIECES, DEVICE_TRANSPORT, WIRE_HEADER_CHARS, avalancheModelFile, decodeAvalancheMessage,
+  AVALANCHE_PIECES, DEVICE_TRANSPORT, NAC_CENTERS, WIRE_HEADER_CHARS, avalancheModelFile, decodeAvalancheMessage,
   pieceAt, reassembleReply, withPlaceholders,
 } from "@weather/protocol";
+import { PIECE_INTERIORS } from "../../protocol/src/avalanche-region.gen.ts";
 import { serveAvalanche } from "../src/avalanche.ts";
 import { parseRequest } from "../src/forecast.ts";
-import { isRated, NWAC_ZONE_IDS, toForecast, validDate, type NacProduct } from "../src/nac.ts";
+import { isRated, toForecast, validDate, type NacProduct } from "../src/nac.ts";
 import { modelsFor } from "../../protocol/test/avalanche-models.ts";
 
-// Recorded from the product endpoint: a Stevens Pass forecast, the off-season summary, and a Mt Hood
-// forecast whose location is not every combination of its aspects and bands.
+// Recorded from the product endpoint: a Stevens Pass forecast, the off-season summary, a Mt Hood
+// forecast whose location is not every combination of its aspects and bands, a Gallatin forecast
+// covering four zones, and a Flathead forecast for a zone since split in two.
 const fixture = (name: string) => JSON.parse(readFileSync(new URL(`fixtures/${name}`, import.meta.url), "utf8")) as NacProduct;
 const STEVENS = fixture("nac-nwac-stevens-2026-01-08.json");
 const SUMMARY = fixture("nac-nwac-summary-2026-09-15.json");
 const CELLS = fixture("nac-nwac-cells.json");
+const GALLATIN = fixture("nac-gnfac-2026-01-02.json");
+const WHITEFISH = fixture("nac-fac-whitefish-2026-01-11.json");
 
-const MODELS = modelsFor("nwac");
+const MODELS = modelsFor("nac");
+const NWAC = NAC_CENTERS.nwac;
 const STEVENS_PIECE = AVALANCHE_PIECES.find((p) => p.center === "nwac" && p.names[0] === "Stevens Pass")!;
 const [STEVENS_LAT, STEVENS_LON] = ["47.7500", "-121.0900"];
 const ANCHOR = Date.parse("2026-01-08T19:00:00Z");
@@ -39,7 +44,7 @@ function answer(handler: (url: URL) => unknown, status = 200) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("toForecast", () => {
-  const f = toForecast(STEVENS, STEVENS_PIECE);
+  const f = toForecast(STEVENS, NWAC);
 
   it("maps the danger days onto the dates they apply to", () => {
     expect(f.danger).toEqual([
@@ -67,7 +72,7 @@ describe("toForecast", () => {
   });
 
   it("keeps the exact cells of a location that isn't every combination", () => {
-    const wetLoose = toForecast(CELLS, STEVENS_PIECE).problems.find((p) => p.cells)!;
+    const wetLoose = toForecast(CELLS, NWAC).problems.find((p) => p.cells)!;
     expect(wetLoose.cells).toHaveLength(19);
     expect(wetLoose.elevations).toEqual(["btl", "tln", "alp"]);
     expect(wetLoose.aspects).toHaveLength(7);
@@ -75,8 +80,8 @@ describe("toForecast", () => {
 
   it("maps an empty band to no rating and a summary to no danger and no problems", () => {
     const empty = { ...STEVENS, danger: [{ valid_day: "current", upper: 2, middle: null, lower: 0 }] };
-    expect(toForecast(empty, STEVENS_PIECE).danger[0]).toMatchObject({ alp: "moderate", tln: "noRating", btl: "noRating" });
-    const summary = toForecast(SUMMARY, STEVENS_PIECE);
+    expect(toForecast(empty, NWAC).danger[0]).toMatchObject({ alp: "moderate", tln: "noRating", btl: "noRating" });
+    const summary = toForecast(SUMMARY, NWAC);
     expect(summary.danger).toEqual([]);
     expect(summary.problems).toEqual([]);
     expect(summary.hazardDiscussion).not.toBe("");
@@ -87,39 +92,51 @@ describe("toForecast", () => {
   it("throws on values it doesn't know", () => {
     const problem = STEVENS.forecast_avalanche_problems![0];
     const withProblem = (over: object) => ({ ...STEVENS, forecast_avalanche_problems: [{ ...problem, ...over }] });
-    expect(() => toForecast(withProblem({ name: "Slush Flow" }), STEVENS_PIECE)).toThrow(/unknown problem type/);
-    expect(() => toForecast(withProblem({ likelihood: "maybe" }), STEVENS_PIECE)).toThrow(/unknown likelihood/);
-    expect(() => toForecast(withProblem({ location: ["up upper"] }), STEVENS_PIECE)).toThrow(/unknown aspect/);
-    expect(() => toForecast({ ...STEVENS, danger: [{ valid_day: "current", upper: 9, middle: 1, lower: 1 }] }, STEVENS_PIECE)).toThrow(/unknown danger rating/);
-    expect(() => toForecast({ ...STEVENS, danger: [{ valid_day: "later", upper: 1, middle: 1, lower: 1 }] }, STEVENS_PIECE)).toThrow(/unknown valid day/);
+    expect(() => toForecast(withProblem({ name: "Slush Flow" }), NWAC)).toThrow(/unknown problem type/);
+    expect(() => toForecast(withProblem({ likelihood: "maybe" }), NWAC)).toThrow(/unknown likelihood/);
+    expect(() => toForecast(withProblem({ location: ["up upper"] }), NWAC)).toThrow(/unknown aspect/);
+    expect(() => toForecast({ ...STEVENS, danger: [{ valid_day: "current", upper: 9, middle: 1, lower: 1 }] }, NWAC)).toThrow(/unknown danger rating/);
+    expect(() => toForecast({ ...STEVENS, danger: [{ valid_day: "later", upper: 1, middle: 1, lower: 1 }] }, NWAC)).toThrow(/unknown valid day/);
   });
 });
 
 describe("validDate", () => {
   it("dates a product published at or after local noon as the next day", () => {
-    expect(validDate("2026-01-08T02:00:00+00:00")).toBe("2026-01-08"); // 18:00 PST on the 7th
-    expect(validDate("2026-01-07T19:59:00+00:00")).toBe("2026-01-07"); // 11:59 PST
-    expect(validDate("2026-01-07T20:00:00+00:00")).toBe("2026-01-08"); // 12:00 PST
-    expect(validDate("2026-04-17T01:30:00+00:00")).toBe("2026-04-17"); // 18:30 PDT on the 16th
+    const pacific = NWAC.timezone;
+    expect(validDate("2026-01-08T02:00:00+00:00", pacific)).toBe("2026-01-08"); // 18:00 PST on the 7th
+    expect(validDate("2026-01-07T19:59:00+00:00", pacific)).toBe("2026-01-07"); // 11:59 PST
+    expect(validDate("2026-01-07T20:00:00+00:00", pacific)).toBe("2026-01-08"); // 12:00 PST
+    expect(validDate("2026-04-17T01:30:00+00:00", pacific)).toBe("2026-04-17"); // 18:30 PDT on the 16th
+    // In the center's own zone: 12:30 MST is past noon in Bozeman but not in Seattle.
+    expect(validDate("2026-01-07T19:30:00+00:00", NAC_CENTERS.gnfac.timezone)).toBe("2026-01-08");
+    expect(validDate("2026-01-07T19:30:00+00:00", pacific)).toBe("2026-01-07");
   });
 });
 
 describe("zones", () => {
-  it("knows the API's id for every NWAC piece", () => {
-    const pieces = AVALANCHE_PIECES.filter((p) => p.center === "nwac");
-    expect(pieces).toHaveLength(10);
-    for (const p of pieces) expect(NWAC_ZONE_IDS[p.names[0]], p.names[0]).toBeTypeOf("number");
+  it("gives every zone of every served center its own piece of that center", () => {
+    const zones = Object.values(NAC_CENTERS).flatMap((c) => c.zones.map((z) => ({ center: c.id.toLowerCase(), ...z })));
+    expect(Object.keys(NAC_CENTERS)).toHaveLength(21);
+    expect(new Set(zones.map((z) => z.piece)).size).toBe(zones.length);
+    for (const z of zones) expect(AVALANCHE_PIECES[z.piece].center).toBe(z.center);
+    expect(AVALANCHE_PIECES.filter((p) => p.center in NAC_CENTERS)).toHaveLength(zones.length);
+    expect(NAC_CENTERS.nwac.zones.find((z) => z.zoneId === 3024)).toMatchObject({
+      piece: STEVENS_PIECE.id, bands: { alp: ["Upper Elevations", "7000-6000ft"] },
+    });
   });
 
   it("chooses the structured model from the point on both sides of the 49th parallel", () => {
     // Mt Baker, in West Slopes North, and Manning Park just north of it.
     expect(pieceAt(48.78, -121.81)?.center).toBe("nwac");
-    expect(avalancheModelFile(48.78, -121.81)).toBe("nwac-structured.bin.gz");
+    expect(avalancheModelFile(48.78, -121.81)).toBe("nac-structured.bin.gz");
     expect(pieceAt(49.06, -120.8)?.center).toBe("avalanche-canada");
     expect(avalancheModelFile(49.06, -120.8)).toBe("avcan-structured.bin.gz");
     // Seattle is in no piece, and the model of a point in no piece is Avalanche Canada's.
     expect(pieceAt(47.6, -122.33)).toBeNull();
     expect(avalancheModelFile(47.6, -122.33)).toBe("avcan-structured.bin.gz");
+    // Every served center shares the avalanche.org model: Bozeman's Bridger Range.
+    expect(pieceAt(45.85, -110.95)?.center).toBe("gnfac");
+    expect(avalancheModelFile(45.85, -110.95)).toBe("nac-structured.bin.gz");
   });
 });
 
@@ -136,7 +153,7 @@ describe("serveAvalanche for an NWAC zone", () => {
     if (result.kind !== "ok") throw new Error(result.kind);
     const { code, forecast } = await decodeAvalancheMessage(MODELS, result.replies[0], ANCHOR, "base94");
     expect(code).toBe(42);
-    expect(forecast).toEqual(withPlaceholders(toForecast(STEVENS, STEVENS_PIECE)));
+    expect(forecast).toEqual(withPlaceholders(toForecast(STEVENS, NWAC)));
     expect(forecast.pieces).toEqual([STEVENS_PIECE.id]);
   });
 
@@ -146,7 +163,7 @@ describe("serveAvalanche for an NWAC zone", () => {
     if (result.kind !== "ok") throw new Error(result.kind);
     const whole = reassembleReply(result.replies.join("\n"), () => WIRE_HEADER_CHARS);
     const { forecast } = await decodeAvalancheMessage(MODELS, whole, ANCHOR, DEVICE_TRANSPORT[device].alphabet);
-    expect(forecast).toEqual(withPlaceholders(toForecast(STEVENS, STEVENS_PIECE)));
+    expect(forecast).toEqual(withPlaceholders(toForecast(STEVENS, NWAC)));
   });
 
   it("round-trips the off-season summary and exact cells", async () => {
@@ -156,7 +173,7 @@ describe("serveAvalanche for an NWAC zone", () => {
       const result = await serveAvalanche(parseRequest(`v8 ${STEVENS_LAT},${STEVENS_LON} f:a d:d u:0000000000000000 k:1 t:${Math.floor(anchor / 3600000)}`));
       if (result.kind !== "ok") throw new Error(result.kind);
       const { forecast } = await decodeAvalancheMessage(MODELS, result.replies[0], Math.floor(anchor / 3600000) * 3600000, "base94");
-      expect(forecast).toEqual(withPlaceholders(toForecast(product, STEVENS_PIECE)));
+      expect(forecast).toEqual(withPlaceholders(toForecast(product, NWAC)));
     }
   });
 
@@ -193,7 +210,7 @@ describe("serveAvalanche for an NWAC zone", () => {
     expect(urls.map((u) => u.searchParams.get("date_start"))).toEqual(["2026-10-19", "2025-11-15", null]);
     expect(urls[2].pathname).toBe(`/v2/public/product/${SUMMARY.id}`);
     const { forecast } = await decodeAvalancheMessage(MODELS, result.replies[0], Date.parse("2026-10-20T19:00:00Z"), "base94");
-    expect(forecast).toEqual(withPlaceholders(toForecast(SUMMARY, STEVENS_PIECE)));
+    expect(forecast).toEqual(withPlaceholders(toForecast(SUMMARY, NWAC)));
   });
 
   it("answers no_forecast for a day nothing covers, a stub, and the API's empty answer", async () => {
@@ -216,5 +233,35 @@ describe("serveAvalanche for an NWAC zone", () => {
     const fetch = answer(() => ({ id: "" }));
     expect(await serveAvalanche(request("d:s", "49.0600", "-120.8000"))).toEqual({ kind: "no_forecast" });
     expect((fetch.mock.calls[0][0] as URL).host).toBe("api.avalanche.ca");
+  });
+});
+
+describe("serveAvalanche for the other avalanche.org centers", () => {
+  const pieceOf = (center: string, zoneId: number) => NAC_CENTERS[center].zones.find((z) => z.zoneId === zoneId)!.piece;
+  const at = (piece: number) => PIECE_INTERIORS[piece].map((v) => v.toFixed(4)).reverse() as [string, string];
+
+  it("asks the center for its zone and codes every zone the product covers", async () => {
+    const madison = pieceOf("gnfac", 2823);
+    const fetch = answer(() => GALLATIN);
+    const anchor = Date.parse("2026-01-02T19:00:00Z");
+    const result = await serveAvalanche(parseRequest(`v8 ${at(madison).join(",")} f:a d:d u:0000000000000000 k:7 t:${anchor / 3600000}`));
+    expect(Object.fromEntries((fetch.mock.calls[0][0] as URL).searchParams)).toEqual({ type: "forecast", center_id: "GNFAC", zone_id: "2823" });
+    if (result.kind !== "ok") throw new Error(result.kind);
+    const { forecast } = await decodeAvalancheMessage(MODELS, result.replies[0], anchor, "base94");
+    const expected = toForecast(GALLATIN, NAC_CENTERS.gnfac);
+    expect(forecast).toEqual(withPlaceholders(expected));
+    expect(expected).toMatchObject({ center: "gnfac", issuedBy: "Gallatin NF Avalanche Center", timezone: "America/Denver" });
+    expect(forecast.pieces).toEqual([2823, 2824, 2825, 2826].map((z) => pieceOf("gnfac", z)).sort((a, b) => a - b));
+    expect(forecast.danger[0].date).toBe("2026-01-02");
+  });
+
+  it("finds a retired zone's products for the zones that replaced it", async () => {
+    const north = pieceOf("fac", 3040), south = pieceOf("fac", 3041);
+    expect(toForecast(WHITEFISH, NAC_CENTERS.fac).pieces).toEqual([north, south]);
+    const fetch = answer((url) => url.pathname.endsWith("/products") ? [row(WHITEFISH)] : WHITEFISH);
+    const anchor = Date.parse("2026-01-11T19:00:00Z");
+    const result = await serveAvalanche(parseRequest(`v8 ${at(south).join(",")} f:a d:d u:0000000000000000 k:7 t:${anchor / 3600000} y:20260111`));
+    expect(result.kind).toBe("ok");
+    expect((fetch.mock.calls[1][0] as URL).pathname).toBe(`/v2/public/product/${WHITEFISH.id}`);
   });
 });

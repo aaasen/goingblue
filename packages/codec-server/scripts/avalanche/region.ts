@@ -3,7 +3,8 @@
  *
  * Each archived area is mapped to the pieces it covers through one interior point per piece.
  * Every product on every walk day since FIRST_WALK is one observation of its area's set, and every
- * NWAC forecast since then one observation of its zone's piece. The anchor (the set's lowest piece) is counted; for each anchor, the higher pieces of its center
+ * forecast since then from an avalanche.org center the app serves one observation of the pieces of
+ * the zones it lists (zones the center no longer has are left out). The anchor (the set's lowest piece) is counted; for each anchor, the higher pieces of its center
  * are ordered by how often they join it, and each takes as its link whichever piece before it
  * (the anchor included) best predicts it over the anchor's observations, by smoothed in-sample
  * cost. The weights are the smoothed chances of the piece being in, given the link out or in.
@@ -22,7 +23,7 @@
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { AVALANCHE_PIECES } from "@weather/protocol";
+import { AVALANCHE_PIECES, NAC_CENTERS } from "@weather/protocol";
 import { inPolygons, piecesInArea } from "@weather/protocol/avalanche-codec/region";
 import { SCALE } from "@weather/protocol/avalanche-codec/rans";
 import { openDb, REPO_ROOT } from "./db.ts";
@@ -73,8 +74,8 @@ function observations(interiors: [number, number][]): { obs: Obs[]; areaPieces: 
     SELECT wp.walk_date AS day, p.area_id AS area, p.owner AS center FROM walk_products wp
     JOIN products p ON p.id = wp.product_id WHERE wp.walk_date >= ?`).all(FIRST_WALK) as { day: string; area: string; center: string }[];
   const nac = db.prepare(`
-    SELECT published_time AS day, json_extract(body, '$.forecast_zone[0].name') AS zone FROM nac_products
-    WHERE center = 'NWAC' AND product_type = 'forecast' AND updated_at != '' AND published_time >= ?`).all(FIRST_WALK) as { day: string; zone: string }[];
+    SELECT center, published_time AS day, json_extract(body, '$.forecast_zone') AS zones FROM nac_products
+    WHERE product_type = 'forecast' AND updated_at != '' AND published_time >= ? GROUP BY id`).all(FIRST_WALK) as { center: string; day: string; zones: string }[];
   db.close();
   const sets = new Map<string, number[]>();
   const centers = new Map<string, string>();
@@ -83,11 +84,16 @@ function observations(interiors: [number, number][]): { obs: Obs[]; areaPieces: 
     const [y, m] = day.split("-").map(Number);
     return m >= 8 ? y : y - 1;
   };
+  let retired = 0;
   for (const r of nac) {
-    const piece = AVALANCHE_PIECES.find((p) => p.center === "nwac" && p.names[0] === r.zone);
-    if (!piece) throw new Error(`region: no piece for NWAC zone ${r.zone}`);
-    out.push({ season: season(r.day), set: [piece.id] });
+    const center = NAC_CENTERS[r.center.toLowerCase()];
+    if (!center) continue;
+    const ids = new Set((JSON.parse(r.zones ?? "[]") as { id: number }[]).map((z) => z.id));
+    const set = center.zones.filter((z) => ids.has(z.zoneId) || z.formerIds.some((id) => ids.has(id))).map((z) => z.piece);
+    if (set.length === 0) { retired++; continue; }
+    out.push({ season: season(r.day), set });
   }
+  if (retired) console.log(`skipped ${retired} avalanche.org forecasts covering only retired zones`);
   let missing = 0, empty = 0;
   for (const r of rows) {
     const area = areas.get(r.area);

@@ -8,8 +8,8 @@ import * as Location from 'expo-location';
 import * as Network from 'expo-network';
 import { pageInsets } from './insets';
 import AvalancheForecastView from './AvalancheScreen';
-import NwacForecastView from './NwacForecast';
-import { bulletinCenter, forecastRegion, pieceAt, pieceFeatures, zoneLabel, zoneNames } from './avalancheDisplay';
+import NacForecastView from './NacForecast';
+import { bulletinCenter, forecastRegion, isNacCenter, pieceAt, pieceFeatures, zoneLabel, zoneNames } from './avalancheDisplay';
 import { loadAvalancheModel, loadModelsForReplies } from './avalancheModel';
 import DayRow from './components/DayRow';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -1830,11 +1830,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     return day ? new Date(`${day}T12:00:00`) : new Date(slot.requestedAt);
   }), [avalancheCache]);
   // The region the loaded bulletin was requested in, named as its saved row names it.
-  const avalancheZoneName = useMemo(() => {
-    if (!avalanche) return '';
-    const piece = pieceAt(avalanche.lat, avalanche.lon, AVALANCHE_PIECES);
-    return piece ? zoneNames(piece) : '';
-  }, [avalanche]);
+  const avalanchePiece = useMemo(() => (avalanche ? pieceAt(avalanche.lat, avalanche.lon, AVALANCHE_PIECES) : null), [avalanche]);
+  const avalancheZoneName = avalanchePiece ? zoneNames(avalanchePiece) : '';
   // A bulletin row names only where it is for: the favorite, else the region, else the point.
   const describeAvalanche = useCallback((slot: Slot): PastRowText => {
     const piece = pieceAt(slot.context.lat, slot.context.lon, AVALANCHE_PIECES);
@@ -2147,8 +2144,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               />
             </View>
           )}
-          {avalanche && bulletinCenter(avalanche.forecast) === 'nwac' && <NwacForecastView forecast={avalanche.forecast} timeFormat={timeFormat} />}
-          {avalanche && bulletinCenter(avalanche.forecast) !== 'nwac' && <AvalancheForecastView forecast={avalanche.forecast} region={avalancheZoneName} timeFormat={timeFormat} />}
+          {avalanche && isNacCenter(bulletinCenter(avalanche.forecast)) && <NacForecastView forecast={avalanche.forecast} requested={avalanchePiece?.id ?? null} timeFormat={timeFormat} />}
+          {avalanche && !isNacCenter(bulletinCenter(avalanche.forecast)) && <AvalancheForecastView forecast={avalanche.forecast} region={avalancheZoneName} timeFormat={timeFormat} />}
           {!avalanche && !avalancheCollecting && !avalancheError && <EmptyForecast />}
           <PastForecasts groups={avalancheGroups} loadedKey={loadedAvalancheKey} describe={describeAvalanche}
             onLoad={loadAvalanchePast} onDelete={deletePast} />

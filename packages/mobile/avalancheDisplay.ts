@@ -1,7 +1,7 @@
 // What the avalanche view says and colors, kept apart from the drawing so it can be tested.
 import tzlookup from 'tz-lookup';
 import {
-  AVALANCHE_PIECES, DANGER_LEVELS, LIKELIHOODS, pieceAt,
+  AVALANCHE_PIECES, DANGER_LEVELS, LIKELIHOODS, NAC_CENTERS, pieceAt,
   type AvalancheForecast, type AvalanchePiece, type DangerDay, type DangerRating, type Elevation, type Likelihood, type ProblemType,
 } from '@weather/protocol';
 import type { DangerIcon } from './dangerIcons';
@@ -202,47 +202,43 @@ export function sizeScale(size: { min: number; max: number }): Scale {
   };
 }
 
-// ── NWAC ─────────────────────────────────────────────────────────────────────
+// ── avalanche.org centers ────────────────────────────────────────────────────
 
-// Each zone's elevation ranges by band, as the center's configuration on avalanche.org gives them.
-const NWAC_BAND_RANGES: Record<string, Record<Elevation, string>> = {
-  'East Slopes Central': { alp: '7500-6000ft', tln: '6000-5000ft', btl: '5000-2500ft' },
-  'East Slopes North': { alp: '8000-6500ft', tln: '6500-5000ft', btl: '5000-3000ft' },
-  'East Slopes South': { alp: '7500-6000ft', tln: '6000-5000ft', btl: '5000-3000ft' },
-  'Mt Hood': { alp: '8500-6500ft', tln: '6500-5500ft', btl: '5500-3500ft' },
-  Olympics: { alp: '6500-5500ft', tln: '5500-4500ft', btl: '4500-3000ft' },
-  'Snoqualmie Pass': { alp: '6500-5500ft', tln: '5500-4000ft', btl: '4000-2500ft' },
-  'Stevens Pass': { alp: '7000-6000ft', tln: '6000-5000ft', btl: '5000-3000ft' },
-  'West Slopes Central': { alp: '7500-5500ft', tln: '5500-4500ft', btl: '4500-2500ft' },
-  'West Slopes North': { alp: '7500-5500ft', tln: '5500-4500ft', btl: '4500-2500ft' },
-  'West Slopes South': { alp: '8000-6500ft', tln: '6500-5500ft', btl: '5500-3500ft' },
-};
-const NWAC_BAND_NAMES: Record<Elevation, string> = { alp: 'Upper Elevations', tln: 'Middle Elevations', btl: 'Lower Elevations' };
+// Whether a center is one of the avalanche.org centers, whose bulletins the app lays out the way
+// their own sites do.
+export const isNacCenter = (center: string): boolean => center in NAC_CENTERS;
 
-export function nwacBandLabel(zone: string, band: Elevation): { name: string; range: string } {
-  return { name: NWAC_BAND_NAMES[band], range: NWAC_BAND_RANGES[zone]?.[band] ?? '' };
+const NAC_ZONES = new Map(Object.values(NAC_CENTERS).flatMap((c) => c.zones.map((z) => [z.piece, z])));
+
+// A band's label for a zone's piece, as the center's configuration words it: a name and an
+// elevation range, either of which can be empty.
+export function nacBandLabel(piece: number | null, band: Elevation): { name: string; range: string } {
+  const [name, range] = (piece === null ? undefined : NAC_ZONES.get(piece)?.bands[band]) ?? ['', ''];
+  return { name, range };
 }
 
-// The zone a forecast covers, from its one piece.
-export function nwacZone(forecast: Pick<AvalancheForecast, 'pieces'>): string {
-  return forecast.pieces.length > 0 ? AVALANCHE_PIECES[forecast.pieces[0]].names[0] : '';
+// The zone a bulletin is shown for: the piece it was requested in when it covers that, else its
+// first piece.
+export function nacZonePiece(forecast: Pick<AvalancheForecast, 'pieces'>, requested: number | null): number | null {
+  if (requested !== null && forecast.pieces.includes(requested)) return requested;
+  return forecast.pieces.length > 0 ? forecast.pieces[0] : null;
 }
 
-export const nwacProblemNames: Record<ProblemType, string> = {
+export const nacProblemNames: Record<ProblemType, string> = {
   stormSlab: 'Storm Slab', windSlab: 'Wind Slab', persistentSlab: 'Persistent Slab',
   deepPersistentSlab: 'Deep Persistent Slab', wetSlab: 'Wet Slab', wetLoose: 'Wet Loose',
   dryLoose: 'Dry Loose', cornice: 'Cornice Fall', glide: 'Glide Avalanches',
 };
 
 // "Wednesday, March 11, 2026", for a "YYYY-MM-DD" calendar date.
-export function nwacDayLabel(date: string): string {
+export function nacDayLabel(date: string): string {
   return new Intl.DateTimeFormat('en-US', {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC',
   }).format(new Date(Date.parse(date)));
 }
 
 // "Tuesday, March 10, 2026 - 6:30PM", in the reader's clock format.
-export function nwacStamp(ms: number, timezone: string, timeFormat: TimeFormat): string {
+export function nacStamp(ms: number, timezone: string, timeFormat: TimeFormat): string {
   const d = new Date(ms);
   const date = new Intl.DateTimeFormat('en-US', {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: timezone,
@@ -256,7 +252,7 @@ export function nwacStamp(ms: number, timezone: string, timeFormat: TimeFormat):
 
 // Historic on top, as the center draws it: sizes 4 and 5 share a row. A half size ends the bar
 // between two rows and bolds the larger, the same rounding as sizeScale.
-export function nwacSizeScale(size: { min: number; max: number }): Scale {
+export function nacSizeScale(size: { min: number; max: number }): Scale {
   const row = (s: number) => Math.max(0, 4 - s);
   const lo = Math.round(size.min), hi = Math.round(size.max);
   const reach = (s: number) => (Number.isInteger(s) || size.min === size.max ? BAR_REACH : 0);
@@ -320,11 +316,14 @@ const PREPARED_BY: Record<string, string> = {
   'parks-glacier': 'Parks Canada',
   'parks-jasper': 'Parks Canada',
   'parks-waterton': 'Parks Canada',
-  nwac: 'Northwest Avalanche Center',
 };
 
-// The line naming the piece a point is in: its center, then its subregions.
-const ZONE_CENTERS: Record<string, string> = { ...PREPARED_BY, kananaskis: 'Kananaskis MRP', nwac: 'NWAC' };
+// The line naming the piece a point is in: its center, then its subregions. avalanche.org centers
+// go by their ids.
+const ZONE_CENTERS: Record<string, string> = {
+  ...PREPARED_BY, kananaskis: 'Kananaskis MRP',
+  ...Object.fromEntries(Object.entries(NAC_CENTERS).map(([key, c]) => [key, c.id])),
+};
 // Subregions forecast together that the line calls by one name.
 const MERGED_NAMES: [string[], string][] = [
   [['White Pass East', 'White Pass West'], 'White Pass'],
@@ -346,7 +345,8 @@ export function zoneLabel(piece: Pick<AvalanchePiece, 'center' | 'names'>): stri
 }
 
 export function preparedBy(forecast: Pick<AvalancheForecast, 'center' | 'pieces' | 'issuedBy'>): string {
-  return PREPARED_BY[bulletinCenter(forecast)] ?? forecast.issuedBy;
+  const center = bulletinCenter(forecast);
+  return PREPARED_BY[center] ?? NAC_CENTERS[center]?.name ?? forecast.issuedBy;
 }
 
 export const CONFIDENCE_NAMES: Record<string, string> = {
@@ -385,12 +385,14 @@ export function dangerTables(
 
 // The zone each center stamps its bulletins in, as the archive's bulletins declare it: Avalanche
 // Canada and Glacier National Park on Pacific time wherever the region, the Rockies parks and
-// Kananaskis on Mountain, Avalanche Québec on Eastern. The one exception is Avalanche Canada's
-// Newfoundland region, stamped on Newfoundland time.
+// Kananaskis on Mountain, Avalanche Québec on Eastern; the avalanche.org centers each in the zone
+// their configuration names. The one exception is Avalanche Canada's Newfoundland region, stamped
+// on Newfoundland time.
 const CENTER_ZONES: Record<string, string> = {
   'avalanche-canada': 'America/Vancouver', 'parks-glacier': 'America/Vancouver',
   'parks-byk': 'America/Edmonton', 'parks-jasper': 'America/Edmonton', 'parks-waterton': 'America/Edmonton',
-  kananaskis: 'America/Edmonton', 'avalanche-quebec': 'America/New_York', nwac: 'America/Los_Angeles',
+  kananaskis: 'America/Edmonton', 'avalanche-quebec': 'America/New_York',
+  ...Object.fromEntries(Object.entries(NAC_CENTERS).map(([key, c]) => [key, c.timezone])),
 };
 
 // The zone a bulletin for a point is stamped in, found from the center whose piece holds the point.

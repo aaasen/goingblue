@@ -14,5 +14,5 @@ export const PROSE: ProseCoder = {
   decode: (bytes, layout) => native.decode(Buffer.from(bytes), layout),
 };
 
-export const modelsFor = (center: "avcan" | "nwac"): Models =>
+export const modelsFor = (center: "avcan" | "nac"): Models =>
   ({ structured: loadStructured(gunzipSync(asset(`${center}-structured.bin.gz`))), prose: PROSE });

@@ -7,12 +7,12 @@ import { readFile } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
 import { AvalancheModel } from "@weather/avalanche-node";
 import {
-  avalancheAnchor, avalancheModelFile, encodeAvalancheMessage, loadStructured, pieceAt, PROSE_MODEL_FILE, WIRE_HEADER_CHARS,
+  NAC_CENTERS, avalancheAnchor, avalancheModelFile, encodeAvalancheMessage, loadStructured, pieceAt, PROSE_MODEL_FILE, WIRE_HEADER_CHARS,
   type AvalancheForecast, type Models, type ProseCoder, type StructuredModel,
 } from "@weather/protocol";
 import { fetchAreaPieces, fetchPointProduct, toForecast } from "./avcan.js";
 import { splitReplyFor, type ForecastParams } from "./forecast.js";
-import { fetchZoneProduct, NWAC_CENTER, toForecast as toNacForecast } from "./nac.js";
+import { fetchZoneProduct, toForecast as toNacForecast } from "./nac.js";
 
 // Part labels ("i/N ") are budgeted at two digits each side at most.
 const MAX_PARTS = 99;
@@ -58,9 +58,10 @@ export type AvalancheResult =
 // The forecast covering the request's point, or null when no center forecasts there then.
 async function fetchForecast(params: ForecastParams, at: number | null): Promise<AvalancheForecast | null> {
   const piece = pieceAt(params.lat!, params.lon!);
-  if (piece?.center === NWAC_CENTER) {
+  const center = piece && NAC_CENTERS[piece.center];
+  if (piece && center) {
     const product = await fetchZoneProduct(piece, params.day ?? null);
-    return product && toNacForecast(product, piece);
+    return product && toNacForecast(product, center);
   }
   const product = await fetchPointProduct(params.lat!, params.lon!, at);
   return product && toForecast(product, await fetchAreaPieces(product, at));

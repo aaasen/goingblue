@@ -2,10 +2,10 @@
  * The archive as training and test documents: every product with a danger rating, as the
  * app's forecast, split into train and test by a hash of the product id.
  */
-import { AVALANCHE_PIECES, piecesInArea, sectionsOf, type AvalancheForecast } from "@weather/protocol";
+import { NAC_CENTERS, piecesInArea, sectionsOf, type AvalancheForecast } from "@weather/protocol";
 import { openDb } from "./db.ts";
 import { isForecast, toForecast, type RawProduct } from "../../src/avcan.ts";
-import { isRated, NWAC_CENTER, toForecast as toNacForecast, type NacProduct } from "../../src/nac.ts";
+import { isRated, toForecast as toNacForecast, type NacProduct } from "../../src/nac.ts";
 
 export function arg(name: string, fallback: number): number {
   const i = process.argv.indexOf(name);
@@ -53,23 +53,27 @@ export function loadBulletins(): Doc[] {
 
 // Every archived NWAC forecast with a danger rating and some prose, latest version of each. A
 // product covering several zones counts once, under its first.
-export function loadNwacBulletins(): Doc[] {
+// Every rated forecast of the avalanche.org centers the app serves. A few from before 2023 carry
+// values the adapter rejects (a null likelihood, a danger of 6); those are left out.
+export function loadNacBulletins(): Doc[] {
   const db = openDb();
   const rows = db.prepare(
-    `SELECT id, body, MAX(updated_at) FROM nac_products WHERE center = 'NWAC' AND product_type = 'forecast' AND updated_at != ''
+    `SELECT id, center, body, MAX(updated_at) FROM nac_products WHERE product_type = 'forecast' AND updated_at != ''
      GROUP BY id ORDER BY published_time, id`,
-  ).all() as { id: number; body: string }[];
+  ).all() as { id: number; center: string; body: string }[];
   db.close();
-  const pieces = AVALANCHE_PIECES.filter((p) => p.center === NWAC_CENTER);
   const out: Doc[] = [];
-  for (const { id, body } of rows) {
+  let rejected = 0;
+  for (const { id, center, body } of rows) {
+    const served = NAC_CENTERS[center.toLowerCase()];
+    if (!served) continue;
     const p = JSON.parse(body) as NacProduct;
     if (!isRated(p)) continue;
-    const piece = pieces.find((x) => x.names[0] === p.forecast_zone![0].name);
-    if (!piece) throw new Error(`no piece for NWAC zone ${p.forecast_zone![0].name}`);
-    const forecast = toNacForecast(p, piece);
+    let forecast: AvalancheForecast;
+    try { forecast = toNacForecast(p, served); } catch { rejected++; continue; }
     if (sectionsOf(forecast).some((s) => s.text)) out.push({ id: String(id), dateIssued: p.published_time, forecast });
   }
+  if (rejected) console.log(`left out ${rejected} forecasts the adapter rejects`);
   return out;
 }
 

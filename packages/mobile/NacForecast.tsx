@@ -2,17 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { SkiaPictureView, Skia, type SkPicture } from '@shopify/react-native-skia';
-import { DANGER_LEVELS, ELEVATIONS, type AvalancheForecast, type AvalancheProblem, type DangerDay, type Elevation, type ProblemType } from '@weather/protocol';
+import { AVALANCHE_PIECES, DANGER_LEVELS, ELEVATIONS, type AvalancheForecast, type AvalancheProblem, type DangerDay, type Elevation, type ProblemType } from '@weather/protocol';
 import { CARD_PAD, DangerScale, PAD, Prose, Rose, ScaleView, iconPicture, iconSlot, roseFitsBeside, useFonts, type Fonts } from './AvalancheScreen';
 import InfoModal from './components/InfoModal';
 import WarningBanner from './components/WarningBanner';
-import { dangerCell, highestDanger, likelihoodScale, nwacBandLabel, nwacDayLabel, nwacProblemNames, nwacSizeScale, nwacStamp, nwacZone } from './avalancheDisplay';
+import { dangerCell, highestDanger, likelihoodScale, nacBandLabel, nacDayLabel, nacProblemNames, nacSizeScale, nacStamp, nacZonePiece, preparedBy } from './avalancheDisplay';
 import { fillPaint } from './skiaPaint';
 import { palette } from './palette';
 import { loadHideExpiredBanner, type TimeFormat } from './settings';
 
-// An NWAC forecast laid out the way nwac.us lays it out, narrowed to a phone: the outlook day
-// collapses, and the problem graphics take two rows rather than four columns.
+// An avalanche.org center's forecast laid out the way the center's site lays it out (nwac.us and
+// the rest share avalanche.org's forecast widget), narrowed to a phone: the outlook day collapses,
+// and the problem graphics take two rows rather than four columns.
 
 const PROBLEM_ICONS: Record<ProblemType, number> = {
   stormSlab: require('./assets/problem-icons/StormSlab.png'),
@@ -64,7 +65,7 @@ const ratingText = (band: Elevation, day: DangerDay) => {
 };
 
 // The first day: a gray row per band, its elevations on a chip, over the pyramid.
-function ForecastDay({ day, zone, width }: { day: DangerDay; zone: string; width: number }) {
+function ForecastDay({ day, zone, width }: { day: DangerDay; zone: number | null; width: number }) {
   const rowH = 74;
   const picture = useMemo(() => recordPyramid(day, width, rowH, width * 0.36, width * 0.22, true), [day, width]);
   const iconH = 34;
@@ -72,12 +73,12 @@ function ForecastDay({ day, zone, width }: { day: DangerDay; zone: string; width
     <View style={{ height: 3 * rowH + 2 * ROW_GAP }}>
       <SkiaPictureView style={StyleSheet.absoluteFill} picture={picture} />
       {BANDS_TOP_DOWN.map((band, i) => {
-        const label = nwacBandLabel(zone, band);
+        const label = nacBandLabel(zone, band);
         return (
           <View key={band} style={[styles.bandRow, { top: i * (rowH + ROW_GAP), height: rowH }]}>
             <View style={styles.chip}>
-              <Text style={styles.chipText}>{label.name}</Text>
-              <Text style={styles.chipText}>{label.range}</Text>
+              {label.name ? <Text style={styles.chipText}>{label.name}</Text> : null}
+              {label.range ? <Text style={styles.chipText}>{label.range}</Text> : null}
             </View>
             <Text style={[styles.rating, { left: width * 0.6, width: width * 0.4 - iconSlot(iconH) * 0.55 }]} numberOfLines={2}>{ratingText(band, day)}</Text>
             <SkiaPictureView style={[styles.bandIcon, { width: iconSlot(iconH), height: iconH, top: (rowH - iconH) / 2 }]} picture={iconPicture(dangerCell(day[band]).icon, iconH)} />
@@ -131,15 +132,15 @@ function ColumnLabel({ label }: { label: string }) {
   );
 }
 
-function ProblemCard({ problem, index, zone, width, fonts }: { problem: AvalancheProblem; index: number; zone: string; width: number; fonts: Fonts }) {
-  const name = nwacProblemNames[problem.type];
+function ProblemCard({ problem, index, zone, width, fonts }: { problem: AvalancheProblem; index: number; zone: number | null; width: number; fonts: Fonts }) {
+  const name = nacProblemNames[problem.type];
   const labels = useMemo(() => Object.fromEntries(ELEVATIONS.map((e) => {
-    const { name: band, range } = nwacBandLabel(zone, e);
-    return [e, `${band} ${range}`];
+    const { name: band, range } = nacBandLabel(zone, e);
+    return [e, `${band} ${range}`.trim()];
   })) as Record<Elevation, string>, [zone]);
   const rose = useMemo(() => ({ fill: ROSE_FILL, labels, font: fonts.small, left: true }), [labels, fonts]);
   const likelihood = useMemo(() => likelihoodScale(problem.likelihood), [problem.likelihood]);
-  const size = useMemo(() => nwacSizeScale(problem.size), [problem.size]);
+  const size = useMemo(() => nacSizeScale(problem.size), [problem.size]);
   const scale = useMemo(() => ({ fill: ROSE_FILL, stroke: palette.textSecondary, muted: SCALE_TEXT_MUTED }), []);
   const besideW = width - PROBLEM_ICON - COLUMN_GAP;
   const beside = roseFitsBeside(besideW, labels, fonts);
@@ -195,7 +196,10 @@ function Heading({ children, info }: { children: string; info?: () => void }) {
   );
 }
 
-export default function NwacForecastView({ forecast, timeFormat }: { forecast: AvalancheForecast; timeFormat: TimeFormat }) {
+// `requested` is the piece the bulletin was requested in, whose zone it is shown for.
+export default function NacForecastView({ forecast, requested, timeFormat }: {
+  forecast: AvalancheForecast; requested: number | null; timeFormat: TimeFormat;
+}) {
   const fonts = useFonts();
   const [pageW, setPageW] = useState(0);
   const [scaleInfo, setScaleInfo] = useState(false);
@@ -203,8 +207,9 @@ export default function NwacForecastView({ forecast, timeFormat }: { forecast: A
   const [hideExpired, setHideExpired] = useState(false);
   useEffect(() => { loadHideExpiredBanner().then(setHideExpired); }, []);
   const width = pageW - 2 * PAD;
-  const zone = nwacZone(forecast);
-  const stamp = (ms: number) => nwacStamp(ms, forecast.timezone, timeFormat);
+  const zone = nacZonePiece(forecast, requested);
+  const zoneName = zone === null ? '' : AVALANCHE_PIECES[zone].names[0];
+  const stamp = (ms: number) => nacStamp(ms, forecast.timezone, timeFormat);
   const [today, outlook] = forecast.danger;
   const corner = today && dangerCell(highestDanger(today)).number ? dangerCell(highestDanger(today)).icon : null;
   return (
@@ -214,7 +219,7 @@ export default function NwacForecastView({ forecast, timeFormat }: { forecast: A
       )}
       <View style={styles.zoneRow}>
         <MaterialCommunityIcons name="map-marker" size={20} color={palette.textSecondary} />
-        <Text style={styles.zone}>{zone.toUpperCase()}</Text>
+        <Text style={styles.zone}>{zoneName.toUpperCase()}</Text>
       </View>
       <View style={styles.stamps}>
         <Stamp label="ISSUED" value={stamp(forecast.issued)} />
@@ -233,7 +238,7 @@ export default function NwacForecastView({ forecast, timeFormat }: { forecast: A
       {today && width > 0 && (
         <View style={styles.section}>
           <Heading info={() => setScaleInfo(true)}>AVALANCHE DANGER</Heading>
-          <Text style={styles.dayLabel}>{nwacDayLabel(today.date)}</Text>
+          <Text style={styles.dayLabel}>{nacDayLabel(today.date)}</Text>
           <ForecastDay day={today} zone={zone} width={width} />
           {outlook && (
             <View style={styles.outlook}>
@@ -243,7 +248,7 @@ export default function NwacForecastView({ forecast, timeFormat }: { forecast: A
                 accessibilityRole="button"
                 accessibilityState={{ expanded: outlookOpen }}
               >
-                <Text style={styles.outlookLabel}>{nwacDayLabel(outlook.date)}</Text>
+                <Text style={styles.outlookLabel}>{nacDayLabel(outlook.date)}</Text>
                 <MaterialCommunityIcons name={outlookOpen ? 'chevron-up' : 'chevron-down'} size={24} color={palette.text} />
               </TouchableOpacity>
               {outlookOpen && <OutlookDay day={outlook} width={width} />}
@@ -275,7 +280,7 @@ export default function NwacForecastView({ forecast, timeFormat }: { forecast: A
         </View>
       ) : null}
 
-      <Text style={styles.attribution}>Avalanche forecast provided by Northwest Avalanche Center.</Text>
+      <Text style={styles.attribution}>{`Avalanche forecast provided by ${preparedBy(forecast)}.`}</Text>
     </View>
   );
 }

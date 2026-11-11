@@ -13,8 +13,11 @@
  * reruns over the same archive number them the same way.
  *
  * avalanche.org centers forecast fixed zones, so each zone in the map layer the collector saved
- * is one piece. They follow the overlaid pieces, so adding a center never renumbers those, and a
- * point on a shared border belongs to the earlier piece.
+ * is one piece. They follow the overlaid pieces, NWAC first and the other centers after it in
+ * NAC_SERVED order, so adding a center never renumbers earlier pieces, and a point on a shared
+ * border belongs to the earlier piece. The same run writes
+ * packages/protocol/src/avalanche-nac.gen.ts: each served center's name, timezone, and zones,
+ * from the center responses the collector saved.
  *
  * Usage: pnpm avalanche-pieces
  */
@@ -34,6 +37,14 @@ const FIRST_WALK = "2023-08-01";
 // What that leaves between them is at most 5 km²; the smallest real piece is over 50.
 const MIN_PIECE_KM2 = 10;
 const OUT = join(REPO_ROOT, "packages", "protocol", "src", "avalanche-pieces.gen.ts");
+const NAC_OUT = join(REPO_ROOT, "packages", "protocol", "src", "avalanche-nac.gen.ts");
+// The avalanche.org centers the app serves: those whose forecasts the codec maps whole.
+const NAC_SERVED = [
+  "NWAC", "BAC", "BTAC", "CAAC", "CNFAIC", "COAA", "ESAC", "FAC", "GNFAC", "HPAC", "IPAC", "KPAC", "MSAC", "MWAC",
+  "PAC", "SAC", "SNFAC", "TAC", "VAC", "WAC", "WCMAC",
+];
+// Retired zone ids, by the current zones that cover their ground.
+const FORMER_ZONES: Record<number, number[]> = { 3039: [3040, 3041] };
 const REQUEST_TIMEOUT_MS = 90_000;
 const RETRIES = 4;
 
@@ -195,17 +206,61 @@ function overlay(areas: Area[]): Piece[] {
 const round = (geom: MultiPoly): MultiPoly =>
   geom.map((poly) => poly.map((ring) => ring.map(([x, y]) => [Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4])));
 
-// One piece per zone of an avalanche.org center, by name, from its latest saved map layer.
-function nacZones(db: ReturnType<typeof openDb>, center: string) {
+interface NacZoneSource {
+  center: string;
+  zoneId: number;
+  names: string[];
+  bbox: BBox;
+  polygons: MultiPoly;
+}
+
+// One piece per zone of an avalanche.org center, from its latest saved map layer, by name.
+function nacZones(db: ReturnType<typeof openDb>, center: string): NacZoneSource[] {
   const row = db.prepare(`SELECT body FROM nac_responses WHERE center = ? AND url LIKE '%/products/map-layer/%' ORDER BY fetched_at DESC LIMIT 1`).get(center) as { body: string } | undefined;
   if (!row) throw new Error(`pieces: no map layer for ${center}; run pnpm avalanche-collect --source ${center.toLowerCase()}`);
-  const layer = JSON.parse(row.body) as { features: { properties: { name: string }; geometry: { type: string; coordinates: unknown } }[] };
+  const layer = JSON.parse(row.body) as { features: { id: number; properties: { name: string }; geometry: { type: string; coordinates: unknown } }[] };
   return layer.features
     .map((f) => {
       const polygons = round((f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates) as MultiPoly);
-      return { center: center.toLowerCase(), names: [f.properties.name], bbox: bboxOf(polygons), polygons };
+      return { center: center.toLowerCase(), zoneId: f.id, names: [f.properties.name], bbox: bboxOf(polygons), polygons };
     })
     .sort((a, b) => a.names[0].localeCompare(b.names[0]));
+}
+
+// A band's label as the center's configuration words it ("Upper Elevations <br>6500-5500ft"), as
+// the line above the break and the line below it; one line is all name.
+function bandLabel(label: string | undefined): [string, string] {
+  const [name = "", range = ""] = (label ?? "").split(/<br\s*\/?>/i).map((l) => l.trim());
+  return [name, range];
+}
+
+// Each served center's name, timezone, and zones, from its latest saved center response.
+function nacCenters(db: ReturnType<typeof openDb>, zones: (NacZoneSource & { id: number })[]) {
+  return NAC_SERVED.map((center) => {
+    const row = db.prepare(`SELECT body FROM nac_responses WHERE center = ? AND url LIKE '%/avalanche-center/%' ORDER BY fetched_at DESC LIMIT 1`).get(center) as { body: string } | undefined;
+    if (!row) throw new Error(`pieces: no center response for ${center}; run pnpm avalanche-collect --source ${center.toLowerCase()}`);
+    const body = JSON.parse(row.body) as {
+      name: string; timezone: string;
+      zones: { id: number; config?: { elevation_band_names?: Record<"upper" | "middle" | "lower", string> } }[];
+    };
+    return {
+      key: center.toLowerCase(),
+      value: {
+        id: center,
+        name: body.name,
+        timezone: body.timezone,
+        zones: zones.filter((z) => z.center === center.toLowerCase()).map((z) => {
+          const bands = body.zones.find((c) => c.id === z.zoneId)?.config?.elevation_band_names;
+          if (!bands) throw new Error(`pieces: ${center} has no band names for zone ${z.zoneId}`);
+          const formerIds = Object.entries(FORMER_ZONES).filter(([, now]) => now.includes(z.zoneId)).map(([id]) => Number(id));
+          return {
+            piece: z.id, zoneId: z.zoneId, formerIds,
+            bands: { alp: bandLabel(bands.upper), tln: bandLabel(bands.middle), btl: bandLabel(bands.lower) },
+          };
+        }),
+      },
+    };
+  });
 }
 
 async function main(): Promise<void> {
@@ -227,7 +282,10 @@ async function main(): Promise<void> {
     return { center: covering[0].center, names, bbox: bboxOf(polygons), polygons };
   });
   out.sort((a, b) => a.center.localeCompare(b.center) || a.names.join(",").localeCompare(b.names.join(",")));
-  out.push(...nacZones(db, "NWAC"));
+  const nac = NAC_SERVED.flatMap((c) => nacZones(db, c)).map((z, i) => ({ ...z, id: out.length + i }));
+  const centers = nacCenters(db, nac);
+  db.close();
+  out.push(...nac.map(({ center, names, bbox, polygons }) => ({ center, names, bbox, polygons })));
 
   const lines = out.map((p, id) => `  ${JSON.stringify({ id, ...p })},`);
   const vertices = out.reduce((n, p) => n + p.polygons.flat(2).length, 0);
@@ -253,6 +311,35 @@ ${lines.join("\n")}
 ];
 `);
   console.log(`wrote ${out.length} pieces (${vertices} vertices) to ${OUT}`);
+
+  writeFileSync(NAC_OUT, `// GENERATED FILE, do not edit by hand. Written by \`pnpm avalanche-pieces\`
+// (packages/codec-server/scripts/avalanche/pieces.ts) from the avalanche.org center responses and
+// map layers the collector saved. The avalanche.org centers the app serves, by piece center.
+
+export interface NacZone {
+  // The zone's piece (avalanche-pieces.gen.ts).
+  piece: number;
+  // The zone's id on the avalanche.org API, and the ids of retired zones its ground was part of.
+  zoneId: number;
+  formerIds: number[];
+  // Each band's label as the center's configuration words it: name, then elevation range.
+  bands: { alp: [string, string]; tln: [string, string]; btl: [string, string] };
+}
+
+export interface NacCenter {
+  // The center's id on the avalanche.org API: "NWAC".
+  id: string;
+  name: string;
+  // The IANA zone the center publishes in.
+  timezone: string;
+  zones: NacZone[];
+}
+
+export const NAC_CENTERS: Record<string, NacCenter> = {
+${centers.map(({ key, value }) => `  ${JSON.stringify(key)}: ${JSON.stringify(value)},`).join("\n")}
+};
+`);
+  console.log(`wrote ${centers.length} centers to ${NAC_OUT}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

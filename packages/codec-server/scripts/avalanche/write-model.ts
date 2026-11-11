@@ -1,11 +1,12 @@
 /**
- * Trains a center's structured model and writes it as the shipped file.
+ * Trains a structured model and writes it as the shipped file: Avalanche Canada's, or with
+ * `--source nac` the one the avalanche.org centers share.
  *
  * The shipped model is trained on every archived bulletin with a danger rating, with no
  * holdout. The file is not in git: this also repins it in packages/protocol/assets/models.json,
  * and `pnpm upload-models` puts it on R2.
  *
- * Usage: pnpm avalanche-model [--source nwac]
+ * Usage: pnpm avalanche-model [--source nac]
  */
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -14,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { loadStructured, packStructured, WIRE_VERSION } from "@weather/protocol";
 import { structuredOf } from "@weather/protocol/avalanche-codec/structured";
-import { loadBulletins, loadNwacBulletins } from "./corpus.ts";
+import { loadBulletins, loadNacBulletins } from "./corpus.ts";
 import { StructuredBuilder } from "./structured.ts";
 
 const ASSETS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "protocol", "assets");
@@ -23,10 +24,10 @@ const MANIFEST_PATH = join(ASSETS, "models.json");
 function main(): void {
   const i = process.argv.indexOf("--source");
   const source = i === -1 ? "avcan" : process.argv[i + 1];
-  if (source !== "avcan" && source !== "nwac") throw new Error(`unknown --source ${source}`);
+  if (source !== "avcan" && source !== "nac") throw new Error(`unknown --source ${source}`);
   const name = `${source}-structured.bin.gz`;
   const modelPath = join(ASSETS, name);
-  const docs = source === "nwac" ? loadNwacBulletins() : loadBulletins();
+  const docs = source === "nac" ? loadNacBulletins() : loadBulletins();
   const builder = new StructuredBuilder();
   for (const d of docs) builder.observe(structuredOf(d.forecast));
   const trained = builder.build();

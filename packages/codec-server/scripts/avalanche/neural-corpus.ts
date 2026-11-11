@@ -10,7 +10,7 @@
  * Usage: NODE_OPTIONS=--max-old-space-size=13000 pnpm avalanche-neural-corpus [out dir, default data/neural]
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { sectionsOf } from "@weather/protocol";
+import { NAC_CENTERS, sectionsOf } from "@weather/protocol";
 import { isRated, toForecast } from "../../src/nac.ts";
 import { loadBulletins } from "./corpus.ts";
 import { openDb } from "./db.ts";
@@ -63,7 +63,9 @@ for (const r of rows) {
   if (!isRated(p)) continue;
   for (const q of p.forecast_avalanche_problems ?? []) q.likelihood = CAIC[q.likelihood] ?? q.likelihood;
   let f;
-  try { f = toForecast(p, { id: 0, names: [""] }); } catch { failed[r.center] = (failed[r.center] ?? 0) + 1; continue; }
+  // The corpus reads no zones, names, or dates, so a center the app doesn't serve needs none.
+  const center = NAC_CENTERS[r.center.toLowerCase()] ?? { id: r.center, name: "", timezone: "UTC", zones: [] };
+  try { f = toForecast(p, center); } catch { failed[r.center] = (failed[r.center] ?? 0) + 1; continue; }
   add(docOf(`nac:${r.id}`, r.center, "nac", p.published_time, f));
 }
 for (const b of loadBulletins()) add(docOf(`avcan:${b.id}`, b.forecast.center, "avcan", new Date(b.forecast.issued).toISOString(), b.forecast));

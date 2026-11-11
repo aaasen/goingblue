@@ -10,7 +10,7 @@ import { replyModelFile, setAvalancheModels } from './cache';
 // shown, and the prose model every center shares, which the native module reads from its file.
 const STRUCTURED: Record<string, number> = {
   'avcan-structured.bin.gz': require('../protocol/assets/avcan-structured.bin.gz'),
-  'nwac-structured.bin.gz': require('../protocol/assets/nwac-structured.bin.gz'),
+  'nac-structured.bin.gz': require('../protocol/assets/nac-structured.bin.gz'),
 };
 const PROSE_ASSET: number = require('../protocol/assets/prose-model.bin');
 

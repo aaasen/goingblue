@@ -114,7 +114,7 @@ describe('avalanche requests in the forecast store', () => {
 });
 
 describe('an NWAC reply', () => {
-  const NWAC_MODELS = modelsFor('nwac');
+  const NAC_MODELS = modelsFor('nac');
   const STEVENS = { lat: 47.75, lon: -121.09 };
   const nwacForecast: AvalancheForecast = {
     ...FORECAST, center: 'nwac', pieces: [107], advice: [], avalancheSummary: '', snowpackSummary: '', weather: [],
@@ -125,19 +125,19 @@ describe('an NWAC reply', () => {
 
   async function stored(token: string) {
     const code = await allocCode(token, nwacContext, 'Avalanche');
-    return encodeAvalancheMessage(NWAC_MODELS, code, anchorOf(nwacContext), nwacForecast, 'base94');
+    return encodeAvalancheMessage(NAC_MODELS, code, anchorOf(nwacContext), nwacForecast, 'base94');
   }
 
   it('names its own model, and Avalanche Canada replies keep theirs', async () => {
     const token = `${TOKEN}-nwac-file`;
     const reply = await stored(token);
-    expect(replyModelFile(reply, token)).toBe('nwac-structured.bin.gz');
+    expect(replyModelFile(reply, token)).toBe('nac-structured.bin.gz');
     const code = await allocCode(token, avalancheContext('d'), 'Avalanche');
     const avcan = await encodeAvalancheMessage(MODELS, code, anchorOf(avalancheContext('d')), FORECAST, 'base94');
     expect(replyModelFile(avcan, token)).toBe('avcan-structured.bin.gz');
   });
 
-  // Before anything below hands in the NWAC model, which stays set for the rest of the file.
+  // Before anything below hands in the avalanche.org model, which stays set for the rest of the file.
   it('keeps a saved reply while its model has not loaded', async () => {
     const token = `${TOKEN}-nwac-prune`;
     const reply = await stored(token);
@@ -149,7 +149,7 @@ describe('an NWAC reply', () => {
   it('is not mistaken for a reply in progress once its model has loaded', async () => {
     const token = `${TOKEN}-nwac-decode`;
     const reply = await stored(token);
-    setAvalancheModels(NWAC_MODELS, 'nwac-structured.bin.gz');
+    setAvalancheModels(NAC_MODELS, 'nac-structured.bin.gz');
     const d = await decodeAvalanche(reply, token);
     expect(d.forecast.hazardDiscussion).toBe('New snow fell on the old crust.');
     expect(d.forecast.pieces).toEqual([107]);

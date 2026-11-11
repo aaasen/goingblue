@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AVALANCHE_PIECES } from '@weather/protocol';
 import {
-  nwacBandLabel, nwacDayLabel, nwacSizeScale, nwacStamp, nwacZone, bulletinCenter, bulletinTimezone, preparedBy, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel, zoneLabel, zoneNames,
+  nacBandLabel, nacDayLabel, nacSizeScale, nacStamp, nacZonePiece, bulletinCenter, bulletinTimezone, preparedBy, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel, zoneLabel, zoneNames,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -181,30 +181,42 @@ describe('bulletinTimezone', () => {
 });
 
 
-describe('NWAC display', () => {
-  it('has elevation ranges for every zone, matching the site', () => {
-    const zones = AVALANCHE_PIECES.filter((p) => p.center === 'nwac').map((p) => p.names[0]);
+describe('avalanche.org center display', () => {
+  const zone = (center: string, name: string) => AVALANCHE_PIECES.find((p) => p.center === center && p.names[0] === name)!;
+
+  it('has elevation ranges for every NWAC zone, matching the site', () => {
+    const zones = AVALANCHE_PIECES.filter((p) => p.center === 'nwac');
     expect(zones).toHaveLength(10);
-    for (const z of zones) for (const band of ['alp', 'tln', 'btl'] as const) expect(nwacBandLabel(z, band).range, `${z} ${band}`).toMatch(/^\d{4}-\d{4}ft$/);
-    expect(nwacBandLabel('West Slopes North', 'alp')).toEqual({ name: 'Upper Elevations', range: '7500-5500ft' });
-    expect(nwacBandLabel('West Slopes North', 'btl')).toEqual({ name: 'Lower Elevations', range: '4500-2500ft' });
+    for (const z of zones) for (const band of ['alp', 'tln', 'btl'] as const) expect(nacBandLabel(z.id, band).range, `${z.names[0]} ${band}`).toMatch(/^\d{4}-\d{4}ft$/);
+    expect(nacBandLabel(zone('nwac', 'West Slopes North').id, 'alp')).toEqual({ name: 'Upper Elevations', range: '7500-5500ft' });
+    expect(nacBandLabel(zone('nwac', 'West Slopes North').id, 'btl')).toEqual({ name: 'Lower Elevations', range: '4500-2500ft' });
+    // A center whose labels are ranges only, and a piece that is no avalanche.org zone.
+    expect(nacBandLabel(zone('vac', 'Maritime').id, 'alp')).toEqual({ name: 'Above 3,000ft', range: '' });
+    expect(nacBandLabel(0, 'alp')).toEqual({ name: '', range: '' });
   });
 
-  it('names the zone from the forecast and labels it for the map', () => {
-    const piece = AVALANCHE_PIECES.find((p) => p.center === 'nwac' && p.names[0] === 'Stevens Pass')!;
-    expect(nwacZone({ pieces: [piece.id] })).toBe('Stevens Pass');
-    expect(zoneLabel(piece)).toBe('NWAC: Stevens Pass');
-    expect(preparedBy({ center: '', pieces: [piece.id], issuedBy: '' })).toBe('Northwest Avalanche Center');
+  it('shows the zone the bulletin was requested in, labeled for the map', () => {
+    const stevens = zone('nwac', 'Stevens Pass');
+    expect(nacZonePiece({ pieces: [stevens.id] }, null)).toBe(stevens.id);
+    expect(zoneLabel(stevens)).toBe('NWAC: Stevens Pass');
+    expect(preparedBy({ center: '', pieces: [stevens.id], issuedBy: '' })).toBe('Northwest Avalanche Center');
+    const madison = zone('gnfac', 'Southern Madison Range'), lionhead = zone('gnfac', 'Lionhead Area');
+    const pieces = [madison.id, lionhead.id].sort((a, b) => a - b);
+    expect(nacZonePiece({ pieces }, lionhead.id)).toBe(lionhead.id);
+    expect(nacZonePiece({ pieces }, stevens.id)).toBe(pieces[0]);
+    expect(zoneLabel(madison)).toBe('GNFAC: Southern Madison Range');
+    expect(preparedBy({ center: '', pieces, issuedBy: '' })).toBe('Gallatin NF Avalanche Center');
+    expect(bulletinTimezone(45.85, -110.95)).toBe('America/Denver');
   });
 
   it('stamps times and days the way the site does', () => {
     const issued = Date.parse('2026-03-11T01:30:00Z');
-    expect(nwacStamp(issued, 'America/Los_Angeles', '12h')).toBe('Tuesday, March 10, 2026 - 6:30PM');
-    expect(nwacStamp(issued, 'America/Los_Angeles', '24h')).toBe('Tuesday, March 10, 2026 - 18:30');
-    expect(nwacStamp(Date.parse('2026-03-11T08:05:00Z'), 'America/Los_Angeles', '12h')).toBe('Wednesday, March 11, 2026 - 1:05AM');
-    expect(nwacStamp(Date.parse('2026-03-11T08:00:00Z'), 'America/Los_Angeles', '24h')).toBe('Wednesday, March 11, 2026 - 01:00');
-    expect(nwacStamp(Date.parse('2026-03-11T07:30:00Z'), 'America/Los_Angeles', '12h')).toBe('Wednesday, March 11, 2026 - 12:30AM');
-    expect(nwacDayLabel('2026-03-11')).toBe('Wednesday, March 11, 2026');
+    expect(nacStamp(issued, 'America/Los_Angeles', '12h')).toBe('Tuesday, March 10, 2026 - 6:30PM');
+    expect(nacStamp(issued, 'America/Los_Angeles', '24h')).toBe('Tuesday, March 10, 2026 - 18:30');
+    expect(nacStamp(Date.parse('2026-03-11T08:05:00Z'), 'America/Los_Angeles', '12h')).toBe('Wednesday, March 11, 2026 - 1:05AM');
+    expect(nacStamp(Date.parse('2026-03-11T08:00:00Z'), 'America/Los_Angeles', '24h')).toBe('Wednesday, March 11, 2026 - 01:00');
+    expect(nacStamp(Date.parse('2026-03-11T07:30:00Z'), 'America/Los_Angeles', '12h')).toBe('Wednesday, March 11, 2026 - 12:30AM');
+    expect(nacDayLabel('2026-03-11')).toBe('Wednesday, March 11, 2026');
   });
 
   it('reads the clock from an engine that ignores the requested hour cycle', () => {
@@ -212,20 +224,20 @@ describe('NWAC display', () => {
     vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(((locale: string, options: Intl.DateTimeFormatOptions) =>
       new Real(locale, options?.hourCycle ? { ...options, hourCycle: 'h12' } : options)) as never);
     try {
-      expect(nwacStamp(Date.parse('2026-03-11T01:30:00Z'), 'America/Los_Angeles', '12h')).toBe('Tuesday, March 10, 2026 - 6:30PM');
-      expect(nwacStamp(Date.parse('2026-03-11T01:30:00Z'), 'America/Los_Angeles', '24h')).toBe('Tuesday, March 10, 2026 - 18:30');
+      expect(nacStamp(Date.parse('2026-03-11T01:30:00Z'), 'America/Los_Angeles', '12h')).toBe('Tuesday, March 10, 2026 - 6:30PM');
+      expect(nacStamp(Date.parse('2026-03-11T01:30:00Z'), 'America/Los_Angeles', '24h')).toBe('Tuesday, March 10, 2026 - 18:30');
     } finally {
       vi.restoreAllMocks();
     }
   });
 
   it('draws the size scale with Historic sharing sizes 4 and 5', () => {
-    const scale = nwacSizeScale({ min: 1, max: 2 });
+    const scale = nacSizeScale({ min: 1, max: 2 });
     expect(scale.rows.map((r) => r.label)).toEqual(['Historic (D4-5)', 'Very Large (D3)', 'Large (D2)', 'Small (D1)']);
     expect(scale.rows.map((r) => r.bold)).toEqual([false, false, true, true]);
     expect(scale.bar[0]).toBeLessThan(2);
     expect(scale.bar[1]).toBeGreaterThan(3);
-    expect(nwacSizeScale({ min: 3.5, max: 4.5 }).rows[0].bold).toBe(true);
-    expect(nwacSizeScale({ min: 1.5, max: 1.5 }).rows.map((r) => r.bold)).toEqual([false, false, true, false]);
+    expect(nacSizeScale({ min: 3.5, max: 4.5 }).rows[0].bold).toBe(true);
+    expect(nacSizeScale({ min: 1.5, max: 1.5 }).rows.map((r) => r.bold)).toEqual([false, false, true, false]);
   });
 });

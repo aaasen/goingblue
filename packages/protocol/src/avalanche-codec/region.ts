@@ -9,6 +9,7 @@
  * Pieces of other centers and pieces below the anchor cannot be in the set.
  */
 import { AVALANCHE_PIECES, type AvalanchePiece } from "../avalanche-pieces.gen.js";
+import { NAC_CENTERS } from "../avalanche-nac.gen.js";
 import { PIECE_INTERIORS, REGION_ANCHOR_COUNTS, REGION_CHAINS } from "../avalanche-region.gen.js";
 import { buildTable, SCALE, type Decision, type Decoder, type Table } from "./rans.js";
 
@@ -80,9 +81,10 @@ export function pieceAt(lat: number, lon: number, pieces: readonly AvalanchePiec
 // The structured model file a forecast for a point is coded with (the prose model is shared). The
 // server and the reader both choose it from the request's point and nothing else, because a
 // forecast decodes to garbage under any other model. Avalanche Canada's API answers for any other
-// point, including outside every piece.
+// point, including outside every piece. The avalanche.org centers share one model.
 export function avalancheModelFile(lat: number, lon: number): string {
-  return pieceAt(lat, lon)?.center === "nwac" ? "nwac-structured.bin.gz" : "avcan-structured.bin.gz";
+  const center = pieceAt(lat, lon)?.center;
+  return center !== undefined && center in NAC_CENTERS ? "nac-structured.bin.gz" : "avcan-structured.bin.gz";
 }
 
 // The prose model, shared by every center (native/avalanche).
