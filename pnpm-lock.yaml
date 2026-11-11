@@ -35,6 +35,9 @@ importers:
       '@openmeteo/sdk':
         specifier: ^1.27.2
         version: 1.27.2
+      '@weather/avalanche-node':
+        specifier: workspace:*
+        version: link:../../native/avalanche-node
       '@weather/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -182,6 +185,9 @@ importers:
         specifier: ^5.0.1
         version: 5.0.1
     devDependencies:
+      '@weather/avalanche-node':
+        specifier: workspace:*
+        version: link:../../native/avalanche-node
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

@@ -36,7 +36,7 @@ import { quotaLine, type StoredQuota } from './quota';
 import { ladderLabel } from './cloudBand';
 import { deviceOffsetHours, offsetHoursAt } from './timezone';
 import {
-  allocCode, attachResponse, chunksCollected, decodeAny, deleteResponses, isAvalancheContext, loadStore,
+  allocCode, attachResponse, bulletinOutline, chunksCollected, decodeAny, decodeAvalanche, deleteResponses, isAvalancheContext, loadStore,
   mergeReply, normalizeReply, prunePastForecasts, replyKind, replyParts, resolveContext, slotModelFile, type Slot,
 } from './cache';
 import LocationMap from './LocationMap';
@@ -912,7 +912,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     for (const slot of avalancheCache) {
       try {
         const d = decodeAny(slot.encoded!, token);
-        days.set(slot, d.kind === 'avalanche' ? d.forecast.danger[0] ?? null : null);
+        days.set(slot, d.kind === 'avalanche' ? bulletinOutline(d).danger[0] ?? null : null);
       } catch { days.set(slot, null); }
     }
     return days;
@@ -1523,8 +1523,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
         }
         await loadModelsForReplies(token, avalancheData);
         if (cancelled) return;
-        const d = decodeAny(avalancheData, token);
-        if (d.kind !== 'avalanche') throw new Error('Invalid forecast');
+        const d = await decodeAvalanche(avalancheData, token);
+        if (cancelled) return;
         setAvalanche({ forecast: d.forecast, lat: d.lat, lon: d.lon });
         pendingAvalancheScroll.current = true;
         setAvalancheError(null);

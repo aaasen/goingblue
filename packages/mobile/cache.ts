@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  avalancheAnchor, avalancheModelFile, chunkLines, collectingChunks, decodeAvalancheReply, decodeMessage, fillSlotsFor,
-  maxFillSeq, mergeParts, peekHeader, readParts, reassembleReply, WIRE_HEADER_CHARS,
-  type AvalancheForecast, type DeviceCode, type ForecastMessage, type Models, type ReplyOracles,
+  avalancheAnchor, avalancheModelFile, chunkLines, collectingChunks, decodeMessage, fillSlotsFor, headForecast,
+  maxFillSeq, mergeParts, peekHeader, readAvalancheReply, readParts, reassembleReply, WIRE_HEADER_CHARS,
+  type AvalancheForecast, type BulletinHead, type DeviceCode, type ForecastMessage, type Models, type ReplyOracles,
   type RequestContext, type Variable,
 } from '@weather/protocol';
 import { bulletinTimezone } from './avalancheDisplay';
@@ -69,11 +69,12 @@ function revivedSlot(s: StoredSlot): Slot {
 const memos = new Map<string, Store>();
 const contextMaps = new Map<string, Map<number, SlotContext>>();
 
-// The avalanche models by file, each handed in once it has loaded (see avalancheModel.ts). Until
-// then a reply coded with it can't be decoded, and the pruning below leaves its slots alone.
+// The avalanche models by structured model file, each handed in once it has loaded (see
+// avalancheModel.ts). Until then a reply coded with it can't be decoded, and the pruning below
+// leaves its slots alone.
 const avalancheModels = new Map<string, Models>();
 
-export function setAvalancheModels(models: Models, file: string = 'avcan-model.bin.gz'): void {
+export function setAvalancheModels(models: Models, file: string = 'avcan-structured.bin.gz'): void {
   avalancheModels.set(file, models);
 }
 
@@ -221,25 +222,47 @@ export function chunksCollected(encoded: string, token: string): number {
 
 export type Decoded =
   | { kind: 'weather'; msg: ForecastMessage }
-  // The point the avalanche request was made for.
-  | { kind: 'avalanche'; code: number; forecast: AvalancheForecast; lat: number; lon: number };
+  // A bulletin read up to its prose, which decodeAvalanche reads; the point the request was made
+  // for.
+  | { kind: 'avalanche'; code: number; head: BulletinHead; lat: number; lon: number };
 
 // Decodes a reply of either kind: the code in its header names the stored request, and the
-// request says which kind of reply it is. Both headers keep the code in the same place.
+// request says which kind of reply it is. Both headers keep the code in the same place. Throws
+// for text that isn't a whole reply, so a bulletin still missing messages doesn't read as one.
 export function decodeAny(encoded: string, token: string): Decoded {
   const reply = normalizeReply(encoded);
   const ctx = resolveSlotContext(token, peekHeader(reply).code);
   if (ctx && isAvalancheContext(ctx)) {
-    const models = avalancheModels.get(modelFileOf(ctx));
-    if (!models) throw new Error('The avalanche model has not loaded.');
     const anchor = avalancheAnchor(ctx.day, ctx.start / 3600000);
-    const { code, forecast } = decodeAvalancheReply(models, reply, anchor, ctx.device);
-    // The wire leaves the zone out; the point's center says which one the bulletin is stamped in.
-    return {
-      kind: 'avalanche', code, forecast: { ...forecast, timezone: bulletinTimezone(ctx.lat, ctx.lon) }, lat: ctx.lat, lon: ctx.lon,
-    };
+    const { code, head } = readAvalancheReply(modelsOf(ctx).structured, reply, anchor, ctx.device);
+    return { kind: 'avalanche', code, head, lat: ctx.lat, lon: ctx.lon };
   }
   return { kind: 'weather', msg: decodeMessage(reply, (code) => resolveContext(token, code)) };
+}
+
+function modelsOf(ctx: AvalancheContext): Models {
+  const models = avalancheModels.get(modelFileOf(ctx));
+  if (!models) throw new Error('The avalanche model has not loaded.');
+  return models;
+}
+
+// A bulletin's forecast without its prose: what the structured fields alone say, such as the
+// danger ratings.
+export function bulletinOutline(d: Extract<Decoded, { kind: 'avalanche' }>): AvalancheForecast {
+  return { ...headForecast(d.head), timezone: bulletinTimezone(d.lat, d.lon) };
+}
+
+// Decodes a whole avalanche reply, prose included. The prose model runs off the JS thread.
+export async function decodeAvalanche(
+  encoded: string, token: string,
+): Promise<{ code: number; forecast: AvalancheForecast; lat: number; lon: number }> {
+  const d = decodeAny(encoded, token);
+  if (d.kind !== 'avalanche') throw new Error('Invalid forecast');
+  const ctx = resolveSlotContext(token, d.code) as AvalancheContext;
+  const texts = await modelsOf(ctx).prose.decode(d.head.prose, d.head.layout);
+  // The wire leaves the zone out; the point's center says which one the bulletin is stamped in.
+  const forecast = { ...headForecast(d.head, texts), timezone: bulletinTimezone(d.lat, d.lon) };
+  return { code: d.code, forecast, lat: d.lat, lon: d.lon };
 }
 
 // Which kind of request a reply answers, read off the header of its first message, or null when

@@ -7,7 +7,7 @@
  *
  * Usage: pnpm avalanche-benchmark [--test-frac 0.2] [--min-count 1] [--word-order 2|3]
  */
-import { decodeBulletin, encodeBulletin, loadModels, packModels, quantizeIssued, sectionsOf, withPlaceholders } from "@weather/protocol";
+import { loadStructured, packStructured, sectionsOf } from "@weather/protocol";
 import { encode, decode, sectionBits } from "@weather/protocol/avalanche-codec/codec";
 import { structuredOf } from "@weather/protocol/avalanche-codec/structured";
 import { tokenize } from "@weather/protocol/avalanche-codec/tokenizer";
@@ -36,9 +36,10 @@ function main(): void {
   const t0 = Date.now();
   const wordOrder = arg("--word-order", WORD_ORDER);
   console.log(`  word order ${wordOrder}`);
+  const trained = trainModels(train.map((d) => d.forecast), wordOrder, minCount);
+  const model = trained.prose;
   // Round-tripped through the file format, so every bulletin below also checks the packing.
-  const models = loadModels(packModels(trainModels(train.map((d) => d.forecast), wordOrder, minCount)));
-  const { prose: model, structured } = models;
+  const structured = loadStructured(packStructured(trained.structured));
   const st = model.stats();
   console.log(`\ntrained in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${st.streams} word streams, vocab ${fmt(st.wordVocab)}, ` + st.entries.map((n, k) => `order ${k + 1}: ${fmt(n)} entries over ${fmt(st.contexts[k])} contexts`).join(", "));
 
@@ -47,8 +48,6 @@ function main(): void {
   let comp = 0;
   let failures = 0;
   let structBits = 0;
-  let combined = 0;
-  let combinedFailures = 0;
   let oov = 0;
   let tokens = 0;
   const msgHist = new Map<number, number>();
@@ -64,14 +63,7 @@ function main(): void {
     }
     raw += utf8.encode(sections.map((s) => s.text).join("\n\n")).length;
     comp += blob.length;
-    structBits += structured.bits(model.byteTable(), struct);
-    const whole = encodeBulletin(models, d.forecast);
-    combined += whole.length;
-    const back = decodeBulletin(models, whole, quantizeIssued(d.forecast.issued));
-    if (JSON.stringify(back) !== JSON.stringify(withPlaceholders(d.forecast))) {
-      combinedFailures++;
-      console.log(`  BULLETIN ROUND TRIP FAILED: ${d.id}`);
-    }
+    structBits += structured.bits(struct);
     for (const s of sections) {
       const stream = model.streamFor(s.kind);
       const toks = tokenize(s.text);
@@ -96,9 +88,8 @@ function main(): void {
   console.log(`  throughput   ${(raw / elapsed / 1000).toFixed(0)} KB/s round trip`);
   const hist = [...msgHist].sort((a, b) => a[0] - b[0]);
   console.log(`  messages of ${MESSAGE_BYTES} bytes: ${hist.map(([m, n]) => `${m}: ${((n / test.length) * 100).toFixed(0)}%`).join("  ")}`);
-  console.log(`\nstructured fields (ratings, confidence, problems)`);
+  console.log(`\nstructured fields (ratings, confidence, problems, section layout)`);
   console.log(`  model bits   ${(structBits / test.length).toFixed(1)} per bulletin (${(structBits / 8 / test.length).toFixed(1)} bytes)`);
-  console.log(`  whole bulletin, structured + prose in one stream: ${(combined / test.length).toFixed(1)} bytes mean, round trip ${fmt(test.length - combinedFailures)}/${fmt(test.length)} exact`);
 
   // Where the bytes of a bulletin go. Bytes are model bits / 8, so they exclude coder framing;
   // per bulletin = occurrences x bytes, since problems and advice repeat.

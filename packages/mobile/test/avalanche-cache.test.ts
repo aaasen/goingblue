@@ -1,10 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { gunzipSync } from 'node:zlib';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  avalancheAnchor, encodeAvalancheMessage, loadModels, partBodyChars, splitReply, WIRE_HEADER_CHARS,
+  avalancheAnchor, encodeAvalancheMessage, partBodyChars, splitReply, WIRE_HEADER_CHARS,
   withPlaceholders, type AvalancheForecast, type RequestContext,
 } from '@weather/protocol';
+import { modelsFor } from '../../protocol/test/avalanche-models';
 
 const storage = new Map<string, string>();
 vi.mock('@react-native-async-storage/async-storage', () => ({
@@ -16,12 +15,12 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 import {
-  allocCode, attachResponse, chunksCollected, decodeAny, loadStore, mergeReply, prunePastForecasts, replyKind,
-  replyModelFile, resolveContext, setAvalancheModels, type AvalancheContext,
+  allocCode, attachResponse, bulletinOutline, chunksCollected, decodeAny, decodeAvalanche, loadStore, mergeReply,
+  prunePastForecasts, replyKind, replyModelFile, resolveContext, setAvalancheModels, type AvalancheContext,
 } from '../cache';
 import SEA_TO_SKY from '../fixtures/avalanche/sea-to-sky-2026-03-01.json';
 
-const MODELS = loadModels(gunzipSync(readFileSync(new URL('../../protocol/assets/avcan-model.bin.gz', import.meta.url))));
+const MODELS = modelsFor('avcan');
 const FORECAST = SEA_TO_SKY as AvalancheForecast;
 const TOKEN = '0000000000000000';
 
@@ -63,12 +62,17 @@ describe('avalanche requests in the forecast store', () => {
     const token = `${TOKEN}-decode`;
     const ctx = avalancheContext('g');
     const code = await allocCode(token, ctx, 'Avalanche');
-    const reply = encodeAvalancheMessage(MODELS, code, anchorOf(ctx), FORECAST, 'base82');
+    const reply = await encodeAvalancheMessage(MODELS, code, anchorOf(ctx), FORECAST, 'base82');
     expect(replyKind(reply, token)).toBe('avalanche');
-    const decoded = decodeAny(reply, token);
+    const decoded = await decodeAvalanche(reply, token);
     expect(decoded).toEqual({
-      kind: 'avalanche', code, forecast: { ...withPlaceholders(FORECAST), timezone: 'America/Vancouver' }, lat: 50.1163, lon: -122.9574,
+      code, forecast: { ...withPlaceholders(FORECAST), timezone: 'America/Vancouver' }, lat: 50.1163, lon: -122.9574,
     });
+    // Without the prose model, the reply reads as whole and its structured fields are there.
+    const head = decodeAny(reply, token);
+    if (head.kind !== 'avalanche') throw new Error(head.kind);
+    expect(bulletinOutline(head).danger).toEqual(decoded.forecast.danger);
+    expect(bulletinOutline(head).bottomLine).toBe('');
     const slots = await attachResponse(token, code, reply);
     expect(slots).toHaveLength(1);
     expect(await prunePastForecasts(token)).toHaveLength(1);
@@ -79,8 +83,8 @@ describe('avalanche requests in the forecast store', () => {
     const ctx = avalancheContext('g');
     const good = await allocCode(token, ctx, 'Avalanche');
     const bad = await allocCode(token, ctx, 'Avalanche');
-    await attachResponse(token, good, encodeAvalancheMessage(MODELS, good, anchorOf(ctx), FORECAST, 'base82'));
-    const reply = encodeAvalancheMessage(MODELS, bad, anchorOf(ctx), FORECAST, 'base82');
+    await attachResponse(token, good, await encodeAvalancheMessage(MODELS, good, anchorOf(ctx), FORECAST, 'base82'));
+    const reply = await encodeAvalancheMessage(MODELS, bad, anchorOf(ctx), FORECAST, 'base82');
     const k = [...reply].findIndex((c, i) => i > WIRE_HEADER_CHARS && c !== reply[i + 1]);
     const corrupted = reply.slice(0, k) + reply[k + 1] + reply[k] + reply.slice(k + 2);
     await attachResponse(token, bad, corrupted);
@@ -92,14 +96,14 @@ describe('avalanche requests in the forecast store', () => {
     const token = `${TOKEN}-parts`;
     const ctx = avalancheContext('i');
     const code = await allocCode(token, ctx, 'Avalanche');
-    const reply = encodeAvalancheMessage(MODELS, code, anchorOf(ctx), FORECAST, 'base32768');
+    const reply = await encodeAvalancheMessage(MODELS, code, anchorOf(ctx), FORECAST, 'base32768');
     const parts = splitReply(reply, WIRE_HEADER_CHARS, partBodyChars('i', WIRE_HEADER_CHARS)!);
     expect(parts.length).toBeGreaterThan(1);
     expect(replyKind(parts[1], token)).toBe('avalanche');
     let held = '';
     for (const part of [...parts].reverse()) held = mergeReply(held, part, token);
-    const decoded = decodeAny(held, token);
-    expect(decoded.kind === 'avalanche' && decoded.forecast).toEqual({ ...withPlaceholders(FORECAST), timezone: 'America/Vancouver' });
+    const decoded = await decodeAvalanche(held, token);
+    expect(decoded.forecast).toEqual({ ...withPlaceholders(FORECAST), timezone: 'America/Vancouver' });
   });
 
   it('know nothing about text that is not a reply', async () => {
@@ -110,7 +114,7 @@ describe('avalanche requests in the forecast store', () => {
 });
 
 describe('an NWAC reply', () => {
-  const NWAC_MODELS = loadModels(gunzipSync(readFileSync(new URL('../../protocol/assets/nwac-model.bin.gz', import.meta.url))));
+  const NWAC_MODELS = modelsFor('nwac');
   const STEVENS = { lat: 47.75, lon: -121.09 };
   const nwacForecast: AvalancheForecast = {
     ...FORECAST, center: 'nwac', pieces: [107], advice: [], avalancheSummary: '', snowpackSummary: '', weather: [],
@@ -127,10 +131,10 @@ describe('an NWAC reply', () => {
   it('names its own model, and Avalanche Canada replies keep theirs', async () => {
     const token = `${TOKEN}-nwac-file`;
     const reply = await stored(token);
-    expect(replyModelFile(reply, token)).toBe('nwac-model.bin.gz');
+    expect(replyModelFile(reply, token)).toBe('nwac-structured.bin.gz');
     const code = await allocCode(token, avalancheContext('d'), 'Avalanche');
-    const avcan = encodeAvalancheMessage(MODELS, code, anchorOf(avalancheContext('d')), FORECAST, 'base94');
-    expect(replyModelFile(avcan, token)).toBe('avcan-model.bin.gz');
+    const avcan = await encodeAvalancheMessage(MODELS, code, anchorOf(avalancheContext('d')), FORECAST, 'base94');
+    expect(replyModelFile(avcan, token)).toBe('avcan-structured.bin.gz');
   });
 
   // Before anything below hands in the NWAC model, which stays set for the rest of the file.
@@ -145,9 +149,8 @@ describe('an NWAC reply', () => {
   it('is not mistaken for a reply in progress once its model has loaded', async () => {
     const token = `${TOKEN}-nwac-decode`;
     const reply = await stored(token);
-    setAvalancheModels(NWAC_MODELS, 'nwac-model.bin.gz');
-    const d = decodeAny(reply, token);
-    if (d.kind !== 'avalanche') throw new Error(d.kind);
+    setAvalancheModels(NWAC_MODELS, 'nwac-structured.bin.gz');
+    const d = await decodeAvalanche(reply, token);
     expect(d.forecast.hazardDiscussion).toBe('New snow fell on the old crust.');
     expect(d.forecast.pieces).toEqual([107]);
     expect(d.forecast.timezone).toBe('America/Los_Angeles');

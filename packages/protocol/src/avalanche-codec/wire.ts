@@ -20,7 +20,8 @@ import { decode, decodeBodyAuto, encode, encodeBodyLE, encodeBodyWide, type Alph
 import { DEVICE_TRANSPORT, type DeviceCode } from "../devices.js";
 import { VERSION_PREFIX_CHARS, encodeVersion, takeVersion } from "../version.js";
 import { WIRE_HEADER_BITS, WIRE_HEADER_CHARS, WIRE_VERSION } from "../wire.js";
-import { decodeBulletin, encodeBulletin, type Models } from "./bulletin.js";
+import { headForecast, readBulletin, encodeBulletin, type BulletinHead, type Models } from "./bulletin.js";
+import type { StructuredModel } from "./structured.js";
 import { ISSUE_STEP_MS, quantizeIssued } from "./time.js";
 
 const CODE_BITS = 7;
@@ -39,9 +40,9 @@ export function avalancheAnchor(day: string | null | undefined, startEpochHour: 
   return day ? Date.parse(`${day}T${String(ANCHOR_HOUR).padStart(2, "0")}:00:00Z`) : startEpochHour * 3600000;
 }
 
-export function encodeAvalancheMessage(
+export async function encodeAvalancheMessage(
   models: Models, code: number, anchor: number, forecast: AvalancheForecast, alphabet: Alphabet = "base85",
-): string {
+): Promise<string> {
   const field = (anchor - quantizeIssued(forecast.issued)) / ISSUE_STEP_MS + ISSUE_AFTER_STEPS;
   if (!Number.isInteger(field) || field < 0 || field > ISSUE_MAX) {
     throw new Error(`avalanche: issue time ${new Date(forecast.issued).toISOString()} is out of the header's range`);
@@ -50,16 +51,17 @@ export function encodeAvalancheMessage(
   putInt(header, code, CODE_BITS);
   putInt(header, field, ISSUE_BITS);
   putInt(header, 0, PAD_BITS);
-  const bytes = encodeBulletin(models, forecast);
+  const bytes = await encodeBulletin(models, forecast);
   const bits: number[] = [];
   for (const b of bytes) for (let i = 0; i < 8; i++) bits.push((b >> i) & 1);
   const body = alphabet === "base32768" ? encodeBodyWide(bits) : encodeBodyLE(bits, alphabet);
   return encodeVersion(WIRE_VERSION) + encode(header) + body;
 }
 
-export function decodeAvalancheMessage(
-  models: Models, s: string, anchor: number, alphabet?: Alphabet,
-): { code: number; forecast: AvalancheForecast } {
+// Reads a message up to its prose, which is cheap; throws for one that is not a whole bulletin.
+export function readAvalancheMessage(
+  structured: StructuredModel, s: string, anchor: number, alphabet?: Alphabet,
+): { code: number; head: BulletinHead } {
   const [version, rest] = takeVersion(s);
   if (version !== WIRE_VERSION) throw new Error(`Version mismatch: encoded v${version}, expected v${WIRE_VERSION}`);
   const headerChars = WIRE_HEADER_CHARS - VERSION_PREFIX_CHARS;
@@ -71,12 +73,30 @@ export function decodeAvalancheMessage(
   const bits = decodeBodyAuto(rest.slice(headerChars), alphabet);
   const bytes = new Uint8Array(Math.ceil(bits.length / 8));
   bits.forEach((bit, i) => { if (bit) bytes[i >> 3] |= 1 << (i & 7); });
-  return { code, forecast: decodeBulletin(models, bytes, issued) };
+  return { code, head: readBulletin(structured, bytes, issued) };
+}
+
+export async function decodeAvalancheMessage(
+  models: Models, s: string, anchor: number, alphabet?: Alphabet,
+): Promise<{ code: number; forecast: AvalancheForecast }> {
+  const { code, head } = readAvalancheMessage(models.structured, s, anchor, alphabet);
+  return { code, forecast: headForecast(head, await models.prose.decode(head.prose, head.layout)) };
+}
+
+// The alphabet of the route a request left by.
+export const replyAlphabet = (device: DeviceCode | undefined): Alphabet | undefined =>
+  device ? DEVICE_TRANSPORT[device].alphabet : undefined;
+
+// A reply as a reader pasted it, read up to its prose for the route its request left by.
+export function readAvalancheReply(
+  structured: StructuredModel, s: string, anchor: number, device: DeviceCode | undefined,
+): { code: number; head: BulletinHead } {
+  return readAvalancheMessage(structured, s, anchor, replyAlphabet(device));
 }
 
 // A reply as a reader pasted it, decoded for the route its request left by.
 export function decodeAvalancheReply(
   models: Models, s: string, anchor: number, device: DeviceCode | undefined,
-): { code: number; forecast: AvalancheForecast } {
-  return decodeAvalancheMessage(models, s, anchor, device ? DEVICE_TRANSPORT[device].alphabet : undefined);
+): Promise<{ code: number; forecast: AvalancheForecast }> {
+  return decodeAvalancheMessage(models, s, anchor, replyAlphabet(device));
 }

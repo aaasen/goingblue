@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
-import { gunzipSync } from "node:zlib";
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_VARS, MODE_AUTO, QUOTA_FREE_FORECASTS, WIRE_HEADER_CHARS, WIRE_VERSION,
-  avalancheAnchor, encodeAvalancheMessage, headerFromString, layoutFor, loadModels, wireCodec,
+  avalancheAnchor, encodeAvalancheMessage, headerFromString, layoutFor, wireCodec,
   type AvalancheForecast, type ForecastMessage, type Period, type QuotaState, type RequestContext,
 } from "../src/index.js";
+import { modelsFor } from "./avalanche-models.js";
 import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.json";
 
 const PERIOD: Period = {
@@ -57,10 +56,9 @@ describe("quota header field", () => {
     expect(() => wireCodec.encode(msgWith({ kind: "free", remaining: -1 }))).toThrow(/remaining/);
   });
 
-  it("peeks an avalanche reply's code through the weather header and sees no quota", () => {
-    const models = loadModels(gunzipSync(readFileSync(new URL("../assets/avcan-model.bin.gz", import.meta.url))));
+  it("peeks an avalanche reply's code through the weather header and sees no quota", async () => {
     const anchor = avalancheAnchor("2026-03-01", 0);
-    const s = encodeAvalancheMessage(models, 99, anchor, SEA_TO_SKY as AvalancheForecast);
+    const s = await encodeAvalancheMessage(modelsFor("avcan"), 99, anchor, SEA_TO_SKY as AvalancheForecast);
     const h = headerFromString(s.slice(0, WIRE_HEADER_CHARS));
     expect(h.code).toBe(99);
     expect(h.quota).toEqual({ kind: "none" });

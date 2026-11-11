@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
-import { gunzipSync } from "node:zlib";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import {
-  DEVICE_TRANSPORT, WIRE_HEADER_CHARS, decodeAvalancheMessage, headerFromString, loadModels,
+  DEVICE_TRANSPORT, WIRE_HEADER_CHARS, decodeAvalancheMessage, headerFromString,
   reassembleReply, withPlaceholders,
 } from "@weather/protocol";
 import { serveAvalanche } from "../src/avalanche.ts";
 import { toForecast, type RawProduct } from "../src/avcan.ts";
 import { parseRequest } from "../src/forecast.ts";
+import { modelsFor } from "../../protocol/test/avalanche-models.ts";
 
 // Recorded from the point endpoint: the Sea to Sky bulletin valid 2026-03-01, and what the API
 // answers for a point no center forecasts. The areas response is cut down to the Sea to Sky area.
@@ -17,7 +17,7 @@ const EMPTY = fixture("avcan-point-empty.json");
 const AREAS = fixture("avcan-areas-sea-to-sky-2026-03-01.json");
 const SEA_TO_SKY_PIECES = [6, 27, 32, 67, 72, 76];
 
-const MODELS = loadModels(gunzipSync(readFileSync(new URL("../../protocol/assets/avcan-model.bin.gz", import.meta.url))));
+const MODELS = modelsFor("avcan");
 const ISSUED_HOUR = Date.parse(SEA_TO_SKY.report.dateIssued) / 3600000;
 
 // The point endpoint answers with `body`; the areas endpoint with `areas`.
@@ -47,7 +47,7 @@ describe("serveAvalanche", () => {
     expect(result.replies).toHaveLength(1);
     // The code sits where a weather header keeps it.
     expect(headerFromString(result.replies[0]).code).toBe(42);
-    const { code, forecast } = decodeAvalancheMessage(MODELS, result.replies[0], Date.parse("2026-03-01T19:00:00Z"), "base94");
+    const { code, forecast } = await decodeAvalancheMessage(MODELS, result.replies[0], Date.parse("2026-03-01T19:00:00Z"), "base94");
     expect(code).toBe(42);
     expect(forecast).toEqual(withPlaceholders(toForecast(SEA_TO_SKY, SEA_TO_SKY_PIECES)));
     expect(forecast.pieces).toEqual(SEA_TO_SKY_PIECES);
@@ -63,7 +63,7 @@ describe("serveAvalanche", () => {
     const { alphabet, maxChars } = DEVICE_TRANSPORT[device];
     if (device === "i") expect(result.replies.length).toBeGreaterThan(1);
     if (result.replies.length === 1 && device !== "s") expect(whole.length).toBeLessThanOrEqual(maxChars);
-    const { forecast } = decodeAvalancheMessage(MODELS, whole, Date.parse("2026-03-01T19:00:00Z"), alphabet);
+    const { forecast } = await decodeAvalancheMessage(MODELS, whole, Date.parse("2026-03-01T19:00:00Z"), alphabet);
     expect(forecast).toEqual(withPlaceholders(toForecast(SEA_TO_SKY, SEA_TO_SKY_PIECES)));
   });
 
@@ -73,7 +73,7 @@ describe("serveAvalanche", () => {
     expect(fetch.mock.calls[0][0].searchParams.has("date")).toBe(false);
     if (result.kind !== "ok") throw new Error(result.kind);
     const whole = reassembleReply(result.replies.join("\n"), () => WIRE_HEADER_CHARS);
-    const { forecast } = decodeAvalancheMessage(MODELS, whole, (ISSUED_HOUR + 3) * 3600000, "base82");
+    const { forecast } = await decodeAvalancheMessage(MODELS, whole, (ISSUED_HOUR + 3) * 3600000, "base82");
     expect(forecast.issued).toBe(Date.parse("2026-03-01T00:00:00Z"));
   });
 

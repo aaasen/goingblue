@@ -1,12 +1,14 @@
 // Avalanche requests (`f:a`): fetch the bulletin covering the request's point from the center that
-// forecasts there, encode it whole under that center's model, and split it over as many messages as it takes. Unlike a weather
+// forecasts there, encode it whole under that center's structured model and the shared prose
+// model, and split it over as many messages as it takes. Unlike a weather
 // reply, which fills the budget the reader chose, a bulletin is never cut to fit: a partial
 // bulletin could leave out the one problem or advice line that matters.
 import { readFile } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
+import { AvalancheModel } from "@weather/avalanche-node";
 import {
-  avalancheAnchor, avalancheModelFile, encodeAvalancheMessage, loadModels, pieceAt, WIRE_HEADER_CHARS,
-  type AvalancheForecast, type Models,
+  avalancheAnchor, avalancheModelFile, encodeAvalancheMessage, loadStructured, pieceAt, PROSE_MODEL_FILE, WIRE_HEADER_CHARS,
+  type AvalancheForecast, type Models, type ProseCoder, type StructuredModel,
 } from "@weather/protocol";
 import { fetchAreaPieces, fetchPointProduct, toForecast } from "./avcan.js";
 import { splitReplyFor, type ForecastParams } from "./forecast.js";
@@ -21,15 +23,32 @@ const MODEL_DIR = new URL("../../protocol/assets/", import.meta.url);
 
 // Each is loaded on its first request, so weather-only instances never pay for one. A failed load
 // is retried by the next request rather than remembered.
-const models = new Map<string, Promise<Models>>();
-function avalancheModels(file: string): Promise<Models> {
-  let loading = models.get(file);
+const loads = new Map<string, Promise<StructuredModel | ProseCoder>>();
+function load<T extends StructuredModel | ProseCoder>(file: string, parse: (bytes: Buffer) => T): Promise<T> {
+  let loading = loads.get(file);
   if (!loading) {
-    loading = readFile(new URL(file, MODEL_DIR)).then((bytes) => loadModels(gunzipSync(bytes)));
-    models.set(file, loading);
-    loading.catch(() => { models.delete(file); });
+    loading = readFile(new URL(file, MODEL_DIR)).then(parse);
+    loads.set(file, loading);
+    loading.catch(() => { loads.delete(file); });
   }
-  return loading;
+  return loading as Promise<T>;
+}
+
+// The native prose model as the protocol's coder. Encoding runs off the event loop.
+export function proseCoder(bytes: Buffer): ProseCoder {
+  const model = new AvalancheModel(bytes);
+  return {
+    encode: async (doc) => new Uint8Array(await model.encode(doc)),
+    decode: (bytes, layout) => model.decode(Buffer.from(bytes), layout),
+  };
+}
+
+async function avalancheModels(file: string): Promise<Models> {
+  const [structured, prose] = await Promise.all([
+    load(file, (bytes) => loadStructured(gunzipSync(bytes))),
+    load(PROSE_MODEL_FILE, proseCoder),
+  ]);
+  return { structured, prose };
 }
 
 export type AvalancheResult =
@@ -58,7 +77,7 @@ export async function serveAvalanche(params: ForecastParams): Promise<AvalancheR
   const fetchMs = Date.now() - fetchStart;
 
   const encodeStart = Date.now();
-  const encoded = encodeAvalancheMessage(m, params.code, anchor, forecast, params.alphabet);
+  const encoded = await encodeAvalancheMessage(m, params.code, anchor, forecast, params.alphabet);
   const replies = splitReplyFor(params, encoded, WIRE_HEADER_CHARS);
   if (replies.length > MAX_PARTS) throw new Error(`avalanche: bulletin for ${forecast.region} needs ${replies.length} parts`);
   return { kind: "ok", replies, fetchMs, encodeMs: Date.now() - encodeStart };

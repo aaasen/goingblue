@@ -23,6 +23,7 @@
     "base32768": "^5.0.1"
   },
   "devDependencies": {
+    "@weather/avalanche-node": "workspace:*",
     "typescript": "^7.0.2",
     "vitest": "^1.6.1"
   }

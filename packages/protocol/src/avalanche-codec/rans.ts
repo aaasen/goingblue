@@ -129,6 +129,13 @@ export class Decoder {
     return this.pos < this.buf.length ? this.buf[this.pos++] : (this.pos++, 0);
   }
 
+  // For a stream with more bytes after it: throws unless the decode ended exactly where the
+  // encoder began (invariant 5), and returns where the stream's bytes end.
+  end(): number {
+    if (this.x !== RANS_L) throw new Error("rans: stream did not end cleanly");
+    return this.pos;
+  }
+
   // Throws unless the decode ended exactly where the encoder began (invariant 5).
   finish(): void {
     if (this.x !== RANS_L) throw new Error("rans: stream did not end cleanly");

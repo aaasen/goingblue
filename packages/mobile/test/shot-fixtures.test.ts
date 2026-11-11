@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gunzipSync } from 'node:zlib';
-import { isValidToken, loadModels } from '@weather/protocol';
+import { isValidToken } from '@weather/protocol';
+import { modelsFor } from '../../protocol/test/avalanche-models';
 
 // The seed's files, read the way the native store reads them: inline manifest values directly,
 // null entries from the overflow file named by the key's MD5.
@@ -31,7 +31,7 @@ vi.mock('../modules/ultra-constrained', () => ({ isUltraConstrained: () => false
 vi.hoisted(() => { (globalThis as { __DEV__?: boolean }).__DEV__ = false; });
 
 import { loadToken } from '../account';
-import { decodeAny, isAvalancheContext, loadStore, setAvalancheModels } from '../cache';
+import { decodeAny, decodeAvalanche, isAvalancheContext, loadStore, setAvalancheModels } from '../cache';
 import { findFavorite, loadFavorites } from '../favorites';
 import { loadAqiScale, loadDevice, loadHideExpiredBanner, loadTimeFormat, loadTwoMessages, loadUnits } from '../settings';
 import { SEED_SETTINGS, SEED_TOKEN, SHOTS, requestCount } from '../screenshots/shots.mjs';
@@ -91,14 +91,14 @@ describe('screenshot seed', () => {
     const store = await loadStore(SEED_TOKEN);
     const expected = fixtures.reduce((n, f) => n + f.requests.length, 0);
     expect(store.slots).toHaveLength(expected);
-    setAvalancheModels(loadModels(gunzipSync(readFileSync(new URL('../../protocol/assets/avcan-model.bin.gz', import.meta.url)))));
+    setAvalancheModels(modelsFor('avcan'));
     for (const slot of store.slots) {
       const decoded = decodeAny(slot.encoded!, SEED_TOKEN);
       expect(decoded.kind).toBe(isAvalancheContext(slot.context) ? 'avalanche' : 'weather');
       const shot = SHOTS.find((s) => s.lat === slot.context.lat && s.lon === slot.context.lon)!;
       expect(findFavorite(favorites, slot.context)?.name).toBe('favorite' in shot ? shot.favorite : undefined);
       if (decoded.kind === 'weather') expect(decoded.msg.periods.length).toBeGreaterThan(0);
-      else expect(decoded.forecast.danger.length).toBeGreaterThan(0);
+      else expect((await decodeAvalanche(slot.encoded!, SEED_TOKEN)).forecast.danger.length).toBeGreaterThan(0);
       // Recorded dates, not today's: the start is the hour-aligned request time of its recording.
       expect(slot.context.start % 3600000).toBe(0);
       expect(slot.context.start).toBeLessThanOrEqual(recordedLatest);

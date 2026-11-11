@@ -1,5 +1,6 @@
 /**
- * The trained avalanche models as one binary file, loaded without parsing the counts.
+ * A center's trained structured model (structured.ts) as one binary file, loaded without parsing
+ * the counts.
  *
  * Layout:
  *   "GBAM"               magic
@@ -15,12 +16,11 @@
  * are views over the file. The arrays are written in the machine's byte order, so both ends
  * must be little-endian, which every supported platform is.
  */
-import { KEY_BASE, Model, Stream, Vocab, type Counts, type Ids, type Level } from "./model.js";
+import { KEY_BASE, Stream, Vocab, type Counts, type Ids, type Level } from "./model.js";
 import { FIELDS, StructuredModel, type Field, type FieldName } from "./structured.js";
-import type { Models } from "./bulletin.js";
 import { decodeUtf8 } from "./utf8.js";
 
-const MAGIC = "GBAM";
+const MAGIC = "GBAS";
 const FORMAT_VERSION = 1;
 
 type ArrayType = "u16" | "u32" | "f64";
@@ -34,13 +34,6 @@ interface StreamDesc {
 }
 
 interface Header {
-  wordOrder: number;
-  kinds: string[];
-  kindCounts: number[];
-  byteCounts: number[];
-  sepCtx: string[];
-  streams: [string, StreamDesc][];
-  seps: StreamDesc;
   structured: [FieldName, { contexts: string[]; stream: StreamDesc }][];
 }
 
@@ -68,7 +61,7 @@ function assertLittleEndian(): void {
   if (new Uint8Array(new Uint16Array([1]).buffer)[0] !== 1) throw new Error("pack: big-endian platforms are not supported");
 }
 
-export function packModels({ prose, structured }: Models): Uint8Array {
+export function packStructured(structured: StructuredModel): Uint8Array {
   assertLittleEndian();
   const arrays: [ArrayBufferView, number][] = [];
   let size = 0;
@@ -89,13 +82,6 @@ export function packModels({ prose, structured }: Models): Uint8Array {
     })),
   });
   const header: Header = {
-    wordOrder: prose.wordOrder,
-    kinds: prose.kinds,
-    kindCounts: prose.kindCounts,
-    byteCounts: prose.byteCounts,
-    sepCtx: prose.sepCtx.tokens,
-    streams: [...prose.streams].map(([name, s]) => [name, stream(s)]),
-    seps: stream(prose.seps),
     structured: FIELDS.map((name) => {
       const f = structured.field(name);
       return [name, { contexts: f.contexts.tokens, stream: stream(f.stream) }];
@@ -113,11 +99,11 @@ export function packModels({ prose, structured }: Models): Uint8Array {
   return out;
 }
 
-export function loadModels(file: Uint8Array): Models {
+export function loadStructured(file: Uint8Array): StructuredModel {
   assertLittleEndian();
   // Views need their element alignment; a buffer that starts off an 8-byte boundary is copied.
   const bytes = file.byteOffset % 8 === 0 ? file : file.slice();
-  if (decodeUtf8(bytes.subarray(0, 4)) !== MAGIC) throw new Error("pack: not an avalanche model file");
+  if (decodeUtf8(bytes.subarray(0, 4)) !== MAGIC) throw new Error("pack: not an avalanche structured model file");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const version = view.getUint32(4, true);
   if (version !== FORMAT_VERSION) throw new Error(`pack: unsupported format version ${version}`);
@@ -147,17 +133,8 @@ export function loadModels(file: Uint8Array): Models {
     });
     return new Stream(new Vocab(d.vocab), levels, { sids: get(d.uni.sids) as Ids, counts: get(d.uni.counts) as Counts });
   };
-  const prose = new Model({
-    wordOrder: header.wordOrder,
-    streams: new Map(header.streams.map(([name, d]) => [name, stream(d)])),
-    seps: stream(header.seps),
-    sepCtx: new Vocab(header.sepCtx),
-    kinds: header.kinds,
-    kindCounts: header.kindCounts,
-    byteCounts: header.byteCounts,
-  });
   const fields = new Map<FieldName, Field>(
     header.structured.map(([name, f]) => [name, { contexts: new Vocab(f.contexts), stream: stream(f.stream) }]),
   );
-  return { prose, structured: new StructuredModel(fields) };
+  return new StructuredModel(fields);
 }

@@ -1,10 +1,14 @@
 {
-  "avcan-model.bin.gz": {
-    "key": "models/avalanche-avcan-v5-18bdf336f1378447.bin.gz",
-    "sha256": "18bdf336f137844720dbb610ec0930ff119fea397e3a8c645c0506355317a430"
+  "avcan-structured.bin.gz": {
+    "key": "models/avalanche-avcan-structured-v8-dcc5725e5e79ff90.bin.gz",
+    "sha256": "dcc5725e5e79ff903655fee48788f35c4fe8a88c0b15e248b974479d8d57a887"
   },
-  "nwac-model.bin.gz": {
-    "key": "models/avalanche-nwac-v8-755f2f06fab4ffb7.bin.gz",
-    "sha256": "755f2f06fab4ffb7a68d17ddeed32ed04229c0a572e6dc664100a525051d7370"
+  "nwac-structured.bin.gz": {
+    "key": "models/avalanche-nwac-structured-v8-93db314da8636616.bin.gz",
+    "sha256": "93db314da86366161ddf76e35ecb04490aa7cb665dba15f5e0323ce9e3651816"
+  },
+  "prose-model.bin": {
+    "key": "models/avalanche-prose-s384c-3698902a0d9f8f04.bin",
+    "sha256": "3698902a0d9f8f0420ce2d992dd99ac7167080f7caad1bbe974091ad7e76a157"
   }
 }

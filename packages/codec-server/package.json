@@ -13,6 +13,7 @@
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "@openmeteo/sdk": "^1.27.2",
+    "@weather/avalanche-node": "workspace:*",
     "@weather/protocol": "workspace:*",
     "hono": "^4.13.2",
     "openmeteo": "^1.2.3"

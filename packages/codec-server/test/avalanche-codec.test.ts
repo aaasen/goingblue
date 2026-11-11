@@ -3,12 +3,14 @@ import { tokenize, detokenize } from "@weather/protocol/avalanche-codec/tokenize
 import type { Model, Section } from "@weather/protocol/avalanche-codec/model";
 import { encode, decode, sectionBits, tokenCosts } from "@weather/protocol/avalanche-codec/codec";
 import { buildTable, normalize, encode as ransEncode, Decoder, SCALE } from "@weather/protocol/avalanche-codec/rans";
+import { readFileSync } from "node:fs";
 import { structuredOf } from "@weather/protocol/avalanche-codec/structured";
 import {
-  UNENCODED, decodeBulletin, encodeBulletin, loadModels, packModels, quantizeIssued, withPlaceholders,
-  type AvalancheForecast, type AvalancheProblem,
+  PROSE_MODEL_FILE, UNENCODED, decodeBulletin, encodeBulletin, loadStructured, packStructured, quantizeIssued, readBulletin,
+  withPlaceholders, type AvalancheForecast, type Models,
 } from "@weather/protocol";
 import { ModelBuilder } from "../scripts/avalanche/model.ts";
+import { proseCoder } from "../src/avalanche.ts";
 import { htmlToText } from "../src/html-text.ts";
 import { train } from "../scripts/avalanche/train.ts";
 import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.json";
@@ -183,17 +185,20 @@ const QUIET = forecast({
 });
 
 describe("bulletin", () => {
-  const models = () => train([forecast(), QUIET]);
+  const PROSE = proseCoder(readFileSync(new URL(`../../protocol/assets/${PROSE_MODEL_FILE}`, import.meta.url)));
+  const modelsOf = (fs: AvalancheForecast[]): Models => ({ structured: train(fs).structured, prose: PROSE });
+  const models = () => modelsOf([forecast(), QUIET]);
+  const roundTrip = async (m: Models, f: AvalancheForecast) => decodeBulletin(m, await encodeBulletin(m, f), quantizeIssued(f.issued));
 
-  it("round-trips a forecast, filling the fields the wire does not carry with placeholders", () => {
+  it("round-trips a forecast, filling the fields the wire does not carry with placeholders", async () => {
     const m = models();
-    for (const f of [forecast(), QUIET]) expect(decodeBulletin(m, encodeBulletin(m, f), quantizeIssued(f.issued))).toEqual(withPlaceholders(f));
-    const back = decodeBulletin(m, encodeBulletin(m, forecast()), quantizeIssued(forecast().issued));
+    for (const f of [forecast(), QUIET]) expect(await roundTrip(m, f)).toEqual(withPlaceholders(f));
+    const back = await roundTrip(m, forecast());
     expect(back).toMatchObject(UNENCODED);
     expect(back.danger.map((d) => d.date)).toEqual(["2026-03-01", "2026-03-02", "2026-03-03"]);
   });
 
-  it("round-trips unseen values and dates, empty prose, and unlabeled weather periods", () => {
+  it("round-trips unseen values and dates, empty prose, and unlabeled weather periods", async () => {
     const m = models();
     const novel = forecast({
       bottomLine: "",
@@ -207,11 +212,12 @@ describe("bulletin", () => {
       weather: [{ label: "", text: "Unheaded weather prose." }, { label: "Monday", text: "" }],
       confidence: { rating: "noRating", statements: ["First.", "Second statement."] },
     });
-    expect(decodeBulletin(m, encodeBulletin(m, novel), quantizeIssued(novel.issued))).toEqual(withPlaceholders(novel));
+    expect(await roundTrip(m, novel)).toEqual(withPlaceholders(novel));
   });
 
-  it("round-trips a hazard discussion and a problem's exact cells", () => {
+  it("round-trips a hazard discussion and a problem's exact cells", async () => {
     const nwac = forecast({
+      pieces: [101],
       advice: [], avalancheSummary: "", snowpackSummary: "", weather: [],
       hazardDiscussion: "Novel discussion of the crust.",
       author: "Irene Henninger",
@@ -222,57 +228,56 @@ describe("bulletin", () => {
         likelihood: "possible", size: { min: 1, max: 2 }, description: "Novel wet loose text.",
       }],
     });
-    const m = train([forecast(), nwac]);
-    expect(decodeBulletin(m, encodeBulletin(m, nwac), quantizeIssued(nwac.issued))).toEqual(withPlaceholders(nwac));
+    expect(await roundTrip(modelsOf([forecast(), nwac]), nwac)).toEqual(withPlaceholders(nwac));
   });
 
   it("charges seen structure a few bits and unseen values many", () => {
-    const m = models();
-    const byteTable = m.prose.byteTable();
-    expect(m.structured.bits(byteTable, structuredOf(forecast()))).toBeLessThan(24);
+    const { structured } = models();
+    expect(structured.bits(structuredOf(forecast()))).toBeLessThan(28);
     const unseen = forecast({ confidence: { rating: "low", statements: [] } });
-    expect(m.structured.bits(byteTable, structuredOf(unseen))).toBeGreaterThan(30);
+    expect(structured.bits(structuredOf(unseen))).toBeGreaterThan(30);
   });
 
-  it("encodes identically after packing and loading", () => {
+  it("encodes identically after packing and loading", async () => {
     const m = models();
-    const loaded = loadModels(packModels(m));
+    const loaded = { ...m, structured: loadStructured(packStructured(m.structured)) };
     for (const f of [forecast(), QUIET]) {
-      const bytes = encodeBulletin(m, f);
-      expect(encodeBulletin(loaded, f)).toEqual(bytes);
-      expect(decodeBulletin(loaded, bytes, quantizeIssued(f.issued))).toEqual(withPlaceholders(f));
+      const bytes = await encodeBulletin(m, f);
+      expect(await encodeBulletin(loaded, f)).toEqual(bytes);
+      expect(await decodeBulletin(loaded, bytes, quantizeIssued(f.issued))).toEqual(withPlaceholders(f));
     }
     // A file that starts off an 8-byte boundary still loads.
-    const packed = packModels(m);
+    const packed = packStructured(m.structured);
     const shifted = new Uint8Array(packed.length + 1).subarray(1);
     shifted.set(packed);
-    expect(encodeBulletin(loadModels(shifted), forecast())).toEqual(encodeBulletin(m, forecast()));
+    expect(await encodeBulletin({ ...m, structured: loadStructured(shifted) }, forecast())).toEqual(await encodeBulletin(m, forecast()));
   });
 
-  it("rejects bytes the model did not write", () => {
+  it("rejects bytes the models did not write", async () => {
     const m = models();
     const f = forecast();
     const issued = quantizeIssued(f.issued);
-    const bytes = encodeBulletin(m, f);
+    const bytes = await encodeBulletin(m, f);
+    // A flip in the prose runs the prose model until it fails, hence the long timeout.
     for (let k = 0; k < bytes.length; k++) {
       const flipped = bytes.slice();
       flipped[k] ^= 0x10;
-      expect(() => decodeBulletin(m, flipped, issued)).toThrow();
+      await expect(decodeBulletin(m, flipped, issued), `byte ${k}`).rejects.toThrow();
     }
-    expect(() => decodeBulletin(m, encodeBulletin(train([QUIET, forecast({ bottomLine: "Other." })]), f), issued)).toThrow();
-    expect(() => decodeBulletin(m, bytes.subarray(0, bytes.length - 3), issued)).toThrow();
-    expect(() => decodeBulletin(m, new Uint8Array([0xff, 0xff]), issued)).toThrow(/runs past the end/);
-  });
+    const other = modelsOf([QUIET, forecast({ confidence: { rating: "low", statements: [] } })]);
+    await expect(decodeBulletin(m, await encodeBulletin(other, f), issued)).rejects.toThrow();
+    expect(() => readBulletin(m.structured, bytes.subarray(0, bytes.length - 3), issued)).toThrow(/incomplete/);
+    expect(() => readBulletin(m.structured, new Uint8Array([0xff, 0xff]), issued)).toThrow(/past the end/);
+  }, 120_000);
 
-  it("round-trips the Sea to Sky forecast", () => {
+  it("round-trips the Sea to Sky forecast", async () => {
     const f = SEA_TO_SKY as AvalancheForecast;
-    const m = train([f]);
-    expect(decodeBulletin(m, encodeBulletin(m, f), quantizeIssued(f.issued))).toEqual(withPlaceholders(f));
+    expect(await roundTrip(modelsOf([f]), f)).toEqual(withPlaceholders(f));
   });
 });
 
 describe("section context", () => {
-  it("starts a problem description from its type and round-trips through the bulletin", () => {
+  it("starts a problem description from its type", () => {
     const builder = new ModelBuilder();
     const a = { kind: "problem", text: "Wind slabs remain reactive near ridge crests.", context: "windSlab" };
     const b = { kind: "problem", text: "Persistent slabs remain a concern on shaded aspects.", context: "persistentSlab" };
@@ -282,12 +287,5 @@ describe("section context", () => {
     const asWind = sectionBits(m, { kind: "problem", text: "Wind", context: "windSlab" });
     const asPersistent = sectionBits(m, { kind: "problem", text: "Wind", context: "persistentSlab" });
     expect(asWind).toBeLessThan(asPersistent);
-
-    const problem = (type: "windSlab" | "persistentSlab", description: string): AvalancheProblem => ({
-      type, elevations: ["alp"], aspects: [], likelihood: "possible", size: { min: 1, max: 2 }, description,
-    });
-    const f = forecast({ problems: [problem("persistentSlab", b.text), problem("windSlab", a.text)] });
-    const models = train([f]);
-    expect(decodeBulletin(models, encodeBulletin(models, f), quantizeIssued(f.issued))).toEqual(withPlaceholders(f));
   });
 });

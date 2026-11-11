@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
-import { gunzipSync } from "node:zlib";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import {
-  AVALANCHE_PIECES, DEVICE_TRANSPORT, WIRE_HEADER_CHARS, avalancheModelFile, decodeAvalancheMessage, loadModels,
+  AVALANCHE_PIECES, DEVICE_TRANSPORT, WIRE_HEADER_CHARS, avalancheModelFile, decodeAvalancheMessage,
   pieceAt, reassembleReply, withPlaceholders,
 } from "@weather/protocol";
 import { serveAvalanche } from "../src/avalanche.ts";
 import { parseRequest } from "../src/forecast.ts";
 import { isRated, NWAC_ZONE_IDS, toForecast, validDate, type NacProduct } from "../src/nac.ts";
+import { modelsFor } from "../../protocol/test/avalanche-models.ts";
 
 // Recorded from the product endpoint: a Stevens Pass forecast, the off-season summary, and a Mt Hood
 // forecast whose location is not every combination of its aspects and bands.
@@ -16,7 +16,7 @@ const STEVENS = fixture("nac-nwac-stevens-2026-01-08.json");
 const SUMMARY = fixture("nac-nwac-summary-2026-09-15.json");
 const CELLS = fixture("nac-nwac-cells.json");
 
-const MODELS = loadModels(gunzipSync(readFileSync(new URL("../../protocol/assets/nwac-model.bin.gz", import.meta.url))));
+const MODELS = modelsFor("nwac");
 const STEVENS_PIECE = AVALANCHE_PIECES.find((p) => p.center === "nwac" && p.names[0] === "Stevens Pass")!;
 const [STEVENS_LAT, STEVENS_LON] = ["47.7500", "-121.0900"];
 const ANCHOR = Date.parse("2026-01-08T19:00:00Z");
@@ -111,15 +111,15 @@ describe("zones", () => {
     for (const p of pieces) expect(NWAC_ZONE_IDS[p.names[0]], p.names[0]).toBeTypeOf("number");
   });
 
-  it("chooses the model from the point on both sides of the 49th parallel", () => {
+  it("chooses the structured model from the point on both sides of the 49th parallel", () => {
     // Mt Baker, in West Slopes North, and Manning Park just north of it.
     expect(pieceAt(48.78, -121.81)?.center).toBe("nwac");
-    expect(avalancheModelFile(48.78, -121.81)).toBe("nwac-model.bin.gz");
+    expect(avalancheModelFile(48.78, -121.81)).toBe("nwac-structured.bin.gz");
     expect(pieceAt(49.06, -120.8)?.center).toBe("avalanche-canada");
-    expect(avalancheModelFile(49.06, -120.8)).toBe("avcan-model.bin.gz");
+    expect(avalancheModelFile(49.06, -120.8)).toBe("avcan-structured.bin.gz");
     // Seattle is in no piece, and the model of a point in no piece is Avalanche Canada's.
     expect(pieceAt(47.6, -122.33)).toBeNull();
-    expect(avalancheModelFile(47.6, -122.33)).toBe("avcan-model.bin.gz");
+    expect(avalancheModelFile(47.6, -122.33)).toBe("avcan-structured.bin.gz");
   });
 });
 
@@ -134,7 +134,7 @@ describe("serveAvalanche for an NWAC zone", () => {
     expect(Object.fromEntries(url.searchParams)).toEqual({ type: "forecast", center_id: "NWAC", zone_id: "3024" });
     expect(init.headers).toBeUndefined();
     if (result.kind !== "ok") throw new Error(result.kind);
-    const { code, forecast } = decodeAvalancheMessage(MODELS, result.replies[0], ANCHOR, "base94");
+    const { code, forecast } = await decodeAvalancheMessage(MODELS, result.replies[0], ANCHOR, "base94");
     expect(code).toBe(42);
     expect(forecast).toEqual(withPlaceholders(toForecast(STEVENS, STEVENS_PIECE)));
     expect(forecast.pieces).toEqual([STEVENS_PIECE.id]);
@@ -145,7 +145,7 @@ describe("serveAvalanche for an NWAC zone", () => {
     const result = await serveAvalanche(request(`d:${device}`));
     if (result.kind !== "ok") throw new Error(result.kind);
     const whole = reassembleReply(result.replies.join("\n"), () => WIRE_HEADER_CHARS);
-    const { forecast } = decodeAvalancheMessage(MODELS, whole, ANCHOR, DEVICE_TRANSPORT[device].alphabet);
+    const { forecast } = await decodeAvalancheMessage(MODELS, whole, ANCHOR, DEVICE_TRANSPORT[device].alphabet);
     expect(forecast).toEqual(withPlaceholders(toForecast(STEVENS, STEVENS_PIECE)));
   });
 
@@ -155,7 +155,7 @@ describe("serveAvalanche for an NWAC zone", () => {
       const anchor = Date.parse(product.published_time) + 3600000;
       const result = await serveAvalanche(parseRequest(`v8 ${STEVENS_LAT},${STEVENS_LON} f:a d:d u:0000000000000000 k:1 t:${Math.floor(anchor / 3600000)}`));
       if (result.kind !== "ok") throw new Error(result.kind);
-      const { forecast } = decodeAvalancheMessage(MODELS, result.replies[0], Math.floor(anchor / 3600000) * 3600000, "base94");
+      const { forecast } = await decodeAvalancheMessage(MODELS, result.replies[0], Math.floor(anchor / 3600000) * 3600000, "base94");
       expect(forecast).toEqual(withPlaceholders(toForecast(product, STEVENS_PIECE)));
     }
   });
@@ -192,7 +192,7 @@ describe("serveAvalanche for an NWAC zone", () => {
     const urls = fetch.mock.calls.map((c) => c[0] as URL);
     expect(urls.map((u) => u.searchParams.get("date_start"))).toEqual(["2026-10-19", "2025-11-15", null]);
     expect(urls[2].pathname).toBe(`/v2/public/product/${SUMMARY.id}`);
-    const { forecast } = decodeAvalancheMessage(MODELS, result.replies[0], Date.parse("2026-10-20T19:00:00Z"), "base94");
+    const { forecast } = await decodeAvalancheMessage(MODELS, result.replies[0], Date.parse("2026-10-20T19:00:00Z"), "base94");
     expect(forecast).toEqual(withPlaceholders(toForecast(SUMMARY, STEVENS_PIECE)));
   });
 

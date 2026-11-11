@@ -20,12 +20,16 @@
  *   confidence
  *   problem count, then per problem: type | previous type, elevations | type,
  *   aspects | type, likelihood | type, size | type
+ *   layout (sections.ts), the count of each prose section kind but problem
+ *
+ * A token no stream has seen is coded as its UTF-8 bytes under a uniform table.
  */
 import type { Aspect, AvalancheForecast, Elevation, ProblemCell } from "../avalanche.js";
 import { daysBetween, quantizeIssued, utcDate } from "./time.js";
-import { BOS, UNK, type Stream, type Vocab } from "./model.js";
+import { BOS, LIT_END, UNK, type Stream, type Vocab } from "./model.js";
 import { planToken, readToken } from "./codec.js";
-import { costBits, type Decision, type Decoder, type Table } from "./rans.js";
+import { buildTable, costBits, type Decision, type Decoder, type Table } from "./rans.js";
+import { layoutOf, sectionsOf } from "./sections.js";
 
 export interface Problem {
   type: string;
@@ -41,6 +45,7 @@ export interface Structured {
   ratings: { date: string; alp: string; tln: string; btl: string }[];   // one entry per day; date as coded
   confidence: string;
   problems: Problem[];
+  layout: string;
 }
 
 export function structuredOf(f: AvalancheForecast): Structured {
@@ -60,6 +65,7 @@ export function structuredOf(f: AvalancheForecast): Structured {
       likelihood: p.likelihood,
       size: `${p.size.min}-${p.size.max}`,
     })),
+    layout: layoutOf(sectionsOf(f)),
   };
 }
 
@@ -72,7 +78,7 @@ export function cellsOf(aspects: string[]): ProblemCell[] | null {
   });
 }
 
-export const FIELDS = ["validity", "dayCount", "date", "rating", "confidence", "problemCount", "type", "elevations", "aspects", "likelihood", "size"] as const;
+export const FIELDS = ["validity", "dayCount", "date", "rating", "confidence", "problemCount", "type", "elevations", "aspects", "likelihood", "size", "layout"] as const;
 export type FieldName = (typeof FIELDS)[number];
 
 // One order-1 stream per field; contexts are strings interned per field.
@@ -89,7 +95,7 @@ const ctx = (f: Field, context: string | null): number =>
 export function walk(
   s: Structured | null, issueHour: number, emit: (field: FieldName, context: string | null, token: string | null) => string,
 ): Structured {
-  const out: Structured = { issueHour, validity: "", ratings: [], confidence: "", problems: [] };
+  const out: Structured = { issueHour, validity: "", ratings: [], confidence: "", problems: [], layout: "" };
   out.validity = emit("validity", null, s ? s.validity : null);
   const days = Number(emit("dayCount", null, s ? String(s.ratings.length) : null));
   for (let d = 0; d < days; d++) {
@@ -117,8 +123,14 @@ export function walk(
     out.problems.push(problem);
     prevType = type;
   }
+  out.layout = emit("layout", null, s ? s.layout : null);
   return out;
 }
+
+let byteTbl: Table | null = null;
+// Every byte value and the literal's end, equally likely.
+const byteTable = (): Table =>
+  (byteTbl ??= buildTable([...Array.from({ length: 256 }, (_, b): [number, number] => [b, 1]), [LIT_END, 1]]));
 
 export class StructuredModel {
   constructor(readonly fields: Map<FieldName, Field>) {}
@@ -129,26 +141,25 @@ export class StructuredModel {
     return f;
   }
 
-  // Appends the decisions for `s` to `plan`. The byte table comes from the prose model so
-  // literals share one table.
-  plan(plan: Decision[], byteTable: Table, s: Structured): void {
+  // Appends the decisions for `s` to `plan`.
+  plan(plan: Decision[], s: Structured): void {
     walk(s, s.issueHour, (field, context, token) => {
       const f = this.field(field);
-      planToken(plan, f.stream, byteTable, [ctx(f, context)], token!);
+      planToken(plan, f.stream, byteTable(), [ctx(f, context)], token!);
       return token!;
     });
   }
 
-  read(dec: Decoder, byteTable: Table, issueHour: number): Structured {
+  read(dec: Decoder, issueHour: number): Structured {
     return walk(null, issueHour, (field, context) => {
       const f = this.field(field);
-      return readToken(dec, f.stream, byteTable, [ctx(f, context)])[0];
+      return readToken(dec, f.stream, byteTable(), [ctx(f, context)])[0];
     });
   }
 
-  bits(byteTable: Table, s: Structured): number {
+  bits(s: Structured): number {
     const plan: Decision[] = [];
-    this.plan(plan, byteTable, s);
+    this.plan(plan, s);
     let bits = 0;
     for (const [table, sym] of plan) bits += costBits(table, sym);
     return bits;

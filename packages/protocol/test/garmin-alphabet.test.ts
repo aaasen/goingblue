@@ -1,13 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { gunzipSync } from "node:zlib";
 import { encode, decode, encodeBodyLE, decodeBodyLE } from "../src/codec.js";
 import { ALPHABET, GARMIN_ALPHABET } from "../src/constants.js";
 import { DEVICE_TRANSPORT, type DeviceCode } from "../src/devices.js";
 import { encodeVersion } from "../src/version.js";
 import { decodeMessage, encodeMessage } from "../src/registry.js";
 import { WIRE_HEADER_BITS, WIRE_HEADER_CHARS, WIRE_VERSION } from "../src/wire.js";
-import { avalancheAnchor, encodeAvalancheMessage, loadModels, type AvalancheForecast } from "../src/index.js";
+import { avalancheAnchor, encodeAvalancheMessage, type AvalancheForecast } from "../src/index.js";
+import { modelsFor } from "./avalanche-models.js";
 import { decodeAvalancheReply } from "../src/avalanche-codec/wire.js";
 import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.json";
 import type { ForecastMessage, RequestContext, Variable } from "../src/model.js";
@@ -92,13 +91,13 @@ describe("an inReach reply", () => {
     expect(decodeMessage(s, () => ctx("g"))).toEqual(decodeMessage(encodeMessage(d, "base85"), () => ctx("z")));
   });
 
-  it("does the same for an avalanche bulletin", () => {
-    const models = loadModels(gunzipSync(readFileSync(new URL("../assets/avcan-model.bin.gz", import.meta.url))));
+  it("does the same for an avalanche bulletin", async () => {
+    const models = modelsFor("avcan");
     const anchor = avalancheAnchor("2026-03-01", 0);
     const forecast = SEA_TO_SKY as AvalancheForecast;
-    const s = encodeAvalancheMessage(models, 7, anchor, forecast, DEVICE_TRANSPORT.g.alphabet);
+    const s = await encodeAvalancheMessage(models, 7, anchor, forecast, DEVICE_TRANSPORT.g.alphabet);
     expect(s).not.toMatch(DOUBLED);
-    const viaZoleo = encodeAvalancheMessage(models, 7, anchor, forecast, DEVICE_TRANSPORT.z.alphabet);
-    expect(decodeAvalancheReply(models, s, anchor, "g")).toEqual(decodeAvalancheReply(models, viaZoleo, anchor, "z"));
+    const viaZoleo = await encodeAvalancheMessage(models, 7, anchor, forecast, DEVICE_TRANSPORT.z.alphabet);
+    expect(await decodeAvalancheReply(models, s, anchor, "g")).toEqual(await decodeAvalancheReply(models, viaZoleo, anchor, "z"));
   });
 });

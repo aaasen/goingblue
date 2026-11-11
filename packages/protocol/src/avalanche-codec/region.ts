@@ -77,12 +77,16 @@ export function pieceAt(lat: number, lon: number, pieces: readonly AvalanchePiec
   return null;
 }
 
-// The model file a forecast for a point is coded with. The server and the reader both choose it
-// from the request's point and nothing else, because a forecast decodes to garbage under any other
-// model. Avalanche Canada's API answers for any other point, including outside every piece.
+// The structured model file a forecast for a point is coded with (the prose model is shared). The
+// server and the reader both choose it from the request's point and nothing else, because a
+// forecast decodes to garbage under any other model. Avalanche Canada's API answers for any other
+// point, including outside every piece.
 export function avalancheModelFile(lat: number, lon: number): string {
-  return pieceAt(lat, lon)?.center === "nwac" ? "nwac-model.bin.gz" : "avcan-model.bin.gz";
+  return pieceAt(lat, lon)?.center === "nwac" ? "nwac-structured.bin.gz" : "avcan-structured.bin.gz";
 }
+
+// The prose model, shared by every center (native/avalanche).
+export const PROSE_MODEL_FILE = "prose-model.bin";
 
 // The pieces of `center` a forecast area (GeoJSON Polygon or MultiPolygon) covers, found by the
 // interior point of each piece. Areas are unions of whole pieces, so one point per piece decides.
