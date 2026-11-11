@@ -1832,11 +1832,12 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // The region the loaded bulletin was requested in, named as its saved row names it.
   const avalanchePiece = useMemo(() => (avalanche ? pieceAt(avalanche.lat, avalanche.lon, AVALANCHE_PIECES) : null), [avalanche]);
   const avalancheZoneName = avalanchePiece ? zoneNames(avalanchePiece) : '';
-  // A bulletin row names only where it is for: the favorite, else the region, else the point.
+  // A bulletin row names only where it is for: the favorite, else the center and region as the
+  // picker's zone line writes them, else the point.
   const describeAvalanche = useCallback((slot: Slot): PastRowText => {
     const piece = pieceAt(slot.context.lat, slot.context.lon, AVALANCHE_PIECES);
     return {
-      label: findFavorite(favorites, slot.context)?.name ?? (piece ? zoneNames(piece) : pointLabel(slot.context, coordFormat)),
+      label: findFavorite(favorites, slot.context)?.name ?? (piece ? zoneLabel(piece) : pointLabel(slot.context, coordFormat)),
       tags: [],
       danger: slotDangerDays.get(slot) ?? null,
     };
