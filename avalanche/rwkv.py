@@ -296,7 +296,11 @@ def doc_bits(model, docs, device, max_len=1 << 16, tokens_per_batch=32768):
 # ---------------------------------------------------------------- train / eval
 
 def build(args, vocab):
-    return RWKV(vocab, args.dim, args.layers, args.ffn or 4 * args.dim, getattr(args, "dropout", 0.0))
+    size = (vocab, args.dim, args.layers, args.ffn or 4 * args.dim, getattr(args, "dropout", 0.0))
+    if getattr(args, "arch", "v4") == "v7":
+        from rwkv7 import RWKV7
+        return RWKV7(*size)
+    return RWKV(*size)
 
 
 def count(model):
@@ -445,6 +449,7 @@ if __name__ == "__main__":
     ap.add_argument("--ckpt-minutes", type=float, default=10)
     ap.add_argument("--max-steps", type=int, default=0)
     ap.add_argument("--dropout", type=float, default=0.0)
+    ap.add_argument("--arch", default="v4", choices=["v4", "v7"], help="v7: the RWKV-7 model in rwkv7.py (float only)")
     ap.add_argument("--accum", type=int, default=1)
     ap.add_argument("--name", default="run")
     ap.add_argument("--sp", default="v2", help="sentencepiece model suffix")
