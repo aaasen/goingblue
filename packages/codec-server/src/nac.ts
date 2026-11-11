@@ -189,7 +189,7 @@ async function listProducts(center: NacCenter, zoneIds: number[], from: string, 
 }
 
 // The product a zone's forecast for `day` ("YYYY-MM-DD") shows: the latest published for that day, or
-// else what was still in force that day, such as a summary published weeks before. The API has no
+// else the latest published before it, even if expired, since some centers skip days. The API has no
 // dated lookup, so this finds it in the listing and fetches it by id.
 async function datedProduct(center: NacCenter, zoneIds: number[], day: string): Promise<NacProduct | null> {
   const near = await listProducts(center, zoneIds, addDays(day, -1), addDays(day, 1));
@@ -197,7 +197,7 @@ async function datedProduct(center: NacCenter, zoneIds: number[], day: string): 
   if (!found) {
     const at = avalancheAnchor(day, 0);
     const back = await listProducts(center, zoneIds, addDays(day, -MAX_DAYS_BACK), addDays(day, 1));
-    found = back.find((p) => Date.parse(p.published_time) <= at && at < Date.parse(p.expires_time));
+    found = back.find((p) => Date.parse(p.published_time) <= at);
   }
   return found ? await getJson(`/v2/public/product/${found.id}`) as NacProduct : null;
 }

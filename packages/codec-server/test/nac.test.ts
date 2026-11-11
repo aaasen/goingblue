@@ -213,10 +213,21 @@ describe("serveAvalanche for an NWAC zone", () => {
     expect(forecast).toEqual(withPlaceholders(toForecast(SUMMARY, NWAC)));
   });
 
+  it("falls back to the latest expired forecast on a day the center skipped", async () => {
+    const skipped = row(STEVENS, { id: 1, published_time: "2026-01-04T15:00:00+00:00", expires_time: "2026-01-05T15:00:00+00:00" });
+    const older = row(STEVENS, { id: 2, published_time: "2026-01-03T15:00:00+00:00", expires_time: "2026-01-04T15:00:00+00:00" });
+    const after = row(STEVENS, { id: 3, published_time: "2026-01-09T15:00:00+00:00", expires_time: "2026-01-10T15:00:00+00:00" });
+    const fetch = answer((url) => url.pathname.endsWith("/products")
+      ? (url.searchParams.get("date_start") === "2026-01-07" ? [] : [older, skipped, after])
+      : STEVENS);
+    expect((await serveAvalanche(request("d:d y:20260108"))).kind).toBe("ok");
+    expect((fetch.mock.calls[2][0] as URL).pathname).toBe("/v2/public/product/1");
+  });
+
   it("answers no_forecast for a day nothing covers, a stub, and the API's empty answer", async () => {
     answer(() => []);
     expect(await serveAvalanche(request("d:s y:20260108"))).toEqual({ kind: "no_forecast" });
-    answer(() => [row(SUMMARY, { published_time: "2025-11-01T00:00:00+00:00", expires_time: "2025-12-01T00:00:00+00:00" })]);
+    answer(() => [row(SUMMARY, { published_time: "2026-01-09T15:00:00+00:00", expires_time: "2026-01-10T15:00:00+00:00" })]);
     expect(await serveAvalanche(request("d:s y:20260108"))).toEqual({ kind: "no_forecast" });
     answer(() => ({ ...STEVENS, updated_at: null }));
     expect(await serveAvalanche(request("d:s"))).toEqual({ kind: "no_forecast" });

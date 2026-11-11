@@ -343,8 +343,6 @@ export async function savePendingAnnualSwitch(at: Date | null): Promise<void> {
   } catch { /* ignore */ }
 }
 
-// Forget every stored preference, the pre-per-quantity master switch included. Part of account
-// deletion: the next launch starts from the defaults as a fresh install would.
 // Hides the avalanche view's expired-forecast banner, so a seeded past bulletin screenshots as a
 // current one.
 export async function loadHideExpiredBanner(): Promise<boolean> {
@@ -355,6 +353,8 @@ export async function loadHideExpiredBanner(): Promise<boolean> {
   }
 }
 
+// Forget every stored preference, the pre-per-quantity master switch included. Part of account
+// deletion: the next launch starts from the defaults as a fresh install would.
 export async function clearSettings(): Promise<void> {
   try {
     await AsyncStorage.multiRemove([
