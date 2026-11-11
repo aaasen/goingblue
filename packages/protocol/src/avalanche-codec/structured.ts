@@ -2,8 +2,8 @@
  * The quantitative side of a bulletin: danger ratings by day and elevation band, the problem
  * list (type, elevations, aspects, likelihood, expected size), and the confidence rating.
  *
- * Each field is a token stream with explicit contexts, coded on the same escape ladder as the
- * prose (context, unigram, bytes), so a value never seen in training still round-trips. The
+ * Each field is a token stream with explicit contexts, coded on an escape ladder (context,
+ * unigram, bytes; see stream.ts), so a value never seen in training still round-trips. The
  * contexts are the correlations that matter: bands step down within a day, days repeat, and a
  * problem's elevations, aspects, likelihood, and size follow from its type.
  *
@@ -26,8 +26,7 @@
  */
 import type { Aspect, AvalancheForecast, Elevation, ProblemCell } from "../avalanche.js";
 import { daysBetween, quantizeIssued, utcDate } from "./time.js";
-import { BOS, LIT_END, UNK, type Stream, type Vocab } from "./model.js";
-import { planToken, readToken } from "./codec.js";
+import { BOS, LIT_END, UNK, planToken, readToken, type Stream, type Vocab } from "./stream.js";
 import { buildTable, costBits, type Decision, type Decoder, type Table } from "./rans.js";
 import { layoutOf, sectionsOf } from "./sections.js";
 
@@ -145,7 +144,7 @@ export class StructuredModel {
   plan(plan: Decision[], s: Structured): void {
     walk(s, s.issueHour, (field, context, token) => {
       const f = this.field(field);
-      planToken(plan, f.stream, byteTable(), [ctx(f, context)], token!);
+      planToken(plan, f.stream, byteTable(), ctx(f, context), token!);
       return token!;
     });
   }
@@ -153,7 +152,7 @@ export class StructuredModel {
   read(dec: Decoder, issueHour: number): Structured {
     return walk(null, issueHour, (field, context) => {
       const f = this.field(field);
-      return readToken(dec, f.stream, byteTable(), [ctx(f, context)])[0];
+      return readToken(dec, f.stream, byteTable(), ctx(f, context));
     });
   }
 

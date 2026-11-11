@@ -78,8 +78,7 @@ def generate(args):
                 for i, d in enumerate(chunk):
                     secs = [{**s, "text": t} for s, t in zip(d["sections"], texts[i]) if t.strip()]
                     if secs:
-                        f.write(json.dumps({**d, "id": f"syn{k}:{d['id']}", "split": "synth", "sections": secs,
-                                            "ppmBits": None, "ownBits": None}) + "\n")
+                        f.write(json.dumps({**d, "id": f"syn{k}:{d['id']}", "split": "synth", "sections": secs}) + "\n")
             os.replace(path + ".tmp", path)
             print(f"{path}: {len(chunk)} docs, {capped} sections hit the length cap", flush=True)
 

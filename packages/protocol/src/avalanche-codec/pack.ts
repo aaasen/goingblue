@@ -10,13 +10,13 @@
  *   zero padding         to a multiple of 8
  *   arrays               each typed array's bytes, 8-byte aligned, offsets relative to here
  *
- * Each context order is stored as columns that compress well: a context key as its word ids
- * (order k has k columns, oldest word first) and each context's successor count instead of
- * running offsets. Loading rebuilds the keys and offsets in one pass; successor ids and counts
- * are views over the file. The arrays are written in the machine's byte order, so both ends
- * must be little-endian, which every supported platform is.
+ * A stream's contexts are stored as one level of columns that compress well: the context ids
+ * and each context's successor count instead of running offsets. Loading rebuilds the offsets
+ * in one pass; context ids, successor ids, and counts are views over the file. The arrays are
+ * written in the machine's byte order, so both ends must be little-endian, which every
+ * supported platform is.
  */
-import { KEY_BASE, Stream, Vocab, type Counts, type Ids, type Level } from "./model.js";
+import { Stream, Vocab, type Counts, type Ids } from "./stream.js";
 import { FIELDS, StructuredModel, type Field, type FieldName } from "./structured.js";
 import { decodeUtf8 } from "./utf8.js";
 
@@ -44,19 +44,6 @@ const narrow = (v: ArrayLike<number>): Uint16Array | Uint32Array => {
   return Uint16Array.from(v);
 };
 
-// A level's keys split into one column per word id, oldest first: the base-KEY_BASE digits.
-function keyColumns(lv: Level, order: number): (Uint16Array | Uint32Array)[] {
-  const cols = Array.from({ length: order }, () => new Array<number>(lv.keys.length));
-  for (let i = 0; i < lv.keys.length; i++) {
-    let k = lv.keys[i];
-    for (let c = order - 1; c >= 0; c--) {
-      cols[c][i] = k % KEY_BASE;
-      k = Math.floor(k / KEY_BASE);
-    }
-  }
-  return cols.map(narrow);
-}
-
 function assertLittleEndian(): void {
   if (new Uint8Array(new Uint16Array([1]).buffer)[0] !== 1) throw new Error("pack: big-endian platforms are not supported");
 }
@@ -74,12 +61,12 @@ export function packStructured(structured: StructuredModel): Uint8Array {
   const stream = (s: Stream): StreamDesc => ({
     vocab: s.vocab.tokens,
     uni: { sids: put(s.uni.sids), counts: put(s.uni.counts) },
-    levels: s.levels.map((lv, level) => ({
-      key: keyColumns(lv, level + 1).map(put),
-      lengths: put(narrow(Array.from({ length: lv.keys.length }, (_, i) => lv.offsets[i + 1] - lv.offsets[i]))),
-      sids: put(lv.sids),
-      counts: put(lv.counts),
-    })),
+    levels: [{
+      key: [put(narrow(s.contexts.keys))],
+      lengths: put(narrow(Array.from({ length: s.contexts.keys.length }, (_, i) => s.contexts.offsets[i + 1] - s.contexts.offsets[i]))),
+      sids: put(s.contexts.sids),
+      counts: put(s.contexts.counts),
+    }],
   });
   const header: Header = {
     structured: FIELDS.map((name) => {
@@ -117,21 +104,13 @@ export function loadStructured(file: Uint8Array): StructuredModel {
     return new Uint16Array(bytes.buffer, at, n);
   };
   const stream = (d: StreamDesc): Stream => {
-    const levels: Level[] = d.levels.map((lv) => {
-      const cols = lv.key.map(get);
-      const lengths = get(lv.lengths);
-      const n = lengths.length;
-      const keys = cols.length === 1 ? new Uint32Array(n) : new Float64Array(n);
-      const offsets = new Uint32Array(n + 1);
-      for (let i = 0; i < n; i++) {
-        let k = 0;
-        for (const c of cols) k = k * KEY_BASE + c[i];
-        keys[i] = k;
-        offsets[i + 1] = offsets[i] + lengths[i];
-      }
-      return { keys, offsets, sids: get(lv.sids) as Ids, counts: get(lv.counts) as Counts };
-    });
-    return new Stream(new Vocab(d.vocab), levels, { sids: get(d.uni.sids) as Ids, counts: get(d.uni.counts) as Counts });
+    if (d.levels.length !== 1 || d.levels[0].key.length !== 1) throw new Error("pack: a stream must have one order-1 level");
+    const lv = d.levels[0];
+    const lengths = get(lv.lengths);
+    const offsets = new Uint32Array(lengths.length + 1);
+    for (let i = 0; i < lengths.length; i++) offsets[i + 1] = offsets[i] + lengths[i];
+    const contexts = { keys: Uint32Array.from(get(lv.key[0])), offsets, sids: get(lv.sids) as Ids, counts: get(lv.counts) as Counts };
+    return new Stream(new Vocab(d.vocab), contexts, { sids: get(d.uni.sids) as Ids, counts: get(d.uni.counts) as Counts });
   };
   const fields = new Map<FieldName, Field>(
     header.structured.map(([name, f]) => [name, { contexts: new Vocab(f.contexts), stream: stream(f.stream) }]),

@@ -14,12 +14,17 @@
  * token (the count of every other kind) says which sections a bulletin has.
  */
 import type { AvalancheForecast } from "../avalanche.js";
-import type { Section } from "./model.js";
 
 export const SECTION_KINDS = [
   "highlights", "problem", "advice", "avalanche-summary", "snowpack-summary", "hazard-discussion",
   "weather-summary", "confidence", "author",
 ] as const;
+
+export interface Section {
+  kind: string;   // one of SECTION_KINDS
+  text: string;
+  context?: string;   // problem type for a problem description
+}
 
 const COUNTED = SECTION_KINDS.filter((k) => k !== "problem");
 

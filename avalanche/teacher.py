@@ -2,7 +2,7 @@
 Pretrained teacher: a Qwen3 base model fine-tuned on the avalanche corpus, scored like rwkv.py
 (-log2 p over section text and a scored end token per section). The center, section kind and
 structured context go in as plain-text headers that are not scored. Bits per doc are independent
-of the tokenizer, so the numbers compare directly with the PPM and RWKV runs.
+of the tokenizer, so the numbers compare directly with the RWKV runs.
 
 With --lora R the base model stays frozen in bf16 and only rank-R updates to its linear layers
 train, which is how models too large to fine-tune whole on the training GPU are compared.
@@ -51,9 +51,7 @@ def tokenize(model_name):
                 t += e[n + i] + [eos]; m += [1] * (len(e[n + i]) + 1)
             toks.append(np.array(t, dtype=np.int32)); masks.append(np.array(m, dtype=np.uint8))
             meta.append({"id": d["id"], "center": d["center"], "source": d["source"], "split": d["split"],
-                         "chars": sum(utf16_len(s["text"]) for s in d["sections"]),
-                         "ppm": sum(d["ppmBits"]) if d["ppmBits"] else None,
-                         "own": sum(d["ownBits"]) if d.get("ownBits") else None})
+                         "chars": sum(utf16_len(s["text"]) for s in d["sections"])})
         np.savez(path + ".tmp.npz", lens=np.array([len(t) for t in toks]), toks=np.concatenate(toks), masks=np.concatenate(masks))
         os.replace(path + ".tmp.npz", path)
         with open(meta_path, "w") as f:

@@ -1,6 +1,6 @@
 """
-Float RWKV-4 language model over avalanche forecast prose, scored against the shared PPM on a
-held-out season. Ideal code length only: sum of -log2 p over text tokens and section ends. Section
+Float RWKV-4 language model over avalanche forecast prose, scored on a held-out
+season. Ideal code length only: sum of -log2 p over text tokens and section ends. Section
 kind, problem type, center and (with --context) the structured fields are given to the model as
 marker tokens and cost nothing, as the structured coder already carries them.
 
@@ -96,9 +96,7 @@ def tokenize(args):
         toks.append(np.array(t, dtype=np.int32))
         masks.append(np.array(m, dtype=np.uint8))
         meta.append({"id": d["id"], "center": d["center"], "source": d.get("source", "nac"), "split": d["split"],
-                     "chars": sum(utf16_len(s["text"]) for s in d["sections"]),
-                     "ppm": sum(d["ppmBits"]) if d["ppmBits"] else None,
-                     "own": sum(d["ownBits"]) if d.get("ownBits") else None})
+                     "chars": sum(utf16_len(s["text"]) for s in d["sections"])})
     np.savez(f"{DATA}/tok{args.vocab}{args.tok}.npz", lens=np.array([len(t) for t in toks]), toks=np.concatenate(toks), masks=np.concatenate(masks))
     with open(f"{DATA}/tok{args.vocab}{args.tok}.json", "w") as f:
         json.dump({"vocab": total, "markers": markers, "meta": meta}, f)
@@ -416,23 +414,19 @@ def evaluate(args):
 
 
 def report(name, docs, bits, split):
-    """Per-center table of model bits against the shared PPM, and for Avalanche Canada its own PPM."""
-    rows = collections.defaultdict(lambda: [0, 0, 0.0, 0.0, 0.0, 0])
+    """Per-center table of model bits."""
+    rows = collections.defaultdict(lambda: [0, 0, 0.0])
     for t, mk, meta in docs:
         if meta["split"] != split:
             continue
         for key in (meta["center"], meta["source"].upper(), "ALL"):
             r = rows[key]
-            r[0] += 1; r[1] += meta["chars"]; r[2] += bits[meta["id"]]; r[3] += meta["ppm"]
-            if meta["own"] is not None:
-                r[4] += meta["own"]; r[5] += 1
-    print(f"{split}: {'center':24} {'docs':>5} {'chars':>6} | {'PPM B':>6} {'b/c':>6} | {'own B':>6} | {'model B':>7} {'b/c':>6} | vs PPM | vs own")
+            r[0] += 1; r[1] += meta["chars"]; r[2] += bits[meta["id"]]
+    print(f"{split}: {'center':24} {'docs':>5} {'chars':>6} | {'model B':>7} {'b/c':>6}")
     order = lambda c: (c in ("NAC", "AVCAN", "ALL"), c == "ALL", c)
     for key in sorted(rows, key=order):
-        n, ch, nb, pb, ob, on = rows[key]
-        own = f"{ob / 8 / n:6.1f}" if on == n else " " * 6
-        vs_own = f"{100 * (nb - ob) / ob:+6.1f}%" if on == n else ""
-        print(f"{split}: {key:24} {n:5} {ch / n:6.0f} | {pb / 8 / n:6.1f} {pb / ch:6.3f} | {own} | {nb / 8 / n:7.1f} {nb / ch:6.3f} | {100 * (nb - pb) / pb:+6.1f}% | {vs_own}")
+        n, ch, nb = rows[key]
+        print(f"{split}: {key:24} {n:5} {ch / n:6.0f} | {nb / 8 / n:7.1f} {nb / ch:6.3f}")
     with open(f"{DATA}/{name}.{split}.json", "w") as f:
         json.dump(bits, f)
 

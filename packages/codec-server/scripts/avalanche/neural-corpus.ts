@@ -5,18 +5,15 @@
  * strings.
  *
  * Split by season: train before 2024-08, val 2024-08 to 2025-08, test 2025-08 to 2026-08; later
- * forecasts are left out. PPM baselines: the shared pool trained before each held-out season
- * (ppmBits), and for Avalanche Canada also its own pool (ownBits).
+ * forecasts are left out.
  *
  * Usage: NODE_OPTIONS=--max-old-space-size=13000 pnpm avalanche-neural-corpus [out dir, default data/neural]
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { sectionsOf } from "@weather/protocol";
-import { sectionBits } from "@weather/protocol/avalanche-codec/codec";
 import { isRated, toForecast } from "../../src/nac.ts";
 import { loadBulletins } from "./corpus.ts";
 import { openDb } from "./db.ts";
-import { ModelBuilder } from "./model.ts";
 
 const OUT = process.argv[2] ?? "data/neural";
 const VAL = "2024-08", TEST = "2025-08", END = "2026-08";
@@ -74,23 +71,11 @@ docs.sort((a, b) => a.published.localeCompare(b.published) || a.id.localeCompare
 console.log("conversion failures by center", failed);
 
 const splitOf = (d: Doc) => d.published < VAL ? "train" : d.published < TEST ? "val" : "test";
-const ppm = new Map<string, number[]>();
-const own = new Map<string, number[]>();
-for (const [cut, held] of [[VAL, "val"], [TEST, "test"]] as const) {
-  for (const [map, keep] of [[ppm, (_: Doc) => true], [own, (d: Doc) => d.source === "avcan"]] as const) {
-    const b = new ModelBuilder();
-    for (const d of docs) if (d.published < cut && keep(d)) for (const s of d.sections) b.observe(s);
-    const pool = b.build(1);
-    for (const d of docs) if (splitOf(d) === held && keep(d)) map.set(d.id, d.sections.map((s) => sectionBits(pool, s)));
-    console.log(`pool before ${cut} (${map === ppm ? "shared" : "avcan"}) scored`);
-  }
-}
-
 const counts: Record<string, Record<string, number>> = {};
 const lines = docs.map((d) => {
   const split = splitOf(d);
   (counts[d.center] ??= {})[split] = (counts[d.center][split] ?? 0) + 1;
-  return JSON.stringify({ ...d, split, ppmBits: ppm.get(d.id) ?? null, ownBits: own.get(d.id) ?? null });
+  return JSON.stringify({ ...d, split });
 });
 mkdirSync(OUT, { recursive: true });
 writeFileSync(`${OUT}/corpus2.jsonl`, lines.join("\n") + "\n");

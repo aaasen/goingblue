@@ -1,7 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { tokenize, detokenize } from "@weather/protocol/avalanche-codec/tokenizer";
-import type { Model, Section } from "@weather/protocol/avalanche-codec/model";
-import { encode, decode, sectionBits, tokenCosts } from "@weather/protocol/avalanche-codec/codec";
 import { buildTable, normalize, encode as ransEncode, Decoder, SCALE } from "@weather/protocol/avalanche-codec/rans";
 import { readFileSync } from "node:fs";
 import { structuredOf } from "@weather/protocol/avalanche-codec/structured";
@@ -9,46 +6,10 @@ import {
   PROSE_MODEL_FILE, UNENCODED, decodeBulletin, encodeBulletin, loadStructured, packStructured, quantizeIssued, readBulletin,
   withPlaceholders, type AvalancheForecast, type Models,
 } from "@weather/protocol";
-import { ModelBuilder } from "../scripts/avalanche/model.ts";
 import { proseCoder } from "../src/avalanche.ts";
 import { htmlToText } from "../src/html-text.ts";
-import { train } from "../scripts/avalanche/train.ts";
+import { StructuredBuilder } from "../scripts/avalanche/structured.ts";
 import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.json";
-
-const TRAIN: Section[] = [
-  { kind: "problem", text: "Wind slabs remain reactive on north through east aspects in the alpine. Use caution near ridge crests." },
-  { kind: "problem", text: "A persistent slab problem exists on all aspects at treeline and above. Avoid steep, unsupported terrain." },
-  { kind: "highlights", text: "Storm slabs will build with 20-30 cm of new snow. Wind slabs are likely on lee features near ridge crests." },
-  { kind: "snowpack-summary", text: "The snowpack is generally well settled below treeline. Surface hoar was buried on Feb 12 and remains a concern." },
-];
-
-function trained(): Model {
-  const b = new ModelBuilder();
-  for (const s of TRAIN) b.observe(s);
-  return b.build();
-}
-
-describe("tokenizer", () => {
-  it("round-trips arbitrary text exactly", () => {
-    const cases = [
-      "",
-      "   ",
-      "Tonight's low -9 to -21 °C... wind 40 km/h!!",
-      "  leading and trailing  \n\nparagraph\tbreaks ",
-      "Québec: crête d'été, façade nord-ouest",
-      "Unicode ’apostrophe’ and emoji ⚠️ survive",
-    ];
-    for (const c of cases) expect(detokenize(tokenize(c))).toBe(c);
-  });
-
-  it("keeps apostrophes inside words and puts punctuation in the separators", () => {
-    const text = "Tonight's slant-wise, and more.\n\nNext (one).";
-    const t = tokenize(text);
-    expect(t.words).toEqual(["Tonight's", "slant", "wise", "and", "more", "Next", "one"]);
-    expect(t.seps).toEqual(["", " ", "-", ", ", " ", ".\n\n", " (", ")."]);
-    expect(detokenize(t)).toBe(text);
-  });
-});
 
 describe("rans", () => {
   it("normalizes counts to exactly SCALE with no zero", () => {
@@ -65,77 +26,6 @@ describe("rans", () => {
     const blob = ransEncode(seq);
     const dec = new Decoder(blob);
     for (const [table, sym] of seq) expect(dec.get(table)).toBe(sym);
-  });
-});
-
-describe("codec", () => {
-  it("round-trips seen, unseen, and non-ASCII sections", () => {
-    const m = trained();
-    const docs: Section[][] = [
-      [TRAIN[0]],
-      TRAIN,
-      [
-        { kind: "problem", text: "Wind slabs remain reactive on north through east aspects at treeline." },
-        { kind: "highlights", text: "Completely novel words like Kokanee and Zymoetz with -12 °C and a\n\nparagraph break." },
-        { kind: "snowpack-summary", text: "" },
-        { kind: "problem", text: "\n" },
-        { kind: "problem", text: "...leading, trailing punctuation!! (and) \"quotes\" ..." },
-        { kind: "problem", text: "Mixed McKenzie PWLs NW 5cm A. c. iPhone ALL CAPS Here" },
-      ],
-      [],
-    ];
-    for (const d of docs) expect(decode(m, encode(m, d))).toEqual(d);
-  });
-
-  it("rejects a section kind it was not trained on", () => {
-    const m = trained();
-    expect(() => encode(m, [{ kind: "weather-summary", text: "Sunny." }])).toThrow(/kind/);
-  });
-
-  it("charges seen text far less than novel text", () => {
-    const m = trained();
-    const seen = sectionBits(m, TRAIN[0]) / TRAIN[0].text.length;
-    const novel = { kind: "problem", text: "xq zvk qpl mnb vcx".repeat(5) };
-    const unseen = sectionBits(m, novel) / novel.text.length;
-    expect(seen).toBeLessThan(2);
-    expect(unseen).toBeGreaterThan(seen * 3);
-  });
-
-  it("isolates vocabularies by kind", () => {
-    const m = trained();
-    // "snowpack" appears only in the snowpack summary, so as a problem it escapes to bytes.
-    const asProblem = sectionBits(m, { kind: "problem", text: "snowpack" });
-    const asSummary = sectionBits(m, { kind: "snowpack-summary", text: "snowpack" });
-    expect(asProblem).toBeGreaterThan(asSummary * 2);
-    expect(m.streamFor("problem")).not.toBe(m.streamFor("snowpack-summary"));
-  });
-
-  it("model bits match the coded size within the coder's overhead", () => {
-    const m = trained();
-    const doc = [...TRAIN, { kind: "problem", text: "Wind slabs are likely near ridge crests on east aspects." }];
-    const bytes = encode(m, doc).length;
-    let bits = 0;
-    for (const s of doc) bits += sectionBits(m, s);
-    expect(bytes * 8).toBeGreaterThanOrEqual(bits);
-    expect(bytes * 8).toBeLessThan(bits + 64 + 8 * (doc.length + 1));
-  });
-});
-
-describe("context orders", () => {
-  it("codes seen phrases on the highest order and falls back on unseen contexts", () => {
-    const m = trained();
-    const seen = { kind: "problem", text: "Wind slabs remain reactive on north through east aspects" };
-    const rungs = tokenCosts(m, seen).filter((r) => r.stream === "word").map((r) => r.rung);
-    // From the third word on, the previous two words plus the section start are all seen.
-    expect(rungs.slice(2)).toEqual(rungs.slice(2).map(() => "order3"));
-    // Separators between two seen words use the pair of words around them; the trailing one
-    // pairs the last word with END, which this text never trained.
-    const seps = tokenCosts(m, seen).filter((r) => r.stream === "sep").map((r) => r.rung);
-    expect(seps.slice(0, -1)).toEqual(seps.slice(0, -1).map(() => "order2"));
-    expect(seps[seps.length - 1]).not.toBe("order2");
-    const novel = { kind: "problem", text: "Zymoetz Kokanee remain" };
-    expect(decode(m, encode(m, [novel]))).toEqual([novel]);
-    expect(tokenCosts(m, novel).filter((r) => r.stream === "word").map((r) => r.rung)).toEqual(["bytes", "bytes", "unigram"]);
   });
 });
 
@@ -186,7 +76,11 @@ const QUIET = forecast({
 
 describe("bulletin", () => {
   const PROSE = proseCoder(readFileSync(new URL(`../../protocol/assets/${PROSE_MODEL_FILE}`, import.meta.url)));
-  const modelsOf = (fs: AvalancheForecast[]): Models => ({ structured: train(fs).structured, prose: PROSE });
+  const modelsOf = (fs: AvalancheForecast[]): Models => {
+    const b = new StructuredBuilder();
+    for (const f of fs) b.observe(structuredOf(f));
+    return { structured: b.build(), prose: PROSE };
+  };
   const models = () => modelsOf([forecast(), QUIET]);
   const roundTrip = async (m: Models, f: AvalancheForecast) => decodeBulletin(m, await encodeBulletin(m, f), quantizeIssued(f.issued));
 
@@ -273,19 +167,5 @@ describe("bulletin", () => {
   it("round-trips the Sea to Sky forecast", async () => {
     const f = SEA_TO_SKY as AvalancheForecast;
     expect(await roundTrip(modelsOf([f]), f)).toEqual(withPlaceholders(f));
-  });
-});
-
-describe("section context", () => {
-  it("starts a problem description from its type", () => {
-    const builder = new ModelBuilder();
-    const a = { kind: "problem", text: "Wind slabs remain reactive near ridge crests.", context: "windSlab" };
-    const b = { kind: "problem", text: "Persistent slabs remain a concern on shaded aspects.", context: "persistentSlab" };
-    for (const s of [a, b, TRAIN[2]]) builder.observe(s);
-    const m = builder.build();
-    // The same first word costs less under its own type than under the other.
-    const asWind = sectionBits(m, { kind: "problem", text: "Wind", context: "windSlab" });
-    const asPersistent = sectionBits(m, { kind: "problem", text: "Wind", context: "persistentSlab" });
-    expect(asWind).toBeLessThan(asPersistent);
   });
 });
