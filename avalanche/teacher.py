@@ -4,8 +4,13 @@ Pretrained teacher: a Qwen3 base model fine-tuned on the avalanche corpus, score
 structured context go in as plain-text headers that are not scored. Bits per doc are independent
 of the tokenizer, so the numbers compare directly with the PPM and RWKV runs.
 
+With --lora R the base model stays frozen in bf16 and only rank-R updates to its linear layers
+train, which is how models too large to fine-tune whole on the training GPU are compared.
+
   python teacher.py train --name q06 --model Qwen/Qwen3-0.6B-Base --epochs 2
+  python teacher.py train --name q4l --model Qwen/Qwen3-4B-Base --lora 64 --lr 2e-4
   python teacher.py eval --name q06 --split val
+  python teacher.py smoke --model Qwen/Qwen3-4B-Base --lora 64     (two steps, peak GPU memory)
 """
 import argparse, collections, json, math, os, random, time
 import numpy as np
@@ -110,9 +115,54 @@ def doc_bits(model, docs, tokens_per_batch=16384):
     return out
 
 
-def load_model(name):
+class LoRA(torch.nn.Module):
+    """A frozen linear layer plus a trainable low-rank update B(Ax); B starts at zero."""
+    def __init__(self, base, r):
+        super().__init__()
+        self.base = base
+        self.A = torch.nn.Parameter(torch.randn(r, base.in_features) / math.sqrt(base.in_features))
+        self.B = torch.nn.Parameter(torch.zeros(base.out_features, r))
+
+    def forward(self, x):
+        return self.base(x) + F.linear(F.linear(x, self.A.to(x.dtype)), self.B.to(x.dtype))
+
+
+def add_lora(model, r):
+    """Freezes the model and wraps every linear layer of the transformer body (not the head)."""
+    for p in model.parameters():
+        p.requires_grad_(False)
+    for parent in list(model.model.modules()):
+        for n, child in list(parent.named_children()):
+            if isinstance(child, torch.nn.Linear):
+                setattr(parent, n, LoRA(child, r))
+    # Gradient checkpointing needs a layer input that requires grad to reach the first layer's update.
+    model.get_input_embeddings().register_forward_hook(lambda _m, _i, out: out.requires_grad_(True))
+
+
+def load_model(name, lora=0):
     from transformers import AutoModelForCausalLM
-    return AutoModelForCausalLM.from_pretrained(name, torch_dtype=torch.float32, attn_implementation="sdpa").cuda()
+    dtype = torch.bfloat16 if lora else torch.float32
+    model = AutoModelForCausalLM.from_pretrained(name, torch_dtype=dtype, attn_implementation="sdpa")
+    if lora:
+        add_lora(model, lora)
+    return model.cuda()
+
+
+def trained_state(model, lora):
+    """What a run has to save: everything, or with LoRA only the updates."""
+    if not lora:
+        return model.state_dict()
+    return {n: p.detach() for n, p in model.named_parameters() if p.requires_grad}
+
+
+def run_args(args):
+    """Model and LoRA rank of a named run, from the file its training wrote; else the command line."""
+    path = f"{DATA}/{args.name}.args.json"
+    if os.path.exists(path):
+        with open(path) as f:
+            a = json.load(f)
+        return a["model"], a.get("lora", 0)
+    return args.model, args.lora
 
 
 def train(args):
@@ -120,12 +170,16 @@ def train(args):
     tr = [d for d in docs if d[2]["split"] == "train"]
     va = [d for d in docs if d[2]["split"] == "val"]
     val_chars = sum(d[2]["chars"] for d in va)
-    model = load_model(args.model)
+    with open(f"{DATA}/{args.name}.args.json", "w") as f:
+        json.dump(vars(args), f)
+    model = load_model(args.model, args.lora)
     model.gradient_checkpointing_enable()
     model.config.use_cache = False
+    params = [p for p in model.parameters() if p.requires_grad]
     n = sum(p.numel() for p in model.parameters())
-    print(f"{args.name}: {args.model}, {n / 1e6:.0f}M params, {sum(int(d[1].sum()) for d in tr):,} train tokens", flush=True)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), weight_decay=0.01)
+    print(f"{args.name}: {args.model}, {n / 1e6:.0f}M params ({sum(p.numel() for p in params) / 1e6:.0f}M trained), "
+          f"{sum(int(d[1].sum()) for d in tr):,} train tokens", flush=True)
+    opt = torch.optim.AdamW(params, lr=args.lr, betas=(0.9, 0.95), weight_decay=0.01)
     order = lambda epoch: random.Random(args.seed * 1000 + epoch)
     steps_per_epoch = sum(1 for _ in batches(tr, MAX_TRAIN, args.batch_tokens, order(0)))
     total_steps = steps_per_epoch * args.epochs
@@ -133,7 +187,7 @@ def train(args):
     st = {"step": 0, "best": float("inf"), "seen": 0, "elapsed": 0.0}
     if os.path.exists(ckpt_path):
         ck = torch.load(ckpt_path, map_location="cuda")
-        model.load_state_dict(ck["model"]); opt.load_state_dict(ck["opt"]); st = ck["st"]
+        model.load_state_dict(ck["model"], strict=not args.lora); opt.load_state_dict(ck["opt"]); st = ck["st"]
         del ck
         print(f"  resumed at step {st['step']}, best val {st['best']:.4f}", flush=True)
     else:
@@ -144,7 +198,7 @@ def train(args):
 
     def checkpoint():
         st["elapsed"] = time.time() - t0
-        save_atomic({"model": model.state_dict(), "opt": opt.state_dict(), "st": st}, ckpt_path)
+        save_atomic({"model": trained_state(model, args.lora), "opt": opt.state_dict(), "st": st}, ckpt_path)
 
     step = st["step"]
     micro = args.micro_tokens
@@ -165,7 +219,7 @@ def train(args):
                     part = nll_bits(model, x[i:i + rows].cuda(), y[i:i + rows].cuda(), m[i:i + rows].cuda(), a[i:i + rows].cuda()).sum() / denom
                 part.backward()
                 loss += part.item()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(params, 1.0)
             opt.step()
             step += 1
             st["step"] = step
@@ -178,7 +232,8 @@ def train(args):
                 mark = ""
                 if bpc < st["best"]:
                     st["best"] = bpc
-                    save_atomic({k: v.to(torch.bfloat16) for k, v in model.state_dict().items()}, f"{DATA}/{args.name}.pt")
+                    best = trained_state(model, args.lora)
+                    save_atomic(best if args.lora else {k: v.to(torch.bfloat16) for k, v in best.items()}, f"{DATA}/{args.name}.pt")
                     mark = " (saved)"
                 print(f"  val {bpc:.4f} b/c at step {step}, {(time.time() - t0) / 60:.1f} min{mark}", flush=True)
                 checkpoint(); last_ckpt = time.time()
@@ -194,11 +249,41 @@ def train(args):
 
 
 def evaluate(args):
-    docs = tokenize(args.model)
-    model = load_model(args.model)
-    model.load_state_dict(torch.load(f"{DATA}/{args.name}.pt", map_location="cuda"))
-    print(f"{args.name}: {args.model} fine-tuned")
+    name, lora = run_args(args)
+    docs = tokenize(name)
+    model = load_model(name, lora)
+    model.load_state_dict(torch.load(f"{DATA}/{args.name}.pt", map_location="cuda"), strict=not lora)
+    print(f"{args.name}: {name} fine-tuned" + (f" (LoRA rank {lora})" if lora else ""))
     report(args.name, docs, doc_bits(model, [d for d in docs if d[2]["split"] == args.split]), args.split)
+
+
+def smoke(args):
+    """Two training steps on the longest forecasts and a scoring pass on a few, with peak GPU memory."""
+    docs = tokenize(args.model)
+    tr = sorted((d for d in docs if d[2]["split"] == "train"), key=lambda d: -len(d[0]))[:8]
+    model = load_model(args.model, args.lora)
+    model.gradient_checkpointing_enable()
+    model.config.use_cache = False
+    params = [p for p in model.parameters() if p.requires_grad]
+    opt = torch.optim.AdamW(params, lr=args.lr)
+    t0 = time.time()
+    for x, y, m, a, _ in batches(tr, MAX_TRAIN, 2 * args.micro_tokens, None):
+        rows = max(1, args.micro_tokens // x.shape[1])
+        opt.zero_grad(set_to_none=True)
+        for i in range(0, x.shape[0], rows):
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                part = nll_bits(model, x[i:i + rows].cuda(), y[i:i + rows].cuda(), m[i:i + rows].cuda(), a[i:i + rows].cuda()).sum() / m.sum().cuda()
+            part.backward()
+        grads = sum(p.grad is not None and bool(p.grad.abs().sum() > 0) for p in params)
+        opt.step()
+        print(f"  step: {x.numel()} tokens, loss {part.item() / math.log(2):.3f} bits/token, {grads}/{len(params)} tensors with gradient", flush=True)
+    seen = sum(len(d[0]) for d in tr)
+    print(f"  train {seen / (time.time() - t0):.0f} tok/s")
+    va = [d for d in docs if d[2]["split"] == "val"][:64]
+    t0 = time.time()
+    bits = doc_bits(model, va)
+    print(f"  val {sum(bits.values()) / sum(d[2]['chars'] for d in va):.4f} b/c on {len(va)} docs, {sum(len(d[0]) for d in va) / (time.time() - t0):.0f} tok/s")
+    print(f"  peak GPU memory {torch.cuda.max_memory_allocated() / 2**30:.1f} GB")
 
 
 if __name__ == "__main__":
@@ -215,5 +300,6 @@ if __name__ == "__main__":
     ap.add_argument("--max-steps", type=int, default=0)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--split", default="val")
+    ap.add_argument("--lora", type=int, default=0, help="rank of the low-rank updates; 0 trains every weight")
     args = ap.parse_args()
-    {"train": train, "eval": evaluate}[args.cmd](args)
+    {"train": train, "eval": evaluate, "smoke": smoke}[args.cmd](args)
