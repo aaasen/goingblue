@@ -6,7 +6,7 @@ seeds put vLLM on a slow sampling path). Output goes to shards
 synth/k<sample>-c<chunk>.jsonl in the corpus format with split "synth"; finished shards are skipped,
 so a preempted run resumes.
 
-  python synth.py train --teacher q06 --samples 2     (queue step: convert, generate, tokenize as v2cs)
+  python synth.py train --teacher q06 --samples 2     (queue step: convert, generate, tokenize as --tok)
   python synth.py convert --teacher q06               (transformers: teacher weights to HF format)
   /opt/vllm/bin/python synth.py generate --teacher q06 --samples 2 [--limit 50]
 """
@@ -88,7 +88,7 @@ def train(args):
     if not os.path.exists(f"{DATA}/{args.teacher}-hf"):
         convert(args)
     subprocess.run([VLLM_PY, "-u", f"{CODE}/synth.py", "generate", "--teacher", args.teacher, "--samples", str(args.samples)], check=True)
-    subprocess.run([sys.executable, "-u", f"{CODE}/rwkv.py", "tokenize", "--vocab", "8000", "--tok", "v2cs", "--context", "--synth"], check=True)
+    subprocess.run([sys.executable, "-u", f"{CODE}/rwkv.py", "tokenize", "--vocab", "8000", "--tok", args.tok, "--context", "--synth"], check=True)
 
 
 def evaluate(args):
@@ -110,5 +110,6 @@ if __name__ == "__main__":
     ap.add_argument("--model", default="Qwen/Qwen3-0.6B-Base")
     ap.add_argument("--samples", type=int, default=2)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--tok", default="v2cs", help="train: name of the tokenized dataset to write")
     args = ap.parse_args()
     {"train": train, "eval": evaluate, "convert": convert, "generate": generate}[args.cmd](args)

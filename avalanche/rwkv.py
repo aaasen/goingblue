@@ -321,6 +321,10 @@ def train(args):
     device = device_of()
     vocab, docs = load_tokens(args.vocab, args.tok)
     tr = [d for d in docs if d[2]["split"] in ("train", "synth")]
+    if args.synth_samples:
+        # Synthetic ids are "syn<sample>:<source id>".
+        tr = [d for d in tr if d[2]["split"] == "train" or int(d[2]["id"][3:].split(":")[0]) < args.synth_samples]
+    print(f"{len(tr)} training docs, {sum(d[2]['split'] == 'synth' for d in tr)} synthetic", flush=True)
     va = [d for d in docs if d[2]["split"] == "val"]
     torch.manual_seed(args.seed)
     model = build(args, vocab).to(device)
@@ -456,6 +460,7 @@ if __name__ == "__main__":
     ap.add_argument("--tok", default="v2", help="tokenized dataset suffix")
     ap.add_argument("--context", action="store_true")
     ap.add_argument("--synth", action="store_true", help="tokenize: add the synth/ shards as split synth")
+    ap.add_argument("--synth-samples", type=int, default=0, help="train: use only the first N synthetic samples per forecast (0: all)")
     ap.add_argument("--split", default="val")
     args = ap.parse_args()
     {"tokenize": tokenize, "train": train, "eval": evaluate, "selftest": selftest}[args.cmd](args)
