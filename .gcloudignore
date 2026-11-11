@@ -11,6 +11,9 @@ data/
 maps/
 packages/mobile/assets/basemap/
 packages/protocol/assets/*.bin.gz
+packages/protocol/assets/*.bin
+native/target/
+*.node
 .env
 deploy.env
 docs/private/

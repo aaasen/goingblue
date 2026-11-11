@@ -3,6 +3,19 @@
 # protocol + codec-server only — no Expo/Metro toolchain — so a frozen version stays cheap to
 # rebuild bit-identically when a base-image CVE or upstream change forces it (verify with
 # packages/codec-server: verify-container against the golden corpus).
+
+# The avalanche prose model's Node binding (native/avalanche-node), compiled for the image's
+# platform: the .node file `napi build` would name for linux-x64-gnu. Bookworm's glibc is older
+# than the Node image's, so the library loads there.
+FROM rust:1.94.0-slim-bookworm AS native
+WORKDIR /native
+# Overrides rust-toolchain.toml, which also lists the mobile targets: the image's toolchain is
+# the same version, and only the host target is needed.
+ENV RUSTUP_TOOLCHAIN=1.94.0
+COPY native/ ./
+RUN cargo build --release --locked -p avalanche-node \
+ && cp target/release/libavalanche_node.so avalanche-node.linux-x64-gnu.node
+
 FROM node:26-slim AS base
 WORKDIR /app
 # Node 26 no longer bundles corepack, so it is installed here; the pnpm version itself still
@@ -22,6 +35,7 @@ RUN pnpm install --frozen-lockfile --filter "@weather/codec-server..."
 COPY tsconfig.base.json ./
 COPY packages/protocol packages/protocol
 COPY packages/codec-server packages/codec-server
+COPY native/avalanche-node/index.js native/avalanche-node/index.d.ts native/avalanche-node/
 # Models are not in git; this downloads the ones the checkout pins, so a codec-vN rebuild gets
 # exactly its own.
 RUN node packages/protocol/scripts/fetch-models.mjs
@@ -34,5 +48,7 @@ RUN pnpm install --frozen-lockfile --prod --filter "@weather/codec-server..."
 COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/packages/protocol/assets packages/protocol/assets
 COPY --from=build /app/packages/codec-server/dist packages/codec-server/dist
+COPY native/avalanche-node/index.js native/avalanche-node/
+COPY --from=native /native/avalanche-node.linux-x64-gnu.node native/avalanche-node/
 USER node
 CMD ["node", "packages/codec-server/dist/index.js"]

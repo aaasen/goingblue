@@ -42,3 +42,8 @@ packages/mobile/assets/basemap/
 
 # Models come from R2 in Dockerfile.codec, pinned by packages/protocol/assets/models.json.
 packages/protocol/assets/*.bin.gz
+
+# The prose model comes from R2 too, and native code is compiled in the image.
+packages/protocol/assets/*.bin
+native/target/
+**/*.node
