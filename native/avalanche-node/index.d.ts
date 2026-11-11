@@ -9,7 +9,23 @@
  */
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
-export declare function modelInfo(bytes: Buffer): ModelInfo
+export declare class AvalancheModel {
+  constructor(bytes: Buffer)
+  info(): ModelInfo
+  /** The prose as one rANS stream, computed off the main thread. */
+  encode(doc: Doc): Promise<Buffer>
+  /** The section texts of a stream, computed off the main thread. */
+  decode(bytes: Buffer, layout: Doc): Promise<string[]>
+}
+
+/**
+ * A forecast's prose with its context markers. To decode, give the same markers; texts are
+ * ignored.
+ */
+export interface Doc {
+  markers: Array<string>
+  sections: Array<Section>
+}
 
 export interface ModelInfo {
   name: string
@@ -21,4 +37,9 @@ export interface ModelInfo {
   pieces: number
   markers: number
   arrays: number
+}
+
+export interface Section {
+  markers: Array<string>
+  text?: string
 }

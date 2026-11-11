@@ -1,20 +1,33 @@
-//! The avalanche forecast prose model. The model file layout is specified in
-//! avalanche/quant.py `write_model`.
+//! The avalanche forecast prose model: the model file, integer RWKV-4 inference, the tokenizer,
+//! and rANS, so that every platform encodes and decodes the same bytes.
+//!
+//! A forecast is one token sequence: the document's markers, then for each section its markers,
+//! its text pieces and END. Markers are context both sides know, given by name; names the model
+//! does not know are dropped on both sides. Pieces and END are coded, each under the model's
+//! prediction after every token before it.
+
+mod file;
+mod rans;
+mod rwkv;
+mod tokenizer;
 
 use std::collections::HashMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-const MAGIC: &[u8; 4] = b"GBNM";
-pub const FORMAT_VERSION: u32 = 1;
+pub use file::{FORMAT_VERSION, ModelInfo};
+
+// A section longer than this decodes as an error rather than running on through garbage.
+const MAX_SECTION_TOKENS: usize = 16384;
 
 #[derive(Debug)]
 pub enum Error {
     NotAModel,
     Version(u32),
-    Header(String),
-    Array(String),
+    Model(String),
+    Input(String),
+    Stream(String),
 }
 
 impl fmt::Display for Error {
@@ -22,180 +35,163 @@ impl fmt::Display for Error {
         match self {
             Error::NotAModel => write!(f, "not a GBNM model file"),
             Error::Version(v) => write!(f, "model format version {v}, expected {FORMAT_VERSION}"),
-            Error::Header(e) => write!(f, "bad model header: {e}"),
-            Error::Array(e) => write!(f, "bad model array: {e}"),
+            Error::Model(e) => write!(f, "bad model: {e}"),
+            Error::Input(e) => write!(f, "bad input: {e}"),
+            Error::Stream(e) => write!(f, "bad stream: {e}"),
         }
     }
 }
 
 impl std::error::Error for Error {}
 
-#[derive(Debug, Deserialize)]
-struct Header {
-    name: String,
-    dim: usize,
-    layers: usize,
-    ffn: usize,
-    vocab: usize,
-    codable: usize,
-    fmt: HashMap<String, i64>,
-    pieces: Vec<(String, f64, u8)>,
-    markers: Vec<String>,
-    arrays: HashMap<String, (String, usize, usize)>,
+/// A forecast's prose with its context. To decode, give the same markers with the texts empty.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct Doc {
+    pub markers: Vec<String>,
+    pub sections: Vec<Section>,
 }
 
-/// What a model file holds, without its arrays.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelInfo {
-    pub name: String,
-    pub dim: usize,
-    pub layers: usize,
-    pub ffn: usize,
-    pub vocab: usize,
-    pub codable: usize,
-    pub pieces: usize,
-    pub markers: usize,
-    pub arrays: usize,
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct Section {
+    pub markers: Vec<String>,
+    #[serde(default)]
+    pub text: String,
 }
 
-/// A model file read into memory. Arrays are views into the file's bytes.
 pub struct Model {
-    header: Header,
-    bytes: Vec<u8>,
-    arrays_at: usize,
+    info: ModelInfo,
+    rwkv: rwkv::Rwkv,
+    tokenizer: tokenizer::Tokenizer,
+    markers: HashMap<String, usize>,
 }
 
-fn u32_at(b: &[u8], at: usize) -> Result<u32, Error> {
-    b.get(at..at + 4).map(|s| u32::from_le_bytes(s.try_into().unwrap())).ok_or(Error::NotAModel)
+// Feeds tokens one step behind, so a coded symbol's table comes from every token before it.
+struct Runner<'a> {
+    rwkv: &'a rwkv::Rwkv,
+    state: rwkv::State,
+    pending: Option<usize>,
+    freqs: Vec<u32>,
+}
+
+impl Runner<'_> {
+    fn marker(&mut self, m: usize) {
+        if let Some(p) = self.pending.replace(m) {
+            self.rwkv.step(&mut self.state, p, None);
+        }
+    }
+
+    // The table for the next symbol, which the caller then passes to `coded`.
+    fn predict(&mut self) -> Result<&[u32], Error> {
+        let p = self.pending.take().ok_or_else(|| Error::Input("the first token must be a marker".into()))?;
+        self.rwkv.step(&mut self.state, p, Some(&mut self.freqs));
+        Ok(&self.freqs)
+    }
+
+    fn coded(&mut self, sym: usize) {
+        self.pending = Some(sym);
+    }
 }
 
 impl Model {
-    pub fn parse(bytes: Vec<u8>) -> Result<Model, Error> {
-        if bytes.get(..4) != Some(MAGIC) {
-            return Err(Error::NotAModel);
+    pub fn load(bytes: Vec<u8>) -> Result<Model, Error> {
+        let f = file::ModelFile::parse(bytes)?;
+        let rwkv = rwkv::Rwkv::load(&f)?;
+        let codable = f.header.codable;
+        let markers = f.header.markers.iter().enumerate().map(|(i, m)| (m.clone(), codable + i)).collect();
+        let info = f.info();
+        let tokenizer = tokenizer::Tokenizer::new(f.header.pieces)?;
+        Ok(Model { info, rwkv, tokenizer, markers })
+    }
+
+    pub fn info(&self) -> &ModelInfo {
+        &self.info
+    }
+
+    fn end(&self) -> usize {
+        self.rwkv.codable - 1
+    }
+
+    fn marker_ids(&self, names: &[String]) -> Vec<usize> {
+        names.iter().filter_map(|n| self.markers.get(n).copied()).collect()
+    }
+
+    fn runner(&self) -> Runner<'_> {
+        Runner { rwkv: &self.rwkv, state: self.rwkv.state(), pending: None, freqs: vec![0; self.rwkv.codable] }
+    }
+
+    /// The text of `doc` as one rANS stream.
+    pub fn encode(&self, doc: &Doc) -> Result<Vec<u8>, Error> {
+        let mut run = self.runner();
+        let mut steps = Vec::new();
+        for m in self.marker_ids(&doc.markers) {
+            run.marker(m);
         }
-        let version = u32_at(&bytes, 4)?;
-        if version != FORMAT_VERSION {
-            return Err(Error::Version(version));
+        for s in &doc.sections {
+            for m in self.marker_ids(&s.markers) {
+                run.marker(m);
+            }
+            let mut toks = self.tokenizer.encode(&s.text);
+            if toks.len() >= MAX_SECTION_TOKENS {
+                return Err(Error::Input(format!("a section of {} tokens is over the limit", toks.len())));
+            }
+            toks.push(self.end());
+            for t in toks {
+                let freqs = run.predict()?;
+                steps.push((freqs[..t].iter().sum(), freqs[t]));
+                run.coded(t);
+            }
         }
-        let len = u32_at(&bytes, 8)? as usize;
-        let text = bytes.get(12..12 + len).ok_or(Error::NotAModel)?;
-        let header: Header = serde_json::from_slice(text).map_err(|e| Error::Header(e.to_string()))?;
-        if header.pieces.len() + 1 != header.codable || header.codable + header.markers.len() != header.vocab {
-            return Err(Error::Header("pieces, markers and vocab disagree".into()));
+        Ok(rans::encode(&steps))
+    }
+
+    /// The section texts of a stream `encode` wrote for a doc with these markers.
+    pub fn decode(&self, bytes: &[u8], layout: &Doc) -> Result<Vec<String>, Error> {
+        let mut run = self.runner();
+        let mut dec = rans::Decoder::new(bytes)?;
+        for m in self.marker_ids(&layout.markers) {
+            run.marker(m);
         }
-        let arrays_at = (12 + len).next_multiple_of(8);
-        let model = Model { header, bytes, arrays_at };
-        for name in model.header.arrays.keys() {
-            model.range(name)?;
+        let mut out = Vec::new();
+        for s in &layout.sections {
+            for m in self.marker_ids(&s.markers) {
+                run.marker(m);
+            }
+            let mut toks = Vec::new();
+            loop {
+                let sym = dec.get(run.predict()?)?;
+                run.coded(sym);
+                if sym == self.end() {
+                    break;
+                }
+                if toks.len() == MAX_SECTION_TOKENS {
+                    return Err(Error::Stream("a section runs past the token limit".into()));
+                }
+                toks.push(sym);
+            }
+            out.push(self.tokenizer.decode(&toks)?);
         }
-        Ok(model)
+        dec.finish()?;
+        Ok(out)
     }
 
-    pub fn info(&self) -> ModelInfo {
-        let h = &self.header;
-        ModelInfo {
-            name: h.name.clone(),
-            dim: h.dim,
-            layers: h.layers,
-            ffn: h.ffn,
-            vocab: h.vocab,
-            codable: h.codable,
-            pieces: h.pieces.len(),
-            markers: h.markers.len(),
-            arrays: h.arrays.len(),
+    /// Feeds `tokens` (piece, END and marker ids) and returns the frequency table after each
+    /// token but the last, for conformance tests against the exported test vectors.
+    pub fn tables(&self, tokens: &[usize]) -> Result<Vec<Vec<u32>>, Error> {
+        if let Some(&t) = tokens.iter().find(|&&t| t >= self.rwkv.vocab) {
+            return Err(Error::Input(format!("token {t} is out of range")));
         }
-    }
-
-    /// A fixed-point constant the file was exported with.
-    pub fn fmt(&self, key: &str) -> Option<i64> {
-        self.header.fmt.get(key).copied()
-    }
-
-    fn range(&self, name: &str) -> Result<(&str, std::ops::Range<usize>), Error> {
-        let (dtype, offset, n) = self.header.arrays.get(name).ok_or_else(|| Error::Array(format!("{name} missing")))?;
-        let width = match dtype.as_str() {
-            "i8" => 1,
-            "i32" => 4,
-            _ => return Err(Error::Array(format!("{name} has dtype {dtype}"))),
-        };
-        let start = self.arrays_at + offset;
-        let end = start + n * width;
-        if offset % 8 != 0 || end > self.bytes.len() {
-            return Err(Error::Array(format!("{name} is out of bounds or unaligned")));
+        let mut state = self.rwkv.state();
+        let mut out = Vec::new();
+        for &t in &tokens[..tokens.len().saturating_sub(1)] {
+            let mut freqs = vec![0; self.rwkv.codable];
+            self.rwkv.step(&mut state, t, Some(&mut freqs));
+            out.push(freqs);
         }
-        Ok((dtype, start..end))
+        Ok(out)
     }
 
-    pub fn i8s(&self, name: &str) -> Result<&[i8], Error> {
-        match self.range(name)? {
-            ("i8", r) => Ok(bytemuck_i8(&self.bytes[r])),
-            (dtype, _) => Err(Error::Array(format!("{name} is {dtype}, not i8"))),
-        }
-    }
-
-    pub fn i32s(&self, name: &str) -> Result<Vec<i32>, Error> {
-        match self.range(name)? {
-            ("i32", r) => Ok(self.bytes[r].chunks_exact(4).map(|c| i32::from_le_bytes(c.try_into().unwrap())).collect()),
-            (dtype, _) => Err(Error::Array(format!("{name} is {dtype}, not i32"))),
-        }
-    }
-}
-
-fn bytemuck_i8(b: &[u8]) -> &[i8] {
-    // SAFETY: u8 and i8 have the same size and alignment.
-    unsafe { std::slice::from_raw_parts(b.as_ptr().cast(), b.len()) }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn file(header: &str, arrays: &[u8]) -> Vec<u8> {
-        let mut b = MAGIC.to_vec();
-        b.extend(FORMAT_VERSION.to_le_bytes());
-        b.extend((header.len() as u32).to_le_bytes());
-        b.extend(header.as_bytes());
-        b.resize(b.len().next_multiple_of(8), 0);
-        b.extend(arrays);
-        b
-    }
-
-    const HEADER: &str = r#"{"name":"t","dim":2,"layers":1,"ffn":4,"vocab":4,"codable":2,"fmt":{"FX":12},
-        "pieces":[["a",0.0,1]],"markers":["center:x","kind:y"],
-        "arrays":{"w.q":["i8",0,3],"w.mul":["i32",8,2]}}"#;
-
-    #[test]
-    fn reads_arrays() {
-        let mut arrays = vec![1u8, 0xff, 3, 0, 0, 0, 0, 0];
-        arrays.extend(7i32.to_le_bytes());
-        arrays.extend((-2i32).to_le_bytes());
-        let m = Model::parse(file(HEADER, &arrays)).unwrap();
-        assert_eq!(m.i8s("w.q").unwrap(), &[1, -1, 3]);
-        assert_eq!(m.i32s("w.mul").unwrap(), vec![7, -2]);
-        assert_eq!(m.fmt("FX"), Some(12));
-        assert_eq!(m.info().markers, 2);
-    }
-
-    #[test]
-    fn rejects_truncated_arrays() {
-        assert!(matches!(Model::parse(file(HEADER, &[0; 8])), Err(Error::Array(_))));
-    }
-
-    #[test]
-    fn rejects_other_files() {
-        assert!(matches!(Model::parse(b"PK\x03\x04".to_vec()), Err(Error::NotAModel)));
-    }
-
-    // The exported model, when data/neural has one.
-    #[test]
-    fn reads_exported_model() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/neural/s384c.int.bin");
-        let Ok(bytes) = std::fs::read(path) else { return };
-        let m = Model::parse(bytes).unwrap();
-        let info = m.info();
-        assert_eq!((info.dim, info.layers, info.codable, info.markers), (384, 6, 8001, 189));
-        assert_eq!(m.i8s("head.q").unwrap().len(), 8001 * 384);
+    /// The pieces of `text`, for comparing tokenizers.
+    pub fn tokenize(&self, text: &str) -> Vec<usize> {
+        self.tokenizer.encode(text)
     }
 }

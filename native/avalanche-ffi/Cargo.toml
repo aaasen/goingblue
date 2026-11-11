@@ -11,6 +11,7 @@ crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
 avalanche.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
