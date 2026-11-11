@@ -58,6 +58,8 @@ export function highestDanger(day: { alp: DangerRating; tln: DangerRating; btl: 
 export interface ForecastRegion {
   data: GeoJSON.FeatureCollection;
   fill: string;
+  // [west, south, east, north] around every piece.
+  bbox: [number, number, number, number];
 }
 
 // Where a decoded forecast applies, filled with its first day's highest danger for the map; null
@@ -66,9 +68,14 @@ export function forecastRegion(
   pieces: readonly number[], danger: readonly { alp: DangerRating; tln: DangerRating; btl: DangerRating }[],
 ): ForecastRegion | null {
   if (pieces.length === 0) return null;
+  const boxes = pieces.map((id) => AVALANCHE_PIECES[id].bbox);
   return {
     data: pieceFeatures(pieces.map((id) => AVALANCHE_PIECES[id])),
     fill: dangerCell(danger.length ? highestDanger(danger[0]) : 'noRating').fill,
+    bbox: [
+      Math.min(...boxes.map((b) => b[0])), Math.min(...boxes.map((b) => b[1])),
+      Math.max(...boxes.map((b) => b[2])), Math.max(...boxes.map((b) => b[3])),
+    ],
   };
 }
 

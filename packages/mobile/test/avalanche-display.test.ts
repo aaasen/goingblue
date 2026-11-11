@@ -39,6 +39,10 @@ describe('forecastRegion', () => {
     ]);
     expect(region?.data.features.map((f) => f.properties?.id)).toEqual([6, 27]);
     expect(region).toMatchObject({ fill: '#ed1c24' });
+    const [a, b] = [AVALANCHE_PIECES[6].bbox, AVALANCHE_PIECES[27].bbox];
+    expect(region?.bbox).toEqual([
+      Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3]),
+    ]);
   });
 
   it('fills extreme in black and a day without a level in its status color', () => {

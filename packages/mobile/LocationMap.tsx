@@ -72,6 +72,17 @@ interface Props {
 const DEFAULT_VIEW = { center: [-110, 54] as [number, number], zoom: MIN_ZOOM };
 // Zoom applied once a coordinate exists — tight enough to confirm the spot, loose enough to nudge it.
 const PICKED_ZOOM = 9;
+// Room around a fitted forecast region.
+const REGION_PADDING = { top: 16, right: 16, bottom: 16, left: 16 };
+
+// The forecast region and the pin together, so neither starts off screen.
+function regionView(region: ForecastRegion, coord: LatLon | null) {
+  const [w, s, e, n] = region.bbox;
+  const bounds: [number, number, number, number] = coord
+    ? [Math.min(w, coord.lon), Math.min(s, coord.lat), Math.max(e, coord.lon), Math.max(n, coord.lat)]
+    : [w, s, e, n];
+  return { bounds, padding: REGION_PADDING };
+}
 
 const MAP_IMAGES = {
   'peak-triangle': require('./assets/peak-triangle.png'),
@@ -97,7 +108,8 @@ export default function LocationMap({ coord, onPick, height, active = true, user
   // open on the same view.
   const lastView = useRef<{ center: [number, number]; zoom: number } | null>(null);
   const initialViewState = lastView.current
-    ?? (coord ? { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM } : DEFAULT_VIEW);
+    ?? (region ? regionView(region, coord)
+      : coord ? { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM } : DEFAULT_VIEW);
   const onRegionDidChange = (e: NativeSyntheticEvent<ViewStateChangeEvent>) => {
     const { center, zoom } = e.nativeEvent;
     lastView.current = { center: [center[0], center[1]], zoom };
@@ -110,12 +122,19 @@ export default function LocationMap({ coord, onPick, height, active = true, user
     wasActive.current = active;
   }, [active]);
 
+  // A map showing a forecast region keeps the region in view rather than closing in on the pin.
   useEffect(() => {
     if (!coord) return;
+    if (region) {
+      const { bounds, padding } = regionView(region, coord);
+      cameraRef.current?.fitBounds(bounds, { padding, duration: 250 });
+      fullscreenCameraRef.current?.fitBounds(bounds, { padding, duration: 250 });
+      return;
+    }
     const stop = { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM, duration: 250 };
     cameraRef.current?.easeTo(stop);
     fullscreenCameraRef.current?.easeTo(stop);
-  }, [coord?.lat, coord?.lon]);
+  }, [coord?.lat, coord?.lon, region?.bbox.join()]);
 
   async function locate() {
     const c = await onLocate?.();
