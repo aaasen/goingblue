@@ -26,13 +26,27 @@ def utf16_len(s):
     return len(s.encode("utf-16-le")) // 2
 
 
-def load_docs():
-    with open(f"{DATA}/corpus2.jsonl") as f:
-        return [json.loads(l) for l in f]
+def load_docs(synth=False):
+    import glob
+    paths = [f"{DATA}/corpus2.jsonl"] + (sorted(glob.glob(f"{DATA}/synth/k*-c*[0-9].jsonl")) if synth else [])
+    docs = []
+    for path in paths:
+        with open(path) as f:
+            docs += [json.loads(l) for l in f]
+    return docs
 
 
 def centers_of(docs):
     return sorted({d["center"] for d in docs})
+
+
+def markers_of(docs, context):
+    """Marker names in id order; marker i is token V + 1 + i."""
+    markers = ["kind:" + k for k in sorted({s["kind"] for d in docs for s in d["sections"]})]
+    markers += ["ptype:" + str(p) for p in PTYPES] + ["center:" + c for c in centers_of(docs)]
+    if context:
+        markers += sorted({c for d in docs for c in d["ctx"] + [c for s in d["sections"] for c in s["ctx"]]})
+    return markers
 
 
 # ---------------------------------------------------------------- tokenizer
@@ -40,13 +54,8 @@ def centers_of(docs):
 def tokenize(args):
     """Writes tok<vocab><tok>.npz/.json. With --context, each doc starts with its structured
     context markers and each problem section with its own; all markers are free."""
-    import glob
     import sentencepiece as spm
-    docs = load_docs()
-    if args.synth:
-        for path in sorted(glob.glob(f"{DATA}/synth/k*-c*[0-9].jsonl")):
-            with open(path) as f:
-                docs += [json.loads(l) for l in f]
+    docs = load_docs(args.synth)
     prefix = f"{DATA}/sp{args.vocab}{args.sp}"
     if not os.path.exists(prefix + ".model"):
         texts = [s["text"] for d in docs if d["split"] == "train" for s in d["sections"]]
@@ -61,10 +70,7 @@ def tokenize(args):
     sp = spm.SentencePieceProcessor(model_file=prefix + ".model")
     V = sp.get_piece_size()
     END = V
-    markers = ["kind:" + k for k in sorted({s["kind"] for d in docs for s in d["sections"]})]
-    markers += ["ptype:" + str(p) for p in PTYPES] + ["center:" + c for c in centers_of(docs)]
-    if args.context:
-        markers += sorted({c for d in docs for c in d["ctx"] + [c for s in d["sections"] for c in s["ctx"]]})
+    markers = markers_of(docs, args.context)
     mid = {k: V + 1 + i for i, k in enumerate(markers)}
     total = V + 1 + len(markers)
 
@@ -95,7 +101,7 @@ def tokenize(args):
                      "own": sum(d["ownBits"]) if d.get("ownBits") else None})
     np.savez(f"{DATA}/tok{args.vocab}{args.tok}.npz", lens=np.array([len(t) for t in toks]), toks=np.concatenate(toks), masks=np.concatenate(masks))
     with open(f"{DATA}/tok{args.vocab}{args.tok}.json", "w") as f:
-        json.dump({"vocab": total, "meta": meta}, f)
+        json.dump({"vocab": total, "markers": markers, "meta": meta}, f)
     chars = sum(m["chars"] for m in meta)
     text_tokens = sum(int(m.sum()) for m in masks)
     print(f"vocab {V} + {total - V} markers; {len(docs)} docs, {text_tokens:,} scored tokens, {chars / text_tokens:.2f} chars per token; "

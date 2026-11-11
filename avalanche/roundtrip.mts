@@ -4,7 +4,7 @@
  * section text -> BPE tokens -> bytes -> tokens -> text, with the markers given to both sides.
  *
  * Usage: node roundtrip.mts [data dir, default data/neural] [docs] [rANS L bits]
- *   with <MODEL>.int.{bin,json} and pieces.json from quant.py export, and corpus2.jsonl.
+ *   with <MODEL>.int.bin and <MODEL>.vectors.json from quant.py export, and corpus2.jsonl.
  *   MODEL defaults to s384c; SHARD=i/n runs every nth test vector.
  */
 import { createHash } from "node:crypto";
@@ -15,8 +15,13 @@ const NDOCS = Number(process.argv[3] ?? 200);
 const L_BITS = Number(process.argv[4] ?? 32);
 const NAME = process.env.MODEL ?? "s384c";
 
-const meta = JSON.parse(readFileSync(`${DIR}/${NAME}.int.json`, "utf8"));
+// The model file layout is in quant.py write_model.
 const bin = readFileSync(`${DIR}/${NAME}.int.bin`);
+if (bin.toString("latin1", 0, 4) !== "GBNM" || bin.readUInt32LE(4) !== 1) throw new Error("not a version 1 GBNM model");
+const headLen = bin.readUInt32LE(8);
+const meta = JSON.parse(bin.toString("utf8", 12, 12 + headLen));
+const ARRAYS = 12 + headLen + ((8 - ((12 + headLen) % 8)) % 8);
+const { vectors } = JSON.parse(readFileSync(`${DIR}/${NAME}.vectors.json`, "utf8"));
 const { FX, FH, FK, FV, FE, FP, FS, FF, FL, AB, FB, SCALE_BITS, WMUL, SIG_RANGE, PP_MIN, EXP_HI_MAX } = meta.fmt;
 const C: number = meta.dim;
 const LAYERS: number = meta.layers;
@@ -24,11 +29,12 @@ const V: number = meta.codable;
 const END = V - 1;
 
 function tensor(name: string): Int8Array | Int32Array {
-  const e = meta.index[name];
+  const e = meta.arrays[name];
   if (!e) throw new Error(`missing ${name}`);
-  const n = e.shape.reduce((a: number, b: number) => a * b, 1);
-  const ab = bin.buffer.slice(bin.byteOffset + e.offset, bin.byteOffset + e.offset + n * (e.dtype === "i8" ? 1 : 4));
-  return e.dtype === "i8" ? new Int8Array(ab) : new Int32Array(ab);
+  const [dtype, offset, n] = e;
+  const start = bin.byteOffset + ARRAYS + offset;
+  const ab = bin.buffer.slice(start, start + n * (dtype === "i8" ? 1 : 4));
+  return dtype === "i8" ? new Int8Array(ab) : new Int32Array(ab);
 }
 
 // ---------------------------------------------------------------- exact integer helpers
@@ -250,7 +256,7 @@ class RansDecoder {
 
 // ---------------------------------------------------------------- SentencePiece BPE
 
-const pieces: { p: string; s: number; t: number }[] = JSON.parse(readFileSync(`${DIR}/pieces.json`, "utf8"));
+const pieces: { p: string; s: number; t: number }[] = meta.pieces.map(([p, s, t]: [string, number, number]) => ({ p, s, t }));
 const pieceId = new Map<string, number>();
 pieces.forEach((p, i) => { if (p.t === 1) pieceId.set(p.p, i); });
 
@@ -288,7 +294,7 @@ function bpeDecode(ids: number[]): string {
 // ---------------------------------------------------------------- checks
 
 const docs = new Map<string, any>();
-const wanted = new Set(meta.vectors.map((v: any) => v.id));
+const wanted = new Set(vectors.map((v: any) => v.id));
 for (const line of readFileSync(`${DIR}/corpus2.jsonl`, "utf8").split("\n")) {
   if (!line) continue;
   const id = line.slice(7, line.indexOf('"', 8));
@@ -315,8 +321,8 @@ let hashSteps = 0, hashBad = 0, tokSame = 0, tokSecs = 0, okDocs = 0, bytesTot =
 let encMs = 0, decMs = 0, steps = 0;
 const freqs = new Int32Array(V);
 const [SHARD, NSHARDS] = (process.env.SHARD ?? "0/1").split("/").map(Number);
-const vectors = meta.vectors.slice(0, NDOCS).filter((_: unknown, i: number) => i % NSHARDS === SHARD);
-for (const [n, vtr] of vectors.entries()) {
+const picked = vectors.slice(0, NDOCS).filter((_: unknown, i: number) => i % NSHARDS === SHARD);
+for (const [n, vtr] of picked.entries()) {
   const doc = docs.get(vtr.id);
   const segs = segments(vtr.tokens, vtr.mask);
   // 1. Port check: the Python token sequence, every step's table hashed.
@@ -382,8 +388,8 @@ for (const [n, vtr] of vectors.entries()) {
   if (n < 5 || n % 25 === 0)
     console.log(`${vtr.id} ${doc.center}: ${chars} chars, ${bytes.length} B (ideal ${(ideal / 8).toFixed(1)} B, Python tokens ${(vtr.bits / 8).toFixed(1)} B) ${ok ? "ok" : "FAIL"}`);
 }
-console.log(`\nport check: ${hashSteps - hashBad}/${hashSteps} step tables match Python (first ${Math.min(5, vectors.length)} docs of this shard)`);
+console.log(`\nport check: ${hashSteps - hashBad}/${hashSteps} step tables match Python (first ${Math.min(5, picked.length)} docs of this shard)`);
 console.log(`tokenizer: ${tokSame}/${tokSecs} sections tokenize exactly as SentencePiece`);
-console.log(`round trip: ${okDocs}/${vectors.length} forecasts decoded exactly`);
-console.log(`size: ${(bytesTot / vectors.length).toFixed(1)} B/doc actual, ${(idealTot / 8 / vectors.length).toFixed(1)} ideal (TS tokens), ${(pyBitsTot / 8 / vectors.length).toFixed(1)} ideal (Python tokens); rANS overhead ${(bytesTot - idealTot / 8).toFixed(0)} B total = ${((bytesTot - idealTot / 8) / vectors.length).toFixed(2)} B/doc; ${(8 * bytesTot / charsTot).toFixed(4)} b/c`);
-console.log(`speed: ${(steps / (encMs / 1000)).toFixed(0)} tokens/s encode, ${(encMs / vectors.length).toFixed(0)} ms/doc encode, ${(decMs / vectors.length).toFixed(0)} ms/doc decode`);
+console.log(`round trip: ${okDocs}/${picked.length} forecasts decoded exactly`);
+console.log(`size: ${(bytesTot / picked.length).toFixed(1)} B/doc actual, ${(idealTot / 8 / picked.length).toFixed(1)} ideal (TS tokens), ${(pyBitsTot / 8 / picked.length).toFixed(1)} ideal (Python tokens); rANS overhead ${(bytesTot - idealTot / 8).toFixed(0)} B total = ${((bytesTot - idealTot / 8) / picked.length).toFixed(2)} B/doc; ${(8 * bytesTot / charsTot).toFixed(4)} b/c`);
+console.log(`speed: ${(steps / (encMs / 1000)).toFixed(0)} tokens/s encode, ${(encMs / picked.length).toFixed(0)} ms/doc encode, ${(decMs / picked.length).toFixed(0)} ms/doc decode`);

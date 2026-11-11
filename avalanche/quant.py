@@ -8,13 +8,13 @@ are int8 with a per-row fixed-point multiplier, and every rescale is a rounding 
 
   python quant.py stats --name s384c              activation ranges of the float model on val
   python quant.py eval --name s384c [--limit N]   float, int8-weight and integer bits on val
-  python quant.py export --name s384c --vectors 200   int model + test vectors for roundtrip.mts
+  python quant.py export --name s384c --vectors 200   int model file + test vectors for roundtrip.mts
 """
 import argparse, hashlib, json, math, os
 import numpy as np
 import torch
 import torch.nn.functional as F
-from rwkv import DATA, build, load_tokens, report, device_of
+from rwkv import DATA, build, load_docs, load_tokens, markers_of, report, device_of
 
 # Fixed-point formats (fraction bits).
 FX = 12          # residual stream x (|x| < 40 observed, clamp at 2^20)
@@ -384,40 +384,79 @@ def evaluate(args):
         json.dump(out, fh)
 
 
+MAGIC = b"GBNM"
+FORMAT_VERSION = 1
+FMT_KEYS = ("FX", "FH", "FK", "FV", "FE", "FP", "FS", "FF", "FL", "AB", "FB", "SCALE_BITS", "WMUL", "SIG_RANGE", "PP_MIN", "EXP_HI_MAX")
+
+
+def write_model(path, header, arrays):
+    """The integer model as one file, everything a platform needs to tokenize, run and code:
+
+      "GBNM"         magic
+      u32 LE         format version
+      u32 LE         header length in bytes
+      header         UTF-8 JSON (below)
+      zero padding   to a multiple of 8
+      arrays         each little-endian, 8-byte aligned, offsets relative to here
+
+    Header: name; dim, layers, ffn; vocab (embedding rows) and codable (pieces + END, the head's
+    rows); fmt, the fixed-point constants above, which a reader checks against its own; pieces as
+    [piece, score, type] (SentencePiece types: 1 normal, 2 unknown, 6 byte); markers, where
+    markers[i] is token codable + i; arrays as name -> [dtype, offset, length], dtype i8 or i32.
+
+    A forecast is one token sequence: center marker, document context markers, then per section
+    its kind marker (for a problem, then its ptype marker and problem context markers), its text
+    pieces and END. Markers are given to both sides; pieces and END are coded."""
+    index, blobs, off = {}, [], 0
+    for name, (dtype, v) in arrays.items():
+        b = v.astype(np.int8 if dtype == "i8" else "<i4").tobytes()
+        index[name] = [dtype, off, int(v.size)]
+        pad_ = (-len(b)) % 8
+        blobs += [b, b"\0" * pad_]
+        off += len(b) + pad_
+    head = json.dumps({**header, "arrays": index}, ensure_ascii=False, separators=(",", ":")).encode()
+    head_pad = (-(12 + len(head))) % 8
+    with open(path, "wb") as f:
+        f.write(MAGIC + FORMAT_VERSION.to_bytes(4, "little") + len(head).to_bytes(4, "little") + head + b"\0" * head_pad)
+        for b in blobs:
+            f.write(b)
+    return 12 + len(head) + head_pad + off
+
+
 def export(args):
-    """Writes <name>.int.bin (all integer tensors, little-endian int32 unless int8) with a JSON
-    index, test vectors (per-step frequency hashes for --vectors val docs) and pieces.json, the
-    SentencePiece table the TS port tokenizes with (type 1 normal, 2 unknown, 6 byte)."""
+    """Writes <name>.int.bin (write_model) and <name>.vectors.json, the test vectors: --vectors val
+    docs with their tokens, mask (1 = coded) and per-step frequency table hashes."""
+    import sentencepiece as spm
     dev = device_of()
     model, a, vocab, docs = load(args.name, dev)
     codable = codable_of(a, docs)
     im = IntModel(model, dev, codable)
-    index, blobs, off = {}, [], 0
+    with open(f"{DATA}/tok{a.vocab}{a.tok}.json") as f:
+        markers = json.load(f).get("markers") or markers_of(load_docs(), True)
+    assert codable + len(markers) == vocab, (codable, len(markers), vocab)
+    sp = spm.SentencePieceProcessor(model_file=f"{DATA}/sp{a.vocab}{a.sp}.model")
+    assert sp.get_piece_size() + 1 == codable
+    kind = lambda i: 6 if sp.is_byte(i) else 2 if sp.is_unknown(i) else 3 if sp.is_control(i) else 1
+    pieces = [[sp.id_to_piece(i), sp.get_score(i), kind(i)] for i in range(sp.get_piece_size())]
+
+    arrays = {}
     for k, v in im.p.items():
         v = v.cpu().numpy()
         if k.endswith(".q"):
-            assert v.min() >= -127 and v.max() <= 127
-            b = v.astype(np.int8).tobytes(); dt = "i8"
+            assert v.min() >= -127 and v.max() <= 127, k
+            arrays[k] = ("i8", v)
         else:
             assert np.abs(v).max() < 2 ** 31, k
-            b = v.astype("<i4").tobytes(); dt = "i32"
-        index[k] = {"offset": off, "shape": list(v.shape), "dtype": dt}
-        blobs.append(b); off += len(b)
-        pad_ = (-off) % 4
-        blobs.append(b"\0" * pad_); off += pad_
+            arrays[k] = ("i32", v)
     for fe in (FE, FP):
         for nm, t in zip(("hi", "lo"), exp_tables(fe)):
-            index[f"exp{fe}.{nm}"] = {"offset": off, "shape": [len(t)], "dtype": "i32"}
-            blobs.append(t.astype("<i4").tobytes()); off += 4 * len(t)
-    t = sigmoid_table()
-    index["sigmoid"] = {"offset": off, "shape": [len(t)], "dtype": "i32"}
-    blobs.append(t.astype("<i4").tobytes()); off += 4 * len(t)
-    meta = {"index": index, "layers": im.L, "dim": im.C, "vocab": vocab, "codable": codable,
-            "fmt": {k: globals()[k] for k in ("FX", "FH", "FK", "FV", "FE", "FP", "FS", "FF", "FL", "AB", "FB", "SCALE_BITS", "WMUL", "SIG_RANGE", "PP_MIN", "EXP_HI_MAX")}}
-    with open(f"{DATA}/{args.name}.int.bin", "wb") as f:
-        for b in blobs:
-            f.write(b)
-    # test vectors: val docs, tokens and freq-table hashes per scored step
+            arrays[f"exp{fe}.{nm}"] = ("i32", t)
+    arrays["sigmoid"] = ("i32", sigmoid_table())
+    header = {"name": args.name, "dim": im.C, "layers": im.L, "ffn": int(im.p["blocks.0.ck.mul"].numel()),
+              "vocab": vocab, "codable": codable, "fmt": {k: globals()[k] for k in FMT_KEYS},
+              "pieces": pieces, "markers": markers}
+    size = write_model(f"{DATA}/{args.name}.int.bin", header, arrays)
+
     va = [d for d in docs if d[2]["split"] == "val"]
     picks = va[:: len(va) // args.vectors][: args.vectors]
     vec = []
@@ -429,15 +468,9 @@ def export(args):
             hs = [hashlib.sha256(f[i].tobytes()).hexdigest()[:16] for i in range(len(f))]
             bits = float(sum(SCALE_BITS - math.log2(f[i][t[i + 1]]) for i in range(len(f)) if mk[i + 1]))
             vec.append({"id": m["id"], "tokens": t.tolist(), "mask": mk.tolist(), "hashes": hs, "bits": bits})
-    meta["vectors"] = vec
-    with open(f"{DATA}/{args.name}.int.json", "w") as f:
-        json.dump(meta, f)
-    import sentencepiece as spm
-    sp = spm.SentencePieceProcessor(model_file=f"{DATA}/sp{a.vocab}{a.sp}.model")
-    kind = lambda i: 6 if sp.is_byte(i) else 2 if sp.is_unknown(i) else 3 if sp.is_control(i) else 1
-    with open(f"{DATA}/pieces.json", "w") as f:
-        json.dump([{"p": sp.id_to_piece(i), "s": sp.get_score(i), "t": kind(i)} for i in range(sp.get_piece_size())], f, ensure_ascii=False)
-    print(f"wrote {args.name}.int.bin ({off / 1e6:.1f} MB) and {len(vec)} test vectors")
+    with open(f"{DATA}/{args.name}.vectors.json", "w") as f:
+        json.dump({"model": args.name, "vectors": vec}, f)
+    print(f"wrote {args.name}.int.bin ({size / 1e6:.1f} MB) and {len(vec)} test vectors")
 
 
 if __name__ == "__main__":
