@@ -13,6 +13,7 @@ COPY packages/server/package.json packages/server/
 # image never builds; the filter keeps the install to server and its workspace dependencies.
 COPY packages/mobile/package.json packages/mobile/
 COPY packages/codec-server/package.json packages/codec-server/
+COPY native/avalanche-node/package.json native/avalanche-node/
 
 FROM base AS build
 RUN pnpm install --frozen-lockfile --filter "@weather/server..."

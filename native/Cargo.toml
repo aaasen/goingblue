@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["avalanche", "avalanche-node", "avalanche-ffi"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+avalanche = { path = "avalanche" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"

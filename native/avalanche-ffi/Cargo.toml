@@ -1,0 +1,17 @@
+[package]
+name = "avalanche-ffi"
+description = "C ABI (iOS) and JNI (Android) bindings for the prose model, used by the app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+avalanche.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.21", default-features = false }

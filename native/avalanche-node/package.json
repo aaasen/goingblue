@@ -1,0 +1,19 @@
+{
+  "name": "@weather/avalanche-node",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "binaryName": "avalanche-node",
+    "targets": ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "test": "node --test test.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.10.12"
+  }
+}

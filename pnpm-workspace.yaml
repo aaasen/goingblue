@@ -1,3 +1,4 @@
 packages:
   - 'packages/*'
   - 'maps/preview'
+  - 'native/avalanche-node'

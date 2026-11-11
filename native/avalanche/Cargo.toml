@@ -1,0 +1,11 @@
+[package]
+name = "avalanche"
+description = "Avalanche forecast prose model: model file, integer inference, and rANS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

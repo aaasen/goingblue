@@ -1,0 +1,4 @@
+module AvalancheFFI {
+  header "avalanche.h"
+  export *
+}
