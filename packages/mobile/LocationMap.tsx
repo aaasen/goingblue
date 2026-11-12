@@ -59,10 +59,8 @@ interface Props {
   offlineMaps?: boolean;
   // Areas drawn as outlines under everything else, such as the avalanche forecast pieces.
   zones?: GeoJSON.FeatureCollection | null;
-  // A preview (no onPick) that still offers the fullscreen button; the fullscreen map pans and
-  // zooms, though a tap picks nothing.
-  expandable?: boolean;
-  // Where an avalanche forecast applies, filled in its danger color over the zones.
+  // Where an avalanche forecast applies, filled in its danger color over the zones, or the zone a
+  // picker has selected.
   region?: ForecastRegion | null;
 }
 
@@ -93,7 +91,7 @@ const MAP_IMAGES = {
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
 // picks a coordinate. The picker's corner button opens the same map fullscreen; the preview has no
 // controls.
-export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon', offlineMaps = false, zones, region, expandable = false }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon', offlineMaps = false, zones, region }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
@@ -122,15 +120,16 @@ export default function LocationMap({ coord, onPick, height, active = true, user
     wasActive.current = active;
   }, [active]);
 
-  // A map showing a forecast region keeps the region in view rather than closing in on the pin.
+  // A map showing a forecast region keeps the region in view rather than closing in on the pin,
+  // with or without a pin.
   useEffect(() => {
-    if (!coord) return;
     if (region) {
       const { bounds, padding } = regionView(region, coord);
       cameraRef.current?.fitBounds(bounds, { padding, duration: 250 });
       fullscreenCameraRef.current?.fitBounds(bounds, { padding, duration: 250 });
       return;
     }
+    if (!coord) return;
     const stop = { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM, duration: 250 };
     cameraRef.current?.easeTo(stop);
     fullscreenCameraRef.current?.easeTo(stop);
@@ -357,7 +356,7 @@ export default function LocationMap({ coord, onPick, height, active = true, user
         <>
           {renderMap(cameraRef, mapRevision)}
           {mapStyle && <Text style={styles.attribution}>© OpenStreetMap</Text>}
-          {(interactive || expandable) && (
+          {interactive && (
             <TouchableOpacity
               style={styles.fullscreenButton}
               onPress={() => setFullscreen(true)}

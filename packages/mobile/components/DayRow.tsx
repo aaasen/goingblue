@@ -1,12 +1,14 @@
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import { Modal, Platform, Pressable, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { palette } from '../palette';
 
-// The day an avalanche bulletin is requested for, as a settings row on its own white card, like
-// the ones in Settings: the label left, the platform's own date picker right. On iOS that is the
-// system's compact date button, which opens Apple's calendar popover. Android has no such control,
-// so the date shows as text with a chevron, and a tap opens its calendar dialog. The date runs from the first season of
+// The day an avalanche bulletin is requested for, as the last of the rows under the Avalanche
+// tab's map (AvalancheZonePicker), drawn as they are: the label, the date as text, a chevron. A
+// tap opens the platform's calendar: Android's own dialog, and on iOS the inline calendar on a
+// card over the screen, since the system's compact date button can't be restyled to match the
+// rows. The date runs from the first season of
 // Avalanche Canada's archive through today. It starts on today, which asks for the bulletin
 // current when the request arrives; `day` is '' then, and YYYY-MM-DD for any earlier date.
 
@@ -24,48 +26,56 @@ function dateOf(day: string): Date {
 }
 
 export default function DayRow({ day, onDay }: { day: string; onDay: (day: string) => void }) {
+  const [open, setOpen] = useState(false);
   const today = new Date();
   const value = day ? dateOf(day) : today;
   const choose = (_: unknown, date: Date) => {
     const picked = isoDay(date);
     onDay(picked === isoDay(today) ? '' : picked);
   };
-  if (Platform.OS === 'ios') {
-    return (
-      <View style={styles.card}>
-        <Text style={styles.label}>Date</Text>
-        <DateTimePicker
-          value={value} mode="date" display="compact"
-          minimumDate={FIRST_DAY} maximumDate={today} onValueChange={choose}
-        />
-      </View>
-    );
-  }
+  const onPress = Platform.OS === 'ios'
+    ? () => setOpen(true)
+    : () => DateTimePickerAndroid.open({ value, mode: 'date', minimumDate: FIRST_DAY, maximumDate: today, onValueChange: choose });
   return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => DateTimePickerAndroid.open({ value, mode: 'date', minimumDate: FIRST_DAY, maximumDate: today, onValueChange: choose })}
-      accessibilityRole="button"
-    >
-      <Text style={styles.label}>Date</Text>
-      <View style={styles.androidValue}>
-        <Text style={styles.androidDate} numberOfLines={1}>
+    <>
+      <TouchableOpacity style={styles.row} onPress={onPress} accessibilityRole="button">
+        <Text style={styles.label}>Date</Text>
+        <Text style={styles.value} numberOfLines={1}>
           {value.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
         </Text>
-        <MaterialCommunityIcons name="chevron-down" size={20} color={palette.textTertiary} />
-      </View>
-    </TouchableOpacity>
+        <MaterialCommunityIcons name="chevron-down" size={20} color={palette.textTertiary} style={styles.chevron} />
+      </TouchableOpacity>
+      {Platform.OS === 'ios' && (
+        <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+          {/* A tap outside the card closes it, as the system's popover does. */}
+          <Pressable style={styles.backdrop} onPress={() => setOpen(false)} accessibilityLabel="Close">
+            <Pressable style={styles.calendar} onPress={() => {}}>
+              <DateTimePicker
+                value={value} mode="date" display="inline"
+                minimumDate={FIRST_DAY} maximumDate={today} onValueChange={choose}
+              />
+              <TouchableOpacity style={styles.done} onPress={() => setOpen(false)} accessibilityRole="button">
+                <Text style={styles.doneText}>Done</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  // Settings' card and list-row type (SettingsScreen), holding the one row. The fixed height keeps
-  // the row the same whether the compact button or the text sits in it.
-  card: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: palette.card, borderRadius: 12, paddingHorizontal: 14, minHeight: 48, marginBottom: 20,
+  // A row of AvalancheZonePicker's.
+  row: {
+    flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 16, paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.cardRule,
   },
-  label: { fontSize: 15, color: palette.text },
-  androidValue: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  androidDate: { fontSize: 15, color: palette.textSecondary },
+  label: { width: 104, fontSize: 15, fontWeight: '600', color: palette.textSecondary },
+  value: { flex: 1, fontSize: 15, color: palette.text },
+  chevron: { alignSelf: 'center', marginLeft: 8 },
+  backdrop: { flex: 1, justifyContent: 'center', padding: 16, backgroundColor: 'rgba(0, 0, 0, 0.35)' },
+  calendar: { backgroundColor: palette.card, borderRadius: 14, padding: 12 },
+  done: { alignSelf: 'flex-end', paddingHorizontal: 8, paddingVertical: 8 },
+  doneText: { fontSize: 16, fontWeight: '600', color: palette.link },
 });

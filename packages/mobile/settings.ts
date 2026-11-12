@@ -143,6 +143,7 @@ const QUOTA_KEY = 'quota';
 const PENDING_ANNUAL_KEY = 'pending_annual_switch';
 // Written only by the screenshot seed (scripts/seed-shots.mts); no setting in the app sets it.
 const HIDE_EXPIRED_BANNER_KEY = 'hide_expired_banner';
+const AVALANCHE_ZONE_KEY = 'avalanche_zone';
 const DEFAULT_TWO_MESSAGES = true;
 const DEFAULT_SYSTEM: Units = 'imperial';
 const DEFAULT_TIME_FORMAT: TimeFormat = '12h';
@@ -353,6 +354,24 @@ export async function loadHideExpiredBanner(): Promise<boolean> {
   }
 }
 
+// The avalanche region last selected, as its request point: a point outlives a renumbering of
+// the pieces. Null when none is selected.
+export async function loadAvalancheZone(): Promise<{ lat: number; lon: number } | null> {
+  try {
+    const stored = JSON.parse((await AsyncStorage.getItem(AVALANCHE_ZONE_KEY)) ?? 'null');
+    return stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lon) ? { lat: stored.lat, lon: stored.lon } : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveAvalancheZone(point: { lat: number; lon: number } | null): Promise<void> {
+  try {
+    if (point) await AsyncStorage.setItem(AVALANCHE_ZONE_KEY, JSON.stringify(point));
+    else await AsyncStorage.removeItem(AVALANCHE_ZONE_KEY);
+  } catch { /* ignore */ }
+}
+
 // Forget every stored preference, the pre-per-quantity master switch included. Part of account
 // deletion: the next launch starts from the defaults as a fresh install would.
 export async function clearSettings(): Promise<void> {
@@ -360,7 +379,7 @@ export async function clearSettings(): Promise<void> {
     await AsyncStorage.multiRemove([
       LEGACY_UNITS_KEY, UNIT_PREFS_KEY, TIME_FORMAT_KEY, COORD_FORMAT_KEY, AQI_SCALE_KEY, DEVICE_KEY,
       TWO_MESSAGES_KEY, PINNED_COORDS_KEY, FAVORITES_KEY, FAVORITES_SORT_KEY, FAVORITES_SORT_REVERSED_KEY,
-      HIDE_EXPIRED_BANNER_KEY, QUOTA_KEY, PENDING_ANNUAL_KEY,
+      HIDE_EXPIRED_BANNER_KEY, AVALANCHE_ZONE_KEY, QUOTA_KEY, PENDING_ANNUAL_KEY,
     ]);
   } catch { /* ignore */ }
 }

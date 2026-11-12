@@ -9,9 +9,8 @@ import * as Network from 'expo-network';
 import { pageInsets } from './insets';
 import AvalancheForecastView from './AvalancheScreen';
 import NacForecastView from './NacForecast';
-import { bulletinCenter, forecastRegion, isNacCenter, pieceAt, pieceFeatures, zoneLabel, zoneNames } from './avalancheDisplay';
+import { bulletinCenter, forecastRegion, isNacCenter, pieceAt, pieceFeatures, zoneLabel, zoneNames, type ForecastRegion } from './avalancheDisplay';
 import { loadAvalancheModel, loadModelsForReplies } from './avalancheModel';
-import DayRow from './components/DayRow';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
@@ -31,6 +30,7 @@ import { fetchText, requestErrorMessage } from './network';
 import {
   type AqiScale, type CoordFormat, type TimeFormat, type UnitPrefs, loadFavoritesSort, loadFavoritesSortReversed, loadPinnedCoords,
   saveFavoritesSort, saveFavoritesSortReversed, savePinnedCoords,
+  loadAvalancheZone, saveAvalancheZone,
 } from './settings';
 import { quotaLine, type StoredQuota } from './quota';
 import { ladderLabel } from './cloudBand';
@@ -44,6 +44,8 @@ import DeviceSelector from './components/DeviceSelector';
 import Section from './components/Section';
 import ActionButton from './components/ActionButton';
 import PasteButton, { type Outcome } from './components/PasteButton';
+import AvalancheZonePicker from './AvalancheZonePicker';
+import { zoneAt, zonePoint, zoneRegion } from './avalancheZones';
 import DangerMountain, { UNRATED_DAY, type MountainDay } from './components/DangerMountain';
 import InfoModal from './components/InfoModal';
 import InfoBox from './components/InfoBox';
@@ -1081,6 +1083,31 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     () => (mapCoord ? pieceAt(mapCoord.lat, mapCoord.lon, AVALANCHE_PIECES) : null),
     [mapCoord?.lat, mapCoord?.lon],
   );
+  // The Avalanche tab's own selection, a forecast region, apart from the Weather tab's point. It
+  // starts on the region stored from the last launch, or else on the one under the Weather tab's
+  // point the first time the tab opens over one.
+  const [avalancheZone, setAvalancheZone] = useState<AvalanchePiece | null>(null);
+  const [avalancheZoneReady, setAvalancheZoneReady] = useState(false);
+  useEffect(() => {
+    loadAvalancheZone().then((point) => {
+      if (point) setAvalancheZone(zoneAt(point));
+      setAvalancheZoneReady(true);
+    });
+  }, []);
+  const avalancheZoneDefaulted = useRef(false);
+  useEffect(() => {
+    if (tab !== 'avalanche' || !avalancheZoneReady || avalancheZoneDefaulted.current) return;
+    avalancheZoneDefaulted.current = true;
+    if (!avalancheZone && zonePiece) selectAvalancheZone(zonePiece);
+  }, [tab, avalancheZoneReady]);
+  function selectAvalancheZone(zone: AvalanchePiece | null) {
+    setAvalancheZone(zone);
+    saveAvalancheZone(zone ? zonePoint(zone) : null);
+  }
+  const avalancheZoneRegion = useMemo(
+    () => (avalancheZone ? zoneRegion(avalancheZone, palette.primary) : null),
+    [avalancheZone],
+  );
   // Where the decoded bulletin applies, in its first day's highest danger.
   const avalancheRegion = useMemo(
     () => (avalanche ? forecastRegion(avalanche.forecast.pieces, avalanche.forecast.danger) : null),
@@ -1287,6 +1314,18 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   // null — a pinned point with unparseable coordinates — greys out the action button, so it never
   // gets this far.
   async function prepareMessage(kind: 'weather' | 'avalanche' = 'weather'): Promise<string | null> {
+    // An avalanche request goes out for its region's own point, whatever the Weather tab holds.
+    if (kind === 'avalanche') {
+      if (!avalancheZone) return null;
+      const point = zonePoint(avalancheZone);
+      const startHour = alignedStartEpochHour();
+      const context = {
+        kind: 'avalanche' as const, lat: point.lat, lon: point.lon, start: startHour * 3600000,
+        day: avalancheDay || null, device: deviceCode(device),
+      };
+      const code = await allocCode(token, context, 'Avalanche');
+      return buildAvalancheMsg(token, point, device, code, startHour, avalancheDay);
+    }
     let coords = resolvedCoords;
     // A stale fix takes the same on-demand path as a missing one: a send is the moment the
     // location has to be right, and refreshing through requestCurrentLocation means a failed
@@ -1297,14 +1336,6 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     }
     if (coords == null || !isFinite(coords.lat) || !isFinite(coords.lon)) return null;
     const startHour = alignedStartEpochHour();
-    if (kind === 'avalanche') {
-      const context = {
-        kind: 'avalanche' as const, lat: coords.lat, lon: coords.lon, start: startHour * 3600000,
-        day: avalancheDay || null, device: deviceCode(device),
-      };
-      const code = await allocCode(token, context, 'Avalanche');
-      return buildAvalancheMsg(token, coords, device, code, startHour, avalancheDay);
-    }
     const code = await allocCode(token, buildContext(coords, mode, model, vars, startHour, device), `${modeName} · ${model.toUpperCase()}`);
     return buildMsg(token, coords, mode, model, vars, device, messages, code, startHour);
   }
@@ -1693,15 +1724,15 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     // is the reply, which comes back in the wide alphabet so it lands in a single bubble.
     iphone: { onPress: () => handleSendSms(), disabled: sendDisabled, busy: locating },
   };
-  // The Avalanche tab's button: the same handlers, sending an avalanche request, and greyed while
-  // the point is outside every forecast zone.
-  const avalancheBlocked = !zonePiece;
+  // The Avalanche tab's button: the same handlers, sending an avalanche request, and greyed until
+  // a region is selected. The Weather tab's point has no say in it.
+  const avalancheBlocked = !avalancheZone;
   const AVALANCHE_ACTIONS: Record<Device, { onPress: () => void; disabled: boolean; busy: boolean }> = {
-    internet: { onPress: () => handleFetch('avalanche'), disabled: fetchDisabled || avalancheBlocked, busy: fetching || locating },
-    sms: { onPress: () => handleSendSms('avalanche'), disabled: sendDisabled || avalancheBlocked, busy: locating },
-    inreach: { onPress: () => handleCopy('avalanche'), disabled: sendDisabled || avalancheBlocked, busy: locating },
-    zoleo: { onPress: () => handleCopy('avalanche'), disabled: sendDisabled || avalancheBlocked, busy: locating },
-    iphone: { onPress: () => handleSendSms('avalanche'), disabled: sendDisabled || avalancheBlocked, busy: locating },
+    internet: { onPress: () => handleFetch('avalanche'), disabled: avalancheBlocked || fetching || offline, busy: fetching },
+    sms: { onPress: () => handleSendSms('avalanche'), disabled: avalancheBlocked, busy: false },
+    inreach: { onPress: () => handleCopy('avalanche'), disabled: avalancheBlocked, busy: false },
+    zoleo: { onPress: () => handleCopy('avalanche'), disabled: avalancheBlocked, busy: false },
+    iphone: { onPress: () => handleSendSms('avalanche'), disabled: avalancheBlocked, busy: false },
   };
   const avalancheAction = AVALANCHE_ACTIONS[device];
   const deviceSpec = DEVICES.find((d) => d.value === device)!;
@@ -1737,6 +1768,19 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const onPick = useStableHandler(pinPoint);
   const onCoordsText = useStableHandler((text: string) => pinCoordsText(text));
   const onLocate = useStableHandler(follow);
+  // The Avalanche tab's map: a tap or a fix selects the region it lands in, and one outside every
+  // region changes nothing. Neither moves the Weather tab's point.
+  const onAvalancheZone = useStableHandler(selectAvalancheZone);
+  const onPickZone = useStableHandler((c: LatLon) => {
+    const zone = zoneAt(c);
+    if (zone) selectAvalancheZone(zone);
+  });
+  const onLocateZone = useStableHandler(async () => {
+    const c = await requestCurrentLocation();
+    const zone = c && zoneAt(c);
+    if (zone) selectAvalancheZone(zone);
+    return c;
+  });
   // Picking a favorite pins its own coordinates, which is what makes the star read as saved,
   // and counts as a use for the recent order.
   const onPickFavorite = useStableHandler((f: Favorite) => {
@@ -1945,20 +1989,21 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       </View>
       <View style={styles.titleRule} />
 
-      {/* The location map, one instance under both tabs so its pin, zoom and pan carry across:
-          no heading, since the map is its own label, edge to edge, with the two ways to a point
-          without it attached underneath (coordinates typed or pasted, and a saved favorite).
-          The Avalanche tab adds the forecast zones on top, and sits its Date card close under
-          the zone hint. */}
-      <View style={[styles.section, tab === 'avalanche' && styles.sectionTight]}>
+      {/* The location map, one instance under both tabs: no heading, since the map is its own
+          label, edge to edge, with the ways to a selection without it attached underneath. The
+          Weather tab selects a point (coordinates typed or pasted, and a saved favorite); the
+          Avalanche tab selects a forecast region, by center and region or by a tap on the zones
+          it draws. Each tab keeps its own selection. */}
+      <View style={styles.section}>
         <LocationPicker
           mapCoord={mapCoord} onPick={onPick} gpsCoords={gpsCoords} following={following} onLocate={onLocate}
           locating={locating} coordsField={coordsField} coordsInvalid={coordsInvalid} onCoordsText={onCoordsText}
           coordFormat={coordFormat} favorites={favorites} currentFavorite={currentFavorite}
           onPickFavorite={onPickFavorite} onSaveFavorite={onSaveFavorite} onRemoveFavorite={onRemoveFavorite}
           onOpenFavorites={onOpenFavorites} pastPoints={pastPoints} onPickPast={onPick}
-          zones={tab === 'avalanche' ? AVALANCHE_ZONES : undefined}
-          zone={tab === 'avalanche' && mapCoord ? zonePiece : undefined}
+          avalanche={tab === 'avalanche'} zone={avalancheZone} selectedRegion={avalancheZoneRegion}
+          onZone={onAvalancheZone} onPickZone={onPickZone} onLocateZone={onLocateZone}
+          day={avalancheDay} onDay={setAvalancheDay}
         />
       </View>
 
@@ -2080,12 +2125,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       )}
       </View>
 
-      {/* The Avalanche tab: the date and device to request for, the send and paste steps, the
-          bulletin, and the saved bulletins. */}
+      {/* The Avalanche tab: the device to request for, the send and paste steps, the bulletin,
+          and the saved bulletins. The region and date are chosen under the map above. */}
       {tab === 'avalanche' && (
         <>
           <View style={styles.builderPad}>
-            <DayRow day={avalancheDay} onDay={setAvalancheDay} />
             <DeviceSelector device={device} onDevice={onDevice} setDeviceInfo={setDeviceInfo} />
             <View style={styles.buttons}>
               <ActionButton
@@ -2099,7 +2143,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               />
             </View>
             {/* One note at most, the first that applies (see RequestBuilder). */}
-            {!zonePiece ? <Text style={styles.actionNote}>Select a location inside the forecast area</Text>
+            {!avalancheZone ? <Text style={styles.actionNote}>Select a forecast region</Text>
               : device !== 'internet' ? null
               : offline ? <Text style={styles.actionNote}>{OFFLINE_MESSAGE}</Text>
               : ultraConstrained && <Text style={styles.actionNote}>{SATELLITE_MESSAGE}</Text>}
@@ -2116,9 +2160,9 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
               )}
             </View>
           </View>
-          {/* Where the bulletin applies, as the Weather tab maps its forecast: the requested point
-              pinned, the region filled in its first day's highest danger. Keyed on the bulletin so
-              a new one recenters the map. */}
+          {/* Where the bulletin applies: the region filled in its first day's highest danger, with
+              nothing else marked but the phone's position. A bulletin that doesn't say where falls back to a pin on the
+              requested point. Keyed on the bulletin so a new one recenters the map. */}
           {/* Meta, as the Weather tab has it less the elevation. Its layout position is the scroll
               target that brings a fresh decode on screen. */}
           {avalanche && (
@@ -2135,14 +2179,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
             <View style={styles.avalancheMap}>
               <LocationMap
                 key={`${avalanche.lat},${avalanche.lon},${avalanche.forecast.issued},${avalanche.forecast.pieces.join('-')}`}
-                coord={{ lat: avalanche.lat, lon: avalanche.lon }}
+                coord={avalancheRegion ? null : { lat: avalanche.lat, lon: avalanche.lon }}
                 height={200}
                 userCoord={gpsCoords}
-                favorites={favorites}
-                pastPoints={pastPoints}
                 zones={AVALANCHE_ZONES}
                 region={avalancheRegion}
-                expandable
               />
             </View>
           )}
@@ -2610,7 +2651,7 @@ function noop() {}
 const LocationPicker = memo(function LocationPicker({
   mapCoord, onPick, gpsCoords, following, onLocate, locating, coordsField, coordsInvalid, onCoordsText,
   coordFormat, favorites, currentFavorite, onPickFavorite, onSaveFavorite, onRemoveFavorite, onOpenFavorites,
-  pastPoints, onPickPast, zones, zone,
+  pastPoints, onPickPast, avalanche, zone, selectedRegion, onZone, onPickZone, onLocateZone, day, onDay,
 }: {
   mapCoord: { lat: number; lon: number } | null; onPick: (c: { lat: number; lon: number }) => void;
   gpsCoords: { lat: number; lon: number } | null; following: boolean; onLocate: () => Promise<{ lat: number; lon: number } | null>; locating: boolean;
@@ -2618,33 +2659,38 @@ const LocationPicker = memo(function LocationPicker({
   favorites: readonly Favorite[]; currentFavorite: Favorite | null; onPickFavorite: (f: Favorite) => void;
   onSaveFavorite: (name: string, coord: LatLon) => void; onRemoveFavorite: () => void; onOpenFavorites: () => void;
   pastPoints: readonly { lat: number; lon: number }[]; onPickPast: (c: { lat: number; lon: number }) => void;
-  zones?: GeoJSON.FeatureCollection;
-  // The forecast piece under the pin, named in a hint under the rows the way the model selector
-  // names its models; null when the pin is outside every piece, and no hint when undefined.
-  zone?: AvalanchePiece | null;
+  // The Avalanche tab's picker: the map draws the forecast zones with the selected region filled
+  // and no pin, favorites or saved points, and the rows choose a center and a region.
+  avalanche: boolean; zone: AvalanchePiece | null; selectedRegion: ForecastRegion | null;
+  onZone: (zone: AvalanchePiece | null) => void; onPickZone: (c: LatLon) => void;
+  onLocateZone: () => Promise<{ lat: number; lon: number } | null>;
+  day: string; onDay: (day: string) => void;
 }) {
   return (
     <>
+      {/* One map for both, so the native surface isn't rebuilt on a tab switch. */}
       <LocationMap
-        coord={mapCoord}
-        onPick={onPick}
+        coord={avalanche ? null : mapCoord}
+        onPick={avalanche ? onPickZone : onPick}
         height={BUILDER_MAP_HEIGHT}
         userCoord={gpsCoords}
-        following={following}
-        onLocate={onLocate}
+        following={!avalanche && following}
+        onLocate={avalanche ? onLocateZone : onLocate}
         locating={locating}
-        favorites={favorites}
+        favorites={avalanche ? undefined : favorites}
         onPickFavorite={onPickFavorite}
         currentFavorite={currentFavorite}
-        onSaveFavorite={onSaveFavorite}
+        onSaveFavorite={avalanche ? undefined : onSaveFavorite}
         onRemoveFavorite={onRemoveFavorite}
-        pastPoints={pastPoints}
+        pastPoints={avalanche ? undefined : pastPoints}
         onPickPast={onPickPast}
         coordFormat={coordFormat}
         offlineMaps
-        zones={zones}
+        zones={avalanche ? AVALANCHE_ZONES : undefined}
+        region={avalanche ? selectedRegion : undefined}
       />
-      <View style={styles.coordsRows}>
+      {avalanche && <AvalancheZonePicker zone={zone} onZone={onZone} day={day} onDay={onDay} />}
+      <View style={[styles.coordsRows, avalanche && styles.hidden]}>
         <View style={styles.coordRow}>
           <Text style={styles.coordLabel}>Coordinates</Text>
           {/* Editing pins. The first keystroke arrives with the field's whole text, fix
@@ -2692,11 +2738,6 @@ const LocationPicker = memo(function LocationPicker({
           </TouchableOpacity>
         )}
       </View>
-      {zone !== undefined && (
-        <Text style={styles.zoneHint}>
-          {zone ? zoneLabel(zone) : 'Avalanche forecasts not available for this location'}
-        </Text>
-      )}
     </>
   );
 });
@@ -2958,7 +2999,6 @@ const styles = StyleSheet.create({
   },
 
   section: { marginBottom: 20 },
-  sectionTight: { marginBottom: 8 },
 
   varList: { backgroundColor: palette.card, borderRadius: 12, overflow: 'hidden' },
   // Sized to a grouped iOS settings row: 50pt tall with 17pt labels, which the switch fits
@@ -3017,7 +3057,6 @@ const styles = StyleSheet.create({
   favoriteSortLabel: { marginBottom: 8, fontSize: 12, fontWeight: '600', color: palette.pageLabel, textTransform: 'uppercase', letterSpacing: 0.5 },
   mapFullBleed: { marginHorizontal: -CONTENT_PAD },
   modelHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 8 },
-  zoneHint: { fontSize: 12, color: palette.pageTextTertiary, lineHeight: 17, marginTop: 8, paddingHorizontal: CONTENT_PAD },
 
   buttons: { marginTop: 4 },
   quotaBox: { marginTop: 12 },
