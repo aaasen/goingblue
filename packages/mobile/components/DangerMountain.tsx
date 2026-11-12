@@ -17,8 +17,12 @@ const BANDS = [['alp', 0], ['tln', 0.45], ['btl', 0.75]] as const;
 // The mountain's half-width at height y, measured from the peak.
 const halfAt = (y: number) => ((y - INSET) / (H - 2 * INSET)) * (W / 2 - INSET);
 
+export type MountainDay = Pick<DangerDay, 'alp' | 'tln' | 'btl'>;
+// Every band white.
+export const UNRATED_DAY: MountainDay = { alp: 'noRating', tln: 'noRating', btl: 'noRating' };
+
 const pictures = new Map<string, SkPicture>();
-function mountainPicture(day: Pick<DangerDay, 'alp' | 'tln' | 'btl'>): SkPicture {
+function mountainPicture(day: MountainDay): SkPicture {
   const outline = palette.textSecondary;
   const key = `${day.alp}:${day.tln}:${day.btl}:${outline}`;
   let picture = pictures.get(key);
@@ -56,7 +60,7 @@ function mountainPicture(day: Pick<DangerDay, 'alp' | 'tln' | 'btl'>): SkPicture
 }
 
 // A day's danger drawn as a mountain in three bands, for a saved bulletin's row.
-export default memo(function DangerMountain({ day }: { day: Pick<DangerDay, 'alp' | 'tln' | 'btl'> }) {
+export default memo(function DangerMountain({ day }: { day: MountainDay }) {
   return <SkiaPictureView style={styles.icon} picture={mountainPicture(day)} />;
 });
 

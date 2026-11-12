@@ -333,7 +333,8 @@ def train(args):
     opt = torch.optim.AdamW([{"params": decay, "weight_decay": 0.01}, {"params": other, "weight_decay": 0}], lr=args.lr, betas=(0.9, 0.99))
     order = lambda epoch: random.Random(args.seed * 1000 + epoch)
     steps_per_epoch = sum(1 for _ in batches(tr, args.max_len, args.batch_tokens, True, order(0)))
-    total_steps = steps_per_epoch * args.epochs
+    total_steps = args.steps or steps_per_epoch * args.epochs
+    epochs = math.ceil(total_steps / steps_per_epoch)
     val_chars = sum(d[2]["chars"] for d in va)
 
     ckpt_path = f"{DATA}/{args.name}.ckpt.pt"
@@ -352,7 +353,7 @@ def train(args):
         save_atomic({"model": model.state_dict(), "opt": opt.state_dict(), "st": st}, ckpt_path)
 
     step = st["step"]
-    for epoch in range(step // steps_per_epoch, args.epochs):
+    for epoch in range(step // steps_per_epoch, epochs):
         skip = step - epoch * steps_per_epoch
         for b, (x, y, m, ds) in enumerate(batches(tr, args.max_len, args.batch_tokens, True, order(epoch))):
             if b < skip:
@@ -398,6 +399,8 @@ def train(args):
                 checkpoint()
                 print(f"stopped at --max-steps {step}", flush=True)
                 return
+            if step == total_steps:
+                break
     print(f"done: best val {st['best']:.4f} b/c, {(time.time() - t0) / 60:.1f} min", flush=True)
 
 
@@ -446,6 +449,7 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--ckpt-minutes", type=float, default=10)
     ap.add_argument("--max-steps", type=int, default=0)
+    ap.add_argument("--steps", type=int, default=0, help="train: total steps for the schedule, in place of --epochs")
     ap.add_argument("--dropout", type=float, default=0.0)
     ap.add_argument("--arch", default="v4", choices=["v4", "v7"], help="v7: the RWKV-7 model in rwkv7.py (float only)")
     ap.add_argument("--accum", type=int, default=1)

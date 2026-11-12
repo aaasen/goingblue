@@ -9,3 +9,4 @@ s384c7 rwkv.py --arch v7 --vocab 8000 --tok v2cs --dim 384 --layers 6 --epochs 2
 synth8 synth.py --teacher q06 --samples 8 --tok v2cs8
 s384c4 rwkv.py --vocab 8000 --tok v2cs8 --synth-samples 4 --dim 384 --layers 6 --epochs 2 --dropout 0.1
 s384c8 rwkv.py --vocab 8000 --tok v2cs8 --dim 384 --layers 6 --epochs 2 --dropout 0.1
+s384c2s rwkv.py --vocab 8000 --tok v2cs8 --synth-samples 2 --steps 5334 --dim 384 --layers 6 --dropout 0.1

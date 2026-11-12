@@ -177,15 +177,15 @@ export interface Scale {
 // How far the bar reaches past the centers of the rows it covers.
 const BAR_REACH = 0.35;
 
-// Certain on top. A half-step covers and bolds the two names it sits between.
-export function likelihoodScale(l: Likelihood): Scale {
+// Certain on top. A half-step covers and bolds the two names it sits between; `reach` is in row units.
+export function likelihoodScale(l: Likelihood, reach = BAR_REACH): Scale {
   const step = LIKELIHOODS.indexOf(l) / 2;
   const lo = Math.floor(step), hi = Math.ceil(step);
   const top = LIKELIHOOD_NAMES.length - 1;
   return {
     rows: LIKELIHOOD_NAMES.map((label, k) => ({ label, bold: k >= lo && k <= hi })).reverse(),
     notes: [],
-    bar: [top - hi - BAR_REACH, top - lo + BAR_REACH],
+    bar: [top - hi - reach, top - lo + reach],
   };
 }
 
@@ -238,36 +238,35 @@ export const nacProblemNames: Record<ProblemType, string> = {
 };
 
 // "Wednesday, March 11, 2026", for a "YYYY-MM-DD" calendar date.
-export function nacDayLabel(date: string): string {
+export function dayLabel(date: string): string {
   return new Intl.DateTimeFormat('en-US', {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC',
   }).format(new Date(Date.parse(date)));
 }
 
-// "Tuesday, March 10, 2026 - 6:30PM", in the reader's clock format.
-export function nacStamp(ms: number, timezone: string, timeFormat: TimeFormat): string {
+// "Tue, Mar 10, 18:30", in the reader's clock format.
+export function stampLabel(ms: number, timezone: string, timeFormat: TimeFormat): string {
   const d = new Date(ms);
   const date = new Intl.DateTimeFormat('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: timezone,
+    weekday: 'short', month: 'short', day: 'numeric', timeZone: timezone,
   }).format(d);
   const { hour, minute } = stampClock(d, timezone);
   const clock = timeFormat === '24h'
     ? `${`${hour}`.padStart(2, '0')}:${minute}`
-    : `${hour % 12 || 12}:${minute}${hour < 12 ? 'AM' : 'PM'}`;
-  return `${date} - ${clock}`;
+    : `${hour % 12 || 12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`;
+  return `${date}, ${clock}`;
 }
 
 // Historic on top, as the center draws it: sizes 4 and 5 share a row. A half size ends the bar
-// between two rows and bolds the larger, the same rounding as sizeScale.
+// between two rows. A range bolds the sizes inside it; a lone half size bolds the larger.
 export function nacSizeScale(size: { min: number; max: number }): Scale {
   const row = (s: number) => Math.max(0, 4 - s);
-  const lo = Math.round(size.min), hi = Math.round(size.max);
-  const reach = (s: number) => (Number.isInteger(s) || size.min === size.max ? BAR_REACH : 0);
+  const [lo, hi] = size.min === size.max ? [Math.round(size.min), Math.round(size.max)] : [size.min, size.max];
   const labels: [string, number][] = [['Historic (D4-5)', 4], ['Very Large (D3)', 3], ['Large (D2)', 2], ['Small (D1)', 1]];
   return {
     rows: labels.map(([label, s]) => ({ label, bold: s === 4 ? hi >= 4 : s >= lo && s <= hi })),
     notes: [],
-    bar: [row(size.max) - reach(size.max), row(size.min) + reach(size.min)],
+    bar: [row(size.max), row(size.min)],
   };
 }
 
@@ -360,11 +359,6 @@ export const CONFIDENCE_NAMES: Record<string, string> = {
   low: 'Low', moderate: 'Moderate', high: 'High', noRating: 'No Rating',
 };
 
-// The weekday of a "YYYY-MM-DD" calendar date.
-export function dayLabel(date: string): string {
-  return new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(new Date(Date.parse(date)));
-}
-
 export interface DangerTableSpec {
   key: string;
   label: string;
@@ -411,12 +405,6 @@ export function bulletinTimezone(lat: number, lon: number): string {
   return (piece && CENTER_ZONES[piece.center]) ?? local;
 }
 
-// The generic abbreviations of the zones bulletins come in. Intl's shortGeneric names some of
-// these by city ("St. John's Time") and Hermes may lack it, so the table is explicit.
-const ZONE_ABBREVIATIONS: Record<string, string> = {
-  'America/Vancouver': 'PT', 'America/Los_Angeles': 'PT', 'America/Edmonton': 'MT', 'America/New_York': 'ET', 'America/St_Johns': 'NT', UTC: 'UTC',
-};
-
 // The hour and minute of an instant in a zone. Hermes's Intl can follow the device's 12/24-hour
 // setting over the options and leaves the hour and minute out of formatToParts, so each field is
 // formatted alone.
@@ -431,21 +419,6 @@ function stampClock(d: Date, timezone: string): { hour: number; minute: string }
     hour: pm || am ? (raw % 12) + (pm ? 12 : 0) : raw % 24,
     minute: `${parseInt(format({ minute: 'numeric' }), 10)}`.padStart(2, '0'),
   };
-}
-
-// "Sat, February 28, 2026 at 16:00 PT", as Avalanche Canada stamps a bulletin, in the reader's
-// clock format. The clock is built here, the way Meteogram's clockLabel builds it.
-export function stampLabel(ms: number, timezone: string, timeFormat: TimeFormat): string {
-  const d = new Date(ms);
-  const format = (options: Intl.DateTimeFormatOptions) =>
-    new Intl.DateTimeFormat('en-US', { ...options, timeZone: timezone }).format(d);
-  const date = format({ weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' });
-  const { hour, minute } = stampClock(d, timezone);
-  const clock = timeFormat === '24h'
-    ? `${`${hour}`.padStart(2, '0')}:${minute}`
-    : `${hour % 12 || 12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`;
-  const zone = ZONE_ABBREVIATIONS[timezone];
-  return `${date} at ${clock}${zone ? ` ${zone}` : ''}`;
 }
 
 // The pieces as map features, one MultiPolygon each.

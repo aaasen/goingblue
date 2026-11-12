@@ -177,30 +177,35 @@ function roseRadius(W: number): number {
   return Math.min(W / 2 - 22, 64);
 }
 
-function roseLayout(W: number, left = false) {
+// Room outside the rose's edge for a compass letter.
+const COMPASS_GAP = 14;
+const COMPASS_POINTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+
+function roseLayout(W: number, style: RoseStyle) {
+  if (!style.labels) {
+    // Eight compass letters around the edge, the widest ("NW") level with the corners.
+    const R = Math.min((W / 2 - COMPASS_GAP - 12) / Math.cos(22.5 * RAD), 64);
+    const edge = R * Math.cos(22.5 * RAD);
+    const cy = edge + COMPASS_GAP + 14;
+    return { R, cx: W / 2, cy, southY: cy + edge + COMPASS_GAP + 4, labelY: () => 0, height: cy + edge + COMPASS_GAP + 12 };
+  }
   const R = roseRadius(W);
   const cy = 22 + R;
   const southY = cy + R + 14;
   const labelY = (i: number) => southY + 20 + i * LEADER_ROW_H;
-  return { R, cx: left ? R + 22 : W / 2, cy, southY, labelY, height: labelY(RINGS.length - 1) + 6 };
+  return { R, cx: W / 2, cy, southY, labelY, height: labelY(RINGS.length - 1) + 6 };
 }
 
-// How a center draws its rose: the covered cells' color, the bands' names, the font they're in, and
-// whether the rose sits left in its column to leave long names room.
-export interface RoseStyle { fill: string; labels: Record<Elevation, string>; font?: SkFont; left?: boolean }
+// How a center draws its rose: the covered cells' color, the bands' names on leaders (or none,
+// with all eight compass points around the edge instead), and one color for every line.
+export interface RoseStyle { fill: string; labels?: Record<Elevation, string>; line?: string }
 const STANDARD_ROSE: RoseStyle = { fill: PROBLEM_FILL, labels: ROSE_ELEVATION_NAMES };
-
-// Whether a left-set rose's longest band name still ends inside a column this wide.
-export function roseFitsBeside(W: number, labels: Record<Elevation, string>, fonts: Fonts): boolean {
-  const { cx } = roseLayout(W, true);
-  return cx + Math.max(...Object.values(labels).map((l) => textWidth(fonts.small, l))) <= W;
-}
 
 // Octagons with a flat side up, so each aspect is one wedge from the center to an edge and each
 // band one ring. A cell fills where the problem sits at that aspect and band. Leaders run from
 // each ring down to its band's name, stepping left so none crosses another's label.
 function recordRose(problem: AvalancheProblem, W: number, fonts: Fonts, style: RoseStyle): SkPicture {
-  const { R, cx, cy, southY, labelY, height } = roseLayout(W, style.left);
+  const { R, cx, cy, southY, labelY, height } = roseLayout(W, style);
   const recorder = Skia.PictureRecorder();
   const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, W, height));
   const fill = fillPaint(style.fill);
@@ -217,7 +222,7 @@ function recordRose(problem: AvalancheProblem, W: number, fonts: Fonts, style: R
       canvas.drawPath(path, fill);
     });
   }
-  const line = strokePaint(ROSE_LINE, 1);
+  const line = strokePaint(style.line ?? ROSE_LINE, 1);
   for (let i = 0; i < 8; i++) {
     const [x, y] = polar(cx, cy, R, i * 45 + 22.5);
     canvas.drawLine(cx, cy, x, y, line);
@@ -229,11 +234,19 @@ function recordRose(problem: AvalancheProblem, W: number, fonts: Fonts, style: R
       if (i === 0) path.moveTo(x, y); else path.lineTo(x, y);
     }
     path.close();
-    canvas.drawPath(path, r === 1 ? strokePaint(ROSE_EDGE, 1) : line);
+    canvas.drawPath(path, r === 1 ? strokePaint(style.line ?? ROSE_EDGE, 1) : line);
   }
 
   const edge = R * Math.cos(22.5 * RAD);
   const ink = palette.text;
+  const labels = style.labels;
+  if (!labels) {
+    COMPASS_POINTS.forEach((point, i) => {
+      const [x, y] = polar(cx, cy, edge + COMPASS_GAP, i * 45);
+      centered(canvas, point, x, y + 5, fonts.compass, ink);
+    });
+    return recorder.finishRecordingAsPicture();
+  }
   centered(canvas, 'N', cx, cy - edge - 8, fonts.compass, ink);
   centered(canvas, 'S', cx, southY, fonts.compass, ink);
   drawText(canvas, 'E', cx + edge + 8, cy + 5, fonts.compass, ink);
@@ -248,14 +261,21 @@ function recordRose(problem: AvalancheProblem, W: number, fonts: Fonts, style: R
     canvas.drawCircle(x, y, 1.75, dot);
     canvas.drawLine(x, y, x, elbow, leader);
     canvas.drawLine(x, elbow, x + 5, elbow, leader);
-    drawText(canvas, style.labels[band], x + 8, baseline, style.font ?? fonts.scale, ink);
+    drawText(canvas, labels[band], x + 8, baseline, fonts.scale, ink);
   });
   return recorder.finishRecordingAsPicture();
 }
 
+// The octagon's flat top edge, below the top of the rose's view, and its height.
+export function roseOctagon(width: number, style: RoseStyle = STANDARD_ROSE): { top: number; height: number } {
+  const { R, cy } = roseLayout(width, style);
+  const edge = R * Math.cos(22.5 * RAD);
+  return { top: cy - edge, height: 2 * edge };
+}
+
 export function Rose({ problem, width, fonts, style = STANDARD_ROSE }: { problem: AvalancheProblem; width: number; fonts: Fonts; style?: RoseStyle }) {
   const picture = useMemo(() => recordRose(problem, width, fonts, style), [problem, width, fonts, style]);
-  return <SkiaPictureView style={{ width, height: roseLayout(width).height }} picture={picture} />;
+  return <SkiaPictureView style={{ width, height: roseLayout(width, style).height }} picture={picture} />;
 }
 
 // A ruler with a tick per row, the bar over the covered rows, and each row's label beside it;
@@ -265,35 +285,52 @@ const SCALE_PAD = 10;
 const RULER_X = 5;
 const SCALE_TEXT_X = RULER_X + 12;
 
-function scaleHeight(scale: Scale): number {
-  return 2 * SCALE_PAD + (scale.rows.length - 1) * SCALE_ROW_H;
+// How a center draws its scales: the bar's color, the color of its outline and the ruler, and the color
+// of uncovered rows. `span` fixes the ruler's length whatever the row count, `tick` is the half width
+// of the ticks and the bar, `gap` the space from the ruler to the labels, `barPad` how far the bar
+// reaches past its ends, and `centered` centers the ruler and labels in the width.
+export interface ScaleStyle {
+  fill: string; stroke?: string; muted?: string; lineWidth?: number;
+  span?: number; tick?: number; gap?: number; barPad?: number; centered?: boolean;
+}
+const STANDARD_SCALE: ScaleStyle = { fill: PROBLEM_FILL };
+
+function rowStep(scale: Scale, style: ScaleStyle): number {
+  return style.span !== undefined ? style.span / (scale.rows.length - 1) : SCALE_ROW_H;
 }
 
-// How a center draws its scales: the bar's color, its outline, and the color of uncovered rows.
-export interface ScaleStyle { fill: string; stroke?: string; muted?: string }
-const STANDARD_SCALE: ScaleStyle = { fill: PROBLEM_FILL };
+function scaleHeight(scale: Scale, style: ScaleStyle): number {
+  return 2 * SCALE_PAD + (scale.rows.length - 1) * rowStep(scale, style);
+}
 
 function recordScale(scale: Scale, W: number, fonts: Fonts, style: ScaleStyle): SkPicture {
   const recorder = Skia.PictureRecorder();
-  const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, W, scaleHeight(scale)));
-  const y = (row: number) => SCALE_PAD + row * SCALE_ROW_H;
-  const line = strokePaint(ROSE_EDGE, 1);
-  canvas.drawLine(RULER_X, y(0), RULER_X, y(scale.rows.length - 1), line);
-  scale.rows.forEach((_, r) => canvas.drawLine(RULER_X - 4, y(r), RULER_X + 4, y(r), line));
+  const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, W, scaleHeight(scale, style)));
+  const step = rowStep(scale, style);
+  const y = (row: number) => SCALE_PAD + row * step;
+  const tick = style.tick ?? 4;
+  const textGap = style.gap ?? SCALE_TEXT_X - RULER_X;
+  const labelsW = Math.max(...scale.rows.map((row) => textWidth(fonts.scaleBold, row.label)));
+  const rulerX = style.centered ? Math.max(tick, (W - tick - textGap - labelsW) / 2 + tick) : RULER_X;
+  const textX = rulerX + textGap;
+  const line = strokePaint(style.stroke ?? ROSE_EDGE, style.lineWidth ?? 1);
+  canvas.drawLine(rulerX, y(0), rulerX, y(scale.rows.length - 1), line);
+  scale.rows.forEach((_, r) => canvas.drawLine(rulerX - tick, y(r), rulerX + tick, y(r), line));
   const [top, bottom] = scale.bar;
-  const bar = Skia.XYWHRect(RULER_X - 4, y(top), 8, y(bottom) - y(top));
+  const pad = style.barPad ?? 0;
+  const bar = Skia.XYWHRect(rulerX - tick, y(top) - pad, 2 * tick, y(bottom) - y(top) + 2 * pad);
   canvas.drawRect(bar, fillPaint(style.fill));
-  if (style.stroke) canvas.drawRect(bar, strokePaint(style.stroke, 1));
+  if (style.stroke) canvas.drawRect(bar, strokePaint(style.stroke, style.lineWidth ?? 1));
   const font = (bold: boolean) => (bold ? fonts.scaleBold : fonts.scale);
-  scale.rows.forEach((row, r) => drawText(canvas, row.label, SCALE_TEXT_X, y(r) + 4.5, font(row.bold), row.bold ? palette.text : style.muted ?? palette.text));
-  const noteX = SCALE_TEXT_X + Math.max(...scale.rows.map((row) => textWidth(fonts.scaleBold, row.label))) + 5;
+  scale.rows.forEach((row, r) => drawText(canvas, row.label, textX, y(r) + 4.5, font(row.bold), row.bold ? palette.text : style.muted ?? palette.text));
+  const noteX = textX + labelsW + 5;
   for (const note of scale.notes) drawText(canvas, note.label, noteX, y(note.at) + 4.5, font(note.bold), palette.text);
   return recorder.finishRecordingAsPicture();
 }
 
 export function ScaleView({ scale, width, fonts, style = STANDARD_SCALE }: { scale: Scale; width: number; fonts: Fonts; style?: ScaleStyle }) {
   const picture = useMemo(() => recordScale(scale, width, fonts, style), [scale, width, fonts, style]);
-  return <SkiaPictureView style={{ width, height: scaleHeight(scale) }} picture={picture} />;
+  return <SkiaPictureView style={{ width, height: scaleHeight(scale, style) }} picture={picture} />;
 }
 
 function ColumnLabel({ label }: { label: string }) {
@@ -306,6 +343,11 @@ function ColumnLabel({ label }: { label: string }) {
 
 const PROBLEM_GAP = 16;
 
+// The bar across the top of a problem card. The card clips it to its rounded corners.
+export function ProblemHead({ index, name }: { index: number; name: string }) {
+  return <Text style={styles.problemHead}>{`Problem ${index + 1}: ${name}`}</Text>;
+}
+
 function ProblemCard({ problem, index, width, fonts }: { problem: AvalancheProblem; index: number; width: number; fonts: Fonts }) {
   const likelihood = useMemo(() => likelihoodScale(problem.likelihood), [problem.likelihood]);
   const size = useMemo(() => sizeScale(problem.size), [problem.size]);
@@ -313,7 +355,7 @@ function ProblemCard({ problem, index, width, fonts }: { problem: AvalancheProbl
   const scaleW = width - PROBLEM_GAP - roseW;
   return (
     <View style={styles.problem}>
-      <Text style={styles.problemHead}>{`Problem ${index + 1}: ${PROBLEM_NAMES[problem.type]}`}</Text>
+      <ProblemHead index={index} name={PROBLEM_NAMES[problem.type]} />
       <View style={styles.problemBody}>
         {width > 0 && (
           <View style={styles.problemColumns}>
@@ -367,7 +409,7 @@ function CollapsibleSection({ label, children }: { label: string; children: Reac
   );
 }
 
-function Card({ children }: { children: ReactNode }) {
+export function Card({ children }: { children: ReactNode }) {
   return <View style={styles.card}>{children}</View>;
 }
 
@@ -396,6 +438,22 @@ function Bullets({ items }: { items: string[] }) {
   );
 }
 
+// A bulletin's facts in rows of two labeled columns. A cell without a value stays empty, and a row
+// without any is left out. The labels are drawn as Section draws its own.
+export type StampCell = [label: string, value: string | null | undefined];
+export function StampGrid({ rows }: { rows: StampCell[][] }) {
+  const shown = rows.filter((row) => row.some(([, value]) => value));
+  return (
+    <>
+      {shown.map((row, i) => (
+        <View key={i} style={[styles.stamps, i === shown.length - 1 && styles.stampsLast]}>
+          {row.map(([label, value]) => (value ? <Stamp key={label} label={label} value={value} /> : <View key={label} style={styles.stampColumn} />))}
+        </View>
+      ))}
+    </>
+  );
+}
+
 // `region` names where the bulletin was requested for.
 export default function AvalancheForecastView({ forecast, region, timeFormat }: {
   forecast: AvalancheForecast; region: string; timeFormat: TimeFormat;
@@ -414,14 +472,12 @@ export default function AvalancheForecastView({ forecast, region, timeFormat }: 
       {forecast.expires < Date.now() && !hideExpired && (
         <WarningBanner>This forecast is no longer valid</WarningBanner>
       )}
-      <View style={styles.stamps}>
-        <Stamp label="Date issued" value={stamp(forecast.issued)} />
-        <Stamp label="Valid until" value={stamp(forecast.expires)} />
-      </View>
-      <View style={[styles.stamps, styles.stampsLast]}>
-        <Stamp label="Prepared by" value={preparedBy(forecast)} />
-        {region ? <Stamp label="Region" value={region} /> : <View style={styles.stampColumn} />}
-      </View>
+      <StampGrid
+        rows={[
+          [['Issued', stamp(forecast.issued)], ['Expires', stamp(forecast.expires)]],
+          [['Region', region], ['Prepared by', preparedBy(forecast)]],
+        ]}
+      />
 
       {forecast.bottomLine ? (
         <View style={styles.section}><Card><Prose text={forecast.bottomLine} lead /></Card></View>
@@ -483,7 +539,7 @@ export default function AvalancheForecastView({ forecast, region, timeFormat }: 
         </CollapsibleSection>
       )}
 
-      <Text style={styles.attribution}>Avalanche forecast provided by Avalanche Canada.</Text>
+      <Text style={styles.attribution}>Avalanche forecast provided by Avalanche Canada</Text>
     </View>
   );
 }
@@ -493,19 +549,19 @@ const styles = StyleSheet.create({
   stamps: { flexDirection: 'row', gap: 16, marginBottom: 10 },
   stampsLast: { marginBottom: 20 },
   stampColumn: { flex: 1 },
-  stampLabel: { fontSize: 12, fontWeight: '700', color: palette.brand, textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 2 },
-  stampValue: { fontSize: 12, fontWeight: '600', color: palette.pageTextSecondary, textTransform: 'uppercase', letterSpacing: 0.3, lineHeight: 17 },
+  stampLabel: { fontSize: 12, fontWeight: '600', color: palette.pageLabel, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
+  stampValue: { fontSize: 15, lineHeight: 20, color: palette.textBody },
   section: { marginBottom: 20 },
   sectionToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sectionToggleOpen: { marginBottom: 8 },
   sectionLabelToggle: { marginBottom: 0 },
   sectionLabel: { fontSize: 12, fontWeight: '600', color: palette.pageLabel, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   card: { backgroundColor: palette.card, borderRadius: 12, padding: CARD_PAD },
-  prose: { fontSize: 15, color: palette.textBody, lineHeight: 22 },
+  prose: { fontSize: 16, color: palette.textBody, lineHeight: 23 },
   proseLead: { fontSize: 18, lineHeight: 25, fontWeight: '700', color: palette.text, textAlign: 'center' },
   proseGap: { marginBottom: 10 },
   bulletRow: { flexDirection: 'row', gap: 8 },
-  bullet: { fontSize: 15, lineHeight: 22, color: palette.textSecondary },
+  bullet: { fontSize: 16, lineHeight: 23, color: palette.textSecondary },
   bulletText: { flex: 1 },
   problem: { borderRadius: 12, overflow: 'hidden', marginBottom: 10, backgroundColor: palette.card },
   problemHead: { backgroundColor: DAY_HEAD, color: '#ffffff', fontSize: 17, fontWeight: '400', paddingHorizontal: CARD_PAD, paddingVertical: 12 },
@@ -515,7 +571,7 @@ const styles = StyleSheet.create({
   columnLabel: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.cardRule, paddingBottom: 5, marginBottom: 6 },
   columnLabelText: { fontSize: 12, fontWeight: '700', color: palette.text, textTransform: 'uppercase', letterSpacing: 0.5 },
   scaleGap: { height: 10 },
-  weatherLabel: { fontSize: 15, fontWeight: '700', color: palette.text, lineHeight: 22 },
+  weatherLabel: { fontSize: 16, fontWeight: '700', color: palette.text, lineHeight: 23 },
   confidence: { fontWeight: '600', color: palette.text },
   dangerDay: { borderRadius: 12, overflow: 'hidden', marginBottom: 10, backgroundColor: '#ffffff' },
   dangerDayLabel: { backgroundColor: DAY_HEAD, color: '#ffffff', fontSize: 17, fontWeight: '400', paddingHorizontal: 14, paddingVertical: 12 },

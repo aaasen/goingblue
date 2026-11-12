@@ -23,7 +23,7 @@ import {
   predictCenter, estimatedLastFullRunMs, fillSlotsFor, multiMessageOffered, startDatetime,
   MODEL_INFO, OPEN_METEO_DOCS, horizonText,
   AVALANCHE_PIECES,
-  type RequestContext, type Center, type ForecastMessage, type AvalancheForecast, type AvalanchePiece, type DangerDay,
+  type RequestContext, type Center, type ForecastMessage, type AvalancheForecast, type AvalanchePiece,
   type QuotaState,
 } from '@weather/protocol';
 import { API_BASE, fetchQuota } from './account';
@@ -44,7 +44,7 @@ import DeviceSelector from './components/DeviceSelector';
 import Section from './components/Section';
 import ActionButton from './components/ActionButton';
 import PasteButton, { type Outcome } from './components/PasteButton';
-import DangerMountain from './components/DangerMountain';
+import DangerMountain, { UNRATED_DAY, type MountainDay } from './components/DangerMountain';
 import InfoModal from './components/InfoModal';
 import InfoBox from './components/InfoBox';
 import EmptyForecast from './components/EmptyForecast';
@@ -907,12 +907,13 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const [modelsLoaded, setModelsLoaded] = useState(0);
   const slotMessage = useCallback((slot: Slot) => slotMessages.get(slot) ?? null, [slotMessages]);
   // Each saved bulletin's first day, for its row's danger icon; decoded once its model is in.
+  // A bulletin without danger days, as in summer, gets the mountain with no band rated.
   const slotDangerDays = useMemo(() => {
-    const days = new Map<Slot, DangerDay | null>();
+    const days = new Map<Slot, MountainDay | null>();
     for (const slot of avalancheCache) {
       try {
         const d = decodeAny(slot.encoded!, token);
-        days.set(slot, d.kind === 'avalanche' ? bulletinOutline(d).danger[0] ?? null : null);
+        days.set(slot, d.kind === 'avalanche' ? bulletinOutline(d).danger[0] ?? UNRATED_DAY : null);
       } catch { days.set(slot, null); }
     }
     return days;
@@ -2436,7 +2437,7 @@ interface PastRowText {
   tags: { tag: string; label: string }[];
   // A bulletin's first day, drawn at the row's start; null while it can't be decoded. Absent on
   // weather rows.
-  danger?: DangerDay | null;
+  danger?: MountainDay | null;
 }
 
 const PastForecastRow = memo(function PastForecastRow({ slot, text, isLoaded, last, editing, selected, onLoad, onToggle }: {

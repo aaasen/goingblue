@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AVALANCHE_PIECES } from '@weather/protocol';
 import {
-  nacBandLabel, nacDayLabel, nacSizeScale, nacStamp, nacZonePiece, bulletinCenter, bulletinTimezone, preparedBy, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel, zoneLabel, zoneNames,
+  nacBandLabel, nacSizeScale, nacZonePiece, bulletinCenter, bulletinTimezone, preparedBy, dangerCell, dangerTables, dayLabel, forecastRegion, highestDanger, likelihoodScale, pieceAt, pieceFeatures, sizeScale, stampLabel, zoneLabel, zoneNames,
 } from '../avalancheDisplay';
 
 describe('dangerCell', () => {
@@ -85,13 +85,13 @@ describe('problem scales', () => {
 describe('zoned labels', () => {
   const issued = Date.parse('2026-03-01T00:00:00Z');
   it('names days and stamps times in the forecast zone', () => {
-    expect(dayLabel('2026-03-01')).toBe('Sunday');
-    expect(stampLabel(issued, 'America/Vancouver', '12h')).toBe('Sat, February 28, 2026 at 4:00 PM PT');
-    expect(stampLabel(issued, 'America/Vancouver', '24h')).toBe('Sat, February 28, 2026 at 16:00 PT');
+    expect(dayLabel('2026-03-01')).toBe('Sunday, March 1, 2026');
+    expect(stampLabel(issued, 'America/Vancouver', '12h')).toBe('Sat, Feb 28, 4:00 PM');
+    expect(stampLabel(issued, 'America/Vancouver', '24h')).toBe('Sat, Feb 28, 16:00');
     const morning = Date.parse('2026-03-01T08:05:00Z');
-    expect(stampLabel(morning, 'America/Vancouver', '12h')).toBe('Sun, March 1, 2026 at 12:05 AM PT');
-    expect(stampLabel(morning, 'America/Vancouver', '24h')).toBe('Sun, March 1, 2026 at 00:05 PT');
-    expect(stampLabel(issued, 'Europe/Zurich', '24h')).toBe('Sun, March 1, 2026 at 01:00');
+    expect(stampLabel(morning, 'America/Vancouver', '12h')).toBe('Sun, Mar 1, 12:05 AM');
+    expect(stampLabel(morning, 'America/Vancouver', '24h')).toBe('Sun, Mar 1, 00:05');
+    expect(stampLabel(issued, 'Europe/Zurich', '24h')).toBe('Sun, Mar 1, 01:00');
   });
 });
 
@@ -106,11 +106,11 @@ describe('dangerTables', () => {
   });
   it('keeps one table per day while the last day is today or later', () => {
     const danger = [day('2026-09-27', 'spring'), day('2026-09-28', 'spring')];
-    expect(dangerTables({ danger, expires, timezone: tz }, now).map((t) => t.label)).toEqual(['Sunday', 'Monday']);
+    expect(dangerTables({ danger, expires, timezone: tz }, now).map((t) => t.label)).toEqual(['Sunday, September 27, 2026', 'Monday, September 28, 2026']);
   });
   it('keeps one table per day when any band has another rating', () => {
     const danger = [day('2026-03-01', 'low'), day('2026-03-02', 'offSeason')];
-    expect(dangerTables({ danger, expires, timezone: tz }, now).map((t) => t.label)).toEqual(['Sunday', 'Monday']);
+    expect(dangerTables({ danger, expires, timezone: tz }, now).map((t) => t.label)).toEqual(['Sunday, March 1, 2026', 'Monday, March 2, 2026']);
   });
 });
 
@@ -215,12 +215,12 @@ describe('avalanche.org center display', () => {
 
   it('stamps times and days the way the site does', () => {
     const issued = Date.parse('2026-03-11T01:30:00Z');
-    expect(nacStamp(issued, 'America/Los_Angeles', '12h')).toBe('Tuesday, March 10, 2026 - 6:30PM');
-    expect(nacStamp(issued, 'America/Los_Angeles', '24h')).toBe('Tuesday, March 10, 2026 - 18:30');
-    expect(nacStamp(Date.parse('2026-03-11T08:05:00Z'), 'America/Los_Angeles', '12h')).toBe('Wednesday, March 11, 2026 - 1:05AM');
-    expect(nacStamp(Date.parse('2026-03-11T08:00:00Z'), 'America/Los_Angeles', '24h')).toBe('Wednesday, March 11, 2026 - 01:00');
-    expect(nacStamp(Date.parse('2026-03-11T07:30:00Z'), 'America/Los_Angeles', '12h')).toBe('Wednesday, March 11, 2026 - 12:30AM');
-    expect(nacDayLabel('2026-03-11')).toBe('Wednesday, March 11, 2026');
+    expect(stampLabel(issued, 'America/Los_Angeles', '12h')).toBe('Tue, Mar 10, 6:30 PM');
+    expect(stampLabel(issued, 'America/Los_Angeles', '24h')).toBe('Tue, Mar 10, 18:30');
+    expect(stampLabel(Date.parse('2026-03-11T08:05:00Z'), 'America/Los_Angeles', '12h')).toBe('Wed, Mar 11, 1:05 AM');
+    expect(stampLabel(Date.parse('2026-03-11T08:00:00Z'), 'America/Los_Angeles', '24h')).toBe('Wed, Mar 11, 01:00');
+    expect(stampLabel(Date.parse('2026-03-11T07:30:00Z'), 'America/Los_Angeles', '12h')).toBe('Wed, Mar 11, 12:30 AM');
+    expect(dayLabel('2026-03-11')).toBe('Wednesday, March 11, 2026');
   });
 
   it('reads the clock from an engine that ignores the requested hour cycle', () => {
@@ -228,8 +228,8 @@ describe('avalanche.org center display', () => {
     vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(((locale: string, options: Intl.DateTimeFormatOptions) =>
       new Real(locale, options?.hourCycle ? { ...options, hourCycle: 'h12' } : options)) as never);
     try {
-      expect(nacStamp(Date.parse('2026-03-11T01:30:00Z'), 'America/Los_Angeles', '12h')).toBe('Tuesday, March 10, 2026 - 6:30PM');
-      expect(nacStamp(Date.parse('2026-03-11T01:30:00Z'), 'America/Los_Angeles', '24h')).toBe('Tuesday, March 10, 2026 - 18:30');
+      expect(stampLabel(Date.parse('2026-03-11T01:30:00Z'), 'America/Los_Angeles', '12h')).toBe('Tue, Mar 10, 6:30 PM');
+      expect(stampLabel(Date.parse('2026-03-11T01:30:00Z'), 'America/Los_Angeles', '24h')).toBe('Tue, Mar 10, 18:30');
     } finally {
       vi.restoreAllMocks();
     }
@@ -239,8 +239,9 @@ describe('avalanche.org center display', () => {
     const scale = nacSizeScale({ min: 1, max: 2 });
     expect(scale.rows.map((r) => r.label)).toEqual(['Historic (D4-5)', 'Very Large (D3)', 'Large (D2)', 'Small (D1)']);
     expect(scale.rows.map((r) => r.bold)).toEqual([false, false, true, true]);
-    expect(scale.bar[0]).toBeLessThan(2);
-    expect(scale.bar[1]).toBeGreaterThan(3);
+    expect(scale.bar).toEqual([2, 3]);
+    expect(nacSizeScale({ min: 1, max: 1.5 }).bar).toEqual([2.5, 3]);
+    expect(nacSizeScale({ min: 1, max: 1.5 }).rows.map((r) => r.bold)).toEqual([false, false, false, true]);
     expect(nacSizeScale({ min: 3.5, max: 4.5 }).rows[0].bold).toBe(true);
     expect(nacSizeScale({ min: 1.5, max: 1.5 }).rows.map((r) => r.bold)).toEqual([false, false, true, false]);
   });
