@@ -87,6 +87,22 @@ export function centerRegions(center: string): RegionSection[] {
   return sections;
 }
 
+// Avalanche Canada's regions far to the east of the rest, left out of its box.
+const EASTERN_GROUPS = ['Newfoundland'];
+const EASTERN_REGIONS = AVALANCHE_CANADA_GROUPS.filter(([title]) => EASTERN_GROUPS.includes(title)).flatMap(([, first]) => first);
+
+// The box around a center's regions, [west, south, east, north]. Avalanche Canada's covers its
+// western regions only.
+export function centerBox(center: string): [number, number, number, number] {
+  const boxes = AVALANCHE_PIECES
+    .filter((p) => p.center === center && !(center === 'avalanche-canada' && EASTERN_REGIONS.includes(p.names[0])))
+    .map((p) => p.bbox);
+  return [
+    Math.min(...boxes.map((b) => b[0])), Math.min(...boxes.map((b) => b[1])),
+    Math.max(...boxes.map((b) => b[2])), Math.max(...boxes.map((b) => b[3])),
+  ];
+}
+
 type Ring = [number, number][];
 
 function ringArea(ring: Ring): number {

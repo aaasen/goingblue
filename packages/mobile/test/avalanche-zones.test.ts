@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AVALANCHE_PIECES } from '@weather/protocol';
-import { ZONE_CENTERS, ZONE_CENTER_SECTIONS, centerName, centerRegions, zoneAt, zonePoint, zoneRegion } from '../avalancheZones';
+import { ZONE_CENTERS, ZONE_CENTER_SECTIONS, centerBox, centerName, centerRegions, zoneAt, zonePoint, zoneRegion } from '../avalancheZones';
 
 describe('zone points', () => {
   it('puts every region\'s request point inside that region, clear of its boundary', () => {
@@ -38,6 +38,16 @@ describe('centers and regions', () => {
       const listed = centerRegions(key).flatMap((s) => s.pieces.map((p) => p.id)).sort((a, b) => a - b);
       expect(listed).toEqual(AVALANCHE_PIECES.filter((p) => p.center === key).map((p) => p.id));
     }
+  });
+
+  it('boxes a center around all of its regions', () => {
+    const [w, s, e, n] = centerBox('nwac');
+    for (const { bbox } of AVALANCHE_PIECES.filter((p) => p.center === 'nwac')) {
+      expect(bbox[0] >= w && bbox[1] >= s && bbox[2] <= e && bbox[3] <= n).toBe(true);
+    }
+    expect(e - w).toBeLessThan(6);
+    // Avalanche Canada's box stops short of its eastern regions.
+    expect(centerBox('avalanche-canada')[2]).toBeLessThan(-110);
   });
 
   it('groups every Avalanche Canada region under a range', () => {

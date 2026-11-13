@@ -62,6 +62,8 @@ interface Props {
   // Where an avalanche forecast applies, filled in its danger color over the zones, or the zone a
   // picker has selected.
   region?: ForecastRegion | null;
+  // A box, [west, south, east, north], to bring into view while there is no region.
+  frame?: [number, number, number, number] | null;
 }
 
 // The picker's starting point before any coordinate is set: as far out as the basemap allows,
@@ -91,7 +93,7 @@ const MAP_IMAGES = {
 // builder's picker and the decoder's preview — they differ only in height and in whether tapping
 // picks a coordinate. The picker's corner button opens the same map fullscreen; the preview has no
 // controls.
-export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon', offlineMaps = false, zones, region }: Props) {
+export default function LocationMap({ coord, onPick, height, active = true, userCoord, onLocate, locating = false, following = false, favorites, onPickFavorite, onSaveFavorite, onRemoveFavorite, currentFavorite = null, pastPoints, onPickPast, coordFormat = 'latlon', offlineMaps = false, zones, region, frame }: Props) {
   const cameraRef = useRef<CameraRef>(null);
   const fullscreenCameraRef = useRef<CameraRef>(null);
   const wasActive = useRef(active);
@@ -129,11 +131,16 @@ export default function LocationMap({ coord, onPick, height, active = true, user
       fullscreenCameraRef.current?.fitBounds(bounds, { padding, duration: 250 });
       return;
     }
+    if (frame) {
+      cameraRef.current?.fitBounds(frame, { padding: REGION_PADDING, duration: 250 });
+      fullscreenCameraRef.current?.fitBounds(frame, { padding: REGION_PADDING, duration: 250 });
+      return;
+    }
     if (!coord) return;
     const stop = { center: [coord.lon, coord.lat] as [number, number], zoom: PICKED_ZOOM, duration: 250 };
     cameraRef.current?.easeTo(stop);
     fullscreenCameraRef.current?.easeTo(stop);
-  }, [coord?.lat, coord?.lon, region?.bbox.join()]);
+  }, [coord?.lat, coord?.lon, region?.bbox.join(), frame?.join()]);
 
   async function locate() {
     const c = await onLocate?.();

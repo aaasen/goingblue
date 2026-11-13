@@ -45,7 +45,7 @@ import Section from './components/Section';
 import ActionButton from './components/ActionButton';
 import PasteButton, { type Outcome } from './components/PasteButton';
 import AvalancheZonePicker from './AvalancheZonePicker';
-import { zoneAt, zonePoint, zoneRegion } from './avalancheZones';
+import { centerBox, zoneAt, zonePoint, zoneRegion } from './avalancheZones';
 import DangerMountain, { UNRATED_DAY, type MountainDay } from './components/DangerMountain';
 import InfoModal from './components/InfoModal';
 import InfoBox from './components/InfoBox';
@@ -1100,7 +1100,10 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
     avalancheZoneDefaulted.current = true;
     if (!avalancheZone && zonePiece) selectAvalancheZone(zonePiece);
   }, [tab, avalancheZoneReady]);
+  // The box of a center chosen without a region yet, for the map to bring into view.
+  const [avalancheFrame, setAvalancheFrame] = useState<[number, number, number, number] | null>(null);
   function selectAvalancheZone(zone: AvalanchePiece | null) {
+    setAvalancheFrame(null);
     setAvalancheZone(zone);
     saveAvalancheZone(zone ? zonePoint(zone) : null);
   }
@@ -1768,10 +1771,13 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
   const onPick = useStableHandler(pinPoint);
   const onCoordsText = useStableHandler((text: string) => pinCoordsText(text));
   const onLocate = useStableHandler(follow);
-  // The Avalanche tab's map: a tap or a fix selects the region it lands in, and one outside every
-  // region changes nothing. Neither moves the Weather tab's point.
+  // The Avalanche tab's map: a tap selects the region it lands in, and one outside every region
+  // clears the selection. A star, a past point or a fix selects its region too, and outside
+  // every region changes nothing. None of them moves the Weather tab's point.
   const onAvalancheZone = useStableHandler(selectAvalancheZone);
-  const onPickZone = useStableHandler((c: LatLon) => {
+  const onAvalancheCenter = useStableHandler((center: string) => setAvalancheFrame(centerBox(center)));
+  const onPickZone = useStableHandler((c: LatLon) => selectAvalancheZone(zoneAt(c)));
+  const onPickZoneMark = useStableHandler((c: LatLon) => {
     const zone = zoneAt(c);
     if (zone) selectAvalancheZone(zone);
   });
@@ -1887,7 +1893,11 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
       danger: slotDangerDays.get(slot) ?? null,
     };
   }, [favorites, coordFormat, slotDangerDays]);
-  const pastPoints = useMemo(() => pastForecastPoints(cache.map((s) => s.context), favorites), [cache, favorites]);
+  // Weather forecasts only: an avalanche request's point stands for its region.
+  const pastPoints = useMemo(
+    () => pastForecastPoints(cache.map((s) => s.context).filter((c) => !isAvalancheContext(c)), favorites),
+    [cache, favorites],
+  );
   const loadedSlot = weatherCache.find((slot) =>
     normalizedForecastData(slot.encoded!) === normalizedForecastData(forecastData),
   );
@@ -2002,7 +2012,7 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
           onPickFavorite={onPickFavorite} onSaveFavorite={onSaveFavorite} onRemoveFavorite={onRemoveFavorite}
           onOpenFavorites={onOpenFavorites} pastPoints={pastPoints} onPickPast={onPick}
           avalanche={tab === 'avalanche'} zone={avalancheZone} selectedRegion={avalancheZoneRegion}
-          onZone={onAvalancheZone} onPickZone={onPickZone} onLocateZone={onLocateZone}
+          onZone={onAvalancheZone} onCenter={onAvalancheCenter} frame={avalancheFrame} onPickZone={onPickZone} onPickZoneMark={onPickZoneMark} onLocateZone={onLocateZone}
           day={avalancheDay} onDay={setAvalancheDay}
         />
       </View>
@@ -2182,6 +2192,8 @@ export default function HomeScreen({ token, device, onDeviceChange, twoMessages,
                 coord={avalancheRegion ? null : { lat: avalanche.lat, lon: avalanche.lon }}
                 height={200}
                 userCoord={gpsCoords}
+                favorites={favorites}
+                pastPoints={pastPoints}
                 zones={AVALANCHE_ZONES}
                 region={avalancheRegion}
               />
@@ -2651,7 +2663,7 @@ function noop() {}
 const LocationPicker = memo(function LocationPicker({
   mapCoord, onPick, gpsCoords, following, onLocate, locating, coordsField, coordsInvalid, onCoordsText,
   coordFormat, favorites, currentFavorite, onPickFavorite, onSaveFavorite, onRemoveFavorite, onOpenFavorites,
-  pastPoints, onPickPast, avalanche, zone, selectedRegion, onZone, onPickZone, onLocateZone, day, onDay,
+  pastPoints, onPickPast, avalanche, zone, selectedRegion, onZone, onCenter, frame, onPickZone, onPickZoneMark, onLocateZone, day, onDay,
 }: {
   mapCoord: { lat: number; lon: number } | null; onPick: (c: { lat: number; lon: number }) => void;
   gpsCoords: { lat: number; lon: number } | null; following: boolean; onLocate: () => Promise<{ lat: number; lon: number } | null>; locating: boolean;
@@ -2660,9 +2672,11 @@ const LocationPicker = memo(function LocationPicker({
   onSaveFavorite: (name: string, coord: LatLon) => void; onRemoveFavorite: () => void; onOpenFavorites: () => void;
   pastPoints: readonly { lat: number; lon: number }[]; onPickPast: (c: { lat: number; lon: number }) => void;
   // The Avalanche tab's picker: the map draws the forecast zones with the selected region filled
-  // and no pin, favorites or saved points, and the rows choose a center and a region.
+  // and the favorites' stars and past weather forecast points, without a pin, and the rows choose
+  // a center and a region. A star or a past point selects the region it sits in.
   avalanche: boolean; zone: AvalanchePiece | null; selectedRegion: ForecastRegion | null;
-  onZone: (zone: AvalanchePiece | null) => void; onPickZone: (c: LatLon) => void;
+  onZone: (zone: AvalanchePiece | null) => void; onCenter: (center: string) => void;
+  frame: [number, number, number, number] | null; onPickZone: (c: LatLon) => void; onPickZoneMark: (c: LatLon) => void;
   onLocateZone: () => Promise<{ lat: number; lon: number } | null>;
   day: string; onDay: (day: string) => void;
 }) {
@@ -2677,19 +2691,20 @@ const LocationPicker = memo(function LocationPicker({
         following={!avalanche && following}
         onLocate={avalanche ? onLocateZone : onLocate}
         locating={locating}
-        favorites={avalanche ? undefined : favorites}
-        onPickFavorite={onPickFavorite}
+        favorites={favorites}
+        onPickFavorite={avalanche ? onPickZoneMark : onPickFavorite}
         currentFavorite={currentFavorite}
         onSaveFavorite={avalanche ? undefined : onSaveFavorite}
         onRemoveFavorite={onRemoveFavorite}
-        pastPoints={avalanche ? undefined : pastPoints}
-        onPickPast={onPickPast}
+        pastPoints={pastPoints}
+        onPickPast={avalanche ? onPickZoneMark : onPickPast}
         coordFormat={coordFormat}
         offlineMaps
         zones={avalanche ? AVALANCHE_ZONES : undefined}
         region={avalanche ? selectedRegion : undefined}
+        frame={avalanche ? frame : undefined}
       />
-      {avalanche && <AvalancheZonePicker zone={zone} onZone={onZone} day={day} onDay={onDay} />}
+      {avalanche && <AvalancheZonePicker zone={zone} onZone={onZone} onCenter={onCenter} day={day} onDay={onDay} />}
       <View style={[styles.coordsRows, avalanche && styles.hidden]}>
         <View style={styles.coordRow}>
           <Text style={styles.coordLabel}>Coordinates</Text>

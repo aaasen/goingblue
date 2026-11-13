@@ -28,9 +28,9 @@ function Item({ label, selected, last, onPress }: { label: string; selected: boo
 // The Avalanche tab's way to a forecast: a forecast center, then one of its regions, each chosen
 // from a full-screen list, and the day to request for. The rows sit under the map as the Weather tab's coordinate rows do.
 // `zone` is the selected region. Choosing another center with more than one region clears it
-// until one of that center's regions is chosen, and opens their list.
-export default memo(function AvalancheZonePicker({ zone, onZone, day, onDay }: {
-  zone: AvalanchePiece | null; onZone: (zone: AvalanchePiece | null) => void;
+// until one of that center's regions is chosen, and reports the center through `onCenter`.
+export default memo(function AvalancheZonePicker({ zone, onZone, onCenter, day, onDay }: {
+  zone: AvalanchePiece | null; onZone: (zone: AvalanchePiece | null) => void; onCenter: (center: string) => void;
   // The day to request for (see DayRow).
   day: string; onDay: (day: string) => void;
 }) {
@@ -42,17 +42,14 @@ export default memo(function AvalancheZonePicker({ zone, onZone, day, onDay }: {
 
   function pickCenter(key: string) {
     setCenter(key);
-    if (key === zone?.center) {
-      setList(null);
-      return;
-    }
+    setList(null);
+    if (key === zone?.center) return;
     const regions = centerRegions(key).flatMap((s) => s.pieces);
     if (regions.length === 1) {
       onZone(regions[0]);
-      setList(null);
     } else {
       onZone(null);
-      setList('region');
+      onCenter(key);
     }
   }
 
