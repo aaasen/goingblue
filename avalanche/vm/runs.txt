@@ -10,3 +10,8 @@ synth8 synth.py --teacher q06 --samples 8 --tok v2cs8
 s384c4 rwkv.py --vocab 8000 --tok v2cs8 --synth-samples 4 --dim 384 --layers 6 --epochs 2 --dropout 0.1
 s384c8 rwkv.py --vocab 8000 --tok v2cs8 --dim 384 --layers 6 --epochs 2 --dropout 0.1
 s384c2s rwkv.py --vocab 8000 --tok v2cs8 --synth-samples 2 --steps 5334 --dim 384 --layers 6 --dropout 0.1
+p384c rwkv.py --vocab 8000 --tok v2c --dim 384 --layers 6 --epochs 5 --dropout 0.2 --eval-every 250 --max-steps 1750
+f384c rwkv.py --vocab 8000 --sp v3 --tok v3c --context --dim 384 --layers 6 --epochs 5 --dropout 0.2 --eval-every 250 --max-steps 1750
+q06a teacher.py --model Qwen/Qwen3-0.6B-Base --epochs 2 --all --stop 0.385 --micro-tokens 2048
+synth3 synth.py --teacher q06a --samples 8 --all
+a384 rwkv.py --all --vocab 8000 --sp v3a --tok v3as --context --synth --dim 384 --layers 6 --epochs 2 --dropout 0.1

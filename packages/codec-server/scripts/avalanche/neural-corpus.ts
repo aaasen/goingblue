@@ -1,6 +1,6 @@
 /**
  * Corpus for the shared neural prose model (avalanche/ at the repo root): every rated NAC forecast
- * and every Avalanche Canada bulletin (exact-text duplicates removed within a center), as the
+ * and every Avalanche Canada bulletin (duplicates by text, formatting aside, removed within a center), as the
  * app's AvalancheForecast sections plus the structured fields the decoder already has, as context
  * strings.
  *
@@ -10,7 +10,7 @@
  * Usage: NODE_OPTIONS=--max-old-space-size=13000 pnpm avalanche-neural-corpus [out dir, default data/neural]
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { NAC_CENTERS, sectionsOf } from "@weather/protocol";
+import { NAC_CENTERS, sectionsOf, stripMarks } from "@weather/protocol";
 import { isRated, toForecast } from "../../src/nac.ts";
 import { loadBulletins } from "./corpus.ts";
 import { openDb } from "./db.ts";
@@ -47,7 +47,7 @@ const seen = new Set<string>();
 const failed: Record<string, number> = {};
 const add = (d: Doc | null) => {
   if (!d || d.published >= END) return;
-  const key = d.center + "\0" + d.sections.map((s) => s.text).join("\0");
+  const key = d.center + "\0" + d.sections.map((s) => stripMarks(s.text)).join("\0");
   if (seen.has(key)) return;
   seen.add(key);
   docs.push(d);
@@ -80,6 +80,6 @@ const lines = docs.map((d) => {
   return JSON.stringify({ ...d, split });
 });
 mkdirSync(OUT, { recursive: true });
-writeFileSync(`${OUT}/corpus2.jsonl`, lines.join("\n") + "\n");
+writeFileSync(`${OUT}/corpus3.jsonl`, lines.join("\n") + "\n");
 console.log(`wrote ${lines.length} docs`);
 for (const [c, n] of Object.entries(counts).sort()) console.log(c.padEnd(24), JSON.stringify(n));

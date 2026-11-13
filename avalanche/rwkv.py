@@ -14,11 +14,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from marks import MARKS, MARK_NAMES
 
 CODE = os.path.dirname(os.path.abspath(__file__))
 # Corpus, tokenizers, checkpoints and results; NEURAL_DATA points elsewhere (the training VM's disk).
 DATA = os.environ.get("NEURAL_DATA", os.path.join(CODE, "..", "data", "neural"))
 CHUNK = 64
+# Teacher samples, as shards of the corpus format.
+SYNTH = "synth3"
 PTYPES = ["stormSlab", "windSlab", "persistentSlab", "deepPersistentSlab", "wetSlab", "wetLoose", "dryLoose", "cornice", "glide", None]
 
 
@@ -26,13 +29,20 @@ def utf16_len(s):
     return len(s.encode("utf-16-le")) // 2
 
 
-def load_docs(synth=False):
+def read_docs(path):
+    with open(path) as f:
+        return [json.loads(l) for l in f]
+
+
+def synth_paths():
     import glob
-    paths = [f"{DATA}/corpus2.jsonl"] + (sorted(glob.glob(f"{DATA}/synth/k*-c*[0-9].jsonl")) if synth else [])
-    docs = []
-    for path in paths:
-        with open(path) as f:
-            docs += [json.loads(l) for l in f]
+    return sorted(glob.glob(f"{DATA}/{SYNTH}/k*-c*[0-9].jsonl"))
+
+
+def load_docs(synth=False):
+    docs = read_docs(f"{DATA}/corpus3.jsonl")
+    for path in synth_paths() if synth else []:
+        docs += read_docs(path)
     return docs
 
 
@@ -49,20 +59,26 @@ def markers_of(docs, context):
     return markers
 
 
+def real_splits(args):
+    """Splits of the real forecasts a run learns from: with --all, every season."""
+    return ("train", "val", "test") if getattr(args, "all", False) else ("train",)
+
+
 # ---------------------------------------------------------------- tokenizer
 
 def tokenize(args):
     """Writes tok<vocab><tok>.npz/.json. With --context, each doc starts with its structured
     context markers and each problem section with its own; all markers are free."""
     import sentencepiece as spm
-    docs = load_docs(args.synth)
+    # The samples are read a shard at a time; they reuse the real forecasts' markers.
+    docs = load_docs()
     prefix = f"{DATA}/sp{args.vocab}{args.sp}"
     if not os.path.exists(prefix + ".model"):
-        texts = [s["text"] for d in docs if d["split"] == "train" for s in d["sections"]]
+        texts = [s["text"] for d in docs if d["split"] in real_splits(args) for s in d["sections"]]
         random.Random(0).shuffle(texts)
         spm.SentencePieceTrainer.train(
             sentence_iterator=iter(texts), model_prefix=prefix, model_type="bpe", vocab_size=args.vocab,
-            character_coverage=0.9995, byte_fallback=True, normalization_rule_name="identity",
+            character_coverage=0.9995, required_chars=MARKS, byte_fallback=True, normalization_rule_name="identity",
             add_dummy_prefix=False, remove_extra_whitespaces=False, allow_whitespace_only_pieces=True,
             max_sentence_length=200000, input_sentence_size=2000000, shuffle_input_sentence=True,
             num_threads=8, unk_id=0, bos_id=-1, eos_id=-1, pad_id=-1, minloglevel=2,
@@ -76,33 +92,38 @@ def tokenize(args):
 
     bad = unk = 0
     toks, masks, meta = [], [], []
-    for d in docs:
-        texts = [s["text"] for s in d["sections"]]
-        enc = sp.encode(texts)
-        bad += sum(sp.decode(e) != t for e, t in zip(enc, texts))
-        unk += sum(e.count(0) for e in enc)
-        i = 0
-        t = [mid["center:" + d["center"]]] + ([mid[c] for c in d["ctx"]] if args.context else [])
-        m = [0] * len(t)
-        for s in d["sections"]:
-            t.append(mid["kind:" + s["kind"]]); m.append(0)
-            if s["kind"] == "problem":
-                t.append(mid["ptype:" + str(s.get("context"))]); m.append(0)
-                if args.context:
-                    t += [mid[c] for c in s["ctx"]]; m += [0] * len(s["ctx"])
-            t += enc[i]; m += [1] * len(enc[i])
-            t.append(END); m.append(1)
-            i += 1
-        toks.append(np.array(t, dtype=np.int32))
-        masks.append(np.array(m, dtype=np.uint8))
-        meta.append({"id": d["id"], "center": d["center"], "source": d.get("source", "nac"), "split": d["split"],
-                     "chars": sum(utf16_len(s["text"]) for s in d["sections"])})
+    count = 0
+    groups = [lambda: docs] + [lambda p=p: read_docs(p) for p in (synth_paths() if args.synth else [])]
+    for group in groups:
+        group = group()
+        count += len(group)
+        for d in group:
+            texts = [s["text"] for s in d["sections"]]
+            enc = sp.encode(texts)
+            bad += sum(sp.decode(e) != t for e, t in zip(enc, texts))
+            unk += sum(e.count(0) for e in enc)
+            i = 0
+            t = [mid["center:" + d["center"]]] + ([mid[c] for c in d["ctx"]] if args.context else [])
+            m = [0] * len(t)
+            for s in d["sections"]:
+                t.append(mid["kind:" + s["kind"]]); m.append(0)
+                if s["kind"] == "problem":
+                    t.append(mid["ptype:" + str(s.get("context"))]); m.append(0)
+                    if args.context:
+                        t += [mid[c] for c in s["ctx"]]; m += [0] * len(s["ctx"])
+                t += enc[i]; m += [1] * len(enc[i])
+                t.append(END); m.append(1)
+                i += 1
+            toks.append(np.array(t, dtype=np.int32))
+            masks.append(np.array(m, dtype=np.uint8))
+            meta.append({"id": d["id"], "center": d["center"], "source": d.get("source", "nac"), "split": d["split"],
+                         "chars": sum(utf16_len(s["text"]) for s in d["sections"])})
     np.savez(f"{DATA}/tok{args.vocab}{args.tok}.npz", lens=np.array([len(t) for t in toks]), toks=np.concatenate(toks), masks=np.concatenate(masks))
     with open(f"{DATA}/tok{args.vocab}{args.tok}.json", "w") as f:
         json.dump({"vocab": total, "markers": markers, "meta": meta}, f)
     chars = sum(m["chars"] for m in meta)
     text_tokens = sum(int(m.sum()) for m in masks)
-    print(f"vocab {V} + {total - V} markers; {len(docs)} docs, {text_tokens:,} scored tokens, {chars / text_tokens:.2f} chars per token; "
+    print(f"vocab {V} + {total - V} markers; {count} docs, {text_tokens:,} scored tokens, {chars / text_tokens:.2f} chars per token; "
           f"round-trip failures {bad}, unk tokens {unk}")
 
 
@@ -317,13 +338,16 @@ def train(args):
     continues from it. Each epoch's batch order comes from (seed, epoch), so resuming skips the
     batches already done."""
     device = device_of()
+    if not os.path.exists(f"{DATA}/tok{args.vocab}{args.tok}.npz"):
+        tokenize(args)
     vocab, docs = load_tokens(args.vocab, args.tok)
-    tr = [d for d in docs if d[2]["split"] in ("train", "synth")]
+    tr = [d for d in docs if d[2]["split"] in real_splits(args) + ("synth",)]
     if args.synth_samples:
         # Synthetic ids are "syn<sample>:<source id>".
-        tr = [d for d in tr if d[2]["split"] == "train" or int(d[2]["id"][3:].split(":")[0]) < args.synth_samples]
+        tr = [d for d in tr if d[2]["split"] != "synth" or int(d[2]["id"][3:].split(":")[0]) < args.synth_samples]
     print(f"{len(tr)} training docs, {sum(d[2]['split'] == 'synth' for d in tr)} synthetic", flush=True)
-    va = [d for d in docs if d[2]["split"] == "val"]
+    # With --all nothing is held out: no scoring, and the last step's weights are the result.
+    va = [] if args.all else [d for d in docs if d[2]["split"] == "val"]
     torch.manual_seed(args.seed)
     model = build(args, vocab).to(device)
     total, emb = count(model)
@@ -382,7 +406,13 @@ def train(args):
             if step % 100 == 0:
                 print(f"  step {step}/{total_steps} epoch {epoch} loss {loss.item() / math.log(2):.3f} bits/token lr {lr:.2e} "
                       f"{st['seen'] / (time.time() - t0):.0f} tok/s", flush=True)
-            if step % args.eval_every == 0 or step == total_steps:
+            if not va:
+                if step == total_steps or step == args.max_steps:
+                    save_atomic({"args": vars(args), "vocab": vocab, "state": model.state_dict()}, f"{DATA}/{args.name}.pt")
+                if time.time() - last_ckpt > args.ckpt_minutes * 60:
+                    checkpoint()
+                    last_ckpt = time.time()
+            elif step % args.eval_every == 0 or step == total_steps:
                 bpc = sum(doc_bits(model, va, device).values()) / val_chars
                 mark = ""
                 if bpc < st["best"]:
@@ -413,7 +443,43 @@ def evaluate(args):
     model.load_state_dict(ck["state"])
     total, emb = count(model)
     print(f"{args.name}: {total / 1e6:.2f}M params ({emb / 1e6:.2f}M embedding + head), {total / 1e6:.1f} MB int8, vocab {a.vocab}, tokens {a.tok}")
-    report(f"{args.name}", docs, doc_bits(model, [d for d in docs if d[2]["split"] == args.split], device), args.split)
+    scored = [d for d in docs if d[2]["split"] == args.split]
+    report(f"{args.name}", docs, doc_bits(model, scored, device), args.split)
+    mark_report(model, scored, device, a, vocab)
+
+
+def mark_report(model, docs, device, a, vocab):
+    """Bits spent on tokens whose piece holds a formatting mark, by the first mark in the piece.
+    A piece that merges a mark with text counts whole, so this is an upper bound on the marks alone."""
+    import sentencepiece as spm
+    sp = spm.SentencePieceProcessor(model_file=f"{DATA}/sp{a.vocab}{a.sp}.model")
+    cls = torch.zeros(vocab, dtype=torch.long)
+    for i in range(sp.get_piece_size()):
+        hit = [MARKS.index(c) for c in sp.id_to_piece(i) if c in MARKS]
+        if hit:
+            cls[i] = 1 + hit[0]
+    if not cls.any():
+        return
+    cls = cls.to(device)
+    bits = torch.zeros(len(MARKS) + 1, dtype=torch.float64, device=device)
+    count = torch.zeros(len(MARKS) + 1, dtype=torch.float64, device=device)
+    model.eval()
+    with torch.no_grad():
+        for x, y, m, ds in batches(docs, 1 << 16, 32768, False, None):
+            y, m = y.to(device), m.to(device)
+            with autocast(device):
+                logits = model(x.to(device))
+            nll = F.cross_entropy(logits.float().transpose(1, 2), y, reduction="none") * m / math.log(2)
+            bits.index_add_(0, cls[y].flatten(), nll.flatten().double())
+            count.index_add_(0, cls[y].flatten(), m.flatten().double())
+    model.train()
+    n = len(docs)
+    print(f"marks: {'kind':12} {'per doc':>8} {'bits each':>9} {'B per doc':>9}")
+    for i, name in enumerate(MARK_NAMES):
+        c, b = count[i + 1].item(), bits[i + 1].item()
+        if c:
+            print(f"marks: {name:12} {c / n:8.2f} {b / c:9.2f} {b / 8 / n:9.2f}")
+    print(f"marks: {'all':12} {count[1:].sum().item() / n:8.2f} {'':9} {bits[1:].sum().item() / 8 / n:9.2f}")
 
 
 def report(name, docs, bits, split):
@@ -457,7 +523,8 @@ if __name__ == "__main__":
     ap.add_argument("--sp", default="v2", help="sentencepiece model suffix")
     ap.add_argument("--tok", default="v2", help="tokenized dataset suffix")
     ap.add_argument("--context", action="store_true")
-    ap.add_argument("--synth", action="store_true", help="tokenize: add the synth/ shards as split synth")
+    ap.add_argument("--synth", action="store_true", help="tokenize: add the teacher samples as split synth")
+    ap.add_argument("--all", action="store_true", help="learn from every season, with nothing held out")
     ap.add_argument("--synth-samples", type=int, default=0, help="train: use only the first N synthetic samples per forecast (0: all)")
     ap.add_argument("--split", default="val")
     args = ap.parse_args()

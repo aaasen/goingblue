@@ -12,10 +12,11 @@ train, which is how models too large to fine-tune whole on the training GPU are 
   python teacher.py eval --name q06 --split val
   python teacher.py smoke --model Qwen/Qwen3-4B-Base --lora 64     (two steps, peak GPU memory)
 """
-import argparse, collections, json, math, os, random, time
+import argparse, collections, json, math, os, random, shutil, time
 import numpy as np
 import torch
 import torch.nn.functional as F
+from marks import to_tags
 from rwkv import DATA, load_docs, report, save_atomic, utf16_len
 
 MAX_TRAIN = 2048
@@ -32,7 +33,7 @@ def section_header(s):
 
 def tokenize(model_name):
     """Token ids and score mask per doc, cached next to the corpus."""
-    path = f"{DATA}/teacher-{model_name.replace('/', '_')}.npz"
+    path = f"{DATA}/teacher3-{model_name.replace('/', '_')}.npz"
     meta_path = path.replace(".npz", ".json")
     if not os.path.exists(path):
         from transformers import AutoTokenizer
@@ -41,7 +42,7 @@ def tokenize(model_name):
         docs = load_docs()
         enc = lambda texts: tk(texts, add_special_tokens=False)["input_ids"]
         heads = enc([header(d) for d in docs])
-        secs = [enc([section_header(s) for s in d["sections"]] + [s["text"] for s in d["sections"]]) for d in docs]
+        secs = [enc([section_header(s) for s in d["sections"]] + [to_tags(s["text"]) for s in d["sections"]]) for d in docs]
         toks, masks, meta = [], [], []
         for d, h, e in zip(docs, heads, secs):
             n = len(d["sections"])
@@ -165,8 +166,9 @@ def run_args(args):
 
 def train(args):
     docs = tokenize(args.model)
-    tr = [d for d in docs if d[2]["split"] == "train"]
-    va = [d for d in docs if d[2]["split"] == "val"]
+    # With --all nothing is held out: no scoring, and the weights at the last step are the result.
+    tr = docs if args.all else [d for d in docs if d[2]["split"] == "train"]
+    va = [] if args.all else [d for d in docs if d[2]["split"] == "val"]
     val_chars = sum(d[2]["chars"] for d in va)
     with open(f"{DATA}/{args.name}.args.json", "w") as f:
         json.dump(vars(args), f)
@@ -181,6 +183,8 @@ def train(args):
     order = lambda epoch: random.Random(args.seed * 1000 + epoch)
     steps_per_epoch = sum(1 for _ in batches(tr, MAX_TRAIN, args.batch_tokens, order(0)))
     total_steps = steps_per_epoch * args.epochs
+    # --stop ends the run partway through the schedule.
+    last_step = round(args.stop * total_steps) if args.stop else total_steps
     ckpt_path = f"{DATA}/{args.name}.ckpt.pt"
     st = {"step": 0, "best": float("inf"), "seen": 0, "elapsed": 0.0}
     if os.path.exists(ckpt_path):
@@ -188,7 +192,7 @@ def train(args):
         model.load_state_dict(ck["model"], strict=not args.lora); opt.load_state_dict(ck["opt"]); st = ck["st"]
         del ck
         print(f"  resumed at step {st['step']}, best val {st['best']:.4f}", flush=True)
-    else:
+    elif va:
         bpc = sum(doc_bits(model, va).values()) / val_chars
         print(f"  zero-shot val {bpc:.4f} b/c", flush=True)
     t0 = time.time() - st["elapsed"]
@@ -196,6 +200,9 @@ def train(args):
 
     def checkpoint():
         st["elapsed"] = time.time() - t0
+        # A full fine-tune's checkpoint is several GB; the old one goes first when two don't fit.
+        if os.path.exists(ckpt_path) and shutil.disk_usage(DATA).free < 1.2 * os.path.getsize(ckpt_path):
+            os.remove(ckpt_path)
         save_atomic({"model": trained_state(model, args.lora), "opt": opt.state_dict(), "st": st}, ckpt_path)
 
     step = st["step"]
@@ -225,7 +232,12 @@ def train(args):
             if step % 20 == 0:
                 print(f"  step {step}/{total_steps} epoch {epoch} loss {loss / math.log(2):.3f} bits/token lr {lr:.2e} "
                       f"{st['seen'] / (time.time() - t0):.0f} tok/s", flush=True)
-            if step % args.eval_every == 0 or step == total_steps:
+            if not va:
+                if step == last_step:
+                    save_atomic({k: v.to(torch.bfloat16) for k, v in trained_state(model, args.lora).items()}, f"{DATA}/{args.name}.pt")
+                if time.time() - last_ckpt > args.ckpt_minutes * 60:
+                    checkpoint(); last_ckpt = time.time()
+            elif step % args.eval_every == 0 or step == last_step:
                 bpc = sum(doc_bits(model, va).values()) / val_chars
                 mark = ""
                 if bpc < st["best"]:
@@ -241,6 +253,10 @@ def train(args):
                 checkpoint()
                 print(f"stopped at --max-steps {step}", flush=True)
                 return
+            if step == last_step:
+                break
+        if step == last_step:
+            break
     if os.path.exists(ckpt_path):
         os.remove(ckpt_path)
     print(f"done: best val {st['best']:.4f} b/c, {(time.time() - t0) / 60:.1f} min", flush=True)
@@ -298,6 +314,8 @@ if __name__ == "__main__":
     ap.add_argument("--max-steps", type=int, default=0)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--split", default="val")
+    ap.add_argument("--all", action="store_true", help="learn from every season, with nothing held out")
+    ap.add_argument("--stop", type=float, default=0, help="end the run at this fraction of the schedule")
     ap.add_argument("--lora", type=int, default=0, help="rank of the low-rank updates; 0 trains every weight")
     args = ap.parse_args()
     {"train": train, "eval": evaluate, "smoke": smoke}[args.cmd](args)

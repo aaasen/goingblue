@@ -8,6 +8,7 @@ import {
 } from "@weather/protocol";
 import { proseCoder } from "../src/avalanche.ts";
 import { htmlToText } from "../src/html-text.ts";
+import { parseMarks, stripMarks } from "@weather/protocol";
 import { StructuredBuilder } from "../scripts/avalanche/structured.ts";
 import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.json";
 
@@ -33,8 +34,41 @@ describe("htmlToText", () => {
   it("turns paragraphs into blank lines and decodes entities", () => {
     expect(htmlToText(" <p>5&nbsp;cm of snow &amp; wind.</p><p></p><p>Next <a href=\"x\">line</a>.</p>"))
       .toBe("5 cm of snow & wind.\n\nNext line.");
-    expect(htmlToText("<ul><li>one</li><li>two</li></ul>")).toBe("one\n\ntwo");
     expect(htmlToText(null)).toBe("");
+  });
+
+  const [B, b, I, i, ITEM, NUM, IN] = "\uE000\uE001\uE002\uE003\uE004\uE005\uE006";
+  it("marks bold and italic runs, with spaces outside the marks", () => {
+    expect(htmlToText("<p>Watch for <strong> wind slabs </strong>near <em>ridgelines</em>.</p>"))
+      .toBe(`Watch for ${B}wind slabs${b} near ${I}ridgelines${i}.`);
+    expect(htmlToText("<b>Very <i>dangerous</i></b> today")).toBe(`${B}Very ${I}dangerous${i}${b} today`);
+    expect(htmlToText('<span style="font-weight: 700">Heads up</span>: <span style="color:red">storm</span>')).toBe(`${B}Heads up${b}: storm`);
+  });
+  it("drops empty runs, merges adjacent ones and ends a run at each line", () => {
+    expect(htmlToText("a<strong> </strong>b <strong>c</strong><strong>d</strong>")).toBe(`a b ${B}cd${b}`);
+    expect(htmlToText("<strong><p>one</p><p>two<br>three</p></strong>")).toBe(`${B}one${b}\n\n${B}two${b}\n${B}three${b}`);
+    expect(htmlToText("<h2>Summary</h2><p>Text</p>")).toBe(`${B}Summary${b}\n\nText`);
+  });
+  it("marks list items with their kind and depth", () => {
+    expect(htmlToText("<ul><li>one</li><li>two</li></ul>")).toBe(`${ITEM}one\n\n${ITEM}two`);
+    expect(htmlToText("<p>Do:</p><ol><li>dig<ul><li><b>deep</b></li></ul></li><li>look</li></ol>"))
+      .toBe(`Do:\n\n${NUM}dig\n\n${IN}${ITEM}${B}deep${b}\n\n${NUM}look`);
+    expect(htmlToText("<ul><li> </li></ul>")).toBe("");
+  });
+  it("removes mark characters the source already has", () => {
+    expect(htmlToText("a\uE000b&#xE004;c")).toBe("abc");
+  });
+  it("leaves the text unchanged apart from the marks", () => {
+    const html = "<p>Up to <strong>30&nbsp;cm</strong>  of <em>new</em> snow.</p><ul><li>Avoid <b>lee</b> slopes</li></ul>";
+    expect(stripMarks(htmlToText(html))).toBe("Up to 30 cm of new snow.\n\nAvoid lee slopes");
+  });
+});
+
+describe("parseMarks", () => {
+  it("reads paragraphs, runs and numbered items", () => {
+    const blocks = parseMarks(htmlToText("<p>A <b>b</b></p><ol><li>x</li><li>y<ul><li>z</li></ul></li><li>w</li></ol>"));
+    expect(blocks.map((k) => [k.list, k.depth, k.number])).toEqual([["", 0, 0], ["numbered", 0, 1], ["numbered", 0, 2], ["bullet", 1, 0], ["numbered", 0, 3]]);
+    expect(blocks[0].lines).toEqual([[{ text: "A ", bold: false, italic: false }, { text: "b", bold: true, italic: false }]]);
   });
 });
 

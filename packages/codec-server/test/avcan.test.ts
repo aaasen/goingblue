@@ -88,10 +88,10 @@ describe("toForecast", () => {
     expect(f.advice).toEqual(["Go easy."]);
   });
 
-  it("reduces advice HTML to text", () => {
+  it("reduces advice HTML to marked text", () => {
     const raw = structuredClone(RAW);
     raw.report.terrainAndTravelAdvice = ["Avoid <strong>steep</strong> slopes &amp; cornices."];
-    expect(toForecast(raw, []).advice).toEqual(["Avoid steep slopes & cornices."]);
+    expect(toForecast(raw, []).advice).toEqual(["Avoid \uE000steep\uE001 slopes & cornices."]);
   });
 
   it("refuses a value outside the scales", () => {

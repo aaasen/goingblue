@@ -1,5 +1,6 @@
 export { UNENCODED, decodeBulletin, encodeBulletin, headForecast, readBulletin, withPlaceholders, type BulletinHead, type Models } from "./bulletin.js";
 export { loadStructured, packStructured } from "./pack.js";
+export { BOLD, BOLD_END, INDENT, ITALIC, ITALIC_END, ITEM, NUMBERED, parseMarks, stripMarks, type ProseBlock, type ProseRun } from "./marks.js";
 export { proseDoc, type ProseCoder, type ProseDoc, type ProseSection } from "./prose.js";
 export { SECTION_KINDS, kindsOf, layoutOf, sectionsOf } from "./sections.js";
 export type { StructuredModel } from "./structured.js";

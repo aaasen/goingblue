@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { SkiaPictureView, Skia, matchFont, type SkCanvas, type SkFont, type SkPicture, type SkSVG } from '@shopify/react-native-skia';
-import { ASPECTS, coversCell, type AvalancheForecast, type AvalancheProblem, type DangerDay, type Elevation } from '@weather/protocol';
+import { ASPECTS, coversCell, parseMarks, type AvalancheForecast, type AvalancheProblem, type DangerDay, type Elevation, type ProseBlock } from '@weather/protocol';
 import { DANGER_ICONS, DANGER_ICON_HEIGHT, type DangerIcon } from './dangerIcons';
 import { drawText, fillPaint, strokePaint, textWidth } from './skiaPaint';
 import { palette } from './palette';
@@ -413,25 +413,58 @@ export function Card({ children }: { children: ReactNode }) {
   return <View style={styles.card}>{children}</View>;
 }
 
-// Paragraphs are blank-line separated; single line breaks stay inside a paragraph.
-export function Prose({ text, lead = false }: { text: string; lead?: boolean }) {
-  const paragraphs = text.split(/\n\n+/).filter(Boolean);
+// A block's lines, with its bold and italic runs.
+function Runs({ block, lead }: { block: ProseBlock; lead: boolean }) {
   return (
     <>
-      {paragraphs.map((p, i) => (
-        <Text key={i} style={[styles.prose, lead && styles.proseLead, i < paragraphs.length - 1 && styles.proseGap]}>{p}</Text>
+      {block.lines.map((line, i) => (
+        <Text key={i}>
+          {i > 0 ? '\n' : ''}
+          {line.map((run, j) => (
+            <Text key={j} style={[run.bold && (lead ? styles.proseLeadBold : styles.bold), run.italic && styles.italic]}>{run.text}</Text>
+          ))}
+        </Text>
       ))}
     </>
   );
 }
 
+const LIST_INDENT = 16;
+
+// Paragraphs and list items are blank-line separated; single line breaks stay inside a block.
+// The text carries its formatting as marks (bold, italic, list items).
+export function Prose({ text, lead = false }: { text: string; lead?: boolean }) {
+  const blocks = parseMarks(text);
+  return (
+    <>
+      {blocks.map((block, i) => {
+        const gap = i < blocks.length - 1 && styles.proseGap;
+        if (!block.list) {
+          return <Text key={i} style={[styles.prose, lead && styles.proseLead, gap]}><Runs block={block} lead={lead} /></Text>;
+        }
+        return (
+          <View key={i} style={[styles.bulletRow, { paddingLeft: block.depth * LIST_INDENT }, gap]}>
+            <Text style={styles.bullet}>{block.list === 'numbered' ? `${block.number}.` : '•'}</Text>
+            <Text style={[styles.prose, styles.bulletText]}><Runs block={block} lead={false} /></Text>
+          </View>
+        );
+      })}
+    </>
+  );
+}
+
+// Each item as one bullet; an item's own list marks are not drawn again.
 function Bullets({ items }: { items: string[] }) {
   return (
     <>
       {items.map((item, i) => (
         <View key={i} style={[styles.bulletRow, i < items.length - 1 && styles.proseGap]}>
           <Text style={styles.bullet}>•</Text>
-          <Text style={[styles.prose, styles.bulletText]}>{item}</Text>
+          <Text style={[styles.prose, styles.bulletText]}>
+            {parseMarks(item).map((block, j) => (
+              <Text key={j}>{j > 0 ? '\n\n' : ''}<Runs block={block} lead={false} /></Text>
+            ))}
+          </Text>
         </View>
       ))}
     </>
@@ -583,6 +616,9 @@ const styles = StyleSheet.create({
   dangerIcon: { width: ICON_SLOT, height: ICON_H },
   dangerRatingText: { flex: 1, fontSize: 15, fontWeight: '700' },
   bold: { fontWeight: '700', color: palette.text },
+  italic: { fontStyle: 'italic' },
+  // The lead is bold already, so its bold runs are heavier.
+  proseLeadBold: { fontWeight: '900' },
   scaleIntro: { marginBottom: 16 },
   scaleRow: {
     flexDirection: 'row', paddingVertical: 14,
