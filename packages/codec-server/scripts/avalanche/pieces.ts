@@ -44,7 +44,10 @@ const NAC_SERVED = [
   "PAC", "SAC", "SNFAC", "TAC", "VAC", "WAC", "WCMAC",
 ];
 // Retired zone ids, by the current zones that cover their ground.
-const FORMER_ZONES: Record<number, number[]> = { 3039: [3040, 3041] };
+const FORMER_ZONES: Record<number, number[]> = { 3039: [3040, 3041], 3012: [3014, 3015], 1833: [3044] };
+// Zones in a served center's map layer that it publishes no avalanche forecasts for, by zone id:
+// CAAC's Juneau, which gets weather products only.
+const UNFORECAST_ZONES = new Set([2164]);
 const REQUEST_TIMEOUT_MS = 90_000;
 const RETRIES = 4;
 
@@ -220,6 +223,7 @@ function nacZones(db: ReturnType<typeof openDb>, center: string): NacZoneSource[
   if (!row) throw new Error(`pieces: no map layer for ${center}; run pnpm avalanche-collect --source ${center.toLowerCase()}`);
   const layer = JSON.parse(row.body) as { features: { id: number; properties: { name: string }; geometry: { type: string; coordinates: unknown } }[] };
   return layer.features
+    .filter((f) => !UNFORECAST_ZONES.has(f.id))
     .map((f) => {
       const polygons = round((f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates) as MultiPoly);
       return { center: center.toLowerCase(), zoneId: f.id, names: [f.properties.name], bbox: bboxOf(polygons), polygons };

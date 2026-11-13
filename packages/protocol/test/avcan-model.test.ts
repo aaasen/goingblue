@@ -17,7 +17,7 @@ const FROZEN_NAC_MODEL_DIGEST = "f3ec54062432899c";
 // The shared prose model (native/avalanche), pinned in models.json.
 const FROZEN_PROSE_DIGEST = "3698902a0d9f8f04";
 // The same for the piece-set model, rewritten by `pnpm avalanche-region`.
-const FROZEN_REGION_DIGEST = "5cff2b2b89d1ca08";
+const FROZEN_REGION_DIGEST = "5086b8ab3e00ee3f";
 
 const digestOf = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex").slice(0, 16);
 

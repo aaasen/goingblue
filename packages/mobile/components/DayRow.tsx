@@ -8,11 +8,11 @@ import { palette } from '../palette';
 // tab's map (AvalancheZonePicker), drawn as they are: the label, the date as text, a chevron. A
 // tap opens the platform's calendar: Android's own dialog, and on iOS the inline calendar on a
 // card over the screen, since the system's compact date button can't be restyled to match the
-// rows. The date runs from the first season of
-// Avalanche Canada's archive through today. It starts on today, which asks for the bulletin
+// rows. The date runs from the start of the earliest season every region has forecasts for
+// through today. It starts on today, which asks for the bulletin
 // current when the request arrives; `day` is '' then, and YYYY-MM-DD for any earlier date.
 
-const FIRST_DAY = new Date(2022, 10, 1);
+const FIRST_DAY = new Date(2025, 10, 1);
 
 // The local calendar date as YYYY-MM-DD.
 function isoDay(d: Date): string {
