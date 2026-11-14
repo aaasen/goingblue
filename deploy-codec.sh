@@ -32,8 +32,11 @@ gcloud builds submit --project "$PROJECT" --config cloudbuild-codec.yaml \
 # token for this service with each call (packages/server/src/identity.ts).
 # GOOGLE_CLOUD_PROJECT names the project the trace field's resource name resolves under; without
 # it the codec's lines still carry their request id, they just don't nest under the request log.
+# An avalanche encode runs on every CPU, so requests sharing an instance slow each other down:
+# concurrency stays low and load spreads across instances. 4 CPUs need at least 2 GiB of memory.
 gcloud run deploy "$CODEC_SERVICE" --project "$PROJECT" --region "$REGION" \
   --image "$IMAGE" --platform managed --no-allow-unauthenticated \
+  --cpu 4 --memory 2Gi --concurrency 4 \
   --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT" \
   --set-secrets "OPEN_METEO_API_KEY=OPEN_METEO_API_KEY:latest"
 
