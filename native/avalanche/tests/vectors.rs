@@ -10,7 +10,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 const DATA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/neural");
-const NAME: &str = "s384c";
+const NAME: &str = "a384";
 
 #[derive(Deserialize)]
 struct Vectors {
@@ -71,7 +71,7 @@ fn matches_test_vectors() {
     let vectors = &vectors.vectors[..limit.min(vectors.vectors.len())];
     let wanted: HashMap<&str, usize> = vectors.iter().enumerate().map(|(i, v)| (v.id.as_str(), i)).collect();
     let mut docs: Vec<Option<CorpusDoc>> = (0..vectors.len()).map(|_| None).collect();
-    for line in std::fs::read_to_string(format!("{DATA}/corpus2.jsonl")).unwrap().lines() {
+    for line in std::fs::read_to_string(format!("{DATA}/corpus3.jsonl")).unwrap().lines() {
         let id = &line[7..line[8..].find('"').unwrap() + 8];
         if let Some(&i) = wanted.get(id) {
             docs[i] = Some(serde_json::from_str(line).unwrap());
