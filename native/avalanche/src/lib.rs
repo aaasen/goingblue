@@ -121,27 +121,32 @@ impl Model {
 
     /// The text of `doc` as one rANS stream.
     pub fn encode(&self, doc: &Doc) -> Result<Vec<u8>, Error> {
-        let mut run = self.runner();
-        let mut steps = Vec::new();
-        for m in self.marker_ids(&doc.markers) {
-            run.marker(m);
-        }
+        self.encode_on(doc, std::thread::available_parallelism().map_or(1, |n| n.get()))
+    }
+
+    /// `encode` on a given number of threads; the stream does not depend on it.
+    pub fn encode_on(&self, doc: &Doc, threads: usize) -> Result<Vec<u8>, Error> {
+        // Every token in order, and whether it is coded (a piece or END) or a marker.
+        let mut tokens = self.marker_ids(&doc.markers);
+        let mut coded = vec![false; tokens.len()];
         for s in &doc.sections {
-            for m in self.marker_ids(&s.markers) {
-                run.marker(m);
-            }
-            let mut toks = self.tokenizer.encode(&s.text);
+            tokens.extend(self.marker_ids(&s.markers));
+            coded.resize(tokens.len(), false);
+            let toks = self.tokenizer.encode(&s.text);
             if toks.len() >= MAX_SECTION_TOKENS {
                 return Err(Error::Input(format!("a section of {} tokens is over the limit", toks.len())));
             }
-            toks.push(self.end());
-            for t in toks {
-                let freqs = run.predict()?;
-                steps.push((freqs[..t].iter().sum(), freqs[t]));
-                run.coded(t);
-            }
+            tokens.extend(toks);
+            tokens.push(self.end());
+            coded.resize(tokens.len(), true);
         }
-        Ok(rans::encode(&steps))
+        if coded.first() == Some(&true) {
+            return Err(Error::Input("the first token must be a marker".into()));
+        }
+        // A coded token's table comes from every token before it; the last token is never fed.
+        let fed = tokens.len().saturating_sub(1);
+        let targets: Vec<Option<usize>> = (0..fed).map(|p| coded[p + 1].then_some(tokens[p + 1])).collect();
+        Ok(rans::encode(&self.rwkv.code(&tokens[..fed], &targets, threads)))
     }
 
     /// How many tokens `encode` feeds the model for `doc`: the work encoding it takes.
