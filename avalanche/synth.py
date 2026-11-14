@@ -1,19 +1,19 @@
 """
-Synthetic forecasts from the fine-tuned teacher, for distillation. Each training forecast
-lends its center, structured context and section list; the teacher writes every section's text in
-turn, sampled at temperature 1 so the text follows its distribution (not reproducible: per-request
-seeds put vLLM on a slow sampling path). The teacher writes formatting as tags, stored as marks.
-Output goes to shards synth3/k<sample>-c<chunk>.jsonl in the corpus format with split "synth"; finished shards are skipped,
-so a preempted run resumes.
+Synthetic forecasts from the teacher, the extra training text for rwkv.py. Each forecast the
+teacher learned from lends its center, structured context and section list; the teacher writes
+every section's text in turn, sampled at temperature 1 so the text follows its distribution (not
+reproducible: per-request seeds put vLLM on a slow sampling path). The teacher writes formatting
+as tags, stored as marks. Output goes to shards k<sample>-c<chunk>.jsonl in the corpus format
+with split "synth"; finished shards are skipped, so a preempted run resumes.
 
-  python synth.py train --teacher q06 --samples 2     (queue step: convert, generate)
-  python synth.py convert --teacher q06               (transformers: teacher weights to HF format)
-  /opt/vllm/bin/python synth.py generate --teacher q06 --samples 2 [--limit 50]
+  python synth.py train --all                         (queue step: convert, generate)
+  python synth.py convert                             (transformers: teacher weights to HF format)
+  /opt/vllm/bin/python synth.py generate --all [--limit 50]
 """
-import argparse, glob, json, os, subprocess, sys
+import argparse, json, os, subprocess
 from marks import from_tags, to_tags
-from rwkv import CODE, DATA, SYNTH, load_docs, real_splits
-from teacher import header, section_header
+from rwkv import CODE, DATA, load_docs, real_splits, synth_dir, synth_paths
+from teacher import MODEL, header, section_header
 
 CHUNK = 4000
 MAX_LEN = 8192
@@ -24,10 +24,10 @@ def convert(args):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
     out = f"{DATA}/{args.teacher}-hf"
-    m = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16)
+    m = AutoModelForCausalLM.from_pretrained(MODEL, dtype=torch.bfloat16)
     m.load_state_dict(torch.load(f"{DATA}/{args.teacher}.pt", map_location="cpu"))
     m.save_pretrained(out)
-    AutoTokenizer.from_pretrained(args.model).save_pretrained(out)
+    AutoTokenizer.from_pretrained(MODEL).save_pretrained(out)
     print(f"wrote {out}", flush=True)
 
 
@@ -41,12 +41,12 @@ def generate(args):
     docs = [d for d in load_docs() if d["split"] in real_splits(args)]
     if args.limit:
         docs = docs[:args.limit]
-    os.makedirs(f"{DATA}/{SYNTH}", exist_ok=True)
+    os.makedirs(synth_dir(args), exist_ok=True)
     llm = LLM(model=model_dir, dtype="bfloat16", enable_prefix_caching=True, gpu_memory_utilization=0.85, kv_cache_dtype="fp8",
               max_model_len=MAX_LEN)
     for k in range(args.samples):
         for c in range(0, len(docs), CHUNK):
-            path = f"{DATA}/{SYNTH}/k{k}-c{c // CHUNK}{'-limit' if args.limit else ''}.jsonl"
+            path = f"{synth_dir(args)}/k{k}-c{c // CHUNK}{'-limit' if args.limit else ''}.jsonl"
             if os.path.exists(path):
                 continue
             chunk = docs[c:c + CHUNK]
@@ -93,7 +93,7 @@ def train(args):
 
 def evaluate(args):
     n = chars = 0
-    for path in sorted(glob.glob(f"{DATA}/{SYNTH}/k*-c*[0-9].jsonl")):
+    for path in synth_paths(args):
         with open(path) as f:
             for l in f:
                 d = json.loads(l)
@@ -106,10 +106,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd")
     ap.add_argument("--name", default="synth")
-    ap.add_argument("--teacher", default="q06")
-    ap.add_argument("--model", default="Qwen/Qwen3-0.6B-Base")
-    ap.add_argument("--samples", type=int, default=2)
-    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--teacher", default="teacher")
     ap.add_argument("--all", action="store_true", help="write samples for every season's forecasts")
+    ap.add_argument("--samples", type=int, default=8, help="samples per forecast")
+    ap.add_argument("--limit", type=int, default=0, help="generate: only the first N forecasts, for a test run")
     args = ap.parse_args()
     {"train": train, "eval": evaluate, "convert": convert, "generate": generate}[args.cmd](args)

@@ -5,7 +5,6 @@ sees in their place. repair() brings the marks of a teacher sample to the form h
 import re
 
 BOLD, BOLD_END, ITALIC, ITALIC_END, ITEM, NUMBERED, INDENT = MARKS = ""
-MARK_NAMES = ["bold", "bold end", "italic", "italic end", "item", "numbered", "indent"]
 # No forecast contains these strings.
 TAGS = ["<b>", "</b>", "<i>", "</i>", "<li>", "<nli>", "<in>"]
 

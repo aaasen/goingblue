@@ -6,15 +6,14 @@ are int8 with a per-row fixed-point multiplier, and every rescale is a rounding 
 (floor((x + 2^(s-1)) / 2^s)). exp and sigmoid are lookup tables. Every intermediate stays below
 2^53 in magnitude, so JS numbers, int64 and the fp64 matmuls used here all agree exactly.
 
-  python quant.py stats --name s384c              activation ranges of the float model on val
-  python quant.py eval --name s384c [--limit N]   float, int8-weight and integer bits on val
-  python quant.py export --name s384c --vectors 200   int model file + test vectors for roundtrip.mts
+  python quant.py eval --name a384 [--limit N]    float and integer bits on the validation season
+  python quant.py export --name a384              model file + test vectors for native/avalanche
 """
-import argparse, hashlib, json, math, os
+import argparse, hashlib, json, math, time
 import numpy as np
 import torch
 import torch.nn.functional as F
-from rwkv import DATA, build, load_docs, load_tokens, markers_of, report, device_of
+from rwkv import DATA, build, load_tokens, report, device_of, variant
 
 # Fixed-point formats (fraction bits).
 FX = 12          # residual stream x (|x| < 40 observed, clamp at 2^20)
@@ -89,13 +88,10 @@ class Tables:
 
 # ---------------------------------------------------------------- quantized model
 
-WBITS = 8
-
-
 def qrows(w):
-    """Signed WBITS-bit rows with per-row (mul, shift): w ~= q * mul / 2^(WMUL + shift), mul in [2^15, 2^16]."""
+    """Signed 8-bit rows with per-row (mul, shift): w ~= q * mul / 2^(WMUL + shift), mul in [2^15, 2^16]."""
     w = w.double()
-    lim = (1 << (WBITS - 1)) - 1
+    lim = 127
     amax = w.abs().amax(1).clamp(min=1e-12)
     s = amax / lim
     q = torch.round(w / s[:, None]).clamp(-lim, lim).long()
@@ -264,7 +260,7 @@ def freqs_from_logits(T_, logits):
 def load(name, dev):
     ck = torch.load(f"{DATA}/{name}.pt", map_location="cpu")
     a = argparse.Namespace(**ck["args"])
-    vocab, docs = load_tokens(a.vocab, a.tok)
+    vocab, docs = load_tokens(a)
     model = build(a, vocab)
     model.load_state_dict(ck["state"])
     return model.to(dev).eval(), a, vocab, docs
@@ -290,42 +286,13 @@ def pad(ds, dev):
     return torch.from_numpy(x).to(dev), torch.from_numpy(y).to(dev), torch.from_numpy(m).to(dev)
 
 
-def stats(args):
-    dev = device_of()
-    model, a, vocab, docs = load(args.name, dev)
-    va = [d for d in docs if d[2]["split"] == "val"][:: max(1, args.stride)]
-    acts = {}
-
-    def hook(n):
-        def f(_m, inp, out):
-            for tag, t in (("in", inp[0]), ("out", out)):
-                t = t.detach().float()
-                r = acts.setdefault(f"{n}.{tag}", [0.0, 0.0, 0])
-                r[0] = max(r[0], t.abs().max().item())
-                r[1] += (t ** 2).sum().item(); r[2] += t.numel()
-        return f
-
-    for n, mod in model.named_modules():
-        if isinstance(mod, (torch.nn.Linear, torch.nn.LayerNorm)):
-            mod.register_forward_hook(hook(n))
-    with torch.no_grad():
-        for ds in batches_by_len(va, 16384):
-            x, _, _ = pad(ds, dev)
-            T = -(-x.shape[1] // 64) * 64
-            model(F.pad(x, (0, T - x.shape[1])))
-    for n, (mx, ss, cnt) in sorted(acts.items()):
-        print(f"{n:28} max {mx:10.3f} rms {math.sqrt(ss / cnt):8.3f}")
-    for i, blk in enumerate(model.blocks):
-        w = torch.exp(blk.time_decay)
-        print(f"block {i}: w [{w.min().item():.5f}, {w.max().item():.3f}] u [{blk.time_first.min().item():.2f}, {blk.time_first.max().item():.2f}]")
-
-
 def codable_of(a, docs):
     V = max(int(t[mk.astype(bool)].max()) for t, mk, _ in docs[:2000])
     return V + 1   # pieces + END, all below the markers
 
 
 def evaluate(args):
+    """Code length of the integer model at the coder's precision against the float model."""
     dev = device_of()
     model, a, vocab, docs = load(args.name, dev)
     codable = codable_of(a, docs)
@@ -334,54 +301,27 @@ def evaluate(args):
         va = va[:: max(1, len(va) // args.limit)][: args.limit]
     print(f"{args.name}: codable symbols {codable} of {vocab}; {len(va)} val docs", flush=True)
     im = IntModel(model, dev, codable)
-    T_ = im.T
-    out = {"float": {}, "float_sub": {}, "w8": {}, "int_ideal": {}, "int_q24": {}, "int_q16": {}}
-    # int8 weights with float activations
-    wq = build(a, vocab).to(dev).eval()
-    wq.load_state_dict(model.state_dict())
-    with torch.no_grad():
-        for n, mod in wq.named_modules():
-            if isinstance(mod, torch.nn.Linear) or isinstance(mod, torch.nn.Embedding):
-                q, mul, shift = qrows(mod.weight.data)
-                mod.weight.data = (q.double() * mul.double()[:, None] / torch.pow(2.0, (WMUL + shift).double())[:, None]).float()
-    import time
+    out = {"float": {}, "int": {}}
     t0 = time.time()
     with torch.no_grad():
         for bi, ds in enumerate(batches_by_len(va, args.batch_tokens)):
             x, y, m = pad(ds, dev)
             T = -(-x.shape[1] // 64) * 64
-            xp = F.pad(x, (0, T - x.shape[1]))
-            for key, mdl in (("float", model), ("w8", wq)):
-                lg = mdl(xp)[:, : x.shape[1]].double()
-                nll = F.cross_entropy(lg.transpose(1, 2), y, reduction="none")
-                sub = -torch.log_softmax(lg[..., :codable], -1).gather(-1, y.clamp(max=codable - 1)[..., None])[..., 0]
-                for r, (_, _, meta) in enumerate(ds):
-                    out[key][meta["id"]] = float((nll[r] * m[r]).sum() / math.log(2))
-                    if key == "float":
-                        out["float_sub"][meta["id"]] = float((sub[r] * m[r]).sum() / math.log(2))
-            lg = im.forward(x)
-            ideal = -torch.log_softmax(lg.double() / (1 << FL), -1).gather(-1, y.clamp(max=codable - 1)[..., None])[..., 0] / math.log(2)
-            f = freqs_from_logits(T_, lg)
-            fy = f.gather(-1, y.clamp(max=codable - 1)[..., None])[..., 0].double()
-            q24 = SCALE_BITS - torch.log2(fy)
-            # same distribution at 16-bit precision, as the static coder's tables
-            f16 = 1 + floordiv(f * ((1 << 16) - codable), torch.tensor(1 << SCALE_BITS, device=dev))
-            q16 = 16 - torch.log2(f16.gather(-1, y.clamp(max=codable - 1)[..., None])[..., 0].double())
+            lg = model(F.pad(x, (0, T - x.shape[1])))[:, : x.shape[1]].double()
+            nll = F.cross_entropy(lg.transpose(1, 2), y, reduction="none") / math.log(2)
+            f = freqs_from_logits(im.T, im.forward(x))
+            bits = SCALE_BITS - torch.log2(f.gather(-1, y.clamp(max=codable - 1)[..., None])[..., 0].double())
             for r, (_, _, meta) in enumerate(ds):
-                mm = m[r]
-                out["int_ideal"][meta["id"]] = float(ideal[r][mm].sum())
-                out["int_q24"][meta["id"]] = float(q24[r][mm].sum())
-                out["int_q16"][meta["id"]] = float(q16[r][mm].sum())
+                out["float"][meta["id"]] = float(nll[r][m[r]].sum())
+                out["int"][meta["id"]] = float(bits[r][m[r]].sum())
             print(f"  batch {bi} ({len(ds)} docs, T={x.shape[1]}) {time.time() - t0:.0f}s", flush=True)
     chars = sum(d[2]["chars"] for d in va)
     base = sum(out["float"].values())
     for key, b in out.items():
         tot = sum(b.values())
-        print(f"{key:10} {tot / chars:.4f} b/c  {tot / 8 / len(va):7.1f} B/doc  {100 * (tot - base) / base:+.2f}% vs float")
+        print(f"{key:6} {tot / chars:.4f} b/c  {tot / 8 / len(va):7.1f} B/doc  {100 * (tot - base) / base:+.2f}% vs float")
     if not args.limit:
-        report(f"{args.name}-int", docs, out["int_q24"], "val")
-    with open(f"{DATA}/{args.name}.quant.json", "w") as fh:
-        json.dump(out, fh)
+        report(f"{args.name}-int", docs, out["int"], "val")
 
 
 MAGIC = b"GBNM"
@@ -431,10 +371,10 @@ def export(args):
     model, a, vocab, docs = load(args.name, dev)
     codable = codable_of(a, docs)
     im = IntModel(model, dev, codable)
-    with open(f"{DATA}/tok{a.vocab}{a.tok}.json") as f:
-        markers = json.load(f).get("markers") or markers_of(load_docs(), True)
+    with open(f"{DATA}/tok{variant(a)}.json") as f:
+        markers = json.load(f)["markers"]
     assert codable + len(markers) == vocab, (codable, len(markers), vocab)
-    sp = spm.SentencePieceProcessor(model_file=f"{DATA}/sp{a.vocab}{a.sp}.model")
+    sp = spm.SentencePieceProcessor(model_file=f"{DATA}/sp{variant(a)}.model")
     assert sp.get_piece_size() + 1 == codable
     kind = lambda i: 6 if sp.is_byte(i) else 2 if sp.is_unknown(i) else 3 if sp.is_control(i) else 1
     pieces = [[sp.id_to_piece(i), sp.get_score(i), kind(i)] for i in range(sp.get_piece_size())]
@@ -476,12 +416,9 @@ def export(args):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd")
-    ap.add_argument("--name", default="s384c")
-    ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--stride", type=int, default=10)
+    ap.add_argument("--name", default="a384")
+    ap.add_argument("--limit", type=int, default=0, help="eval: score about this many forecasts")
     ap.add_argument("--batch-tokens", type=int, default=32768)
-    ap.add_argument("--vectors", type=int, default=8)
-    ap.add_argument("--wbits", type=int, default=8)
+    ap.add_argument("--vectors", type=int, default=8, help="export: number of test forecasts")
     args = ap.parse_args()
-    WBITS = args.wbits
-    {"stats": stats, "eval": evaluate, "export": export}[args.cmd](args)
+    {"eval": evaluate, "export": export}[args.cmd](args)

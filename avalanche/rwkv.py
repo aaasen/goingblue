@@ -1,27 +1,26 @@
 """
-Float RWKV-4 language model over avalanche forecast prose, scored on a held-out
-season. Ideal code length only: sum of -log2 p over text tokens and section ends. Section
-kind, problem type, center and (with --context) the structured fields are given to the model as
-marker tokens and cost nothing, as the structured coder already carries them.
+RWKV-4 language model over avalanche forecast text: the model that ships. Scored by ideal code
+length, the sum of -log2 p over text tokens and section ends. The center, section kind, problem
+type and structured fields are given to the model as marker tokens and cost nothing, as the
+structured coder already carries them.
 
-  python rwkv.py tokenize --vocab 8000 --tok v2c --context
-  python rwkv.py train --vocab 8000 --tok v2c --dim 256 --layers 4 --epochs 5 --name d256
-  python rwkv.py eval --name d256 --split val
-  python rwkv.py selftest
+Trains on the real forecasts plus the teacher's samples (synth.py). By default the 2024-25 season
+is held out for validation and 2025-26 for test; --all trains on every season.
+
+  python rwkv.py train --name a384 --all
+  python rwkv.py eval --name a384
 """
-import argparse, collections, json, math, os, random, sys, time
+import argparse, collections, json, math, os, random, time
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from marks import MARKS, MARK_NAMES
+from marks import MARKS
 
 CODE = os.path.dirname(os.path.abspath(__file__))
 # Corpus, tokenizers, checkpoints and results; NEURAL_DATA points elsewhere (the training VM's disk).
 DATA = os.environ.get("NEURAL_DATA", os.path.join(CODE, "..", "data", "neural"))
 CHUNK = 64
-# Teacher samples, as shards of the corpus format.
-SYNTH = "synth3"
 PTYPES = ["stormSlab", "windSlab", "persistentSlab", "deepPersistentSlab", "wetSlab", "wetLoose", "dryLoose", "cornice", "glide", None]
 
 
@@ -34,45 +33,51 @@ def read_docs(path):
         return [json.loads(l) for l in f]
 
 
-def synth_paths():
+def variant(args):
+    """Suffix of the files that depend on which seasons a run learns from."""
+    return "-all" if args.all else ""
+
+
+def synth_dir(args):
+    """Teacher samples, as shards of the corpus format."""
+    return f"{DATA}/synth{variant(args)}"
+
+
+def synth_paths(args):
     import glob
-    return sorted(glob.glob(f"{DATA}/{SYNTH}/k*-c*[0-9].jsonl"))
+    return sorted(glob.glob(f"{synth_dir(args)}/k*-c*[0-9].jsonl"))
 
 
-def load_docs(synth=False):
-    docs = read_docs(f"{DATA}/corpus3.jsonl")
-    for path in synth_paths() if synth else []:
-        docs += read_docs(path)
-    return docs
+def load_docs():
+    return read_docs(f"{DATA}/corpus3.jsonl")
 
 
 def centers_of(docs):
     return sorted({d["center"] for d in docs})
 
 
-def markers_of(docs, context):
+def markers_of(docs):
     """Marker names in id order; marker i is token V + 1 + i."""
     markers = ["kind:" + k for k in sorted({s["kind"] for d in docs for s in d["sections"]})]
     markers += ["ptype:" + str(p) for p in PTYPES] + ["center:" + c for c in centers_of(docs)]
-    if context:
-        markers += sorted({c for d in docs for c in d["ctx"] + [c for s in d["sections"] for c in s["ctx"]]})
-    return markers
+    return markers + sorted({c for d in docs for c in d["ctx"] + [c for s in d["sections"] for c in s["ctx"]]})
 
 
 def real_splits(args):
     """Splits of the real forecasts a run learns from: with --all, every season."""
-    return ("train", "val", "test") if getattr(args, "all", False) else ("train",)
+    return ("train", "val", "test") if args.all else ("train",)
 
 
 # ---------------------------------------------------------------- tokenizer
 
 def tokenize(args):
-    """Writes tok<vocab><tok>.npz/.json. With --context, each doc starts with its structured
-    context markers and each problem section with its own; all markers are free."""
+    """Trains the SentencePiece model on the real forecasts and writes the tokenized forecasts and
+    samples (tok.npz, tok.json). Each doc starts with its center and structured context markers
+    and each problem section with its own; all markers are free."""
     import sentencepiece as spm
     # The samples are read a shard at a time; they reuse the real forecasts' markers.
     docs = load_docs()
-    prefix = f"{DATA}/sp{args.vocab}{args.sp}"
+    prefix = f"{DATA}/sp{variant(args)}"
     if not os.path.exists(prefix + ".model"):
         texts = [s["text"] for d in docs if d["split"] in real_splits(args) for s in d["sections"]]
         random.Random(0).shuffle(texts)
@@ -86,14 +91,14 @@ def tokenize(args):
     sp = spm.SentencePieceProcessor(model_file=prefix + ".model")
     V = sp.get_piece_size()
     END = V
-    markers = markers_of(docs, args.context)
+    markers = markers_of(docs)
     mid = {k: V + 1 + i for i, k in enumerate(markers)}
     total = V + 1 + len(markers)
 
     bad = unk = 0
     toks, masks, meta = [], [], []
     count = 0
-    groups = [lambda: docs] + [lambda p=p: read_docs(p) for p in (synth_paths() if args.synth else [])]
+    groups = [lambda: docs] + [lambda p=p: read_docs(p) for p in synth_paths(args)]
     for group in groups:
         group = group()
         count += len(group)
@@ -103,14 +108,13 @@ def tokenize(args):
             bad += sum(sp.decode(e) != t for e, t in zip(enc, texts))
             unk += sum(e.count(0) for e in enc)
             i = 0
-            t = [mid["center:" + d["center"]]] + ([mid[c] for c in d["ctx"]] if args.context else [])
+            t = [mid["center:" + d["center"]]] + [mid[c] for c in d["ctx"]]
             m = [0] * len(t)
             for s in d["sections"]:
                 t.append(mid["kind:" + s["kind"]]); m.append(0)
                 if s["kind"] == "problem":
                     t.append(mid["ptype:" + str(s.get("context"))]); m.append(0)
-                    if args.context:
-                        t += [mid[c] for c in s["ctx"]]; m += [0] * len(s["ctx"])
+                    t += [mid[c] for c in s["ctx"]]; m += [0] * len(s["ctx"])
                 t += enc[i]; m += [1] * len(enc[i])
                 t.append(END); m.append(1)
                 i += 1
@@ -118,8 +122,8 @@ def tokenize(args):
             masks.append(np.array(m, dtype=np.uint8))
             meta.append({"id": d["id"], "center": d["center"], "source": d.get("source", "nac"), "split": d["split"],
                          "chars": sum(utf16_len(s["text"]) for s in d["sections"])})
-    np.savez(f"{DATA}/tok{args.vocab}{args.tok}.npz", lens=np.array([len(t) for t in toks]), toks=np.concatenate(toks), masks=np.concatenate(masks))
-    with open(f"{DATA}/tok{args.vocab}{args.tok}.json", "w") as f:
+    np.savez(f"{DATA}/tok{variant(args)}.npz", lens=np.array([len(t) for t in toks]), toks=np.concatenate(toks), masks=np.concatenate(masks))
+    with open(f"{DATA}/tok{variant(args)}.json", "w") as f:
         json.dump({"vocab": total, "markers": markers, "meta": meta}, f)
     chars = sum(m["chars"] for m in meta)
     text_tokens = sum(int(m.sum()) for m in masks)
@@ -127,9 +131,9 @@ def tokenize(args):
           f"round-trip failures {bad}, unk tokens {unk}")
 
 
-def load_tokens(vocab, tok):
-    z = np.load(f"{DATA}/tok{vocab}{tok}.npz")
-    with open(f"{DATA}/tok{vocab}{tok}.json") as f:
+def load_tokens(args):
+    z = np.load(f"{DATA}/tok{variant(args)}.npz")
+    with open(f"{DATA}/tok{variant(args)}.json") as f:
         j = json.load(f)
     toks, masks, lens = z["toks"], z["masks"], z["lens"]
     offs = np.concatenate([[0], np.cumsum(lens)])
@@ -175,18 +179,6 @@ def _wkv_chunked(w, u, k, v):
     num = num + dec_t * carry_num + cur * v.view(B, n, L, C)
     den = den + dec_t * carry_den + cur
     return (num / den).view(B, T, C)
-
-
-def wkv_naive(w, u, k, v):
-    B, T, C = k.shape
-    out = torch.zeros_like(k)
-    a, b = torch.zeros(B, C), torch.zeros(B, C)
-    for t in range(T):
-        e = torch.exp(u + k[:, t])
-        out[:, t] = (a + e * v[:, t]) / (b + e)
-        a = torch.exp(-w) * a + torch.exp(k[:, t]) * v[:, t]
-        b = torch.exp(-w) * b + torch.exp(k[:, t])
-    return out
 
 
 def shift(x):
@@ -236,26 +228,11 @@ class RWKV(nn.Module):
         self.head = nn.Linear(C, vocab, bias=False)
         nn.init.normal_(self.head.weight, std=0.5 / math.sqrt(C))
 
-    def forward(self, idx, wkv=wkv_chunked):
+    def forward(self, idx):
         x = self.ln0(self.emb(idx))
         for b in self.blocks:
-            x = b(x, wkv)
+            x = b(x, wkv_chunked)
         return self.head(self.ln_out(x))
-
-
-def selftest(_args):
-    torch.manual_seed(0)
-    B, T, C = 2, 3 * CHUNK, 8
-    w = torch.rand(C) * 2
-    u = torch.randn(C)
-    k, v = torch.randn(B, T, C) * 3, torch.randn(B, T, C)
-    a, b = wkv_chunked(w, u, k, v), wkv_naive(w, u, k, v)
-    print("max abs diff chunked vs naive:", (a - b).abs().max().item())
-    m = RWKV(100, 16, 2, 64)
-    for p in m.parameters():
-        p.data += torch.randn_like(p) * 0.1
-    x = torch.randint(0, 100, (2, 2 * CHUNK))
-    print("model chunked vs naive:", (m(x) - m(x, wkv_naive)).abs().max().item())
 
 
 # ---------------------------------------------------------------- data
@@ -315,11 +292,7 @@ def doc_bits(model, docs, device, max_len=1 << 16, tokens_per_batch=32768):
 # ---------------------------------------------------------------- train / eval
 
 def build(args, vocab):
-    size = (vocab, args.dim, args.layers, args.ffn or 4 * args.dim, getattr(args, "dropout", 0.0))
-    if getattr(args, "arch", "v4") == "v7":
-        from rwkv7 import RWKV7
-        return RWKV7(*size)
-    return RWKV(*size)
+    return RWKV(vocab, args.dim, args.layers, 4 * args.dim, args.dropout)
 
 
 def count(model):
@@ -338,13 +311,10 @@ def train(args):
     continues from it. Each epoch's batch order comes from (seed, epoch), so resuming skips the
     batches already done."""
     device = device_of()
-    if not os.path.exists(f"{DATA}/tok{args.vocab}{args.tok}.npz"):
+    if not os.path.exists(f"{DATA}/tok{variant(args)}.npz"):
         tokenize(args)
-    vocab, docs = load_tokens(args.vocab, args.tok)
+    vocab, docs = load_tokens(args)
     tr = [d for d in docs if d[2]["split"] in real_splits(args) + ("synth",)]
-    if args.synth_samples:
-        # Synthetic ids are "syn<sample>:<source id>".
-        tr = [d for d in tr if d[2]["split"] != "synth" or int(d[2]["id"][3:].split(":")[0]) < args.synth_samples]
     print(f"{len(tr)} training docs, {sum(d[2]['split'] == 'synth' for d in tr)} synthetic", flush=True)
     # With --all nothing is held out: no scoring, and the last step's weights are the result.
     va = [] if args.all else [d for d in docs if d[2]["split"] == "val"]
@@ -357,8 +327,7 @@ def train(args):
     opt = torch.optim.AdamW([{"params": decay, "weight_decay": 0.01}, {"params": other, "weight_decay": 0}], lr=args.lr, betas=(0.9, 0.99))
     order = lambda epoch: random.Random(args.seed * 1000 + epoch)
     steps_per_epoch = sum(1 for _ in batches(tr, args.max_len, args.batch_tokens, True, order(0)))
-    total_steps = args.steps or steps_per_epoch * args.epochs
-    epochs = math.ceil(total_steps / steps_per_epoch)
+    total_steps = steps_per_epoch * args.epochs
     val_chars = sum(d[2]["chars"] for d in va)
 
     ckpt_path = f"{DATA}/{args.name}.ckpt.pt"
@@ -377,7 +346,7 @@ def train(args):
         save_atomic({"model": model.state_dict(), "opt": opt.state_dict(), "st": st}, ckpt_path)
 
     step = st["step"]
-    for epoch in range(step // steps_per_epoch, epochs):
+    for epoch in range(step // steps_per_epoch, args.epochs):
         skip = step - epoch * steps_per_epoch
         for b, (x, y, m, ds) in enumerate(batches(tr, args.max_len, args.batch_tokens, True, order(epoch))):
             if b < skip:
@@ -387,17 +356,11 @@ def train(args):
                 g["lr"] = lr
             x, y, m = x.to(device), y.to(device), m.to(device)
             opt.zero_grad(set_to_none=True)
-            denom = m.sum()
-            loss = 0.0
-            # --accum splits the batch's rows into micro-batches with the same summed gradient.
-            for xs, ys, ms in zip(x.chunk(args.accum), y.chunk(args.accum), m.chunk(args.accum)):
-                with autocast(device):
-                    logits = model(xs)
-                nll = F.cross_entropy(logits.float().transpose(1, 2), ys, reduction="none")
-                part = (nll * ms).sum() / denom
-                part.backward()
-                loss += part.detach()
-                del logits, nll, part
+            with autocast(device):
+                logits = model(x)
+            nll = F.cross_entropy(logits.float().transpose(1, 2), y, reduction="none")
+            loss = (nll * m).sum() / m.sum()
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             step += 1
@@ -429,8 +392,6 @@ def train(args):
                 checkpoint()
                 print(f"stopped at --max-steps {step}", flush=True)
                 return
-            if step == total_steps:
-                break
     print(f"done: best val {st['best']:.4f} b/c, {(time.time() - t0) / 60:.1f} min", flush=True)
 
 
@@ -438,48 +399,12 @@ def evaluate(args):
     device = device_of()
     ck = torch.load(f"{DATA}/{args.name}.pt", map_location=device)
     a = argparse.Namespace(**ck["args"])
-    vocab, docs = load_tokens(a.vocab, a.tok)
+    vocab, docs = load_tokens(a)
     model = build(a, vocab).to(device)
     model.load_state_dict(ck["state"])
     total, emb = count(model)
-    print(f"{args.name}: {total / 1e6:.2f}M params ({emb / 1e6:.2f}M embedding + head), {total / 1e6:.1f} MB int8, vocab {a.vocab}, tokens {a.tok}")
-    scored = [d for d in docs if d[2]["split"] == args.split]
-    report(f"{args.name}", docs, doc_bits(model, scored, device), args.split)
-    mark_report(model, scored, device, a, vocab)
-
-
-def mark_report(model, docs, device, a, vocab):
-    """Bits spent on tokens whose piece holds a formatting mark, by the first mark in the piece.
-    A piece that merges a mark with text counts whole, so this is an upper bound on the marks alone."""
-    import sentencepiece as spm
-    sp = spm.SentencePieceProcessor(model_file=f"{DATA}/sp{a.vocab}{a.sp}.model")
-    cls = torch.zeros(vocab, dtype=torch.long)
-    for i in range(sp.get_piece_size()):
-        hit = [MARKS.index(c) for c in sp.id_to_piece(i) if c in MARKS]
-        if hit:
-            cls[i] = 1 + hit[0]
-    if not cls.any():
-        return
-    cls = cls.to(device)
-    bits = torch.zeros(len(MARKS) + 1, dtype=torch.float64, device=device)
-    count = torch.zeros(len(MARKS) + 1, dtype=torch.float64, device=device)
-    model.eval()
-    with torch.no_grad():
-        for x, y, m, ds in batches(docs, 1 << 16, 32768, False, None):
-            y, m = y.to(device), m.to(device)
-            with autocast(device):
-                logits = model(x.to(device))
-            nll = F.cross_entropy(logits.float().transpose(1, 2), y, reduction="none") * m / math.log(2)
-            bits.index_add_(0, cls[y].flatten(), nll.flatten().double())
-            count.index_add_(0, cls[y].flatten(), m.flatten().double())
-    model.train()
-    n = len(docs)
-    print(f"marks: {'kind':12} {'per doc':>8} {'bits each':>9} {'B per doc':>9}")
-    for i, name in enumerate(MARK_NAMES):
-        c, b = count[i + 1].item(), bits[i + 1].item()
-        if c:
-            print(f"marks: {name:12} {c / n:8.2f} {b / c:9.2f} {b / 8 / n:9.2f}")
-    print(f"marks: {'all':12} {count[1:].sum().item() / n:8.2f} {'':9} {bits[1:].sum().item() / 8 / n:9.2f}")
+    print(f"{args.name}: {total / 1e6:.2f}M params ({emb / 1e6:.2f}M embedding + head), {total / 1e6:.1f} MB int8")
+    report(args.name, docs, doc_bits(model, [d for d in docs if d[2]["split"] == args.split], device), args.split)
 
 
 def report(name, docs, bits, split):
@@ -503,29 +428,20 @@ def report(name, docs, bits, split):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd")
-    ap.add_argument("--vocab", type=int, default=16000)
-    ap.add_argument("--dim", type=int, default=256)
-    ap.add_argument("--layers", type=int, default=4)
-    ap.add_argument("--ffn", type=int, default=0)
+    ap.add_argument("--name", default="model")
+    ap.add_argument("--all", action="store_true", help="learn from every season, with nothing held out")
+    ap.add_argument("--vocab", type=int, default=8000)
+    ap.add_argument("--dim", type=int, default=384)
+    ap.add_argument("--layers", type=int, default=6)
+    ap.add_argument("--dropout", type=float, default=0.1)
     ap.add_argument("--epochs", type=int, default=2)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--max-len", type=int, default=2048)
     ap.add_argument("--batch-tokens", type=int, default=32768)
     ap.add_argument("--eval-every", type=int, default=1000)
-    ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--ckpt-minutes", type=float, default=10)
-    ap.add_argument("--max-steps", type=int, default=0)
-    ap.add_argument("--steps", type=int, default=0, help="train: total steps for the schedule, in place of --epochs")
-    ap.add_argument("--dropout", type=float, default=0.0)
-    ap.add_argument("--arch", default="v4", choices=["v4", "v7"], help="v7: the RWKV-7 model in rwkv7.py (float only)")
-    ap.add_argument("--accum", type=int, default=1)
-    ap.add_argument("--name", default="run")
-    ap.add_argument("--sp", default="v2", help="sentencepiece model suffix")
-    ap.add_argument("--tok", default="v2", help="tokenized dataset suffix")
-    ap.add_argument("--context", action="store_true")
-    ap.add_argument("--synth", action="store_true", help="tokenize: add the teacher samples as split synth")
-    ap.add_argument("--all", action="store_true", help="learn from every season, with nothing held out")
-    ap.add_argument("--synth-samples", type=int, default=0, help="train: use only the first N synthetic samples per forecast (0: all)")
-    ap.add_argument("--split", default="val")
+    ap.add_argument("--max-steps", type=int, default=0, help="stop early, for a test run")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--split", default="val", help="eval: the season to score")
     args = ap.parse_args()
-    {"tokenize": tokenize, "train": train, "eval": evaluate, "selftest": selftest}[args.cmd](args)
+    {"tokenize": tokenize, "train": train, "eval": evaluate}[args.cmd](args)
