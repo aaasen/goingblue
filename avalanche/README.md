@@ -1,10 +1,12 @@
 # Avalanche Forecasts
 
-Going Blue provides full avalanche forecasts via satellite. Avalanche Canada forecasts average 1,970 characters (330 words) and NWAC forecasts are even longer at an average of 2,850 characters (470 words). Sending the entire forecast via SMS would take 12-18 messages on average, which is far too many for satellite messengers. To send full avalanche forecasts via satellite, the forecasts need to be compressed so that they fit in just a few messages. Off the shelf compression methods can only compress the data about 2x:
+Going Blue compresses full avalanche forecasts into just a few text messages using a neural model that achieves compression ratios of 12:1 to 20:1 depending on the avalanche center.
 
-- gzip
-- zstd pretrained
-- brotli
+Avalanche forecasts are sourced from Avalanche Canada and the National Avalanche Center, which serves many American avalanche centers through a standardized interface and API. As of late 2026, the CAIC and the UAC are the largest forecast centers that are not supported by NAC.
+
+Full avalanche forecasts range are about 2,000-3,000 characters or 300-500 words. Avalanche Canada forecasts are on the shorter end at an average of 1,970 characters (330 words). NWAC forecasts are on the longer end with an average of 2,850 characters (470 words). Sending an entire forecast without compression would take between 12 and 18 messages, which is impractical over satellite messenger.
+
+Standard tools like gzip, zstd, and brotli can compress the forecasts about 2-5x. gzip performs the worst since it has no pretraining and can't learn patterns in such short messages. Brotli has a built-in dictionary which makes it slightly better. With pretraining on avalanche forecasts, zstd can reach compression ratios near 5x. 
 
 | Method | Average size | Compression ratio | SMS messages |
 |---|---:|---:|---:|
