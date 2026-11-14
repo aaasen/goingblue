@@ -103,6 +103,24 @@ impl Lin {
 
     // out[o] = rshift(sum_i x[i] q[o][i] * mul[o], WMUL + shift[o] + fin - fout)
     fn apply(&self, x: &[i32], fin: u32, fout: u32, out: &mut [i64]) {
+        #[cfg(target_arch = "x86_64")]
+        if std::arch::is_x86_feature_detected!("avx2") {
+            // SAFETY: the CPU has AVX2.
+            return unsafe { self.apply_avx2(x, fin, fout, out) };
+        }
+        self.apply_rows(x, fin, fout, out)
+    }
+
+    // The same arithmetic compiled for AVX2, which baseline x86-64 lacks: its 32-bit multiplies
+    // are several times slower.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn apply_avx2(&self, x: &[i32], fin: u32, fout: u32, out: &mut [i64]) {
+        self.apply_rows(x, fin, fout, out)
+    }
+
+    #[inline(always)]
+    fn apply_rows(&self, x: &[i32], fin: u32, fout: u32, out: &mut [i64]) {
         for o in 0..self.rows {
             let row = &self.q[o * self.cols..(o + 1) * self.cols];
             out[o] = rshift(dot(x, row) * self.mul[o], self.shift_of(o, fin, fout) as u32);
@@ -110,7 +128,7 @@ impl Lin {
     }
 }
 
-#[inline]
+#[inline(always)]
 fn dot(x: &[i32], q: &[i8]) -> i64 {
     let mut acc = 0i64;
     for (xs, qs) in x.chunks(DOT_BLOCK).zip(q.chunks(DOT_BLOCK)) {
