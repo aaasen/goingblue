@@ -161,9 +161,17 @@ const SERVED_TYPES = new Set(["forecast", "summary"]);
 // How far before the requested day the reply's header can place a product's issue time.
 const MAX_DAYS_BACK = 339;
 
+const HEADERS = { "User-Agent": "GoingBlue (+https://going.blue)", Origin: "https://going.blue" };
+
+// A failure carries the start of the response, which says who refused the call and why.
 async function getJson(path: string): Promise<unknown> {
-  const res = await fetch(new URL(path, API), { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  if (!res.ok) throw new Error(`nac: HTTP ${res.status}`);
+  const res = await fetch(new URL(path, API), {
+    headers: HEADERS, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    const body = (await res.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 200);
+    throw new Error(`nac: HTTP ${res.status}${body ? `: ${body}` : ""}`);
+  }
   return res.json();
 }
 

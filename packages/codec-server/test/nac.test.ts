@@ -141,7 +141,7 @@ describe("zones", () => {
 });
 
 describe("serveAvalanche for an NWAC zone", () => {
-  it("asks avalanche.org for the zone's latest product, with no Origin", async () => {
+  it("asks avalanche.org for the zone's latest product, naming itself", async () => {
     const fetch = answer(() => STEVENS);
     const result = await serveAvalanche(request("d:d"));
     expect(fetch).toHaveBeenCalledOnce();
@@ -149,7 +149,7 @@ describe("serveAvalanche for an NWAC zone", () => {
     expect(url.host).toBe("api.avalanche.org");
     expect(url.pathname).toBe("/v2/public/product");
     expect(Object.fromEntries(url.searchParams)).toEqual({ type: "forecast", center_id: "NWAC", zone_id: "3024" });
-    expect(init.headers).toBeUndefined();
+    expect(init.headers).toEqual({ "User-Agent": "GoingBlue (+https://going.blue)", Origin: "https://going.blue" });
     if (result.kind !== "ok") throw new Error(result.kind);
     const { code, forecast } = await decodeAvalancheMessage(MODELS, result.replies[0], ANCHOR, "base94");
     expect(code).toBe(42);
