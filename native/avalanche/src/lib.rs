@@ -144,6 +144,12 @@ impl Model {
         Ok(rans::encode(&steps))
     }
 
+    /// How many tokens `encode` feeds the model for `doc`: the work encoding it takes.
+    pub fn steps(&self, doc: &Doc) -> usize {
+        let sections = doc.sections.iter().map(|s| self.marker_ids(&s.markers).len() + self.tokenizer.encode(&s.text).len() + 1);
+        self.marker_ids(&doc.markers).len() + sections.sum::<usize>()
+    }
+
     /// The section texts of a stream `encode` wrote for a doc with these markers.
     pub fn decode(&self, bytes: &[u8], layout: &Doc) -> Result<Vec<String>, Error> {
         let mut run = self.runner();

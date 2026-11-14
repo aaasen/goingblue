@@ -76,6 +76,12 @@ impl AvalancheModel {
         AsyncTask::new(Encode { model: self.model.clone(), doc: doc_of(doc) })
     }
 
+    /// How many tokens `encode` feeds the model for `doc`.
+    #[napi]
+    pub fn steps(&self, doc: Doc) -> u32 {
+        self.model.steps(&doc_of(doc)) as u32
+    }
+
     /// The section texts of a stream, computed off the main thread.
     #[napi(ts_return_type = "Promise<string[]>")]
     pub fn decode(&self, bytes: Buffer, layout: Doc) -> AsyncTask<Decode> {

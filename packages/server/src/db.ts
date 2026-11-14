@@ -194,6 +194,11 @@ export async function migrate(): Promise<void> {
       add column if not exists fetch_ms int,
       add column if not exists encode_ms int
   `);
+  // The tokens the avalanche prose model was fed for the reply, the work its `encode_ms` paid
+  // for. Null for weather requests and from containers that do not report it.
+  await query(`
+    alter table requests add column if not exists encode_steps int
+  `);
   // The gateway's id for the message, the same value its logs and the codec's carry as
   // `request_id`, so a row leads straight to the lines that produced it. Null on rows written
   // before the id existed; every row since has one, because the gateway mints it before

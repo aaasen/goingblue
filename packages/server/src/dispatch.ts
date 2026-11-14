@@ -41,6 +41,9 @@ export interface RequestShape {
   // overhead.
   fetchMs: number | null;
   encodeMs: number | null;
+  // The tokens the avalanche prose model was fed, the work `encodeMs` paid for. Null for weather
+  // requests and from containers that do not report it.
+  encodeSteps: number | null;
 }
 
 export type DispatchResult =
@@ -168,6 +171,7 @@ export function parseShapeHeader(header: string | null): RequestShape | null {
     periods: shapePeriods(o["periods"]),
     fetchMs: shapeInt(o["fetchMs"]),
     encodeMs: shapeInt(o["encodeMs"]),
+    encodeSteps: shapeInt(o["encodeSteps"]),
   };
 }
 

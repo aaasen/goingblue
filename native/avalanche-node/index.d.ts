@@ -14,6 +14,8 @@ export declare class AvalancheModel {
   info(): ModelInfo
   /** The prose as one rANS stream, computed off the main thread. */
   encode(doc: Doc): Promise<Buffer>
+  /** How many tokens `encode` feeds the model for `doc`. */
+  steps(doc: Doc): number
   /** The section texts of a stream, computed off the main thread. */
   decode(bytes: Buffer, layout: Doc): Promise<string[]>
 }

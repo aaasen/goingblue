@@ -34,16 +34,20 @@ function load<T extends StructuredModel | ProseCoder>(file: string, parse: (byte
   return loading as Promise<T>;
 }
 
+// A prose coder that can also say how many model steps encoding a doc takes.
+export type NativeProseCoder = ProseCoder & { steps(doc: Parameters<ProseCoder["encode"]>[0]): number };
+
 // The native prose model as the protocol's coder. Encoding runs off the event loop.
-export function proseCoder(bytes: Buffer): ProseCoder {
+export function proseCoder(bytes: Buffer): NativeProseCoder {
   const model = new AvalancheModel(bytes);
   return {
+    steps: (doc) => model.steps(doc),
     encode: async (doc) => new Uint8Array(await model.encode(doc)),
     decode: (bytes, layout) => model.decode(Buffer.from(bytes), layout),
   };
 }
 
-async function avalancheModels(file: string): Promise<Models> {
+async function avalancheModels(file: string): Promise<{ structured: StructuredModel; prose: NativeProseCoder }> {
   const [structured, prose] = await Promise.all([
     load(file, (bytes) => loadStructured(gunzipSync(bytes))),
     load(PROSE_MODEL_FILE, proseCoder),
@@ -52,7 +56,8 @@ async function avalancheModels(file: string): Promise<Models> {
 }
 
 export type AvalancheResult =
-  | { kind: "ok"; replies: string[]; fetchMs: number; encodeMs: number }
+  // `encodeSteps` is the prose model's work: the tokens it was fed.
+  | { kind: "ok"; replies: string[]; fetchMs: number; encodeMs: number; encodeSteps: number }
   | { kind: "no_forecast" };
 
 // The forecast covering the request's point, or null when no center forecasts there then.
@@ -78,8 +83,17 @@ export async function serveAvalanche(params: ForecastParams): Promise<AvalancheR
   const fetchMs = Date.now() - fetchStart;
 
   const encodeStart = Date.now();
-  const encoded = await encodeAvalancheMessage(m, params.code, anchor, forecast, params.alphabet);
+  let encodeSteps = 0;
+  const prose: ProseCoder = {
+    decode: m.prose.decode,
+    encode: (doc) => {
+      encodeSteps += m.prose.steps(doc);
+      return m.prose.encode(doc);
+    },
+  };
+  const models: Models = { structured: m.structured, prose };
+  const encoded = await encodeAvalancheMessage(models, params.code, anchor, forecast, params.alphabet);
   const replies = splitReplyFor(params, encoded, WIRE_HEADER_CHARS);
   if (replies.length > MAX_PARTS) throw new Error(`avalanche: bulletin for ${forecast.region} needs ${replies.length} parts`);
-  return { kind: "ok", replies, fetchMs, encodeMs: Date.now() - encodeStart };
+  return { kind: "ok", replies, fetchMs, encodeMs: Date.now() - encodeStart, encodeSteps };
 }

@@ -104,9 +104,9 @@ async function encodeAvalanche(c: Context, params: ForecastParams) {
       log.info("encode.no_forecast", { version: params.decoderVersion });
       return c.text("no_forecast", 422);
     }
-    const { replies, fetchMs, encodeMs } = result;
+    const { replies, fetchMs, encodeMs, encodeSteps } = result;
     return c.text(replies.join("\n"), 200, {
-      "X-Request-Shape": JSON.stringify({ ...describeRequest(params), messages: replies.length, fetchMs, encodeMs }),
+      "X-Request-Shape": JSON.stringify({ ...describeRequest(params), messages: replies.length, fetchMs, encodeMs, encodeSteps }),
     });
   } catch (e) {
     log.error("encode.failed", { version: params.decoderVersion, err: e });

@@ -154,6 +154,9 @@ describe("serveAvalanche for an NWAC zone", () => {
     const { code, forecast } = await decodeAvalancheMessage(MODELS, result.replies[0], ANCHOR, "base94");
     expect(code).toBe(42);
     expect(forecast).toEqual(withPlaceholders(toForecast(STEVENS, NWAC)));
+    // At least one token per section, and no more than one per character of prose.
+    expect(result.encodeSteps).toBeGreaterThan(10);
+    expect(result.encodeSteps).toBeLessThan(JSON.stringify(STEVENS).length);
     expect(forecast.pieces).toEqual([STEVENS_PIECE.id]);
   });
 
