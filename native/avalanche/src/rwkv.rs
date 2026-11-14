@@ -42,6 +42,8 @@ const X_CLAMP: i64 = 1 << 20;
 // below 2^31. Loading checks that every input a model can produce is within MAX_INPUT.
 const DOT_BLOCK: usize = 64;
 const MAX_INPUT: i64 = ((1i64 << 31) - 1) / (127 * DOT_BLOCK as i64);
+// The same for inputs that fit in i16, which is nearly all of them: 2^15 * 2^7 * 256 = 2^30.
+const DOT16_BLOCK: usize = 256;
 
 #[inline]
 fn rshift(x: i64, s: u32) -> i64 {
@@ -101,29 +103,49 @@ impl Lin {
         Ok(())
     }
 
-    // out[o] = rshift(sum_i x[i] q[o][i] * mul[o], WMUL + shift[o] + fin - fout)
-    fn apply(&self, x: &[i32], fin: u32, fout: u32, out: &mut [i64]) {
+    // out[o] = rshift(sum_i x[i] q[o][i] * mul[o], WMUL + shift[o] + fin - fout). `narrow` is
+    // scratch of at least x's length.
+    fn apply(&self, x: &[i32], fin: u32, fout: u32, narrow: &mut [i16], out: &mut [i64]) {
+        // 16-bit inputs multiply twice as many weights per vector instruction, with the same sums.
+        let narrow = &mut narrow[..x.len()];
+        let mut fits = true;
+        for (n, &v) in narrow.iter_mut().zip(x) {
+            *n = v as i16;
+            fits &= *n as i32 == v;
+        }
+        let narrow = fits.then_some(&*narrow);
         #[cfg(target_arch = "x86_64")]
         if std::arch::is_x86_feature_detected!("avx2") {
             // SAFETY: the CPU has AVX2.
-            return unsafe { self.apply_avx2(x, fin, fout, out) };
+            return unsafe { self.apply_avx2(x, narrow, fin, fout, out) };
         }
-        self.apply_rows(x, fin, fout, out)
+        self.apply_rows(x, narrow, fin, fout, out)
     }
 
-    // The same arithmetic compiled for AVX2, which baseline x86-64 lacks: its 32-bit multiplies
-    // are several times slower.
+    // The same sums with AVX2, which baseline x86-64 lacks.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
-    unsafe fn apply_avx2(&self, x: &[i32], fin: u32, fout: u32, out: &mut [i64]) {
-        self.apply_rows(x, fin, fout, out)
+    unsafe fn apply_avx2(&self, x: &[i32], narrow: Option<&[i16]>, fin: u32, fout: u32, out: &mut [i64]) {
+        for o in 0..self.rows {
+            let row = &self.q[o * self.cols..(o + 1) * self.cols];
+            let d = match narrow {
+                // SAFETY: this function is compiled for AVX2.
+                Some(n) => unsafe { dot16_avx2(n, row) },
+                None => dot(x, row),
+            };
+            out[o] = rshift(d * self.mul[o], self.shift_of(o, fin, fout) as u32);
+        }
     }
 
     #[inline(always)]
-    fn apply_rows(&self, x: &[i32], fin: u32, fout: u32, out: &mut [i64]) {
+    fn apply_rows(&self, x: &[i32], narrow: Option<&[i16]>, fin: u32, fout: u32, out: &mut [i64]) {
         for o in 0..self.rows {
             let row = &self.q[o * self.cols..(o + 1) * self.cols];
-            out[o] = rshift(dot(x, row) * self.mul[o], self.shift_of(o, fin, fout) as u32);
+            let d = match narrow {
+                Some(n) => dot16(n, row),
+                None => dot(x, row),
+            };
+            out[o] = rshift(d * self.mul[o], self.shift_of(o, fin, fout) as u32);
         }
     }
 }
@@ -137,6 +159,47 @@ fn dot(x: &[i32], q: &[i8]) -> i64 {
             s += a * b as i32;
         }
         acc += s as i64;
+    }
+    acc
+}
+
+#[inline(always)]
+fn dot16(x: &[i16], q: &[i8]) -> i64 {
+    let mut acc = 0i64;
+    for (xs, qs) in x.chunks(DOT16_BLOCK).zip(q.chunks(DOT16_BLOCK)) {
+        let mut s = 0i32;
+        for (&a, &b) in xs.iter().zip(qs) {
+            s += a as i32 * b as i32;
+        }
+        acc += s as i64;
+    }
+    acc
+}
+
+// dot16 with 16 products per multiply-add. Each i32 lane takes two products per step, at most
+// 2^23, so a block of AVX2_BLOCK elements stays below 2^31 per lane.
+#[cfg(target_arch = "x86_64")]
+const AVX2_BLOCK: usize = 2048;
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn dot16_avx2(x: &[i16], q: &[i8]) -> i64 {
+    use std::arch::x86_64::*;
+    let mut acc = 0i64;
+    for (xs, qs) in x.chunks(AVX2_BLOCK).zip(q.chunks(AVX2_BLOCK)) {
+        let (xv, xt) = xs.as_chunks::<16>();
+        let (qv, qt) = qs.as_chunks::<16>();
+        let mut sum = _mm256_setzero_si256();
+        for (a, b) in xv.iter().zip(qv) {
+            // SAFETY: both pointers cover 16 elements.
+            let (a, b) = unsafe { (_mm256_loadu_si256(a.as_ptr().cast()), _mm_loadu_si128(b.as_ptr().cast())) };
+            sum = _mm256_add_epi32(sum, _mm256_madd_epi16(a, _mm256_cvtepi8_epi16(b)));
+        }
+        let mut lanes = [0i32; 8];
+        // SAFETY: lanes holds 256 bits.
+        unsafe { _mm256_storeu_si256(lanes.as_mut_ptr().cast(), sum) };
+        acc += lanes.iter().map(|&l| l as i64).sum::<i64>();
+        acc += xt.iter().zip(qt).map(|(&a, &b)| a as i64 * b as i64).sum::<i64>();
     }
     acc
 }
@@ -195,6 +258,7 @@ pub(crate) struct State {
     kk16: Vec<i32>,
     logits: Vec<i64>,
     e: Vec<i64>,
+    narrow: Vec<i16>,
 }
 
 impl Rwkv {
@@ -300,6 +364,7 @@ impl Rwkv {
             kk16: vec![0; self.ffn],
             logits: vec![0; self.codable],
             e: vec![0; self.codable],
+            narrow: vec![0; c.max(self.ffn)],
         }
     }
 
@@ -347,11 +412,11 @@ impl Rwkv {
         for (l, b) in self.blocks.iter().enumerate() {
             self.layer_norm(&s.x, &b.ln1, &mut s.h);
             Self::mix(&s.h, &s.p1[l], &b.tm_k, &mut s.m);
-            b.key.apply(&s.m, FH, FK, &mut s.k);
+            b.key.apply(&s.m, FH, FK, &mut s.narrow, &mut s.k);
             Self::mix(&s.h, &s.p1[l], &b.tm_v, &mut s.m);
-            b.value.apply(&s.m, FH, FV, &mut s.v);
+            b.value.apply(&s.m, FH, FV, &mut s.narrow, &mut s.v);
             Self::mix(&s.h, &s.p1[l], &b.tm_r, &mut s.m);
-            b.recept.apply(&s.m, FH, FH, &mut s.r);
+            b.recept.apply(&s.m, FH, FH, &mut s.narrow, &mut s.r);
             s.p1[l].copy_from_slice(&s.h);
             let (aa, bb, pp) = (&mut s.aa[l], &mut s.bb[l], &mut s.pp[l]);
             for i in 0..c {
@@ -373,20 +438,20 @@ impl Rwkv {
                 bb[i] = rshift(e1 * bb[i] + (e2 << FB), FE);
                 pp[i] = q;
             }
-            b.out.apply(&s.y, FV, FX, &mut s.o);
+            b.out.apply(&s.y, FV, FX, &mut s.narrow, &mut s.o);
             for i in 0..c {
                 s.x[i] += s.o[i];
             }
             self.layer_norm(&s.x, &b.ln2, &mut s.h);
             Self::mix(&s.h, &s.p2[l], &b.cm_k, &mut s.m);
-            b.ck.apply(&s.m, FH, FH, &mut s.kk);
+            b.ck.apply(&s.m, FH, FH, &mut s.narrow, &mut s.kk);
             for j in 0..self.ffn {
                 let a = s.kk[j].max(0);
                 s.kk16[j] = sat16(rshift(a * a, 2 * FH - FF)) as i32;
             }
             Self::mix(&s.h, &s.p2[l], &b.cm_r, &mut s.m);
-            b.cr.apply(&s.m, FH, FH, &mut s.r);
-            b.cv.apply(&s.kk16, FF, FX, &mut s.o);
+            b.cr.apply(&s.m, FH, FH, &mut s.narrow, &mut s.r);
+            b.cv.apply(&s.kk16, FF, FX, &mut s.narrow, &mut s.o);
             for i in 0..c {
                 s.x[i] = (s.x[i] + rshift(self.sigmoid(s.r[i], FH) * s.o[i], FS)).clamp(-X_CLAMP, X_CLAMP);
             }
@@ -397,7 +462,7 @@ impl Rwkv {
         for i in 0..c {
             s.m[i] = s.h[i] as i32;
         }
-        self.head.apply(&s.m, FH, FL, &mut s.logits);
+        self.head.apply(&s.m, FH, FL, &mut s.narrow, &mut s.logits);
         self.softmax(s, freqs);
     }
 
@@ -424,5 +489,40 @@ impl Rwkv {
             tot += f;
         }
         freqs[am] += ((1i64 << SCALE_BITS) - tot) as u32;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The narrow kernels compute the same sums as the wide one, at the extremes too.
+    #[test]
+    fn dot_kernels_agree() {
+        let mut seed = 1u64;
+        let mut next = move || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as i64
+        };
+        for len in [1, 7, 16, 384, 1536, 5000] {
+            for case in 0..4 {
+                let x: Vec<i16> = (0..len)
+                    .map(|_| match case {
+                        0 => i16::MAX,
+                        1 => i16::MIN,
+                        _ => next() as i16,
+                    })
+                    .collect();
+                let q: Vec<i8> = (0..len).map(|_| if case < 2 { 127 } else { (next() % 128) as i8 }).collect();
+                let wide: Vec<i32> = x.iter().map(|&v| v as i32).collect();
+                let want = dot(&wide, &q);
+                assert_eq!(dot16(&x, &q), want);
+                #[cfg(target_arch = "x86_64")]
+                if std::arch::is_x86_feature_detected!("avx2") {
+                    // SAFETY: the CPU has AVX2.
+                    assert_eq!(unsafe { dot16_avx2(&x, &q) }, want);
+                }
+            }
+        }
     }
 }
