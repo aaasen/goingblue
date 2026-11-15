@@ -41,6 +41,10 @@ import { PAGE } from "./shell.js";
 // size rather than shrinking it to fit. The band's height is a minimum, not a fixed size, for the
 // same reason: the band grows to hold the stack rather than letting the lower badge run over the
 // photo credit, and the 40px padding keeps the credit's corner clear of it when the band does grow.
+//
+// The source button closes the row, drawn to match the store badges: black, 50px tall, with their
+// gray edge and 6.5px corner radius. GitHub allows its mark for linking to GitHub in black or
+// white, without effects and not over a busy background, which the solid button satisfies.
 const HERO_CSS = `
   .hero {
     position: relative;
@@ -70,6 +74,10 @@ const HERO_CSS = `
   .appbtn img { display: block; width: 150px; height: 50px; }
   .playbtn { display: block; width: 169px; }
   .playbtn img { display: block; width: 169px; height: 50px; }
+  .srcbtn { box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+    gap: 8px; width: 150px; height: 50px; border: 1px solid #a6a6a6; border-radius: 6.5px;
+    background: #000; color: #fff; font-size: 17px; font-weight: 500; text-decoration: none; }
+  .srcbtn svg { width: 20px; height: 20px; fill: currentColor; }
   @media (max-width: 600px) {
     .appicon { width: 92px; height: 92px; border-radius: 21px; }
     .hero h1 { font-size: 1.85em; }
@@ -163,6 +171,10 @@ const SHOTS_CSS = `
   @media (max-width: 600px) { .howto figure { flex-basis: 260px; } }
 `;
 
+// GitHub's `mark-github` octicon at 16px, as distributed, inline so it takes the button's color.
+// The link's aria-label names it for screen readers.
+const GITHUB_MARK = `<svg viewBox="0 0 16 16" aria-hidden=true><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>`;
+
 // The masthead the shell hangs above the wrap. It carries the <h1> itself, which is why the shell
 // draws none of its own for a page that brings a header.
 const HERO = `<header class=hero>
@@ -175,6 +187,7 @@ const HERO = `<header class=hero>
         height=50 alt="Download on the App Store"></a>
       <a class=playbtn href="${PLAY_STORE_URL}"><img src="${img("googleplay-badge.svg")}" width=169
         height=50 alt="Get it on Google Play"></a>
+      <a class=srcbtn href="${REPO_URL}" aria-label="View source on GitHub">${GITHUB_MARK}<span>GitHub</span></a>
     </div>
   </div>
   <p class=herocredit>Sultana from Denali, May 2026</p>
@@ -273,8 +286,6 @@ satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO.<
   multiple models and past forecasts while offline.</li>
   <li><strong>Private</strong>: ${BRAND} requires no account and does not store your name, email,
   or phone number.</li>
-  <li><strong>Open source</strong>: View the source and a detailed explanation of the codec on
-  <a href="${REPO_URL}">GitHub</a>.</li>
 </ul>
 
 <h2 id=subscriptions>Subscriptions</h2>
