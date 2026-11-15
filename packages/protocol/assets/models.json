@@ -4,8 +4,8 @@
     "sha256": "dcc5725e5e79ff903655fee48788f35c4fe8a88c0b15e248b974479d8d57a887"
   },
   "prose-model.bin": {
-    "key": "models/avalanche-prose-a384-84fcf3b2ff384e14.bin",
-    "sha256": "84fcf3b2ff384e141f3708df973757ed57153db311e71a48de5b2065ca7b0ddb"
+    "key": "models/avalanche-prose-a256-914fd8816e0a8d82.bin",
+    "sha256": "914fd8816e0a8d82bb30f7dc820f88f94372e363bd9b7cc334db8f4b16c3511d"
   },
   "nac-structured.bin.gz": {
     "key": "models/avalanche-nac-structured-v8-9882c493c3b9f831.bin.gz",

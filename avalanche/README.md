@@ -122,12 +122,12 @@ There are 5 steps to the training process:
 | Data collection | `pnpm avalanche-neural-corpus` | `corpus3.jsonl` | |
 | Teacher fine-tuning | `python teacher.py train --name teacher --all` | `teacher.pt` | 1.7 h |
 | Synthetic forecast generation | `python synth.py train --all` | `synth-all/` | 16.5 h |
-| Training | `python rwkv.py train --name a256 --all` | `a256.pt` | 3.1 h |
+| Training | `python rwkv.py train --name a256 --all` | `a256.pt` | 2.1 h |
 | Quantization | `python quant.py export --name a256` | `a256.int.bin`, `a256.vectors.json` | |
 
 The shipped model was trained on all available training data. In development, the model was only trained on forecasts from before August 2024. The 2024-2025 season forecasts were used for validation and 2025-2026 forecasts were used for testing. 
 
-Training the model takes about 21 hours on a g2-standard-4 with one L4 GPU, which is about $15 on-demand or $5-8 with spot pricing. 
+Training the model takes about 20 hours on a g2-standard-4 with one L4 GPU, which is about $14 on-demand or $5-8 with spot pricing. 
 
 ### Development
 

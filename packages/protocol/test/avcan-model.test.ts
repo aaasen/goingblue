@@ -15,7 +15,7 @@ import SEA_TO_SKY from "../../mobile/fixtures/avalanche/sea-to-sky-2026-03-01.js
 const FROZEN_MODEL_DIGEST = "9e96b36f5b5810b9";
 const FROZEN_NAC_MODEL_DIGEST = "f3ec54062432899c";
 // The shared prose model (native/avalanche), pinned in models.json.
-const FROZEN_PROSE_DIGEST = "84fcf3b2ff384e14";
+const FROZEN_PROSE_DIGEST = "914fd8816e0a8d82";
 // The same for the piece-set model, rewritten by `pnpm avalanche-region`.
 const FROZEN_REGION_DIGEST = "5086b8ab3e00ee3f";
 

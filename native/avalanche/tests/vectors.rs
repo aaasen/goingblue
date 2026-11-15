@@ -10,7 +10,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 const DATA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/neural");
-const NAME: &str = "a384";
+const NAME: &str = "a256";
 
 #[derive(Deserialize)]
 struct Vectors {
