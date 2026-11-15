@@ -16,7 +16,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 
 import {
   allocCode, attachResponse, bulletinOutline, chunksCollected, decodeAny, decodeAvalanche, loadStore, mergeReply,
-  prunePastForecasts, replyKind, replyModelFile, resolveContext, setAvalancheModels, type AvalancheContext,
+  PROSE_MODEL, prunePastForecasts, replyKind, replyModelFile, resolveContext, setAvalancheModels, type AvalancheContext,
 } from '../cache';
 import SEA_TO_SKY from '../fixtures/avalanche/sea-to-sky-2026-03-01.json';
 
@@ -90,6 +90,23 @@ describe('avalanche requests in the forecast store', () => {
     await attachResponse(token, bad, corrupted);
     expect(() => decodeAny(corrupted, token)).toThrow();
     expect((await prunePastForecasts(token)).map((s) => s.code)).toEqual([good]);
+  });
+
+  it('drop a saved reply read with a different prose model', async () => {
+    const token = `${TOKEN}-model`;
+    const ctx = avalancheContext('g');
+    const codes = [await allocCode(token, ctx, 'a'), await allocCode(token, ctx, 'b'), await allocCode(token, ctx, 'c')];
+    for (const code of codes) {
+      await attachResponse(token, code, await encodeAvalancheMessage(MODELS, code, anchorOf(ctx), FORECAST, 'base82'));
+    }
+    const key = `forecast_store_v1:${token}`;
+    const stored = JSON.parse(storage.get(key)!);
+    expect(stored.slots.map((s: { proseModel: string }) => s.proseModel)).toEqual([PROSE_MODEL, PROSE_MODEL, PROSE_MODEL]);
+    // One saved under another model, one from before the model was recorded.
+    stored.slots[1].proseModel = '0000000000000000';
+    delete stored.slots[2].proseModel;
+    storage.set(key, JSON.stringify(stored));
+    expect((await prunePastForecasts(token)).map((s) => s.code)).toEqual([codes[0]]);
   });
 
   it('collect a multi-part reply one message at a time', async () => {

@@ -6,6 +6,7 @@ import {
   type RequestContext, type Variable,
 } from '@weather/protocol';
 import { bulletinTimezone } from './avalancheDisplay';
+import MODEL_PINS from '../protocol/assets/models.json';
 
 // The response is slim (see the protocol's message-code scheme): it omits lat/lon/models/vars/
 // resolution and carries only a 7-bit `code`. We store each outgoing request's context under its
@@ -15,6 +16,10 @@ import { bulletinTimezone } from './avalancheDisplay';
 
 const STORE_KEY_PREFIX = 'forecast_store_v1:';
 const CODE_SPACE = 128; // 7-bit message code, 0..127
+
+// The bundled prose model, by the start of its pinned hash. Prose coded with one model reads only
+// with that model.
+export const PROSE_MODEL = MODEL_PINS['prose-model.bin'].sha256.slice(0, 16);
 
 // What an avalanche request stored so its reply can be decoded: the point, the request time
 // (`t:`) and the requested day (`y:`, null for the latest bulletin), which together give the
@@ -41,6 +46,7 @@ export interface Slot {
   requestedAt: number;
   encoded?: string;     // the response, once received
   savedAt?: number;     // when the response was attached
+  proseModel?: string;  // avalanche: the prose model the response was read with
 }
 
 interface Store {
@@ -318,6 +324,7 @@ export async function attachResponse(token: string, code: number, encoded: strin
   if (slot) {
     slot.encoded = normalizeReply(encoded);
     slot.savedAt = Date.now();
+    if (isAvalancheContext(slot.context)) slot.proseModel = PROSE_MODEL;
     await persist(token, store);
   }
   return pastForecasts(store);
@@ -328,7 +335,8 @@ function pastForecasts(store: Store): Slot[] {
 }
 
 // Drop any received forecast that no longer decodes — e.g. one saved by a retired protocol
-// version (support is dropped deliberately, see VERSIONING.md) or corrupted in storage. Past
+// version (support is dropped deliberately, see VERSIONING.md) or corrupted in storage, or an
+// avalanche forecast saved under a different prose model, whose text can't be read. Past
 // forecasts are a short-lived convenience buffer, so an entry we can't display is dead weight.
 // Slots still awaiting a response (no `encoded` yet) are kept. Returns the surviving forecasts.
 export async function prunePastForecasts(token: string): Promise<Slot[]> {
@@ -336,6 +344,7 @@ export async function prunePastForecasts(token: string): Promise<Slot[]> {
   const before = store.slots.length;
   store.slots = store.slots.filter((s) => {
     if (!s.encoded) return true;
+    if (isAvalancheContext(s.context) && s.proseModel !== PROSE_MODEL) return false;
     if (isAvalancheContext(s.context) && !avalancheModels.has(modelFileOf(s.context))) return true;
     try { decodeAny(s.encoded, token); return true; }
     catch { return false; }
@@ -360,6 +369,7 @@ export async function deleteResponses(token: string, codes: readonly number[]): 
     if (!codes.includes(slot.code)) continue;
     delete slot.encoded;
     delete slot.savedAt;
+    delete slot.proseModel;
   }
   await persist(token, store);
   return pastForecasts(store);

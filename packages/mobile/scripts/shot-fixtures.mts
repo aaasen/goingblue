@@ -20,6 +20,11 @@ import type { Favorite } from '../favorites';
 import { offsetHoursAt } from '../timezone';
 import { SEED_SETTINGS, SEED_TOKEN, SHOTS, isAvalancheShot, requestCount, type Shot } from '../screenshots/shots.mjs';
 
+// As cache.ts PROSE_MODEL, which a script can't import: the cache module loads React Native.
+const PROSE_MODEL: string = JSON.parse(readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'protocol', 'assets', 'models.json'), 'utf8',
+))['prose-model.bin'].sha256.slice(0, 16);
+
 export const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'screenshots', 'fixtures');
 
 export interface FixtureRequest {
@@ -164,6 +169,7 @@ export interface SeedSlot {
   requestedAt: number;
   encoded: string;
   savedAt: number;
+  proseModel?: string;
 }
 
 // What the app would have stored for this request had it sent it, the reply attached the way
@@ -187,6 +193,7 @@ export function seedSlot(params: ForecastParams, wire: string, shot: Shot): Seed
       context: { kind: 'avalanche', lat: shot.lat, lon: shot.lon, start, day: params.day, device: params.device! },
       label: 'Avalanche',
       ...times,
+      proseModel: PROSE_MODEL,
     };
   }
   const mask = params.modelsMask;
