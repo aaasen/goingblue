@@ -5,7 +5,7 @@
 export const BRAND = "Going Blue";
 export const TAGLINE = "Expedition weather forecasts via satellite";
 export const SITE_URL = "https://going.blue";
-export const TERMS_UPDATED = "October 20, 2026";
+export const TERMS_UPDATED = "November 15, 2026";
 export const PRIVACY_UPDATED = "October 20, 2026";
 export const CONTACT_EMAIL = "help@going.blue";
 export const FORECAST_NUMBER = "+14254345858";

@@ -1,4 +1,4 @@
-import { MODEL_INFO, OPEN_METEO_DOCS, horizonText } from "@weather/protocol";
+import { MODEL_INFO, NAC_CENTERS, OPEN_METEO_DOCS, horizonText } from "@weather/protocol";
 import { BRAND, REPO_URL } from "../constants.js";
 import { DELETION_HTML } from "./privacy.js";
 
@@ -26,6 +26,9 @@ const MODELS_HTML = MODEL_INFO.map((m) => `
     <ul>${m.models.map(({ spec, region }) => `
       <li>${spec.label}: ${horizonText(spec.horizonHours)}, ${region}</li>`).join("")}
     </ul>` : ""}`).join("");
+
+const US_CENTERS_HTML = Object.values(NAC_CENTERS).map((c) => `${c.name} (${c.id})`).sort().map((n) => `
+      <li>${n}</li>`).join("");
 
 export const FAQ_HTML = `
 <div class=faq>
@@ -57,6 +60,17 @@ export const FAQ_HTML = `
   <summary>Which weather models are supported?</summary>
   <div class=answer>${MODELS_HTML}
     <p>For model details, see <a href="${OPEN_METEO_DOCS}">Open-Meteo</a>.</p>
+  </div>
+</details>
+<details>
+  <summary>Which avalanche centers are supported?</summary>
+  <div class=answer>
+    <p>${BRAND} supports all Canadian avalanche centers. The following US centers are
+    supported:</p>
+    <ul>${US_CENTERS_HTML}
+    </ul>
+    <p>The Colorado Avalanche Information Center and the Utah Avalanche Center are not supported
+    yet since they don't provide full forecasts through the avalanche.org API.</p>
   </div>
 </details>
 <details>

@@ -191,7 +191,7 @@ const HERO = `<header class=hero>
 const LANDING_BODY = `
 <p class=intro>${BRAND} is an expedition weather app designed specifically for low-bandwidth satellite
 connections. It is built for skiers, alpinists, backpackers, kayakers, sailors, hunters, and anyone
-else who needs detailed weather forecasts in remote places. ${BRAND} works with direct-to-cell
+else who needs detailed weather or avalanche forecasts in remote places. ${BRAND} works with direct-to-cell
 satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO.</p>
 
 <div class=shots>
@@ -258,6 +258,9 @@ satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO.<
   <li><strong>30+ weather models</strong>: Forecasts from high-resolution models like HRRR (3km),
   HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for
   your location.</li>
+  <li><strong>Avalanche forecasts</strong>: Full avalanche forecasts from Avalanche Canada and 21 US
+  avalanche centers. Forecasts are compressed 10-18x using a neural model so that the entire
+  forecast fits in just a few messages.</li>
   <li><strong>Detailed cloud cover</strong>: See up to 10 levels in the atmosphere to
   differentiate between high clouds, valley fog, and whiteout conditions.</li>
   <li><strong>Mountain forecasts</strong>: Pressure-level winds and freezing level for
@@ -266,7 +269,6 @@ satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO.<
   forecasts.</li>
   <li><strong>Model agreement</strong>: See how well the forecast agrees with models from NOAA,
   ECMWF, ECCC, and DWD.</li>
-  <li><strong>Avalanche forecasts</strong>: Full avalanche forecasts from Avalanche Canada.</li>
   <li><strong>Works offline</strong>: All forecasts are saved on your device for comparing
   multiple models and past forecasts while offline.</li>
   <li><strong>Private</strong>: ${BRAND} requires no account and does not store your name, email,

@@ -1,6 +1,6 @@
 # Going Blue: Expedition Weather Forecasts via Satellite
 
-Going Blue is an expedition weather app designed specifically for low-bandwidth satellite connections. It is built for skiers, alpinists, backpackers, kayakers, sailors, hunters, and anyone else who needs detailed weather forecasts in remote places. Going Blue works with direct-to-cell satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927) and the [Play Store](https://play.google.com/store/apps/details?id=com.laneaasen.weather).
+Going Blue is an expedition weather app designed specifically for low-bandwidth satellite connections. It is built for skiers, alpinists, backpackers, kayakers, sailors, hunters, and anyone else who needs detailed weather or avalanche forecasts in remote places. Going Blue works with direct-to-cell satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO. Going Blue is deployed at [going.blue](https://going.blue/) and is available on the [App Store](https://apps.apple.com/app/id6798411927) and the [Play Store](https://play.google.com/store/apps/details?id=com.laneaasen.weather).
 
 <img src="packages/mobile/screenshots/readme.png" width="100%" alt="Five screenshots: a Mont Blanc meteogram with humidity, freezing level, and detailed clouds; Denali with freezing level and pressure-level winds; cloud cover on Jiehkkevarri; model agreement for Monte Fitz Roy; and the Avalanche Canada forecast for Rogers Pass">
 
@@ -15,11 +15,11 @@ Going Blue is an expedition weather app designed specifically for low-bandwidth 
 - **Satellite ready**: Get forecasts anywhere in the world, without cell reception. Works with direct-to-cell satellite internet (Starlink Direct to Cell, T-Satellite), Garmin inReach, ZOLEO, and iPhone satellite messaging.
 - **Hundreds of data points per message**: Uses custom compression optimized for weather data to fit a detailed weather forecast into a single message.
 - **30+ weather models**: Forecasts from high-resolution models like HRRR (3km), HRDPS (2.5km), ICON-D2 (2km), and MET Norway (1km). Automatically chooses the best model for your location.
+- **Avalanche forecasts**: Full avalanche forecasts from Avalanche Canada and 21 US avalanche centers. Forecasts are compressed 10-18x using a neural model so that the entire forecast fits in just a few messages.
 - **Detailed cloud cover**: See up to 10 levels in the atmosphere to differentiate between high clouds, valley fog, and whiteout conditions.
 - **Mountain forecasts**: Pressure-level winds and freezing level for high-altitude mountaineering.
 - **Air quality**: Plan around wildfire smoke and other pollution with AQI forecasts.
 - **Model agreement**: See how well the forecast agrees with models from NOAA, ECMWF, ECCC, and DWD.
-- **Avalanche forecasts**: Full avalanche forecasts from Avalanche Canada.
 - **Works offline**: All forecasts are saved on your device for comparing multiple models and past forecasts while offline.
 - **Private**: Going Blue requires no account and does not store your name, email, or phone number.
 
@@ -330,7 +330,7 @@ Apparent or "feels like" temperature is calculated from temperature, sustained w
 
 ## Avalanche Forecasts
 
-Going Blue can retrieve full avalanche forecasts, exactly as they appear in the avalanche report, in just 1-3 SMS messages. Forecasts are compressed using a neural model trained on historical avalanche that compresses forecasts 10-18x. Details of avalanche forecast compression are in the [avalanche README](./avalanche/README.md).
+Going Blue can retrieve full avalanche forecasts, exactly as they appear in the avalanche report, in just 1-3 SMS messages. Forecasts are compressed using a neural model trained on historical avalanche forecasts that compresses forecasts 10-18x. Details of avalanche forecast compression are in the [avalanche README](./avalanche/README.md).
 
 ## Development
 
@@ -442,6 +442,15 @@ The Going Blue codec relies on the client and server having identical codebooks.
 #### Codec v6 (App version 1.6.0)
 
  - Removed $, @, and _ from the Garmin alphabet to prevent message splitting.
+
+#### Codec v7 (App version 1.7.0)
+
+ - Added Going Blue Expedition subscription.
+
+#### Codec v8 (App version 1.8.0)
+
+ - Added a neural model for avalanche forecast compression which compresses forecasts 50% more than the previous PPM model.
+ - Added support for 21 American avalanche centers. 
 
 ## License
 

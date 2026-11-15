@@ -61,10 +61,10 @@ service or mobile carrier. You are responsible for those charges.</p>
 <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>
 
 <h2>No warranty — forecasts are informational</h2>
-<p>Weather forecasts are provided on an "as is" and "as available" basis for informational
+<p>Weather and avalanche forecasts are provided on an "as is" and "as available" basis for informational
 purposes only. Forecasts are inherently uncertain and may be inaccurate, delayed, or
-unavailable. <strong>Do not rely on the Service as your sole source of weather information
-for decisions affecting safety, including in remote or backcountry settings.</strong> Always
+unavailable. <strong>Do not rely on the Service as your sole source of weather or avalanche
+information for decisions affecting safety, including in remote or backcountry settings.</strong> Always
 use appropriate judgment and additional sources for safety-critical decisions.</p>
 
 <h2>Limitation of liability</h2>
@@ -74,7 +74,9 @@ forecast information.</p>
 
 <h2>Data sources</h2>
 <p>Weather forecasts are derived from data provided by <a href="https://open-meteo.com">Open-Meteo</a>.
-Avalanche forecasts are provided by <a href="https://avalanche.ca">Avalanche Canada</a>.
+Avalanche forecasts are provided by <a href="https://avalanche.ca">Avalanche Canada</a> and, in the
+United States, by regional avalanche centers through the
+<a href="https://avalanche.org">National Avalanche Center</a>.
 Maps are built from data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>
 contributors (via <a href="https://protomaps.com">Protomaps</a>), the
 <a href="https://overturemaps.org">Overture Maps Foundation</a>,
