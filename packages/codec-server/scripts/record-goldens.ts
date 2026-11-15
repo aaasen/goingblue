@@ -1,12 +1,12 @@
 /**
  * Records the golden corpus: for each representative request, the exact upstream responses
- * (Open-Meteo for weather, Avalanche Canada for avalanche) and the exact encoded output, written to test/golden/goldens.json. Run this at SHIP time —
+ * (Open-Meteo for weather, Avalanche Canada and avalanche.org for avalanche) and the exact encoded output, written to test/golden/goldens.json. Run this at SHIP time —
  * the moment the current protocol version reaches real clients — and commit the result; from
  * then on golden.test.ts fails any change that moves a bit of this version's output, which is
  * exactly a change that would break deployed clients (see VERSIONING.md).
  *
  * Hits the live Open-Meteo API once per weather case (the EU center twice: split surface/pressure
- * sources) and the live Avalanche Canada API once or twice per avalanche case. Re-recording is only legitimate alongside a deliberate protocol version bump.
+ * sources) and the live Avalanche Canada or avalanche.org API once or twice per avalanche case. Re-recording is only legitimate alongside a deliberate protocol version bump.
  *
  *   pnpm --filter @weather/protocol build
  *   pnpm exec tsx scripts/record-goldens.ts               # from packages/codec-server
@@ -78,6 +78,14 @@ const AVALANCHE_CASES = [
   { name: "rogers-pass/2026-04-28-i", loc: "51.3000,-117.5200", tokens: "d:i y:20260428" },
   // Early season placeholder.
   { name: "rogers-pass/2025-11-05-s", loc: "51.3000,-117.5200", tokens: "d:s y:20251105" },
+  // Northwest Avalanche Center (avalanche.org), plain SMS.
+  { name: "nwac-east-central/2025-12-16-s", loc: "47.4189,-120.7336", tokens: "d:s y:20251216" },
+  // Northwest Avalanche Center, iPhone satellite.
+  { name: "nwac-east-north/2026-03-17-i", loc: "48.6562,-120.4623", tokens: "d:i y:20260317" },
+  // Bridger-Teton Avalanche Center, inReach.
+  { name: "btac/2026-03-17-g", loc: "43.6661,-110.0834", tokens: "d:g y:20260317" },
+  // Flathead Avalanche Center, ZOLEO.
+  { name: "fac/2026-03-17-z", loc: "48.8503,-114.6260", tokens: "d:z y:20260317" },
   // No `y:`: the bulletin in force at the request time.
   { name: "sea-to-sky/latest-i", loc: "50.1163,-122.9574", tokens: "d:i" },
 ];
@@ -85,7 +93,7 @@ const AVALANCHE_CASES = [
 interface GoldenCase {
   name: string;
   request: string;
-  // Upstream responses (Open-Meteo FlatBuffers, Avalanche Canada JSON), base64-encoded, keyed by request path+query (origin
+  // Upstream responses (Open-Meteo FlatBuffers, avalanche center JSON), base64-encoded, keyed by request path+query (origin
   // stripped, so replay is independent of OPEN_METEO_BASE_URL). The SDK transport is binary, so
   // the recorded body is the raw response bytes rather than parsed JSON.
   responses: Record<string, string>;
