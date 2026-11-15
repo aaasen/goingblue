@@ -148,7 +148,20 @@ Training the model on synthetic data helps it perform closer to a larger model. 
 
 #### Model Size
 
-The model is 384 wide with 6 layers and 17.8 million parameters. Bundle size, memory usage, and encoding time scale with the number of parameters. A larger model, 512 wide with 8 layers (36 MB), was only 1.2% smaller (182.6 B against 184.9 B, both with 2x synthetic data). That was not worth twice the file size and twice the decode time on a phone. On real forecasts only, 256 wide with 4 layers, 384 with 6 and 512 with 8 were within 0.5% of each other, and every size overfit without dropout.
+A larger model could compress forecasts more but the size comes with a few costs:
+1. Bundle size: the model needs to be bundled into the app so that the client has it offline.
+2. Decode time: decoding is fairly slow since it is done on the CPU.
+3. Memory usage: all of the model weights need to be in memory for inference. 
+
+I tested a few different model sizes on the 2024-2025 season with 8x synthetic data. Timing is on my M1 Macbook Pro, not a phone. 
+
+| Model | Bytes per forecast | Bundle size | Decode time |
+|---|---:|---:|---:|
+| 384 wide, 6 layers | 178.3 B | 18.4 MB | 364 ms |
+| 256 wide, 6 layers | 183.4 B | 9.8 MB | 197 ms |
+| 256 wide, 4 layers | 186.4 B | 8.1 MB | 140 ms |
+
+I went with the 256 wide, 6 layer model since it is under 10MB, decodes quickly enough to not be noticeable, and performs only 2.9% worse than the 384 wide model that is twice the size and half as fast.
 
 #### Architecture
 
