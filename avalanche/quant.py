@@ -6,8 +6,8 @@ are int8 with a per-row fixed-point multiplier, and every rescale is a rounding 
 (floor((x + 2^(s-1)) / 2^s)). exp and sigmoid are lookup tables. Every intermediate stays below
 2^53 in magnitude, so JS numbers, int64 and the fp64 matmuls used here all agree exactly.
 
-  python quant.py eval --name a384 [--limit N]    float and integer bits on the validation season
-  python quant.py export --name a384              model file + test vectors for native/avalanche
+  python quant.py eval --name a256 [--limit N]    float and integer bits on the validation season
+  python quant.py export --name a256              model file + test vectors for native/avalanche
 """
 import argparse, hashlib, json, math, time
 import numpy as np
@@ -416,7 +416,7 @@ def export(args):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd")
-    ap.add_argument("--name", default="a384")
+    ap.add_argument("--name", default="a256")
     ap.add_argument("--limit", type=int, default=0, help="eval: score about this many forecasts")
     ap.add_argument("--batch-tokens", type=int, default=32768)
     ap.add_argument("--vectors", type=int, default=8, help="export: number of test forecasts")

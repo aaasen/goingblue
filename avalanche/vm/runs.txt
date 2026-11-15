@@ -1,3 +1,3 @@
 teacher teacher.py --all
 synth synth.py --all
-a384 rwkv.py --all
+a256 rwkv.py --all

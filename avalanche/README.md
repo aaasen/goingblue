@@ -45,9 +45,9 @@ The advantage of a neural model is that it can use context in the entire message
 
 The main challenge of using a neural model is that the client and server need to share the exact same deterministic model. Even a slight change in the probability of a single token would corrupt a message. Large language models can't be used because floating-point math gives slightly different results on different devices.
 
-Another challenge is that the model needs to be bundled in the app so that the client can use it while offline. This limits the number of weights that the model can use. For Going Blue, I decided to cap the model size at 20MB, or about 20 million weights. Most modern LLMs have billions of weights. 
+Another challenge is that the model needs to be bundled in the app so that the client can use it while offline. This limits the number of weights that the model can use. For Going Blue, I decided to keep the model under 10 MB, or about 10 million weights. Most modern LLMs have billions of weights. 
 
-The neural model compresses forecasts about 1.6 times as much as PPM:
+The neural model compresses forecasts about 1.5 times as much as PPM:
 
 | Method | Average size | Compression ratio | SMS messages |
 |---|---:|---:|---:|
@@ -57,13 +57,13 @@ The neural model compresses forecasts about 1.6 times as much as PPM:
 | zstd -19 | 1,366 B | 2.1x | 11 |
 | zstd -19, pretrained 4 MB dictionary | 638 B | 4.5x | 5 |
 | PPM | 429 B | 6.7x | 4 |
-| Neural | 271 B | 10.6x | 3 |
+| Neural | 279 B | 10.3x | 3 |
 
 ## Neural Model
 
 A single neural model for avalanche forecast text is shared by every avalanche center (avalanche.org and Avalanche Canada). The other avalanche forecast information like danger ratings and problem type/likelihood/size/elevation/aspect is coded separately. The neural model uses this information as free context. 
 
-The model is a small [RWKV-4](https://www.rwkv.com/) that is 384 wide with 6 layers and 17.8 million parameters. It uses an 8,000 piece SentencePiece vocabulary that preserves formatting including bold, italics, and lists. 
+The model is a small [RWKV-4](https://www.rwkv.com/) that is 256 wide with 6 layers and 9.3 million parameters. It uses an 8,000 piece SentencePiece vocabulary that preserves formatting including bold, italics, and lists. 
 
 The client and server must compute exactly the same probabilities for each token, so inference is done with integers on the CPU. The model uses 8-bit integer weights, fixed-point activations, and lookup tables for exponentials and sigmoid. This ensures that the calculations are identical regardless of the platform.
 
@@ -122,8 +122,8 @@ There are 5 steps to the training process:
 | Data collection | `pnpm avalanche-neural-corpus` | `corpus3.jsonl` | |
 | Teacher fine-tuning | `python teacher.py train --name teacher --all` | `teacher.pt` | 1.7 h |
 | Synthetic forecast generation | `python synth.py train --all` | `synth-all/` | 16.5 h |
-| Training | `python rwkv.py train --name a384 --all` | `a384.pt` | 3.1 h |
-| Quantization | `python quant.py export --name a384` | `a384.int.bin`, `a384.vectors.json` | |
+| Training | `python rwkv.py train --name a256 --all` | `a256.pt` | 3.1 h |
+| Quantization | `python quant.py export --name a256` | `a256.int.bin`, `a256.vectors.json` | |
 
 The shipped model was trained on all available training data. In development, the model was only trained on forecasts from before August 2024. The 2024-2025 season forecasts were used for validation and 2025-2026 forecasts were used for testing. 
 
@@ -131,7 +131,7 @@ Training the model takes about 21 hours on a g2-standard-4 with one L4 GPU, whic
 
 ### Development
 
-I tried tweaking many parts of the model during development. Sizes in this section are the average bytes per forecast across all centers on the held-out 2024-2025 season.
+I tried tweaking many parts of the model during development. Sizes in this section are the average bytes per forecast across all centers on the held-out 2024-2025 season. The synthetic data, architecture and teacher experiments were run with a 384 wide, 6 layer model.
 
 #### Synthetic Data Volume
 

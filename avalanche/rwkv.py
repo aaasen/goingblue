@@ -7,8 +7,8 @@ structured coder already carries them.
 Trains on the real forecasts plus the teacher's samples (synth.py). By default the 2024-25 season
 is held out for validation and 2025-26 for test; --all trains on every season.
 
-  python rwkv.py train --name a384 --all
-  python rwkv.py eval --name a384
+  python rwkv.py train --name a256 --all
+  python rwkv.py eval --name a256
 """
 import argparse, collections, json, math, os, random, time
 import numpy as np
@@ -431,7 +431,7 @@ if __name__ == "__main__":
     ap.add_argument("--name", default="model")
     ap.add_argument("--all", action="store_true", help="learn from every season, with nothing held out")
     ap.add_argument("--vocab", type=int, default=8000)
-    ap.add_argument("--dim", type=int, default=384)
+    ap.add_argument("--dim", type=int, default=256)
     ap.add_argument("--layers", type=int, default=6)
     ap.add_argument("--dropout", type=float, default=0.1)
     ap.add_argument("--epochs", type=int, default=2)
