@@ -15,13 +15,11 @@ Standard tools like gzip, zstd, and brotli can compress the forecasts about 2-5x
 | brotli -q 11 | 1,074 B | 2.7x | 7 |
 | zstd -19 | 1,366 B | 2.1x | 9 |
 | zstd -19, pretrained 4 MB dictionary | 638 B | 4.5x | 4 |
-| PPM | 429 B | 6.7x | 3 |
-| Neural (s384c) | 280 B | 10.3x | 2 |
 
-Another approach to compressing the forecasts is to use prediction by partial matching (PPM). This computes the probability of the next word from the previous n words and uses entropy coding to encode the messages. For example, if we have a sentence like:
+Prediction by partial matching (PPM) can compress the forecasts even more. With PPM, the client and the server share a model that predicts the next word given the previous words. To encode a message, the server iterates through the forecast token by token, adding a symbol to the message based on the probability of the token. This uses an rANS entropy coding so that more likely symbols require less information in the message. For example, with a sentence like:
 
 ```
-Snow flurries and strong winds will be building storm
+Snow flurries and strong winds will be building storm < >
 ```
 
 The probabilities of the next word are:
@@ -29,9 +27,9 @@ The probabilities of the next word are:
  - slab 16.7%
  - snow 6.5%
 
-If the next word of the forecast is actually "slabs", it's very cheap to send because both the client and server expect it. 
+If the next word of the forecast is actually "slabs", it's very cheap to send because both the client and server expect it. If the next word is "snow", a longer symbol will be written to the message. If the next word is not in the model at all, the server falls back to writing it out byte by byte.
 
-The weakness of PPM is that it is rigid and doesn't generalize well to unseen forecasts. If a pattern hasn't been seen in the training corpus, it's very expensive to encode. PPM works well for Avalanche Canada forecasts which are formulaic and written in a generic voice. It does significantly worse on NWAC forecasts, which have longer more free form discussions with lots of variations among forecasters.
+With this shared model trained on past avalanche forecasts, messages that are similar to previous forecasts are very cheap to encode. This works well for Avalanche Canada forecasts which tend to be formulaic and use common phrases. The weakness of PPM is that it doesn't generalize well to unseen forecasts. It doesn't work well with NWAC, which have longer more free form discussions with lots of variations among forecasters.
 
 | | NWAC | Avalanche Canada |
 |---|---:|---:|
@@ -41,71 +39,134 @@ The weakness of PPM is that it is rigid and doesn't generalize well to unseen fo
 | PPM compression ratio | 6.7x | 10.7x |
 | PPM SMS messages | 3 | 2 |
 
-The next step in compression is using a neural model. The neural model also predicts the probability of the next word and encodes it using entropy coding. The main difference is that it can use the entire forecast as context instead of a fixed number of previous words. This makes its predictions better and less brittle.
+To make the model generalize better, we can use a neural model. The general idea is the same as PPM: the client and server share a model that can predict the next word from the current context, then use entropy coding to encode the messages. The better the model can predict the forecast, the less actually needs to be sent in the message.
 
-## The model
+The advantage of a neural model is that it can use context in the entire message, not just the last few words. This makes its predictions better and less brittle. 
 
-One neural model of avalanche forecast text is shared by every center (the avalanche.org centers and Avalanche Canada). It predicts the next token of a forecast's text, and an entropy coder turns those predictions into bytes. The forecast's structured fields (center, danger ratings, problem types, likelihood, size, elevations, aspects) are coded separately, so the model receives them as free context.
+The main challenge of using a neural model is that the client and server need to share the exact same deterministic model. Even a slight change in the probability of a single token would derail decoding. LLMs can't be used because they aren't deterministic. 
 
-The model is a small RWKV-4: 384 wide, 6 layers, an 8,000 piece SentencePiece vocabulary, 17.8 million parameters, and 18.4 MB with one byte per weight. Bold, italics and list items are kept as reserved characters in the text, which the tokenizer treats like any other character.
+Another challenge is that the model needs to be bundled in the app so that the client can use it while offline. This limits the number of weights that the model can use. For Going Blue, I decided to cap the model size at 20MB, or about 20 million weights. Most modern LLMs have billions of weights. 
 
-Encoder and decoder must compute exactly the same probabilities, so inference is specified in integers: int8 weights, fixed-point activations, and lookup tables for exp and sigmoid. Every platform that follows the spec gets the same bits. The engine that runs the model in the app and on the server is in `native/avalanche`.
+The neural model compresses forecasts about twice as much as the PPM:
 
-## How it was trained
+| Method | Average size | Compression ratio | SMS messages |
+|---|---:|---:|---:|
+| Uncompressed (UTF-8) | 2,881 B | 1.0x | 19 |
+| gzip -9 | 1,385 B | 2.1x | 9 |
+| brotli -q 11 | 1,074 B | 2.7x | 7 |
+| zstd -19 | 1,366 B | 2.1x | 9 |
+| zstd -19, pretrained 4 MB dictionary | 638 B | 4.5x | 4 |
+| PPM | 429 B | 6.7x | 3 |
+| Neural (s384c) | 280 B | 10.3x | 2 |
 
-The model learns from two sources: the real forecasts (54,669 of them) and synthetic forecasts written by a larger teacher model.
+## Neural Model
 
-1. **Teacher.** Qwen3 0.6B Base is fine-tuned on the real forecasts. It sees each forecast as plain text: a header with the center and structured fields, then each section under a bracketed heading, with formatting written as tags.
-2. **Synthetic forecasts.** For every real forecast, the teacher writes 8 new ones with the same center, structured fields and section list, sampled at temperature 1. That is 437,352 synthetic forecasts.
-3. **Student.** The RWKV-4 model trains for 2 epochs on the real and synthetic forecasts together.
-4. **Integer model.** The trained weights are converted to the integer model file, along with test vectors that `native/avalanche` checks itself against.
+A single neural model for avalanche forecast text is shared by every avalanche center (avalanche.org and Avalanche Canada). The other avalanche forecast information like danger ratings and problem type/likelihood/size/elevation/aspect are coded separately. The neural model uses this information as free context. 
+
+The model is a small [RWKV-4](https://www.rwkv.com/) that is 384 wide with 6 layers and 17.8 million parameters. It uses an 8,000 piece SentencePiece vocabulary that preserves formatting including bold, italics, and lists. 
+
+The client and server must compute exactly the same probabilities for each token, so inference is done with integers on the CPU. The model uses 8-bit integer weights, fixed-point activations, and lookup tables for exponents and sigmoid. This ensures that the calculations are identical regardless of the platform.
+
+The encoder and decoder are written in Rust with bindings for iOS, Android, and Node. The code is in `native/avalanche`. 
+
+### Training
+
+The model is trained on historical forecasts from Avalanche Canada and numerous American avalanche centers:
+
+| Avalanche Center | Forecasts | Timeframe |
+|---|---:|---|
+| Bridger-Teton Avalanche Center (BTAC) | 11,614 | 1999-2026 |
+| Avalanche Canada | 9,849 | 2022-2026 |
+| Northwest Avalanche Center (NWAC) | 7,862 | 2020-2026 |
+| Colorado Avalanche Information Center (CAIC) | 6,831 | 2022-2026 |
+| Sawtooth Avalanche Center (SNFAC) | 2,933 | 2019-2026 |
+| Sierra Avalanche Center (SAC) | 1,836 | 2013-2026 |
+| Crested Butte Avalanche Center (CBAC) | 1,452 | 2020-2026 |
+| Flathead Avalanche Center (FAC) | 1,059 | 2021-2026 |
+| Parks Canada: Banff, Yoho and Kootenay | 900 | 2022-2026 |
+| Central Oregon Avalanche Center (COAA) | 846 | 2020-2026 |
+| Wallowa Avalanche Center (WAC) | 808 | 2020-2026 |
+| Chugach National Forest Avalanche Center (CNFAIC) | 802 | 2024-2026 |
+| Idaho Panhandle Avalanche Center (IPAC) | 714 | 2020-2026 |
+| Eastern Sierra Avalanche Center (ESAC) | 700 | 2021-2026 |
+| Parks Canada: Glacier | 669 | 2022-2026 |
+| Parks Canada: Jasper | 663 | 2022-2026 |
+| Mount Shasta Avalanche Center (MSAC) | 658 | 2021-2026 |
+| Mount Washington Avalanche Center (MWAC) | 626 | 2021-2026 |
+| Kananaskis Country | 574 | 2022-2026 |
+| Avalanche Québec | 501 | 2022-2026 |
+| Valdez Avalanche Center (VAC) | 453 | 2023-2026 |
+| Payette Avalanche Center (PAC) | 395 | 2020-2026 |
+| West Central Montana Avalanche Center (WCMAC) | 380 | 2021-2026 |
+| Gallatin NF Avalanche Center (GNFAC) | 363 | 2025-2026 |
+| Taos Avalanche Center (TAC) | 318 | 2020-2026 |
+| Parks Canada: Waterton Lakes | 204 | 2022-2026 |
+| Bridgeport Avalanche Center (BAC) | 173 | 2022-2026 |
+| Hatcher Pass Avalanche Center (HPAC) | 154 | 2024-2026 |
+| Kachina Peaks Avalanche Center (KPAC) | 149 | 2022-2026 |
+| Haines Avalanche Center (HAC) | 112 | 2023-2026 |
+| Coastal Alaska Avalanche Center (CAAC) | 71 | 2025-2026 |
+| **Total** | **54,669** | |
+
+In total, there are over 50,000 forecasts to train on, which isn't much for a neural model. To augment the training data, I generated 8 synthetic forecasts for each real forecast using a larger teacher model (Qwen3 0.6 Base). This brings the total number of forecasts for training to 492,021.
+
+There are 5 steps to the training process:
+1. **Data collection:** Historical avalanche forecasts pulled from Avalanche Canada and the avalanche.org API.
+2. **Teacher fine-tuning:** Qwen3 0.6B Base is fine-tuned on the real avalanche forecasts.
+3. **Synthetic forecast generation:** For every real forecast, the teacher model generates 8 synthetic forecasts with the same center, structured fields and section list.
+4. **Training:** The RWKV-4 model is trained on the real and synthetic forecasts.
+5. **Quantization:** The trained weights are converted into the integer model file.
 
 | Step | Command | Output (in `data/neural/`) | Time on one L4 |
 |---|---|---|---:|
-| Corpus | `pnpm avalanche-neural-corpus` | `corpus3.jsonl` | |
-| Teacher | `python teacher.py train --name teacher --all` | `teacher.pt` | 1.7 h |
-| Synthetic forecasts | `python synth.py train --all` | `synth-all/` | 16.5 h |
-| Student | `python rwkv.py train --name a384 --all` | `a384.pt` | 3.1 h |
-| Integer model | `python quant.py export --name a384` | `a384.int.bin`, `a384.vectors.json` | |
+| Data collection | `pnpm avalanche-neural-corpus` | `corpus3.jsonl` | |
+| Teacher fine-tuning | `python teacher.py train --name teacher --all` | `teacher.pt` | 1.7 h |
+| Synthetic forecast generation | `python synth.py train --all` | `synth-all/` | 16.5 h |
+| Training | `python rwkv.py train --name a384 --all` | `a384.pt` | 3.1 h |
+| Quantization | `python quant.py export --name a384` | `a384.int.bin`, `a384.vectors.json` | |
 
-The defaults of each script are the recipe of the shipped model, `a384`. Sampling is not reproducible, so a retrain gives a model of the same quality but not the same weights.
+The shipped model was trained off of all available training data. In development, the model was only trained on forecasts from before August 2024. The 2024-2025 season forecasts were used for validation and 2025-2026 forecasts were used for test. 
 
-### Seasons
+Training the model takes about 24 hours on a g2-standard-4 with one L4 GPU, which is about $17 on-demand or $5-8 with spot pricing. 
 
-Without `--all`, the corpus is split by season: train before August 2024, validation 2024-25, test 2025-26. Every choice below was made on the validation season. The shipped model is trained with `--all`, on every season, so it has no held-out score. To measure a change, train without `--all` and compare on validation:
+### Development
 
-```bash
-python rwkv.py eval --name <name>      # per-center table on the validation season
-python quant.py eval --name <name>     # integer model against float
-```
+I tried tweaking many parts of the model during development:
 
-## What was tried
+#### Synthetic Data Volume
 
-Sizes are average bytes per forecast on the 2024-25 validation season, over all centers, unless noted. The word-level PPM model that the neural model replaced takes 294.5 B on the same forecasts.
+Training the model on synthetic data helps it perform closer to a larger model. Synthetic data generation is by far the longest and most expensive part of the training cycle since it uses a large teacher model. I decided to stop at 8x synthetic data since it was giving diminishing returns and doubling the training time wasn't worth it for a marginal increase in performance. 
 
-| Model | Size | |
+| Model | Size |
 |---|---:|---|
-| PPM | 294.5 B | |
-| Student on real forecasts only | 203.1 B | |
-| Student, 2 synthetic per real | 184.9 B | |
-| Student, 4 synthetic per real | 181.0 B | |
-| Student, 8 synthetic per real | 178.3 B | the shipped recipe, before formatting |
-| Teacher (Qwen3 0.6B) | 162.9 B | too large and slow to ship |
+| PPM | 294.5 B |
+| Student: real forecasts only | 203.1 B |
+| Student: 2x synthetic | 184.9 B |
+| Student: 4x synthetic | 181.0 B |
+| Student: 8x synthetic | 178.3 B |
+| Teacher (Qwen3 0.6B) | 162.9 B |
 
-**Synthetic data volume.** Each doubling of the synthetic forecasts helped (2.1%, then 1.5%). A control run with 2 synthetic per real but as many training steps as the 4 per real run reached 184.0 B, so the gain comes from more data and not from longer training. 16 per real was not run.
+#### Model Size
+
+The model is 384 wide with 6 layers and 17.8 million parameters. Bundle size, memory usage, and encoding time scale with the number of parameters. I tested with larger models but didn't observe any benefit, probably because of a lack of training data. 
 
 **Student size.** 512 wide and 8 layers (36 MB) was 1.2% smaller than 384 wide and 6 layers (182.6 B against 184.9 B). That was not worth twice the file size and twice the decode time on a phone. On real forecasts only, 256 wide with 4 layers, 384 with 6 and 512 with 8 were within 0.5% of each other, and every size overfit without dropout.
 
-**Architecture.** RWKV-7 with the same size and data tied RWKV-4 (184.7 B against 184.9 B), so the model stayed on RWKV-4, which already had an integer spec.
+#### Architecture
 
-**Teacher size.** Qwen3 1.7B with low-rank updates scored 160.9 B as a teacher, only 1.2% better than the fully fine-tuned 0.6B (162.9 B). The 0.6B with low-rank updates scored 168.3 B. The 0.6B full fine-tune overfits in its second epoch, so the run stops at 38.5% of its schedule, where held-out loss was lowest.
+RWKV-4 is a fairly old model, originally released in May 2023. I decided to use it because it is simple to make it deterministic. I tested the more recent RWKV-7 model and saw no measurable improvement (184.7 bytes per message for 4 versus 184.9 for 7). 
 
-**Integer inference.** The integer model costs 0.02% over float. Weights at 6, 5 and 4 bits cost 0.05%, 0.18% and 0.85%. The coder needs frequency tables that total 2^24: tables that total 2^16 cost 5% or more.
+#### Teacher Model Size
 
-## Training VM
+I tried Qwen 1.7B and it scored only 1.2% better than Qwen3 0.6B. I decided it wasn't worth the extra cost to use the larger model for generating synthetic data.
 
-Everything except the corpus export runs on a Spot GPU VM:
+| Model | Bytes per message |
+| Qwen3 0.6B | 162.9 |
+| Qwen3 1.7B | 160.9 |
 
+#### Training VM
+
+The training was done on a spot VM on Google Cloud:
 - `avalanche-train-1`: g2-standard-4 with one L4, image `pytorch-2-9-cu129-ubuntu-2204-nvidia-580`, Spot with termination action STOP.
 - `avalanche-train`: a 20 GB data disk mounted at `/mnt/train`. Code and data share `/mnt/train/neural`, and the Hugging Face cache is in `/mnt/train/hf`.
 - vLLM, for `synth.py generate`, is installed separately in `/opt/vllm` (vllm 0.11.0, transformers 4.57.6).
