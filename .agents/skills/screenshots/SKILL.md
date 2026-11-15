@@ -64,7 +64,7 @@ Filename: agreement
 
 ## Avalanche
 
-Caption: "Avalanche Canada forecasts for hut trips and ski traverses"
+Caption: "Full avalanche forecasts in the US and Canada for hut trips and ski traverses"
 Location: Rogers Pass, Glacier National Park (51.30098,-117.51949), seeded as a favorite
 Forecast: Glacier, requested for February 27, 2026
 Open the Avalanche tab and tap the Rogers Pass entry under "Saved forecasts". The seed hides the "This forecast is no longer valid" banner.

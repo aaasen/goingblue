@@ -44,7 +44,7 @@ CAPTIONS_LIST = [
     ("cloud", "Avoid whiteouts and flat light with detailed cloud cover"),
     ("aqi", "Plan around wildfire smoke with AQI forecasts"),
     ("agreement", "Compare forecasts from NOAA, ECMWF, GEM, and ICON models"),
-    ("avalanche", "Avalanche Canada forecasts for hut trips and ski traverses"),
+    ("avalanche", "Full avalanche forecasts in the US and Canada for hut trips and ski traverses"),
 ]
 
 # The Google Play set uses the same shots in the same order; a caption here replaces the App

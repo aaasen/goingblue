@@ -226,7 +226,7 @@ satellite internet, SMS, Garmin inReach, iPhone satellite messaging, and ZOLEO.<
   </figure>
   <figure>
     <img src="${img("shot-avalanche.jpg")}" width=750 height=1630 loading=lazy
-      alt="Avalanche Canada forecasts for hut trips and ski traverses">
+      alt="Full avalanche forecasts in the US and Canada for hut trips and ski traverses">
   </figure>
 </div>
 
