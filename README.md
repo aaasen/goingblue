@@ -330,29 +330,7 @@ Apparent or "feels like" temperature is calculated from temperature, sustained w
 
 ## Avalanche Forecasts
 
-Going Blue can retrieve full avalanche forecasts, exactly as they appear in the avalanche report, in just 1-2 SMS messages. Forecasts are compressed using a lossless Prediction by Partial Matching (PPM) model fit on historical avalanche forecasts. Since forecasts are fairly formulaic, they compress extremely well, with compression ratios around 15x.
-
-### Compression
-
-An avalanche forecast contains structured data as well as prose. The structured fields are:
- - Region: Avalanche Canada forecasts do not have fixed regions. The forecast area is broken down into pieces and each forecast covers a set of pieces.
- - Danger ratings: 3 elevation bands, 3 days. The danger rating is conditioned on the band above it or the previous day's danger rating.
- - Problem type: Conditioned on the previous problem's type.
- - Problem elevation, aspect, likelihood, and size: Conditioned on the problem type.
- - Confidence rating
- - Validity period
-
-The structured data compresses very well and averages about 29 bits per forecast. Prose takes up the vast majority of the forecast.
-
-To encode the prose, it is first word-tokenized and split into two streams: words and space/punctuation. Splitting it into two streams allows a word to be predicted from the last word instead of the last separator token.
-
-Each section of the forecast (bottom line, problem description, snowpack summary, etc.) has its own word probability model. The model is derived from the historical forecast archive, which goes back to 2022 and contains about 13,000 forecasts. Words are predicted from the preceding 3 words. If a word has not been seen in the current context before, the encoder falls back to a shorter context (preceding 2 words, then previous word). If the word hasn't been seen in a shorter context, it is encoded as raw UTF-8 bytes.
-
-Separators are predicted from the two words surrounding them. The separator model is shared between sections.
-
-Forecasts are encoded using rANS, just like weather forecasts. The probability model is about 6.5MB gzipped and is bundled in the app.
-
-Compression ratios are around 15x, or about 0.5 bits per character. The average avalanche forecast takes 146 bytes. 52% of forecasts fit in 1 SMS and 96% fit in 2. The compression ratio is so high because forecasts use a lot of canned phrases. For example, travel advice and confidence can be compressed at a ratio of 60x because they pull from a set of phrases that the model already knows.
+Going Blue can retrieve full avalanche forecasts, exactly as they appear in the avalanche report, in just 1-3 SMS messages. Forecasts are compressed using a neural model trained on historical avalanche that compresses forecasts 10-18x. Details of avalanche forecast compression are in the [avalanche README](./avalanche/README.md).
 
 ## Development
 
