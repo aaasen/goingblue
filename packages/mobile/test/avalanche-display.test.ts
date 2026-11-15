@@ -92,6 +92,7 @@ describe('zoned labels', () => {
     expect(stampLabel(morning, 'America/Vancouver', '12h')).toBe('Sun, Mar 1, 12:05 AM');
     expect(stampLabel(morning, 'America/Vancouver', '24h')).toBe('Sun, Mar 1, 00:05');
     expect(stampLabel(issued, 'Europe/Zurich', '24h')).toBe('Sun, Mar 1, 01:00');
+    expect(stampLabel(NaN, 'America/Vancouver', '12h')).toBeNull();
   });
 });
 

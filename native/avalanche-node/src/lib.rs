@@ -70,16 +70,10 @@ impl AvalancheModel {
         }
     }
 
-    /// The prose as one rANS stream, computed off the main thread.
-    #[napi(ts_return_type = "Promise<Buffer>")]
+    /// The prose as one rANS stream, with the tokens fed to the model, computed off the main thread.
+    #[napi(ts_return_type = "Promise<Encoded>")]
     pub fn encode(&self, doc: Doc) -> AsyncTask<Encode> {
         AsyncTask::new(Encode { model: self.model.clone(), doc: doc_of(doc) })
-    }
-
-    /// How many tokens `encode` feeds the model for `doc`.
-    #[napi]
-    pub fn steps(&self, doc: Doc) -> u32 {
-        self.model.steps(&doc_of(doc)) as u32
     }
 
     /// The section texts of a stream, computed off the main thread.
@@ -89,21 +83,27 @@ impl AvalancheModel {
     }
 }
 
+#[napi(object)]
+pub struct Encoded {
+    pub bytes: Buffer,
+    pub steps: u32,
+}
+
 pub struct Encode {
     model: Arc<avalanche::Model>,
     doc: avalanche::Doc,
 }
 
 impl Task for Encode {
-    type Output = Vec<u8>;
-    type JsValue = Buffer;
+    type Output = (Vec<u8>, usize);
+    type JsValue = Encoded;
 
-    fn compute(&mut self) -> napi::Result<Vec<u8>> {
-        self.model.encode(&self.doc).map_err(err)
+    fn compute(&mut self) -> napi::Result<(Vec<u8>, usize)> {
+        self.model.encode_counted(&self.doc).map_err(err)
     }
 
-    fn resolve(&mut self, _env: Env, out: Vec<u8>) -> napi::Result<Buffer> {
-        Ok(out.into())
+    fn resolve(&mut self, _env: Env, (bytes, steps): (Vec<u8>, usize)) -> napi::Result<Encoded> {
+        Ok(Encoded { bytes: bytes.into(), steps: steps as u32 })
     }
 }
 

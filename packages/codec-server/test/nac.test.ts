@@ -98,6 +98,14 @@ describe("toForecast", () => {
     expect(() => toForecast({ ...STEVENS, danger: [{ valid_day: "current", upper: 9, middle: 1, lower: 1 }] }, NWAC)).toThrow(/unknown danger rating/);
     expect(() => toForecast({ ...STEVENS, danger: [{ valid_day: "later", upper: 1, middle: 1, lower: 1 }] }, NWAC)).toThrow(/unknown valid day/);
   });
+
+  it("covers the requested piece when the product lists no zone it knows", () => {
+    for (const forecast_zone of [[], [{ id: 99999, name: "" }]]) {
+      const f = toForecast({ ...STEVENS, forecast_zone } as NacProduct, NWAC, STEVENS_PIECE);
+      expect(f.pieces).toEqual([STEVENS_PIECE.id]);
+    }
+    expect(toForecast({ ...STEVENS, forecast_zone: [] }, NWAC, STEVENS_PIECE).region).toBe("Stevens Pass");
+  });
 });
 
 describe("validDate", () => {
@@ -173,7 +181,9 @@ describe("serveAvalanche for an NWAC zone", () => {
     for (const product of [SUMMARY, CELLS]) {
       answer(() => product);
       const anchor = Date.parse(product.published_time) + 3600000;
-      const result = await serveAvalanche(parseRequest(`v8 ${STEVENS_LAT},${STEVENS_LON} f:a d:d u:0000000000000000 k:1 t:${Math.floor(anchor / 3600000)}`));
+      const piece = NWAC.zones.find((z) => z.zoneId === product.forecast_zone![0].id)!.piece;
+      const [lat, lon] = PIECE_INTERIORS[piece].map((v) => v.toFixed(4)).reverse();
+      const result = await serveAvalanche(parseRequest(`v8 ${lat},${lon} f:a d:d u:0000000000000000 k:1 t:${Math.floor(anchor / 3600000)}`));
       if (result.kind !== "ok") throw new Error(result.kind);
       const { forecast } = await decodeAvalancheMessage(MODELS, result.replies[0], Math.floor(anchor / 3600000) * 3600000, "base94");
       expect(forecast).toEqual(withPlaceholders(toForecast(product, NWAC)));

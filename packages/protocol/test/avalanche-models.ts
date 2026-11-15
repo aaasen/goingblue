@@ -10,7 +10,7 @@ export const asset = (name: string): Buffer => readFileSync(new URL(`../assets/$
 const native = new AvalancheModel(asset(PROSE_MODEL_FILE));
 
 export const PROSE: ProseCoder = {
-  encode: async (doc) => new Uint8Array(await native.encode(doc)),
+  encode: async (doc) => new Uint8Array((await native.encode(doc)).bytes),
   decode: (bytes, layout) => native.decode(Buffer.from(bytes), layout),
 };
 

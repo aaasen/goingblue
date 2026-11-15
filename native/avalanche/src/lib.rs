@@ -121,11 +121,16 @@ impl Model {
 
     /// The text of `doc` as one rANS stream.
     pub fn encode(&self, doc: &Doc) -> Result<Vec<u8>, Error> {
+        Ok(self.encode_counted(doc)?.0)
+    }
+
+    /// `encode`, with how many tokens it fed the model: the work encoding took.
+    pub fn encode_counted(&self, doc: &Doc) -> Result<(Vec<u8>, usize), Error> {
         self.encode_on(doc, std::thread::available_parallelism().map_or(1, |n| n.get()))
     }
 
-    /// `encode` on a given number of threads; the stream does not depend on it.
-    pub fn encode_on(&self, doc: &Doc, threads: usize) -> Result<Vec<u8>, Error> {
+    /// `encode_counted` on a given number of threads; the stream does not depend on it.
+    pub fn encode_on(&self, doc: &Doc, threads: usize) -> Result<(Vec<u8>, usize), Error> {
         // Every token in order, and whether it is coded (a piece or END) or a marker.
         let mut tokens = self.marker_ids(&doc.markers);
         let mut coded = vec![false; tokens.len()];
@@ -146,13 +151,7 @@ impl Model {
         // A coded token's table comes from every token before it; the last token is never fed.
         let fed = tokens.len().saturating_sub(1);
         let targets: Vec<Option<usize>> = (0..fed).map(|p| coded[p + 1].then_some(tokens[p + 1])).collect();
-        Ok(rans::encode(&self.rwkv.code(&tokens[..fed], &targets, threads)))
-    }
-
-    /// How many tokens `encode` feeds the model for `doc`: the work encoding it takes.
-    pub fn steps(&self, doc: &Doc) -> usize {
-        let sections = doc.sections.iter().map(|s| self.marker_ids(&s.markers).len() + self.tokenizer.encode(&s.text).len() + 1);
-        self.marker_ids(&doc.markers).len() + sections.sum::<usize>()
+        Ok((rans::encode(&self.rwkv.code(&tokens[..fed], &targets, threads)), fed))
     }
 
     /// The section texts of a stream `encode` wrote for a doc with these markers.

@@ -5,6 +5,7 @@
 // bulletin could leave out the one problem or advice line that matters.
 import { readFile } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
+// Loads the native binding when the server starts, so an image without it fails to boot.
 import { AvalancheModel } from "@weather/avalanche-node";
 import {
   NAC_CENTERS, avalancheAnchor, avalancheModelFile, encodeAvalancheMessage, loadStructured, pieceAt, PROSE_MODEL_FILE, WIRE_HEADER_CHARS,
@@ -34,15 +35,21 @@ function load<T extends StructuredModel | ProseCoder>(file: string, parse: (byte
   return loading as Promise<T>;
 }
 
-// A prose coder that can also say how many model steps encoding a doc takes.
-export type NativeProseCoder = ProseCoder & { steps(doc: Parameters<ProseCoder["encode"]>[0]): number };
+// A prose coder that can also say how many model steps encoding a doc took.
+export type NativeProseCoder = ProseCoder & {
+  encodeCounted(doc: Parameters<ProseCoder["encode"]>[0]): Promise<{ bytes: Uint8Array; steps: number }>;
+};
 
 // The native prose model as the protocol's coder. Encoding runs off the event loop.
 export function proseCoder(bytes: Buffer): NativeProseCoder {
   const model = new AvalancheModel(bytes);
+  const encodeCounted = async (doc: Parameters<ProseCoder["encode"]>[0]) => {
+    const out = await model.encode(doc);
+    return { bytes: new Uint8Array(out.bytes), steps: out.steps };
+  };
   return {
-    steps: (doc) => model.steps(doc),
-    encode: async (doc) => new Uint8Array(await model.encode(doc)),
+    encodeCounted,
+    encode: async (doc) => (await encodeCounted(doc)).bytes,
     decode: (bytes, layout) => model.decode(Buffer.from(bytes), layout),
   };
 }
@@ -66,7 +73,7 @@ async function fetchForecast(params: ForecastParams, at: number | null): Promise
   const center = piece && NAC_CENTERS[piece.center];
   if (piece && center) {
     const product = await fetchZoneProduct(piece, params.day ?? null);
-    return product && toNacForecast(product, center);
+    return product && toNacForecast(product, center, piece);
   }
   const product = await fetchPointProduct(params.lat!, params.lon!, at);
   return product && toForecast(product, await fetchAreaPieces(product, at));
@@ -86,9 +93,10 @@ export async function serveAvalanche(params: ForecastParams): Promise<AvalancheR
   let encodeSteps = 0;
   const prose: ProseCoder = {
     decode: m.prose.decode,
-    encode: (doc) => {
-      encodeSteps += m.prose.steps(doc);
-      return m.prose.encode(doc);
+    encode: async (doc) => {
+      const out = await m.prose.encodeCounted(doc);
+      encodeSteps += out.steps;
+      return out.bytes;
     },
   };
   const models: Models = { structured: m.structured, prose };

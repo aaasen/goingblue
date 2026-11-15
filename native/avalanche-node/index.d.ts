@@ -12,10 +12,8 @@ export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-was
 export declare class AvalancheModel {
   constructor(bytes: Buffer)
   info(): ModelInfo
-  /** The prose as one rANS stream, computed off the main thread. */
-  encode(doc: Doc): Promise<Buffer>
-  /** How many tokens `encode` feeds the model for `doc`. */
-  steps(doc: Doc): number
+  /** The prose as one rANS stream, with the tokens fed to the model, computed off the main thread. */
+  encode(doc: Doc): Promise<Encoded>
   /** The section texts of a stream, computed off the main thread. */
   decode(bytes: Buffer, layout: Doc): Promise<string[]>
 }
@@ -27,6 +25,11 @@ export declare class AvalancheModel {
 export interface Doc {
   markers: Array<string>
   sections: Array<Section>
+}
+
+export interface Encoded {
+  bytes: Buffer
+  steps: number
 }
 
 export interface ModelInfo {

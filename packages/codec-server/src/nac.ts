@@ -130,13 +130,16 @@ function productPieces(p: NacProduct, center: Pick<NacCenter, "zones">): number[
   return center.zones.filter((z) => ids.has(z.zoneId) || z.formerIds.some((id) => ids.has(id))).map((z) => z.piece);
 }
 
-export function toForecast(p: NacProduct, center: NacCenter): AvalancheForecast {
-  const pieces = productPieces(p, center);
+// `requested` is the piece the product was fetched for, which the bulletin always covers even when
+// the product lists no zones or only zones newer than the generated table.
+export function toForecast(p: NacProduct, center: NacCenter, requested?: Pick<AvalanchePiece, "id" | "names">): AvalancheForecast {
+  const pieces = [...new Set([...productPieces(p, center), ...(requested ? [requested.id] : [])])].sort((a, b) => a - b);
+  const region = (p.forecast_zone ?? []).map((z) => z.name).join(", ");
   return {
     center: center.id.toLowerCase(),
     issuedBy: center.name,
     author: (p.author ?? "").trim(),
-    region: (p.forecast_zone ?? []).map((z) => z.name).join(", "),
+    region: region || (requested?.names[0] ?? ""),
     pieces,
     issued: Date.parse(p.published_time),
     expires: Date.parse(p.expires_time),

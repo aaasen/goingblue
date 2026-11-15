@@ -1,7 +1,9 @@
 #!/bin/zsh
 # Builds the app's avalanche library into the Expo module at packages/mobile/modules/avalanche:
-# an xcframework (device + Apple silicon simulator) for iOS and an arm64 .so for Android. The
-# outputs are committed, because EAS builds the app without a Rust toolchain.
+# an xcframework (device + Apple silicon simulator) for iOS and an arm64 .so for Android, the only
+# ABI the app builds for (buildArchs in app.json). The outputs are committed, because EAS builds
+# the app without a Rust toolchain. Each platform's source-hash records the sources it was built
+# from (source-hash.mjs).
 # Usage: build-mobile.sh [ios|android]   (both by default)
 set -eu
 cd "$(dirname "$0")"
@@ -21,11 +23,13 @@ ios() {
     -library target/aarch64-apple-ios/release/$LIB.a -headers avalanche-ffi/include \
     -library target/aarch64-apple-ios-sim/release/$LIB.a -headers avalanche-ffi/include \
     -output $MODULE/ios/Avalanche.xcframework
+  node source-hash.mjs > $MODULE/ios/source-hash
 }
 
 android() {
   export ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}/ndk/27.1.12297006}
   cargo ndk -t arm64-v8a -P 24 -o $MODULE/android/src/main/jniLibs build --release -p avalanche-ffi
+  node source-hash.mjs > $MODULE/android/source-hash
 }
 
 case "${1:-all}" in

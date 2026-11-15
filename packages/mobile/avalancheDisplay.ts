@@ -244,8 +244,9 @@ export function dayLabel(date: string): string {
   }).format(new Date(Date.parse(date)));
 }
 
-// "Tue, Mar 10, 18:30", in the reader's clock format.
-export function stampLabel(ms: number, timezone: string, timeFormat: TimeFormat): string {
+// "Tue, Mar 10, 18:30", in the reader's clock format, or null for a time the bulletin leaves out.
+export function stampLabel(ms: number, timezone: string, timeFormat: TimeFormat): string | null {
+  if (!Number.isFinite(ms)) return null;
   const d = new Date(ms);
   const date = new Intl.DateTimeFormat('en-US', {
     weekday: 'short', month: 'short', day: 'numeric', timeZone: timezone,

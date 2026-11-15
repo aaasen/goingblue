@@ -20,7 +20,7 @@ test("round-trips a forecast", { skip }, async () => {
       { markers: ["kind:problem", "ptype:windSlab", "lk:likely", "sz:1-2"], text: "Avoid steep, wind-loaded slopes near ridgelines. Ünïcode 🏔️ too." },
     ],
   };
-  const bytes = await model.encode(doc);
+  const { bytes } = await model.encode(doc);
   assert.ok(bytes.length > 0 && bytes.length < 60, `${bytes.length} bytes`);
   assert.deepEqual(await model.decode(bytes, doc), doc.sections.map((s) => s.text));
   await assert.rejects(model.decode(Buffer.from("garbage bytes here"), doc), /bad stream/);

@@ -113,7 +113,7 @@ fn matches_test_vectors() {
         // The stream does not depend on how many threads encode it.
         let whole = model.encode(&doc).unwrap();
         for threads in [1, 2, 3, 8, 64] {
-            assert_eq!(model.encode_on(&doc, threads).unwrap(), whole, "{} on {threads} threads", v.id);
+            assert_eq!(model.encode_on(&doc, threads).unwrap().0, whole, "{} on {threads} threads", v.id);
         }
         assert_eq!(model.decode(&enc, &doc).unwrap(), texts, "{} round trip", v.id);
         bytes_total += enc.len();

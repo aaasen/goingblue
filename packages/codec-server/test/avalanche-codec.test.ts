@@ -108,8 +108,9 @@ const QUIET = forecast({
   problems: [],
 });
 
+const PROSE = proseCoder(readFileSync(new URL(`../../protocol/assets/${PROSE_MODEL_FILE}`, import.meta.url)));
+
 describe("bulletin", () => {
-  const PROSE = proseCoder(readFileSync(new URL(`../../protocol/assets/${PROSE_MODEL_FILE}`, import.meta.url)));
   const modelsOf = (fs: AvalancheForecast[]): Models => {
     const b = new StructuredBuilder();
     for (const f of fs) b.observe(structuredOf(f));

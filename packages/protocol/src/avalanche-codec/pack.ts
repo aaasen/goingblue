@@ -3,7 +3,7 @@
  * the counts.
  *
  * Layout:
- *   "GBAM"               magic
+ *   "GBAS"               magic
  *   u32 LE               format version
  *   u32 LE               header length in bytes
  *   header               UTF-8 JSON: vocabularies, small tables, and where each array lives
